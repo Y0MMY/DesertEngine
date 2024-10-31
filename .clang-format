@@ -1,0 +1,22 @@
+IndentWidth: 4 
+ContinuationIndentWidth: 5 
+ConstructorInitializerIndentWidth: 5   
+BreakBeforeBraces: Allman 
+SortIncludes:  false 
+AllowShortIfStatementsOnASingleLine: false 
+IndentCaseLabels: true 
+ColumnLimit: 115 
+AlignAfterOpenBracket: Align 
+AlignConsecutiveAssignments: true 
+AlignConsecutiveDeclarations: true 
+AllowShortCaseLabelsOnASingleLine: false 
+AllowShortBlocksOnASingleLine: false 
+AllowShortFunctionsOnASingleLine: false 
+DerivePointerAlignment: false 
+PointerAlignment: Left 
+AlwaysBreakTemplateDeclarations: true 
+SpacesInParentheses: true 
+AccessModifierOffset: -4  
+UseTab: Never 
+ConstructorInitializerAllOnOneLineOrOnePerLine : false
+NamespaceIndentation: All

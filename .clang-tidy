@@ -1,0 +1,13 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-uppercase-literal-suffix,
+  cppcoreguidelines-pro-type-member-init,
+  modernize-use-explicit
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(?!.*ThirdParty/).*'
