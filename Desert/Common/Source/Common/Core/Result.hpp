@@ -15,7 +15,7 @@ namespace Common
     Result<T> MakeError( const std::string& message );
 
     template <typename T, typename... Args>
-    Result<T> MakeFormattedError( const std::string& format, Args&&... args );
+    Result<T> MakeFormattedError( std::string_view format, Args&&... args );
 
     template <typename T>
     auto MakeSuccess( const T& value );
@@ -32,8 +32,9 @@ namespace Common
             }
 
             template <typename... Args>
-            Error( const std::string& format, Args&&... args )
-                 : m_ErrorMessage( fmt::format( format, std::forward<Args>( args )... ) )
+            Error( std::string_view format, Args&&... args )
+                 : m_ErrorMessage( fmt::vformat( format, fmt::make_format_args( args... ) ) )
+
             {
             }
 
@@ -84,10 +85,10 @@ namespace Common
 
     private:
         friend Result<T> MakeError<T>( const std::string& message );
-        friend auto MakeSuccess<T>( const T& value );
+        friend auto      MakeSuccess<T>( const T& value );
 
         template <typename U, typename... Args>
-        friend Result<U> MakeFormattedError( const std::string& format, Args&&... args );
+        friend Result<U> MakeFormattedError( std::string_view format, Args&&... args );
     };
 
     template <typename T>
@@ -97,7 +98,7 @@ namespace Common
     }
 
     template <typename T, typename... Args>
-    Result<T> MakeFormattedError( const std::string& format, Args&&... args )
+    Result<T> MakeFormattedError( std::string_view format, Args&&... args )
     {
         return Result<T>( Result<T>::Error( format, std::forward<Args>( args )... ) );
     }

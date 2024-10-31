@@ -12,6 +12,8 @@ namespace Desert::Engine
     struct ApplicationInfo
     {
         std::string Title;
+        uint32_t Width;
+        uint32_t Height;
     };
 
     class Application : public Common::Singleton<Application>
@@ -29,6 +31,9 @@ namespace Desert::Engine
         void Run();
 
     private:
+        void Init();
+        void Destroy();
+    private:
         bool OnClose( Common::EventWindowClose& e )
         {
             return true;
@@ -41,6 +46,7 @@ namespace Desert::Engine
 
         Common::LayerStack m_LayerStack;
 
+        Common::Timestep m_PrevTimestep;
         bool m_IsRunningApplication = true;
     };
 

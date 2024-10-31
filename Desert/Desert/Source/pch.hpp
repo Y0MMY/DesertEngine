@@ -22,3 +22,4 @@
 #include <limits>
 
 #include <Common/Core/Core.hpp>
+#include <Common/Core/Singleton.hpp>

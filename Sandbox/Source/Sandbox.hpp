@@ -20,8 +20,9 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
     using namespace Desert::Engine;
 
     ApplicationInfo appInfo;
-    appInfo.Title = "Desert Engine";
+    appInfo.Title  = "Desert Engine";
+    appInfo.Width  = 1920;
+    appInfo.Height = 780;
 
-    Common::Singleton<Desert::Sandbox>::CreateInstance( appInfo );
-    return &Common::Singleton<Desert::Sandbox>::GetInstance();
+    return &Common::Singleton<Desert::Sandbox>::CreateInstance(appInfo);
 }

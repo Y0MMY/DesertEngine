@@ -1,7 +1,7 @@
 local currentDir = _MAIN_SCRIPT_DIR
 local dependenciesPath = currentDir .. "/Dependencies.lua"
 
-include(dependenciesPath)
+local dependencies = include(dependenciesPath)
 
 project "Desert"
     kind "StaticLib"
@@ -27,6 +27,10 @@ project "Desert"
         "%{wks.location}/ThirdParty/yaml-cpp/include",
         "%{wks.location}/ThirdParty/glm/",
         "%{wks.location}/ThirdParty/GLFW/include",
+
+        "%{wks.location}/ThirdParty/VulkanSDK/shaderc/Include",
+        "%{wks.location}/ThirdParty/VulkanSDK/spirv_cross/Include",
+        "%{wks.location}/ThirdParty/VulkanSDK/include",
     }
 
     -- includedirs {
@@ -61,10 +65,15 @@ project "Desert"
     --     "%{LibraryDir.assimp_Debug}",
     --     "%{LibraryDir.OGLCompiler_Debug}",
     -- }
-    links
-    {   
-        "Common"
+    local allLinks = {
+        "Common",
     }
+
+    for _, libPath in pairs(dependencies.LibraryDir) do
+        table.insert(allLinks, libPath)
+    end
+
+    links(allLinks)
 
     defines { "YAML_CPP_STATIC_DEFINE" }
     filter "configurations:Debug"

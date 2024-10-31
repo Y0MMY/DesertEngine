@@ -15,12 +15,13 @@ namespace Common
         }
 
         template <typename... Args>
-        static void CreateInstance( Args&&... args )
+        static T& CreateInstance( Args&&... args )
         {
             if ( !m_Instance )
             {
                 m_Instance = std::make_unique<T>( std::forward<Args>( args )... );
             }
+            return *m_Instance;
         }
 
     protected:
