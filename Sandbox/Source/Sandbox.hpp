@@ -3,12 +3,25 @@
 #include <Engine/Desert.hpp>
 #include <Engine/EntryPoint.hpp>
 
-using namespace Desert::Engine;
-Desert::Engine::Applicaton* CreateApplication( int argc, char** argv )
+namespace Desert
 {
+    class Sandbox : public Engine::Application
+    {
+    public:
+        Sandbox( const Engine::ApplicationInfo& appinfo );
+
+        virtual void OnCreate() override;
+        virtual void OnDestroy() override;
+    };
+} // namespace Desert
+
+Desert::Engine::Application* CreateApplication( int argc, char** argv )
+{
+    using namespace Desert::Engine;
+
     ApplicationInfo appInfo;
     appInfo.Title = "Desert Engine";
 
-    Common::Singleton<Applicaton>::CreateInstance( appInfo );
-    return &Common::Singleton<Applicaton>::GetInstance();
+    Common::Singleton<Desert::Sandbox>::CreateInstance( appInfo );
+    return &Common::Singleton<Desert::Sandbox>::GetInstance();
 }

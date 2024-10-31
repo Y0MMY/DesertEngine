@@ -21,7 +21,7 @@ project "Desert"
     }
 
     includedirs {
-        "Source/",
+        "%{wks.location}/Desert/Desert/Source/",
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/ThirdParty/spdlog/include/",
         "%{wks.location}/ThirdParty/yaml-cpp/include",
