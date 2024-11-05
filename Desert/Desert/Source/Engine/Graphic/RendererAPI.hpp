@@ -15,7 +15,7 @@ namespace Desert::Graphic
 
     public:
     public:
-        static const RendererAPIType GetAPI()
+        static const RendererAPIType GetAPIType()
         {
             return s_RenderingAPI;
         }

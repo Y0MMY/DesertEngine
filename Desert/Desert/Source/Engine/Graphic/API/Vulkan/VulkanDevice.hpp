@@ -15,9 +15,10 @@ namespace Desert::Graphic::API::Vulkan
         {
             std::optional<int32_t> GraphicsFamily;
             std::optional<int32_t> ComputeFamily;
+            std::optional<int32_t> PresentFamily;
         };
 
-        const VkPhysicalDevice& GetPhysicalDevice() const
+        const VkPhysicalDevice& GetVulkanPhysicalDevice() const
         {
             return m_PhysicalDevice;
         }

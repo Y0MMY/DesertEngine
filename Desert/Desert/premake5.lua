@@ -18,6 +18,8 @@ project "Desert"
         -- Engine 
         "Source/Engine/**.cpp", 
         "Source/Engine/**.hpp",
+
+        "%{wks.location}/ThirdParty/VulkanSDK/VulkanAllocator/vk_mem_alloc.cpp",
     }
 
     includedirs {
@@ -27,6 +29,8 @@ project "Desert"
         "%{wks.location}/ThirdParty/yaml-cpp/include",
         "%{wks.location}/ThirdParty/glm/",
         "%{wks.location}/ThirdParty/GLFW/include",
+        "%{wks.location}/ThirdParty/VulkanSDK/",
+
 
         "%{wks.location}/ThirdParty/VulkanSDK/shaderc/Include",
         "%{wks.location}/ThirdParty/VulkanSDK/spirv_cross/Include",

@@ -1,7 +1,9 @@
 #include <Engine/Core/Application.hpp>
-
-#include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+
+#include <Common/Core/Memory/CommandBuffer.hpp>
+
+#include <GLFW/glfw3.h>
 
 namespace Desert::Engine
 {
@@ -20,11 +22,10 @@ namespace Desert::Engine
 
         /************ initializing data *************/
 
-        Graphic::API::Vulkan::VulkanContext::CreateInstance( (GLFWwindow*)m_Window->GetNativeWindow() ).CreateVKInstance();
-        const auto& pDevice = Graphic::API::Vulkan::VulkanPhysicalDevice::Create();
-        pDevice->CreateDevice();
-        auto& lDevice = Common::Singleton<Graphic::API::Vulkan::VulkanLogicalDevice>::CreateInstance( pDevice );
-        lDevice.CreateDevice();
+        const auto& context = Graphic::RendererContext::Create( (GLFWwindow*)m_Window->GetNativeWindow() );
+        std::shared_ptr<Graphic::API::Vulkan::VulkanContext> vkContext =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>( context );
+        vkContext->CreateVKInstance();
     }
 
     void Application::Run()

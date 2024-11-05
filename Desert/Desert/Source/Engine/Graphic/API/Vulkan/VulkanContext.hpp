@@ -37,7 +37,6 @@ namespace Desert::Graphic::API::Vulkan
     private:
         inline static VkInstance s_VulkanInstance;
         VkDebugReportCallbackEXT m_DebugReportCallback = VK_NULL_HANDLE;
-
         GLFWwindow* m_GLFWwindow;
     };
 

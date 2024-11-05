@@ -20,6 +20,8 @@ namespace Common
     template <typename T>
     auto MakeSuccess( const T& value );
 
+    using BoolResult = Result<bool>;
+
     template <typename T>
     class Result
     {

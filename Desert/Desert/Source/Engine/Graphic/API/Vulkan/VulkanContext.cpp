@@ -1,5 +1,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 
 #include <vulkan/vulkan.h>
 
@@ -110,6 +112,13 @@ namespace Desert::Graphic::API::Vulkan
             VK_CHECK_RESULT( vkCreateDebugReportCallbackEXT( s_VulkanInstance, &debug_report_ci, nullptr,
                                                              &m_DebugReportCallback ) );
         }
+
+        const auto& pDevice = Graphic::API::Vulkan::VulkanPhysicalDevice::Create();
+        pDevice->CreateDevice();
+        auto& lDevice = Common::Singleton<VulkanLogicalDevice>::CreateInstance( pDevice );
+        lDevice.CreateDevice();
+
+        VulkanAllocator::GetInstance().Init( lDevice, s_VulkanInstance );
 
         return Common::MakeSuccess( VK_SUCCESS );
     }

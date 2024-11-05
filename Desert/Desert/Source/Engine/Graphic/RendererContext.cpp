@@ -7,11 +7,11 @@ namespace Desert::Graphic
 {
     std::shared_ptr<RendererContext> RendererContext::Create(GLFWwindow * window)
     {
-        switch ( RendererAPI::GetAPI() )
+        switch ( RendererAPI::GetAPIType() )
         {
             case RendererAPIType::Vulkan:
             {
-               // return std::make_shared<API::Vulkan::VulkanContext>::Create( window );
+               return std::make_shared<API::Vulkan::VulkanContext>( window );
             }
         }
 
