@@ -20,7 +20,7 @@ namespace Common
     class Window // NOTE: should be Singleton?
     {
     public:
-        virtual ~Window() = default;
+        virtual ~Window()                   = default;
         virtual Common::Result<bool> Init() = 0;
 
         virtual void ProcessEvents() = 0;

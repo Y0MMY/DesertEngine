@@ -2,6 +2,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
+#include <Engine/Core/EngineContext.h>
 
 #include <vulkan/vulkan.h>
 
@@ -119,6 +120,7 @@ namespace Desert::Graphic::API::Vulkan
         lDevice.CreateDevice();
 
         VulkanAllocator::GetInstance().Init( lDevice, s_VulkanInstance );
+       
 
         return Common::MakeSuccess( VK_SUCCESS );
     }

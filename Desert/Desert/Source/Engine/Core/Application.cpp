@@ -2,6 +2,10 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 
 #include <Common/Core/Memory/CommandBuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
+#include <Engine/Core/EngineContext.h>
+#include <Engine/Graphic/Renderer.hpp>
 
 #include <GLFW/glfw3.h>
 
@@ -10,6 +14,8 @@ namespace Desert::Engine
 
     Application::Application( const ApplicationInfo& appInfo ) : m_ApplicationInfo( appInfo )
     {
+        EngineContext::CreateInstance();
+
         Common::WindowSpecification specWindow;
         specWindow.Title  = appInfo.Title;
         specWindow.Width  = appInfo.Width;
@@ -17,15 +23,11 @@ namespace Desert::Engine
 
         m_Window = Common::Window::Create( specWindow );
         m_Window->Init();
+        EngineContext::GetInstance().m_CurrentWindow = m_Window;
 
         m_Window->SetEventCallback( [this]( Common::Event& e ) { this->ProcessEvents( e ); } );
 
-        /************ initializing data *************/
-
-        const auto& context = Graphic::RendererContext::Create( (GLFWwindow*)m_Window->GetNativeWindow() );
-        std::shared_ptr<Graphic::API::Vulkan::VulkanContext> vkContext =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>( context );
-        vkContext->CreateVKInstance();
+        Graphic::Renderer::CreateInstance().Init();
     }
 
     void Application::Run()

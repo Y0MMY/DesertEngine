@@ -13,7 +13,7 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanIndexBuffer : public IndexBuffer
     {
     public:
-        VulkanIndexBuffer( void* data, uint32_t size, BufferUsage usage = BufferUsage::Static );
+        VulkanIndexBuffer( const void* data, uint32_t size, BufferUsage usage = BufferUsage::Static );
         VulkanIndexBuffer( uint32_t size, BufferUsage usage = BufferUsage::Dynamic );
 
         virtual ~VulkanIndexBuffer() = default;

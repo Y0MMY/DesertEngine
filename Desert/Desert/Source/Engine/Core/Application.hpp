@@ -12,8 +12,8 @@ namespace Desert::Engine
     struct ApplicationInfo
     {
         std::string Title;
-        uint32_t Width;
-        uint32_t Height;
+        uint32_t    Width;
+        uint32_t    Height;
     };
 
     class Application : public Common::Singleton<Application>
@@ -28,11 +28,17 @@ namespace Desert::Engine
         void PushLayer( Common::Layer* layer );
         void PopLayer( Common::Layer* layer );
 
+        const auto& GetWindow() const
+        {
+            return m_Window;
+        }
+
         void Run();
 
     private:
         void Init();
         void Destroy();
+
     private:
         bool OnClose( Common::EventWindowClose& e )
         {
@@ -47,7 +53,7 @@ namespace Desert::Engine
         Common::LayerStack m_LayerStack;
 
         Common::Timestep m_PrevTimestep;
-        bool m_IsRunningApplication = true;
+        bool             m_IsRunningApplication = true;
     };
 
     Application* CreateApplicaton( int argc, char** argv );

@@ -54,11 +54,11 @@ namespace Common
             return m_IsSuccess;
         }
 
-        const std::optional<T> GetValue() const
+        const T GetValue() const
         {
             if ( !m_IsSuccess )
             {
-                return std::nullopt;
+                return T{};
             }
             return std::get<T>( m_Outcome );
         }

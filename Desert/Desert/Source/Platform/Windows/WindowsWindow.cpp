@@ -2,6 +2,9 @@
 
 #include <Common/Core/Events/WindowEvents.hpp>
 
+#include <Engine/Graphic/RendererAPI.hpp>
+#include <Engine/Core/EngineContext.h>
+
 namespace Desert::Platform::Windows
 {
 
@@ -27,8 +30,13 @@ namespace Desert::Platform::Windows
             s_GLFWInitialized = true;
         }
 
+        if ( Graphic::RendererAPI::GetAPIType() == Graphic::RendererAPIType::Vulkan )
+            glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
+
         m_GLFWWindow = glfwCreateWindow( (int)m_Data.Specification.Width, (int)m_Data.Specification.Height,
                                          m_Data.Specification.Title.c_str(), nullptr, nullptr );
+
+       // EngineContext::GetInstance().m_CurrentWindow = m_GLFWWindow;
 
         LOG_INFO( "The Window (windows) was created with: Title = {}, Width = {}, Height = {}",
                   m_Data.Specification.Title.c_str(), m_Data.Specification.Width, m_Data.Specification.Height );

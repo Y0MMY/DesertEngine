@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 
 #include <Engine/Graphic/RendererContext.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -38,6 +39,8 @@ namespace Desert::Graphic::API::Vulkan
         inline static VkInstance s_VulkanInstance;
         VkDebugReportCallbackEXT m_DebugReportCallback = VK_NULL_HANDLE;
         GLFWwindow* m_GLFWwindow;
+
+        std::unique_ptr<VulkanSwapChain> m_SwapChain;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

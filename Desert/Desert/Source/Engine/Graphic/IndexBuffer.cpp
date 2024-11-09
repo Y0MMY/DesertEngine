@@ -12,7 +12,10 @@ namespace Desert::Graphic
             case RendererAPIType::None:
                 return nullptr;
             case RendererAPIType::Vulkan:
-                return std::make_shared<VulkanIndexBuffer>::Create( data, size, usage );
+            {
+                return std::make_shared<API::Vulkan::VulkanIndexBuffer>( data, size,
+                                                                                                  usage );
+            }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;
@@ -25,7 +28,9 @@ namespace Desert::Graphic
             case RendererAPIType::None:
                 return nullptr;
             case RendererAPIType::Vulkan:
-                return std::make_shared<VulkanIndexBuffer>::Create( size, usage );
+            {
+                return std::make_shared<API::Vulkan::VulkanIndexBuffer>( size, usage );
+            }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;

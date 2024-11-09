@@ -68,7 +68,7 @@ namespace Desert::Graphic::API::Vulkan
                 return Common::MakeError<bool>( stagingBufferAllocation.GetError() );
             }
 
-            auto stagingBufferAllocationVAL = stagingBufferAllocation.GetValue().value();
+            auto stagingBufferAllocationVAL = stagingBufferAllocation.GetValue();
 
             // copy data to staging buffer
 
@@ -87,14 +87,14 @@ namespace Desert::Graphic::API::Vulkan
                 return Common::MakeError<bool>( buffer.GetError() );
             }
 
-            m_MemoryAllocation = buffer.GetValue().value();
+            m_MemoryAllocation = buffer.GetValue();
             auto copyCmd       = device->RT_GetCommandBufferGraphic();
             if ( !copyCmd.IsSuccess() )
             {
                 return Common::MakeError<bool>( copyCmd.GetError() );
             }
 
-            auto copyCmdVal = copyCmd.GetValue().value();
+            auto copyCmdVal = copyCmd.GetValue();
 
             VkBufferCopy copyRegion = {};
             copyRegion.size         = m_Size;

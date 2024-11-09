@@ -57,8 +57,8 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanAllocator::Init( const VulkanLogicalDevice& device, VkInstance instance )
     {
         VmaAllocatorCreateInfo allocatorInfo = {};
-        allocatorInfo.device                 = device.GetLogicalDevice();
-        allocatorInfo.physicalDevice         = device.GetPhysicalDevice()->GetPhysicalDevice();
+        allocatorInfo.device                 = device.GetVulkanLogicalDevice();
+        allocatorInfo.physicalDevice         = device.GetPhysicalDevice()->GetVulkanPhysicalDevice();
         allocatorInfo.vulkanApiVersion       = VK_API_VERSION_1_2;
         allocatorInfo.instance               = instance;
 

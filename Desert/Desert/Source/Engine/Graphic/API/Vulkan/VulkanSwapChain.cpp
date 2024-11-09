@@ -3,11 +3,45 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
+    namespace
+    {
+        Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
+                                                     VkImageAspectFlags aspectFlags, VkImageViewType viewType,
+                                                     uint32_t layerCount, uint32_t mipLeveles )
+        {
+            VkImageViewCreateInfo viewInfo = { .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                               .pNext            = VK_NULL_HANDLE,
+                                               .image            = image,
+                                               .viewType         = viewType,
+                                               .format           = format,
+                                               .components       = { .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                                                                     .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                                                                     .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                                                                     .a = VK_COMPONENT_SWIZZLE_IDENTITY },
+                                               .subresourceRange = { .aspectMask     = aspectFlags,
+                                                                     .baseMipLevel   = 0,
+                                                                     .levelCount     = mipLeveles,
+                                                                     .baseArrayLayer = 0,
+                                                                     .layerCount     = layerCount } };
 
-    void VulkanSwapChain::Init( const VkInstance instance, const std::shared_ptr<VulkanLogicalDevice>& device )
+            VkImageView imageView;
+
+            VK_RETURN_RESULT_IF_FALSE_TYPE( VkImageView,
+                                            vkCreateImageView( device, &viewInfo, VK_NULL_HANDLE, &imageView ) );
+
+            return Common::MakeSuccess( imageView );
+        }
+    } // namespace
+    void VulkanSwapChain::Init( GLFWwindow* window, const VkInstance instance, VulkanLogicalDevice& device )
     {
         m_VulkanInstance = instance;
-        m_LogicalDevice  = device;
+        m_LogicalDevice  = &device;
+
+        InitSurface( window );
+        GetImageFormatAndColorSpace();
+
+        m_VulkanQueue = VulkanQueue(this);
+        m_VulkanQueue.Init();
     }
 
     void VulkanSwapChain::InitSurface( GLFWwindow* window )
@@ -15,12 +49,15 @@ namespace Desert::Graphic::API::Vulkan
         glfwCreateWindowSurface( m_VulkanInstance, window, nullptr, &m_Surface );
     }
 
-    Common::Result<VkResult> VulkanSwapChain::Create( uint32_t width, uint32_t height )
+    Common::Result<VkResult> VulkanSwapChain::Create( uint32_t* width, uint32_t* height )
     {
+        auto oldSwapchain = m_SwapChain;
+
+        const auto& pDevice = m_LogicalDevice->GetPhysicalDevice()->GetVulkanPhysicalDevice();
+        const auto& lDevice = m_LogicalDevice->GetVulkanLogicalDevice();
         // Get physical device surface properties and formats
         VkSurfaceCapabilitiesKHR surfCaps;
-        VK_RETURN_RESULT_IF_FALSE( vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-             m_LogicalDevice->GetPhysicalDevice()->GetVulkanPhysicalDevice(), m_Surface, &surfCaps ) );
+        VK_RETURN_RESULT_IF_FALSE( vkGetPhysicalDeviceSurfaceCapabilitiesKHR( pDevice, m_Surface, &surfCaps ) );
 
         uint32_t numberOfSwapChainImages =
              std::clamp( surfCaps.minImageCount + 1, surfCaps.minImageCount, surfCaps.maxImageCount );
@@ -39,6 +76,24 @@ namespace Desert::Graphic::API::Vulkan
             preTransform = surfCaps.currentTransform;
         }
 
+        VkExtent2D swapchainExtent = {};
+        // If width (and height) equals the special value 0xFFFFFFFF, the size of the surface will be set by the
+        // swapchain
+        if ( surfCaps.currentExtent.width == (uint32_t)-1 )
+        {
+            // If the surface size is undefined, the size is set to
+            // the size of the images requested.
+            swapchainExtent.width  = *width;
+            swapchainExtent.height = *height;
+        }
+        else
+        {
+            // If the surface size is defined, the swap chain size must match
+            swapchainExtent = surfCaps.currentExtent;
+            *width          = surfCaps.currentExtent.width;
+            *height         = surfCaps.currentExtent.height;
+        }
+
         VkSwapchainCreateInfoKHR swapChainCreateInfo{};
         swapChainCreateInfo.sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         swapChainCreateInfo.pNext                 = nullptr;
@@ -47,7 +102,7 @@ namespace Desert::Graphic::API::Vulkan
         swapChainCreateInfo.imageColorSpace       = m_ColorSpace;
         swapChainCreateInfo.imageFormat           = m_ColorFormat;
         swapChainCreateInfo.presentMode           = swapchainPresentMode;
-        swapChainCreateInfo.imageExtent           = { width, height };
+        swapChainCreateInfo.imageExtent           = swapchainExtent;
         swapChainCreateInfo.imageArrayLayers      = 1;
         swapChainCreateInfo.imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         swapChainCreateInfo.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
@@ -56,10 +111,21 @@ namespace Desert::Graphic::API::Vulkan
         swapChainCreateInfo.preTransform          = (VkSurfaceTransformFlagBitsKHR)preTransform;
         swapChainCreateInfo.clipped               = VK_TRUE;
         swapChainCreateInfo.compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        swapChainCreateInfo.oldSwapchain          = VK_NULL_HANDLE;
+        swapChainCreateInfo.oldSwapchain          = oldSwapchain;
 
         VK_RETURN_RESULT_IF_FALSE( vkCreateSwapchainKHR( m_LogicalDevice->GetVulkanLogicalDevice(),
                                                          &swapChainCreateInfo, nullptr, &m_SwapChain ) );
+
+        // If an existing swap chain is re-created, destroy the old swap chain
+        // This also cleans up all the presentable images
+        if ( oldSwapchain != VK_NULL_HANDLE )
+        {
+            for ( uint32_t i = 0; i < m_ImagesView.size(); i++ )
+            {
+                vkDestroyImageView( lDevice, m_ImagesView[i], nullptr );
+            }
+            vkDestroySwapchainKHR( lDevice, oldSwapchain, nullptr );
+        }
 
         LOG_TRACE( "Swap chain created" );
 
@@ -72,9 +138,17 @@ namespace Desert::Graphic::API::Vulkan
         VK_RETURN_RESULT_IF_FALSE( vkGetSwapchainImagesKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
                                                             &swapChainImages, m_Images.data() ) );
 
-        for (uint32_t i = 0; i < swapChainImages; i++)
+        for ( uint32_t i = 0; i < swapChainImages; i++ )
         {
+            const auto& createdImageView =
+                 CreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), m_Images[i], m_ColorFormat,
+                                  VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
+            if ( !createdImageView.IsSuccess() )
+            {
+                return Common::MakeError<VkResult>( createdImageView.GetError() );
+            }
 
+            m_ImagesView[i] = createdImageView.GetValue();
         }
 
         return Common::MakeSuccess( VK_SUCCESS );
@@ -127,5 +201,15 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
     }
+
+    Common::Result<VkResult> VulkanSwapChain::AcquireNextImage( VkSemaphore presentCompleteSemaphore,
+                                                                uint32_t*   imageIndex )
+    {
+        VK_RETURN_RESULT( vkAcquireNextImageKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
+                                                 UINT64_MAX, presentCompleteSemaphore, VK_NULL_HANDLE,
+                                                 imageIndex ) );
+    }
+
+   
 
 } // namespace Desert::Graphic::API::Vulkan

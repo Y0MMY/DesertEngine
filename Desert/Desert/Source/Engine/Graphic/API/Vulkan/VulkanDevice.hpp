@@ -27,6 +27,8 @@ namespace Desert::Graphic::API::Vulkan
             return m_SupportedExtensions.find( extensionName ) != m_SupportedExtensions.end();
         }
 
+        uint32_t
+
         Common::Result<bool> CreateDevice();
 
         static std::shared_ptr<VulkanPhysicalDevice> Create();
@@ -55,7 +57,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_PhysicalDevice;
         }
-        const VkDevice& GetLogicalDevice() const
+        const VkDevice& GetVulkanLogicalDevice() const
         {
             return m_LogicalDevice;
         }
