@@ -41,7 +41,6 @@ namespace Desert::Platform::Windows
         LOG_INFO( "The Window (windows) was created with: Title = {}, Width = {}, Height = {}",
                   m_Data.Specification.Title.c_str(), m_Data.Specification.Width, m_Data.Specification.Height );
 
-        glfwMakeContextCurrent( m_GLFWWindow );
         glfwSetWindowUserPointer( m_GLFWWindow, &m_Data );
 
         glfwSetWindowCloseCallback( m_GLFWWindow,

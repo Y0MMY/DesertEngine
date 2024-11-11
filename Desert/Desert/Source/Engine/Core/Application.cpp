@@ -4,6 +4,7 @@
 #include <Common/Core/Memory/CommandBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Core/EngineContext.h>
 #include <Engine/Graphic/Renderer.hpp>
 
@@ -40,6 +41,19 @@ namespace Desert::Engine
             {
                 layer->OnUpdate( m_PrevTimestep );
             }
+
+            auto&       con  = Graphic::Renderer::GetInstance().GetRendererContext();
+            const auto& vcon = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>( con );
+            auto&       q    = vcon->GetVulkanQueue();
+            auto&       s    = vcon->GetVulkanSwapChain();
+
+            for ( int i = 0; i < q->GetDrawCommandBuffers().size(); i++ )
+            {
+                Graphic::API::Vulkan::VulkanRendererAPI::ClearImage_Vulkan_test( q->GetDrawCommandBuffers()[i],
+                                                                                 s->GetVKImage()[i] );
+            }
+            q->Present();
+
             m_PrevTimestep = Common::Timestep( timestep - Common::Timestep() );
             m_Window->ProcessEvents();
         }

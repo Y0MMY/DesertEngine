@@ -2,25 +2,25 @@
 
 #include <vulkan/vulkan.h>
 
-#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
-
 namespace Desert::Graphic::API::Vulkan
 {
+    struct VulkanSwapChain;
+
     class VulkanQueue final
     {
     public:
         VulkanQueue( VulkanSwapChain* swapChain );
 
-        void Present();
-        void Init();
+        void                     Present();
+        Common::Result<VkResult> Init();
+
+        const auto& GetDrawCommandBuffers() const
+        {
+            return m_DrawCommandBuffers;
+        }
 
     private:
         Common::Result<VkResult> QueuePresent( VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore );
-
-        const auto& GetLogicalDevice() const
-        {
-            return m_SwapChain->m_LogicalDevice;
-        }
 
     private:
         VulkanSwapChain* m_SwapChain;
@@ -34,7 +34,6 @@ namespace Desert::Graphic::API::Vulkan
         } m_Semaphores;
 
         std::vector<VkCommandBuffer> m_DrawCommandBuffers;
-        VkCommandPool                m_CommandPool = nullptr; // TODO: should i use pool allocated in device class?
 
         uint32_t             m_CurrentBufferIndex = 0;
         std::vector<VkFence> m_WaitFences;

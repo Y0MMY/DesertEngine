@@ -120,7 +120,15 @@ namespace Desert::Graphic::API::Vulkan
         lDevice.CreateDevice();
 
         VulkanAllocator::GetInstance().Init( lDevice, s_VulkanInstance );
-       
+
+        m_SwapChain = std::make_unique<VulkanSwapChain>();
+        m_SwapChain->Init( m_GLFWwindow, s_VulkanInstance, lDevice );
+
+        static uint32_t width, height;
+        m_SwapChain->Create(&width, &height);
+
+        m_VulkanQueue = std::make_unique<VulkanQueue>(m_SwapChain.get());
+        m_VulkanQueue->Init();
 
         return Common::MakeSuccess( VK_SUCCESS );
     }

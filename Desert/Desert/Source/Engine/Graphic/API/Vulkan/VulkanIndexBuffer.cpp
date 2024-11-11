@@ -59,8 +59,7 @@ namespace Desert::Graphic::API::Vulkan
             m_MemoryAllocation = allocator
                                       .RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
                                                           VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer )
-                                      .GetValue()
-                                      .value();
+                                      .GetValue();
         }
 
         else [[likely]]

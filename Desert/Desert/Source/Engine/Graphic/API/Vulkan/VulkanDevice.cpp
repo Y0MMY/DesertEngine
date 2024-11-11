@@ -139,7 +139,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    Common::Result<VkCommandBuffer> VulkanLogicalDevice::RT_GetCommandBufferCompute()
+    Common::Result<VkCommandBuffer> VulkanLogicalDevice::RT_GetCommandBufferCompute( bool begin )
     {
         VkCommandBufferAllocateInfo allocateInfo;
         allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -151,12 +151,21 @@ namespace Desert::Graphic::API::Vulkan
         VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
                                         vkAllocateCommandBuffers( m_LogicalDevice, &allocateInfo, &cmdBuffer ) );
 
+        if ( begin )
+        {
+            VkCommandBufferBeginInfo cmdBufferBeginInfo{};
+            cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
+                                            vkBeginCommandBuffer( cmdBuffer, &cmdBufferBeginInfo ) );
+        }
+
         return Common::MakeSuccess( cmdBuffer );
     }
 
-    Common::Result<VkCommandBuffer> VulkanLogicalDevice::RT_GetCommandBufferGraphic()
+    Common::Result<VkCommandBuffer> VulkanLogicalDevice::RT_GetCommandBufferGraphic( bool begin )
     {
         VkCommandBufferAllocateInfo allocateInfo;
+        allocateInfo.pNext              = VK_NULL_HANDLE;
         allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocateInfo.commandBufferCount = 1;
@@ -166,9 +175,13 @@ namespace Desert::Graphic::API::Vulkan
         VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
                                         vkAllocateCommandBuffers( m_LogicalDevice, &allocateInfo, &cmdBuffer ) );
 
-        VkCommandBufferBeginInfo cmdBufferBeginInfo{};
-        cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer, vkBeginCommandBuffer( cmdBuffer, &cmdBufferBeginInfo ) );
+        if ( begin )
+        {
+            VkCommandBufferBeginInfo cmdBufferBeginInfo{};
+            cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
+                                            vkBeginCommandBuffer( cmdBuffer, &cmdBufferBeginInfo ) );
+        }
 
         return Common::MakeSuccess( cmdBuffer );
     }
@@ -209,8 +222,8 @@ namespace Desert::Graphic::API::Vulkan
             createInfo.enabledExtensionCount   = (uint32_t)deviceExtensions.size();
         }
 
-        VK_CHECK_RESULT(
-             vkCreateDevice( m_PhysicalDevice->GetVulkanPhysicalDevice(), &createInfo, nullptr, &m_LogicalDevice ) );
+        VK_CHECK_RESULT( vkCreateDevice( m_PhysicalDevice->GetVulkanPhysicalDevice(), &createInfo, nullptr,
+                                         &m_LogicalDevice ) );
         VkCommandPoolCreateInfo cmdPoolInfo = {};
         cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         cmdPoolInfo.queueFamilyIndex        = *m_PhysicalDevice->m_QueueFamilyIndices.GraphicsFamily;

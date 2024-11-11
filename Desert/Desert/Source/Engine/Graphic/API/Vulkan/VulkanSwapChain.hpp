@@ -19,7 +19,15 @@ namespace Desert::Graphic::API::Vulkan
 
         Common::Result<VkSurfaceFormatKHR> GetImageFormatAndColorSpace();
 
-        uint32_t GetImageCount() const { return m_Images.size(); }
+        uint32_t GetImageCount() const
+        {
+            return m_Images.size();
+        }
+
+        const auto GetVKImage() const
+        {
+            return m_Images;
+        }
 
     private:
         void InitSurface( GLFWwindow* window );
@@ -31,8 +39,6 @@ namespace Desert::Graphic::API::Vulkan
         VulkanLogicalDevice* m_LogicalDevice;
         VkInstance           m_VulkanInstance;
 
-        VulkanQueue m_VulkanQueue;
-
         VkSwapchainKHR m_SwapChain = VK_NULL_HANDLE;
         VkSurfaceKHR   m_Surface;
 
@@ -41,8 +47,8 @@ namespace Desert::Graphic::API::Vulkan
 
         std::vector<VkImage>     m_Images;
         std::vector<VkImageView> m_ImagesView;
-    private:
 
+    private:
         friend class VulkanQueue;
     };
 } // namespace Desert::Graphic::API::Vulkan

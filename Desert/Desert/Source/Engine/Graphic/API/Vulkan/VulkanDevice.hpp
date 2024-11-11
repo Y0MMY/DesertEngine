@@ -27,7 +27,10 @@ namespace Desert::Graphic::API::Vulkan
             return m_SupportedExtensions.find( extensionName ) != m_SupportedExtensions.end();
         }
 
-        uint32_t
+        std::optional<int32_t> GetGraphicsFamily() const
+        {
+            return m_QueueFamilyIndices.GraphicsFamily;
+        }
 
         Common::Result<bool> CreateDevice();
 
@@ -57,13 +60,22 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_PhysicalDevice;
         }
-        const VkDevice& GetVulkanLogicalDevice() const
+        const VkDevice GetVulkanLogicalDevice() const
         {
             return m_LogicalDevice;
         }
 
-        Common::Result<VkCommandBuffer> RT_GetCommandBufferCompute();
-        Common::Result<VkCommandBuffer> RT_GetCommandBufferGraphic();
+        VkQueue GetGraphicsQueue()
+        {
+            return m_GraphicsQueue;
+        }
+        VkQueue GetComputeQueue()
+        {
+            return m_ComputeQueue;
+        }
+
+        Common::Result<VkCommandBuffer> RT_GetCommandBufferCompute(bool begin = false);
+        Common::Result<VkCommandBuffer> RT_GetCommandBufferGraphic(bool begin = false);
 
         Common::Result<VkResult> RT_FlushCommandBufferCompute( VkCommandBuffer commandBuffer );
         Common::Result<VkResult> RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer );

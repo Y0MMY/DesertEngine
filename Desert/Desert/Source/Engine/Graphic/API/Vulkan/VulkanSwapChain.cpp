@@ -39,9 +39,6 @@ namespace Desert::Graphic::API::Vulkan
 
         InitSurface( window );
         GetImageFormatAndColorSpace();
-
-        m_VulkanQueue = VulkanQueue(this);
-        m_VulkanQueue.Init();
     }
 
     void VulkanSwapChain::InitSurface( GLFWwindow* window )

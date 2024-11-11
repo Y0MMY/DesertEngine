@@ -14,6 +14,10 @@ namespace Desert::Graphic
         virtual ~RendererAPI() = default;
 
     public:
+
+        virtual void Init() = 0;
+        virtual void ClearImage( ) = 0;
+
     public:
         static const RendererAPIType GetAPIType()
         {
