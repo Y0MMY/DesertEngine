@@ -35,7 +35,6 @@ namespace Desert::Graphic::API::Vulkan
 
         std::vector<VkCommandBuffer> m_DrawCommandBuffers;
 
-        uint32_t             m_CurrentBufferIndex = 0;
         std::vector<VkFence> m_WaitFences;
     };
 } // namespace Desert::Graphic::API::Vulkan

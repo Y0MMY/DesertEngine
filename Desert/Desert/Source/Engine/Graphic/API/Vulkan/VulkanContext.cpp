@@ -2,6 +2,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
+#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
 #include <Engine/Core/EngineContext.h>
 
 #include <vulkan/vulkan.h>
@@ -113,7 +115,6 @@ namespace Desert::Graphic::API::Vulkan
             VK_CHECK_RESULT( vkCreateDebugReportCallbackEXT( s_VulkanInstance, &debug_report_ci, nullptr,
                                                              &m_DebugReportCallback ) );
         }
-
         const auto& pDevice = Graphic::API::Vulkan::VulkanPhysicalDevice::Create();
         pDevice->CreateDevice();
         auto& lDevice = Common::Singleton<VulkanLogicalDevice>::CreateInstance( pDevice );
@@ -121,16 +122,27 @@ namespace Desert::Graphic::API::Vulkan
 
         VulkanAllocator::GetInstance().Init( lDevice, s_VulkanInstance );
 
+        CommandBufferAllocator::CreateInstance( lDevice );
+
         m_SwapChain = std::make_unique<VulkanSwapChain>();
         m_SwapChain->Init( m_GLFWwindow, s_VulkanInstance, lDevice );
 
         static uint32_t width, height;
-        m_SwapChain->Create(&width, &height);
+        m_SwapChain->Create( &width, &height );
 
-        m_VulkanQueue = std::make_unique<VulkanQueue>(m_SwapChain.get());
+        m_VulkanQueue = std::make_unique<VulkanQueue>( m_SwapChain.get() ); //TODO: make shared ptr
         m_VulkanQueue->Init();
 
+        VulkanRenderCommandBuffer::CreateInstance( "test" ).Init( m_VulkanQueue.get() );
         return Common::MakeSuccess( VK_SUCCESS );
+    }
+
+    void VulkanContext::BeginFrame() const
+    {
+    }
+
+    void VulkanContext::EndFrame() const
+    {
     }
 
 } // namespace Desert::Graphic::API::Vulkan

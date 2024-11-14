@@ -55,54 +55,54 @@ namespace Desert::Graphic::API::Vulkan
         else [[likely]]
         {
 
-            VkBufferCreateInfo stagingBufferCreateInfo =
-                 CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE );
+        //    VkBufferCreateInfo stagingBufferCreateInfo =
+        //         CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE );
 
-            VkBuffer stagingBuffer;
-            auto     stagingBufferAllocation = allocator.RT_AllocateBuffer(
-                 "VertexBuffer_staging", stagingBufferCreateInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, stagingBuffer );
+        //    VkBuffer stagingBuffer;
+        //    auto     stagingBufferAllocation = allocator.RT_AllocateBuffer(
+        //         "VertexBuffer_staging", stagingBufferCreateInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, stagingBuffer );
 
-            if ( !stagingBufferAllocation.IsSuccess() )
-            {
-                return Common::MakeError<bool>( stagingBufferAllocation.GetError() );
-            }
+        //    if ( !stagingBufferAllocation.IsSuccess() )
+        //    {
+        //        return Common::MakeError<bool>( stagingBufferAllocation.GetError() );
+        //    }
 
-            auto stagingBufferAllocationVAL = stagingBufferAllocation.GetValue();
+        //    auto stagingBufferAllocationVAL = stagingBufferAllocation.GetValue();
 
-            // copy data to staging buffer
+        //    // copy data to staging buffer
 
-            auto destData = allocator.MapMemory( stagingBufferAllocationVAL );
-            memcpy( destData, m_StorageBuffer.Data, m_StorageBuffer.Size );
-            allocator.UnmapMemory( stagingBufferAllocationVAL );
+        //    auto destData = allocator.MapMemory( stagingBufferAllocationVAL );
+        //    memcpy( destData, m_StorageBuffer.Data, m_StorageBuffer.Size );
+        //    allocator.UnmapMemory( stagingBufferAllocationVAL );
 
-            auto vertexBufferCreateInfo = CreateVertexBufferInfo(
-                 m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                 VK_SHARING_MODE_EXCLUSIVE );
+        //    auto vertexBufferCreateInfo = CreateVertexBufferInfo(
+        //         m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        //         VK_SHARING_MODE_EXCLUSIVE );
 
-            const auto buffer = allocator.RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
-                                                             VMA_MEMORY_USAGE_GPU_ONLY, m_VulkanBuffer );
-            if ( !buffer.IsSuccess() )
-            {
-                return Common::MakeError<bool>( buffer.GetError() );
-            }
+        //    const auto buffer = allocator.RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
+        //                                                     VMA_MEMORY_USAGE_GPU_ONLY, m_VulkanBuffer );
+        //    if ( !buffer.IsSuccess() )
+        //    {
+        //        return Common::MakeError<bool>( buffer.GetError() );
+        //    }
 
-            m_MemoryAllocation = buffer.GetValue();
-            auto copyCmd       = device->RT_GetCommandBufferGraphic();
-            if ( !copyCmd.IsSuccess() )
-            {
-                return Common::MakeError<bool>( copyCmd.GetError() );
-            }
+        //    m_MemoryAllocation = buffer.GetValue();
+        //    auto copyCmd       = device->RT_GetCommandBufferGraphic();
+        //    if ( !copyCmd.IsSuccess() )
+        //    {
+        //        return Common::MakeError<bool>( copyCmd.GetError() );
+        //    }
 
-            auto copyCmdVal = copyCmd.GetValue();
+        //    auto copyCmdVal = copyCmd.GetValue();
 
-            VkBufferCopy copyRegion = {};
-            copyRegion.size         = m_Size;
+        //    VkBufferCopy copyRegion = {};
+        //    copyRegion.size         = m_Size;
 
-            vkCmdCopyBuffer( copyCmdVal, stagingBuffer, m_VulkanBuffer, 1, &copyRegion );
+        //    vkCmdCopyBuffer( copyCmdVal, stagingBuffer, m_VulkanBuffer, 1, &copyRegion );
 
-            device->RT_FlushCommandBufferGraphic( copyCmdVal );
+        //    device->RT_FlushCommandBufferGraphic( copyCmdVal );
 
-            allocator.RT_DestroyBuffer( stagingBuffer, m_MemoryAllocation );
+        //    allocator.RT_DestroyBuffer( stagingBuffer, m_MemoryAllocation );
         }
         return Common::MakeSuccess( true );
     }

@@ -74,12 +74,6 @@ namespace Desert::Graphic::API::Vulkan
             return m_ComputeQueue;
         }
 
-        Common::Result<VkCommandBuffer> RT_GetCommandBufferCompute(bool begin = false);
-        Common::Result<VkCommandBuffer> RT_GetCommandBufferGraphic(bool begin = false);
-
-        Common::Result<VkResult> RT_FlushCommandBufferCompute( VkCommandBuffer commandBuffer );
-        Common::Result<VkResult> RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer );
-
         void Destroy();
 
         Common::Result<bool> CreateDevice();
@@ -92,5 +86,7 @@ namespace Desert::Graphic::API::Vulkan
 
         VkQueue m_GraphicsQueue;
         VkQueue m_ComputeQueue;
+
+        friend class CommandBufferAllocator;
     };
 } // namespace Desert::Graphic::API::Vulkan

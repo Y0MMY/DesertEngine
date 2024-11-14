@@ -37,6 +37,7 @@ namespace Desert::Engine
         while ( m_IsRunningApplication )
         {
             Common::Timestep timestep;
+            Graphic::Renderer::GetInstance().BeginFrame();
             for ( const auto& layer : m_LayerStack )
             {
                 layer->OnUpdate( m_PrevTimestep );
@@ -45,13 +46,10 @@ namespace Desert::Engine
             auto&       con  = Graphic::Renderer::GetInstance().GetRendererContext();
             const auto& vcon = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>( con );
             auto&       q    = vcon->GetVulkanQueue();
-            auto&       s    = vcon->GetVulkanSwapChain();
 
-            for ( int i = 0; i < q->GetDrawCommandBuffers().size(); i++ )
-            {
-                Graphic::API::Vulkan::VulkanRendererAPI::ClearImage_Vulkan_test( q->GetDrawCommandBuffers()[i],
-                                                                                 s->GetVKImage()[i] );
-            }
+            Graphic::Renderer::GetInstance().ClearImage();
+
+            Graphic::Renderer::GetInstance().EndFrame();
             q->Present();
 
             m_PrevTimestep = Common::Timestep( timestep - Common::Timestep() );

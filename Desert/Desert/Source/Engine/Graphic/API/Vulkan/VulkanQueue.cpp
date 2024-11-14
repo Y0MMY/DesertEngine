@@ -3,6 +3,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
+#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
+#include <Engine/Core/EngineContext.h>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -29,6 +31,8 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::Present() // TODO: result
     {
+        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentBufferIndex;
+
         const auto& device = m_SwapChain->m_LogicalDevice->GetVulkanLogicalDevice();
         const auto& queue  = m_SwapChain->m_LogicalDevice->GetGraphicsQueue();
 
@@ -40,21 +44,23 @@ namespace Desert::Graphic::API::Vulkan
         submitInfo.waitSemaphoreCount      = 1;
         submitInfo.pSignalSemaphores       = &m_Semaphores.RenderComplete;
         submitInfo.signalSemaphoreCount    = 1;
-        submitInfo.pCommandBuffers         = &m_DrawCommandBuffers[m_CurrentBufferIndex];
+        submitInfo.pCommandBuffers         = &m_DrawCommandBuffers[currentIndex];
         submitInfo.commandBufferCount      = 1;
 
-        vkResetFences( device, 1, &m_WaitFences[m_CurrentBufferIndex] );
+        vkResetFences( device, 1, &m_WaitFences[currentIndex] );
 
         uint32_t imageIndex = ~0U;
         m_SwapChain->AcquireNextImage( m_Semaphores.PresentComplete, &imageIndex );
 
         // Submit to the graphics queue passing a wait fence
-        VK_CHECK_RESULT( vkQueueSubmit( queue, 1, &submitInfo, m_WaitFences[m_CurrentBufferIndex] ) );
+        VK_CHECK_RESULT( vkQueueSubmit( queue, 1, &submitInfo, m_WaitFences[currentIndex] ) );
 
         const auto& queuePresent = QueuePresent( queue, imageIndex, m_Semaphores.RenderComplete );
 
-        m_CurrentBufferIndex = ( m_CurrentBufferIndex + 1 ) % m_SwapChain->GetImageCount();
-        vkWaitForFences( device, 1, &m_WaitFences[m_CurrentBufferIndex], VK_TRUE, UINT64_MAX );
+        uint32_t newCurrentFrame                          = ( currentIndex + 1 ) % m_SwapChain->GetImageCount();
+        EngineContext::GetInstance().m_CurrentBufferIndex = newCurrentFrame;
+        vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE,
+                         UINT64_MAX );
     }
 
     Common::Result<VkResult> VulkanQueue::QueuePresent( VkQueue queue, uint32_t imageIndex,
@@ -98,7 +104,7 @@ namespace Desert::Graphic::API::Vulkan
 
         for ( uint32_t i = 0; i < m_DrawCommandBuffers.size(); i++ )
         {
-            const auto& buffer = m_SwapChain->m_LogicalDevice->RT_GetCommandBufferGraphic();
+            const auto& buffer = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic();
             if ( !buffer.IsSuccess() )
             {
                 return Common::MakeError<VkResult>( buffer.GetError() );
@@ -114,8 +120,10 @@ namespace Desert::Graphic::API::Vulkan
         for ( size_t i = 0; i < m_WaitFences.size(); ++i )
         {
 
-            auto res = vkCreateFence( m_SwapChain->m_LogicalDevice->GetVulkanLogicalDevice(), &fenceCreateInfo,
-                                      nullptr, &m_WaitFences[i] );
+            VK_RETURN_RESULT_IF_FALSE( vkCreateFence( m_SwapChain->m_LogicalDevice->GetVulkanLogicalDevice(),
+                                                      &fenceCreateInfo, nullptr, &m_WaitFences[i] ) );
         }
+
+        return Common::MakeSuccess( VK_SUCCESS );
     }
 } // namespace Desert::Graphic::API::Vulkan

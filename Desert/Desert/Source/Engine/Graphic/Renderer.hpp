@@ -14,6 +14,13 @@ namespace Desert::Graphic
             return m_RendererContext;
         }
 
+        void BeginFrame();
+        void EndFrame();
+
+        void ClearImage();
+
+
+        uint32_t GetCurrentFrameIndex();
     private:
         void InitGraphicAPI();
 

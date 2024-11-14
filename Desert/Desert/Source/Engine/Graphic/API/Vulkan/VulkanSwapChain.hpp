@@ -24,7 +24,7 @@ namespace Desert::Graphic::API::Vulkan
             return m_Images.size();
         }
 
-        const auto GetVKImage() const
+        const auto& GetVKImage() const
         {
             return m_Images;
         }

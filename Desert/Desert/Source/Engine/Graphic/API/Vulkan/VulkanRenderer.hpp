@@ -12,26 +12,13 @@ namespace Desert::Graphic::API::Vulkan
         {
         }
 
-        static void ClearImage_Vulkan_test(VkCommandBuffer cmdBuffer, VkImage image)
-        {
-            static VkClearColorValue ClearColor = { 1.0f, 0.0f, 0.0f, 0.0f };
+        virtual void ClearImage() override;
 
-            VkCommandBufferBeginInfo cmdBufferBeginInfo{};
-            cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-            vkBeginCommandBuffer( cmdBuffer, &cmdBufferBeginInfo );
-
-            VkImageSubresourceRange ImageRange = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-                                                   .baseMipLevel   = 0,
-                                                   .levelCount     = 1,
-                                                   .baseArrayLayer = 0,
-                                                   .layerCount     = 1 };
-
-            vkCmdClearColorImage(cmdBuffer, image, VK_IMAGE_LAYOUT_GENERAL, &ClearColor, 1, &ImageRange);
-
-            VkResult res = vkEndCommandBuffer(cmdBuffer);
-        }
+        virtual void BeginFrame() override;
+        virtual void EndFrame() override;
 
     private:
+        VkCommandBuffer m_CurrentCommandBuffer = nullptr;
     };
+
 } // namespace Desert::Graphic::API::Vulkan

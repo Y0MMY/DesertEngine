@@ -8,19 +8,15 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-
+ 
     class VulkanContext final : public RendererContext, public Common::Singleton<VulkanContext>
     {
     public:
         VulkanContext( GLFWwindow* window );
         virtual ~VulkanContext() = default;
 
-        virtual void BeginFrame() const override
-        {
-        }
-        virtual void EndFrame() const override
-        {
-        }
+        virtual void BeginFrame() const override;
+        virtual void EndFrame() const override;
 
         virtual void OnResize( uint32_t width, uint32_t height ) override
         {
