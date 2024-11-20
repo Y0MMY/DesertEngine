@@ -92,16 +92,16 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         VkSwapchainCreateInfoKHR swapChainCreateInfo{};
-        swapChainCreateInfo.sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        swapChainCreateInfo.pNext                 = nullptr;
-        swapChainCreateInfo.surface               = m_Surface;
-        swapChainCreateInfo.minImageCount         = numberOfSwapChainImages;
-        swapChainCreateInfo.imageColorSpace       = m_ColorSpace;
-        swapChainCreateInfo.imageFormat           = m_ColorFormat;
-        swapChainCreateInfo.presentMode           = swapchainPresentMode;
-        swapChainCreateInfo.imageExtent           = swapchainExtent;
-        swapChainCreateInfo.imageArrayLayers      = 1;
-        swapChainCreateInfo.imageUsage            = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        swapChainCreateInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        swapChainCreateInfo.pNext            = nullptr;
+        swapChainCreateInfo.surface          = m_Surface;
+        swapChainCreateInfo.minImageCount    = numberOfSwapChainImages;
+        swapChainCreateInfo.imageColorSpace  = m_ColorSpace;
+        swapChainCreateInfo.imageFormat      = m_ColorFormat;
+        swapChainCreateInfo.presentMode      = swapchainPresentMode;
+        swapChainCreateInfo.imageExtent      = swapchainExtent;
+        swapChainCreateInfo.imageArrayLayers = 1;
+        swapChainCreateInfo.imageUsage = ( VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT );
         swapChainCreateInfo.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
         swapChainCreateInfo.queueFamilyIndexCount = 0;
         swapChainCreateInfo.pQueueFamilyIndices   = NULL;
@@ -206,7 +206,5 @@ namespace Desert::Graphic::API::Vulkan
                                                  UINT64_MAX, presentCompleteSemaphore, VK_NULL_HANDLE,
                                                  imageIndex ) );
     }
-
-   
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -11,7 +11,7 @@ namespace Desert::Graphic::API::Vulkan
     public:
         VulkanRenderCommandBuffer( const std::string& debugName );
 
-        inline VkCommandBuffer RT_GetCommandBuffer( uint32_t index, bool computeBuffer = false )
+        inline VkCommandBuffer GetCommandBuffer( uint32_t index, bool computeBuffer = false )
         {
             return m_CommandBuffers[index];
         }
