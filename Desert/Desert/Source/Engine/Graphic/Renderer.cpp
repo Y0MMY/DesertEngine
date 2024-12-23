@@ -34,14 +34,7 @@ namespace Desert::Graphic
     {
         InitGraphicAPI();
 
-
-
-        return Common::MakeSuccess(true);
-    }
-
-    void Renderer::ClearImage()
-    {
-        s_RendererAPI->ClearImage();
+        return Common::MakeSuccess( true );
     }
 
     void Renderer::EndFrame()
@@ -56,7 +49,18 @@ namespace Desert::Graphic
 
     uint32_t Renderer::GetCurrentFrameIndex()
     {
-        return  EngineContext::GetInstance().GetCurrentBufferIndex();
+        return EngineContext::GetInstance().GetCurrentBufferIndex();
+    }
+
+    Common::Memory::CommandBuffer& Renderer::GetRenderCommandQueue()
+    {
+        static Common::Memory::CommandBuffer cmdBuffer;
+        return cmdBuffer;
+    }
+
+    void Renderer::PresentFinalImage()
+    {
+        s_RendererAPI->PresentFinalImage();
     }
 
 } // namespace Desert::Graphic

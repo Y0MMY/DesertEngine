@@ -29,6 +29,20 @@ namespace Desert::Graphic::API::Vulkan
             return m_Images;
         }
 
+        const auto& GetVKImagesView() const
+        {
+            return m_ImagesView;
+        }
+
+        VkFormat GetColorFormat() const
+        {
+            return m_ColorFormat;
+        }
+        VkColorSpaceKHR GetColorSpace() const
+        {
+            return m_ColorSpace;
+        }
+
     private:
         void InitSurface( GLFWwindow* window );
 

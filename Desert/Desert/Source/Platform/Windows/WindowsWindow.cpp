@@ -4,6 +4,7 @@
 
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Core/EngineContext.h>
+#include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Platform::Windows
 {
@@ -36,7 +37,7 @@ namespace Desert::Platform::Windows
         m_GLFWWindow = glfwCreateWindow( (int)m_Data.Specification.Width, (int)m_Data.Specification.Height,
                                          m_Data.Specification.Title.c_str(), nullptr, nullptr );
 
-       // EngineContext::GetInstance().m_CurrentWindow = m_GLFWWindow;
+        // EngineContext::GetInstance().m_CurrentWindow = m_GLFWWindow;
 
         LOG_INFO( "The Window (windows) was created with: Title = {}, Width = {}, Height = {}",
                   m_Data.Specification.Title.c_str(), m_Data.Specification.Width, m_Data.Specification.Height );
@@ -99,6 +100,11 @@ namespace Desert::Platform::Windows
     void WindowsWindow::ProcessEvents()
     {
         glfwPollEvents();
+    }
+
+    void WindowsWindow::PresentFinalImage() const
+    {
+        Graphic::Renderer::GetInstance().GetRendererContext()->PresentFinalImage();
     }
 
 } // namespace Desert::Platform::Windows

@@ -10,6 +10,7 @@ namespace Desert::Graphic
         virtual ~RendererContext() = default;
 
         virtual void BeginFrame() const = 0;
+        virtual void PresentFinalImage() const   = 0;
         virtual void EndFrame() const   = 0;
 
         virtual void OnResize( uint32_t width, uint32_t height ) = 0;

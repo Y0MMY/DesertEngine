@@ -9,6 +9,7 @@
 namespace Desert::Graphic::API::Vulkan
 {
     class VulkanQueue;
+    class VulkanSwapChain;
 }
 
 namespace Desert
@@ -35,13 +36,20 @@ namespace Desert
             return m_CurrentBufferIndex;
         }
 
+        uint32_t GetFramesInFlight() const
+        {
+            return m_FramesInFlight;
+        }
+
     private:
         std::shared_ptr<Common::Window> m_CurrentWindow;
 
         uint32_t m_CurrentBufferIndex = 0;
+        uint32_t m_FramesInFlight = 2;
 
     private:
         friend class Desert::Engine::Application;
         friend class Desert::Graphic::API::Vulkan::VulkanQueue;
+        friend class Desert::Graphic::API::Vulkan::VulkanSwapChain;
     };
 } // namespace Desert

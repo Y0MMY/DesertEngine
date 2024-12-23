@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/RendererContext.hpp>
+#include <Common/Core/Memory/CommandBuffer.hpp>
 
 namespace Desert::Graphic
 {
@@ -17,12 +18,21 @@ namespace Desert::Graphic
         void BeginFrame();
         void EndFrame();
 
-        void ClearImage();
-
+        void PresentFinalImage();
 
         uint32_t GetCurrentFrameIndex();
+
+        template <typename FuncT>
+        static void SubmitCommand( FuncT&& func )
+        {
+            Common::Memory::SubmitCommand( GetRenderCommandQueue(), std::forward<FuncT>( func ) );
+        }
+
     private:
         void InitGraphicAPI();
+
+    private:
+        static Common::Memory::CommandBuffer& GetRenderCommandQueue();
 
     private:
         std::shared_ptr<RendererContext> m_RendererContext;

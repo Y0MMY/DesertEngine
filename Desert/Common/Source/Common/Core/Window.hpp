@@ -40,6 +40,8 @@ namespace Common
         virtual bool IsWindowMinimized() const = 0;
         virtual void Maximize() const          = 0;
 
+        virtual void PresentFinalImage() const = 0;
+
         virtual void SetEventCallback( const EventCallbackFn& e ) = 0;
 
         static std::shared_ptr<Window> Create( const WindowSpecification& specification );

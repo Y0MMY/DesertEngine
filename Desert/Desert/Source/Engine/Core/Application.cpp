@@ -40,17 +40,16 @@ namespace Desert::Engine
             Graphic::Renderer::GetInstance().BeginFrame();
             for ( const auto& layer : m_LayerStack )
             {
-                layer->OnUpdate( m_PrevTimestep );
+                //layer->OnUpdate( m_PrevTimestep );
             }
 
             auto&       con  = Graphic::Renderer::GetInstance().GetRendererContext();
             const auto& vcon = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>( con );
             auto&       q    = vcon->GetVulkanQueue();
 
-            Graphic::Renderer::GetInstance().ClearImage();
 
             Graphic::Renderer::GetInstance().EndFrame();
-            q->Present();
+            m_Window->PresentFinalImage();
 
             m_PrevTimestep = Common::Timestep( timestep - Common::Timestep() );
             m_Window->ProcessEvents();

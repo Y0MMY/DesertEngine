@@ -24,5 +24,5 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
     appInfo.Width  = 1920;
     appInfo.Height = 780;
 
-    return &Common::Singleton<Desert::Sandbox>::CreateInstance(appInfo);
+    return &Common::Singleton<Desert::Sandbox>::CreateInstance( appInfo );
 }

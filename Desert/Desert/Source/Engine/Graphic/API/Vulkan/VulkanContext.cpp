@@ -130,10 +130,10 @@ namespace Desert::Graphic::API::Vulkan
         static uint32_t width, height;
         m_SwapChain->Create( &width, &height );
 
-        m_VulkanQueue = std::make_unique<VulkanQueue>( m_SwapChain.get() ); //TODO: make shared ptr
+        m_VulkanQueue = std::make_unique<VulkanQueue>( m_SwapChain.get() ); // TODO: make shared ptr
         m_VulkanQueue->Init();
 
-        VulkanRenderCommandBuffer::CreateInstance( "test" ).Init( m_VulkanQueue.get() );
+        VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );
         return Common::MakeSuccess( VK_SUCCESS );
     }
 
@@ -143,6 +143,11 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanContext::EndFrame() const
     {
+    }
+
+    void VulkanContext::PresentFinalImage() const
+    {
+        m_VulkanQueue->Present();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

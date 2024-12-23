@@ -1,37 +1,10 @@
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
 
+#include <Engine/Core/EngineContext.h>
+
 namespace Desert::Graphic::API::Vulkan
 {
-    namespace
-    {
-        Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
-                                                     VkImageAspectFlags aspectFlags, VkImageViewType viewType,
-                                                     uint32_t layerCount, uint32_t mipLeveles )
-        {
-            VkImageViewCreateInfo viewInfo = { .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                                               .pNext            = VK_NULL_HANDLE,
-                                               .image            = image,
-                                               .viewType         = viewType,
-                                               .format           = format,
-                                               .components       = { .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                                                                     .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                                                                     .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                                                                     .a = VK_COMPONENT_SWIZZLE_IDENTITY },
-                                               .subresourceRange = { .aspectMask     = aspectFlags,
-                                                                     .baseMipLevel   = 0,
-                                                                     .levelCount     = mipLeveles,
-                                                                     .baseArrayLayer = 0,
-                                                                     .layerCount     = layerCount } };
-
-            VkImageView imageView;
-
-            VK_RETURN_RESULT_IF_FALSE_TYPE( VkImageView,
-                                            vkCreateImageView( device, &viewInfo, VK_NULL_HANDLE, &imageView ) );
-
-            return Common::MakeSuccess( imageView );
-        }
-    } // namespace
     void VulkanSwapChain::Init( GLFWwindow* window, const VkInstance instance, VulkanLogicalDevice& device )
     {
         m_VulkanInstance = instance;
@@ -124,6 +97,7 @@ namespace Desert::Graphic::API::Vulkan
             vkDestroySwapchainKHR( lDevice, oldSwapchain, nullptr );
         }
 
+
         LOG_TRACE( "Swap chain created" );
 
         uint32_t swapChainImages = 0u;
@@ -132,13 +106,14 @@ namespace Desert::Graphic::API::Vulkan
         m_Images.resize( swapChainImages );
         m_ImagesView.resize( swapChainImages );
 
+        EngineContext::GetInstance().m_FramesInFlight = m_ImagesView.size();
         VK_RETURN_RESULT_IF_FALSE( vkGetSwapchainImagesKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
                                                             &swapChainImages, m_Images.data() ) );
 
         for ( uint32_t i = 0; i < swapChainImages; i++ )
         {
             const auto& createdImageView =
-                 CreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), m_Images[i], m_ColorFormat,
+                 Utils::CreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), m_Images[i], m_ColorFormat,
                                   VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
             if ( !createdImageView.IsSuccess() )
             {
