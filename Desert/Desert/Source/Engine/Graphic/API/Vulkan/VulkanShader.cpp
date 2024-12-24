@@ -5,7 +5,6 @@
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
 
 #include <shaderc/shaderc.hpp>
-#include <vulkan/vulkan.h>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -34,6 +33,20 @@ namespace Desert::Graphic::API::Vulkan
             return (shaderc_shader_kind)0;
         }
 
+        VkShaderStageFlagBits ShaderStageToVkShader( Core::Formats::ShaderStage shaderType )
+        {
+            switch ( shaderType )
+            {
+                case Desert::Core::Formats::ShaderStage::Vertex:
+                    return VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
+                case Desert::Core::Formats::ShaderStage::Fragment:
+                    return VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT;
+                case Desert::Core::Formats::ShaderStage::Compute:
+                    return VkShaderStageFlagBits::VK_SHADER_STAGE_COMPUTE_BIT;
+            }
+            return (VkShaderStageFlagBits)0;
+        }
+
         Common::Result<std::vector<uint32_t>> Compile( const Core::Formats::ShaderStage stage,
                                                        const std::string                shaderSource,
                                                        const std::string&               shaderPath )
@@ -60,7 +73,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         void CreateShaderModule( const Core::Formats::ShaderStage& stage, const std::vector<uint32_t>& shaderData,
-                                 const std::filesystem::path& filepath )
+                                 const std::filesystem::path&                  filepath,
+                                 std::vector<VkPipelineShaderStageCreateInfo>& writeCreateInfo )
         {
             VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
@@ -73,20 +87,29 @@ namespace Desert::Graphic::API::Vulkan
             VkShaderModule shaderModule;
             VK_CHECK_RESULT( vkCreateShaderModule( device, &moduleCreateInfo, NULL, &shaderModule ) );
             VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_SHADER_MODULE,
-                                              fmt::format( "{}:{}", filepath.filename().string(), "TODO" ), shaderModule );
+                                              fmt::format( "{}:{}", filepath.filename().string(), "TODO" ),
+                                              shaderModule );
+
+            VkPipelineShaderStageCreateInfo& shaderStage = writeCreateInfo.emplace_back();
+            shaderStage.sType                            = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            shaderStage.stage                            = Utils::ShaderStageToVkShader( stage );
+            shaderStage.module                           = shaderModule;
+            shaderStage.pName                            = "main";
         }
 
     } // namespace Utils
 
     VulkanShader::VulkanShader( const std::filesystem::path& path ) : m_ShaderPath( path )
     {
-        Utils::CreateDirectoriesIfNoExists();
+        Utils::CreateDirectoriesIfNoExists(); //TODO: move to a better location
 
         Reload();
     }
 
     Common::BoolResult VulkanShader::Reload() // also load
     {
+        m_PipelineShaderStageCreateInfos.clear();
+
         const auto shaderContent    = Common::Utils::FileSystem::ReadFileContent( m_ShaderPath );
         const auto shadersWithStage = Core::Preprocess::Shader::PreProcess( shaderContent );
 
@@ -99,10 +122,10 @@ namespace Desert::Graphic::API::Vulkan
                 return Common::MakeError<bool>( result.GetError() );
             }
 
-            Utils::CreateShaderModule( stage, result.GetValue(), m_ShaderPath );
+            Utils::CreateShaderModule( stage, result.GetValue(), m_ShaderPath, m_PipelineShaderStageCreateInfos);
         }
 
-        LOG_INFO("The shader {} was created or reloaded", m_ShaderPath.filename().string());
+        LOG_INFO( "The shader {} was created or reloaded", m_ShaderPath.filename().string() );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

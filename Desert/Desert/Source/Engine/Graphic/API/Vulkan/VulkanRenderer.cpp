@@ -1,7 +1,9 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp> //temp
+#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>      //temp
+#include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>    //temp
 #include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -64,6 +66,11 @@ namespace Desert::Graphic::API::Vulkan
                   ->GetFramebuffers()[frameIndex];
 
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
+
+        vkCmdBindPipeline(
+             m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( m_Pipeline )->GetVkPipeline() );
+        vkCmdDraw(m_CurrentCommandBuffer, 3, 1, 0, 0);
         vkCmdEndRenderPass( m_CurrentCommandBuffer );
     }
 
@@ -84,7 +91,14 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::Init()
     {
         m_framebuffer = Framebuffer::Create( {} );
-        m_framebuffer->Resize(1, 1);
+        m_framebuffer->Resize( 1, 1 );
+        m_Shader = Shader::Create( "test.glsl" );
+        PipelineSpecification spec;
+        spec.DebugName   = "test temp";
+        spec.Framebuffer = m_framebuffer;
+        spec.Shader      = m_Shader;
+        m_Pipeline       = Pipeline::Create( spec );
+        m_Pipeline->Invalidate();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

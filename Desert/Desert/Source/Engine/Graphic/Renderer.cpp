@@ -10,7 +10,8 @@
 namespace Desert::Graphic
 {
     static RendererAPI* s_RendererAPI = nullptr;
-
+    static std::shared_ptr<Framebuffer> s_frame;
+    static std::shared_ptr<Shader> s_shader;
     void Renderer::InitGraphicAPI()
     {
         m_RendererContext =

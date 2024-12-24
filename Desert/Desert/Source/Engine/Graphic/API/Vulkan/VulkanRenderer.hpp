@@ -2,6 +2,8 @@
 
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
+#include <Engine/Graphic/Shader.hpp>
+#include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -18,6 +20,8 @@ namespace Desert::Graphic::API::Vulkan
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
 
         std::shared_ptr<Framebuffer> m_framebuffer; //temp
+        std::shared_ptr<Shader> m_Shader; //temp
+        std::shared_ptr<Pipeline> m_Pipeline; //temp
     };
 
 } // namespace Desert::Graphic::API::Vulkan

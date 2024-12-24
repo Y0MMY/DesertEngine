@@ -1,13 +1,8 @@
 #include <Engine/Core/Application.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 
-#include <Common/Core/Memory/CommandBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Core/EngineContext.h>
 #include <Engine/Graphic/Renderer.hpp>
-#include <Engine/Graphic/Shader.hpp>
 
 #include <GLFW/glfw3.h>
 
@@ -44,11 +39,6 @@ namespace Desert::Engine
                 //layer->OnUpdate( m_PrevTimestep );
             }
 
-            auto&       con  = Graphic::Renderer::GetInstance().GetRendererContext();
-            const auto& vcon = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>( con );
-            auto&       q    = vcon->GetVulkanQueue();
-
-
             Graphic::Renderer::GetInstance().EndFrame();
             m_Window->PresentFinalImage();
 
@@ -56,8 +46,6 @@ namespace Desert::Engine
             m_Window->ProcessEvents();
         }
         Destroy();
-
-        Graphic::Shader::Create("test.glsl");
     }
 
     void Application::PushLayer( Common::Layer* layer )

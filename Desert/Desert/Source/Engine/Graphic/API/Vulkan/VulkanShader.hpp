@@ -2,6 +2,8 @@
 
 #include <Engine/Graphic/Shader.hpp>
 
+#include <vulkan/vulkan.h>
+
 namespace Desert::Graphic::API::Vulkan
 {
     class VulkanShader final : public Shader
@@ -16,12 +18,19 @@ namespace Desert::Graphic::API::Vulkan
         {
         }
         virtual Common::BoolResult Reload() override;
-        virtual const std::string GetName() const override
+        virtual const std::string  GetName() const override
         {
             return "";
         }
+
+        const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
+        {
+            return m_PipelineShaderStageCreateInfos;
+        }
+
     private:
-        std::filesystem::path m_ShaderPath;
+        std::vector<VkPipelineShaderStageCreateInfo> m_PipelineShaderStageCreateInfos;
+        std::filesystem::path                        m_ShaderPath;
     };
 
 } // namespace Desert::Graphic::API::Vulkan
