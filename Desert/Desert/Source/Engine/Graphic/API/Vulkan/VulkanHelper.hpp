@@ -47,9 +47,10 @@ namespace Desert::Graphic::API::Vulkan
 
     namespace Utils
     {
-       inline Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
-                                                     VkImageAspectFlags aspectFlags, VkImageViewType viewType,
-                                                     uint32_t layerCount, uint32_t mipLeveles )
+        inline Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
+                                                            VkImageAspectFlags aspectFlags,
+                                                            VkImageViewType viewType, uint32_t layerCount,
+                                                            uint32_t mipLeveles )
         {
             VkImageViewCreateInfo viewInfo = { .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                                .pNext            = VK_NULL_HANDLE,
@@ -74,4 +75,21 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeSuccess( imageView );
         }
     } // namespace Utils
+
+    namespace VKUtils
+    {
+        inline static void SetDebugUtilsObjectName( const VkDevice device, const VkObjectType objectType,
+                                                    const std::string& name, const void* handle )
+        {
+            VkDebugUtilsObjectNameInfoEXT nameInfo;
+            nameInfo.sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            nameInfo.objectType   = objectType;
+            nameInfo.pObjectName  = name.c_str();
+            nameInfo.objectHandle = (uint64_t)handle;
+            nameInfo.pNext        = VK_NULL_HANDLE;
+
+           // VK_CHECK_RESULT( vkSetDebugUtilsObjectNameEXT( device, &nameInfo ) );
+        }
+    } // namespace VKUtils
+
 } // namespace Desert::Graphic::API::Vulkan
