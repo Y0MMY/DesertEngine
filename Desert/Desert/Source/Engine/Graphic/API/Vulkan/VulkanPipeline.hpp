@@ -22,7 +22,6 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_Pipeline;
         }
-
     private:
         PipelineSpecification m_Specification;
 

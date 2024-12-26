@@ -20,8 +20,17 @@ namespace Desert::Graphic::API::Vulkan
             submitInfo.commandBufferCount = 1;
             submitInfo.pCommandBuffers    = &commandBuffer;
 
-            VK_RETURN_RESULT_IF_FALSE_TYPE( VkResult, vkQueueSubmit( queue, 1, &submitInfo, VK_NULL_HANDLE ) );
+            VkFence fence;
+            // Create fence to ensure that the command buffer has finished executing
+            VkFenceCreateInfo fenceCreateInfo = {};
+            fenceCreateInfo.sType             = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+            fenceCreateInfo.flags             = 0;
+            VK_RETURN_RESULT_IF_FALSE( vkCreateFence( device, &fenceCreateInfo, nullptr, &fence ) );
+            VK_RETURN_RESULT_IF_FALSE_TYPE( VkResult, vkQueueSubmit( queue, 1, &submitInfo, fence) );
 
+            // Wait for the fence to signal that command buffer has finished executing
+            VK_CHECK_RESULT( vkWaitForFences( device, 1, &fence, VK_TRUE, UINT64_MAX ) );
+            vkDestroyFence(device, fence, nullptr);
             vkFreeCommandBuffers( device, commandPool, 1, &commandBuffer ); // TODO: vkResetCommandBuffer
             return Common::MakeSuccess( VK_SUCCESS );
         }
@@ -92,7 +101,7 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::Result<VkResult> CommandBufferAllocator::RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer )
     {
-        return FlushCommandBuffer( m_LogicalDevice, m_ComputeCommandPool, commandBuffer, m_GraphicsQueue );
+        return FlushCommandBuffer( m_LogicalDevice, m_CommandGraphicPool, commandBuffer, m_GraphicsQueue );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

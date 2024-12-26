@@ -44,9 +44,9 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationInfo allocInfo;
         vmaGetAllocationInfo( s_VmaAllocator, allocation, &allocInfo );
 
-        const auto& infoData = MakeNewAllocatedInfoData( tag, allocInfo, m_AllocatedDataInfo );
+        const auto& infoData = MakeNewAllocatedInfoData( tag, allocInfo, s_AllocatedDataInfo);
 
-        m_AllocatedDataInfo.push_back( infoData );
+        s_AllocatedDataInfo.push_back( infoData );
 
         ALLOCATOR_LOG( "Allocating image ( {} ); size: {}. ", tag, allocInfo.size );
         ALLOCATOR_LOG( "\tTotal allocated : {}. ", infoData.Offset + infoData.Size );
@@ -82,7 +82,7 @@ namespace Desert::Graphic::API::Vulkan
         if ( s_VmaAllocator == nullptr )
         {
             return Common::MakeError<VmaAllocation>(
-                 "VmaAllocator is nullptr. You should call `VulkanAllocator::Init` first. " );
+                 "VmaAllocator is nullptr. You must call `VulkanAllocator::Init` first. " );
         }
 
         VmaAllocationCreateInfo allocCreateInfo = {};
@@ -94,11 +94,11 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationInfo allocInfo;
         vmaGetAllocationInfo( s_VmaAllocator, allocation, &allocInfo );
 
-        const auto& infoData = MakeNewAllocatedInfoData( tag, allocInfo, m_AllocatedDataInfo );
+        const auto& infoData = MakeNewAllocatedInfoData( tag, allocInfo, s_AllocatedDataInfo );
 
-        m_AllocatedDataInfo.push_back( infoData );
+        s_AllocatedDataInfo.push_back( infoData );
 
-        ALLOCATOR_LOG( "Allocating image ( {} ); size: {}. ", tag, allocInfo.size );
+        ALLOCATOR_LOG( "Allocating buffer ( {} ); size: {}. ", tag, allocInfo.size );
         ALLOCATOR_LOG( "\tTotal allocated : {}. ", infoData.Offset + infoData.Size );
 
         return Common::MakeSuccess( allocation );

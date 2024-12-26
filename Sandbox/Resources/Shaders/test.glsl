@@ -2,12 +2,13 @@
 
 #version 450 
 
+layout(location = 0) in vec3 aPosition;
 
-vec2 pos[3] = vec2[3] (vec2(-0.7, 0.7), vec2(0.7, 0.7), vec2(0.7, -0.7));
+// vec2 pos[3] = vec2[3] (vec2(-0.7, 0.7), vec2(0.7, 0.7), vec2(0.7, -0.7));
 
 void main()
 {
-   gl_Position = vec4(pos[gl_VertexIndex], 0.0, 1.0);
+   gl_Position = vec4(aPosition, 1.0);
 }
 
 

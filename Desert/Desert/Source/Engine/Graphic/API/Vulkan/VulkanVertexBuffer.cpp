@@ -32,15 +32,15 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    [[nodiscard]] Common::BoolResult
-    VulkanVertexBuffer::Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device )
+    [[nodiscard]] Common::BoolResult VulkanVertexBuffer::Invalidate()
     {
-        return RT_Invalidate( device );
+        return RT_Invalidate();
     }
 
-    [[nodiscard]] Common::BoolResult
-    VulkanVertexBuffer::RT_Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device )
+    [[nodiscard]] Common::BoolResult VulkanVertexBuffer::RT_Invalidate()
     {
+        const VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
         auto& allocator = VulkanAllocator::GetInstance();
 
         if ( m_StorageBuffer.Data == nullptr ) [[unlikely]]
@@ -88,7 +88,7 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             m_MemoryAllocation = buffer.GetValue();
-            auto copyCmd       = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic();
+            auto copyCmd       = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic( true );
             if ( !copyCmd.IsSuccess() )
             {
                 return Common::MakeError<bool>( copyCmd.GetError() );

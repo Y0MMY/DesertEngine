@@ -82,6 +82,11 @@ namespace Desert::Graphic
             return m_Elements;
         }
 
+        uint32_t GetElementCount() const
+        {
+            return (uint32_t)m_Elements.size();
+        }
+
         std::vector<VertexBufferElement>::iterator begin()
         {
             return m_Elements.begin();

@@ -17,9 +17,9 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanAllocator : public Common::Singleton<VulkanAllocator>
     {
     public:
-        auto& GetAllocatedDataInfo()
+        static auto& GetAllocatedDataInfo()
         {
-            return m_AllocatedDataInfo;
+            return s_AllocatedDataInfo;
         }
 
         Common::Result<VmaAllocation> RT_AllocateImage( const std::string&       tag,
@@ -35,7 +35,7 @@ namespace Desert::Graphic::API::Vulkan
         uint8_t* MapMemory( VmaAllocation allocation )
         {
             uint8_t* mappedMemory = nullptr;
-            vmaMapMemory( VulkanAllocator::GetVMAAllocator(), allocation, (void**)mappedMemory );
+            vmaMapMemory( VulkanAllocator::GetVMAAllocator(), allocation, (void**)&mappedMemory );
             return mappedMemory;
         }
 
@@ -49,7 +49,7 @@ namespace Desert::Graphic::API::Vulkan
         VulkanAllocator() = default;
 
     private:
-        std::vector<AllocatedData> m_AllocatedDataInfo;
+        static inline std::vector<AllocatedData> s_AllocatedDataInfo;
 
         friend class Common::Singleton<VulkanAllocator>;
     };

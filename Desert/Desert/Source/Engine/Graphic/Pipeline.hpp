@@ -2,13 +2,15 @@
 
 #include <Engine/Graphic/Shader.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
+#include <Engine/Graphic/Vertexbuffer.hpp>
 
 namespace Desert::Graphic
 {
     struct PipelineSpecification
     {
-        std::shared_ptr<Shader> Shader;
+        std::shared_ptr<Shader>      Shader;
         std::shared_ptr<Framebuffer> Framebuffer;
+        VertexBufferLayout           Layout;
 
         std::string DebugName;
     };

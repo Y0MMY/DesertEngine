@@ -1,10 +1,12 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp> //temp
-#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>      //temp
-#include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>    //temp
+#include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>  //temp
+#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>       //temp
+#include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>     //temp
+#include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp> //temp
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/VertexBuffer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -70,7 +72,13 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindPipeline(
              m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( m_Pipeline )->GetVkPipeline() );
-        vkCmdDraw(m_CurrentCommandBuffer, 3, 1, 0, 0);
+
+        VkDeviceSize offsets[] = { 0 }; 
+        const auto   buffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>( m_VertexBuffer )
+                                 ->GetVulkanBuffer();
+        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &buffer, offsets );
+
+        vkCmdDraw( m_CurrentCommandBuffer, 3, 1, 0, 0 );
         vkCmdEndRenderPass( m_CurrentCommandBuffer );
     }
 
@@ -94,6 +102,17 @@ namespace Desert::Graphic::API::Vulkan
         m_framebuffer->Resize( 1, 1 );
         m_Shader = Shader::Create( "test.glsl" );
         PipelineSpecification spec;
+
+        float* vertices = new float[9]{
+             0.0f,  -0.5f, 0.0f, // Нижний угол (по оси Y)
+             0.5f,  0.5f,  0.0f, // Верхний правый угол
+             -0.5f, 0.5f,  0.0f  // Верхний левый угол
+        };
+
+        m_VertexBuffer = VertexBuffer::Create( vertices, 9 * 4 );
+        std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>(m_VertexBuffer)->Invalidate();
+        spec.Layout = { { ShaderDataType::Float3, "a_Position" } };
+
         spec.DebugName   = "test temp";
         spec.Framebuffer = m_framebuffer;
         spec.Shader      = m_Shader;
