@@ -1,5 +1,9 @@
 #pragma once
 
+#include <Engine/Graphic/RenderPass.hpp>
+#include <Engine/Graphic/VertexBuffer.hpp>
+#include <Engine/Graphic/Pipeline.hpp>
+
 namespace Desert::Graphic
 {
     enum class RendererAPIType : uint8_t
@@ -16,10 +20,14 @@ namespace Desert::Graphic
     public:
         virtual void Init() = 0;
 
-        virtual void BeginFrame() = 0;
-        virtual void PresentFinalImage()   = 0;
-        virtual void EndFrame()   = 0;
+        virtual Common::BoolResult BeginFrame()                                                     = 0;
+        virtual Common::BoolResult EndFrame()                                                       = 0;
+        virtual Common::BoolResult PresentFinalImage()                                              = 0;
+        virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) = 0;
+        virtual Common::BoolResult EndRenderPass()                                                  = 0;
 
+        virtual void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
+                                        const std::shared_ptr<Pipeline>&     pipeline ) = 0; // TEMP
     public:
         static const RendererAPIType GetAPIType()
         {

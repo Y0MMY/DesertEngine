@@ -1,12 +1,12 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>  //temp
-#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>       //temp
-#include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>     //temp
-#include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp> //temp
+
+#include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
+
 #include <Engine/Graphic/Renderer.hpp>
-#include <Engine/Graphic/VertexBuffer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -40,8 +40,13 @@ namespace Desert::Graphic::API::Vulkan
         }
     } // namespace
 
-    void VulkanRendererAPI::BeginFrame()
+    Common::BoolResult VulkanRendererAPI::BeginFrame()
     {
+        if ( m_CurrentCommandBuffer != nullptr )
+        {
+            return Common::MakeError<bool>( "BeginFrame(): Error! Have you call EndFrame() ?" );
+        }
+
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         VkCommandBufferBeginInfo cmdBufferBeginInfo{};
@@ -50,74 +55,81 @@ namespace Desert::Graphic::API::Vulkan
         m_CurrentCommandBuffer = VulkanRenderCommandBuffer::GetInstance().GetCommandBuffer( frameIndex );
         vkBeginCommandBuffer( m_CurrentCommandBuffer, &cmdBufferBeginInfo );
 
-        VkClearColorValue ClearColor = { 1.0f, 0.0f, 0.0f, 0.0f }; // TODO: TEMP
-        VkClearValue      ClearValue;
-        ClearValue.color = ClearColor;
-
-        VkRenderPassBeginInfo renderPassBeginInfo = {
-             .sType      = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-             .pNext      = NULL,
-             .renderPass = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>( m_framebuffer )
-                                ->GetRenderPass(),
-             .renderArea      = { .offset = { .x = 0, .y = 0 }, .extent = { .width = 1920, .height = 780 } },
-             .clearValueCount = 1,
-             .pClearValues    = &ClearValue };
-
-        renderPassBeginInfo.framebuffer =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>( m_framebuffer )
-                  ->GetFramebuffers()[frameIndex];
-
-        vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
-
-        vkCmdBindPipeline(
-             m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( m_Pipeline )->GetVkPipeline() );
-
-        VkDeviceSize offsets[] = { 0 }; 
-        const auto   buffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>( m_VertexBuffer )
-                                 ->GetVulkanBuffer();
-        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &buffer, offsets );
-
-        vkCmdDraw( m_CurrentCommandBuffer, 3, 1, 0, 0 );
-        vkCmdEndRenderPass( m_CurrentCommandBuffer );
+        return Common::MakeSuccess( true );
     }
 
-    void VulkanRendererAPI::EndFrame()
+    Common::BoolResult VulkanRendererAPI::EndFrame()
     {
+        if ( m_CurrentCommandBuffer == nullptr )
+        {
+            return Common::MakeError<bool>( "EndFrame(): Error! Have you call BeginFrame() ?" );
+        }
+
         VkResult res = vkEndCommandBuffer( m_CurrentCommandBuffer );
 
         m_CurrentCommandBuffer = nullptr;
+
+        return Common::MakeSuccess( true );
     }
 
-    void VulkanRendererAPI::PresentFinalImage()
+    Common::BoolResult VulkanRendererAPI::PresentFinalImage()
     {
         std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
              Renderer::GetInstance().GetRendererContext() )
              ->PresentFinalImage();
+
+        return Common::MakeSuccess( true );
     }
 
     void VulkanRendererAPI::Init()
     {
-        m_framebuffer = Framebuffer::Create( {} );
-        m_framebuffer->Resize( 1, 1 );
-        m_Shader = Shader::Create( "test.glsl" );
-        PipelineSpecification spec;
+    }
 
-        float* vertices = new float[9]{
-             0.0f,  -0.5f, 0.0f, // Нижний угол (по оси Y)
-             0.5f,  0.5f,  0.0f, // Верхний правый угол
-             -0.5f, 0.5f,  0.0f  // Верхний левый угол
-        };
+    Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
+    {
+        uint32_t          frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        VkClearColorValue clearColor = { 1.0f, 0.0f, 0.0f, 0.0f }; // TODO: get from specification
+        VkClearValue      clearValue;
+        clearValue.color = clearColor;
 
-        m_VertexBuffer = VertexBuffer::Create( vertices, 9 * 4 );
-        std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>(m_VertexBuffer)->Invalidate();
-        spec.Layout = { { ShaderDataType::Float3, "a_Position" } };
+        VkRenderPassBeginInfo renderPassBeginInfo = {
+             .sType      = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+             .pNext      = NULL,
+             .renderPass = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
+                                renderPass->GetSpecification().TargetFramebuffer )
+                                ->GetRenderPass(),
+             .renderArea      = { .offset = { .x = 0, .y = 0 }, .extent = { .width = 1920, .height = 780 } },
+             .clearValueCount = 1,
+             .pClearValues    = &clearValue };
 
-        spec.DebugName   = "test temp";
-        spec.Framebuffer = m_framebuffer;
-        spec.Shader      = m_Shader;
-        m_Pipeline       = Pipeline::Create( spec );
-        m_Pipeline->Invalidate();
+        renderPassBeginInfo.framebuffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
+                                               renderPass->GetSpecification().TargetFramebuffer )
+                                               ->GetFramebuffers()[frameIndex];
+
+        vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
+
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResult VulkanRendererAPI::EndRenderPass()
+    {
+        vkCmdEndRenderPass( m_CurrentCommandBuffer );
+        return Common::MakeSuccess( true );
+    }
+
+    void VulkanRendererAPI::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
+                                               const std::shared_ptr<Pipeline>&     pipeline )
+    {
+        vkCmdBindPipeline(
+             m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipeline() );
+
+        VkDeviceSize offsets[] = { 0 };
+        const auto   buffer =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>( vertexBuffer )->GetVulkanBuffer();
+        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &buffer, offsets );
+
+        vkCmdDraw( m_CurrentCommandBuffer, 3, 1, 0, 0 );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

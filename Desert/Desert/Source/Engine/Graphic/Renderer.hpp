@@ -3,6 +3,10 @@
 #include <Engine/Graphic/RendererContext.hpp>
 #include <Common/Core/Memory/CommandBuffer.hpp>
 
+#include <Engine/Graphic/RenderPass.hpp>
+#include <Engine/Graphic/VertexBuffer.hpp>
+#include <Engine/Graphic/Pipeline.hpp>
+
 namespace Desert::Graphic
 {
     class Renderer : public Common::Singleton<Renderer>
@@ -17,6 +21,11 @@ namespace Desert::Graphic
 
         void BeginFrame();
         void EndFrame();
+        void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
+        void EndRenderPass();
+
+        void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
+                                const std::shared_ptr<Pipeline>&     pipeline );
 
         void PresentFinalImage();
 

@@ -29,21 +29,19 @@ namespace Desert::Engine
 
     void Application::Run()
     {
+        OnCreate();
         Init();
         while ( m_IsRunningApplication )
         {
             Common::Timestep timestep;
-            Graphic::Renderer::GetInstance().BeginFrame();
             for ( const auto& layer : m_LayerStack )
             {
-                //layer->OnUpdate( m_PrevTimestep );
+                layer->OnUpdate( m_PrevTimestep );
             }
-
-            Graphic::Renderer::GetInstance().EndFrame();
             m_Window->PresentFinalImage();
+            m_Window->ProcessEvents();
 
             m_PrevTimestep = Common::Timestep( timestep - Common::Timestep() );
-            m_Window->ProcessEvents();
         }
         Destroy();
     }

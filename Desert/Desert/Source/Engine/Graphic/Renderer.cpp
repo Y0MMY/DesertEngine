@@ -9,10 +9,10 @@
 
 namespace Desert::Graphic
 {
-    static RendererAPI* s_RendererAPI = nullptr;
+    static RendererAPI*                 s_RendererAPI = nullptr;
     static std::shared_ptr<Framebuffer> s_frame;
-    static std::shared_ptr<Shader> s_shader;
-    void Renderer::InitGraphicAPI()
+    static std::shared_ptr<Shader>      s_shader;
+    void                                Renderer::InitGraphicAPI()
     {
         m_RendererContext =
              RendererContext::Create( EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw() );
@@ -62,6 +62,22 @@ namespace Desert::Graphic
     void Renderer::PresentFinalImage()
     {
         s_RendererAPI->PresentFinalImage();
+    }
+
+    void Renderer::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
+                                      const std::shared_ptr<Pipeline>&     pipeline )
+    {
+        s_RendererAPI->TEST_DrawTriangle( vertexBuffer, pipeline );
+    }
+
+    void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
+    {
+        s_RendererAPI->BeginRenderPass(renderPass);
+    }
+
+    void Renderer::EndRenderPass()
+    {
+        s_RendererAPI->EndRenderPass();
     }
 
 } // namespace Desert::Graphic

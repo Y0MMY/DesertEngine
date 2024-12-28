@@ -1,4 +1,5 @@
 #include "Sandbox.hpp"
+#include "EditorLayer.hpp"
 
 namespace Desert
 {
@@ -9,6 +10,7 @@ namespace Desert
 
     void Sandbox::OnCreate()
     {
+        PushLayer(new EditorLayer(""));
     }
 
     void Sandbox::OnDestroy()
