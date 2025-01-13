@@ -10,7 +10,7 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanShader final : public Shader
     {
     public:
-        struct ShaderDescriptorSet
+        struct DescriptorSetInfo
         {
             VkDescriptorPool             Pool;
             std::vector<VkDescriptorSet> DescriptorSets;
@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Common::BoolResult Reload() override;
         virtual const std::string  GetName() const override
         {
-            return "";
+            return "TODO";
         }
 
         const VkWriteDescriptorSet GetDescriptorSet( const std::string& name, uint32_t set ) const;
@@ -43,14 +43,12 @@ namespace Desert::Graphic::API::Vulkan
             return m_PipelineShaderStageCreateInfos;
         }
         std::vector<VkDescriptorSetLayout> GetAllDescriptorSetLayouts();
-        ShaderDescriptorSet                CreateDescriptorSets( uint32_t numberOfSets );
+        DescriptorSetInfo                  CreateDescriptorSets( uint32_t numberOfSets );
 
-        std::vector<ShaderResource::ShaderDescriptorSet>& GetShaderDescriptorSets() 
+        auto& GetShaderDescriptorSets()
         {
             return m_ReflectionData.ShaderDescriptorSets;
         }
-
-        void AllocateUniformBuffer(ShaderResource::UniformBuffer& dst);
 
     private:
         void               Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );

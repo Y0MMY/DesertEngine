@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/RendererTypes.hpp>
+#include <Engine/Core/Formats/Shader.hpp>
 
 namespace Desert::Graphic
 {

@@ -40,6 +40,6 @@ namespace Desert::Graphic::API::Vulkan
         VkPipelineLayout m_PipelineLayout;
         VkPipeline       m_Pipeline;
 
-        VulkanShader::ShaderDescriptorSet m_ShaderDescriptorSet;
+        VulkanShader::DescriptorSetInfo m_ShaderDescriptorSet;
     };
 } // namespace Desert::Graphic::API::Vulkan

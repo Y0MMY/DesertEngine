@@ -2,6 +2,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
 
+#include <Engine/Core/Models/Shader.hpp>
+
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
 
 #include <shaderc/shaderc.hpp>
@@ -11,12 +13,43 @@ namespace Desert::Graphic::API::Vulkan
 {
     namespace Utils
     {
-        // NOTE: here the key defines the set index
-        std::unordered_map<uint32_t, std::vector<VkDescriptorPoolSize>>
-        FindTypesCount( const std::vector<ShaderResource::ShaderDescriptorSet>& shaderDescriptorSets,
-                        uint32_t                                                numberOfSets )
+        Core::Formats::ShaderStage GetShaderStageFlagBitsFromSPV( const spv::ExecutionModel& executionModel )
         {
-            std::unordered_map<uint32_t, std::vector<VkDescriptorPoolSize>> poolSizes;
+            switch ( executionModel )
+            {
+                case spv::ExecutionModelVertex:
+                    return Core::Formats::ShaderStage::Vertex;
+                case spv::ExecutionModelFragment:
+                    return Core::Formats::ShaderStage::Fragment;
+                case spv::ExecutionModelGLCompute:
+                    return Core::Formats::ShaderStage::Compute;
+            }
+
+            return Core::Formats::ShaderStage::None;
+        }
+
+        VkShaderStageFlags GetVkShaderStageFlags( const Core::Formats::ShaderStage& stage )
+        {
+            switch ( stage )
+            {
+                case Core::Formats::ShaderStage::Vertex:
+                    return VK_SHADER_STAGE_VERTEX_BIT;
+
+                case Core::Formats::ShaderStage::Fragment:
+                    return VK_SHADER_STAGE_FRAGMENT_BIT;
+
+                case Core::Formats::ShaderStage::Compute:
+                    return VK_SHADER_STAGE_COMPUTE_BIT;
+            }
+            return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
+        }
+
+        // NOTE: here the key defines the set index
+        std::vector<VkDescriptorPoolSize>
+        GetDescriptorPoolSize( const std::vector<ShaderResource::ShaderDescriptorSet>& shaderDescriptorSets,
+                               uint32_t                                                numberOfSets )
+        {
+            std::vector<VkDescriptorPoolSize> poolSizes;
 
             for ( uint32_t set = 0; set < shaderDescriptorSets.size(); set++ )
             {
@@ -28,7 +61,7 @@ namespace Desert::Graphic::API::Vulkan
 
                 if ( shaderDescriptorSet.UniformBuffers.size() )
                 {
-                    VkDescriptorPoolSize& typeCount = poolSizes[set].emplace_back();
+                    VkDescriptorPoolSize& typeCount = poolSizes.emplace_back();
                     typeCount.type                  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                     typeCount.descriptorCount = (uint32_t)shaderDescriptorSet.UniformBuffers.size() * numberOfSets;
                 }
@@ -138,7 +171,7 @@ namespace Desert::Graphic::API::Vulkan
         Reload();
     }
 
-    static std::unordered_map<uint32_t, std::unordered_map<uint32_t, ShaderResource::UniformBuffer>>
+    static std::unordered_map<uint32_t, std::unordered_map<uint32_t, Core::Models::UniformBuffer>>
          s_UniformBuffers; // set -> binding point -> buffer
 
     Common::BoolResult VulkanShader::Reload() // also load
@@ -208,17 +241,17 @@ namespace Desert::Graphic::API::Vulkan
                      m_ReflectionData.ShaderDescriptorSets[descriptorSet];
                 if ( s_UniformBuffers[descriptorSet].find( binding ) == s_UniformBuffers[descriptorSet].end() )
                 {
-                    ShaderResource::UniformBuffer uniformBuffer;
-                    uniformBuffer.BindingPoint                    = binding;
-                    uniformBuffer.Size                            = size;
-                    uniformBuffer.Name                            = name;
-                    uniformBuffer.ShaderStage                     = VK_SHADER_STAGE_ALL;
+                    Core::Models::UniformBuffer uniformBuffer;
+                    uniformBuffer.BindingPoint = binding;
+                    uniformBuffer.Size         = size;
+                    uniformBuffer.Name         = name;
+                    uniformBuffer.ShaderStage =
+                         Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
                     s_UniformBuffers.at( descriptorSet )[binding] = uniformBuffer;
                 }
                 else
                 {
-                    ShaderResource::UniformBuffer& uniformBuffer =
-                         s_UniformBuffers.at( descriptorSet ).at( binding );
+                    Core::Models::UniformBuffer& uniformBuffer = s_UniformBuffers.at( descriptorSet ).at( binding );
                     if ( size > uniformBuffer.Size )
                         uniformBuffer.Size = size;
                 }
@@ -248,17 +281,19 @@ namespace Desert::Graphic::API::Vulkan
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
         std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
-        for ( uint32_t set = 0; set < m_ReflectionData.ShaderDescriptorSets.size(); set++ )
+        for (uint32_t set = 0; set < m_ReflectionData.ShaderDescriptorSets.size(); set++)
         {
             auto& shaderDescriptorSet = m_ReflectionData.ShaderDescriptorSets[set];
+
+            // Uniform buffer
             for ( auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
             {
                 VkDescriptorSetLayoutBinding& layoutBinding = layoutBindings.emplace_back();
                 layoutBinding.descriptorType                = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                 layoutBinding.descriptorCount               = 1;
-                layoutBinding.stageFlags                    = uniformBuffer.ShaderStage;
-                layoutBinding.pImmutableSamplers            = nullptr;
-                layoutBinding.binding                       = binding;
+                layoutBinding.stageFlags         = Utils::GetVkShaderStageFlags( uniformBuffer.ShaderStage );
+                layoutBinding.pImmutableSamplers = nullptr;
+                layoutBinding.binding            = binding;
 
                 VkWriteDescriptorSet& set = shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name];
                 set                       = {};
@@ -289,21 +324,22 @@ namespace Desert::Graphic::API::Vulkan
         return m_DescriptorSetLayouts;
     }
 
-    VulkanShader::ShaderDescriptorSet VulkanShader::CreateDescriptorSets( uint32_t numberOfSets )
+    VulkanShader::DescriptorSetInfo VulkanShader::CreateDescriptorSets( uint32_t numberOfSets )
     {
-        ShaderDescriptorSet result;
+        DescriptorSetInfo result;
 
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        const auto& poolSizes = Utils::FindTypesCount( m_ReflectionData.ShaderDescriptorSets, numberOfSets );
+        const auto& poolSizes =
+             Utils::GetDescriptorPoolSize( m_ReflectionData.ShaderDescriptorSets, numberOfSets );
 
-        DESERT_VERIFY( poolSizes.find( 0 ) != poolSizes.end() );
+        DESERT_VERIFY( !poolSizes.empty() );
 
         VkDescriptorPoolCreateInfo descriptorPoolInfo = {};
         descriptorPoolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         descriptorPoolInfo.pNext                      = nullptr;
-        descriptorPoolInfo.poolSizeCount              = poolSizes.at( 0 ).size();
-        descriptorPoolInfo.pPoolSizes                 = poolSizes.at( 0 ).data();
+        descriptorPoolInfo.poolSizeCount              = poolSizes.size();
+        descriptorPoolInfo.pPoolSizes                 = poolSizes.data();
         descriptorPoolInfo.maxSets                    = numberOfSets;
 
         VK_CHECK_RESULT( vkCreateDescriptorPool( device, &descriptorPoolInfo, nullptr, &result.Pool ) );
@@ -315,7 +351,7 @@ namespace Desert::Graphic::API::Vulkan
             allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
             allocInfo.descriptorPool              = result.Pool;
             allocInfo.descriptorSetCount          = 1;
-            allocInfo.pSetLayouts                 = &m_DescriptorSetLayouts[0];
+            allocInfo.pSetLayouts                 = &m_DescriptorSetLayouts[i];
 
             VK_CHECK_RESULT( vkAllocateDescriptorSets( device, &allocInfo, &result.DescriptorSets[i] ) );
         }
@@ -325,12 +361,6 @@ namespace Desert::Graphic::API::Vulkan
     const VkWriteDescriptorSet VulkanShader::GetDescriptorSet( const std::string& name, uint32_t set ) const
     {
         return m_ReflectionData.ShaderDescriptorSets.at( set ).WriteDescriptorSets.at( name );
-    }
-
-    void VulkanShader::AllocateUniformBuffer( ShaderResource::UniformBuffer& dst )
-    {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        ShaderResource::UniformBuffer& uniformBuffer = dst;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

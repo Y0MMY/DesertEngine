@@ -159,6 +159,7 @@ namespace Desert::Graphic::API::Vulkan
 
         LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
 
+        // TODO: MOVE TO VulkanShader
         auto& shaderDescriptorSets = vulkanShader->GetShaderDescriptorSets();
         for ( uint32_t set = 0; set < shaderDescriptorSets.size(); set++ )
         {
@@ -167,7 +168,7 @@ namespace Desert::Graphic::API::Vulkan
             {
 
                 VkWriteDescriptorSet& set = shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name];
-                set.dstSet               = m_ShaderDescriptorSet.DescriptorSets[0];
+                set.dstSet                = m_ShaderDescriptorSet.DescriptorSets[0];
             }
         }
     }

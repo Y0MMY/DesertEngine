@@ -2,24 +2,20 @@
 
 #include <vulkan/vulkan.h>
 
+#include <Engine/Core/Models/Shader.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
     namespace ShaderResource
     {
-        struct UniformBuffer
-        {
-            VkDescriptorBufferInfo Descriptor;
-            uint32_t               Size         = 0;
-            uint32_t               BindingPoint = 0;
-            std::string            Name;
-            VkShaderStageFlagBits  ShaderStage = VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
-        };
+
+        inline constexpr uint32_t MAX_SETS = 1;
 
         struct ShaderDescriptorSet
         {
-            std::unordered_map<uint32_t, UniformBuffer> UniformBuffers;
+            std::unordered_map<uint32_t, Core::Models::UniformBuffer>           UniformBuffers;
             std::unordered_map<std::string, VkWriteDescriptorSet> WriteDescriptorSets;
-            
+
             operator bool()
             {
                 return !UniformBuffers.empty();
