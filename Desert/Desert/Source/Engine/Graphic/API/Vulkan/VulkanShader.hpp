@@ -10,9 +10,15 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanShader final : public Shader
     {
     public:
+        struct ShaderDescriptorSet
+        {
+            VkDescriptorPool             Pool;
+            std::vector<VkDescriptorSet> DescriptorSets;
+        };
+
         struct ReflectionData
         {
-            std::vector<ShaderResource::ShaderDescriptorSet>           ShaderDescriptorSets;
+            std::vector<ShaderResource::ShaderDescriptorSet> ShaderDescriptorSets;
         };
 
     public:
@@ -30,20 +36,32 @@ namespace Desert::Graphic::API::Vulkan
             return "";
         }
 
+        const VkWriteDescriptorSet GetDescriptorSet( const std::string& name, uint32_t set ) const;
+
         const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
         {
             return m_PipelineShaderStageCreateInfos;
         }
         std::vector<VkDescriptorSetLayout> GetAllDescriptorSetLayouts();
+        ShaderDescriptorSet                CreateDescriptorSets( uint32_t numberOfSets );
+
+        std::vector<ShaderResource::ShaderDescriptorSet>& GetShaderDescriptorSets() 
+        {
+            return m_ReflectionData.ShaderDescriptorSets;
+        }
+
+        void AllocateUniformBuffer(ShaderResource::UniformBuffer& dst);
+
     private:
-        void Reflect(VkShaderStageFlagBits flag , const std::vector<uint32_t>& spirvBinary);
+        void               Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
         Common::BoolResult CreateDescriptorsLayout();
         Common::BoolResult CreateDescriptors();
+
     private:
         std::vector<VkPipelineShaderStageCreateInfo> m_PipelineShaderStageCreateInfos;
         std::filesystem::path                        m_ShaderPath;
 
-        ReflectionData m_ReflectionData;
+        ReflectionData                     m_ReflectionData;
         std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts;
     };
 

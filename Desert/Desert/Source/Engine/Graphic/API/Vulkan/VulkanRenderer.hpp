@@ -6,6 +6,7 @@
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/VertexBuffer.hpp>
+#include <Engine/Graphic/UniformBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -26,6 +27,8 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
+
+        std::shared_ptr<UniformBuffer> m_UniformBuffer;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

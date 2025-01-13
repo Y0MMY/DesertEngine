@@ -5,8 +5,12 @@
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
+
+#include <glm/glm.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -83,6 +87,10 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::Init()
     {
+        m_UniformBuffer = UniformBuffer::Create( 4 * 4, 0 );
+
+        constexpr float f[4] = { 1.0, 1., 1., 1.0 };
+        m_UniformBuffer->RT_SetData( f, sizeof( f ) );
     }
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
@@ -128,6 +136,28 @@ namespace Desert::Graphic::API::Vulkan
         const auto   buffer =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>( vertexBuffer )->GetVulkanBuffer();
         vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &buffer, offsets );
+
+        const auto pBufferInfo =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanUniformBuffer>( m_UniformBuffer )
+                  ->GetDescriptorBufferInfo();
+
+        const auto shader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+
+        VkWriteDescriptorSet writeDescriptorSet = shader->GetDescriptorSet( "UniformBufferObject", 0 );
+        writeDescriptorSet.pBufferInfo          = &pBufferInfo;
+
+        VkDevice         device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkPipelineLayout layout =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipelineLayout();
+
+        vkUpdateDescriptorSets( device, 1, &writeDescriptorSet, 0, nullptr );
+
+        vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
+                                 &std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )
+                                       ->GetShaderDescriptorSet()
+                                       .DescriptorSets[0],
+                                 0, nullptr );
 
         vkCmdDraw( m_CurrentCommandBuffer, 3, 1, 0, 0 );
     }

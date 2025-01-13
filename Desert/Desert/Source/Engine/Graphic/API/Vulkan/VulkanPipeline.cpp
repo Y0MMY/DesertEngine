@@ -1,6 +1,5 @@
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Core/EngineContext.h>
 
@@ -118,10 +117,16 @@ namespace Desert::Graphic::API::Vulkan
              .attachmentCount = 1,
              .pAttachments    = &BlendAttachState };
 
-        std::shared_ptr<VulkanShader> shader =
+        std::shared_ptr<VulkanShader> vulkanShader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader );
 
-        const auto descriptorSetLayouts = shader->GetAllDescriptorSetLayouts();
+        const auto descriptorSets = vulkanShader->GetShaderDescriptorSets();
+        if ( !descriptorSets.empty() )
+        {
+            m_ShaderDescriptorSet = vulkanShader->CreateDescriptorSets( 1 );
+        }
+
+        const auto descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
 
         VkPipelineLayoutCreateInfo LayoutInfo = { .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                                   .setLayoutCount = (uint32_t)descriptorSetLayouts.size(),
@@ -136,8 +141,8 @@ namespace Desert::Graphic::API::Vulkan
 
         VkGraphicsPipelineCreateInfo pipelineInfo = {
              .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-             .stageCount          = (uint32_t)shader->GetPipelineShaderStageCreateInfos().size(),
-             .pStages             = shader->GetPipelineShaderStageCreateInfos().data(),
+             .stageCount          = (uint32_t)vulkanShader->GetPipelineShaderStageCreateInfos().size(),
+             .pStages             = vulkanShader->GetPipelineShaderStageCreateInfos().data(),
              .pVertexInputState   = &vertexInputInfo,
              .pInputAssemblyState = &pipelineIACreateInfo,
              .pViewportState      = &VPCreateInfo,
@@ -153,6 +158,18 @@ namespace Desert::Graphic::API::Vulkan
         res = vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &m_Pipeline );
 
         LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
+
+        auto& shaderDescriptorSets = vulkanShader->GetShaderDescriptorSets();
+        for ( uint32_t set = 0; set < shaderDescriptorSets.size(); set++ )
+        {
+            auto& shaderDescriptorSet = shaderDescriptorSets[set];
+            for ( auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
+            {
+
+                VkWriteDescriptorSet& set = shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name];
+                set.dstSet               = m_ShaderDescriptorSet.DescriptorSets[0];
+            }
+        }
     }
 
 } // namespace Desert::Graphic::API::Vulkan

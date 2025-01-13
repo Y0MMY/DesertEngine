@@ -18,7 +18,11 @@ void main()
 
 layout(location = 0) out vec4 oColor;
 
+layout(binding = 0) uniform UniformBufferObject {
+    vec4 color;
+} ubo;
+
 void main()
 {
-	oColor = vec4(0.0, 0.4, 1.0, 1.0);
+	oColor = ubo.color;
 }

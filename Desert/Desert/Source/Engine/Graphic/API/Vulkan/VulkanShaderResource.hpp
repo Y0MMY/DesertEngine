@@ -18,6 +18,12 @@ namespace Desert::Graphic::API::Vulkan
         struct ShaderDescriptorSet
         {
             std::unordered_map<uint32_t, UniformBuffer> UniformBuffers;
+            std::unordered_map<std::string, VkWriteDescriptorSet> WriteDescriptorSets;
+            
+            operator bool()
+            {
+                return !UniformBuffers.empty();
+            }
         };
 
     } // namespace ShaderResource

@@ -11,6 +11,32 @@ namespace Desert::Graphic::API::Vulkan
 {
     namespace Utils
     {
+        // NOTE: here the key defines the set index
+        std::unordered_map<uint32_t, std::vector<VkDescriptorPoolSize>>
+        FindTypesCount( const std::vector<ShaderResource::ShaderDescriptorSet>& shaderDescriptorSets,
+                        uint32_t                                                numberOfSets )
+        {
+            std::unordered_map<uint32_t, std::vector<VkDescriptorPoolSize>> poolSizes;
+
+            for ( uint32_t set = 0; set < shaderDescriptorSets.size(); set++ )
+            {
+                auto& shaderDescriptorSet = shaderDescriptorSets[set];
+                if ( !shaderDescriptorSet.UniformBuffers.size() ) // Empty descriptor set
+                {
+                    continue;
+                }
+
+                if ( shaderDescriptorSet.UniformBuffers.size() )
+                {
+                    VkDescriptorPoolSize& typeCount = poolSizes[set].emplace_back();
+                    typeCount.type                  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    typeCount.descriptorCount = (uint32_t)shaderDescriptorSet.UniformBuffers.size() * numberOfSets;
+                }
+            }
+
+            return poolSizes;
+        }
+
         void CreateDirectoriesIfNoExists()
         {
             bool exist = Common::Utils::FileSystem::Exists( Common::Constants::Path::SHADERDIR_PATH );
@@ -234,12 +260,12 @@ namespace Desert::Graphic::API::Vulkan
                 layoutBinding.pImmutableSamplers            = nullptr;
                 layoutBinding.binding                       = binding;
 
-                /* VkWriteDescriptorSet& set = shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name];
-                 set                       = {};
-                 set.sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                 set.descriptorType        = layoutBinding.descriptorType;
-                 set.descriptorCount       = 1;
-                 set.dstBinding            = layoutBinding.binding;*/
+                VkWriteDescriptorSet& set = shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name];
+                set                       = {};
+                set.sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                set.descriptorType        = layoutBinding.descriptorType;
+                set.descriptorCount       = 1;
+                set.dstBinding            = layoutBinding.binding;
             }
 
             VkDescriptorSetLayoutCreateInfo descriptorLayout = {};
@@ -260,7 +286,51 @@ namespace Desert::Graphic::API::Vulkan
 
     std::vector<VkDescriptorSetLayout> VulkanShader::GetAllDescriptorSetLayouts()
     {
-        return {};
+        return m_DescriptorSetLayouts;
+    }
+
+    VulkanShader::ShaderDescriptorSet VulkanShader::CreateDescriptorSets( uint32_t numberOfSets )
+    {
+        ShaderDescriptorSet result;
+
+        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        const auto& poolSizes = Utils::FindTypesCount( m_ReflectionData.ShaderDescriptorSets, numberOfSets );
+
+        DESERT_VERIFY( poolSizes.find( 0 ) != poolSizes.end() );
+
+        VkDescriptorPoolCreateInfo descriptorPoolInfo = {};
+        descriptorPoolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descriptorPoolInfo.pNext                      = nullptr;
+        descriptorPoolInfo.poolSizeCount              = poolSizes.at( 0 ).size();
+        descriptorPoolInfo.pPoolSizes                 = poolSizes.at( 0 ).data();
+        descriptorPoolInfo.maxSets                    = numberOfSets;
+
+        VK_CHECK_RESULT( vkCreateDescriptorPool( device, &descriptorPoolInfo, nullptr, &result.Pool ) );
+        result.DescriptorSets.resize( numberOfSets );
+
+        for ( uint32_t i = 0; i < numberOfSets; i++ )
+        {
+            VkDescriptorSetAllocateInfo allocInfo = {};
+            allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorPool              = result.Pool;
+            allocInfo.descriptorSetCount          = 1;
+            allocInfo.pSetLayouts                 = &m_DescriptorSetLayouts[0];
+
+            VK_CHECK_RESULT( vkAllocateDescriptorSets( device, &allocInfo, &result.DescriptorSets[i] ) );
+        }
+        return result;
+    }
+
+    const VkWriteDescriptorSet VulkanShader::GetDescriptorSet( const std::string& name, uint32_t set ) const
+    {
+        return m_ReflectionData.ShaderDescriptorSets.at( set ).WriteDescriptorSets.at( name );
+    }
+
+    void VulkanShader::AllocateUniformBuffer( ShaderResource::UniformBuffer& dst )
+    {
+        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        ShaderResource::UniformBuffer& uniformBuffer = dst;
     }
 
 } // namespace Desert::Graphic::API::Vulkan
