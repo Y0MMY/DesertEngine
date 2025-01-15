@@ -4,11 +4,13 @@
 
 layout(location = 0) in vec3 aPosition;
 
-// vec2 pos[3] = vec2[3] (vec2(-0.7, 0.7), vec2(0.7, 0.7), vec2(0.7, -0.7));
+layout(binding = 0) uniform camera {
+    mat4  mvp;
+} ubo;
 
 void main()
 {
-   gl_Position = vec4(aPosition, 1.0);
+   gl_Position = ubo.mvp * vec4(aPosition, 1.0);
 }
 
 
@@ -18,11 +20,7 @@ void main()
 
 layout(location = 0) out vec4 oColor;
 
-layout(binding = 0) uniform UniformBufferObject {
-    vec4 color;
-} ubo;
-
 void main()
 {
-	oColor = ubo.color;
+	oColor = vec4(1.0, 1.0, 1.0, 1.0);
 }

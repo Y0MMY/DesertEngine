@@ -9,11 +9,13 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Core/Camera.hpp>
 
 #include <glm/glm.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
+    static Core::Camera s_Camera;
     namespace
     {
         void InsertImageMemoryBarrier( VkCommandBuffer cmdbuffer, VkImage image, VkAccessFlags srcAccessMask,
@@ -87,10 +89,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::Init()
     {
-        m_UniformBuffer = UniformBuffer::Create( 4 * 4, 0 );
-
-        constexpr float f[4] = { 1.0, 1., 1., 1.0 };
-        m_UniformBuffer->RT_SetData( f, sizeof( f ) );
+        m_UniformBuffer = UniformBuffer::Create( sizeof( s_Camera ), 0 );
     }
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
@@ -128,6 +127,7 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
                                                const std::shared_ptr<Pipeline>&     pipeline )
     {
+
         vkCmdBindPipeline(
              m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipeline() );
@@ -141,11 +141,16 @@ namespace Desert::Graphic::API::Vulkan
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanUniformBuffer>( m_UniformBuffer )
                   ->GetDescriptorBufferInfo();
 
+        s_Camera.OnUpdate();
+
+        auto vp = s_Camera.GetProjectionMatrix() * s_Camera.GetViewMatrix();
+        m_UniformBuffer->RT_SetData( &vp[0], sizeof( glm::mat4 ) );
+
         const auto shader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+        VkWriteDescriptorSet writeDescriptorSet = shader->GetDescriptorSet( "camera", 0 );
 
-        VkWriteDescriptorSet writeDescriptorSet = shader->GetDescriptorSet( "UniformBufferObject", 0 );
-        writeDescriptorSet.pBufferInfo          = &pBufferInfo;
+        writeDescriptorSet.pBufferInfo = &pBufferInfo;
 
         VkDevice         device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
         VkPipelineLayout layout =
@@ -158,7 +163,6 @@ namespace Desert::Graphic::API::Vulkan
                                        ->GetShaderDescriptorSet()
                                        .DescriptorSets[0],
                                  0, nullptr );
-
         vkCmdDraw( m_CurrentCommandBuffer, 3, 1, 0, 0 );
     }
 

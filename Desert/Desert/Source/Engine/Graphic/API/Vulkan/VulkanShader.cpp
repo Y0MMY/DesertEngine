@@ -44,7 +44,6 @@ namespace Desert::Graphic::API::Vulkan
             return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
         }
 
-        // NOTE: here the key defines the set index
         std::vector<VkDescriptorPoolSize>
         GetDescriptorPoolSize( const std::vector<ShaderResource::ShaderDescriptorSet>& shaderDescriptorSets,
                                uint32_t                                                numberOfSets )
@@ -181,6 +180,8 @@ namespace Desert::Graphic::API::Vulkan
         const auto shaderContent    = Common::Utils::FileSystem::ReadFileContent( m_ShaderPath );
         const auto shadersWithStage = Core::Preprocess::Shader::PreProcess( shaderContent );
 
+        m_ReflectionData.ShaderDescriptorSets.clear();
+
         for ( auto [stage, source] : shadersWithStage )
         {
             const auto compileResult = Utils::Compile( stage, source, m_ShaderPath.string() );
@@ -197,8 +198,6 @@ namespace Desert::Graphic::API::Vulkan
             {
                 return Common::MakeError<bool>( createShaderModuleResult.GetError() );
             }
-
-            m_ReflectionData.ShaderDescriptorSets.clear();
 
             Reflect( Utils::ShaderStageToVkShader( stage ), compileResult.GetValue() );
             const auto createDescriptorsResult = CreateDescriptors();
@@ -251,7 +250,8 @@ namespace Desert::Graphic::API::Vulkan
                 }
                 else
                 {
-                    Core::Models::UniformBuffer& uniformBuffer = s_UniformBuffers.at( descriptorSet ).at( binding );
+                    Core::Models::UniformBuffer& uniformBuffer =
+                         s_UniformBuffers.at( descriptorSet ).at( binding );
                     if ( size > uniformBuffer.Size )
                         uniformBuffer.Size = size;
                 }
@@ -281,7 +281,7 @@ namespace Desert::Graphic::API::Vulkan
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
         std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
-        for (uint32_t set = 0; set < m_ReflectionData.ShaderDescriptorSets.size(); set++)
+        for ( uint32_t set = 0; set < m_ReflectionData.ShaderDescriptorSets.size(); set++ )
         {
             auto& shaderDescriptorSet = m_ReflectionData.ShaderDescriptorSets[set];
 

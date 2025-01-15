@@ -67,6 +67,11 @@ namespace Desert::Engine
                  m_IsRunningApplication = false;
                  return true;
              } );
+
+        for (const auto& registeredEvent : s_RegisteredEvents)
+        {
+            registeredEvent(e);
+        }
     }
 
     void Application::Init()

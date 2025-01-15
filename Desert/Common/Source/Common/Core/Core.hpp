@@ -54,7 +54,7 @@ decltype( auto ) initializeDefaultValue()
         Common::Logger::LogWarn( "Verify failed: {} at {}:{}", #cond, __FILE__, __LINE__ );                       \
     }
 
-//#define MAKE_SHARED_OBJECT( type, value ) Memory::Shared<type>::Create( value );
+// #define MAKE_SHARED_OBJECT( type, value ) Memory::Shared<type>::Create( value );
 
 namespace Common
 {
@@ -68,3 +68,7 @@ namespace Common
     class UUID;
     using AssetHandle = UUID;
 } // namespace Common
+
+#define REGISTER_EVENT( instance, method )                                                                        \
+    Engine::Application::GetInstance().s_RegisteredEvents.push_back( [instance]( Common::Event& e )               \
+                                                                     { instance->method( e ); } )

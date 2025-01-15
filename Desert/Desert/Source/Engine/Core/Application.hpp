@@ -54,6 +54,9 @@ namespace Desert::Engine
 
         Common::Timestep m_PrevTimestep;
         bool             m_IsRunningApplication = true;
+
+    public:
+        inline static std::vector<std::function<void( Common::Event& )>> s_RegisteredEvents;
     };
 
     Application* CreateApplicaton( int argc, char** argv );

@@ -1,6 +1,8 @@
 #include <Platform/Windows/WindowsWindow.hpp>
 
 #include <Common/Core/Events/WindowEvents.hpp>
+#include <Common/Core/Events/MouseEvents.hpp>
+#include <Common/Core/Events/KeyEvents.hpp>
 
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Core/EngineContext.h>
@@ -52,6 +54,28 @@ namespace Desert::Platform::Windows
                                         Common::EventWindowClose event;
                                         data.EventCallback( event );
                                     } );
+
+        glfwSetKeyCallback( m_GLFWWindow,
+                            []( GLFWwindow* window, int key, int scancode, int action, int mods )
+                            {
+                                auto& data = *(WindowData*)glfwGetWindowUserPointer( window );
+
+                                switch ( action )
+                                {
+                                    case GLFW_PRESS:
+                                    {
+                                        Common::KeyPressedEvent event( (Common::KeyCode)key, 0 );
+                                        data.EventCallback( event );
+                                        break;
+                                    }
+                                    case GLFW_REPEAT:
+                                    {
+                                        Common::KeyPressedEvent event( (Common::KeyCode)key, 1 );
+                                        data.EventCallback( event );
+                                        break;
+                                    }
+                                }
+                            } );
 
         return Common::MakeSuccess( true );
     }
