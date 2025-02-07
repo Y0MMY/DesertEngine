@@ -4,6 +4,7 @@ namespace Desert::Graphic
 {
     typedef unsigned int RenderingID;
     typedef unsigned int BindingPoint;
+    typedef unsigned int SetPoint;
 
     enum class BufferUsage
     {

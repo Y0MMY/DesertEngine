@@ -8,6 +8,7 @@
 // =================== Engine =================== //
 
 #include <Engine/Core/Application.hpp>
+#include <Engine/Core/Scene.hpp>
 
 // =================== Graphic =================== //
 
@@ -17,3 +18,5 @@
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Shader.hpp>
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/Texture.hpp>
+#include <Engine/Graphic/Image.hpp>

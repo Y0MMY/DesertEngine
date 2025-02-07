@@ -16,35 +16,6 @@
 namespace Desert::Graphic::API::Vulkan
 {
     static Core::Camera s_Camera;
-    namespace
-    {
-        void InsertImageMemoryBarrier( VkCommandBuffer cmdbuffer, VkImage image, VkAccessFlags srcAccessMask,
-                                       VkAccessFlags dstAccessMask, VkImageLayout oldImageLayout,
-                                       VkImageLayout newImageLayout, VkPipelineStageFlags srcStageMask,
-                                       VkPipelineStageFlags dstStageMask )
-        {
-            VkImageSubresourceRange subresourceRange = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-                                                         .baseMipLevel   = 0,
-                                                         .levelCount     = 1,
-                                                         .baseArrayLayer = 0,
-                                                         .layerCount     = 1 };
-
-            VkImageMemoryBarrier imageMemoryBarrier{};
-            imageMemoryBarrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-            imageMemoryBarrier.srcAccessMask    = srcAccessMask;
-            imageMemoryBarrier.dstAccessMask    = dstAccessMask;
-            imageMemoryBarrier.oldLayout        = oldImageLayout;
-            imageMemoryBarrier.newLayout        = newImageLayout;
-            imageMemoryBarrier.image            = image;
-            imageMemoryBarrier.subresourceRange = subresourceRange;
-
-            vkCmdPipelineBarrier( cmdbuffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1,
-                                  &imageMemoryBarrier );
-        }
-    } // namespace
 
     Common::BoolResult VulkanRendererAPI::BeginFrame()
     {
@@ -90,6 +61,8 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::Init()
     {
         m_UniformBuffer = UniformBuffer::Create( sizeof( s_Camera ), 0 );
+
+        m_texture = Texture2D::Create( "bricks.jpg" );
     }
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
@@ -127,6 +100,8 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
                                                const std::shared_ptr<Pipeline>&     pipeline )
     {
+        UpdateDescriptorSets( pipeline );
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         vkCmdBindPipeline(
              m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -137,10 +112,6 @@ namespace Desert::Graphic::API::Vulkan
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>( vertexBuffer )->GetVulkanBuffer();
         vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &buffer, offsets );
 
-        const auto pBufferInfo =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanUniformBuffer>( m_UniformBuffer )
-                  ->GetDescriptorBufferInfo();
-
         s_Camera.OnUpdate();
 
         auto vp = s_Camera.GetProjectionMatrix() * s_Camera.GetViewMatrix();
@@ -148,22 +119,51 @@ namespace Desert::Graphic::API::Vulkan
 
         const auto shader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
-        VkWriteDescriptorSet writeDescriptorSet = shader->GetDescriptorSet( "camera", 0 );
-
-        writeDescriptorSet.pBufferInfo = &pBufferInfo;
 
         VkDevice         device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
         VkPipelineLayout layout =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipelineLayout();
+        vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
+                                 &shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 ), 0,
+                                 nullptr );
+        vkCmdDraw( m_CurrentCommandBuffer, 4, 1, 0, 0 );
+    }
+
+    void VulkanRendererAPI::UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline )
+    {
+        auto vkImage = std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_texture->GetImage2D() );
+        auto info    = vkImage->GetVulkanImageInfo();
+
+        VkDescriptorImageInfo imageInfo = {};
+        imageInfo.sampler               = info.Sampler;
+        imageInfo.imageView             = info.ImageView;
+        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        VkDevice   device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        const auto shader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+        VkWriteDescriptorSet writeDescriptorSet = shader->GetDescriptorSet( "camera", 0, frameIndex );
+        const auto           pBufferInfo =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanUniformBuffer>( m_UniformBuffer )
+                  ->GetDescriptorBufferInfo();
+        writeDescriptorSet.pBufferInfo = &pBufferInfo;
+
+        VkWriteDescriptorSet writeDescriptorSetImage = {};
+        writeDescriptorSetImage.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSetImage.dstSet =
+             shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+        writeDescriptorSetImage.dstBinding      = 2;
+        writeDescriptorSetImage.dstArrayElement = 0;
+        writeDescriptorSetImage.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writeDescriptorSetImage.descriptorCount = 1;
+        writeDescriptorSetImage.pImageInfo      = &imageInfo;
+
 
         vkUpdateDescriptorSets( device, 1, &writeDescriptorSet, 0, nullptr );
-
-        vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
-                                 &std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )
-                                       ->GetShaderDescriptorSet()
-                                       .DescriptorSets[0],
-                                 0, nullptr );
-        vkCmdDraw( m_CurrentCommandBuffer, 3, 1, 0, 0 );
+        vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

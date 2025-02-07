@@ -20,6 +20,8 @@ project "Desert"
         "Source/Engine/**.hpp",
 
         "%{wks.location}/ThirdParty/VulkanSDK/VulkanAllocator/vk_mem_alloc.cpp",
+         -- stb
+        "%{wks.location}/ThirdParty/stb/stb_image.cpp",
     }
 
     includedirs {
@@ -30,6 +32,7 @@ project "Desert"
         "%{wks.location}/ThirdParty/glm/",
         "%{wks.location}/ThirdParty/GLFW/include",
         "%{wks.location}/ThirdParty/VulkanSDK/",
+        "%{wks.location}/ThirdParty/stb/include/",
 
 
         "%{wks.location}/ThirdParty/VulkanSDK/shaderc/Include",

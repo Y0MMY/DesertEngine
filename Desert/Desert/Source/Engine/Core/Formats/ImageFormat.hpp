@@ -4,14 +4,16 @@ namespace Desert::Core::Formats
 {
     enum class ImageFormat
     {
-        None = 0,
         RGB,
         RGBA,
-        RGBA16F,
-        RGBA32F,
-
-        DEPTH32F,
-
-        DEPTH24STENCIL8
     };
-}
+
+    struct ImageSpecification
+    {
+        uint32_t                  Width;
+        uint32_t                  Height;
+        ImageFormat               Format;
+        uint32_t                  TextureSamples = 1;
+        std::optional<std::byte*> Data;
+    };
+} // namespace Desert::Core::Formats

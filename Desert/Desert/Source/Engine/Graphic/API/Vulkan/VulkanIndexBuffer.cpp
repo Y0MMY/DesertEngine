@@ -98,7 +98,7 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             m_MemoryAllocation = buffer.GetValue();
-            auto copyCmd       = CommandBufferAllocator::GetInstance().RT_GetCommandBufferCompute();
+            auto copyCmd       = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic();
             if ( !copyCmd.IsSuccess() )
             {
                 return Common::MakeError<bool>( copyCmd.GetError() );

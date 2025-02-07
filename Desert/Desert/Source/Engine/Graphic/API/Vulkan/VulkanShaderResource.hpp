@@ -13,8 +13,11 @@ namespace Desert::Graphic::API::Vulkan
 
         struct ShaderDescriptorSet
         {
-            std::unordered_map<uint32_t, Core::Models::UniformBuffer>           UniformBuffers;
-            std::unordered_map<std::string, VkWriteDescriptorSet> WriteDescriptorSets;
+            std::unordered_map<BindingPoint, Core::Models::UniformBuffer> UniformBuffers;
+            std::unordered_map<uint32_t, Core::Models::ImageSampler> ImageSamplers;
+            std::unordered_map<std::string, std::vector<VkWriteDescriptorSet>>
+                 WriteDescriptorSets; // NOTE: std::vector defines the number of frames, i.e. there will be a
+                                      // different VkWriteDescriptorSet for each frame
 
             operator bool()
             {

@@ -44,25 +44,21 @@ namespace Desert::Graphic::API::Vulkan
             return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
         }
 
-        std::vector<VkDescriptorPoolSize>
-        GetDescriptorPoolSize( const std::vector<ShaderResource::ShaderDescriptorSet>& shaderDescriptorSets,
-                               uint32_t                                                numberOfSets )
+        std::vector<VkDescriptorPoolSize> GetDescriptorPoolSize(
+             const std::unordered_map<SetPoint, ShaderResource::ShaderDescriptorSet>& shaderDescriptorSets )
         {
             std::vector<VkDescriptorPoolSize> poolSizes;
+            uint32_t                          sets = shaderDescriptorSets.size();
 
-            for ( uint32_t set = 0; set < shaderDescriptorSets.size(); set++ )
+            for ( SetPoint set = 0; set < sets; set++ )
             {
-                auto& shaderDescriptorSet = shaderDescriptorSets[set];
-                if ( !shaderDescriptorSet.UniformBuffers.size() ) // Empty descriptor set
+                const auto& uniformBuffers = shaderDescriptorSets.at( set ).UniformBuffers;
+                if ( !uniformBuffers.empty() )
                 {
-                    continue;
-                }
+                    auto& poolSize = poolSizes.emplace_back();
 
-                if ( shaderDescriptorSet.UniformBuffers.size() )
-                {
-                    VkDescriptorPoolSize& typeCount = poolSizes.emplace_back();
-                    typeCount.type                  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                    typeCount.descriptorCount = (uint32_t)shaderDescriptorSet.UniformBuffers.size() * numberOfSets;
+                    poolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    poolSize.descriptorCount = uniformBuffers.size() * sets;
                 }
             }
 
@@ -170,9 +166,6 @@ namespace Desert::Graphic::API::Vulkan
         Reload();
     }
 
-    static std::unordered_map<uint32_t, std::unordered_map<uint32_t, Core::Models::UniformBuffer>>
-         s_UniformBuffers; // set -> binding point -> buffer
-
     Common::BoolResult VulkanShader::Reload() // also load
     {
         m_PipelineShaderStageCreateInfos.clear();
@@ -233,12 +226,9 @@ namespace Desert::Graphic::API::Vulkan
                 uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
                 uint32_t    size          = (uint32_t)compiler.get_declared_struct_size( bufferType );
 
-                if ( descriptorSet >= m_ReflectionData.ShaderDescriptorSets.size() )
-                    m_ReflectionData.ShaderDescriptorSets.resize( descriptorSet + 1 );
+                auto& uniformBuffers = m_ReflectionData.ShaderDescriptorSets[descriptorSet].UniformBuffers;
 
-                ShaderResource::ShaderDescriptorSet& shaderDescriptorSet =
-                     m_ReflectionData.ShaderDescriptorSets[descriptorSet];
-                if ( s_UniformBuffers[descriptorSet].find( binding ) == s_UniformBuffers[descriptorSet].end() )
+                if ( uniformBuffers.find( binding ) == uniformBuffers.end() )
                 {
                     Core::Models::UniformBuffer uniformBuffer;
                     uniformBuffer.BindingPoint = binding;
@@ -246,22 +236,41 @@ namespace Desert::Graphic::API::Vulkan
                     uniformBuffer.Name         = name;
                     uniformBuffer.ShaderStage =
                          Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
-                    s_UniformBuffers.at( descriptorSet )[binding] = uniformBuffer;
+
+                    uniformBuffers.insert( { binding, uniformBuffer } );
                 }
                 else
                 {
-                    Core::Models::UniformBuffer& uniformBuffer =
-                         s_UniformBuffers.at( descriptorSet ).at( binding );
-                    if ( size > uniformBuffer.Size )
-                        uniformBuffer.Size = size;
                 }
-                shaderDescriptorSet.UniformBuffers[binding] = s_UniformBuffers.at( descriptorSet ).at( binding );
 
                 LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
                 LOG_TRACE( "  Member Count: {0}", memberCount );
                 LOG_TRACE( "  Size: {0}", size );
                 LOG_TRACE( "-------------------" );
             }
+        }
+
+        LOG_TRACE( "Images: " );
+        for ( const auto& resource : resources.sampled_images )
+        {
+            const auto& name          = resource.name;
+            uint32_t    binding       = compiler.get_decoration( resource.id, spv::DecorationBinding );
+            uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+
+            auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].ImageSamplers;
+
+            if ( imageSampler.find( binding ) == imageSampler.end() )
+            {
+                Core::Models::ImageSampler newImageSampler;
+                newImageSampler.BindingPoint = binding;
+                newImageSampler.Name         = name;
+                newImageSampler.ShaderStage =
+                     Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+
+                imageSampler.insert( { binding, newImageSampler } );
+            }
+
+            LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
         }
     }
 
@@ -281,39 +290,46 @@ namespace Desert::Graphic::API::Vulkan
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
         std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
-        for ( uint32_t set = 0; set < m_ReflectionData.ShaderDescriptorSets.size(); set++ )
+
+        uint32_t sets = m_ReflectionData.ShaderDescriptorSets.size();
+        for ( SetPoint set = 0; set < sets; set++ )
         {
             auto& shaderDescriptorSet = m_ReflectionData.ShaderDescriptorSets[set];
 
             // Uniform buffer
-            for ( auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
+            for ( const auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
             {
-                VkDescriptorSetLayoutBinding& layoutBinding = layoutBindings.emplace_back();
-                layoutBinding.descriptorType                = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                layoutBinding.descriptorCount               = 1;
-                layoutBinding.stageFlags         = Utils::GetVkShaderStageFlags( uniformBuffer.ShaderStage );
-                layoutBinding.pImmutableSamplers = nullptr;
-                layoutBinding.binding            = binding;
-
-                VkWriteDescriptorSet& set = shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name];
-                set                       = {};
-                set.sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                set.descriptorType        = layoutBinding.descriptorType;
-                set.descriptorCount       = 1;
-                set.dstBinding            = layoutBinding.binding;
+                auto& layout              = layoutBindings.emplace_back();
+                layout.binding            = binding;
+                layout.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                layout.stageFlags         = Utils::GetVkShaderStageFlags( uniformBuffer.ShaderStage );
+                layout.pImmutableSamplers = nullptr;
+                layout.descriptorCount    = 1; // not array at now
             }
 
-            VkDescriptorSetLayoutCreateInfo descriptorLayout = {};
-            descriptorLayout.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-            descriptorLayout.pNext                           = nullptr;
-            descriptorLayout.bindingCount                    = (uint32_t)( layoutBindings.size() );
-            descriptorLayout.pBindings                       = layoutBindings.data();
+            // Samplers
+            for ( const auto& [binding, sampler] : shaderDescriptorSet.ImageSamplers )
+            {
+                auto& layout              = layoutBindings.emplace_back();
+                layout.binding            = binding;
+                layout.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                layout.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+                layout.pImmutableSamplers = nullptr;
+                layout.descriptorCount    = 1;
+            }
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+            layoutInfo.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            layoutInfo.bindingCount                    = (uint32_t)layoutBindings.size();
+            layoutInfo.pBindings                       = layoutBindings.data();
 
             if ( set >= m_DescriptorSetLayouts.size() )
+            {
                 m_DescriptorSetLayouts.resize( (size_t)( set + 1 ) );
+            }
 
-            VK_RETURN_RESULT_IF_FALSE_TYPE( bool, vkCreateDescriptorSetLayout( device, &descriptorLayout, nullptr,
-                                                                               &m_DescriptorSetLayouts[set] ) );
+            VK_RETURN_RESULT_IF_FALSE_TYPE(
+                 bool, vkCreateDescriptorSetLayout( device, &layoutInfo, nullptr, &m_DescriptorSetLayouts[set] ) );
         }
 
         return Common::MakeSuccess( true );
@@ -324,43 +340,94 @@ namespace Desert::Graphic::API::Vulkan
         return m_DescriptorSetLayouts;
     }
 
-    VulkanShader::DescriptorSetInfo VulkanShader::CreateDescriptorSets( uint32_t numberOfSets )
+    VulkanShader::DescriptorSetInfo VulkanShader::AllocateDescriptorSets( uint32_t framesInFlight )
     {
         DescriptorSetInfo result;
 
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice    device    = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        const auto& poolSizes = Utils::GetDescriptorPoolSize( m_ReflectionData.ShaderDescriptorSets );
+        uint32_t    sets      = m_ReflectionData.ShaderDescriptorSets.size();
 
-        const auto& poolSizes =
-             Utils::GetDescriptorPoolSize( m_ReflectionData.ShaderDescriptorSets, numberOfSets );
+        result.Pool.resize( framesInFlight );
+        result.DescriptorSets.resize( framesInFlight );
 
-        DESERT_VERIFY( !poolSizes.empty() );
+        for ( uint32_t frame = 0; frame < framesInFlight; frame++ )
+        {
+            VkDescriptorPoolCreateInfo poolInfo = {};
+            poolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+            poolInfo.poolSizeCount              = poolSizes.size();
+            poolInfo.pPoolSizes                 = poolSizes.data();
+            poolInfo.maxSets                    = sets;
 
-        VkDescriptorPoolCreateInfo descriptorPoolInfo = {};
-        descriptorPoolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        descriptorPoolInfo.pNext                      = nullptr;
-        descriptorPoolInfo.poolSizeCount              = poolSizes.size();
-        descriptorPoolInfo.pPoolSizes                 = poolSizes.data();
-        descriptorPoolInfo.maxSets                    = numberOfSets;
+            VK_CHECK_RESULT( vkCreateDescriptorPool( device, &poolInfo, nullptr, &result.Pool[frame] ) );
 
-        VK_CHECK_RESULT( vkCreateDescriptorPool( device, &descriptorPoolInfo, nullptr, &result.Pool ) );
-        result.DescriptorSets.resize( numberOfSets );
+            result.DescriptorSets[frame].resize( sets );
+        }
 
-        for ( uint32_t i = 0; i < numberOfSets; i++ )
+        for ( uint32_t frame = 0; frame < framesInFlight; frame++ )
         {
             VkDescriptorSetAllocateInfo allocInfo = {};
             allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool              = result.Pool;
-            allocInfo.descriptorSetCount          = 1;
-            allocInfo.pSetLayouts                 = &m_DescriptorSetLayouts[i];
+            allocInfo.descriptorPool              = result.Pool[frame];
+            allocInfo.descriptorSetCount          = sets;
+            allocInfo.pSetLayouts                 = m_DescriptorSetLayouts.data();
 
-            VK_CHECK_RESULT( vkAllocateDescriptorSets( device, &allocInfo, &result.DescriptorSets[i] ) );
+            const VkResult sdf =
+                 vkAllocateDescriptorSets( device, &allocInfo, result.DescriptorSets[frame].data() );
+            if ( sdf != VK_SUCCESS )
+            {
+                auto sdfStr = VkResultToString( sdf );
+                LOG_TRACE( "\n\n{}\n\n", sdfStr );
+            }
         }
+
         return result;
     }
 
-    const VkWriteDescriptorSet VulkanShader::GetDescriptorSet( const std::string& name, uint32_t set ) const
+    void VulkanShader::CreateDescriptorSets( uint32_t framesInFlight )
     {
-        return m_ReflectionData.ShaderDescriptorSets.at( set ).WriteDescriptorSets.at( name );
+        m_DescriptorSetInfo = AllocateDescriptorSets( framesInFlight );
+
+        auto& shaderDescriptorSets = m_ReflectionData.ShaderDescriptorSets;
+
+        for ( uint32_t frame = 0; frame < framesInFlight; frame++ )
+        {
+            for ( SetPoint set = 0; set < shaderDescriptorSets.size(); set++ )
+            {
+                auto& shaderDescriptorSet = shaderDescriptorSets[set];
+
+                for ( auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
+                {
+                    VkWriteDescriptorSet& writeDescriptor =
+                         shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name].emplace_back();
+
+                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
+                    writeDescriptor.dstBinding      = uniformBuffer.BindingPoint;
+                    writeDescriptor.descriptorCount = 1;
+                }
+
+                for ( auto& [binding, sampler] : shaderDescriptorSet.ImageSamplers )
+                {
+                    VkWriteDescriptorSet& writeDescriptor =
+                         shaderDescriptorSet.WriteDescriptorSets[sampler.Name].emplace_back();
+
+                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
+                    writeDescriptor.descriptorCount = 1;
+                    writeDescriptor.dstBinding      = sampler.BindingPoint;
+                }
+            }
+        }
+
+    }
+
+    const VkWriteDescriptorSet VulkanShader::GetDescriptorSet( const std::string& name, uint32_t set,
+                                                               uint32_t frame ) const
+    {
+        return m_ReflectionData.ShaderDescriptorSets.at( set ).WriteDescriptorSets.at( name ).at( frame );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

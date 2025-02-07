@@ -50,7 +50,7 @@ namespace Desert::Core
 
         glm::vec2 m_InitialMousePosition = glm::vec2( 0.0f );
 
-        glm::vec3 m_RightDirection;
+        glm::vec3 m_RightDirection = glm::vec3( 1.0, 0.0f, 0.0f );
         glm::vec3 m_Direction;
 
         glm::mat4 m_ViewMatrix = glm::mat4( 1.0f );

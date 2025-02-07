@@ -123,7 +123,7 @@ namespace Desert::Graphic::API::Vulkan
         const auto descriptorSets = vulkanShader->GetShaderDescriptorSets();
         if ( !descriptorSets.empty() )
         {
-            m_ShaderDescriptorSet = vulkanShader->CreateDescriptorSets( 1 );
+            vulkanShader->CreateDescriptorSets( 3 );
         }
 
         const auto descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
@@ -158,19 +158,6 @@ namespace Desert::Graphic::API::Vulkan
         res = vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &m_Pipeline );
 
         LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
-
-        // TODO: MOVE TO VulkanShader
-        auto& shaderDescriptorSets = vulkanShader->GetShaderDescriptorSets();
-        for ( uint32_t set = 0; set < shaderDescriptorSets.size(); set++ )
-        {
-            auto& shaderDescriptorSet = shaderDescriptorSets[set];
-            for ( auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
-            {
-
-                VkWriteDescriptorSet& set = shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name];
-                set.dstSet                = m_ShaderDescriptorSet.DescriptorSets[0];
-            }
-        }
     }
 
 } // namespace Desert::Graphic::API::Vulkan

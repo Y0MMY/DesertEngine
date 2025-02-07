@@ -29,17 +29,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_PipelineLayout;
         }
 
-        const auto GetShaderDescriptorSet() const
-        {
-            return m_ShaderDescriptorSet;
-        }
-
     private:
         PipelineSpecification m_Specification;
 
         VkPipelineLayout m_PipelineLayout;
         VkPipeline       m_Pipeline;
 
-        VulkanShader::DescriptorSetInfo m_ShaderDescriptorSet;
     };
 } // namespace Desert::Graphic::API::Vulkan

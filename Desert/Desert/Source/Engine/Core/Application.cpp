@@ -49,7 +49,6 @@ namespace Desert::Engine
     void Application::PushLayer( Common::Layer* layer )
     {
         m_LayerStack.PushLayer( layer );
-        layer->OnAttach();
     }
 
     void Application::PopLayer( Common::Layer* layer )

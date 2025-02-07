@@ -16,10 +16,7 @@ namespace Desert
         virtual void OnUpdate( Common::Timestep ts ) override;
 
     private:
-        std::shared_ptr<Graphic::VertexBuffer> m_Vertexbuffer;
-        std::shared_ptr<Graphic::Pipeline>     m_Pipeline;
-        std::shared_ptr<Graphic::Framebuffer>  m_Framebuffer;
-        std::shared_ptr<Graphic::Shader>       m_Shader;
-        std::shared_ptr<Graphic::RenderPass>   m_RenderPass;
+        Core::Scene                             m_testscene;
+        std::shared_ptr<Graphic::SceneRenderer> m_testscenerenderer;
     };
 } // namespace Desert

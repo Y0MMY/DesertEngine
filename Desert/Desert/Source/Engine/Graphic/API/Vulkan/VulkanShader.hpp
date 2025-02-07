@@ -12,13 +12,14 @@ namespace Desert::Graphic::API::Vulkan
     public:
         struct DescriptorSetInfo
         {
-            VkDescriptorPool             Pool;
-            std::vector<VkDescriptorSet> DescriptorSets;
+            std::vector<VkDescriptorPool>                              Pool;
+            std::vector<std::vector<VkDescriptorSet>> DescriptorSets; // frame -> set
         };
 
         struct ReflectionData
         {
-            std::vector<ShaderResource::ShaderDescriptorSet> ShaderDescriptorSets;
+            std::unordered_map<SetPoint, ShaderResource::ShaderDescriptorSet>
+                 ShaderDescriptorSets; // uint32_t = set
         };
 
     public:
@@ -36,18 +37,24 @@ namespace Desert::Graphic::API::Vulkan
             return "TODO";
         }
 
-        const VkWriteDescriptorSet GetDescriptorSet( const std::string& name, uint32_t set ) const;
+        const VkWriteDescriptorSet GetDescriptorSet( const std::string& name, uint32_t set, uint32_t frame ) const;
 
         const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
         {
             return m_PipelineShaderStageCreateInfos;
         }
         std::vector<VkDescriptorSetLayout> GetAllDescriptorSetLayouts();
-        DescriptorSetInfo                  CreateDescriptorSets( uint32_t numberOfSets );
+        void                               CreateDescriptorSets( uint32_t framesInFlight );
+        DescriptorSetInfo                  AllocateDescriptorSets( uint32_t framesInFlight );
 
         auto& GetShaderDescriptorSets()
         {
             return m_ReflectionData.ShaderDescriptorSets;
+        }
+
+        auto& GetVulkanDescriptorSetInfo() const
+        {
+            return m_DescriptorSetInfo;
         }
 
     private:
@@ -60,7 +67,9 @@ namespace Desert::Graphic::API::Vulkan
         std::filesystem::path                        m_ShaderPath;
 
         ReflectionData                     m_ReflectionData;
-        std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts;
+        std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts; // set
+
+        DescriptorSetInfo m_DescriptorSetInfo;
     };
 
 } // namespace Desert::Graphic::API::Vulkan
