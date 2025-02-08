@@ -8,8 +8,8 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRenderCommandBuffer::Init( VulkanQueue* queue )
     {
-
-        m_CommandBuffers = queue->GetDrawCommandBuffers();
+        m_DrawCommandBuffers    = queue->GetDrawCommandBuffers();
+        m_ComputeCommandBuffers = queue->GetComputeCommandBuffers();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

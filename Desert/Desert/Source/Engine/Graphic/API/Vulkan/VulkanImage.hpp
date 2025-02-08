@@ -14,6 +14,8 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocation MemoryAlloc = nullptr;
     };
 
+    VkFormat GetImageVulkanFormat(const Core::Formats::ImageFormat& imageFormat);
+
     class VulkanImage2D final : public Image2D
     {
     public:
@@ -46,6 +48,8 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual void Use( uint32_t slot = 0 ) const override;
 
+    private:
+        VkImageCreateInfo GetImageCreateInfo(VkFormat imageFormat);
     private:
         Core::Formats::ImageSpecification m_ImageSpecification;
 

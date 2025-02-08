@@ -1,5 +1,5 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
@@ -134,6 +134,7 @@ namespace Desert::Graphic::API::Vulkan
         m_VulkanQueue->Init();
 
         VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );
+        VulkanLoadDebugUtilsExtensions( s_VulkanInstance );
         return Common::MakeSuccess( VK_SUCCESS );
     }
 

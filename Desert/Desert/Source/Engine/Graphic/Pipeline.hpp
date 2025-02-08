@@ -26,4 +26,18 @@ namespace Desert::Graphic
 
         static std::shared_ptr<Pipeline> Create( const PipelineSpecification& spec );
     };
+
+    class PipelineCompute
+    {
+    public:
+        virtual ~PipelineCompute() = default;
+
+        virtual void Begin() = 0;
+        virtual void End()   = 0;
+
+        virtual void Invalidate() = 0;
+
+        static std::shared_ptr<PipelineCompute> Create( const std::shared_ptr<Shader>& shader );
+    };
+
 } // namespace Desert::Graphic

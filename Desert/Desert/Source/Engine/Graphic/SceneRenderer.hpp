@@ -17,6 +17,7 @@ namespace Desert::Graphic
         std::shared_ptr<Graphic::Pipeline>     m_TESTPipeline;
         std::shared_ptr<Graphic::Framebuffer>  m_TESTFramebuffer;
         std::shared_ptr<Graphic::Shader>       m_TESTShader;
+        std::shared_ptr<Graphic::Shader>       m_TESTCompShader;
         std::shared_ptr<Graphic::RenderPass>   m_TESTRenderPass;
     };
 } // namespace Desert::Graphic

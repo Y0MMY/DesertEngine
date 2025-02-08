@@ -2,7 +2,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
-#include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Core/EngineContext.h>
 
 namespace Desert::Graphic::API::Vulkan

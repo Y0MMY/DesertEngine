@@ -16,6 +16,8 @@ namespace Desert::Core::Preprocess::Shader
                 return Formats::ShaderStage::Vertex;
             if ( typeStr == "fragment" )
                 return Formats::ShaderStage::Fragment;
+            if ( typeStr == "compute" )
+                return Formats::ShaderStage::Compute;
 
             return Formats::ShaderStage::None;
         }

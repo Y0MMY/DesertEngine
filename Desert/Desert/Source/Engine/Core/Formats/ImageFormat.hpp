@@ -4,8 +4,7 @@ namespace Desert::Core::Formats
 {
     enum class ImageFormat
     {
-        RGB,
-        RGBA,
+        RGBA8F,
     };
 
     struct ImageSpecification

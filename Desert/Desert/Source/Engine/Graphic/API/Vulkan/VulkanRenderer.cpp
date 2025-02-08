@@ -139,14 +139,14 @@ namespace Desert::Graphic::API::Vulkan
         imageInfo.imageView             = info.ImageView;
         imageInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         VkDevice   device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
         const auto shader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
-        VkWriteDescriptorSet writeDescriptorSet = shader->GetDescriptorSet( "camera", 0, frameIndex );
-        const auto           pBufferInfo =
+        VkWriteDescriptorSet writeDescriptorSet =
+             shader->GetWriteDescriptorSet( WriteDescriptorType::Uniform, 0, 0, frameIndex );
+        const auto pBufferInfo =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanUniformBuffer>( m_UniformBuffer )
                   ->GetDescriptorBufferInfo();
         writeDescriptorSet.pBufferInfo = &pBufferInfo;
@@ -160,7 +160,6 @@ namespace Desert::Graphic::API::Vulkan
         writeDescriptorSetImage.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writeDescriptorSetImage.descriptorCount = 1;
         writeDescriptorSetImage.pImageInfo      = &imageInfo;
-
 
         vkUpdateDescriptorSets( device, 1, &writeDescriptorSet, 0, nullptr );
         vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );

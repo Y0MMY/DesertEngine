@@ -18,7 +18,7 @@ namespace Desert::Graphic::API::Vulkan
                       Common::Utils::FileSystem::GetFileName( path ), false, true );
             float* data      = stbi_loadf( path.string().c_str(), &width, &height, &nrChannels, STBI_rgb_alpha );
             imageSpec.Data   = (std::byte*)data;
-            imageSpec.Format = Core::Formats::ImageFormat::RGB;
+            imageSpec.Format = Core::Formats::ImageFormat::RGBA8F;
         }
         else
         {
@@ -27,7 +27,7 @@ namespace Desert::Graphic::API::Vulkan
             unsigned char* data = stbi_load( path.string().c_str(), &width, &height, &nrChannels,
                                              false ? STBI_rgb : STBI_rgb_alpha );
             imageSpec.Data   = (std::byte*)data;
-            imageSpec.Format = Core::Formats::ImageFormat::RGB;
+            imageSpec.Format = Core::Formats::ImageFormat::RGBA8F;
         }
 
         imageSpec.Width  = static_cast<uint32_t>( width );

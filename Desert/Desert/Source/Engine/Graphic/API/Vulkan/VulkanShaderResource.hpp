@@ -13,11 +13,24 @@ namespace Desert::Graphic::API::Vulkan
 
         struct ShaderDescriptorSet
         {
-            std::unordered_map<BindingPoint, Core::Models::UniformBuffer> UniformBuffers;
-            std::unordered_map<uint32_t, Core::Models::ImageSampler> ImageSamplers;
-            std::unordered_map<std::string, std::vector<VkWriteDescriptorSet>>
-                 WriteDescriptorSets; // NOTE: std::vector defines the number of frames, i.e. there will be a
-                                      // different VkWriteDescriptorSet for each frame
+
+            // NOTE: std::vector defines the number of frames, i.e. there will be a
+            // different VkWriteDescriptorSet for each frame
+            using UniformBufferPair = std::pair<Core::Models::UniformBuffer, std::vector<VkWriteDescriptorSet>>;
+            using SamplerBufferPair = std::pair<Core::Models::ImageSampler, std::vector<VkWriteDescriptorSet>>;
+            using StorageBufferPair = std::pair<Core::Models::StorageBuffer, std::vector<VkWriteDescriptorSet>>;
+            using PushConstantBufferPair =
+                 std::pair<Core::Models::PushConstantRange, std::vector<VkWriteDescriptorSet>>;
+
+            using UniformBufferMap      = std::unordered_map<BindingPoint, UniformBufferPair>;
+            using ImageSamplerMap       = std::unordered_map<BindingPoint, SamplerBufferPair>;
+            using StorageBufferMap      = std::unordered_map<BindingPoint, StorageBufferPair>;
+            using PushConstantBufferMap = std::unordered_map<BindingPoint, PushConstantBufferPair>;
+
+            UniformBufferMap UniformBuffers;
+            ImageSamplerMap  ImageSamplers;
+            StorageBufferMap StorageBuffers;
+         //   PushConstantBufferMap
 
             operator bool()
             {

@@ -1,6 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
 #include <Engine/Core/Models/Shader.hpp>
 
@@ -237,7 +237,10 @@ namespace Desert::Graphic::API::Vulkan
                     uniformBuffer.ShaderStage =
                          Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                    uniformBuffers.insert( { binding, uniformBuffer } );
+                    ShaderResource::ShaderDescriptorSet::UniformBufferPair insertPair = {
+                         uniformBuffer, {} /*is defined later in CreateDescriptorSets*/ };
+
+                    uniformBuffers.insert( { binding, insertPair } );
                 }
                 else
                 {
@@ -267,7 +270,35 @@ namespace Desert::Graphic::API::Vulkan
                 newImageSampler.ShaderStage =
                      Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                imageSampler.insert( { binding, newImageSampler } );
+                ShaderResource::ShaderDescriptorSet::SamplerBufferPair insertPair = {
+                     newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
+
+                imageSampler.insert( { binding, insertPair } );
+            }
+
+            LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
+        }
+
+        LOG_TRACE( "Storage Buffers: " );
+        for ( const auto& resource : resources.storage_buffers )
+        {
+            const auto& name          = resource.name;
+            uint32_t    binding       = compiler.get_decoration( resource.id, spv::DecorationBinding );
+            uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+
+            auto& storageBuffers = m_ReflectionData.ShaderDescriptorSets[descriptorSet].StorageBuffers;
+
+            if ( storageBuffers.find( binding ) == storageBuffers.end() )
+            {
+                Core::Models::StorageBuffer storageBuffer;
+                storageBuffer.BindingPoint = binding;
+                storageBuffer.Name         = name;
+                storageBuffer.ShaderStage = Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+
+                ShaderResource::ShaderDescriptorSet::StorageBufferPair insertPair = {
+                     storageBuffer, {} /*is defined later in CreateDescriptorSets*/ };
+
+                storageBuffers.insert( { binding, insertPair } );
             }
 
             LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
@@ -302,7 +333,7 @@ namespace Desert::Graphic::API::Vulkan
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                layout.stageFlags         = Utils::GetVkShaderStageFlags( uniformBuffer.ShaderStage );
+                layout.stageFlags         = Utils::GetVkShaderStageFlags( uniformBuffer.first.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1; // not array at now
             }
@@ -398,36 +429,39 @@ namespace Desert::Graphic::API::Vulkan
 
                 for ( auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
                 {
-                    VkWriteDescriptorSet& writeDescriptor =
-                         shaderDescriptorSet.WriteDescriptorSets[uniformBuffer.Name].emplace_back();
+                    VkWriteDescriptorSet& writeDescriptor = uniformBuffer.second.emplace_back();
 
                     writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                     writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
-                    writeDescriptor.dstBinding      = uniformBuffer.BindingPoint;
+                    writeDescriptor.dstBinding      = uniformBuffer.first.BindingPoint;
                     writeDescriptor.descriptorCount = 1;
                 }
 
                 for ( auto& [binding, sampler] : shaderDescriptorSet.ImageSamplers )
                 {
-                    VkWriteDescriptorSet& writeDescriptor =
-                         shaderDescriptorSet.WriteDescriptorSets[sampler.Name].emplace_back();
+                    VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
 
                     writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                     writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
                     writeDescriptor.descriptorCount = 1;
-                    writeDescriptor.dstBinding      = sampler.BindingPoint;
+                    writeDescriptor.dstBinding      = sampler.first.BindingPoint;
                 }
             }
         }
-
     }
 
-    const VkWriteDescriptorSet VulkanShader::GetDescriptorSet( const std::string& name, uint32_t set,
-                                                               uint32_t frame ) const
+    const VkWriteDescriptorSet VulkanShader::GetWriteDescriptorSet( const WriteDescriptorType& type,
+                                                                    uint32_t binding, uint32_t set,
+                                                                    uint32_t frame ) const
     {
-        return m_ReflectionData.ShaderDescriptorSets.at( set ).WriteDescriptorSets.at( name ).at( frame );
+        switch ( type )
+        {
+            case WriteDescriptorType::Uniform:
+                return m_ReflectionData.ShaderDescriptorSets.at( set ).UniformBuffers.at( binding ).second.at(
+                     frame );
+        }
     }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -1,6 +1,6 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanQueue.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
@@ -59,8 +59,7 @@ namespace Desert::Graphic::API::Vulkan
 
         uint32_t newCurrentFrame                          = ( currentIndex + 1 ) % m_SwapChain->GetImageCount();
         EngineContext::GetInstance().m_CurrentBufferIndex = newCurrentFrame;
-        vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE,
-                         UINT64_MAX );
+        vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
     }
 
     Common::Result<VkResult> VulkanQueue::QueuePresent( VkQueue queue, uint32_t imageIndex,
@@ -101,15 +100,27 @@ namespace Desert::Graphic::API::Vulkan
         m_Semaphores.RenderComplete  = semaphore2.GetValue();
 
         m_DrawCommandBuffers.resize( m_SwapChain->GetImageCount() );
+        m_ComputeCommandBuffers.resize( m_SwapChain->GetImageCount() );
 
-        for ( uint32_t i = 0; i < m_DrawCommandBuffers.size(); i++ )
+        for ( uint32_t i = 0; i < m_SwapChain->GetImageCount(); i++ )
         {
-            const auto& buffer = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic();
-            if ( !buffer.IsSuccess() )
+            /*Graphic buffers*/
+
+            const auto& bufferDraw = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic();
+            if ( !bufferDraw.IsSuccess() )
             {
-                return Common::MakeError<VkResult>( buffer.GetError() );
+                return Common::MakeError<VkResult>( bufferDraw.GetError() );
             }
-            m_DrawCommandBuffers[i] = buffer.GetValue();
+            m_DrawCommandBuffers[i] = bufferDraw.GetValue();
+
+            /*Compute buffers*/
+
+            const auto& bufferCompute = CommandBufferAllocator::GetInstance().RT_GetCommandBufferCompute();
+            if ( !bufferCompute.IsSuccess() )
+            {
+                return Common::MakeError<VkResult>( bufferCompute.GetError() );
+            }
+            m_ComputeCommandBuffers[i] = bufferCompute.GetValue();
         }
 
         m_WaitFences.resize( m_SwapChain->GetImageCount() );

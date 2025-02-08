@@ -2,8 +2,13 @@
 
 #include <vulkan/vulkan.hpp>
 
+inline PFN_vkSetDebugUtilsObjectNameEXT
+     fpSetDebugUtilsObjectNameEXT; // Making it static randomly sets it to nullptr for some reason.
+
 namespace Desert::Graphic::API::Vulkan
 {
+    void VulkanLoadDebugUtilsExtensions( VkInstance instance );
+
 #define VK_CHECK_RESULT( f )                                                                                      \
     {                                                                                                             \
         VkResult res = ( f );                                                                                     \
@@ -45,78 +50,16 @@ namespace Desert::Graphic::API::Vulkan
         }                                                                                                         \
     }
 
-    const inline std::string VkResultToString( VkResult result )
-    {
-        switch ( result )
-        {
-            case VK_SUCCESS:
-                return "VK_SUCCESS";
-            case VK_NOT_READY:
-                return "VK_NOT_READY";
-            case VK_TIMEOUT:
-                return "VK_TIMEOUT";
-            case VK_EVENT_SET:
-                return "VK_EVENT_SET";
-            case VK_EVENT_RESET:
-                return "VK_EVENT_RESET";
-            case VK_INCOMPLETE:
-                return "VK_INCOMPLETE";
-            case VK_ERROR_OUT_OF_HOST_MEMORY:
-                return "VK_ERROR_OUT_OF_HOST_MEMORY";
-            case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-                return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
-            case VK_ERROR_INITIALIZATION_FAILED:
-                return "VK_ERROR_INITIALIZATION_FAILED";
-            case VK_ERROR_DEVICE_LOST:
-                return "VK_ERROR_DEVICE_LOST";
-            case VK_ERROR_MEMORY_MAP_FAILED:
-                return "VK_ERROR_MEMORY_MAP_FAILED";
-            case VK_ERROR_LAYER_NOT_PRESENT:
-                return "VK_ERROR_LAYER_NOT_PRESENT";
-            case VK_ERROR_EXTENSION_NOT_PRESENT:
-                return "VK_ERROR_EXTENSION_NOT_PRESENT";
-            case VK_ERROR_FEATURE_NOT_PRESENT:
-                return "VK_ERROR_FEATURE_NOT_PRESENT";
-            case VK_ERROR_INCOMPATIBLE_DRIVER:
-                return "VK_ERROR_INCOMPATIBLE_DRIVER";
-            case VK_ERROR_TOO_MANY_OBJECTS:
-                return "VK_ERROR_TOO_MANY_OBJECTS";
-            case VK_ERROR_FORMAT_NOT_SUPPORTED:
-                return "VK_ERROR_FORMAT_NOT_SUPPORTED";
-            default:
-                return "Unknown VkResult";
-        }
-    }
+    const std::string VkResultToString( VkResult result );
 
     namespace Utils
     {
-        inline Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
-                                                            VkImageAspectFlags aspectFlags,
-                                                            VkImageViewType viewType, uint32_t layerCount,
-                                                            uint32_t mipLeveles )
-        {
-            VkImageViewCreateInfo viewInfo = { .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                                               .pNext            = VK_NULL_HANDLE,
-                                               .image            = image,
-                                               .viewType         = viewType,
-                                               .format           = format,
-                                               .components       = { .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                                                                     .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                                                                     .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                                                                     .a = VK_COMPONENT_SWIZZLE_IDENTITY },
-                                               .subresourceRange = { .aspectMask     = aspectFlags,
-                                                                     .baseMipLevel   = 0,
-                                                                     .levelCount     = mipLeveles,
-                                                                     .baseArrayLayer = 0,
-                                                                     .layerCount     = layerCount } };
+        void InsertImageMemoryBarrier( VkCommandBuffer cmdBuf, VkImage Image, VkFormat Format,
+                                       VkImageLayout OldLayout, VkImageLayout NewLayout );
 
-            VkImageView imageView;
-
-            VK_RETURN_RESULT_IF_FALSE_TYPE( VkImageView,
-                                            vkCreateImageView( device, &viewInfo, VK_NULL_HANDLE, &imageView ) );
-
-            return Common::MakeSuccess( imageView );
-        }
+        Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
+                                                     VkImageAspectFlags aspectFlags, VkImageViewType viewType,
+                                                     uint32_t layerCount, uint32_t mipLeveles );
     } // namespace Utils
 
     namespace VKUtils
@@ -131,7 +74,7 @@ namespace Desert::Graphic::API::Vulkan
             nameInfo.objectHandle = (uint64_t)handle;
             nameInfo.pNext        = VK_NULL_HANDLE;
 
-            // VK_CHECK_RESULT( vkSetDebugUtilsObjectNameEXT( device, &nameInfo ) );
+            VK_CHECK_RESULT(fpSetDebugUtilsObjectNameEXT( device, &nameInfo ) );
         }
     } // namespace VKUtils
 

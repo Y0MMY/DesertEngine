@@ -159,5 +159,4 @@ namespace Desert::Graphic::API::Vulkan
 
         LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
     }
-
 } // namespace Desert::Graphic::API::Vulkan

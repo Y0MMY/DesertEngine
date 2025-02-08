@@ -7,12 +7,18 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
+    enum class WriteDescriptorType
+    {
+        Uniform = 0,
+        Sampler
+    };
+
     class VulkanShader final : public Shader
     {
     public:
         struct DescriptorSetInfo
         {
-            std::vector<VkDescriptorPool>                              Pool;
+            std::vector<VkDescriptorPool>             Pool;
             std::vector<std::vector<VkDescriptorSet>> DescriptorSets; // frame -> set
         };
 
@@ -37,7 +43,8 @@ namespace Desert::Graphic::API::Vulkan
             return "TODO";
         }
 
-        const VkWriteDescriptorSet GetDescriptorSet( const std::string& name, uint32_t set, uint32_t frame ) const;
+        const VkWriteDescriptorSet GetWriteDescriptorSet( const WriteDescriptorType& type, uint32_t binding,
+                                                          uint32_t set, uint32_t frame ) const;
 
         const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
         {

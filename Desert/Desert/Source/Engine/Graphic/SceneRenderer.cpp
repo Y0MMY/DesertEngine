@@ -29,6 +29,22 @@ namespace Desert::Graphic
         spec.Shader      = m_TESTShader;
         m_TESTPipeline   = Graphic::Pipeline::Create( spec );
         m_TESTPipeline->Invalidate();
+
+
+
+
+
+        //
+
+
+
+        m_TESTCompShader = Graphic::Shader::Create( "comute_test.glsl" );
+
+
+
+
+
+
     }
 
     void SceneRenderer::BeginFrame()

@@ -13,12 +13,13 @@ namespace Desert::Graphic::API::Vulkan
 
         inline VkCommandBuffer GetCommandBuffer( uint32_t index, bool computeBuffer = false )
         {
-            return m_CommandBuffers[index];
+            return ( computeBuffer ? m_ComputeCommandBuffers[index] : m_DrawCommandBuffers[index] );
         }
 
         void Init( VulkanQueue* queue );
 
     private:
-        std::vector<VkCommandBuffer> m_CommandBuffers;
+        std::vector<VkCommandBuffer> m_DrawCommandBuffers;
+        std::vector<VkCommandBuffer> m_ComputeCommandBuffers;
     };
 } // namespace Desert::Graphic::API::Vulkan

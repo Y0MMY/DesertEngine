@@ -34,6 +34,5 @@ namespace Desert::Graphic::API::Vulkan
 
         VkPipelineLayout m_PipelineLayout;
         VkPipeline       m_Pipeline;
-
     };
 } // namespace Desert::Graphic::API::Vulkan
