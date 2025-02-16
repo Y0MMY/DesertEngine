@@ -43,10 +43,10 @@ namespace Desert::Graphic::API::Vulkan
         VkApplicationInfo appInfo{};
         appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.pApplicationName   = "Hello Triangle";
-        appInfo.applicationVersion = VK_MAKE_VERSION( 1, 0, 0 );
+        appInfo.applicationVersion = VK_MAKE_VERSION( 1,2, 0 );
         appInfo.pEngineName        = "No Engine";
-        appInfo.engineVersion      = VK_MAKE_VERSION( 1, 0, 0 );
-        appInfo.apiVersion         = VK_API_VERSION_1_0;
+        appInfo.engineVersion      = VK_MAKE_VERSION( 1, 3, 0 );
+        appInfo.apiVersion         = VK_API_VERSION_1_3;
 
         std::vector<const char*> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME,
                                                         VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
@@ -120,6 +120,7 @@ namespace Desert::Graphic::API::Vulkan
         auto& lDevice = Common::Singleton<VulkanLogicalDevice>::CreateInstance( pDevice );
         lDevice.CreateDevice();
 
+        VulkanAllocator::CreateInstance();
         VulkanAllocator::GetInstance().Init( lDevice, s_VulkanInstance );
 
         CommandBufferAllocator::CreateInstance( lDevice );

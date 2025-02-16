@@ -103,7 +103,7 @@ namespace Desert::Graphic::API::Vulkan
 
             CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmdVal );
 
-            allocator.RT_DestroyBuffer( stagingBuffer, m_MemoryAllocation );
+            allocator.RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL);
         }
         return Common::MakeSuccess( true );
     }

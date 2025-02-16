@@ -9,6 +9,7 @@ namespace Common::Constants // TODO: should be merge from config
         const std::filesystem::path RESOURCE_PATH         = "Resources/";
         const std::filesystem::path SHADERDIR_PATH        = "Resources/Shaders/";
         const std::filesystem::path TEXTUREDIR_PATH       = "Resources/Textures/";
+        const std::filesystem::path TEXTUREDIRENV_PATH    = "Resources/Textures/Cubes/";
         const std::filesystem::path RESOURCE_SPIRV_BINARY = "Resources/Shaders/SPIRV/Bin/";
         const std::filesystem::path SCENE_PATH            = "Resources/Assets/Scene/";
     } // namespace Path

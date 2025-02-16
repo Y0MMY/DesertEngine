@@ -5,6 +5,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 
@@ -58,11 +59,17 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
+    static struct ubo
+    {
+        glm::mat4 proj;
+        glm::mat4 view;
+    };
+
     void VulkanRendererAPI::Init()
     {
-        m_UniformBuffer = UniformBuffer::Create( sizeof( s_Camera ), 0 );
+        m_UniformBuffer = UniformBuffer::Create( sizeof( ubo ), 0 );
 
-        m_texture = Texture2D::Create( "bricks.jpg" );
+       m_texture = TextureCube::Create( "Arches_E_PineTree_Radiance.tga" );
     }
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
@@ -98,7 +105,9 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     void VulkanRendererAPI::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                               const std::shared_ptr<Pipeline>&     pipeline )
+                                               const std::shared_ptr<IndexBuffer>&  indexBuffer,
+
+                                               const std::shared_ptr<Pipeline>& pipeline )
     {
         UpdateDescriptorSets( pipeline );
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
@@ -112,10 +121,17 @@ namespace Desert::Graphic::API::Vulkan
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>( vertexBuffer )->GetVulkanBuffer();
         vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &buffer, offsets );
 
+        const auto ibuffer =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanIndexBuffer>( indexBuffer )->GetVulkanBuffer();
+
+        vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
+
         s_Camera.OnUpdate();
 
         auto vp = s_Camera.GetProjectionMatrix() * s_Camera.GetViewMatrix();
-        m_UniformBuffer->RT_SetData( &vp[0], sizeof( glm::mat4 ) );
+
+        ubo ubob{ s_Camera.GetProjectionMatrix(), s_Camera.GetViewMatrix() };
+        m_UniformBuffer->RT_SetData( &ubob, sizeof( ubo ) );
 
         const auto shader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
@@ -126,7 +142,7 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
                                  &shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 ), 0,
                                  nullptr );
-        vkCmdDraw( m_CurrentCommandBuffer, 4, 1, 0, 0 );
+        vkCmdDrawIndexed( m_CurrentCommandBuffer, indexBuffer->GetCount(), 1, 0, 0, 0 );
     }
 
     void VulkanRendererAPI::UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline )
@@ -155,7 +171,7 @@ namespace Desert::Graphic::API::Vulkan
         writeDescriptorSetImage.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writeDescriptorSetImage.dstSet =
              shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-        writeDescriptorSetImage.dstBinding      = 2;
+        writeDescriptorSetImage.dstBinding      = 1;
         writeDescriptorSetImage.dstArrayElement = 0;
         writeDescriptorSetImage.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writeDescriptorSetImage.descriptorCount = 1;

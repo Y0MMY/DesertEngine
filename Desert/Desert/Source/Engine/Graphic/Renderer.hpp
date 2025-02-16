@@ -5,7 +5,9 @@
 
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/VertexBuffer.hpp>
+#include <Engine/Graphic/IndexBuffer.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
+#include <Engine/Graphic/Texture.hpp>
 
 namespace Desert::Graphic
 {
@@ -25,7 +27,8 @@ namespace Desert::Graphic
         void EndRenderPass();
 
         void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                const std::shared_ptr<Pipeline>&     pipeline );
+                                const std::shared_ptr<IndexBuffer>&  indexBuffer,
+                                const std::shared_ptr<Pipeline>& pipeline );
 
         void PresentFinalImage();
 

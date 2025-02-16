@@ -21,6 +21,9 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Use( BindUsage use = BindUsage::Bind ) const override;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override;
 
+        [[nodiscard]] virtual Common::BoolResult Invalidate() override;
+        [[nodiscard]] virtual Common::BoolResult RT_Invalidate() override;
+
         [[nodiscard]] Common::BoolResult Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device );
         [[nodiscard]] Common::BoolResult RT_Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device );
 
@@ -31,6 +34,11 @@ namespace Desert::Graphic::API::Vulkan
         virtual [[nodiscard]] unsigned int GetCount() const override
         {
             return m_Size / sizeof( uint32_t );
+        }
+
+        VkBuffer GetVulkanBuffer()
+        {
+            return m_VulkanBuffer;
         }
 
     private:

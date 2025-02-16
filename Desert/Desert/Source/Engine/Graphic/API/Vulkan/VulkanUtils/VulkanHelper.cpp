@@ -47,7 +47,8 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     void Utils::InsertImageMemoryBarrier( VkCommandBuffer cmdBuf, VkImage Image, VkFormat Format,
-                                          VkImageLayout OldLayout, VkImageLayout NewLayout )
+                                          VkImageLayout OldLayout, VkImageLayout NewLayout, uint32_t layers,
+                                          uint32_t mipLevels )
     {
         VkImageMemoryBarrier barrier = { .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                                          .pNext               = NULL,
@@ -61,9 +62,9 @@ namespace Desert::Graphic::API::Vulkan
                                          .subresourceRange =
                                               VkImageSubresourceRange{ .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
                                                                        .baseMipLevel   = 0,
-                                                                       .levelCount     = 1,
+                                                                       .levelCount     = mipLevels,
                                                                        .baseArrayLayer = 0,
-                                                                       .layerCount     = 1 } };
+                                                                       .layerCount     = layers } };
 
         VkPipelineStageFlags sourceStage      = VK_PIPELINE_STAGE_NONE;
         VkPipelineStageFlags destinationStage = VK_PIPELINE_STAGE_NONE;
@@ -185,6 +186,15 @@ namespace Desert::Graphic::API::Vulkan
 
             sourceStage      = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
             destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        }
+        else if ( OldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+                  NewLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL )
+        {
+            barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+            sourceStage      = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+            destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         }
 
         vkCmdPipelineBarrier( cmdBuf, sourceStage, destinationStage, 0, 0, NULL, 0, NULL, 1, &barrier );

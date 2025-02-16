@@ -20,4 +20,20 @@ namespace Desert::Graphic::API::Vulkan
 
         std::shared_ptr<Image2D> m_Image2D;
     };
+
+    class VulkanTextureCube final : public TextureCube
+    {
+    public:
+        VulkanTextureCube( const std::filesystem::path& path );
+
+        virtual const std::shared_ptr<Image2D>& GetImage2D() const override
+        {
+            return m_Image2D;
+        }
+
+    private:
+        std::filesystem::path m_TexturePath;
+
+        std::shared_ptr<Image2D> m_Image2D;
+    };
 } // namespace Desert::Graphic::API::Vulkan

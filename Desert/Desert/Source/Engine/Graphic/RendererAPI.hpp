@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/VertexBuffer.hpp>
+#include <Engine/Graphic/IndexBuffer.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 
 namespace Desert::Graphic
@@ -27,6 +28,7 @@ namespace Desert::Graphic
         virtual Common::BoolResult EndRenderPass()                                                  = 0;
 
         virtual void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
+                                        const std::shared_ptr<IndexBuffer>& indexBuffer,
                                         const std::shared_ptr<Pipeline>&     pipeline ) = 0; // TEMP
     public:
         static const RendererAPIType GetAPIType()

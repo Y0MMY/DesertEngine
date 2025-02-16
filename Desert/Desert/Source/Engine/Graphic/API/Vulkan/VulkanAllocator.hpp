@@ -45,7 +45,6 @@ namespace Desert::Graphic::API::Vulkan
 
         static VmaAllocator& GetVMAAllocator();
 
-    private:
         VulkanAllocator() = default;
 
     private:

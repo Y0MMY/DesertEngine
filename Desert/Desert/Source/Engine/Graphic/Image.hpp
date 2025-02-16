@@ -20,5 +20,4 @@ namespace Desert::Graphic
     public:
         static std::shared_ptr<Image2D> Create( const Core::Formats::ImageSpecification& spec );
     };
-
 } // namespace Desert::Graphic

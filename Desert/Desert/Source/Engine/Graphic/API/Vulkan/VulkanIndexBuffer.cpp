@@ -6,8 +6,8 @@ namespace Desert::Graphic::API::Vulkan
 {
     namespace
     {
-        static VkBufferCreateInfo CreateVertexBufferInfo( uint32_t size, VkBufferUsageFlags flags,
-                                                          VkSharingMode sharingMode )
+        static VkBufferCreateInfo CreateIndexBufferInfo( uint32_t size, VkBufferUsageFlags flags,
+                                                         VkSharingMode sharingMode )
         {
             VkBufferCreateInfo vertexBufferCreateInfo = {};
             vertexBufferCreateInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -44,19 +44,21 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    Common::BoolResult VulkanIndexBuffer::Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device )
+    Common::BoolResult VulkanIndexBuffer::Invalidate()
     {
-        return RT_Invalidate( device );
+        return RT_Invalidate();
     }
 
-    Common::BoolResult VulkanIndexBuffer::RT_Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device )
+    Common::BoolResult VulkanIndexBuffer::RT_Invalidate()
     {
+        const VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
         auto& allocator = VulkanAllocator::GetInstance();
 
         if ( m_StorageBuffer.Data == nullptr ) [[unlikely]]
         {
             auto vertexBufferCreateInfo =
-                 CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE );
+                 CreateIndexBufferInfo( m_Size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE );
             m_MemoryAllocation = allocator
                                       .RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
                                                           VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer )
@@ -67,7 +69,7 @@ namespace Desert::Graphic::API::Vulkan
         {
 
             VkBufferCreateInfo stagingBufferCreateInfo =
-                 CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE );
+                 CreateIndexBufferInfo( m_Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE );
 
             VkBuffer stagingBuffer;
             auto     stagingBufferAllocation = allocator.RT_AllocateBuffer(
@@ -86,7 +88,7 @@ namespace Desert::Graphic::API::Vulkan
             memcpy( destData, m_StorageBuffer.Data, m_StorageBuffer.Size );
             allocator.UnmapMemory( stagingBufferAllocationVAL );
 
-            auto vertexBufferCreateInfo = CreateVertexBufferInfo(
+            auto vertexBufferCreateInfo = CreateIndexBufferInfo(
                  m_Size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                  VK_SHARING_MODE_EXCLUSIVE );
 
@@ -98,7 +100,7 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             m_MemoryAllocation = buffer.GetValue();
-            auto copyCmd       = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic();
+            auto copyCmd       = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic( true );
             if ( !copyCmd.IsSuccess() )
             {
                 return Common::MakeError<bool>( copyCmd.GetError() );
@@ -111,9 +113,9 @@ namespace Desert::Graphic::API::Vulkan
 
             vkCmdCopyBuffer( copyCmdVal, stagingBuffer, m_VulkanBuffer, 1, &copyRegion );
 
-            CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic( copyCmdVal );
+            CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmdVal );
 
-            allocator.RT_DestroyBuffer( stagingBuffer, m_MemoryAllocation );
+            allocator.RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL);
         }
         return Common::MakeSuccess( true );
     }

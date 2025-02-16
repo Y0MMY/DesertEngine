@@ -17,5 +17,4 @@ namespace Desert::Graphic
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
     }
-
 } // namespace Desert::Graphic

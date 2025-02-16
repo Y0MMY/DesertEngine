@@ -55,7 +55,8 @@ namespace Desert::Graphic::API::Vulkan
     namespace Utils
     {
         void InsertImageMemoryBarrier( VkCommandBuffer cmdBuf, VkImage Image, VkFormat Format,
-                                       VkImageLayout OldLayout, VkImageLayout NewLayout );
+                                       VkImageLayout OldLayout, VkImageLayout NewLayout, uint32_t layers = 1,
+                                       uint32_t mipLevels = 1 );
 
         Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
                                                      VkImageAspectFlags aspectFlags, VkImageViewType viewType,
@@ -74,7 +75,7 @@ namespace Desert::Graphic::API::Vulkan
             nameInfo.objectHandle = (uint64_t)handle;
             nameInfo.pNext        = VK_NULL_HANDLE;
 
-            VK_CHECK_RESULT(fpSetDebugUtilsObjectNameEXT( device, &nameInfo ) );
+            VK_CHECK_RESULT( fpSetDebugUtilsObjectNameEXT( device, &nameInfo ) );
         }
     } // namespace VKUtils
 

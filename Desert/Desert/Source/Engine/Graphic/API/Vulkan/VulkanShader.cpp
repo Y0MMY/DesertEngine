@@ -13,6 +13,23 @@ namespace Desert::Graphic::API::Vulkan
 {
     namespace Utils
     {
+        static bool IsArray( const spirv_cross::SPIRType& type )
+        {
+            return type.array.size() > 0;
+        }
+
+        static uint32_t GetArraySize( const spirv_cross::SPIRType& type )
+        {
+            if ( !IsArray( type ) )
+                return 1;
+            size_t arraySize = 1;
+            for ( auto size : type.array )
+            {
+                arraySize *= size;
+            }
+            return arraySize;
+        }
+
         Core::Formats::ShaderStage GetShaderStageFlagBitsFromSPV( const spv::ExecutionModel& executionModel )
         {
             switch ( executionModel )
@@ -259,14 +276,22 @@ namespace Desert::Graphic::API::Vulkan
             const auto& name          = resource.name;
             uint32_t    binding       = compiler.get_decoration( resource.id, spv::DecorationBinding );
             uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+            auto&       imageType     = compiler.get_type( resource.base_type_id );
 
             auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].ImageSamplers;
 
             if ( imageSampler.find( binding ) == imageSampler.end() )
             {
+                uint32_t arraySize = 1;
+                if ( Utils::IsArray( imageType ) )
+                {
+                    arraySize = Utils::GetArraySize( imageType );
+                }
+
                 Core::Models::ImageSampler newImageSampler;
                 newImageSampler.BindingPoint = binding;
                 newImageSampler.Name         = name;
+                newImageSampler.ArraySize    = arraySize;
                 newImageSampler.ShaderStage =
                      Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 

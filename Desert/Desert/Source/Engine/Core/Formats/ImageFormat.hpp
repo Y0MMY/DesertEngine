@@ -2,6 +2,12 @@
 
 namespace Desert::Core::Formats
 {
+    enum class ImageType
+    {
+        Image2D,
+        ImageCube
+    };
+
     enum class ImageFormat
     {
         RGBA8F,
@@ -14,5 +20,6 @@ namespace Desert::Core::Formats
         ImageFormat               Format;
         uint32_t                  TextureSamples = 1;
         std::optional<std::byte*> Data;
+        ImageType                 Type;
     };
 } // namespace Desert::Core::Formats

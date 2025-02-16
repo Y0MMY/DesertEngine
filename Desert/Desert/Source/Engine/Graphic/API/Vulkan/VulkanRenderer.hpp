@@ -27,7 +27,9 @@ namespace Desert::Graphic::API::Vulkan
         virtual [[nodiscard]] Common::BoolResult EndRenderPass() override;
 
         virtual void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                        const std::shared_ptr<Pipeline>&     pipeline ) override; // TEMP
+                                        const std::shared_ptr<IndexBuffer>&  indexBuffer,
+
+                                        const std::shared_ptr<Pipeline>& pipeline ) override; // TEMP
 
     private:
         void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
@@ -37,7 +39,7 @@ namespace Desert::Graphic::API::Vulkan
 
         std::shared_ptr<UniformBuffer> m_UniformBuffer;
 
-        std::shared_ptr<Texture2D> m_texture;
+        std::shared_ptr<TextureCube> m_texture;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

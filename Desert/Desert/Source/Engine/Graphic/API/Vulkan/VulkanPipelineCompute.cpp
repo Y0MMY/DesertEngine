@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -56,6 +57,21 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindPipeline( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComputePipeline );
         vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, nullptr );
+    }
+
+    void VulkanPipelineCompute::ReadBuffer( uint32_t bufferSize )
+    {
+       /* auto& allocator = VulkanAllocator::GetInstance();
+
+        VkBufferCreateInfo bufferCreateInfo;
+        bufferCreateInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.size        = bufferSize;
+        bufferCreateInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+
+        VkBuffer buffer;
+        const auto buffer = allocator.RT_AllocateBuffer( "STAGING", bufferCreateInfo, VMA_MEMORY_USAGE_GPU_ONLY, buffer);*/
     }
 
 } // namespace Desert::Graphic::API::Vulkan

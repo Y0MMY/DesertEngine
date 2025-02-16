@@ -113,17 +113,15 @@ namespace Desert::Core
             m_FocalPoint         = m_Location + GetForwardDirection() * distance;
             m_Distance           = distance;
 
-            m_InitialMousePosition = MousePosition;
-            m_Location += m_LocationDelta;
-            m_Yaw += m_YawDelta;
-            m_Pitch += m_PitchDelta;
-
             static constexpr float MaxPitch = glm::radians( 89.0f );
             static constexpr float MinPitch = -MaxPitch;
             m_Pitch                         = glm::clamp( m_Pitch, MinPitch, MaxPitch );
-
-            UpdateCameraView();
         }
+        m_InitialMousePosition = MousePosition;
+        m_Location += m_LocationDelta;
+        m_Yaw += m_YawDelta;
+        m_Pitch += m_PitchDelta;
+        UpdateCameraView();
     }
 
     glm::quat Camera::GetOrientation() const

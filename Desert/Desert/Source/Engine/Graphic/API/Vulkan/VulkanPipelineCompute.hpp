@@ -15,7 +15,9 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Begin() override;
         virtual void End() override;
 
-        void Execute(VkDescriptorSet descriptorSet);
+        void Execute( VkDescriptorSet descriptorSet );
+
+        void ReadBuffer( uint32_t bufferSize ); // TEMP
 
         virtual void Invalidate() override;
 

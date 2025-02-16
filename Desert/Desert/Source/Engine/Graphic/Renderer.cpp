@@ -65,14 +65,15 @@ namespace Desert::Graphic
     }
 
     void Renderer::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
+                                      const std::shared_ptr<IndexBuffer>&  indexBuffer,
                                       const std::shared_ptr<Pipeline>&     pipeline )
     {
-        s_RendererAPI->TEST_DrawTriangle( vertexBuffer, pipeline );
+        s_RendererAPI->TEST_DrawTriangle( vertexBuffer, indexBuffer, pipeline );
     }
 
     void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
     {
-        s_RendererAPI->BeginRenderPass(renderPass);
+        s_RendererAPI->BeginRenderPass( renderPass );
     }
 
     void Renderer::EndRenderPass()
