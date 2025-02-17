@@ -43,6 +43,10 @@ namespace Desert::Graphic::API::Vulkan
             return m_ColorSpace;
         }
 
+        void OnResize(uint32_t width, uint32_t height);
+
+        void Release();
+
     private:
         void InitSurface( GLFWwindow* window );
 
@@ -54,7 +58,7 @@ namespace Desert::Graphic::API::Vulkan
         VkInstance           m_VulkanInstance;
 
         VkSwapchainKHR m_SwapChain = VK_NULL_HANDLE;
-        VkSurfaceKHR   m_Surface;
+        VkSurfaceKHR   m_Surface = VK_NULL_HANDLE;
 
         VkFormat        m_ColorFormat;
         VkColorSpaceKHR m_ColorSpace;

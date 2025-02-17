@@ -28,9 +28,12 @@ namespace Desert::Graphic
 
         void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
                                 const std::shared_ptr<IndexBuffer>&  indexBuffer,
-                                const std::shared_ptr<Pipeline>& pipeline );
+                                const std::shared_ptr<Pipeline>&     pipeline );
 
         void PresentFinalImage();
+
+        void ResizeWindowEvent( uint32_t width, uint32_t height,
+                                const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
 
         uint32_t GetCurrentFrameIndex();
 

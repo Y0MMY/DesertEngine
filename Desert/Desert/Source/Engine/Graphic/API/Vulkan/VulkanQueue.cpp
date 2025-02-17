@@ -56,6 +56,10 @@ namespace Desert::Graphic::API::Vulkan
         VK_CHECK_RESULT( vkQueueSubmit( queue, 1, &submitInfo, m_WaitFences[currentIndex] ) );
 
         const auto& queuePresent = QueuePresent( queue, imageIndex, m_Semaphores.RenderComplete );
+        if ( !queuePresent.IsSuccess() )
+        {
+            LOG_INFO( "[QueuePresent] Error: {}", queuePresent.GetError() );
+        }
 
         uint32_t newCurrentFrame                          = ( currentIndex + 1 ) % m_SwapChain->GetImageCount();
         EngineContext::GetInstance().m_CurrentBufferIndex = newCurrentFrame;
@@ -77,7 +81,19 @@ namespace Desert::Graphic::API::Vulkan
             presentInfo.pWaitSemaphores    = &waitSemaphore;
             presentInfo.waitSemaphoreCount = 1;
         }
-        VK_RETURN_RESULT( vkQueuePresentKHR( queue, &presentInfo ) );
+        const auto res = ( vkQueuePresentKHR( queue, &presentInfo ) );
+        if ( res == VK_SUCCESS )
+        {
+            return Common::MakeSuccess( VK_SUCCESS );
+        }
+
+        // Swap chain is no longer compatible with the surface and needs to be recreated
+        /*else if ( res == VK_ERROR_OUT_OF_DATE_KHR )
+        {
+            uint32_t width = 1;
+            uint32_t height = 1;
+            m_SwapChain->OnResize( width, height );
+        }*/
     }
 
     Common::Result<VkResult> VulkanQueue::Init()

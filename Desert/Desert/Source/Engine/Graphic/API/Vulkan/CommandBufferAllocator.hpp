@@ -9,7 +9,6 @@ namespace Desert::Graphic::API::Vulkan
     public:
         CommandBufferAllocator( const VulkanLogicalDevice& device );
 
-
         Common::Result<VkCommandBuffer> RT_GetCommandBufferCompute( bool begin = false );
         Common::Result<VkCommandBuffer> RT_GetCommandBufferGraphic( bool begin = false );
 

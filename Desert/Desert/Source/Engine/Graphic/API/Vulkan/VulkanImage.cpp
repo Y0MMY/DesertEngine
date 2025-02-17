@@ -123,12 +123,32 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         void PerformImageCopyCubemap( VkCommandBuffer copyCmdVal, VkImage srcImage, VkImage dstImage,
-                                      uint32_t width, uint32_t height )
+                                      uint32_t width, uint32_t height, VkFormat format )
         {
             uint32_t faceWidth  = width / 4;
             uint32_t faceHeight = height / 3;
 
+            /*
+                *+---+----+----+----+
+                |    | +Y |    |    |
+                +----+----+----+----+
+                | -X | -Z | +X | +Z |
+                +----+----+----+----+
+                |    | -Y |    |    |
+                +----+----+----+----+
+            */
+
+            int faceOffsets[6][2] = {
+                 { 2, 1 }, // +X
+                 { 0, 1 }, // -X
+                 { 1, 0 }, // +Y
+                 { 1, 2 }, // -Y
+                 { 3, 1 }, // +Z
+                 { 1, 1 }  // -Z
+            };
+
             VkImageCopy copies[6] = {
+
                  { // +X
                    .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                    .srcOffset = { static_cast<int32_t>( 2U * faceWidth ), static_cast<int32_t>( faceHeight ), 0 },
@@ -166,18 +186,16 @@ namespace Desert::Graphic::API::Vulkan
                    .dstOffset      = { 0, 0, 0 },
                    .extent         = { faceWidth, faceHeight, 1 } } };
 
-            Utils::InsertImageMemoryBarrier( copyCmdVal, srcImage, VK_FORMAT_R8G8B8A8_UNORM,
-                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1,
-                                             1 );
+            Utils::InsertImageMemoryBarrier( copyCmdVal, srcImage, format,
+                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 1 );
 
-            Utils::InsertImageMemoryBarrier( copyCmdVal, dstImage, VK_FORMAT_R8G8B8A8_UNORM,
-                                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6,
-                                             1 );
+            Utils::InsertImageMemoryBarrier( copyCmdVal, dstImage, format, VK_IMAGE_LAYOUT_UNDEFINED,
+                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, 1 );
             vkCmdCopyImage( copyCmdVal, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage,
                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, copies );
 
-            Utils::InsertImageMemoryBarrier( copyCmdVal, dstImage, VK_FORMAT_R8G8B8A8_UNORM,
-                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            Utils::InsertImageMemoryBarrier( copyCmdVal, dstImage, format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 6, 1 );
 
             CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmdVal );
@@ -290,7 +308,7 @@ namespace Desert::Graphic::API::Vulkan
 
             Utils::PerformImageCopyCubemap( copyCmdVal, imageSrc->GetVulkanImageInfo().Image,
                                             m_VulkanImageInfo.Image, m_ImageSpecification.Width,
-                                            m_ImageSpecification.Height );
+                                            m_ImageSpecification.Height, imageVulkanFormat );
         }
         else
         {

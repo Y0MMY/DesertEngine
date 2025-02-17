@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/Framebuffer.hpp>
 
 #include <Engine/Core/EngineContext.h>
 
@@ -97,7 +98,6 @@ namespace Desert::Graphic::API::Vulkan
             vkDestroySwapchainKHR( lDevice, oldSwapchain, nullptr );
         }
 
-
         LOG_TRACE( "Swap chain created" );
 
         uint32_t swapChainImages = 0u;
@@ -114,7 +114,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             const auto& createdImageView =
                  Utils::CreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), m_Images[i], m_ColorFormat,
-                                  VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
+                                         VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
             if ( !createdImageView.IsSuccess() )
             {
                 return Common::MakeError<VkResult>( createdImageView.GetError() );
@@ -180,6 +180,31 @@ namespace Desert::Graphic::API::Vulkan
         VK_RETURN_RESULT( vkAcquireNextImageKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
                                                  UINT64_MAX, presentCompleteSemaphore, VK_NULL_HANDLE,
                                                  imageIndex ) );
+    }
+
+    void VulkanSwapChain::OnResize( uint32_t width, uint32_t height )
+    {
+
+        Release();
+        Create( &width, &height );
+    }
+
+    void VulkanSwapChain::Release()
+    {
+        const auto& device = m_LogicalDevice->GetVulkanLogicalDevice();
+        if ( m_SwapChain != VK_NULL_HANDLE )
+        {
+            for ( uint32_t i = 0; i < m_ImagesView.size(); i++ )
+            {
+                vkDestroyImageView( device, m_ImagesView[i], nullptr );
+              //  vkDestroyImage( device, m_Images[i], nullptr );
+            }
+        }
+        if ( m_Surface != VK_NULL_HANDLE )
+        {
+            vkDestroySwapchainKHR( device, m_SwapChain, nullptr );
+        }
+        m_SwapChain = VK_NULL_HANDLE;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

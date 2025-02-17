@@ -81,4 +81,10 @@ namespace Desert::Graphic
         s_RendererAPI->EndRenderPass();
     }
 
+    void Renderer::ResizeWindowEvent( uint32_t width, uint32_t height,
+                                      const std::vector<std::shared_ptr<Framebuffer>>& framebuffers )
+    {
+        s_RendererAPI->ResizeWindowEvent(width, height, framebuffers);
+    }
+
 } // namespace Desert::Graphic

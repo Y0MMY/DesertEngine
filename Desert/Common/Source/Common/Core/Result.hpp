@@ -12,6 +12,12 @@ namespace Common
     class Result;
 
     template <typename T>
+    Result<T> MakeErrorWithCode( T&& errorCode, const std::string& message );
+
+    template <typename T, typename... Args>
+    Result<T> MakeFormattedErrorWithCode( T&& errorCode, std::string_view format, Args&&... args );
+
+    template <typename T>
     Result<T> MakeError( const std::string& message );
 
     template <typename T, typename... Args>
@@ -29,13 +35,28 @@ namespace Common
         class Error
         {
         public:
-            explicit Error( const std::string& errorMessage ) : m_ErrorMessage( errorMessage )
+            explicit Error( T&& errorCode, const std::string& errorMessage )
+                 : m_ErrorMessage( errorMessage ), m_ErrorCode( errorCode )
+            {
+            }
+
+            explicit Error( const std::string& errorMessage )
+                 : m_ErrorMessage( errorMessage ), m_ErrorCode( std::nullopt )
             {
             }
 
             template <typename... Args>
-            Error( std::string_view format, Args&&... args )
-                 : m_ErrorMessage( fmt::vformat( format, fmt::make_format_args( args... ) ) )
+            explicit Error( T&& errorCode, std::string_view format, Args&&... args )
+                 : m_ErrorMessage( fmt::vformat( format, fmt::make_format_args( args... ) ) ),
+                   m_ErrorCode( errorCode )
+
+            {
+            }
+
+            template <typename... Args>
+            explicit Error( std::string_view format, Args&&... args )
+                 : m_ErrorMessage( fmt::vformat( format, fmt::make_format_args( args... ) ) ),
+                   m_ErrorCode( std::nullopt )
 
             {
             }
@@ -45,8 +66,14 @@ namespace Common
                 return m_ErrorMessage;
             }
 
+            const auto& GetErrorCode() const
+            {
+                return m_ErrorCode;
+            }
+
         private:
-            std::string m_ErrorMessage;
+            std::string      m_ErrorMessage;
+            std::optional<T> m_ErrorCode;
         };
 
         bool IsSuccess() const
@@ -86,17 +113,34 @@ namespace Common
         bool                      m_IsSuccess;
 
     private:
+        friend Result<T> MakeErrorWithCode<T>( T&& errorCode, const std::string& message );
         friend Result<T> MakeError<T>( const std::string& message );
-        friend auto      MakeSuccess<T>( const T& value );
+
+        friend auto MakeSuccess<T>( const T& value );
+
+        template <typename U, typename... Args>
+        friend Result<U> MakeFormattedErrorWithCode( T&& errorCode, std::string_view format, Args&&... args );
 
         template <typename U, typename... Args>
         friend Result<U> MakeFormattedError( std::string_view format, Args&&... args );
     };
 
     template <typename T>
+    Result<T> MakeErrorWithCode( T&& errorCode, const std::string& message )
+    {
+        return Result<T>( Result<T>::Error( errorCode, message ) );
+    }
+
+    template <typename T>
     Result<T> MakeError( const std::string& message )
     {
         return Result<T>( Result<T>::Error( message ) );
+    }
+
+    template <typename T, typename... Args>
+    Result<T> MakeFormattedErrorWithCode( T&& errorCode, std::string_view format, Args&&... args )
+    {
+        return Result<T>( Result<T>::Error( errorCode, format, std::forward<Args>( args )... ) );
     }
 
     template <typename T, typename... Args>

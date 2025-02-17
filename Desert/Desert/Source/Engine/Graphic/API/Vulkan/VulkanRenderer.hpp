@@ -31,6 +31,9 @@ namespace Desert::Graphic::API::Vulkan
 
                                         const std::shared_ptr<Pipeline>& pipeline ) override; // TEMP
 
+        virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
+                                        const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) override;
+
     private:
         void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
 

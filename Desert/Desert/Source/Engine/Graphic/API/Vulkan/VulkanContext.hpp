@@ -8,7 +8,7 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
- 
+
     class VulkanContext final : public RendererContext, public Common::Singleton<VulkanContext>
     {
     public:
@@ -37,7 +37,7 @@ namespace Desert::Graphic::API::Vulkan
             return m_SwapChain;
         }
 
-        [[nodiscard]] const auto& GetVulkanQueue()const
+        [[nodiscard]] const auto& GetVulkanQueue() const
         {
             return m_VulkanQueue;
         }

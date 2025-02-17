@@ -1,4 +1,8 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
+#include <Engine/Core/Application.hpp>
+#include <Engine/Core/EngineContext.h>
 
 #include <glm/glm.hpp>
 
@@ -6,6 +10,8 @@ namespace Desert::Graphic
 {
     void SceneRenderer::Init()
     {
+        REGISTER_EVENT( this, OnEvent );
+
         /* RenderPassSpecification renderPassSpec;
          renderPassSpec.DebugName         = "tes6t";
 
@@ -43,7 +49,11 @@ namespace Desert::Graphic
         renderPassSpecSkybox.DebugName = "Skybox";
 
         m_TESTFramebufferSkybox = Graphic::Framebuffer::Create( {} );
-        m_TESTFramebufferSkybox->Resize( 1, 1 );
+
+        uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
+        uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
+
+        m_TESTFramebufferSkybox->Resize(width, height);
 
         m_TESTShaderSkybox = Graphic::Shader::Create( "skybox.glsl" );
         Graphic::PipelineSpecification spec;
@@ -87,8 +97,7 @@ namespace Desert::Graphic
         m_TESTPipelineSkybox = Graphic::Pipeline::Create( spec );
         m_TESTPipelineSkybox->Invalidate();
 
-
-        //m_TESTTextureSkybox = TextureCube::Create("Arches_E_PineTree_Radiance.tga");
+        // m_TESTTextureSkybox = TextureCube::Create("Arches_E_PineTree_Radiance.tga");
     }
 
     void SceneRenderer::BeginFrame()
@@ -106,6 +115,22 @@ namespace Desert::Graphic
 
         renderer.EndRenderPass();
         renderer.EndFrame();
+    }
+
+    void SceneRenderer::OnEvent( Common::Event& e )
+    {
+        Common::EventManager eventManager( e );
+        eventManager.Notify<Common::EventWindowResize>( [this]( Common::EventWindowResize& e )
+                                                        { return this->OnWindowResize( e ); } );
+    }
+
+    bool SceneRenderer::OnWindowResize( Common::EventWindowResize& e )
+    {
+        auto&                                              renderer = Renderer::GetInstance();
+        std::vector<std::shared_ptr<Graphic::Framebuffer>> framebuffers;
+        framebuffers.push_back( m_TESTFramebufferSkybox );
+        renderer.ResizeWindowEvent( e.width, e.height, framebuffers );
+        return false;
     }
 
 } // namespace Desert::Graphic

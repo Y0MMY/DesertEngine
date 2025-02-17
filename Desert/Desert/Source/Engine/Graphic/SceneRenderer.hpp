@@ -2,6 +2,8 @@
 
 #include <Engine/Graphic/Renderer.hpp>
 
+#include <Common/Core/Events/WindowEvents.hpp>
+
 namespace Desert::Graphic
 {
     class SceneRenderer final
@@ -12,6 +14,10 @@ namespace Desert::Graphic
         void BeginFrame();
         void EndFrame();
 
+        void OnEvent( Common::Event& e );
+
+    private:
+        bool OnWindowResize(Common::EventWindowResize& e);
     private:
         /* std::shared_ptr<Graphic::VertexBuffer> m_TESTVertexbuffer;
          std::shared_ptr<Graphic::Pipeline>     m_TESTPipeline;

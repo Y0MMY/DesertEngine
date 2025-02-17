@@ -3,6 +3,7 @@
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/Events/MouseEvents.hpp>
 #include <Common/Core/Events/KeyEvents.hpp>
+#include <Common/Core/Events/WindowEvents.hpp>
 
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Core/EngineContext.h>
@@ -54,6 +55,17 @@ namespace Desert::Platform::Windows
                                         Common::EventWindowClose event;
                                         data.EventCallback( event );
                                     } );
+
+        glfwSetWindowSizeCallback( m_GLFWWindow,
+                                   []( GLFWwindow* window, int width, int height )
+                                   {
+                                       auto& data = *( (WindowData*)glfwGetWindowUserPointer( window ) );
+
+                                       Common::EventWindowResize event( (uint32_t)width, (uint32_t)height );
+                                       data.EventCallback( event );
+                                       data.Specification.Width  = width;
+                                       data.Specification.Height = height;
+                                   } );
 
         glfwSetKeyCallback( m_GLFWWindow,
                             []( GLFWwindow* window, int key, int scancode, int action, int mods )

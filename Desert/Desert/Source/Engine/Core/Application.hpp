@@ -7,6 +7,8 @@
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/Window.hpp>
 
+#include <Common/Core/Core.hpp>
+
 namespace Desert::Engine
 {
     struct ApplicationInfo
@@ -40,7 +42,7 @@ namespace Desert::Engine
         void Destroy();
 
     private:
-        bool OnClose( Common::EventWindowClose& e )
+        NO_DISCARD bool OnClose( Common::EventWindowClose& e )
         {
             return true;
         }

@@ -8,6 +8,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
+#include <Engine/Core/EngineContext.h>
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
@@ -69,7 +70,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         m_UniformBuffer = UniformBuffer::Create( sizeof( ubo ), 0 );
 
-       m_texture = TextureCube::Create( "Arches_E_PineTree_Radiance.tga" );
+        m_texture = TextureCube::Create( "Arches_E_PineTree_Radiance.tga" );
     }
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
@@ -79,13 +80,16 @@ namespace Desert::Graphic::API::Vulkan
         VkClearValue      clearValue;
         clearValue.color = clearColor;
 
+        const auto framebuffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
+             renderPass->GetSpecification().TargetFramebuffer );
+
         VkRenderPassBeginInfo renderPassBeginInfo = {
-             .sType      = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-             .pNext      = NULL,
-             .renderPass = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
-                                renderPass->GetSpecification().TargetFramebuffer )
-                                ->GetRenderPass(),
-             .renderArea      = { .offset = { .x = 0, .y = 0 }, .extent = { .width = 1920, .height = 780 } },
+             .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+             .pNext           = NULL,
+             .renderPass      = framebuffer->GetRenderPass(),
+             .renderArea      = { .offset = { .x = 0, .y = 0 },
+                                  .extent = { .width  = framebuffer->GetFramebufferWidth(),
+                                              .height = framebuffer->GetFramebufferHeight() } },
              .clearValueCount = 1,
              .pClearValues    = &clearValue };
 
@@ -94,6 +98,21 @@ namespace Desert::Graphic::API::Vulkan
                                                ->GetFramebuffers()[frameIndex];
 
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
+
+        uint32_t windowWidth  = EngineContext::GetInstance().GetCurrentWindowWidth();
+        uint32_t windowHeight = EngineContext::GetInstance().GetCurrentWindowHeight();
+
+        VkViewport viewport = { .x        = 0.0f,
+                                .y        = 0.0f,
+                                .width    = (float)windowWidth,
+                                .height   = (float)windowHeight,
+                                .minDepth = 0.0f,
+                                .maxDepth = 1.0f };
+
+        VkRect2D scissor = { .offset = { 0, 0 }, .extent = { windowWidth, windowHeight } };
+
+        vkCmdSetViewport( m_CurrentCommandBuffer, 0, 1, &viewport );
+        vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
 
         return Common::MakeSuccess( true );
     }
@@ -179,6 +198,22 @@ namespace Desert::Graphic::API::Vulkan
 
         vkUpdateDescriptorSets( device, 1, &writeDescriptorSet, 0, nullptr );
         vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );
+    }
+
+    void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height,
+                                               const std::vector<std::shared_ptr<Framebuffer>>& framebuffers )
+    {
+        vkDeviceWaitIdle( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice() );
+
+        const auto& swapChain = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
+                                     Renderer::GetInstance().GetRendererContext() )
+                                     ->GetVulkanSwapChain();
+
+        swapChain->OnResize(width, height);
+        for (auto& fb : framebuffers)
+        {
+            fb->Resize(width, height);
+        }
     }
 
 } // namespace Desert::Graphic::API::Vulkan

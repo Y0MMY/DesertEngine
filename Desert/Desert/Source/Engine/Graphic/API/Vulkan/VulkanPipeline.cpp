@@ -68,30 +68,19 @@ namespace Desert::Graphic::API::Vulkan
              .topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
              .primitiveRestartEnable = VK_FALSE };
 
-        uint32_t windowWidth  = EngineContext::GetInstance().GetCurrentWindowWidth();
-        uint32_t windowHeight = EngineContext::GetInstance().GetCurrentWindowHeight();
+        std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
-        VkViewport VP = { .x        = 0.0f,
-                          .y        = 0.0f,
-                          .width    = (float)windowWidth,
-                          .height   = (float)windowHeight,
-                          .minDepth = 0.0f,
-                          .maxDepth = 1.0f };
-
-        VkRect2D scissor{ .offset =
-                               {
-                                    .x = 0,
-                                    .y = 0,
-                               },
-
-                          .extent = { .width = windowWidth, .height = windowHeight } };
+        VkPipelineDynamicStateCreateInfo dynamicStateInfo = {};
+        dynamicStateInfo.sType                            = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicStateInfo.dynamicStateCount                = static_cast<uint32_t>( dynamicStates.size() );
+        dynamicStateInfo.pDynamicStates                   = dynamicStates.data();
 
         VkPipelineViewportStateCreateInfo VPCreateInfo = {
              .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
              .viewportCount = 1,
-             .pViewports    = &VP,
+             .pViewports    = nullptr,
              .scissorCount  = 1,
-             .pScissors     = &scissor };
+        };
 
         VkPipelineRasterizationStateCreateInfo rastCreateInfo = {
              .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -149,6 +138,7 @@ namespace Desert::Graphic::API::Vulkan
              .pRasterizationState = &rastCreateInfo,
              .pMultisampleState   = &pipelineMSCreateInfo,
              .pColorBlendState    = &BlendCreateInfo,
+             .pDynamicState       = &dynamicStateInfo,
              .layout              = m_PipelineLayout,
              .renderPass          = framebuffer->GetRenderPass(),
              .subpass             = 0,
