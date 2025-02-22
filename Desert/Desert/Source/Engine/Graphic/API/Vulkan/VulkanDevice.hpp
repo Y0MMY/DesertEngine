@@ -34,9 +34,15 @@ namespace Desert::Graphic::API::Vulkan
 
         Common::Result<bool> CreateDevice();
 
+        VkFormat GetDepthFormat() const
+        {
+            return m_DepthFormat;
+        }
+
         static std::shared_ptr<VulkanPhysicalDevice> Create();
 
     private:
+        VkFormat           FindDepthFormat() const;
         QueueFamilyIndices GetQueueFamilyIndices( int flags );
 
     private:
@@ -44,6 +50,8 @@ namespace Desert::Graphic::API::Vulkan
         std::vector<VkQueueFamilyProperties> m_QueueFamilyProperties;
         std::vector<VkDeviceQueueCreateInfo> m_QueueCreateInfos;
         QueueFamilyIndices                   m_QueueFamilyIndices;
+
+        VkFormat m_DepthFormat = VK_FORMAT_UNDEFINED;
 
         std::unordered_set<std::string> m_SupportedExtensions;
 

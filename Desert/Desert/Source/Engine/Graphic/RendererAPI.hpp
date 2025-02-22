@@ -34,6 +34,8 @@ namespace Desert::Graphic
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
                                         const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) = 0;
 
+        virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const = 0;
+
     public:
         static const RendererAPIType GetAPIType()
         {

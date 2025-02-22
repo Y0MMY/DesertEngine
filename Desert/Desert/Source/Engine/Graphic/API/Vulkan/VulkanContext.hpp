@@ -49,8 +49,8 @@ namespace Desert::Graphic::API::Vulkan
         VkDebugReportCallbackEXT m_DebugReportCallback = VK_NULL_HANDLE;
         GLFWwindow*              m_GLFWwindow;
 
-        std::unique_ptr<VulkanSwapChain> m_SwapChain;
-        std::unique_ptr<VulkanQueue>     m_VulkanQueue;
+        std::shared_ptr<VulkanSwapChain> m_SwapChain;
+        std::shared_ptr<VulkanQueue>     m_VulkanQueue;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -27,6 +27,7 @@ project "Desert"
     includedirs {
         "%{wks.location}/Desert/Desert/Source/",
         "%{wks.location}/Desert/Common/Source",
+        
         "%{wks.location}/ThirdParty/spdlog/include/",
         "%{wks.location}/ThirdParty/yaml-cpp/include",
         "%{wks.location}/ThirdParty/glm/",
@@ -38,6 +39,8 @@ project "Desert"
         "%{wks.location}/ThirdParty/VulkanSDK/shaderc/Include",
         "%{wks.location}/ThirdParty/VulkanSDK/spirv_cross/Include",
         "%{wks.location}/ThirdParty/VulkanSDK/include",
+
+        "%{wks.location}/ThirdParty/",
     }
 
     -- includedirs {
@@ -74,6 +77,7 @@ project "Desert"
     -- }
     local allLinks = {
         "Common",
+        "ImGui",
     }
 
     for _, libPath in pairs(dependencies.LibraryDir) do

@@ -84,7 +84,12 @@ namespace Desert::Graphic
     void Renderer::ResizeWindowEvent( uint32_t width, uint32_t height,
                                       const std::vector<std::shared_ptr<Framebuffer>>& framebuffers )
     {
-        s_RendererAPI->ResizeWindowEvent(width, height, framebuffers);
+        s_RendererAPI->ResizeWindowEvent( width, height, framebuffers );
+    }
+
+    std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()
+    {
+        return s_RendererAPI->GetCompositeFramebuffer();
     }
 
 } // namespace Desert::Graphic

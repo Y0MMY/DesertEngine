@@ -10,3 +10,6 @@
 [submodule "ThirdParty/GLFW"]
 	path = ThirdParty/GLFW
 	url = https://github.com/Y0MMY/glfw
+[submodule "ThirdParty/ImGui"]
+	path = ThirdParty/ImGui
+	url = https://github.com/Y0MMY/imgui

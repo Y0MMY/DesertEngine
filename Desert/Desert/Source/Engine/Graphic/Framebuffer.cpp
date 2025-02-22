@@ -12,7 +12,12 @@ namespace Desert::Graphic
             case RendererAPIType::None:
                 return nullptr;
             case RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanFramebuffer>( spec );
+            {
+                const auto framebuffer = std::make_shared<API::Vulkan::VulkanFramebuffer>( spec );
+                FramebufferLibrary::s_Framebuffers.push_back( framebuffer );
+
+                return framebuffer;
+            }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;

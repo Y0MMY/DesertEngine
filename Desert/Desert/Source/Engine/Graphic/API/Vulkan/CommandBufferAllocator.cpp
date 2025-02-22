@@ -31,7 +31,7 @@ namespace Desert::Graphic::API::Vulkan
             // Wait for the fence to signal that command buffer has finished executing
             VK_CHECK_RESULT( vkWaitForFences( device, 1, &fence, VK_TRUE, UINT64_MAX ) );
             vkDestroyFence( device, fence, nullptr );
-            vkFreeCommandBuffers( device, commandPool, 1, &commandBuffer ); // TODO: vkResetCommandBuffer
+
             return Common::MakeSuccess( VK_SUCCESS );
         }
     } // namespace
@@ -71,7 +71,8 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( cmdBuffer );
     }
 
-    Common::Result<VkCommandBuffer> CommandBufferAllocator::RT_GetCommandBufferGraphic( bool begin /*= false */ )
+    Common::Result<VkCommandBuffer>
+    CommandBufferAllocator::RT_AllocateCommandBufferGraphic( bool begin /*= false */ )
     {
         VkCommandBufferAllocateInfo allocateInfo;
         allocateInfo.pNext              = VK_NULL_HANDLE;
@@ -103,6 +104,21 @@ namespace Desert::Graphic::API::Vulkan
     Common::Result<VkResult> CommandBufferAllocator::RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer )
     {
         return FlushCommandBuffer( m_LogicalDevice, m_CommandGraphicPool, commandBuffer, m_GraphicsQueue );
+    }
+
+    Common::Result<VkCommandBuffer> CommandBufferAllocator::RT_AllocateSecondCommandBufferGraphic()
+    {
+        VkCommandBufferAllocateInfo allocateInfo = {};
+        allocateInfo.sType                       = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocateInfo.commandPool                 = m_CommandGraphicPool;
+        allocateInfo.level                       = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+        allocateInfo.commandBufferCount          = 1;
+
+        VkCommandBuffer cmdBuffer;
+        VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
+                                        vkAllocateCommandBuffers( m_LogicalDevice, &allocateInfo, &cmdBuffer ) );
+
+        return Common::MakeSuccess( cmdBuffer );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

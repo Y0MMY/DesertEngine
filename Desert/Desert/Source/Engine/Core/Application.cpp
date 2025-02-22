@@ -25,6 +25,10 @@ namespace Desert::Engine
         m_Window->SetEventCallback( [this]( Common::Event& e ) { this->ProcessEvents( e ); } );
 
         Graphic::Renderer::CreateInstance().Init();
+
+#ifdef EBABLE_IMGUI
+        m_ImGuiLayer = ImGui::ImGuiLayer::Create();
+#endif // EBABLE_IMGUI
     }
 
     void Application::Run()
@@ -34,10 +38,14 @@ namespace Desert::Engine
         while ( m_IsRunningApplication )
         {
             Common::Timestep timestep;
+#ifdef EBABLE_IMGUI
+            ProcessImGui();
+#endif // EBABLE_IMGUI
             for ( const auto& layer : m_LayerStack )
             {
                 layer->OnUpdate( m_PrevTimestep );
             }
+
             m_Window->PresentFinalImage();
             m_Window->ProcessEvents();
 
@@ -67,9 +75,9 @@ namespace Desert::Engine
                  return true;
              } );
 
-        for (const auto& registeredEvent : s_RegisteredEvents)
+        for ( const auto& registeredEvent : s_RegisteredEvents )
         {
-            registeredEvent(e);
+            registeredEvent( e );
         }
     }
 
@@ -79,6 +87,10 @@ namespace Desert::Engine
         {
             layer->OnAttach();
         }
+
+#ifdef EBABLE_IMGUI
+        m_ImGuiLayer->OnAttach();
+#endif // EBABLE_IMGUI
     }
 
     void Application::Destroy()
@@ -88,6 +100,20 @@ namespace Desert::Engine
             layer->OnDetach();
             delete layer;
         }
+
+#ifdef EBABLE_IMGUI
+        m_ImGuiLayer->OnDetach();
+        m_ImGuiLayer.reset();
+#endif // EBABLE_IMGUI
+    }
+
+    void Application::ProcessImGui()
+    {
+        m_ImGuiLayer->Begin();
+
+        m_ImGuiLayer->OnUpdate( {} );
+
+        m_ImGuiLayer->End();
     }
 
 } // namespace Desert::Engine

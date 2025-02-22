@@ -7,7 +7,7 @@ layout(location = 1) in vec2 aTexCoord;
 
 layout(binding = 0) uniform camera {
     mat4 projection;
-    mat4  view;
+    mat4 view;
 } ubo;
 
 layout(location =3) out vec3 outUVW ;
@@ -18,9 +18,9 @@ void main()
     vec4 position = vec4(aPosition.xy, 1.0, 1.0);
 	gl_Position = position;
 
-    mat4 u_InverseVP = (inverse(ubo.projection * ubo.view));
+    mat4 inverseVP = inverse(ubo.projection * ubo.view);
 
-	v_Position = (u_InverseVP * position).xyz;
+	v_Position = ((inverseVP * position).xyz);
     v_Position.xy *= -1.0;
 
 }

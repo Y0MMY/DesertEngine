@@ -9,6 +9,10 @@
 
 #include <Common/Core/Core.hpp>
 
+#ifdef EBABLE_IMGUI
+#include <Engine/imgui/ImGuiLayer.hpp>
+#endif // EBABLE_IMGUI
+
 namespace Desert::Engine
 {
     struct ApplicationInfo
@@ -48,6 +52,8 @@ namespace Desert::Engine
         }
         void ProcessEvents( Common::Event& e );
 
+        [[maybe_unused]]void ProcessImGui();
+
     private:
         ApplicationInfo                 m_ApplicationInfo;
         std::shared_ptr<Common::Window> m_Window;
@@ -59,6 +65,10 @@ namespace Desert::Engine
 
     public:
         inline static std::vector<std::function<void( Common::Event& )>> s_RegisteredEvents;
+
+#ifdef EBABLE_IMGUI
+        std::shared_ptr<ImGui::ImGuiLayer> m_ImGuiLayer;
+#endif // EBABLE_IMGUI
     };
 
     Application* CreateApplicaton( int argc, char** argv );

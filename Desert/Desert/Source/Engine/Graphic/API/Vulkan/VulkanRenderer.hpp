@@ -34,6 +34,8 @@ namespace Desert::Graphic::API::Vulkan
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
                                         const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) override;
 
+        virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
+
     private:
         void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
 
@@ -41,8 +43,8 @@ namespace Desert::Graphic::API::Vulkan
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
 
         std::shared_ptr<UniformBuffer> m_UniformBuffer;
-
-        std::shared_ptr<TextureCube> m_texture;
+        std::shared_ptr<Framebuffer>   m_CompositeFramebuffer;
+        std::shared_ptr<TextureCube>   m_texture;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

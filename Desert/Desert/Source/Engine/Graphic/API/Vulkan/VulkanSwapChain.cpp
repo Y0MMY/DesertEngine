@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
 
 #include <Engine/Core/EngineContext.h>
@@ -13,6 +14,8 @@ namespace Desert::Graphic::API::Vulkan
 
         InitSurface( window );
         GetImageFormatAndColorSpace();
+
+        CreateSwapChainRenderPass();
     }
 
     void VulkanSwapChain::InitSurface( GLFWwindow* window )
@@ -65,6 +68,9 @@ namespace Desert::Graphic::API::Vulkan
             *height         = surfCaps.currentExtent.height;
         }
 
+        m_Width  = *width;
+        m_Height = *height;
+
         VkSwapchainCreateInfoKHR swapChainCreateInfo{};
         swapChainCreateInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         swapChainCreateInfo.pNext            = nullptr;
@@ -91,9 +97,9 @@ namespace Desert::Graphic::API::Vulkan
         // This also cleans up all the presentable images
         if ( oldSwapchain != VK_NULL_HANDLE )
         {
-            for ( uint32_t i = 0; i < m_ImagesView.size(); i++ )
+            for ( uint32_t i = 0; i < m_SwapChainImages.ImagesView.size(); i++ )
             {
-                vkDestroyImageView( lDevice, m_ImagesView[i], nullptr );
+                vkDestroyImageView( lDevice, m_SwapChainImages.ImagesView[i], nullptr );
             }
             vkDestroySwapchainKHR( lDevice, oldSwapchain, nullptr );
         }
@@ -103,25 +109,27 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t swapChainImages = 0u;
         VK_RETURN_RESULT_IF_FALSE( vkGetSwapchainImagesKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
                                                             &swapChainImages, VK_NULL_HANDLE ) );
-        m_Images.resize( swapChainImages );
-        m_ImagesView.resize( swapChainImages );
+        m_SwapChainImages.Images.resize( swapChainImages );
+        m_SwapChainImages.ImagesView.resize( swapChainImages );
 
-        EngineContext::GetInstance().m_FramesInFlight = m_ImagesView.size();
+        EngineContext::GetInstance().m_FramesInFlight = m_SwapChainImages.ImagesView.size();
         VK_RETURN_RESULT_IF_FALSE( vkGetSwapchainImagesKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
-                                                            &swapChainImages, m_Images.data() ) );
+                                                            &swapChainImages, m_SwapChainImages.Images.data() ) );
 
         for ( uint32_t i = 0; i < swapChainImages; i++ )
         {
             const auto& createdImageView =
-                 Utils::CreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), m_Images[i], m_ColorFormat,
-                                         VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
+                 Utils::CreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChainImages.Images[i],
+                                         m_ColorFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
             if ( !createdImageView.IsSuccess() )
             {
                 return Common::MakeError<VkResult>( createdImageView.GetError() );
             }
 
-            m_ImagesView[i] = createdImageView.GetValue();
+            m_SwapChainImages.ImagesView[i] = createdImageView.GetValue();
         }
+
+        CreateColorAndDepthImages();
 
         return Common::MakeSuccess( VK_SUCCESS );
     }
@@ -194,10 +202,10 @@ namespace Desert::Graphic::API::Vulkan
         const auto& device = m_LogicalDevice->GetVulkanLogicalDevice();
         if ( m_SwapChain != VK_NULL_HANDLE )
         {
-            for ( uint32_t i = 0; i < m_ImagesView.size(); i++ )
+            for ( uint32_t i = 0; i < m_SwapChainImages.ImagesView.size(); i++ )
             {
-                vkDestroyImageView( device, m_ImagesView[i], nullptr );
-              //  vkDestroyImage( device, m_Images[i], nullptr );
+                vkDestroyImageView( device, m_SwapChainImages.ImagesView[i], nullptr );
+                //  vkDestroyImage( device, m_Images[i], nullptr );
             }
         }
         if ( m_Surface != VK_NULL_HANDLE )
@@ -205,6 +213,148 @@ namespace Desert::Graphic::API::Vulkan
             vkDestroySwapchainKHR( device, m_SwapChain, nullptr );
         }
         m_SwapChain = VK_NULL_HANDLE;
+    }
+
+    Common::Result<VkResult> VulkanSwapChain::CreateSwapChainRenderPass()
+    {
+        VkFormat depthFormat = m_LogicalDevice->GetPhysicalDevice()->GetDepthFormat();
+
+        // Render Pass
+        std::array<VkAttachmentDescription, 2> attachments = {};
+        // Color attachment
+        attachments[0].format         = m_ColorFormat;
+        attachments[0].samples        = VK_SAMPLE_COUNT_1_BIT;
+        attachments[0].loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[0].storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[0].stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[0].initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[0].finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        // Depth attachment
+        attachments[1].format         = depthFormat;
+        attachments[1].samples        = VK_SAMPLE_COUNT_1_BIT;
+        attachments[1].loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[1].storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[1].stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[1].initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[1].finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference colorReference = {};
+        colorReference.attachment            = 0;
+        colorReference.layout                = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depthReference = {};
+        depthReference.attachment            = 1;
+        depthReference.layout                = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpassDescription = {};
+        subpassDescription.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpassDescription.colorAttachmentCount = 1;
+        subpassDescription.pColorAttachments    = &colorReference;
+        // subpassDescription.pDepthStencilAttachment = &depthReference;
+        subpassDescription.inputAttachmentCount    = 0;
+        subpassDescription.pInputAttachments       = nullptr;
+        subpassDescription.preserveAttachmentCount = 0;
+        subpassDescription.pPreserveAttachments    = nullptr;
+        subpassDescription.pResolveAttachments     = nullptr;
+
+        VkSubpassDependency dependency = {};
+        dependency.srcSubpass          = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass          = 0;
+        dependency.srcStageMask        = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstStageMask        = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask       = 0;
+        dependency.dstAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        VkRenderPassCreateInfo renderPassInfo = {};
+        renderPassInfo.sType                  = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount        = static_cast<uint32_t>(attachments.size());
+        renderPassInfo.pAttachments           = attachments.data();
+        renderPassInfo.subpassCount           = 1;
+        renderPassInfo.pSubpasses             = &subpassDescription;
+        renderPassInfo.dependencyCount        = 1;
+        renderPassInfo.pDependencies          = &dependency;
+
+        VK_RETURN_RESULT_IF_FALSE( vkCreateRenderPass( m_LogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo,
+                                                       nullptr, &m_VkRenderPass ) );
+    }
+
+    Common::Result<VkResult> VulkanSwapChain::CreateColorAndDepthImages()
+    {
+        // Color image
+        {
+            VkImageCreateInfo imageInfo{};
+            imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            imageInfo.imageType     = VK_IMAGE_TYPE_2D;
+            imageInfo.extent.width  = m_Width;
+            imageInfo.extent.height = m_Height;
+            imageInfo.extent.depth  = 1;
+            imageInfo.mipLevels     = 1;
+            imageInfo.arrayLayers   = 1;
+            imageInfo.format        = m_ColorFormat;
+            imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            imageInfo.usage       = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            imageInfo.samples     = m_MSAASamples;
+            imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+            VulkanAllocator::GetInstance().RT_AllocateImage( "sdf", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
+                                                             m_ColorImages.Image );
+
+            VkImageViewCreateInfo imageViewCI{};
+            imageViewCI.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            imageViewCI.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+            imageViewCI.image                           = m_ColorImages.Image;
+            imageViewCI.format                          = m_ColorFormat;
+            imageViewCI.subresourceRange.baseMipLevel   = 0;
+            imageViewCI.subresourceRange.levelCount     = 1;
+            imageViewCI.subresourceRange.baseArrayLayer = 0;
+            imageViewCI.subresourceRange.layerCount     = 1;
+            imageViewCI.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+
+            VK_CHECK_RESULT( vkCreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
+                                                &m_ColorImages.ImageView ) );
+        }
+
+        // Depth image
+        {
+            VkFormat depthFormat = m_LogicalDevice->GetPhysicalDevice()->GetDepthFormat();
+
+            VkImageCreateInfo imageInfo{};
+            imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            imageInfo.imageType     = VK_IMAGE_TYPE_2D;
+            imageInfo.extent.width  = m_Width;
+            imageInfo.extent.height = m_Height;
+            imageInfo.extent.depth  = 1;
+            imageInfo.mipLevels     = 1;
+            imageInfo.arrayLayers   = 1;
+            imageInfo.format        = depthFormat;
+            imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            imageInfo.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            imageInfo.samples       = m_MSAASamples;
+            imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+
+            VulkanAllocator::GetInstance().RT_AllocateImage( "sdf", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
+                                                             m_DepthStencilImages.Image );
+
+            VkImageViewCreateInfo imageViewCI{};
+            imageViewCI.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            imageViewCI.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+            imageViewCI.image                           = m_DepthStencilImages.Image;
+            imageViewCI.format                          = depthFormat;
+            imageViewCI.subresourceRange.baseMipLevel   = 0;
+            imageViewCI.subresourceRange.levelCount     = 1;
+            imageViewCI.subresourceRange.baseArrayLayer = 0;
+            imageViewCI.subresourceRange.layerCount     = 1;
+            imageViewCI.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+            VK_CHECK_RESULT( vkCreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
+                                                &m_DepthStencilImages.ImageView ) );
+        }
+
+        return Common::MakeSuccess( VK_SUCCESS );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -91,7 +91,7 @@ namespace Desert::Graphic::API::Vulkan
 
         Common::Result<VkCommandBuffer> PrepareCommandBuffer()
         {
-            return CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic( true );
+            return CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
         }
 
         void PerformImageCopy2D( VkCommandBuffer copyCmdVal, VkBuffer stagingBuffer, VkFormat imageVulkanFormat,

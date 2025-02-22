@@ -35,6 +35,9 @@ namespace Desert::Graphic
         void ResizeWindowEvent( uint32_t width, uint32_t height,
                                 const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
 
+        std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
+
+
         uint32_t GetCurrentFrameIndex();
 
         template <typename FuncT>

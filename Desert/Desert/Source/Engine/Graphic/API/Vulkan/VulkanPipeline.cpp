@@ -1,6 +1,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/EngineContext.h>
 
 #include <Engine/Graphic/VertexBuffer.hpp>
@@ -63,7 +65,7 @@ namespace Desert::Graphic::API::Vulkan
              .vertexAttributeDescriptionCount = (uint32_t)vertexInputAttributes.size(),
              .pVertexAttributeDescriptions    = vertexInputAttributes.data() };
 
-        VkPipelineInputAssemblyStateCreateInfo pipelineIACreateInfo = {
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
              .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
              .topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
              .primitiveRestartEnable = VK_FALSE };
@@ -75,36 +77,54 @@ namespace Desert::Graphic::API::Vulkan
         dynamicStateInfo.dynamicStateCount                = static_cast<uint32_t>( dynamicStates.size() );
         dynamicStateInfo.pDynamicStates                   = dynamicStates.data();
 
-        VkPipelineViewportStateCreateInfo VPCreateInfo = {
+        VkPipelineViewportStateCreateInfo viewportState = {
              .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
              .viewportCount = 1,
              .pViewports    = nullptr,
              .scissorCount  = 1,
         };
 
-        VkPipelineRasterizationStateCreateInfo rastCreateInfo = {
-             .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-             .polygonMode = VK_POLYGON_MODE_FILL,
-             .cullMode    = VK_CULL_MODE_NONE,
-             .frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-             .lineWidth   = 1.0f };
+        VkPipelineRasterizationStateCreateInfo rasterizer = {
+             .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+             .depthClampEnable        = VK_FALSE,
+             .rasterizerDiscardEnable = VK_FALSE,
+             .polygonMode             = VK_POLYGON_MODE_FILL,
+             .cullMode                = VK_CULL_MODE_NONE,
+             .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+             .depthBiasEnable         = VK_FALSE,
+             .lineWidth               = 1.0f,
+        };
 
-        VkPipelineMultisampleStateCreateInfo pipelineMSCreateInfo = {
+        VkPipelineMultisampleStateCreateInfo multisampling = {
              .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
              .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
              .sampleShadingEnable  = VK_FALSE,
-             .minSampleShading     = 1.0f };
+        };
 
-        VkPipelineColorBlendAttachmentState BlendAttachState = {
+        VkPipelineDepthStencilStateCreateInfo depthStencil = {
+             .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+             .depthTestEnable       = VK_TRUE,
+             .depthWriteEnable      = VK_TRUE,
+             .depthCompareOp        = VK_COMPARE_OP_LESS,
+             .depthBoundsTestEnable = VK_FALSE,
+             .stencilTestEnable     = VK_FALSE };
+
+        VkPipelineColorBlendAttachmentState colorBlendAttachment = {
+             //.blendEnable    = VK_TRUE,
+             //.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+             //                VK_COLOR_COMPONENT_A_BIT
              .blendEnable    = VK_FALSE,
              .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
                                VK_COLOR_COMPONENT_A_BIT };
-        VkPipelineColorBlendStateCreateInfo BlendCreateInfo = {
+
+        VkPipelineColorBlendStateCreateInfo colorBlending = {
              .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
              .logicOpEnable   = VK_FALSE,
              .logicOp         = VK_LOGIC_OP_COPY,
              .attachmentCount = 1,
-             .pAttachments    = &BlendAttachState };
+             .pAttachments    = &colorBlendAttachment,
+             .blendConstants  = { 0.0f, 0.0f, 0.0f, 0.0f },
+        };
 
         std::shared_ptr<VulkanShader> vulkanShader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader );
@@ -125,22 +145,24 @@ namespace Desert::Graphic::API::Vulkan
 
         VkResult res = vkCreatePipelineLayout( device, &LayoutInfo, VK_NULL_HANDLE, &m_PipelineLayout );
 
-        std::shared_ptr<VulkanFramebuffer> framebuffer =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer );
+        const auto& swapChain = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
+                                     Renderer::GetInstance().GetRendererContext() )
+                                     ->GetVulkanSwapChain();
 
         VkGraphicsPipelineCreateInfo pipelineInfo = {
              .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
              .stageCount          = (uint32_t)vulkanShader->GetPipelineShaderStageCreateInfos().size(),
              .pStages             = vulkanShader->GetPipelineShaderStageCreateInfos().data(),
              .pVertexInputState   = &vertexInputInfo,
-             .pInputAssemblyState = &pipelineIACreateInfo,
-             .pViewportState      = &VPCreateInfo,
-             .pRasterizationState = &rastCreateInfo,
-             .pMultisampleState   = &pipelineMSCreateInfo,
-             .pColorBlendState    = &BlendCreateInfo,
+             .pInputAssemblyState = &inputAssembly,
+             .pViewportState      = &viewportState,
+             .pRasterizationState = &rasterizer,
+             .pMultisampleState   = &multisampling,
+             .pDepthStencilState  = &depthStencil,
+             .pColorBlendState    = &colorBlending,
              .pDynamicState       = &dynamicStateInfo,
              .layout              = m_PipelineLayout,
-             .renderPass          = framebuffer->GetRenderPass(),
+             .renderPass          = swapChain->GetRenderPass(),
              .subpass             = 0,
              .basePipelineHandle  = VK_NULL_HANDLE,
              .basePipelineIndex   = -1 };
@@ -148,5 +170,5 @@ namespace Desert::Graphic::API::Vulkan
         res = vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &m_Pipeline );
 
         LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
-    }
+    } // namespace Desert::Graphic::API::Vulkan
 } // namespace Desert::Graphic::API::Vulkan

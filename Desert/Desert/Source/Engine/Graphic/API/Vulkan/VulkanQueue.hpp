@@ -38,9 +38,8 @@ namespace Desert::Graphic::API::Vulkan
             VkSemaphore RenderComplete;
         } m_Semaphores;
 
-        std::vector<VkCommandBuffer> m_DrawCommandBuffers;
+        std::vector<std::pair<VkCommandBuffer, VkCommandBuffer>> m_DrawCommandBuffers; // main command buffer | second command buffer
         std::vector<VkCommandBuffer> m_ComputeCommandBuffers;
-
         std::vector<VkFence> m_WaitFences;
     };
 } // namespace Desert::Graphic::API::Vulkan

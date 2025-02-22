@@ -125,13 +125,13 @@ namespace Desert::Graphic::API::Vulkan
 
         CommandBufferAllocator::CreateInstance( lDevice );
 
-        m_SwapChain = std::make_unique<VulkanSwapChain>();
+        m_SwapChain = std::make_shared<VulkanSwapChain>();
         m_SwapChain->Init( m_GLFWwindow, s_VulkanInstance, lDevice );
 
         uint32_t width, height;
         m_SwapChain->Create( &width, &height );
 
-        m_VulkanQueue = std::make_unique<VulkanQueue>( m_SwapChain.get() ); // TODO: make shared ptr
+        m_VulkanQueue = std::make_shared<VulkanQueue>( m_SwapChain.get() ); // TODO: make shared ptr
         m_VulkanQueue->Init();
 
         VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );

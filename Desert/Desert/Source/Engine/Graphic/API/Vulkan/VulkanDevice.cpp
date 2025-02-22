@@ -102,6 +102,9 @@ namespace Desert::Graphic::API::Vulkan
                 m_SupportedExtensions.emplace( ext.extensionName );
             }
         }
+
+        m_DepthFormat = FindDepthFormat();
+
         return Common::MakeSuccess( true );
     }
 
@@ -201,4 +204,22 @@ namespace Desert::Graphic::API::Vulkan
         return indices;
     }
 
+    VkFormat VulkanPhysicalDevice::FindDepthFormat() const
+    {
+        // Since all depth formats may be optional, we need to find a suitable depth format to use
+        // Start with the highest precision packed format
+        std::array<VkFormat, 5> depthFormats = { VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT,
+                                                 VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM_S8_UINT,
+                                                 VK_FORMAT_D16_UNORM };
+
+        for ( auto& format : depthFormats )
+        {
+            VkFormatProperties formatProps;
+            vkGetPhysicalDeviceFormatProperties( m_PhysicalDevice, format, &formatProps );
+            // Format must support depth stencil attachment for optimal tiling
+            if ( formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT )
+                return format;
+        }
+        return VK_FORMAT_UNDEFINED;
+    }
 } // namespace Desert::Graphic::API::Vulkan

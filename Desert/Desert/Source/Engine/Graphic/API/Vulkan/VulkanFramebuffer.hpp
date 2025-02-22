@@ -17,11 +17,6 @@ namespace Desert::Graphic::API::Vulkan
             return m_FramebufferSpecification;
         }
 
-        const auto GetRenderPass() const
-        {
-            return m_VkRenderPass;
-        }
-
         const auto GetFramebuffers() const
         {
             return m_Framebuffers;
@@ -41,8 +36,6 @@ namespace Desert::Graphic::API::Vulkan
     private:
     private:
         FramebufferSpecification m_FramebufferSpecification;
-
-        VkRenderPass m_VkRenderPass = VK_NULL_HANDLE;
 
         std::vector<VkFramebuffer> m_Framebuffers;
 

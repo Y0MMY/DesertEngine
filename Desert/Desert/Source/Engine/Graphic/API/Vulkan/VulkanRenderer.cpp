@@ -10,6 +10,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 #include <Engine/Core/EngineContext.h>
 
+#include <Engine/Graphic/API/Vulkan/imgui/ImGuiRenderer.hpp>
+
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
 
@@ -75,23 +77,29 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
     {
-        uint32_t          frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        VkClearColorValue clearColor = { 1.0f, 0.0f, 0.0f, 0.0f }; // TODO: get from specification
-        VkClearValue      clearValue;
-        clearValue.color = clearColor;
+        uint32_t                    frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        std::array<VkClearValue, 2> clearValues{};
+        clearValues[0].color        = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+        clearValues[1].depthStencil = { 1.0f, 0 };
 
         const auto framebuffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
              renderPass->GetSpecification().TargetFramebuffer );
 
+        const auto& swapChain = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
+                                     Renderer::GetInstance().GetRendererContext() )
+                                     ->GetVulkanSwapChain();
+
+        m_CompositeFramebuffer = framebuffer;
+
         VkRenderPassBeginInfo renderPassBeginInfo = {
              .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
              .pNext           = NULL,
-             .renderPass      = framebuffer->GetRenderPass(),
+             .renderPass      = swapChain->GetRenderPass(),
              .renderArea      = { .offset = { .x = 0, .y = 0 },
                                   .extent = { .width  = framebuffer->GetFramebufferWidth(),
                                               .height = framebuffer->GetFramebufferHeight() } },
-             .clearValueCount = 1,
-             .pClearValues    = &clearValue };
+             .clearValueCount = static_cast<uint32_t>( clearValues.size() ),
+             .pClearValues    = clearValues.data() };
 
         renderPassBeginInfo.framebuffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
                                                renderPass->GetSpecification().TargetFramebuffer )
@@ -119,6 +127,9 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanRendererAPI::EndRenderPass()
     {
+#ifdef EBABLE_IMGUI
+        ImGui::VulkanImGuiRenderer::GetInstance().RenderImGui( m_CurrentCommandBuffer );
+#endif // EBABLE_IMGUI
         vkCmdEndRenderPass( m_CurrentCommandBuffer );
         return Common::MakeSuccess( true );
     }
@@ -209,11 +220,16 @@ namespace Desert::Graphic::API::Vulkan
                                      Renderer::GetInstance().GetRendererContext() )
                                      ->GetVulkanSwapChain();
 
-        swapChain->OnResize(width, height);
-        for (auto& fb : framebuffers)
+        swapChain->OnResize( width, height );
+        for ( auto& fb : framebuffers )
         {
-            fb->Resize(width, height);
+            fb->Resize( width, height );
         }
+    }
+
+    std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
+    {
+        return m_CompositeFramebuffer;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

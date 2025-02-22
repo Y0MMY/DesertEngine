@@ -35,6 +35,8 @@ decltype( auto ) initializeDefaultValue()
 #define IS_DERIVED_bool( T, X ) ( std::is_base_of<X, T>::value )
 #define NO_DISCARD [[nodiscard]]
 
+#define EBABLE_IMGUI 1
+
 #if defined( DESERT_PLATFORM_WINDOWS )
 #define DESERT_DEBUG_BREAK __debugbreak()
 #elif defined( DESERT_PLATFORM_LINUX )

@@ -44,7 +44,7 @@ namespace Desert::Graphic::API::Vulkan
         submitInfo.waitSemaphoreCount      = 1;
         submitInfo.pSignalSemaphores       = &m_Semaphores.RenderComplete;
         submitInfo.signalSemaphoreCount    = 1;
-        submitInfo.pCommandBuffers         = &m_DrawCommandBuffers[currentIndex];
+        submitInfo.pCommandBuffers         = &m_DrawCommandBuffers[currentIndex].first;
         submitInfo.commandBufferCount      = 1;
 
         vkResetFences( device, 1, &m_WaitFences[currentIndex] );
@@ -122,12 +122,19 @@ namespace Desert::Graphic::API::Vulkan
         {
             /*Graphic buffers*/
 
-            const auto& bufferDraw = CommandBufferAllocator::GetInstance().RT_GetCommandBufferGraphic();
+            const auto& bufferDraw = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic();
             if ( !bufferDraw.IsSuccess() )
             {
                 return Common::MakeError<VkResult>( bufferDraw.GetError() );
             }
-            m_DrawCommandBuffers[i] = bufferDraw.GetValue();
+            m_DrawCommandBuffers[i].first = bufferDraw.GetValue();
+
+            const auto& bufferDrawSecondary = CommandBufferAllocator::GetInstance().RT_AllocateSecondCommandBufferGraphic();
+            if ( !bufferDrawSecondary.IsSuccess() )
+            {
+                return Common::MakeError<VkResult>(bufferDrawSecondary.GetError() );
+            }
+            m_DrawCommandBuffers[i].second = bufferDrawSecondary.GetValue();
 
             /*Compute buffers*/
 
