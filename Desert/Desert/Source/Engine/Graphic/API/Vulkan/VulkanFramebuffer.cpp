@@ -1,86 +1,109 @@
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Core/EngineContext.h>
 
+#include <Engine/Graphic/Image.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
     namespace
     {
-        Common::Result<std::vector<VkFramebuffer>> CreateFramebuffers( VkDevice                         device,
-                                                                       std::shared_ptr<VulkanSwapChain> swapChain,
-                                                                       uint32_t width, uint32_t height )
+        Common::Result<VkRenderPass> CreateRenderPass( VkDevice                                       device,
+                                                       const std::vector<Core::Formats::ImageFormat>& attachments )
         {
-            std::vector<VkFramebuffer> frameBuffers;
-            frameBuffers.resize( EngineContext::GetInstance().GetFramesInFlight() );
+            std::vector<VkAttachmentDescription> attachmentDescriptions;
+            std::vector<VkAttachmentReference>   attachmentRefs;
 
-            /*uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
-            uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();*/
-
-            VkResult res;
-
-           /* VkImageMemoryBarrier barrier            = {};
-            barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.oldLayout                       = VK_IMAGE_LAYOUT_UNDEFINED;
-            barrier.newLayout                       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-            barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange.baseMipLevel   = 0;
-            barrier.subresourceRange.levelCount     = 1;
-            barrier.subresourceRange.baseArrayLayer = 0;
-            barrier.subresourceRange.layerCount     = 1;*/
-
-            const auto& images = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
-                                      Renderer::GetInstance().GetRendererContext() )
-                                      ->GetVulkanSwapChain()
-                                      ->GetSwapChainVKImage();
-
-            for ( uint32_t i = 0; i < frameBuffers.size(); i++ )
+            for ( const auto& attachment : attachments )
             {
-                //barrier.image = images[i];
+                VkAttachmentDescription attachmentDescription = {};
+                attachmentDescription.format                  = GetImageVulkanFormat( attachment );
+                attachmentDescription.samples                 = VK_SAMPLE_COUNT_1_BIT;
 
-               /* auto copyCmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
-                if ( !copyCmd.IsSuccess() )
+                if ( Graphic::Utils::IsDepthFormat( attachment ) )
                 {
-                    return Common::MakeError<std::vector<VkFramebuffer>>( "TODO: make error info" );
+                    attachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    attachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                    attachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                    attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                    attachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                    attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                }
+                else
+                {
+                    attachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    attachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                    attachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                    attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                    attachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                    attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
                 }
 
-                vkCmdPipelineBarrier( copyCmd.GetValue(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                                      &barrier );
-                CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmd.GetValue() );*/
-
-                std::array<VkImageView, 2> attachments = { swapChain->GetSwapChainVKImagesView()[i],swapChain->GetDepthImages().ImageView };
-
-                VkFramebufferCreateInfo fbCreateInfo = {};
-                fbCreateInfo.sType                   = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-                fbCreateInfo.renderPass              = swapChain->GetRenderPass();
-                fbCreateInfo.attachmentCount         = static_cast<uint32_t>( attachments.size() );
-                fbCreateInfo.pAttachments            = attachments.data();
-                fbCreateInfo.width                   = width;
-                fbCreateInfo.height                  = height;
-                fbCreateInfo.layers                  = 1;
-
-                res = vkCreateFramebuffer( device, &fbCreateInfo, NULL, &frameBuffers[i] );
-                if ( res != VK_SUCCESS )
-                {
-                    return Common::MakeError<std::vector<VkFramebuffer>>( "TODO: make error info" );
-                }
+                attachmentDescriptions.push_back( attachmentDescription );
             }
-            return Common::MakeSuccess( frameBuffers );
+
+            for ( size_t i = 0; i < attachmentDescriptions.size(); ++i )
+            {
+                VkAttachmentReference attachmentRef = {};
+                attachmentRef.attachment            = static_cast<uint32_t>( i );
+                attachmentRef.layout                = ( Graphic::Utils::IsDepthFormat( attachments[i] ) )
+                                                           ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                                           : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+                attachmentRefs.push_back( attachmentRef );
+            }
+
+            VkSubpassDescription subpass = {};
+            subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            subpass.colorAttachmentCount = attachmentRefs.size();
+            subpass.pColorAttachments    = attachmentRefs.data();
+
+            VkRenderPassCreateInfo renderPassCreateInfo = {};
+            renderPassCreateInfo.sType                  = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+            renderPassCreateInfo.attachmentCount        = static_cast<uint32_t>( attachmentDescriptions.size() );
+            renderPassCreateInfo.pAttachments           = attachmentDescriptions.data();
+            renderPassCreateInfo.subpassCount           = 1;
+            renderPassCreateInfo.pSubpasses             = &subpass;
+
+            VkRenderPass renderPass;
+            if ( vkCreateRenderPass( device, &renderPassCreateInfo, nullptr, &renderPass ) != VK_SUCCESS )
+            {
+                return Common::MakeError<VkRenderPass>( "" );
+            }
+
+            return Common::MakeSuccess( renderPass );
         }
     } // namespace
 
     VulkanFramebuffer::VulkanFramebuffer( const FramebufferSpecification& spec )
          : m_FramebufferSpecification( spec )
     {
+
+        for ( const auto attachment : spec.Attachments.Attachments )
+        {
+            Core::Formats::ImageSpecification spec;
+            spec.Format = attachment;
+            spec.Usage  = Core::Formats::ImageUsage::Attachment;
+
+            if ( Graphic::Utils::IsDepthFormat( attachment ) )
+            {
+                m_DepthAttachment = std::make_shared<VulkanImage2D>( spec );
+            }
+            else
+            {
+                m_ColorAttachment = std::make_shared<VulkanImage2D>( spec );
+            }
+        }
     }
 
     Common::BoolResult VulkanFramebuffer::Resize( uint32_t width, uint32_t height, bool forceRecreate )
     {
-        if ( m_Framebuffers.empty() )
+        if ( m_Framebuffer != VK_NULL_HANDLE )
         {
             Release();
         }
@@ -88,35 +111,76 @@ namespace Desert::Graphic::API::Vulkan
         m_Width  = width;
         m_Height = height;
 
-        const auto swapchain = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
-                                    Renderer::GetInstance().GetRendererContext() )
-                                    ->GetVulkanSwapChain();
+        if ( m_DepthAttachment )
+        {
+            auto& spec  = m_DepthAttachment->GetImageSpecification();
+            spec.Width  = width;
+            spec.Height = height;
+            sp_cast<VulkanImage2D>( m_DepthAttachment )->RT_Invalidate();
+        }
+
+        if ( m_ColorAttachment )
+        {
+            auto& spec  = m_ColorAttachment->GetImageSpecification();
+            spec.Width  = width;
+            spec.Height = height;
+            sp_cast<VulkanImage2D>( m_ColorAttachment )->RT_Invalidate();
+        }
 
         const auto& device = Common::Singleton<VulkanLogicalDevice>::GetInstance().GetVulkanLogicalDevice();
 
-        const auto result = CreateFramebuffers( device, swapchain, width, height );
+        const auto result = CreateFramebuffer( device, width, height );
         if ( !result.IsSuccess() )
         {
-            return Common::MakeError<bool>( result.GetError() );
+            return Common::MakeError( result.GetError() );
         }
 
-        m_Framebuffers = result.GetValue();
+        return Common::MakeSuccess( true );
     }
 
     void VulkanFramebuffer::Use( BindUsage /*= BindUsage::Bind */ ) const
     {
     }
 
+    Common::Result<VkFramebuffer> VulkanFramebuffer::CreateFramebuffer( VkDevice device, uint32_t width,
+                                                                        uint32_t height )
+    {
+        VkFramebuffer frameBuffer;
+
+        const auto renderPassResult =
+             CreateRenderPass( device, m_FramebufferSpecification.Attachments.Attachments );
+        if ( !renderPassResult.IsSuccess() )
+        {
+            return Common::MakeError<VkFramebuffer>( renderPassResult.GetError() );
+        }
+        const auto renderPass = renderPassResult.GetValue();
+
+        m_RenderPass = renderPass;
+
+        std::vector<VkImageView> attachments( 1u );
+        attachments[0] = sp_cast<VulkanImage2D>( m_ColorAttachment )->GetVulkanImageInfo().ImageView;
+
+        VkFramebufferCreateInfo framebufferCreateInfo = {};
+        framebufferCreateInfo.sType                   = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferCreateInfo.renderPass              = renderPass;
+        framebufferCreateInfo.attachmentCount         = static_cast<uint32_t>( attachments.size() );
+        framebufferCreateInfo.pAttachments            = attachments.data();
+        framebufferCreateInfo.width                   = width;
+        framebufferCreateInfo.height                  = height;
+        framebufferCreateInfo.layers                  = 1;
+
+        auto res = vkCreateFramebuffer(device, &framebufferCreateInfo, nullptr, &m_Framebuffer);
+        VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_FRAMEBUFFER, "TODO", m_Framebuffer );
+        return Common::MakeSuccess( frameBuffer );
+    }
+
     void VulkanFramebuffer::Release()
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        for ( uint32_t i = 0; i < m_Framebuffers.size(); i++ )
-        {
-            vkDestroyFramebuffer( device, m_Framebuffers[i], VK_NULL_HANDLE );
-        }
+        vkDestroyFramebuffer( device, m_Framebuffer, VK_NULL_HANDLE );
 
-        m_Framebuffers.clear();
+        m_Framebuffer = VK_NULL_HANDLE;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

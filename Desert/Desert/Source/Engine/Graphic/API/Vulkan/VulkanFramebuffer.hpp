@@ -17,13 +17,24 @@ namespace Desert::Graphic::API::Vulkan
             return m_FramebufferSpecification;
         }
 
-        const auto GetFramebuffers() const
+        virtual uint32_t GetFramebufferWidth() const override
         {
-            return m_Framebuffers;
+            return m_Width;
+        }
+        virtual uint32_t GetFramebufferHeight() const override
+        {
+            return m_Height;
         }
 
-        virtual uint32_t GetFramebufferWidth() const  override { return m_Width; }
-        virtual uint32_t GetFramebufferHeight() const override { return m_Height; }
+        const auto GetVKFramebuffer() const
+        {
+            return m_Framebuffer;
+        }
+
+        const auto GetVKRenderPass() const
+        {
+            return m_RenderPass;
+        }
 
         void Release();
 
@@ -31,15 +42,28 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual Common::BoolResult Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
 
-        /*virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const = 0;
-        virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const                     = 0;*/
+        virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const override
+        {
+            return m_ColorAttachment;
+        }
+        virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const override
+        {
+            return m_DepthAttachment;
+        }
+
     private:
+        Common::Result<VkFramebuffer> CreateFramebuffer( VkDevice device, uint32_t width, uint32_t height );
+
     private:
+        std::shared_ptr<Image2D> m_DepthAttachment;
+        std::shared_ptr<Image2D> m_ColorAttachment;
+
         FramebufferSpecification m_FramebufferSpecification;
 
-        std::vector<VkFramebuffer> m_Framebuffers;
+        VkFramebuffer m_Framebuffer = VK_NULL_HANDLE;
+        VkRenderPass  m_RenderPass  = VK_NULL_HANDLE;
 
-        uint32_t m_Width = 0;
+        uint32_t m_Width  = 0;
         uint32_t m_Height = 0;
     };
 } // namespace Desert::Graphic::API::Vulkan

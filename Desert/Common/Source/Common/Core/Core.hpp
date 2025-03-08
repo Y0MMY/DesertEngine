@@ -72,6 +72,12 @@ namespace Common
     using AssetHandle = UUID;
 } // namespace Common
 
+template <typename T, typename U>
+constexpr std::shared_ptr<T> sp_cast( const std::shared_ptr<U>& ptr )
+{
+    return std::static_pointer_cast<T>( ptr );
+}
+
 #define REGISTER_EVENT( instance, method )                                                                        \
     Engine::Application::GetInstance().s_RegisteredEvents.push_back( [instance]( Common::Event& e )               \
                                                                      { instance->method( e ); } )

@@ -21,3 +21,4 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>

@@ -202,12 +202,12 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         Common::Result<VkImageView> CreateImageView( VkDevice device, VkFormat imageVulkanFormat,
-                                                     const VkImage image, uint32_t mipLevels,
-                                                     bool cubemap = false )
+                                                     const VkImage image, uint32_t mipLevels, bool cubemap = false,
+                                                     bool isDepth = false )
         {
-            return Utils::CreateImageView( device, image, imageVulkanFormat, VK_IMAGE_ASPECT_COLOR_BIT,
-                                           cubemap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D,
-                                           cubemap ? 6 : 1, mipLevels );
+            return Utils::CreateImageView(
+                 device, image, imageVulkanFormat, isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+                 cubemap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, cubemap ? 6 : 1, mipLevels );
         }
 
         void CreateSampler( VkDevice device, VkSampler& samplerOutput )
@@ -253,11 +253,35 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        DESERT_VERIFY( m_ImageSpecification.Data );
-
-        auto&             allocator         = VulkanAllocator::GetInstance();
         VkFormat          imageVulkanFormat = GetImageVulkanFormat( m_ImageSpecification.Format );
         VkImageCreateInfo imageCreateInfo   = GetImageCreateInfo( imageVulkanFormat );
+        auto&             allocator         = VulkanAllocator::GetInstance();
+
+        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::Attachment )
+        {
+            auto imageAllocation = Utils::CreateImageBuffer( allocator, imageCreateInfo, m_VulkanImageInfo.Image );
+            if ( !imageAllocation.IsSuccess() )
+            {
+                return Common::MakeError<bool>( imageAllocation.GetError() );
+            }
+
+            auto createImageView =
+                 Utils::CreateImageView( device, imageVulkanFormat, m_VulkanImageInfo.Image, m_MipLevels, false,
+                                         Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) );
+
+            if ( !createImageView.IsSuccess() )
+            {
+                return Common::MakeError<bool>( createImageView.GetError() );
+            }
+
+            m_VulkanImageInfo.ImageView = createImageView.GetValue();
+
+            Utils::CreateSampler( device, m_VulkanImageInfo.Sampler );
+
+            return Common::MakeSuccess( true );
+        }
+
+        DESERT_VERIFY( m_ImageSpecification.Data );
 
         uint32_t imageSize = Utils::CalculateImageSize( m_ImageSpecification.Width, m_ImageSpecification.Height,
                                                         m_ImageSpecification.Format );
@@ -269,7 +293,7 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( stagingBufferAllocation.GetError() );
         }
 
-        if ( m_ImageSpecification.Type == Core::Formats::ImageType::ImageCube )
+        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
         {
 
             Utils::CopyDataToStagingBufferCubemap( allocator, stagingBuffer, stagingBufferAllocation.GetValue(),
@@ -297,11 +321,11 @@ namespace Desert::Graphic::API::Vulkan
 
         VkCommandBuffer copyCmdVal = copyCmd.GetValue();
 
-        if ( m_ImageSpecification.Type == Core::Formats::ImageType::ImageCube )
+        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
         {
             Core::Formats::ImageSpecification specification;
-            specification      = m_ImageSpecification;
-            specification.Type = Core::Formats::ImageType::Image2D;
+            specification       = m_ImageSpecification;
+            specification.Usage = Core::Formats::ImageUsage::Image2D;
 
             std::shared_ptr<VulkanImage2D> imageSrc = std::make_shared<VulkanImage2D>( specification );
             imageSrc->RT_Invalidate();
@@ -319,7 +343,7 @@ namespace Desert::Graphic::API::Vulkan
         // create ImageView
         auto createImageView =
              Utils::CreateImageView( device, imageVulkanFormat, m_VulkanImageInfo.Image, m_MipLevels,
-                                     m_ImageSpecification.Type == Core::Formats::ImageType::ImageCube );
+                                     m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube );
         if ( !createImageView.IsSuccess() )
         {
             return Common::MakeError<bool>( createImageView.GetError() );
@@ -338,12 +362,26 @@ namespace Desert::Graphic::API::Vulkan
     VkImageCreateInfo VulkanImage2D::GetImageCreateInfo( VkFormat imageFormat )
     {
         VkImageCreateFlags flags = {};
+        VkImageUsageFlags  usage = VK_IMAGE_USAGE_SAMPLED_BIT;
         // Cube faces count as array layers in Vulkan
         uint32_t arrayLayers = 1;
-        if ( m_ImageSpecification.Type == Core::Formats::ImageType::ImageCube )
+        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
         {
             flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
             arrayLayers = 6;
+        }
+
+        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::Attachment )
+        {
+            if ( Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) )
+                usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            else
+                usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
+
+        else // Image2D
+        {
+            usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         }
 
         uint32_t faceWidth  = m_ImageSpecification.Width / 4;
@@ -355,10 +393,10 @@ namespace Desert::Graphic::API::Vulkan
              .flags       = flags,
              .imageType   = VK_IMAGE_TYPE_2D,
              .format      = imageFormat,
-             .extent      = { .width  = ( m_ImageSpecification.Type == Core::Formats::ImageType::ImageCube )
+             .extent      = { .width  = ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
                                              ? faceWidth
                                              : m_ImageSpecification.Width,
-                              .height = ( m_ImageSpecification.Type == Core::Formats::ImageType::ImageCube )
+                              .height = ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
                                              ? faceHeight
                                              : m_ImageSpecification.Height,
                               .depth  = 1 },
@@ -366,8 +404,7 @@ namespace Desert::Graphic::API::Vulkan
              .arrayLayers = arrayLayers,
              .samples     = VK_SAMPLE_COUNT_1_BIT,
              .tiling      = VK_IMAGE_TILING_OPTIMAL,
-             .usage       = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+             .usage       = usage,
              .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
     }
 

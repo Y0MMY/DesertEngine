@@ -89,7 +89,7 @@ namespace Desert::Graphic::API::Vulkan
              .depthClampEnable        = VK_FALSE,
              .rasterizerDiscardEnable = VK_FALSE,
              .polygonMode             = VK_POLYGON_MODE_FILL,
-             .cullMode                = VK_CULL_MODE_NONE,
+             .cullMode                = VK_CULL_MODE_NONE, // VK_CULL_MODE_BACK_BIT
              .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
              .depthBiasEnable         = VK_FALSE,
              .lineWidth               = 1.0f,
@@ -145,9 +145,8 @@ namespace Desert::Graphic::API::Vulkan
 
         VkResult res = vkCreatePipelineLayout( device, &LayoutInfo, VK_NULL_HANDLE, &m_PipelineLayout );
 
-        const auto& swapChain = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
-                                     Renderer::GetInstance().GetRendererContext() )
-                                     ->GetVulkanSwapChain();
+        const auto& renderPass =
+             sp_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer )->GetVKRenderPass();
 
         VkGraphicsPipelineCreateInfo pipelineInfo = {
              .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -162,7 +161,7 @@ namespace Desert::Graphic::API::Vulkan
              .pColorBlendState    = &colorBlending,
              .pDynamicState       = &dynamicStateInfo,
              .layout              = m_PipelineLayout,
-             .renderPass          = swapChain->GetRenderPass(),
+             .renderPass          = renderPass,
              .subpass             = 0,
              .basePipelineHandle  = VK_NULL_HANDLE,
              .basePipelineIndex   = -1 };

@@ -130,6 +130,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         CreateColorAndDepthImages();
+        CreateSwapChainFramebuffers();
 
         return Common::MakeSuccess( VK_SUCCESS );
     }
@@ -205,14 +206,46 @@ namespace Desert::Graphic::API::Vulkan
             for ( uint32_t i = 0; i < m_SwapChainImages.ImagesView.size(); i++ )
             {
                 vkDestroyImageView( device, m_SwapChainImages.ImagesView[i], nullptr );
-                //  vkDestroyImage( device, m_Images[i], nullptr );
             }
         }
         if ( m_Surface != VK_NULL_HANDLE )
         {
             vkDestroySwapchainKHR( device, m_SwapChain, nullptr );
         }
+
+        for ( const auto framebuffer : m_SwapChainFramebuffers )
+        {
+            vkDestroyFramebuffer( device, framebuffer, VK_NULL_HANDLE );
+        }
+
         m_SwapChain = VK_NULL_HANDLE;
+    }
+
+    Common::Result<VkResult> VulkanSwapChain::CreateSwapChainFramebuffers()
+    {
+        m_SwapChainFramebuffers.resize( m_SwapChainImages.ImagesView.size() );
+        for ( uint32_t i = 0; i < m_SwapChainFramebuffers.size(); i++ )
+        {
+            std::array<VkImageView, 2> attachments = { GetSwapChainVKImagesView()[i], GetDepthImages().ImageView };
+
+            VkFramebufferCreateInfo fbCreateInfo = {};
+            fbCreateInfo.sType                   = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fbCreateInfo.renderPass              = m_VkRenderPass;
+            fbCreateInfo.attachmentCount         = static_cast<uint32_t>( attachments.size() );
+            fbCreateInfo.pAttachments            = attachments.data();
+            fbCreateInfo.width                   = m_Width;
+            fbCreateInfo.height                  = m_Height;
+            fbCreateInfo.layers                  = 1;
+
+            const auto& device = m_LogicalDevice->GetVulkanLogicalDevice();
+            auto        res    = vkCreateFramebuffer( device, &fbCreateInfo, NULL, &m_SwapChainFramebuffers[i] );
+
+            if ( res != VK_SUCCESS )
+            {
+                return Common::MakeError<VkResult>( "TODO: make error info" );
+            }
+        }
+        return Common::MakeSuccess( VK_SUCCESS );
     }
 
     Common::Result<VkResult> VulkanSwapChain::CreateSwapChainRenderPass()
@@ -269,7 +302,7 @@ namespace Desert::Graphic::API::Vulkan
 
         VkRenderPassCreateInfo renderPassInfo = {};
         renderPassInfo.sType                  = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount        = static_cast<uint32_t>(attachments.size());
+        renderPassInfo.attachmentCount        = static_cast<uint32_t>( attachments.size() );
         renderPassInfo.pAttachments           = attachments.data();
         renderPassInfo.subpassCount           = 1;
         renderPassInfo.pSubpasses             = &subpassDescription;

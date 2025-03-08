@@ -17,4 +17,14 @@ namespace Desert::Graphic
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
     }
+
+    namespace Utils
+    {
+        bool IsDepthFormat( Core::Formats::ImageFormat format )
+        {
+            if ( format == Core::Formats::ImageFormat::DEPTH32F )
+                return true;
+            return false;
+        }
+    } // namespace Utils
 } // namespace Desert::Graphic

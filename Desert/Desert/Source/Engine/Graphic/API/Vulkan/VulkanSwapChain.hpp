@@ -69,6 +69,7 @@ namespace Desert::Graphic::API::Vulkan
     private:
         Common::Result<VkResult> AcquireNextImage( VkSemaphore presentCompleteSemaphore, uint32_t* imageIndex );
         Common::Result<VkResult> CreateSwapChainRenderPass();
+        Common::Result<VkResult> CreateSwapChainFramebuffers();
         Common::Result<VkResult> CreateColorAndDepthImages();
 
     private:
@@ -102,6 +103,8 @@ namespace Desert::Graphic::API::Vulkan
             std::vector<VkImage>     Images;
             std::vector<VkImageView> ImagesView;
         } m_SwapChainImages;
+
+        std::vector<VkFramebuffer> m_SwapChainFramebuffers;
 
         VkRenderPass m_VkRenderPass = VK_NULL_HANDLE;
 

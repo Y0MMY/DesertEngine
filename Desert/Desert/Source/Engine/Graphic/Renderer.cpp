@@ -64,11 +64,9 @@ namespace Desert::Graphic
         s_RendererAPI->PresentFinalImage();
     }
 
-    void Renderer::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                      const std::shared_ptr<IndexBuffer>&  indexBuffer,
-                                      const std::shared_ptr<Pipeline>&     pipeline )
+    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline )
     {
-        s_RendererAPI->TEST_DrawTriangle( vertexBuffer, indexBuffer, pipeline );
+        s_RendererAPI->SubmitFullscreenQuad( pipeline );
     }
 
     void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
@@ -90,6 +88,11 @@ namespace Desert::Graphic
     std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()
     {
         return s_RendererAPI->GetCompositeFramebuffer();
+    }
+
+    void Renderer::RenderImGui()
+    {
+        s_RendererAPI->RenderImGui();
     }
 
 } // namespace Desert::Graphic

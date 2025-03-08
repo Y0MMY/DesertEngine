@@ -28,6 +28,10 @@ namespace Desert::Core
         void OnUpdate();
         void OnEvent( Common::Event& e );
 
+        const auto GetDirection() const
+        {
+            return m_Direction;
+        }
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
@@ -39,7 +43,6 @@ namespace Desert::Core
         glm::vec3 GetForwardDirection() const;
 
         void UpdateCameraView();
-
     private:
         glm::mat4 m_ProjectionMatrix = glm::mat4( 1.0f );
 

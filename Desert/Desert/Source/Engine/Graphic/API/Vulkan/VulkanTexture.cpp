@@ -32,7 +32,7 @@ namespace Desert::Graphic::API::Vulkan
 
         imageSpec.Width  = static_cast<uint32_t>( width );
         imageSpec.Height = static_cast<uint32_t>( height );
-        imageSpec.Type   = Core::Formats::ImageType::Image2D;
+        imageSpec.Usage   = Core::Formats::ImageUsage::Image2D;
 
         m_Image2D = Image2D::Create( imageSpec );
         std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
@@ -63,7 +63,7 @@ namespace Desert::Graphic::API::Vulkan
 
         imageSpec.Width  = static_cast<uint32_t>( width );
         imageSpec.Height = static_cast<uint32_t>( height );
-        imageSpec.Type   = Core::Formats::ImageType::ImageCube;
+        imageSpec.Usage   = Core::Formats::ImageUsage::ImageCube;
 
         m_Image2D = Image2D::Create( imageSpec );
         std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();

@@ -26,10 +26,9 @@ namespace Desert::Graphic
         virtual Common::BoolResult PresentFinalImage()                                              = 0;
         virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) = 0;
         virtual Common::BoolResult EndRenderPass()                                                  = 0;
+        virtual void               RenderImGui()                                                    = 0;
 
-        virtual void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                        const std::shared_ptr<IndexBuffer>&  indexBuffer,
-                                        const std::shared_ptr<Pipeline>&     pipeline ) = 0; // TEMP
+        virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline ) = 0;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
                                         const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) = 0;

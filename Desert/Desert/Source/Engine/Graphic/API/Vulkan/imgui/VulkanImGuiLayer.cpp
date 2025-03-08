@@ -18,9 +18,6 @@
 
 namespace Desert::Graphic::API::Vulkan::ImGui
 {
-
-    static std::vector<VkCommandBuffer> s_ImGuiCommandBuffers;
-
     void VulkanImGui::OnAttach()
     {
         //  1: create descriptor pool for IMGUI
@@ -82,13 +79,6 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         // Clear font textures from cpu data
         ImGui_ImplVulkan_DestroyFontUploadObjects();
-
-        s_ImGuiCommandBuffers.push_back(
-             CommandBufferAllocator::GetInstance().RT_AllocateSecondCommandBufferGraphic().GetValue() );
-        s_ImGuiCommandBuffers.push_back(
-             CommandBufferAllocator::GetInstance().RT_AllocateSecondCommandBufferGraphic().GetValue() );
-        s_ImGuiCommandBuffers.push_back(
-             CommandBufferAllocator::GetInstance().RT_AllocateSecondCommandBufferGraphic().GetValue() );
     }
 
     void VulkanImGui::OnDetach()

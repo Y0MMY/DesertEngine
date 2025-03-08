@@ -48,11 +48,16 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual void Use( uint32_t slot = 0 ) const override;
 
+        virtual Core::Formats::ImageSpecification& GetImageSpecification() override
+        {
+            return m_ImageSpecification;
+        }
+
     private:
         VkImageCreateInfo GetImageCreateInfo( VkFormat imageFormat );
 
     private:
-        uint32_t m_MipLevels = 0u;
+        uint32_t                          m_MipLevels = 0u;
         Core::Formats::ImageSpecification m_ImageSpecification;
 
         bool m_Loaded = false;

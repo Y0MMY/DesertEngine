@@ -19,7 +19,13 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    static Core::Camera s_Camera;
+    struct VulkanRendererData
+    {
+        std::shared_ptr<VulkanVertexBuffer> QuadVertexBuffer;
+        std::shared_ptr<VulkanIndexBuffer>  QuadIndexBuffer;
+    };
+
+    static VulkanRendererData* s_Data = nullptr;
 
     Common::BoolResult VulkanRendererAPI::BeginFrame()
     {
@@ -70,76 +76,103 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::Init()
     {
-        m_UniformBuffer = UniformBuffer::Create( sizeof( ubo ), 0 );
+        s_Data = new VulkanRendererData;
 
-        m_texture = TextureCube::Create( "Arches_E_PineTree_Radiance.tga" );
+        struct QuadVertex
+        {
+            glm::vec3 Position;
+            glm::vec2 TexCoord;
+        };
+
+        std::array<QuadVertex, 4> data;
+        data[0].Position = { -1, 1, 0 };
+        data[1].TexCoord = { 0, 1 };
+
+        data[1].Position = { -1, -1, 0 };
+        data[1].TexCoord = { 0, 0 };
+
+        data[2].Position = { 1, 1, 0 };
+        data[2].TexCoord = { 1, 1 };
+
+        data[3].Position = { 1, -1, 0 };
+        data[3].TexCoord = { 1, 0 };
+
+        s_Data->QuadVertexBuffer = std::make_shared<VulkanVertexBuffer>( data.data(), 4 * sizeof( QuadVertex ) );
+        s_Data->QuadVertexBuffer->Invalidate();
+
+        uint32_t* indices = new uint32_t[6]{
+             0, 1, 2, 1, 2, 3,
+        };
+
+        s_Data->QuadIndexBuffer = std::make_shared<VulkanIndexBuffer>( indices, 6 * sizeof( unsigned int ) );
+        s_Data->QuadIndexBuffer->Invalidate();
+
+        delete[] indices;
+    }
+
+    std::array<VkClearValue, 2> CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
+    {
+        const auto                  clearColor = renderPass->GetSpecification().ClearColor;
+        std::array<VkClearValue, 2> clearValues{};
+        clearValues[0].color = { clearColor.Color.x, clearColor.Color.y, clearColor.Color.z, clearColor.Color.w };
+        clearValues[1].depthStencil = { clearColor.DepthStencil.x,
+                                        static_cast<uint32_t>( clearColor.DepthStencil.y ) };
+        return clearValues;
+    }
+
+    std::shared_ptr<VulkanFramebuffer> GetFramebuffer( const std::shared_ptr<RenderPass>& renderPass )
+    {
+        return sp_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
+             renderPass->GetSpecification().TargetFramebuffer );
+    }
+
+    std::shared_ptr<VulkanSwapChain> GetSwapChain()
+    {
+        return sp_cast<Graphic::API::Vulkan::VulkanContext>( Renderer::GetInstance().GetRendererContext() )
+             ->GetVulkanSwapChain();
+    }
+
+    VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::shared_ptr<VulkanSwapChain>&   swapChain,
+                                                     const std::shared_ptr<VulkanFramebuffer>& framebuffer,
+                                                     const std::array<VkClearValue, 2>&        clearValues )
+    {
+        VkRenderPassBeginInfo renderPassBeginInfo = {};
+        renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassBeginInfo.renderPass            = framebuffer->GetVKRenderPass();
+        renderPassBeginInfo.renderArea.offset     = { 0, 0 };
+        renderPassBeginInfo.renderArea.extent     = { framebuffer->GetFramebufferWidth(),
+                                                      framebuffer->GetFramebufferHeight() };
+        renderPassBeginInfo.clearValueCount       = static_cast<uint32_t>( clearValues.size() );
+        renderPassBeginInfo.pClearValues          = clearValues.data();
+        renderPassBeginInfo.framebuffer           = framebuffer->GetVKFramebuffer();
+        return renderPassBeginInfo;
     }
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
     {
-        uint32_t                    frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color        = { { 0.0f, 0.0f, 0.0f, 1.0f } };
-        clearValues[1].depthStencil = { 1.0f, 0 };
-
-        const auto framebuffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
-             renderPass->GetSpecification().TargetFramebuffer );
-
-        const auto& swapChain = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
-                                     Renderer::GetInstance().GetRendererContext() )
-                                     ->GetVulkanSwapChain();
+        auto        clearValues = CreateClearValues( renderPass );
+        auto        framebuffer = GetFramebuffer( renderPass );
+        const auto& swapChain   = GetSwapChain();
 
         m_CompositeFramebuffer = framebuffer;
 
-        VkRenderPassBeginInfo renderPassBeginInfo = {
-             .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-             .pNext           = NULL,
-             .renderPass      = swapChain->GetRenderPass(),
-             .renderArea      = { .offset = { .x = 0, .y = 0 },
-                                  .extent = { .width  = framebuffer->GetFramebufferWidth(),
-                                              .height = framebuffer->GetFramebufferHeight() } },
-             .clearValueCount = static_cast<uint32_t>( clearValues.size() ),
-             .pClearValues    = clearValues.data() };
-
-        renderPassBeginInfo.framebuffer = std::static_pointer_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
-                                               renderPass->GetSpecification().TargetFramebuffer )
-                                               ->GetFramebuffers()[frameIndex];
-
+        VkRenderPassBeginInfo renderPassBeginInfo =
+             CreateRenderPassBeginInfo( swapChain, framebuffer, clearValues );
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
 
-        uint32_t windowWidth  = EngineContext::GetInstance().GetCurrentWindowWidth();
-        uint32_t windowHeight = EngineContext::GetInstance().GetCurrentWindowHeight();
-
-        VkViewport viewport = { .x        = 0.0f,
-                                .y        = 0.0f,
-                                .width    = (float)windowWidth,
-                                .height   = (float)windowHeight,
-                                .minDepth = 0.0f,
-                                .maxDepth = 1.0f };
-
-        VkRect2D scissor = { .offset = { 0, 0 }, .extent = { windowWidth, windowHeight } };
-
-        vkCmdSetViewport( m_CurrentCommandBuffer, 0, 1, &viewport );
-        vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
+        SetViewportAndScissor();
 
         return Common::MakeSuccess( true );
     }
 
     Common::BoolResult VulkanRendererAPI::EndRenderPass()
     {
-#ifdef EBABLE_IMGUI
-        ImGui::VulkanImGuiRenderer::GetInstance().RenderImGui( m_CurrentCommandBuffer );
-#endif // EBABLE_IMGUI
         vkCmdEndRenderPass( m_CurrentCommandBuffer );
         return Common::MakeSuccess( true );
     }
 
-    void VulkanRendererAPI::TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                               const std::shared_ptr<IndexBuffer>&  indexBuffer,
-
-                                               const std::shared_ptr<Pipeline>& pipeline )
+    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline )
     {
-        UpdateDescriptorSets( pipeline );
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         vkCmdBindPipeline(
@@ -147,21 +180,11 @@ namespace Desert::Graphic::API::Vulkan
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipeline() );
 
         VkDeviceSize offsets[] = { 0 };
-        const auto   buffer =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanVertexBuffer>( vertexBuffer )->GetVulkanBuffer();
-        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &buffer, offsets );
+        const auto   vbuffer   = s_Data->QuadVertexBuffer->GetVulkanBuffer();
+        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &vbuffer, offsets );
 
-        const auto ibuffer =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanIndexBuffer>( indexBuffer )->GetVulkanBuffer();
-
+        const auto ibuffer = s_Data->QuadIndexBuffer->GetVulkanBuffer();
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
-
-        s_Camera.OnUpdate();
-
-        auto vp = s_Camera.GetProjectionMatrix() * s_Camera.GetViewMatrix();
-
-        ubo ubob{ s_Camera.GetProjectionMatrix(), s_Camera.GetViewMatrix() };
-        m_UniformBuffer->RT_SetData( &ubob, sizeof( ubo ) );
 
         const auto shader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
@@ -172,43 +195,7 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
                                  &shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 ), 0,
                                  nullptr );
-        vkCmdDrawIndexed( m_CurrentCommandBuffer, indexBuffer->GetCount(), 1, 0, 0, 0 );
-    }
-
-    void VulkanRendererAPI::UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline )
-    {
-        auto vkImage = std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_texture->GetImage2D() );
-        auto info    = vkImage->GetVulkanImageInfo();
-
-        VkDescriptorImageInfo imageInfo = {};
-        imageInfo.sampler               = info.Sampler;
-        imageInfo.imageView             = info.ImageView;
-        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-
-        VkDevice   device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        const auto shader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
-        VkWriteDescriptorSet writeDescriptorSet =
-             shader->GetWriteDescriptorSet( WriteDescriptorType::Uniform, 0, 0, frameIndex );
-        const auto pBufferInfo =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanUniformBuffer>( m_UniformBuffer )
-                  ->GetDescriptorBufferInfo();
-        writeDescriptorSet.pBufferInfo = &pBufferInfo;
-
-        VkWriteDescriptorSet writeDescriptorSetImage = {};
-        writeDescriptorSetImage.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writeDescriptorSetImage.dstSet =
-             shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-        writeDescriptorSetImage.dstBinding      = 1;
-        writeDescriptorSetImage.dstArrayElement = 0;
-        writeDescriptorSetImage.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writeDescriptorSetImage.descriptorCount = 1;
-        writeDescriptorSetImage.pImageInfo      = &imageInfo;
-
-        vkUpdateDescriptorSets( device, 1, &writeDescriptorSet, 0, nullptr );
-        vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );
+        vkCmdDrawIndexed( m_CurrentCommandBuffer, s_Data->QuadIndexBuffer->GetCount(), 1, 0, 0, 0 );
     }
 
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height,
@@ -227,9 +214,35 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
+    void VulkanRendererAPI::SetViewportAndScissor()
+    {
+        uint32_t windowWidth  = EngineContext::GetInstance().GetCurrentWindowWidth();
+        uint32_t windowHeight = EngineContext::GetInstance().GetCurrentWindowHeight();
+
+        VkViewport viewport = {};
+        viewport.x          = 0.0f;
+        viewport.y          = 0.0f;
+        viewport.width      = static_cast<float>( windowWidth );
+        viewport.height     = static_cast<float>( windowHeight );
+        viewport.minDepth   = 0.0f;
+        viewport.maxDepth   = 1.0f;
+
+        VkRect2D scissor = {};
+        scissor.offset   = { 0, 0 };
+        scissor.extent   = { windowWidth, windowHeight };
+
+        vkCmdSetViewport( m_CurrentCommandBuffer, 0, 1, &viewport );
+        vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
+    }
+
     std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
     {
         return m_CompositeFramebuffer;
+    }
+
+    void VulkanRendererAPI::RenderImGui()
+    {
+        ImGui::VulkanImGuiRenderer::GetInstance().RenderImGui( m_CurrentCommandBuffer );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

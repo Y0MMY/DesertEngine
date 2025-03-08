@@ -2,6 +2,7 @@
 
 #include <Engine/Core/Formats/ImageFormat.hpp>
 #include <Engine/Graphic/RendererTypes.hpp>
+#include <Engine/Graphic/Image.hpp>
 
 namespace Desert::Graphic
 {
@@ -37,8 +38,8 @@ namespace Desert::Graphic
         virtual uint32_t GetFramebufferWidth() const  = 0;
         virtual uint32_t GetFramebufferHeight() const = 0;
 
-        /*virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const = 0;
-        virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const                     = 0;*/
+        virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const = 0;
+        virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const                     = 0;
 
         static std::shared_ptr<Framebuffer> Create( const FramebufferSpecification& spec );
     };

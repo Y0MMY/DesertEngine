@@ -8,7 +8,7 @@ IncludeDir = {}
 IncludeDir["entt"] = "%{wks.location}/ThirdParty/entt/include"
 
 LibraryDir = {
-    -- assimp_D = assimpBase .. "/Debug/assimp-vc142-mtd.lib",
+    assimp_D = assimpBase .. "/Debug/assimp-vc142-mtd.lib",
     shaderc_Debug = shadercBase .. "/shadercd.lib",
     shaderc_shared_Debug = shadercBase .. "/shaderc_sharedd.lib",
     shaderc_shared = shadercBase .. "/shaderc_shared.lib",

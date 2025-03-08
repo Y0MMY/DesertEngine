@@ -34,7 +34,7 @@ project "Desert"
         "%{wks.location}/ThirdParty/GLFW/include",
         "%{wks.location}/ThirdParty/VulkanSDK/",
         "%{wks.location}/ThirdParty/stb/include/",
-
+        "%{wks.location}/ThirdParty/assimp/include",
 
         "%{wks.location}/ThirdParty/VulkanSDK/shaderc/Include",
         "%{wks.location}/ThirdParty/VulkanSDK/spirv_cross/Include",

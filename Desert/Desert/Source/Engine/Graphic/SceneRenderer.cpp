@@ -1,6 +1,9 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.h>
 
@@ -8,85 +11,78 @@
 
 namespace Desert::Graphic
 {
+    static struct ubo
+    {
+        glm::mat4 proj;
+        glm::mat4 view;
+    };
+
+    static std::shared_ptr<API::Vulkan::VulkanUniformBuffer> s_Uniformbuffer;
+
+    void SceneRenderer::UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline )
+    {
+        auto vkImage = std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>(
+             m_SceneInfo.ActiveScene->GetEnvironment() );
+
+        auto info = vkImage->GetVulkanImageInfo();
+
+        VkDescriptorImageInfo imageInfo = {};
+        imageInfo.sampler               = info.Sampler;
+        imageInfo.imageView             = info.ImageView;
+        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        VkDevice   device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        const auto shader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+
+        VkWriteDescriptorSet writeDescriptorSet =
+             shader->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Uniform, 0, 0, frameIndex );
+
+        const auto pBufferInfo         = s_Uniformbuffer->GetDescriptorBufferInfo();
+        writeDescriptorSet.pBufferInfo = &pBufferInfo;
+
+        VkWriteDescriptorSet writeDescriptorSetImage = {};
+        writeDescriptorSetImage.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSetImage.dstSet =
+             shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+        writeDescriptorSetImage.dstBinding      = 1;
+        writeDescriptorSetImage.dstArrayElement = 0;
+        writeDescriptorSetImage.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writeDescriptorSetImage.descriptorCount = 1;
+        writeDescriptorSetImage.pImageInfo      = &imageInfo;
+
+        vkUpdateDescriptorSets( device, 1, &writeDescriptorSet, 0, nullptr );
+        vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );
+
+        auto vp = m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
+
+        ubo ubob{ m_SceneInfo.ActiveCamera->GetProjectionMatrix(), m_SceneInfo.ActiveCamera->GetViewMatrix() };
+        s_Uniformbuffer->RT_SetData( &ubob, sizeof( ubo ) );
+    }
+
     void SceneRenderer::Init()
     {
         REGISTER_EVENT( this, OnEvent );
 
-        /* RenderPassSpecification renderPassSpec;
-         renderPassSpec.DebugName         = "tes6t";
-
-         m_TESTFramebuffer = Graphic::Framebuffer::Create( {} );
-         m_TESTFramebuffer->Resize( 1, 1 );
-
-         m_TESTShader = Graphic::Shader::Create( "test.glsl" );
-         Graphic::PipelineSpecification spec;
-
-         renderPassSpec.TargetFramebuffer = m_TESTFramebuffer;
-         m_TESTRenderPass = Graphic::RenderPass::Create( renderPassSpec );
-
-         float* vertices = new float[8]{
-              -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,
-         };
-
-         m_TESTVertexbuffer = Graphic::VertexBuffer::Create( vertices, 8 * 4 );
-         m_TESTVertexbuffer->Invalidate();
-         spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" } };
-
-         spec.DebugName   = "test temp";
-         spec.Framebuffer = m_TESTFramebuffer;
-         spec.Shader      = m_TESTShader;
-         m_TESTPipeline   = Graphic::Pipeline::Create( spec );
-         m_TESTPipeline->Invalidate();
- */
-
-        //
-
-        // m_TESTCompShader = Graphic::Shader::Create( "comute_test.glsl" );
-
-        //
-
         RenderPassSpecification renderPassSpecSkybox;
         renderPassSpecSkybox.DebugName = "Skybox";
 
-        m_TESTFramebufferSkybox = Graphic::Framebuffer::Create( {} );
+        FramebufferSpecification TESTFramebufferFramebufferSpec;
+        TESTFramebufferFramebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
+        m_TESTFramebufferSkybox = Graphic::Framebuffer::Create( TESTFramebufferFramebufferSpec );
 
         uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
         uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
 
-        m_TESTFramebufferSkybox->Resize(width, height);
+        m_TESTFramebufferSkybox->Resize( width, height );
 
         m_TESTShaderSkybox = Graphic::Shader::Create( "skybox.glsl" );
         Graphic::PipelineSpecification spec;
 
         renderPassSpecSkybox.TargetFramebuffer = m_TESTFramebufferSkybox;
         m_TESTRenderPassSkybox                 = Graphic::RenderPass::Create( renderPassSpecSkybox );
-
-        struct QuadVertex
-        {
-            glm::vec3 Position;
-            glm::vec2 TexCoord;
-        };
-
-        std::array<QuadVertex, 4> data;
-        data[0].Position = { -1, 1, 0 };
-        data[1].TexCoord = { 0, 1 };
-
-        data[1].Position = { -1, -1, 0 };
-        data[1].TexCoord = { 0, 0 };
-
-        data[2].Position = { 1, 1, 0 };
-        data[2].TexCoord = { 1, 1 };
-
-        data[3].Position = { 1, -1, 0 };
-        data[3].TexCoord = { 1, 0 };
-
-        m_TESTVertexbufferSkybox = Graphic::VertexBuffer::Create( data.data(), 4 * sizeof( QuadVertex ) );
-        m_TESTVertexbufferSkybox->Invalidate();
-        uint32_t* indices = new uint32_t[6]{
-             0, 1, 2, 1, 2, 3,
-        };
-        m_TESTIndexbufferSkybox = Graphic::IndexBuffer::Create( indices, 6 * sizeof( unsigned int ) );
-        m_TESTIndexbufferSkybox->Invalidate();
 
         spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" },
                         { Graphic::ShaderDataType::Float2, "a_TexCoord" } };
@@ -97,23 +93,42 @@ namespace Desert::Graphic
         m_TESTPipelineSkybox = Graphic::Pipeline::Create( spec );
         m_TESTPipelineSkybox->Invalidate();
 
-        // m_TESTTextureSkybox = TextureCube::Create("Arches_E_PineTree_Radiance.tga");
+        // Composite
+        {
+            FramebufferSpecification compFramebufferSpec;
+            compFramebufferSpec.Attachments          = { Core::Formats::ImageFormat::RGBA8F };
+            std::shared_ptr<Framebuffer> framebuffer = Framebuffer::Create( compFramebufferSpec );
+
+            PipelineSpecification pipelineSpecification;
+            pipelineSpecification.Layout = { { ShaderDataType::Float3, "a_Position" },
+                                             { ShaderDataType::Float2, "a_TexCoord" } };
+
+            pipelineSpecification.Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
+
+            RenderPassSpecification renderPassSpec;
+            renderPassSpec.TargetFramebuffer = framebuffer;
+            renderPassSpec.DebugName         = "SceneComposite";
+        }
+
+        s_Uniformbuffer = std::make_shared<API::Vulkan::VulkanUniformBuffer>( sizeof( ubo ), 0 );
     }
 
-    void SceneRenderer::BeginFrame()
+    void SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>& scene, const Core::Camera& camera )
     {
+        m_SceneInfo.ActiveScene  = scene;
+        m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
+
         auto& renderer = Renderer::GetInstance();
 
         renderer.BeginFrame();
-        renderer.BeginRenderPass( m_TESTRenderPassSkybox );
-        renderer.TEST_DrawTriangle( m_TESTVertexbufferSkybox, m_TESTIndexbufferSkybox, m_TESTPipelineSkybox );
+        //  renderer.RenderImGui();
     }
 
-    void SceneRenderer::EndFrame()
+    void SceneRenderer::EndScene()
     {
         auto& renderer = Renderer::GetInstance();
 
-        renderer.EndRenderPass();
+        CompositeRenderPass();
         renderer.EndFrame();
     }
 
@@ -131,6 +146,18 @@ namespace Desert::Graphic
         framebuffers.push_back( m_TESTFramebufferSkybox );
         renderer.ResizeWindowEvent( e.width, e.height, framebuffers );
         return false;
+    }
+
+    void SceneRenderer::CompositeRenderPass()
+    {
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.BeginFrame();
+        renderer.BeginRenderPass( m_TESTRenderPassSkybox );
+        /*a temporary solution until we add a material system.*/
+        UpdateDescriptorSets( m_TESTPipelineSkybox );
+        renderer.SubmitFullscreenQuad( m_TESTPipelineSkybox );
+        renderer.EndRenderPass();
     }
 
 } // namespace Desert::Graphic

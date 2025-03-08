@@ -17,13 +17,13 @@ namespace Common
     template <typename T, typename... Args>
     Result<T> MakeFormattedErrorWithCode( T&& errorCode, std::string_view format, Args&&... args );
 
-    template <typename T>
+    template <typename T = bool>
     Result<T> MakeError( const std::string& message );
 
     template <typename T, typename... Args>
     Result<T> MakeFormattedError( std::string_view format, Args&&... args );
 
-    template <typename T>
+    template <typename T = bool>
     auto MakeSuccess( const T& value );
 
     using BoolResult = Result<bool>;

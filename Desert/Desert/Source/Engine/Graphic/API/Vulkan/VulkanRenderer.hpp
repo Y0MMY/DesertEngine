@@ -25,11 +25,9 @@ namespace Desert::Graphic::API::Vulkan
         virtual [[nodiscard]] Common::BoolResult
         BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
         virtual [[nodiscard]] Common::BoolResult EndRenderPass() override;
+        virtual void                             RenderImGui() override;
 
-        virtual void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                        const std::shared_ptr<IndexBuffer>&  indexBuffer,
-
-                                        const std::shared_ptr<Pipeline>& pipeline ) override; // TEMP
+        virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline ) override;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
                                         const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) override;
@@ -38,13 +36,12 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
+        void SetViewportAndScissor();
 
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
 
-        std::shared_ptr<UniformBuffer> m_UniformBuffer;
         std::shared_ptr<Framebuffer>   m_CompositeFramebuffer;
-        std::shared_ptr<TextureCube>   m_texture;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

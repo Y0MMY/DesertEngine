@@ -11,15 +11,15 @@ namespace Desert::Graphic
     class Texture
     {
     public:
-        virtual Core::Formats::ImageType GetType() const = 0;
+        virtual Core::Formats::ImageUsage GetType() const = 0;
     };
 
     class Texture2D : public Texture
     {
     public:
-        virtual Core::Formats::ImageType GetType() const override
+        virtual Core::Formats::ImageUsage GetType() const override
         {
-            return Core::Formats::ImageType::Image2D;
+            return Core::Formats::ImageUsage::Image2D;
         }
         virtual const std::shared_ptr<Image2D>& GetImage2D() const = 0;
 
@@ -29,9 +29,9 @@ namespace Desert::Graphic
     class TextureCube : public Texture
     {
     public:
-        virtual Core::Formats::ImageType GetType() const override
+        virtual Core::Formats::ImageUsage GetType() const override
         {
-            return Core::Formats::ImageType::Image2D;
+            return Core::Formats::ImageUsage::Image2D;
         }
         virtual const std::shared_ptr<Image2D>& GetImage2D() const = 0;
 

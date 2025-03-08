@@ -3,10 +3,18 @@
 
 #include <Engine/Graphic/Framebuffer.hpp>
 
+#include <glm/glm.hpp>
+
 namespace Desert::Graphic
 {
     struct RenderPassSpecification
     {
+        struct
+        {
+            glm::vec4 Color        = { 0.0f, 0.0f, 0.0f, 1.0f }; 
+            glm::vec2 DepthStencil = { 1.0f, 0 }; // X = Depth, Y = Stencil
+        } ClearColor;
+
         std::shared_ptr<Framebuffer> TargetFramebuffer;
         std::string                  DebugName;
     };

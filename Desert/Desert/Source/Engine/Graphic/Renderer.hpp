@@ -25,10 +25,9 @@ namespace Desert::Graphic
         void EndFrame();
         void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
         void EndRenderPass();
+        void RenderImGui();
 
-        void TEST_DrawTriangle( const std::shared_ptr<VertexBuffer>& vertexBuffer,
-                                const std::shared_ptr<IndexBuffer>&  indexBuffer,
-                                const std::shared_ptr<Pipeline>&     pipeline );
+        void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline );
 
         void PresentFinalImage();
 
@@ -36,7 +35,6 @@ namespace Desert::Graphic
                                 const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
-
 
         uint32_t GetCurrentFrameIndex();
 
