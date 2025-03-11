@@ -15,7 +15,7 @@ namespace Desert::Graphic
     public:
         void Init();
 
-        void BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene, const Core::Camera& camera);
+        void BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene, const Core::Camera& camera );
         void EndScene();
 
         void OnEvent( Common::Event& e );
@@ -26,6 +26,7 @@ namespace Desert::Graphic
 
         /*a temporary solution until we add a material system.*/
         void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
+        void UpdateDescriptorSets2( void* dst, void* imageview, void* sampler );
 
     private:
         bool OnWindowResize( Common::EventWindowResize& e );
@@ -34,7 +35,7 @@ namespace Desert::Graphic
         struct
         {
             std::shared_ptr<Core::Scene> ActiveScene;
-            Core::Camera* ActiveCamera;
+            Core::Camera*                ActiveCamera;
         } m_SceneInfo;
 
     private:
@@ -43,7 +44,9 @@ namespace Desert::Graphic
         std::shared_ptr<Graphic::Shader>      m_TESTShaderSkybox;
         std::shared_ptr<Graphic::RenderPass>  m_TESTRenderPassSkybox;
 
-        std::shared_ptr<Graphic::Texture> m_TESTTextureSkybox;
-
+        std::shared_ptr<Graphic::Shader>      m_ShaderComposite;
+        std::shared_ptr<Graphic::Framebuffer> m_FramebufferComposite;
+        std::shared_ptr<Graphic::RenderPass>  m_RenderPassComposite;
+        std::shared_ptr<Graphic::Pipeline>    m_PipelineComposite;
     };
 } // namespace Desert::Graphic

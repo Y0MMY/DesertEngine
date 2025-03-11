@@ -59,6 +59,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_VkRenderPass;
         }
 
+        const auto GetVKFramebuffers() const
+        {
+            return m_SwapChainFramebuffers;
+        }
+
         void OnResize( uint32_t width, uint32_t height );
 
         void Release();

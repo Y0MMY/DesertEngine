@@ -226,7 +226,7 @@ namespace Desert::Graphic::API::Vulkan
         m_SwapChainFramebuffers.resize( m_SwapChainImages.ImagesView.size() );
         for ( uint32_t i = 0; i < m_SwapChainFramebuffers.size(); i++ )
         {
-            std::array<VkImageView, 2> attachments = { GetSwapChainVKImagesView()[i], GetDepthImages().ImageView };
+            std::array<VkImageView, 1> attachments = { GetSwapChainVKImagesView()[i] };
 
             VkFramebufferCreateInfo fbCreateInfo = {};
             fbCreateInfo.sType                   = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -253,7 +253,8 @@ namespace Desert::Graphic::API::Vulkan
         VkFormat depthFormat = m_LogicalDevice->GetPhysicalDevice()->GetDepthFormat();
 
         // Render Pass
-        std::array<VkAttachmentDescription, 2> attachments = {};
+        std::array<VkAttachmentDescription, 1> attachments = {};
+
         // Color attachment
         attachments[0].format         = m_ColorFormat;
         attachments[0].samples        = VK_SAMPLE_COUNT_1_BIT;
@@ -263,34 +264,19 @@ namespace Desert::Graphic::API::Vulkan
         attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attachments[0].initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
         attachments[0].finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        // Depth attachment
-        attachments[1].format         = depthFormat;
-        attachments[1].samples        = VK_SAMPLE_COUNT_1_BIT;
-        attachments[1].loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attachments[1].storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-        attachments[1].stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        attachments[1].initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-        attachments[1].finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
         VkAttachmentReference colorReference = {};
         colorReference.attachment            = 0;
         colorReference.layout                = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        VkAttachmentReference depthReference = {};
-        depthReference.attachment            = 1;
-        depthReference.layout                = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
         VkSubpassDescription subpassDescription = {};
         subpassDescription.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpassDescription.colorAttachmentCount = 1;
         subpassDescription.pColorAttachments    = &colorReference;
-        // subpassDescription.pDepthStencilAttachment = &depthReference;
-        subpassDescription.inputAttachmentCount    = 0;
-        subpassDescription.pInputAttachments       = nullptr;
-        subpassDescription.preserveAttachmentCount = 0;
-        subpassDescription.pPreserveAttachments    = nullptr;
-        subpassDescription.pResolveAttachments     = nullptr;
+        subpassDescription.inputAttachmentCount = 0;
+        subpassDescription.pInputAttachments    = nullptr;
+        subpassDescription.pPreserveAttachments = nullptr;
+        subpassDescription.pResolveAttachments  = nullptr;
 
         VkSubpassDependency dependency = {};
         dependency.srcSubpass          = VK_SUBPASS_EXTERNAL;
@@ -302,12 +288,12 @@ namespace Desert::Graphic::API::Vulkan
 
         VkRenderPassCreateInfo renderPassInfo = {};
         renderPassInfo.sType                  = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount        = static_cast<uint32_t>( attachments.size() );
-        renderPassInfo.pAttachments           = attachments.data();
-        renderPassInfo.subpassCount           = 1;
-        renderPassInfo.pSubpasses             = &subpassDescription;
-        renderPassInfo.dependencyCount        = 1;
-        renderPassInfo.pDependencies          = &dependency;
+        renderPassInfo.attachmentCount = 1; 
+        renderPassInfo.pAttachments    = attachments.data();
+        renderPassInfo.subpassCount    = 1;
+        renderPassInfo.pSubpasses      = &subpassDescription;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies   = &dependency;
 
         VK_RETURN_RESULT_IF_FALSE( vkCreateRenderPass( m_LogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo,
                                                        nullptr, &m_VkRenderPass ) );

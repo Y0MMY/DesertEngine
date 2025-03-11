@@ -260,6 +260,7 @@ namespace Desert::Graphic::API::Vulkan
         if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::Attachment )
         {
             auto imageAllocation = Utils::CreateImageBuffer( allocator, imageCreateInfo, m_VulkanImageInfo.Image );
+
             if ( !imageAllocation.IsSuccess() )
             {
                 return Common::MakeError<bool>( imageAllocation.GetError() );
@@ -405,7 +406,8 @@ namespace Desert::Graphic::API::Vulkan
              .samples     = VK_SAMPLE_COUNT_1_BIT,
              .tiling      = VK_IMAGE_TILING_OPTIMAL,
              .usage       = usage,
-             .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
+             .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
+             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
     }
 
     VkFormat GetImageVulkanFormat( const Core::Formats::ImageFormat& imageFormat )
@@ -414,6 +416,8 @@ namespace Desert::Graphic::API::Vulkan
         {
             case Core::Formats::ImageFormat::RGBA8F:
                 return VK_FORMAT_R8G8B8A8_UNORM;
+            case Core::Formats::ImageFormat::BGRA8F:
+                return VK_FORMAT_B8G8R8A8_UNORM;
 
                 // Add more formats if needed
             default:

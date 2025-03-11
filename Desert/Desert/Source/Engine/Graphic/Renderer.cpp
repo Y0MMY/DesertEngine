@@ -74,6 +74,11 @@ namespace Desert::Graphic
         s_RendererAPI->BeginRenderPass( renderPass );
     }
 
+    void Renderer::BeginSwapChainRenderPass()
+    {
+        s_RendererAPI->BeginSwapChainRenderPass( );
+    }
+
     void Renderer::EndRenderPass()
     {
         s_RendererAPI->EndRenderPass();

@@ -24,6 +24,7 @@ namespace Desert::Graphic
         void BeginFrame();
         void EndFrame();
         void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
+        void BeginSwapChainRenderPass();
         void EndRenderPass();
         void RenderImGui();
 

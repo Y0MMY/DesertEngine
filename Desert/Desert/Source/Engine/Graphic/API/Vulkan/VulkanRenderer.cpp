@@ -81,21 +81,21 @@ namespace Desert::Graphic::API::Vulkan
         struct QuadVertex
         {
             glm::vec3 Position;
-            glm::vec2 TexCoord;
+            //glm::vec2 TexCoord;
         };
 
         std::array<QuadVertex, 4> data;
         data[0].Position = { -1, 1, 0 };
-        data[1].TexCoord = { 0, 1 };
+        //data[1].TexCoord = { 0, 1 };
 
         data[1].Position = { -1, -1, 0 };
-        data[1].TexCoord = { 0, 0 };
+        //data[1].TexCoord = { 0, 0 };
 
         data[2].Position = { 1, 1, 0 };
-        data[2].TexCoord = { 1, 1 };
+        //data[2].TexCoord = { 1, 1 };
 
         data[3].Position = { 1, -1, 0 };
-        data[3].TexCoord = { 1, 0 };
+        //data[3].TexCoord = { 1, 0 };
 
         s_Data->QuadVertexBuffer = std::make_shared<VulkanVertexBuffer>( data.data(), 4 * sizeof( QuadVertex ) );
         s_Data->QuadVertexBuffer->Invalidate();
@@ -107,7 +107,7 @@ namespace Desert::Graphic::API::Vulkan
         s_Data->QuadIndexBuffer = std::make_shared<VulkanIndexBuffer>( indices, 6 * sizeof( unsigned int ) );
         s_Data->QuadIndexBuffer->Invalidate();
 
-        delete[] indices;
+        //delete[] indices;
     }
 
     std::array<VkClearValue, 2> CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
@@ -148,6 +148,21 @@ namespace Desert::Graphic::API::Vulkan
         return renderPassBeginInfo;
     }
 
+    VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::shared_ptr<VulkanSwapChain>& swapChain,
+                                                     const VkFramebuffer                     framebuffer,
+                                                     const std::array<VkClearValue, 2>&      clearValues )
+    {
+        VkRenderPassBeginInfo renderPassBeginInfo = {};
+        renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassBeginInfo.renderPass            = swapChain->GetRenderPass();
+        renderPassBeginInfo.renderArea.offset     = { 0, 0 };
+        renderPassBeginInfo.renderArea.extent     = { 1920, 780 };
+        renderPassBeginInfo.clearValueCount       = static_cast<uint32_t>( clearValues.size() );
+        renderPassBeginInfo.pClearValues          = clearValues.data();
+        renderPassBeginInfo.framebuffer           = framebuffer;
+        return renderPassBeginInfo;
+    }
+
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
     {
         auto        clearValues = CreateClearValues( renderPass );
@@ -156,11 +171,27 @@ namespace Desert::Graphic::API::Vulkan
 
         m_CompositeFramebuffer = framebuffer;
 
+        SetViewportAndScissor();
+
         VkRenderPassBeginInfo renderPassBeginInfo =
              CreateRenderPassBeginInfo( swapChain, framebuffer, clearValues );
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
 
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResult VulkanRendererAPI::BeginSwapChainRenderPass()
+    {
+        uint32_t                    frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        std::array<VkClearValue, 2> clearValues{};
+        const auto&                 swapChain   = GetSwapChain();
+        const auto                  framebuffer = swapChain->GetVKFramebuffers();
+
         SetViewportAndScissor();
+
+        VkRenderPassBeginInfo renderPassBeginInfo =
+             CreateRenderPassBeginInfo( swapChain, framebuffer[frameIndex], clearValues );
+        vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
 
         return Common::MakeSuccess( true );
     }
@@ -175,6 +206,15 @@ namespace Desert::Graphic::API::Vulkan
     {
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
+        const auto shader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+        const auto& desSet = shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+
+        VkPipelineLayout layout =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipelineLayout();
+        vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &desSet, 0,
+                                 nullptr );
+
         vkCmdBindPipeline(
              m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipeline() );
@@ -186,15 +226,8 @@ namespace Desert::Graphic::API::Vulkan
         const auto ibuffer = s_Data->QuadIndexBuffer->GetVulkanBuffer();
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
 
-        const auto shader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        VkDevice         device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        VkPipelineLayout layout =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipelineLayout();
-        vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
-                                 &shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 ), 0,
-                                 nullptr );
         vkCmdDrawIndexed( m_CurrentCommandBuffer, s_Data->QuadIndexBuffer->GetCount(), 1, 0, 0, 0 );
     }
 

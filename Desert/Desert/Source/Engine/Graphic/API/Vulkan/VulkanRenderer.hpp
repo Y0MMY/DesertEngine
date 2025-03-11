@@ -24,6 +24,8 @@ namespace Desert::Graphic::API::Vulkan
         virtual [[nodiscard]] Common::BoolResult PresentFinalImage() override;
         virtual [[nodiscard]] Common::BoolResult
         BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
+        virtual Common::BoolResult
+        BeginSwapChainRenderPass() override;
         virtual [[nodiscard]] Common::BoolResult EndRenderPass() override;
         virtual void                             RenderImGui() override;
 
@@ -41,7 +43,7 @@ namespace Desert::Graphic::API::Vulkan
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
 
-        std::shared_ptr<Framebuffer>   m_CompositeFramebuffer;
+        std::shared_ptr<Framebuffer> m_CompositeFramebuffer;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -13,6 +13,7 @@ namespace Desert::Core::Formats
     enum class ImageFormat
     {
         RGBA8F,
+        BGRA8F,
 
         DEPTH32F
     };

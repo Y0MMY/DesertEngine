@@ -21,12 +21,13 @@ namespace Desert::Graphic
     public:
         virtual void Init() = 0;
 
-        virtual Common::BoolResult BeginFrame()                                                     = 0;
-        virtual Common::BoolResult EndFrame()                                                       = 0;
-        virtual Common::BoolResult PresentFinalImage()                                              = 0;
-        virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) = 0;
-        virtual Common::BoolResult EndRenderPass()                                                  = 0;
-        virtual void               RenderImGui()                                                    = 0;
+        virtual Common::BoolResult BeginFrame()                                                              = 0;
+        virtual Common::BoolResult EndFrame()                                                                = 0;
+        virtual Common::BoolResult PresentFinalImage()                                                       = 0;
+        virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )          = 0;
+        virtual Common::BoolResult BeginSwapChainRenderPass( ) = 0;
+        virtual Common::BoolResult EndRenderPass()                                                           = 0;
+        virtual void               RenderImGui()                                                             = 0;
 
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline ) = 0;
 

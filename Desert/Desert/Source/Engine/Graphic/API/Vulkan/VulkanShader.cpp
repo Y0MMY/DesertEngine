@@ -77,6 +77,15 @@ namespace Desert::Graphic::API::Vulkan
                     poolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                     poolSize.descriptorCount = uniformBuffers.size() * sets;
                 }
+
+                const auto& imageSamplers = shaderDescriptorSets.at( set ).ImageSamplers;
+                if ( !imageSamplers.empty() )
+                {
+                    auto& poolSize = poolSizes.emplace_back();
+
+                    poolSize.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    poolSize.descriptorCount = imageSamplers.size() * sets;
+                }
             }
 
             return poolSizes;

@@ -21,7 +21,7 @@ namespace Desert::Graphic
     {
         uint32_t                           Samples = 2; // Multisampling
         FramebufferAttachmentSpecification Attachments;
-
+        std::string DebugName;
         bool NoResizeble = false;
     };
 

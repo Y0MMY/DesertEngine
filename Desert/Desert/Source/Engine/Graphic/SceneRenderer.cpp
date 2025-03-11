@@ -11,6 +11,7 @@
 
 namespace Desert::Graphic
 {
+
     static struct ubo
     {
         glm::mat4 proj;
@@ -62,52 +63,88 @@ namespace Desert::Graphic
         s_Uniformbuffer->RT_SetData( &ubob, sizeof( ubo ) );
     }
 
+    void SceneRenderer::UpdateDescriptorSets2( void* dst, void* imageview, void* sampler )
+    {
+
+        VkDescriptorImageInfo imageInfo = {};
+        imageInfo.sampler               = (VkSampler)sampler;
+        imageInfo.imageView             = (VkImageView)imageview;
+        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        VkDevice device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        VkWriteDescriptorSet writeDescriptorSetImage = {};
+        writeDescriptorSetImage.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSetImage.dstSet               = (VkDescriptorSet)dst;
+        writeDescriptorSetImage.dstBinding           = 2;
+        writeDescriptorSetImage.dstArrayElement      = 0;
+        writeDescriptorSetImage.descriptorType       = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writeDescriptorSetImage.descriptorCount      = 1;
+        writeDescriptorSetImage.pImageInfo           = &imageInfo;
+
+        vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );
+    }
+
     void SceneRenderer::Init()
     {
         REGISTER_EVENT( this, OnEvent );
 
-        RenderPassSpecification renderPassSpecSkybox;
-        renderPassSpecSkybox.DebugName = "Skybox";
-
-        FramebufferSpecification TESTFramebufferFramebufferSpec;
-        TESTFramebufferFramebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
-        m_TESTFramebufferSkybox = Graphic::Framebuffer::Create( TESTFramebufferFramebufferSpec );
-
         uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
         uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
 
-        m_TESTFramebufferSkybox->Resize( width, height );
+        {
+            RenderPassSpecification renderPassSpecSkybox;
+            renderPassSpecSkybox.DebugName = "Skybox";
 
-        m_TESTShaderSkybox = Graphic::Shader::Create( "skybox.glsl" );
-        Graphic::PipelineSpecification spec;
+            FramebufferSpecification TESTFramebufferFramebufferSpec;
+            TESTFramebufferFramebufferSpec.DebugName = "Skybox";
+            TESTFramebufferFramebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
+            m_TESTFramebufferSkybox = Graphic::Framebuffer::Create( TESTFramebufferFramebufferSpec );
 
-        renderPassSpecSkybox.TargetFramebuffer = m_TESTFramebufferSkybox;
-        m_TESTRenderPassSkybox                 = Graphic::RenderPass::Create( renderPassSpecSkybox );
+            m_TESTFramebufferSkybox->Resize( width, height );
 
-        spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" },
-                        { Graphic::ShaderDataType::Float2, "a_TexCoord" } };
+            m_TESTShaderSkybox = Graphic::Shader::Create( "skybox.glsl" );
+            Graphic::PipelineSpecification spec;
 
-        spec.DebugName       = "skybox";
-        spec.Framebuffer     = m_TESTFramebufferSkybox;
-        spec.Shader          = m_TESTShaderSkybox;
-        m_TESTPipelineSkybox = Graphic::Pipeline::Create( spec );
-        m_TESTPipelineSkybox->Invalidate();
+            renderPassSpecSkybox.TargetFramebuffer = m_TESTFramebufferSkybox;
+            m_TESTRenderPassSkybox                 = Graphic::RenderPass::Create( renderPassSpecSkybox );
+
+            spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" }};
+
+            spec.DebugName       = "skybox";
+            spec.Framebuffer     = m_TESTFramebufferSkybox;
+            spec.Shader          = m_TESTShaderSkybox;
+            m_TESTPipelineSkybox = Graphic::Pipeline::Create( spec );
+            m_TESTPipelineSkybox->Invalidate();
+        }
 
         // Composite
         {
-            FramebufferSpecification compFramebufferSpec;
-            compFramebufferSpec.Attachments          = { Core::Formats::ImageFormat::RGBA8F };
-            std::shared_ptr<Framebuffer> framebuffer = Framebuffer::Create( compFramebufferSpec );
-
-            PipelineSpecification pipelineSpecification;
-            pipelineSpecification.Layout = { { ShaderDataType::Float3, "a_Position" },
-                                             { ShaderDataType::Float2, "a_TexCoord" } };
-
-            pipelineSpecification.Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
-
             RenderPassSpecification renderPassSpec;
-            renderPassSpec.TargetFramebuffer = framebuffer;
-            renderPassSpec.DebugName         = "SceneComposite";
+            renderPassSpec.DebugName = "SceneComposite";
+
+            FramebufferSpecification framebufferSpec;
+            framebufferSpec.DebugName = "SceneComposite";
+            framebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::BGRA8F );
+            m_FramebufferComposite = Graphic::Framebuffer::Create( framebufferSpec );
+
+            m_FramebufferComposite->Resize( width, height );
+
+            m_ShaderComposite = Graphic::Shader::Create( "SceneComposite.glsl" );
+            Graphic::PipelineSpecification spec;
+
+            renderPassSpec.TargetFramebuffer = m_FramebufferComposite;
+            m_RenderPassComposite            = Graphic::RenderPass::Create( renderPassSpec );
+
+            spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+
+            spec.DebugName      = "SceneComposite";
+            spec.Framebuffer    = m_FramebufferComposite;
+            spec.Shader         = m_ShaderComposite;
+            m_PipelineComposite = Graphic::Pipeline::Create( spec );
+            m_PipelineComposite->Invalidate();
         }
 
         s_Uniformbuffer = std::make_shared<API::Vulkan::VulkanUniformBuffer>( sizeof( ubo ), 0 );
@@ -121,6 +158,7 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
 
         renderer.BeginFrame();
+
         //  renderer.RenderImGui();
     }
 
@@ -128,7 +166,9 @@ namespace Desert::Graphic
     {
         auto& renderer = Renderer::GetInstance();
 
+        GeometryRenderPass();
         CompositeRenderPass();
+
         renderer.EndFrame();
     }
 
@@ -150,9 +190,33 @@ namespace Desert::Graphic
 
     void SceneRenderer::CompositeRenderPass()
     {
+
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
         auto& renderer = Renderer::GetInstance();
 
-        renderer.BeginFrame();
+        renderer.BeginSwapChainRenderPass( );
+        /*a temporary solution until we add a material system.*/
+
+        const auto imageInfo =
+             sp_cast<API::Vulkan::VulkanImage2D>(
+                  m_TESTPipelineSkybox->GetSpecification().Framebuffer->GetColorAttachmentImage() )
+                  ->GetVulkanImageInfo();
+
+        const auto dstSet = sp_cast<API::Vulkan::VulkanShader>( m_PipelineComposite->GetSpecification().Shader )
+                                 ->GetVulkanDescriptorSetInfo()
+                                 .DescriptorSets.at( frameIndex )
+                                 .at( 0 );
+
+        UpdateDescriptorSets2(dstSet, imageInfo.ImageView, imageInfo.Sampler);
+        renderer.SubmitFullscreenQuad( m_PipelineComposite );
+        renderer.EndRenderPass();
+    }
+
+    void SceneRenderer::GeometryRenderPass()
+    {
+        auto& renderer = Renderer::GetInstance();
+
         renderer.BeginRenderPass( m_TESTRenderPassSkybox );
         /*a temporary solution until we add a material system.*/
         UpdateDescriptorSets( m_TESTPipelineSkybox );
