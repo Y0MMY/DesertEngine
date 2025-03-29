@@ -8,6 +8,7 @@
 #include <Engine/Graphic/IndexBuffer.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/Texture.hpp>
+#include <Engine/Graphic/Mesh.hpp>
 
 namespace Desert::Graphic
 {
@@ -27,6 +28,8 @@ namespace Desert::Graphic
         void BeginSwapChainRenderPass();
         void EndRenderPass();
         void RenderImGui();
+        void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
+                         const glm::mat4& mvp /*TEMP*/ );
 
         void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline );
 

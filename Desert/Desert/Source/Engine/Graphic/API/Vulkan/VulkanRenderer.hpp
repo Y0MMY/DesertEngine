@@ -23,11 +23,12 @@ namespace Desert::Graphic::API::Vulkan
         virtual [[nodiscard]] Common::BoolResult EndFrame() override;
         virtual [[nodiscard]] Common::BoolResult PresentFinalImage() override;
         virtual [[nodiscard]] Common::BoolResult
-        BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
-        virtual Common::BoolResult
-        BeginSwapChainRenderPass() override;
+                                   BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
+        virtual Common::BoolResult BeginSwapChainRenderPass() override;
         virtual [[nodiscard]] Common::BoolResult EndRenderPass() override;
         virtual void                             RenderImGui() override;
+        virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
+                                 const glm::mat4& mvp /*TEMP*/ ) override;
 
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline ) override;
 

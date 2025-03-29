@@ -20,6 +20,8 @@ namespace Desert::Graphic
 
         void OnEvent( Common::Event& e );
 
+        void RenderMesh( const std::shared_ptr<Mesh>& mesh );
+
     private:
         void CompositeRenderPass();
         void GeometryRenderPass();
@@ -32,21 +34,32 @@ namespace Desert::Graphic
         bool OnWindowResize( Common::EventWindowResize& e );
 
     private:
+        struct MeshRenderInfo
+        {
+            std::shared_ptr<Mesh> Mesh;
+        };
+
+        struct RenderInfo
+        {
+            std::shared_ptr<Graphic::Shader>      Shader;
+            std::shared_ptr<Graphic::Framebuffer> Framebuffer;
+            std::shared_ptr<Graphic::RenderPass>  RenderPass;
+            std::shared_ptr<Graphic::Pipeline>    Pipeline;
+        };
+
         struct
         {
             std::shared_ptr<Core::Scene> ActiveScene;
             Core::Camera*                ActiveCamera;
+
+            struct
+            {
+                RenderInfo Skybox;
+                RenderInfo Composite;
+                RenderInfo Geometry;
+
+                std::vector<MeshRenderInfo> MeshInfo;
+            } Renderdata;
         } m_SceneInfo;
-
-    private:
-        std::shared_ptr<Graphic::Pipeline>    m_TESTPipelineSkybox;
-        std::shared_ptr<Graphic::Framebuffer> m_TESTFramebufferSkybox;
-        std::shared_ptr<Graphic::Shader>      m_TESTShaderSkybox;
-        std::shared_ptr<Graphic::RenderPass>  m_TESTRenderPassSkybox;
-
-        std::shared_ptr<Graphic::Shader>      m_ShaderComposite;
-        std::shared_ptr<Graphic::Framebuffer> m_FramebufferComposite;
-        std::shared_ptr<Graphic::RenderPass>  m_RenderPassComposite;
-        std::shared_ptr<Graphic::Pipeline>    m_PipelineComposite;
     };
 } // namespace Desert::Graphic

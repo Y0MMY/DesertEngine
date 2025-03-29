@@ -30,6 +30,9 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
+
+        std::pair<uint32_t, VkPushConstantRange> SetUpPushConstantRange() const;
+    private:
         PipelineSpecification m_Specification;
 
         VkPipelineLayout m_PipelineLayout;

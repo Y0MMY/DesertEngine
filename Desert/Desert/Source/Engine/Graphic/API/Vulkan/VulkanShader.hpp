@@ -26,6 +26,8 @@ namespace Desert::Graphic::API::Vulkan
         {
             std::unordered_map<SetPoint, ShaderResource::ShaderDescriptorSet>
                  ShaderDescriptorSets; // uint32_t = set
+
+            std::optional<Core::Models::PushConstant> PushConstantRanges;
         };
 
     public:
@@ -57,6 +59,11 @@ namespace Desert::Graphic::API::Vulkan
         auto& GetShaderDescriptorSets()
         {
             return m_ReflectionData.ShaderDescriptorSets;
+        }
+
+        auto& GetShaderPushConstant()
+        {
+            return m_ReflectionData.PushConstantRanges;
         }
 
         auto& GetVulkanDescriptorSetInfo() const

@@ -70,6 +70,7 @@ namespace Common
     using serialized_str = std::string;
     class UUID;
     using AssetHandle = UUID;
+    using Filepath = std::filesystem::path;
 } // namespace Common
 
 template <typename T, typename U>

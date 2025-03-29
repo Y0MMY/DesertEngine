@@ -22,3 +22,4 @@
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/Mesh.hpp>

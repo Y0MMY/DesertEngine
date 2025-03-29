@@ -12,6 +12,7 @@ namespace Common::Constants // TODO: should be merge from config
         const std::filesystem::path TEXTUREDIRENV_PATH    = "Resources/Textures/Cubes/";
         const std::filesystem::path RESOURCE_SPIRV_BINARY = "Resources/Shaders/SPIRV/Bin/";
         const std::filesystem::path SCENE_PATH            = "Resources/Assets/Scene/";
+        const std::filesystem::path MESH_PATH             = "Resources/Mesh/";
     } // namespace Path
 
     namespace Extensions

@@ -9,6 +9,11 @@ namespace Desert::Graphic
     class SceneRenderer;
 }
 
+namespace Desert
+{
+    class Mesh;
+}
+
 namespace Desert::Core
 {
     class Scene final : public std::enable_shared_from_this<Scene>
@@ -21,6 +26,8 @@ namespace Desert::Core
         void Init();
 
         void SetEnvironment( const std::shared_ptr<Graphic::Image2D>& environment );
+
+        void AddMeshToRenderList(const std::shared_ptr<Mesh>& mesh) const;
 
         const std::shared_ptr<Graphic::Image2D>& GetEnvironment() const { return m_Environment; }
 

@@ -19,21 +19,22 @@ namespace Desert::Core::Models
         uint32_t                   DescriptorSet = 0;
         uint32_t                   ArraySize     = 0;
         std::string                Name;
-        Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::Fragment;
+        const Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::Fragment;
     };
 
     struct StorageBuffer
     {
-        uint32_t               Size         = 0;
-        uint32_t               BindingPoint = 0;
-        std::string            Name;
+        uint32_t                   Size         = 0;
+        uint32_t                   BindingPoint = 0;
+        std::string                Name;
         Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::None;
     };
 
-    struct PushConstantRange
+    struct PushConstant
     {
-        uint32_t              Offset      = 0;
-        uint32_t              Size        = 0;
+        uint32_t                   Offset = 0;
+        uint32_t                   Size   = 0;
+        std::string                Name;
         Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::None;
     };
 

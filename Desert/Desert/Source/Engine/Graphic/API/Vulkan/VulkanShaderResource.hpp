@@ -19,18 +19,14 @@ namespace Desert::Graphic::API::Vulkan
             using UniformBufferPair = std::pair<Core::Models::UniformBuffer, std::vector<VkWriteDescriptorSet>>;
             using SamplerBufferPair = std::pair<Core::Models::ImageSampler, std::vector<VkWriteDescriptorSet>>;
             using StorageBufferPair = std::pair<Core::Models::StorageBuffer, std::vector<VkWriteDescriptorSet>>;
-            using PushConstantBufferPair =
-                 std::pair<Core::Models::PushConstantRange, std::vector<VkWriteDescriptorSet>>;
 
-            using UniformBufferMap      = std::unordered_map<BindingPoint, UniformBufferPair>;
-            using ImageSamplerMap       = std::unordered_map<BindingPoint, SamplerBufferPair>;
-            using StorageBufferMap      = std::unordered_map<BindingPoint, StorageBufferPair>;
-            using PushConstantBufferMap = std::unordered_map<BindingPoint, PushConstantBufferPair>;
+            using UniformBufferMap = std::unordered_map<BindingPoint, UniformBufferPair>;
+            using ImageSamplerMap  = std::unordered_map<BindingPoint, SamplerBufferPair>;
+            using StorageBufferMap = std::unordered_map<BindingPoint, StorageBufferPair>;
 
-            UniformBufferMap UniformBuffers;
-            ImageSamplerMap  ImageSamplers;
-            StorageBufferMap StorageBuffers;
-         //   PushConstantBufferMap
+            UniformBufferMap           UniformBuffers;
+            ImageSamplerMap            ImageSamplers;
+            StorageBufferMap           StorageBuffers;
 
             operator bool()
             {

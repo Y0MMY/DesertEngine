@@ -132,18 +132,27 @@ namespace Desert::Graphic::API::Vulkan
         const auto descriptorSets = vulkanShader->GetShaderDescriptorSets();
         if ( !descriptorSets.empty() )
         {
-            vulkanShader->CreateDescriptorSets( 3 );
+            vulkanShader->CreateDescriptorSets( 3 ); // TODO: frame in flight
         }
 
         const auto descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
 
-        VkPipelineLayoutCreateInfo LayoutInfo = { .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        const auto& pushConstant = SetUpPushConstantRange();
+
+        VkPipelineLayoutCreateInfo lyoutInfo = { .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                                   .setLayoutCount = (uint32_t)descriptorSetLayouts.size(),
-                                                  .pSetLayouts    = descriptorSetLayouts.data() };
+                                                  .pSetLayouts    = descriptorSetLayouts.data(),
+                                                  .pushConstantRangeCount = pushConstant.first,
+                                                  .pPushConstantRanges    = &pushConstant.second };
 
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        VkResult res = vkCreatePipelineLayout( device, &LayoutInfo, VK_NULL_HANDLE, &m_PipelineLayout );
+        VkResult res = vkCreatePipelineLayout( device, &lyoutInfo, VK_NULL_HANDLE, &m_PipelineLayout );
+
+        if ( !m_Specification.Framebuffer )
+        {
+            // return TODO: assert
+        }
 
         const auto& renderPass =
              sp_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer )->GetVKRenderPass();
@@ -170,4 +179,46 @@ namespace Desert::Graphic::API::Vulkan
 
         LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
     } // namespace Desert::Graphic::API::Vulkan
+
+    std::pair<uint32_t, VkPushConstantRange> VulkanPipeline::SetUpPushConstantRange() const
+    {
+        std::shared_ptr<VulkanShader> vulkanShader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader );
+
+        const auto& pushConstant = vulkanShader->GetShaderPushConstant();
+        if ( !pushConstant )
+        {
+            return { 0, {} };
+        }
+
+        const auto& pcValue = pushConstant.value();
+        // setup push constants
+        VkPushConstantRange pushConstantCI;
+        pushConstantCI.offset = pcValue.Offset;
+        pushConstantCI.size   = pcValue.Size;
+
+        switch ( pcValue.ShaderStage ) // TODO
+        {
+            case Core::Formats::ShaderStage::Vertex:
+            {
+                pushConstantCI.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+                break;
+            }
+
+            case Core::Formats::ShaderStage::Fragment:
+            {
+                pushConstantCI.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+                break;
+            }
+
+            case Core::Formats::ShaderStage::Compute:
+            {
+                pushConstantCI.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                break;
+            }
+        }
+
+        return { 1, pushConstantCI };
+    }
+
 } // namespace Desert::Graphic::API::Vulkan

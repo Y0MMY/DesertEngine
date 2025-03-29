@@ -76,7 +76,7 @@ namespace Desert::Graphic
 
     void Renderer::BeginSwapChainRenderPass()
     {
-        s_RendererAPI->BeginSwapChainRenderPass( );
+        s_RendererAPI->BeginSwapChainRenderPass();
     }
 
     void Renderer::EndRenderPass()
@@ -98,6 +98,11 @@ namespace Desert::Graphic
     void Renderer::RenderImGui()
     {
         s_RendererAPI->RenderImGui();
+    }
+
+    void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh, const glm::mat4& mvp /*TEMP*/)
+    {
+        s_RendererAPI->RenderMesh(pipeline, mesh, mvp);
     }
 
 } // namespace Desert::Graphic

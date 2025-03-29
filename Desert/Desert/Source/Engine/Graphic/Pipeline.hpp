@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Shader.hpp>
+#include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
 #include <Engine/Graphic/Vertexbuffer.hpp>
 
@@ -10,6 +11,7 @@ namespace Desert::Graphic
     {
         std::shared_ptr<Shader>      Shader;
         std::shared_ptr<Framebuffer> Framebuffer;
+        std::shared_ptr<RenderPass>  Renderpass;
         VertexBufferLayout           Layout;
 
         std::string DebugName;

@@ -10,7 +10,7 @@ namespace Desert::Core
     {
     }
 
-    void Scene::OnUpdate(const Core::Camera& camera)
+    void Scene::OnUpdate( const Core::Camera& camera )
     {
         m_SceneRenderer->BeginScene( shared_from_this(), camera );
         m_SceneRenderer->EndScene();
@@ -24,6 +24,11 @@ namespace Desert::Core
     void Scene::SetEnvironment( const std::shared_ptr<Graphic::Image2D>& environment )
     {
         m_Environment = environment;
+    }
+
+    void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const
+    {
+        m_SceneRenderer->RenderMesh( mesh );
     }
 
 } // namespace Desert::Core

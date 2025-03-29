@@ -239,7 +239,6 @@ namespace Desert::Graphic::API::Vulkan
         auto                  resources = compiler.get_shader_resources();
 
         LOG_TRACE( "Uniform Buffers: " );
-
         for ( const auto& resource : resources.uniform_buffers )
         {
             auto activeBuffers = compiler.get_active_buffer_ranges( resource.id );
@@ -301,8 +300,8 @@ namespace Desert::Graphic::API::Vulkan
                 newImageSampler.BindingPoint = binding;
                 newImageSampler.Name         = name;
                 newImageSampler.ArraySize    = arraySize;
-                newImageSampler.ShaderStage =
-                     Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+                /*newImageSampler.ShaderStage =
+                     Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );*/
 
                 ShaderResource::ShaderDescriptorSet::SamplerBufferPair insertPair = {
                      newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
@@ -336,6 +335,41 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
+        }
+
+        LOG_TRACE( "PushConstant Buffers: " );
+        for ( const auto& resource : resources.push_constant_buffers )
+        {
+            auto activeBuffers = compiler.get_active_buffer_ranges( resource.id );
+            if ( activeBuffers.size() )
+            {
+                const auto& name        = resource.name;
+                auto&       bufferType  = compiler.get_type( resource.base_type_id );
+                int         memberCount = (uint32_t)bufferType.member_types.size();
+                uint32_t    size        = (uint32_t)compiler.get_declared_struct_size( bufferType );
+
+                auto& pushConstantReflection = m_ReflectionData.PushConstantRanges;
+
+                if ( !pushConstantReflection)
+                {
+                    Core::Models::PushConstant pushConstant;
+                    pushConstant.Size   = size;
+                    pushConstant.Offset = 0;
+                    pushConstant.Name   = name;
+                    pushConstant.ShaderStage =
+                         Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+
+                    pushConstantReflection = pushConstant;
+                }
+                else
+                {
+                }
+
+                LOG_TRACE( "  {0}", name );
+                LOG_TRACE( "  Member Count: {0}", memberCount );
+                LOG_TRACE( "  Size: {0}", size );
+                LOG_TRACE( "-------------------" );
+            }
         }
     }
 

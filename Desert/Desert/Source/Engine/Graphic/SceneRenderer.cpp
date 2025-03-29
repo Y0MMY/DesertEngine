@@ -11,7 +11,6 @@
 
 namespace Desert::Graphic
 {
-
     static struct ubo
     {
         glm::mat4 proj;
@@ -101,23 +100,24 @@ namespace Desert::Graphic
             FramebufferSpecification TESTFramebufferFramebufferSpec;
             TESTFramebufferFramebufferSpec.DebugName = "Skybox";
             TESTFramebufferFramebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
-            m_TESTFramebufferSkybox = Graphic::Framebuffer::Create( TESTFramebufferFramebufferSpec );
 
-            m_TESTFramebufferSkybox->Resize( width, height );
+            m_SceneInfo.Renderdata.Skybox.Framebuffer =
+                 Graphic::Framebuffer::Create( TESTFramebufferFramebufferSpec );
+            m_SceneInfo.Renderdata.Skybox.Framebuffer->Resize( width, height );
 
-            m_TESTShaderSkybox = Graphic::Shader::Create( "skybox.glsl" );
+            m_SceneInfo.Renderdata.Skybox.Shader = Graphic::Shader::Create( "skybox.glsl" );
             Graphic::PipelineSpecification spec;
 
-            renderPassSpecSkybox.TargetFramebuffer = m_TESTFramebufferSkybox;
-            m_TESTRenderPassSkybox                 = Graphic::RenderPass::Create( renderPassSpecSkybox );
+            renderPassSpecSkybox.TargetFramebuffer   = m_SceneInfo.Renderdata.Skybox.Framebuffer;
+            m_SceneInfo.Renderdata.Skybox.RenderPass = Graphic::RenderPass::Create( renderPassSpecSkybox );
 
-            spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" }};
+            spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" } };
 
-            spec.DebugName       = "skybox";
-            spec.Framebuffer     = m_TESTFramebufferSkybox;
-            spec.Shader          = m_TESTShaderSkybox;
-            m_TESTPipelineSkybox = Graphic::Pipeline::Create( spec );
-            m_TESTPipelineSkybox->Invalidate();
+            spec.DebugName                         = "skybox";
+            spec.Framebuffer                       = m_SceneInfo.Renderdata.Skybox.Framebuffer;
+            spec.Shader                            = m_SceneInfo.Renderdata.Skybox.Shader;
+            m_SceneInfo.Renderdata.Skybox.Pipeline = Graphic::Pipeline::Create( spec );
+            m_SceneInfo.Renderdata.Skybox.Pipeline->Invalidate();
         }
 
         // Composite
@@ -128,23 +128,47 @@ namespace Desert::Graphic
             FramebufferSpecification framebufferSpec;
             framebufferSpec.DebugName = "SceneComposite";
             framebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::BGRA8F );
-            m_FramebufferComposite = Graphic::Framebuffer::Create( framebufferSpec );
 
-            m_FramebufferComposite->Resize( width, height );
+            m_SceneInfo.Renderdata.Composite.Framebuffer = Graphic::Framebuffer::Create( framebufferSpec );
+            m_SceneInfo.Renderdata.Composite.Framebuffer->Resize( width, height );
 
-            m_ShaderComposite = Graphic::Shader::Create( "SceneComposite.glsl" );
+            m_SceneInfo.Renderdata.Composite.Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
             Graphic::PipelineSpecification spec;
 
-            renderPassSpec.TargetFramebuffer = m_FramebufferComposite;
-            m_RenderPassComposite            = Graphic::RenderPass::Create( renderPassSpec );
+            renderPassSpec.TargetFramebuffer            = m_SceneInfo.Renderdata.Composite.Framebuffer;
+            m_SceneInfo.Renderdata.Composite.RenderPass = Graphic::RenderPass::Create( renderPassSpec );
 
             spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" } };
 
-            spec.DebugName      = "SceneComposite";
-            spec.Framebuffer    = m_FramebufferComposite;
-            spec.Shader         = m_ShaderComposite;
-            m_PipelineComposite = Graphic::Pipeline::Create( spec );
-            m_PipelineComposite->Invalidate();
+            spec.DebugName                            = "SceneComposite";
+            spec.Framebuffer                          = m_SceneInfo.Renderdata.Composite.Framebuffer;
+            spec.Shader                               = m_SceneInfo.Renderdata.Composite.Shader;
+            m_SceneInfo.Renderdata.Composite.Pipeline = Graphic::Pipeline::Create( spec );
+            m_SceneInfo.Renderdata.Composite.Pipeline->Invalidate();
+        }
+
+        // Geometry static pass
+        {
+            FramebufferSpecification framebufferSpec;
+            framebufferSpec.DebugName = "SceneGeometry";
+            framebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
+
+            m_SceneInfo.Renderdata.Geometry.Framebuffer = Graphic::Framebuffer::Create( framebufferSpec );
+            m_SceneInfo.Renderdata.Geometry.Framebuffer->Resize( width, height );
+
+            RenderPassSpecification renderPassSpec;
+            renderPassSpec.DebugName         = "SceneGeometry";
+            renderPassSpec.TargetFramebuffer = m_SceneInfo.Renderdata.Geometry.Framebuffer;
+
+            PipelineSpecification pipelineSpecification;
+            pipelineSpecification.Layout      = { { ShaderDataType::Float3, "a_Position" } };
+            pipelineSpecification.DebugName   = "PBR-Static";
+            pipelineSpecification.Renderpass  = RenderPass::Create( renderPassSpec );
+            pipelineSpecification.Shader      = Graphic::Shader::Create( "StaticPBR.glsl" );
+            pipelineSpecification.Framebuffer = m_SceneInfo.Renderdata.Geometry.Framebuffer;
+
+            m_SceneInfo.Renderdata.Geometry.Pipeline = Pipeline::Create( pipelineSpecification );
+            m_SceneInfo.Renderdata.Geometry.Pipeline->Invalidate();
         }
 
         s_Uniformbuffer = std::make_shared<API::Vulkan::VulkanUniformBuffer>( sizeof( ubo ), 0 );
@@ -158,8 +182,6 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
 
         renderer.BeginFrame();
-
-        //  renderer.RenderImGui();
     }
 
     void SceneRenderer::EndScene()
@@ -183,7 +205,7 @@ namespace Desert::Graphic
     {
         auto&                                              renderer = Renderer::GetInstance();
         std::vector<std::shared_ptr<Graphic::Framebuffer>> framebuffers;
-        framebuffers.push_back( m_TESTFramebufferSkybox );
+        framebuffers.push_back( m_SceneInfo.Renderdata.Skybox.Framebuffer );
         renderer.ResizeWindowEvent( e.width, e.height, framebuffers );
         return false;
     }
@@ -195,21 +217,22 @@ namespace Desert::Graphic
 
         auto& renderer = Renderer::GetInstance();
 
-        renderer.BeginSwapChainRenderPass( );
+        renderer.BeginSwapChainRenderPass();
         /*a temporary solution until we add a material system.*/
 
-        const auto imageInfo =
-             sp_cast<API::Vulkan::VulkanImage2D>(
-                  m_TESTPipelineSkybox->GetSpecification().Framebuffer->GetColorAttachmentImage() )
-                  ->GetVulkanImageInfo();
+        const auto imageInfo = sp_cast<API::Vulkan::VulkanImage2D>(
+                                    m_SceneInfo.Renderdata.Skybox.Framebuffer->GetColorAttachmentImage() )
+                                    ->GetVulkanImageInfo();
 
-        const auto dstSet = sp_cast<API::Vulkan::VulkanShader>( m_PipelineComposite->GetSpecification().Shader )
+        const auto dstSet = sp_cast<API::Vulkan::VulkanShader>( m_SceneInfo.Renderdata.Composite.Shader )
                                  ->GetVulkanDescriptorSetInfo()
                                  .DescriptorSets.at( frameIndex )
                                  .at( 0 );
 
-        UpdateDescriptorSets2(dstSet, imageInfo.ImageView, imageInfo.Sampler);
-        renderer.SubmitFullscreenQuad( m_PipelineComposite );
+        UpdateDescriptorSets2( dstSet, imageInfo.ImageView, imageInfo.Sampler );
+        renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Composite.Pipeline );
+        renderer.RenderImGui();
+
         renderer.EndRenderPass();
     }
 
@@ -217,11 +240,23 @@ namespace Desert::Graphic
     {
         auto& renderer = Renderer::GetInstance();
 
-        renderer.BeginRenderPass( m_TESTRenderPassSkybox );
+        renderer.BeginRenderPass( m_SceneInfo.Renderdata.Skybox.RenderPass );
         /*a temporary solution until we add a material system.*/
-        UpdateDescriptorSets( m_TESTPipelineSkybox );
-        renderer.SubmitFullscreenQuad( m_TESTPipelineSkybox );
+        UpdateDescriptorSets( m_SceneInfo.Renderdata.Skybox.Pipeline );
+        renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Skybox.Pipeline );
+
+        for ( const auto& meshIno : m_SceneInfo.Renderdata.MeshInfo )
+        {
+            auto vp = m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
+            renderer.RenderMesh( m_SceneInfo.Renderdata.Geometry.Pipeline, meshIno.Mesh, vp);
+        }
+
         renderer.EndRenderPass();
+    }
+
+    void SceneRenderer::RenderMesh( const std::shared_ptr<Mesh>& mesh )
+    {
+        m_SceneInfo.Renderdata.MeshInfo.push_back( { mesh } );
     }
 
 } // namespace Desert::Graphic

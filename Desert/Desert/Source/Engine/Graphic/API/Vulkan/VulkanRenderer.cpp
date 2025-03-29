@@ -81,21 +81,21 @@ namespace Desert::Graphic::API::Vulkan
         struct QuadVertex
         {
             glm::vec3 Position;
-            //glm::vec2 TexCoord;
+            // glm::vec2 TexCoord;
         };
 
         std::array<QuadVertex, 4> data;
         data[0].Position = { -1, 1, 0 };
-        //data[1].TexCoord = { 0, 1 };
+        // data[1].TexCoord = { 0, 1 };
 
         data[1].Position = { -1, -1, 0 };
-        //data[1].TexCoord = { 0, 0 };
+        // data[1].TexCoord = { 0, 0 };
 
         data[2].Position = { 1, 1, 0 };
-        //data[2].TexCoord = { 1, 1 };
+        // data[2].TexCoord = { 1, 1 };
 
         data[3].Position = { 1, -1, 0 };
-        //data[3].TexCoord = { 1, 0 };
+        // data[3].TexCoord = { 1, 0 };
 
         s_Data->QuadVertexBuffer = std::make_shared<VulkanVertexBuffer>( data.data(), 4 * sizeof( QuadVertex ) );
         s_Data->QuadVertexBuffer->Invalidate();
@@ -107,7 +107,7 @@ namespace Desert::Graphic::API::Vulkan
         s_Data->QuadIndexBuffer = std::make_shared<VulkanIndexBuffer>( indices, 6 * sizeof( unsigned int ) );
         s_Data->QuadIndexBuffer->Invalidate();
 
-        //delete[] indices;
+        // delete[] indices;
     }
 
     std::array<VkClearValue, 2> CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
@@ -276,6 +276,42 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::RenderImGui()
     {
         ImGui::VulkanImGuiRenderer::GetInstance().RenderImGui( m_CurrentCommandBuffer );
+    }
+
+    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,
+                                        const std::shared_ptr<Mesh>& mesh, const glm::mat4& mvp /*TEMP*/ )
+    {
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        /* const auto shader =
+              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+         const auto& desSet = shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+         */
+         VkPipelineLayout layout =
+              std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipelineLayout();
+       /*  vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &desSet,
+         0, nullptr );*/
+
+        vkCmdBindPipeline(
+             m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline )->GetVkPipeline() );
+
+        VkDeviceSize offsets[] = { 0 };
+        const auto   vbuffer =
+             sp_cast<API::Vulkan::VulkanVertexBuffer>( mesh->GetVertexBuffer() )->GetVulkanBuffer();
+        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &vbuffer, offsets );
+
+        const auto ibuffer = sp_cast<API::Vulkan::VulkanIndexBuffer>( mesh->GetIndexBuffer() )->GetVulkanBuffer();
+        vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
+
+        // VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+
+
+        vkCmdPushConstants(m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64,
+                            & mvp );
+
+        vkCmdDrawIndexed( m_CurrentCommandBuffer, mesh->GetIndexBuffer()->GetCount(), 1, 0, 0, 0 );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -109,11 +109,11 @@ namespace Desert::Engine
 
     void Application::ProcessImGui()
     {
-       /* m_ImGuiLayer->Begin();
+        m_ImGuiLayer->Begin();
 
         m_ImGuiLayer->OnUpdate( {} );
 
-        m_ImGuiLayer->End();*/
+        m_ImGuiLayer->End();
     }
 
 } // namespace Desert::Engine
