@@ -11,19 +11,18 @@ namespace Desert::Graphic::API::Vulkan
     public:
         VulkanRenderCommandBuffer( const std::string& debugName );
 
-        inline VkCommandBuffer GetCommandBuffer( uint32_t index, bool computeBuffer = false,
-                                                 bool secondCommandBuffer = false )
-        {
-            return ( computeBuffer ? m_ComputeCommandBuffers[index]
-                                   : ( secondCommandBuffer ? m_DrawCommandBuffers[index].second
-                                                           : m_DrawCommandBuffers[index].first ) );
-        }
+        VkCommandBuffer GetCommandBuffer(bool computeBuffer = false,
+            bool secondCommandBuffer = false);
 
         void Init( VulkanQueue* queue );
 
+        void RegisterUserCommand( std::function<void()> command );
+        void ExecuteUserCommands( );
     private:
         std::vector<std::pair<VkCommandBuffer, VkCommandBuffer>>
                                      m_DrawCommandBuffers; // main command buffer | second command buffer
         std::vector<VkCommandBuffer> m_ComputeCommandBuffers;
+
+        std::vector<std::function<void()>> m_UserCommands;
     };
 } // namespace Desert::Graphic::API::Vulkan

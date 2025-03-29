@@ -231,7 +231,7 @@ namespace Desert::Graphic
 
         UpdateDescriptorSets2( dstSet, imageInfo.ImageView, imageInfo.Sampler );
         renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Composite.Pipeline );
-        renderer.RenderImGui();
+        //renderer.RenderImGui();
 
         renderer.EndRenderPass();
     }

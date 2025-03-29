@@ -10,10 +10,9 @@ namespace Desert::Core
     {
     }
 
-    void Scene::OnUpdate( const Core::Camera& camera )
+    void Scene::BeginScene( const Core::Camera& camera )
     {
         m_SceneRenderer->BeginScene( shared_from_this(), camera );
-        m_SceneRenderer->EndScene();
     }
 
     void Scene::Init()
@@ -29,6 +28,11 @@ namespace Desert::Core
     void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const
     {
         m_SceneRenderer->RenderMesh( mesh );
+    }
+
+    void Scene::EndScene()
+    {
+        m_SceneRenderer->EndScene();
     }
 
 } // namespace Desert::Core

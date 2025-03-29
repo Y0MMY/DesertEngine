@@ -18,6 +18,54 @@
 
 namespace Desert::Graphic::API::Vulkan::ImGui
 {
+    static VkRenderPass s_RenderpassImgui;
+
+    VkRenderPass CreateImGuiRenderPass( VkDevice device, VkFormat swapchainFormat )
+    {
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format         = swapchainFormat;
+        colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_LOAD;
+        colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference colorAttachmentRef{};
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments    = &colorAttachmentRef;
+
+        VkSubpassDependency dependency{};
+        dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass    = 0;
+        dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments    = &colorAttachment;
+        renderPassInfo.subpassCount    = 1;
+        renderPassInfo.pSubpasses      = &subpass;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies   = &dependency;
+
+        VkRenderPass imguiRenderPass;
+        if ( vkCreateRenderPass( device, &renderPassInfo, nullptr, &imguiRenderPass ) != VK_SUCCESS )
+        {
+        }
+
+        return imguiRenderPass;
+    }
+
     void VulkanImGui::OnAttach()
     {
         //  1: create descriptor pool for IMGUI
@@ -79,11 +127,15 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         // Clear font textures from cpu data
         ImGui_ImplVulkan_DestroyFontUploadObjects();
+
+        s_RenderpassImgui = CreateImGuiRenderPass( device, swapchain->GetColorFormat() );
     }
 
     void VulkanImGui::OnDetach()
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        vkDeviceWaitIdle(device);
 
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -94,19 +146,53 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
     void VulkanImGui::OnUpdate( Common::Timestep ts )
     {
-        ::ImGui::ShowDemoWindow();
+        VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand( []() { ::ImGui::ShowDemoWindow(); } );
     }
 
     void VulkanImGui::Begin()
     {
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ::ImGui::NewFrame();
+        VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand(
+             []()
+             {
+                 ImGui_ImplVulkan_NewFrame();
+                 ImGui_ImplGlfw_NewFrame();
+                 ::ImGui::NewFrame();
+             } );
     }
 
     void VulkanImGui::End()
     {
-        /*Implemented in ImGuiRenderer.cpp*/
-    }
+        VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand(
+             []()
+             {
+                 ::ImGui::Render();
 
+                 VkCommandBuffer       commandBuffer = VulkanRenderCommandBuffer::GetInstance().GetCommandBuffer();
+                 VkRenderPassBeginInfo renderPassInfo{};
+                 renderPassInfo.sType      = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                 renderPassInfo.renderPass = s_RenderpassImgui;
+
+                 uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+                 const auto& context = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
+                      Renderer::GetInstance().GetRendererContext() );
+
+                 const auto& swapchain = context->GetVulkanSwapChain();
+
+                 uint32_t windowWidth  = EngineContext::GetInstance().GetCurrentWindowWidth();
+                 uint32_t windowHeight = EngineContext::GetInstance().GetCurrentWindowHeight();
+
+                 renderPassInfo.framebuffer       = swapchain->GetVKFramebuffers()[frameIndex];
+                 renderPassInfo.renderArea.offset = { 0, 0 };
+                 renderPassInfo.renderArea.extent = { windowWidth, windowHeight };
+                 renderPassInfo.clearValueCount   = 0;
+                 renderPassInfo.pClearValues      = nullptr;
+
+                 vkCmdBeginRenderPass( commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE );
+
+                 ImGui_ImplVulkan_RenderDrawData( ::ImGui::GetDrawData(), commandBuffer, 0 );
+
+                 vkCmdEndRenderPass( commandBuffer );
+             } );
+    }
 } // namespace Desert::Graphic::API::Vulkan::ImGui

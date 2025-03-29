@@ -22,7 +22,8 @@ namespace Desert
     void EditorLayer::OnUpdate( Common::Timestep ts )
     {
         m_EditorCamera.OnUpdate();
-        m_testscene->OnUpdate(m_EditorCamera);
+        m_testscene->BeginScene( m_EditorCamera );
+        m_testscene->EndScene( );
 
         /*auto& renderer = Graphic::Renderer::GetInstance();
         renderer.BeginFrame();
