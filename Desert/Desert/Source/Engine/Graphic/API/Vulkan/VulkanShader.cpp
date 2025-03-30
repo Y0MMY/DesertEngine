@@ -86,6 +86,15 @@ namespace Desert::Graphic::API::Vulkan
                     poolSize.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                     poolSize.descriptorCount = imageSamplers.size() * sets;
                 }
+
+                const auto& imageSamplersStorage = shaderDescriptorSets.at( set ).StorageImageSamplers;
+                if ( !imageSamplersStorage.empty() )
+                {
+                    auto& poolSize = poolSizes.emplace_back();
+
+                    poolSize.type            = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                    poolSize.descriptorCount = imageSamplersStorage.size() * sets;
+                }
             }
 
             return poolSizes;
@@ -350,7 +359,7 @@ namespace Desert::Graphic::API::Vulkan
 
                 auto& pushConstantReflection = m_ReflectionData.PushConstantRanges;
 
-                if ( !pushConstantReflection)
+                if ( !pushConstantReflection )
                 {
                     Core::Models::PushConstant pushConstant;
                     pushConstant.Size   = size;
@@ -369,6 +378,38 @@ namespace Desert::Graphic::API::Vulkan
                 LOG_TRACE( "  Member Count: {0}", memberCount );
                 LOG_TRACE( "  Size: {0}", size );
                 LOG_TRACE( "-------------------" );
+            }
+        }
+
+        LOG_TRACE( "Storage Images: " );
+        for ( const auto& resource : resources.storage_images )
+        {
+            const auto& name          = resource.name;
+            uint32_t    binding       = compiler.get_decoration( resource.id, spv::DecorationBinding );
+            uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+            auto&       imageType     = compiler.get_type( resource.base_type_id );
+
+            auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].StorageImageSamplers;
+
+            if ( imageSampler.find( binding ) == imageSampler.end() )
+            {
+                uint32_t arraySize = 1;
+                if ( Utils::IsArray( imageType ) )
+                {
+                    arraySize = Utils::GetArraySize( imageType );
+                }
+
+                Core::Models::ImageSampler newImageSampler;
+                newImageSampler.BindingPoint = binding;
+                newImageSampler.Name         = name;
+                newImageSampler.ArraySize    = arraySize;
+                newImageSampler.ShaderStage =
+                     Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+
+                ShaderResource::ShaderDescriptorSet::SamplerBufferPair insertPair = {
+                     newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
+
+                imageSampler.insert( { binding, insertPair } );
             }
         }
     }
@@ -413,6 +454,17 @@ namespace Desert::Graphic::API::Vulkan
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 layout.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+                layout.pImmutableSamplers = nullptr;
+                layout.descriptorCount    = 1;
+            }
+
+            // Storage Samplers
+            for ( const auto& [binding, sampler] : shaderDescriptorSet.StorageImageSamplers )
+            {
+                auto& layout              = layoutBindings.emplace_back();
+                layout.binding            = binding;
+                layout.descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.first.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1;
             }
@@ -471,13 +523,7 @@ namespace Desert::Graphic::API::Vulkan
             allocInfo.descriptorSetCount          = sets;
             allocInfo.pSetLayouts                 = m_DescriptorSetLayouts.data();
 
-            const VkResult sdf =
-                 vkAllocateDescriptorSets( device, &allocInfo, result.DescriptorSets[frame].data() );
-            if ( sdf != VK_SUCCESS )
-            {
-                auto sdfStr = VkResultToString( sdf );
-                LOG_TRACE( "\n\n{}\n\n", sdfStr );
-            }
+            VK_CHECK_RESULT( vkAllocateDescriptorSets( device, &allocInfo, result.DescriptorSets[frame].data() ) );
         }
 
         return result;
@@ -512,6 +558,17 @@ namespace Desert::Graphic::API::Vulkan
 
                     writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
+                    writeDescriptor.descriptorCount = 1;
+                    writeDescriptor.dstBinding      = sampler.first.BindingPoint;
+                }
+
+                for ( auto& [binding, sampler] : shaderDescriptorSet.StorageImageSamplers )
+                {
+                    VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
+
+                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
                     writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
                     writeDescriptor.descriptorCount = 1;
                     writeDescriptor.dstBinding      = sampler.first.BindingPoint;

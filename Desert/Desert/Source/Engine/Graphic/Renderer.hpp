@@ -38,7 +38,9 @@ namespace Desert::Graphic
         void ResizeWindowEvent( uint32_t width, uint32_t height,
                                 const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
 
-        std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
+        std::shared_ptr<Framebuffer>     GetCompositeFramebuffer();
+
+        std::shared_ptr<Image2D> EquirectangularToCubeMap( const Common::Filepath& filepath ) ;
 
         uint32_t GetCurrentFrameIndex();
 

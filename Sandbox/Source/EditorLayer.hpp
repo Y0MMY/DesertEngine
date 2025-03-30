@@ -14,6 +14,9 @@ namespace Desert
         {
         }
         virtual void OnUpdate( Common::Timestep ts ) override;
+        virtual void OnImGuiRender() override
+        {
+        }
 
     private:
         std::shared_ptr<Core::Scene>            m_testscene;

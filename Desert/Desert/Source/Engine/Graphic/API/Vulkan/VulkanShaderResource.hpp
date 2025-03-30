@@ -24,9 +24,10 @@ namespace Desert::Graphic::API::Vulkan
             using ImageSamplerMap  = std::unordered_map<BindingPoint, SamplerBufferPair>;
             using StorageBufferMap = std::unordered_map<BindingPoint, StorageBufferPair>;
 
-            UniformBufferMap           UniformBuffers;
-            ImageSamplerMap            ImageSamplers;
-            StorageBufferMap           StorageBuffers;
+            UniformBufferMap UniformBuffers;
+            ImageSamplerMap  ImageSamplers;
+            StorageBufferMap StorageBuffers;
+            ImageSamplerMap  StorageImageSamplers;
 
             operator bool()
             {

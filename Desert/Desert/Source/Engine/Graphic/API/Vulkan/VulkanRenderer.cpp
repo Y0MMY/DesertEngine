@@ -4,6 +4,7 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanPipelineCompute.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
@@ -39,7 +40,7 @@ namespace Desert::Graphic::API::Vulkan
         VkCommandBufferBeginInfo cmdBufferBeginInfo{};
         cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-        m_CurrentCommandBuffer = VulkanRenderCommandBuffer::GetInstance().GetCommandBuffer( );
+        m_CurrentCommandBuffer = VulkanRenderCommandBuffer::GetInstance().GetCommandBuffer();
         vkBeginCommandBuffer( m_CurrentCommandBuffer, &cmdBufferBeginInfo );
 
         return Common::MakeSuccess( true );
@@ -299,6 +300,53 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdPushConstants( m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, &mvp );
 
         vkCmdDrawIndexed( m_CurrentCommandBuffer, mesh->GetIndexBuffer()->GetCount(), 1, 0, 0, 0 );
+    }
+
+    std::shared_ptr<Desert::Graphic::Image2D>
+    VulkanRendererAPI::EquirectangularToCubeMap( const Common::Filepath& filepath )
+    {
+        static std::shared_ptr<Shader> shader = Shader::Create( "comute_test.glsl" );
+
+        Core::Formats::ImageSpecification info;
+        info.Width                            = 3200;
+        info.Height                           = 2400;
+        info.Format = Core::Formats::ImageFormat::RGBA8F;
+        info.Usage = Core::Formats::ImageUsage::Storage;
+
+        static std::shared_ptr<Image2D> image = Image2D::Create(info);
+        const auto& imageVulkan = sp_cast<API::Vulkan::VulkanImage2D>(image);
+        imageVulkan->RT_Invalidate();
+
+        const auto& shaderVulkan = sp_cast<API::Vulkan::VulkanShader>(shader);
+
+        auto vulkanPipelineCompute = Graphic::PipelineCompute::Create( shader );
+        vulkanPipelineCompute->Invalidate();
+        vulkanPipelineCompute->Begin();
+
+        VkDescriptorImageInfo imageInfo = {};
+        imageInfo.imageView             = imageVulkan->GetVulkanImageInfo().ImageView;
+        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_GENERAL;
+
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        VkWriteDescriptorSet descriptorWrite = {};
+        descriptorWrite.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet               = shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at(frameIndex).at(0);
+        descriptorWrite.dstBinding           = 1;
+        descriptorWrite.dstArrayElement      = 0;
+        descriptorWrite.descriptorType       = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        descriptorWrite.descriptorCount      = 1;
+        descriptorWrite.pImageInfo           = &imageInfo;
+
+        VkDevice   device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        vkUpdateDescriptorSets( device, 1, &descriptorWrite, 0, nullptr );
+
+        sp_cast<API::Vulkan::VulkanPipelineCompute>(vulkanPipelineCompute)->BindDS(descriptorWrite.dstSet);
+
+        vulkanPipelineCompute->Dispatch( 3200 / 32 , 2800 / 32, 1 );
+        vulkanPipelineCompute->End();
+
+        return std::shared_ptr<Desert::Graphic::Image2D>( nullptr );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

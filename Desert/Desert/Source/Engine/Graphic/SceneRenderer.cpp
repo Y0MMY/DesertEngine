@@ -181,6 +181,8 @@ namespace Desert::Graphic
 
         auto& renderer = Renderer::GetInstance();
 
+        renderer.EquirectangularToCubeMap( "" );
+
         renderer.BeginFrame();
     }
 

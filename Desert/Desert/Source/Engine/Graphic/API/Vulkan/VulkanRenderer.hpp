@@ -37,6 +37,8 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 
+        virtual std::shared_ptr<Image2D> EquirectangularToCubeMap( const Common::Filepath& filepath ) override;
+
     private:
         void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
         void SetViewportAndScissor();

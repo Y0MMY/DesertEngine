@@ -7,18 +7,45 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    VulkanPipelineCompute::VulkanPipelineCompute( const std::shared_ptr<Shader> shader ) : m_Shader( shader )
+    VulkanPipelineCompute::VulkanPipelineCompute( const std::shared_ptr<Shader>& shader ) : m_Shader( shader )
     {
     }
 
     void VulkanPipelineCompute::Begin()
     {
-        uint32_t frameIndex          = Renderer::GetInstance().GetCurrentFrameIndex();
-        m_ActiveComputeCommandBuffer = VulkanRenderCommandBuffer::GetInstance().GetCommandBuffer( frameIndex );
+        m_ActiveComputeCommandBuffer = VulkanRenderCommandBuffer::GetInstance().GetCommandBuffer( true );
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer( m_ActiveComputeCommandBuffer, &beginInfo );
+        vkCmdBindPipeline( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComputePipeline );
     }
 
     void VulkanPipelineCompute::End()
     {
+        vkEndCommandBuffer( m_ActiveComputeCommandBuffer );
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers    = &m_ActiveComputeCommandBuffer;
+
+        VkQueue computeQueue = VulkanLogicalDevice::GetInstance().GetComputeQueue();
+        vkQueueSubmit( computeQueue, 1, &submitInfo, VK_NULL_HANDLE );
+        vkQueueWaitIdle( computeQueue ); // TODO: fence
+
+        m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
+    }
+
+    void VulkanPipelineCompute::Execute()
+    {
+    }
+
+    void VulkanPipelineCompute::Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
+    {
+        vkCmdDispatch( m_ActiveComputeCommandBuffer, groupCountX, groupCountY, groupCountZ );
     }
 
     void VulkanPipelineCompute::Invalidate()
@@ -27,6 +54,12 @@ namespace Desert::Graphic::API::Vulkan
 
         const auto vulkanShader         = std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Shader );
         auto       descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
+
+        const auto descriptorSets = vulkanShader->GetShaderDescriptorSets();
+        if ( !descriptorSets.empty() )
+        {
+            vulkanShader->CreateDescriptorSets( 3 ); // TODO: frame in flight
+        }
 
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
         pipelineLayoutCreateInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -52,26 +85,26 @@ namespace Desert::Graphic::API::Vulkan
                                           m_ComputePipeline );
     }
 
-    void VulkanPipelineCompute::Execute( VkDescriptorSet descriptorSet )
-    {
-        vkCmdBindPipeline( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComputePipeline );
-        vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                 m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, nullptr );
-    }
-
     void VulkanPipelineCompute::ReadBuffer( uint32_t bufferSize )
     {
-       /* auto& allocator = VulkanAllocator::GetInstance();
+        /* auto& allocator = VulkanAllocator::GetInstance();
 
-        VkBufferCreateInfo bufferCreateInfo;
-        bufferCreateInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferCreateInfo.size        = bufferSize;
-        bufferCreateInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+         VkBufferCreateInfo bufferCreateInfo;
+         bufferCreateInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+         bufferCreateInfo.size        = bufferSize;
+         bufferCreateInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+         bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 
-        VkBuffer buffer;
-        const auto buffer = allocator.RT_AllocateBuffer( "STAGING", bufferCreateInfo, VMA_MEMORY_USAGE_GPU_ONLY, buffer);*/
+         VkBuffer buffer;
+         const auto buffer = allocator.RT_AllocateBuffer( "STAGING", bufferCreateInfo, VMA_MEMORY_USAGE_GPU_ONLY,
+         buffer);*/
+    }
+
+    void VulkanPipelineCompute::BindDS( VkDescriptorSet descriptorSet )
+    {
+        vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                 m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, 0 );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

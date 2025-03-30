@@ -35,6 +35,8 @@ namespace Desert::Graphic
         virtual ~PipelineCompute() = default;
 
         virtual void Begin() = 0;
+        virtual void Execute() = 0;
+        virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         virtual void End()   = 0;
 
         virtual void Invalidate() = 0;

@@ -105,4 +105,10 @@ namespace Desert::Graphic
         s_RendererAPI->RenderMesh(pipeline, mesh, mvp);
     }
 
+    std::shared_ptr<Desert::Graphic::Image2D>
+    Renderer::EquirectangularToCubeMap( const Common::Filepath& filepath )
+    {
+        return s_RendererAPI->EquirectangularToCubeMap(filepath);
+    }
+
 } // namespace Desert::Graphic

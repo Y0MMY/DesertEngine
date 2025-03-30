@@ -10,12 +10,14 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanPipelineCompute final : public PipelineCompute
     {
     public:
-        VulkanPipelineCompute( const std::shared_ptr<Shader> shader );
+        VulkanPipelineCompute( const std::shared_ptr<Shader>& shader );
 
         virtual void Begin() override;
+        virtual void Execute() override;
+        virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
         virtual void End() override;
 
-        void Execute( VkDescriptorSet descriptorSet );
+        void BindDS( VkDescriptorSet descriptorSet );
 
         void ReadBuffer( uint32_t bufferSize ); // TEMP
 
