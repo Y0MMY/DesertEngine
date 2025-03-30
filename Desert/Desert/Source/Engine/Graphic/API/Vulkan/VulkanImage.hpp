@@ -54,7 +54,18 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        VkImageCreateInfo GetImageCreateInfo( VkFormat imageFormat );
+        VkImageCreateInfo  GetImageCreateInfo( VkFormat imageFormat );
+        VkImageCreateInfo  CreateImageInfo( VkFormat format );
+        Common::BoolResult CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
+                                                  VkImageCreateInfo& imageInfo, VkFormat format );
+        Common::BoolResult CreateTextureImage( VkDevice device, VulkanAllocator& allocator,
+                                               VkImageCreateInfo& imageInfo, VkFormat format );
+
+        Common::BoolResult CreateStorageImage( VkDevice device, VulkanAllocator& allocator,
+                                               VkImageCreateInfo& imageInfo );
+
+        Common::BoolResult CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
+                                               VkImageCreateInfo& imageInfo, VkFormat format );
 
     private:
         uint32_t                          m_MipLevels = 0u;

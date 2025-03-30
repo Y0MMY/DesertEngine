@@ -15,6 +15,10 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         virtual void OnUpdate( Common::Timestep ts ) override;
         virtual void Begin() override;
         virtual void End() override;
+
+        virtual void OnImGuiRender() override
+        {
+        }
     private:
         VkDescriptorPool m_ImguiPool;
 

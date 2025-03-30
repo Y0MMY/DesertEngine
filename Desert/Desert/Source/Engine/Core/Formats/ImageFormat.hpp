@@ -6,6 +6,7 @@ namespace Desert::Core::Formats
     {
         Image2D,
         ImageCube,
+        Storage,
 
         Attachment
     };
@@ -18,6 +19,11 @@ namespace Desert::Core::Formats
         DEPTH32F
     };
 
+    /* enum ImageProperties
+     {
+         Store,
+     };*/
+
     struct ImageSpecification
     {
         uint32_t                  Width;
@@ -26,5 +32,6 @@ namespace Desert::Core::Formats
         uint32_t                  TextureSamples = 1;
         std::optional<std::byte*> Data;
         ImageUsage                Usage;
+        // ImageProperties           Properties;
     };
 } // namespace Desert::Core::Formats

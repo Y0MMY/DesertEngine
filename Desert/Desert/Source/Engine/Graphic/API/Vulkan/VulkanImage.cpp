@@ -4,240 +4,155 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    static constexpr uint32_t LayerCount = 6;
+    // Constants
+    static constexpr uint32_t CUBEMAP_FACE_COUNT = 6;
+    static constexpr uint32_t MIN_MIP_LEVELS     = 1;
 
     namespace Utils
     {
-        uint32_t CalculateImageSize( uint32_t width, uint32_t height, const Core::Formats::ImageFormat& format )
+
+        uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format )
         {
-            uint32_t size = width * height;
 
             switch ( format )
             {
                 case Core::Formats::ImageFormat::RGBA8F:
-                    size *= 4; // RGBA8F uses 4 bytes per pixel
-                    break;
+                    return 4; // RGBA = 4 channels, 8 bits each
             }
 
-            return size;
+            return 0U;
         }
 
-        [[maybe_unused]] std::array<std::vector<unsigned char>, LayerCount>
-        GetCubeSidesImageData( const std::byte* originalImageData, uint32_t width, uint32_t height )
+        // Calculates the byte size of an image based on dimensions and format
+        uint32_t CalculateImageSize( uint32_t width, uint32_t height, const Core::Formats::ImageFormat& format )
         {
-            std::array<std::vector<unsigned char>, 6> faces;
-
-            /*
-                * +---+---+---+---+
-                |   | U |   |   |
-                +---+---+---+---+
-                | L | F | R | B |
-                +---+---+---+---+
-                |   | D |   |   |
-                +---+---+---+---+
-            */
-            int faceOffsets[6][2] = {
-                 { 0, 1 }, // left
-                 { 1, 1 }, // front
-                 { 2, 1 }, // right
-                 { 3, 1 }, // back
-                 { 1, 0 }, // up
-                 { 1, 2 }, // down
-
-            };
-            unsigned int faceWidth  = width / 4;
-            unsigned int faceHeight = height / 3;
-
-            return faces;
+            uint32_t pixelCount = width * height;
+            return pixelCount * GetBytesPerPixel( format );
         }
 
-        Common::Result<VmaAllocation> CreateStagingBuffer( VulkanAllocator& allocator, uint32_t imageSize,
-                                                           VkBuffer& stagingBuffer )
+        // Creates a temporary buffer for transferring image data to GPU
+        Common::Result<VmaAllocation> CreateStagingBuffer( VulkanAllocator& allocator, uint32_t bufferSize,
+                                                           VkBuffer& outBuffer )
         {
-            VkBufferCreateInfo bufferCreateInfo = {};
-            bufferCreateInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferCreateInfo.size               = imageSize;
-            bufferCreateInfo.usage              = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-            bufferCreateInfo.sharingMode        = VK_SHARING_MODE_EXCLUSIVE;
+            VkBufferCreateInfo bufferInfo = { .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                              .size        = bufferSize,
+                                              .usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                              .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
 
-            return allocator.RT_AllocateBuffer( "Image2D(staging)-TODO: Name", bufferCreateInfo,
-                                                VMA_MEMORY_USAGE_CPU_TO_GPU, stagingBuffer );
+            return allocator.RT_AllocateBuffer( "ImageStagingBuffer", bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU,
+                                                outBuffer );
         }
 
-        void CopyDataToStagingBuffer2D( VulkanAllocator& allocator, VkBuffer stagingBuffer,
-                                        VmaAllocation stagingBufferAllocation, uint32_t imageSize,
-                                        std::byte* data )
+        // Copies image data to a staging buffer
+        void CopyToStagingBuffer( VulkanAllocator& allocator, VkBuffer stagingBuffer,
+                                  VmaAllocation stagingAllocation, uint32_t dataSize,
+                                  const std::optional<std::byte*>& sourceData )
         {
-            uint8_t* destData = allocator.MapMemory( stagingBufferAllocation );
-            memcpy( destData, data, imageSize );
-            allocator.UnmapMemory( stagingBufferAllocation );
+            if ( !sourceData )
+                return;
+
+            void* mappedData = allocator.MapMemory( stagingAllocation );
+            memcpy( mappedData, *sourceData, dataSize );
+            allocator.UnmapMemory( stagingAllocation );
         }
 
-        void CopyDataToStagingBufferCubemap( VulkanAllocator& allocator, VkBuffer stagingBuffer,
-                                             VmaAllocation stagingBufferAllocation, uint32_t imageSize,
-                                             std::byte* data )
+        // Creates a Vulkan image with specified parameters
+        Common::Result<VmaAllocation> CreateImage( VulkanAllocator& allocator, VkImageCreateInfo& imageInfo,
+                                                   VkImage& outImage )
         {
-            uint8_t* destData = allocator.MapMemory( stagingBufferAllocation );
-            memcpy( destData, data, imageSize );
-            allocator.UnmapMemory( stagingBufferAllocation );
+            return allocator.RT_AllocateImage( "VulkanImage", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, outImage );
         }
 
-        Common::Result<VmaAllocation> CreateImageBuffer( VulkanAllocator&   allocator,
-                                                         VkImageCreateInfo& imageCreateInfo, VkImage& outPut )
-        {
-            return allocator.RT_AllocateImage( "Image2D-TODO: Name", imageCreateInfo, VMA_MEMORY_USAGE_GPU_ONLY,
-                                               outPut );
-        }
-
-        Common::Result<VkCommandBuffer> PrepareCommandBuffer()
+        // Prepares a command buffer for image operations
+        Common::Result<VkCommandBuffer> GetCommandBuffer()
         {
             return CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
         }
 
-        void PerformImageCopy2D( VkCommandBuffer copyCmdVal, VkBuffer stagingBuffer, VkFormat imageVulkanFormat,
-                                 const VkImage image, uint32_t width, uint32_t height, uint32_t mipLevels )
+        // Transitions image layout and copies data from buffer to image
+        void CopyBufferToImage2D( VkCommandBuffer commandBuffer, VkBuffer sourceBuffer, VkFormat imageFormat,
+                                  VkImage destinationImage, uint32_t width, uint32_t height, uint32_t mipLevels )
         {
-            Utils::InsertImageMemoryBarrier( copyCmdVal, image, imageVulkanFormat, VK_IMAGE_LAYOUT_UNDEFINED,
-                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, mipLevels );
+            // Transition image to transfer destination layout
+            Utils::InsertImageMemoryBarrier( commandBuffer, destinationImage, imageFormat,
+                                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                             1, // Array layers
+                                             mipLevels );
 
-            VkBufferImageCopy bufferCopyRegion = {
-                 .bufferOffset      = 0,
-                 .bufferRowLength   = 0,
-                 .bufferImageHeight = 0,
-                 .imageSubresource  = VkImageSubresourceLayers{ .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-                                                                .mipLevel       = 0,
-                                                                .baseArrayLayer = 0,
-                                                                .layerCount     = 1 },
-                 .imageOffset       = VkOffset3D{ .x = 0, .y = 0, .z = 0 },
-                 .imageExtent       = VkExtent3D{ .width = width, .height = height, .depth = 1 } };
+            VkBufferImageCopy copyRegion = { .bufferOffset      = 0,
+                                             .bufferRowLength   = 0,
+                                             .bufferImageHeight = 0,
+                                             .imageSubresource  = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                                    .mipLevel       = 0,
+                                                                    .baseArrayLayer = 0,
+                                                                    .layerCount     = 1 },
+                                             .imageOffset       = { 0, 0, 0 },
+                                             .imageExtent       = { width, height, 1 } };
 
-            vkCmdCopyBufferToImage( copyCmdVal, stagingBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                                    &bufferCopyRegion );
+            vkCmdCopyBufferToImage( commandBuffer, sourceBuffer, destinationImage,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion );
 
-            // Perform the memory barrier for shader read
-            Utils::InsertImageMemoryBarrier( copyCmdVal, image, imageVulkanFormat,
+            // Transition to shader-read layout
+            Utils::InsertImageMemoryBarrier( commandBuffer, destinationImage, imageFormat,
                                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, mipLevels );
-
-            CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmdVal );
-        }
-
-        void PerformImageCopyCubemap( VkCommandBuffer copyCmdVal, VkImage srcImage, VkImage dstImage,
-                                      uint32_t width, uint32_t height, VkFormat format )
-        {
-            uint32_t faceWidth  = width / 4;
-            uint32_t faceHeight = height / 3;
-
-            /*
-                *+---+----+----+----+
-                |    | +Y |    |    |
-                +----+----+----+----+
-                | -X | -Z | +X | +Z |
-                +----+----+----+----+
-                |    | -Y |    |    |
-                +----+----+----+----+
-            */
-
-            int faceOffsets[6][2] = {
-                 { 2, 1 }, // +X
-                 { 0, 1 }, // -X
-                 { 1, 0 }, // +Y
-                 { 1, 2 }, // -Y
-                 { 3, 1 }, // +Z
-                 { 1, 1 }  // -Z
-            };
-
-            VkImageCopy copies[6] = {
-
-                 { // +X
-                   .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                   .srcOffset = { static_cast<int32_t>( 2U * faceWidth ), static_cast<int32_t>( faceHeight ), 0 },
-                   .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                   .dstOffset      = { 0, 0, 0 },
-                   .extent         = { faceWidth, faceHeight, 1 } },
-                 { // -X
-                   .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                   .srcOffset      = { 0, static_cast<int32_t>( faceHeight ), 0 },
-                   .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1 },
-                   .dstOffset      = { 0, 0, 0 },
-                   .extent         = { faceWidth, faceHeight, 1 } },
-                 { // +Y
-                   .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                   .srcOffset      = { static_cast<int32_t>( faceWidth ), 0, 0 },
-                   .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 2, 1 },
-                   .dstOffset      = { 0, 0, 0 },
-                   .extent         = { faceWidth, faceHeight, 1 } },
-                 { // -Y
-                   .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                   .srcOffset = { static_cast<int32_t>( faceWidth ), static_cast<int32_t>( 2U * faceHeight ), 0 },
-                   .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 3, 1 },
-                   .dstOffset      = { 0, 0, 0 },
-                   .extent         = { faceWidth, faceHeight, 1 } },
-                 { // +Z
-                   .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                   .srcOffset      = { static_cast<int32_t>( faceWidth ), static_cast<int32_t>( faceHeight ), 0 },
-                   .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 4, 1 },
-                   .dstOffset      = { 0, 0, 0 },
-                   .extent         = { faceWidth, faceHeight, 1 } },
-                 { // -Z
-                   .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                   .srcOffset = { static_cast<int32_t>( 3U * faceWidth ), static_cast<int32_t>( faceHeight ), 0 },
-                   .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 5, 1 },
-                   .dstOffset      = { 0, 0, 0 },
-                   .extent         = { faceWidth, faceHeight, 1 } } };
-
-            Utils::InsertImageMemoryBarrier( copyCmdVal, srcImage, format,
                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 1 );
+                                             1, // Array layers
+                                             mipLevels );
 
-            Utils::InsertImageMemoryBarrier( copyCmdVal, dstImage, format, VK_IMAGE_LAYOUT_UNDEFINED,
-                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, 1 );
-            vkCmdCopyImage( copyCmdVal, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage,
-                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, copies );
-
-            Utils::InsertImageMemoryBarrier( copyCmdVal, dstImage, format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 6, 1 );
-
-            CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmdVal );
+            CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
         }
 
-        Common::Result<VkImageView> CreateImageView( VkDevice device, VkFormat imageVulkanFormat,
-                                                     const VkImage image, uint32_t mipLevels, bool cubemap = false,
+        // Creates an image view for accessing the image
+        Common::Result<VkImageView> CreateImageView( VkDevice device, VkFormat format, VkImage image,
+                                                     uint32_t mipLevels, bool isCubemap = false,
                                                      bool isDepth = false )
         {
-            return Utils::CreateImageView(
-                 device, image, imageVulkanFormat, isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
-                 cubemap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, cubemap ? 6 : 1, mipLevels );
+            return Utils::CreateImageView( device, image, format,
+                                           isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+                                           isCubemap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D,
+                                           isCubemap ? CUBEMAP_FACE_COUNT : 1, mipLevels );
         }
 
-        void CreateSampler( VkDevice device, VkSampler& samplerOutput )
+        // Creates a sampler for texture filtering
+        void CreateTextureSampler( VkDevice device, VkSampler& outSampler )
         {
-            VkSamplerCreateInfo samplerCreateInfo = {};
-            samplerCreateInfo.sType               = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-            samplerCreateInfo.maxAnisotropy       = 1.0f;
-            samplerCreateInfo.magFilter           = VK_FILTER_LINEAR;
-            samplerCreateInfo.minFilter           = VK_FILTER_LINEAR;
-            samplerCreateInfo.mipmapMode          = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-            samplerCreateInfo.addressModeU        = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            samplerCreateInfo.addressModeV        = samplerCreateInfo.addressModeU;
-            samplerCreateInfo.addressModeW        = samplerCreateInfo.addressModeU;
-            samplerCreateInfo.mipLodBias          = 0.0f;
-            samplerCreateInfo.maxAnisotropy       = 1.0f;
-            samplerCreateInfo.minLod              = 0.0f;
-            samplerCreateInfo.maxLod              = 100.0f;
-            samplerCreateInfo.borderColor         = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+            VkSamplerCreateInfo samplerInfo = { .sType         = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                                                .magFilter     = VK_FILTER_LINEAR,
+                                                .minFilter     = VK_FILTER_LINEAR,
+                                                .mipmapMode    = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                                                .addressModeU  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                                .addressModeV  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                                .addressModeW  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                                .mipLodBias    = 0.0f,
+                                                .maxAnisotropy = 1.0f,
+                                                .minLod        = 0.0f,
+                                                .maxLod        = 100.0f,
+                                                .borderColor   = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE };
 
-            VK_CHECK_RESULT( vkCreateSampler( device, &samplerCreateInfo, nullptr, &samplerOutput ) );
+            VK_CHECK_RESULT( vkCreateSampler( device, &samplerInfo, nullptr, &outSampler ) );
         }
-
     } // namespace Utils
 
-    VulkanImage2D::VulkanImage2D( const Core::Formats::ImageSpecification& specification )
-         : m_ImageSpecification( specification )
+    VkFormat GetImageVulkanFormat( const Core::Formats::ImageFormat& format )
     {
-        m_MipLevels = // static_cast<uint32_t>(std::floor(
-                      // std::log2( std::max( m_ImageSpecification.Width, m_ImageSpecification.Height ) ) ) ) +
-             1;
+        switch ( format )
+        {
+            case Core::Formats::ImageFormat::RGBA8F:
+                return VK_FORMAT_R8G8B8A8_UNORM;
+            case Core::Formats::ImageFormat::BGRA8F:
+                return VK_FORMAT_B8G8R8A8_UNORM;
+            default:
+                return VK_FORMAT_UNDEFINED;
+        }
+    }
+
+    // VulkanImage2D Implementation
+    VulkanImage2D::VulkanImage2D( const Core::Formats::ImageSpecification& spec ) : m_ImageSpecification( spec )
+    {
+        // For now just use 1 mip level
+        // Could calculate based on image dimensions:
+        // m_MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+        m_MipLevels = MIN_MIP_LEVELS;
     }
 
     uint32_t VulkanImage2D::GetMipmapLevels() const
@@ -245,184 +160,325 @@ namespace Desert::Graphic::API::Vulkan
         return m_MipLevels;
     }
 
-    void VulkanImage2D::Use( uint32_t slot /*= 0*/ ) const
+    void VulkanImage2D::Use( uint32_t slot ) const
     {
+        // Implementation would bind the image to a descriptor set
     }
 
     Common::BoolResult VulkanImage2D::RT_Invalidate()
     {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice         device    = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VulkanAllocator& allocator = VulkanAllocator::GetInstance();
 
-        VkFormat          imageVulkanFormat = GetImageVulkanFormat( m_ImageSpecification.Format );
-        VkImageCreateInfo imageCreateInfo   = GetImageCreateInfo( imageVulkanFormat );
-        auto&             allocator         = VulkanAllocator::GetInstance();
+        VkFormat          format    = GetImageVulkanFormat( m_ImageSpecification.Format );
+        VkImageCreateInfo imageInfo = CreateImageInfo( format );
 
-        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::Attachment )
+        // Handle different image usage cases
+        switch ( m_ImageSpecification.Usage )
         {
-            auto imageAllocation = Utils::CreateImageBuffer( allocator, imageCreateInfo, m_VulkanImageInfo.Image );
+            case Core::Formats::ImageUsage::Attachment:
+                return CreateAttachmentImage( device, allocator, imageInfo, format );
 
-            if ( !imageAllocation.IsSuccess() )
-            {
-                return Common::MakeError<bool>( imageAllocation.GetError() );
-            }
+            case Core::Formats::ImageUsage::Storage:
+                return CreateStorageImage( device, allocator, imageInfo );
 
-            auto createImageView =
-                 Utils::CreateImageView( device, imageVulkanFormat, m_VulkanImageInfo.Image, m_MipLevels, false,
-                                         Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) );
+            case Core::Formats::ImageUsage::ImageCube:
+                return CreateCubemapImage( device, allocator, imageInfo, format );
 
-            if ( !createImageView.IsSuccess() )
-            {
-                return Common::MakeError<bool>( createImageView.GetError() );
-            }
+            default: // Regular 2D texture
+                return CreateTextureImage( device, allocator, imageInfo, format );
+        }
+    }
 
-            m_VulkanImageInfo.ImageView = createImageView.GetValue();
+    // Helper methods for different image types
+    Common::BoolResult VulkanImage2D::CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
+                                                             VkImageCreateInfo& imageInfo, VkFormat format )
+    {
+        imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
 
-            Utils::CreateSampler( device, m_VulkanImageInfo.Sampler );
+        if ( Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) )
+            imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        else
+            imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-            return Common::MakeSuccess( true );
+        auto allocation = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
+        if ( !allocation.IsSuccess() )
+        {
+            return Common::MakeError<bool>( allocation.GetError() );
         }
 
-        DESERT_VERIFY( m_ImageSpecification.Data );
+        bool isDepth = Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format );
+        auto viewResult =
+             Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, false, isDepth );
+
+        if ( !viewResult.IsSuccess() )
+        {
+            return Common::MakeError<bool>( viewResult.GetError() );
+        }
+
+        m_VulkanImageInfo.ImageView = viewResult.GetValue();
+        Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
+
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResult VulkanImage2D::CreateTextureImage( VkDevice device, VulkanAllocator& allocator,
+                                                          VkImageCreateInfo& imageInfo, VkFormat format )
+    {
+        if ( !m_ImageSpecification.Data )
+        {
+            return Common::MakeError<bool>( "No image data provided" );
+        }
+
+        imageInfo.usage =
+             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
         uint32_t imageSize = Utils::CalculateImageSize( m_ImageSpecification.Width, m_ImageSpecification.Height,
                                                         m_ImageSpecification.Format );
 
         VkBuffer stagingBuffer;
-        auto     stagingBufferAllocation = Utils::CreateStagingBuffer( allocator, imageSize, stagingBuffer );
-        if ( !stagingBufferAllocation.IsSuccess() )
+        auto     stagingAlloc = Utils::CreateStagingBuffer( allocator, imageSize, stagingBuffer );
+        if ( !stagingAlloc.IsSuccess() )
         {
-            return Common::MakeError<bool>( stagingBufferAllocation.GetError() );
+            return Common::MakeError<bool>( stagingAlloc.GetError() );
         }
 
-        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
-        {
+        Utils::CopyToStagingBuffer( allocator, stagingBuffer, stagingAlloc.GetValue(), imageSize,
+                                    m_ImageSpecification.Data );
 
-            Utils::CopyDataToStagingBufferCubemap( allocator, stagingBuffer, stagingBufferAllocation.GetValue(),
-                                                   imageSize, m_ImageSpecification.Data.value() );
-        }
-        else
+        auto imageAlloc = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
+        if ( !imageAlloc.IsSuccess() )
         {
-            Utils::CopyDataToStagingBuffer2D( allocator, stagingBuffer, stagingBufferAllocation.GetValue(),
-                                              imageSize, m_ImageSpecification.Data.value() );
+            return Common::MakeError<bool>( imageAlloc.GetError() );
         }
+        m_VulkanImageInfo.MemoryAlloc = imageAlloc.GetValue();
 
-        auto imageAllocation = Utils::CreateImageBuffer( allocator, imageCreateInfo, m_VulkanImageInfo.Image );
-        if ( !imageAllocation.IsSuccess() )
+        auto cmdBuffer = Utils::GetCommandBuffer();
+        if ( !cmdBuffer.IsSuccess() )
         {
-            return Common::MakeError<bool>( imageAllocation.GetError() );
+            return Common::MakeError<bool>( cmdBuffer.GetError() );
         }
 
-        m_VulkanImageInfo.MemoryAlloc = imageAllocation.GetValue();
+        Utils::CopyBufferToImage2D( cmdBuffer.GetValue(), stagingBuffer, format, m_VulkanImageInfo.Image,
+                                    m_ImageSpecification.Width, m_ImageSpecification.Height, m_MipLevels );
 
-        auto copyCmd = Utils::PrepareCommandBuffer();
-        if ( !copyCmd.IsSuccess() )
+        auto viewResult = Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels );
+
+        if ( !viewResult.IsSuccess() )
         {
-            return Common::MakeError<bool>( copyCmd.GetError() );
+            return Common::MakeError<bool>( viewResult.GetError() );
         }
+        m_VulkanImageInfo.ImageView = viewResult.GetValue();
+        Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
 
-        VkCommandBuffer copyCmdVal = copyCmd.GetValue();
-
-        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
-        {
-            Core::Formats::ImageSpecification specification;
-            specification       = m_ImageSpecification;
-            specification.Usage = Core::Formats::ImageUsage::Image2D;
-
-            std::shared_ptr<VulkanImage2D> imageSrc = std::make_shared<VulkanImage2D>( specification );
-            imageSrc->RT_Invalidate();
-
-            Utils::PerformImageCopyCubemap( copyCmdVal, imageSrc->GetVulkanImageInfo().Image,
-                                            m_VulkanImageInfo.Image, m_ImageSpecification.Width,
-                                            m_ImageSpecification.Height, imageVulkanFormat );
-        }
-        else
-        {
-            Utils::PerformImageCopy2D( copyCmdVal, stagingBuffer, imageVulkanFormat, m_VulkanImageInfo.Image,
-                                       m_ImageSpecification.Width, m_ImageSpecification.Height, m_MipLevels );
-        }
-
-        // create ImageView
-        auto createImageView =
-             Utils::CreateImageView( device, imageVulkanFormat, m_VulkanImageInfo.Image, m_MipLevels,
-                                     m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube );
-        if ( !createImageView.IsSuccess() )
-        {
-            return Common::MakeError<bool>( createImageView.GetError() );
-        }
-
-        m_VulkanImageInfo.ImageView = createImageView.GetValue();
-
-        // create sampler
-        Utils::CreateSampler( device, m_VulkanImageInfo.Sampler );
-
-        VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_IMAGE, "Texture", m_VulkanImageInfo.Image );
+        VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_IMAGE, "Texture2D", m_VulkanImageInfo.Image );
 
         return Common::MakeSuccess( true );
     }
 
-    VkImageCreateInfo VulkanImage2D::GetImageCreateInfo( VkFormat imageFormat )
+    Common::BoolResult VulkanImage2D::CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
+                                                          VkImageCreateInfo& imageInfo, VkFormat format )
     {
-        VkImageCreateFlags flags = {};
-        VkImageUsageFlags  usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-        // Cube faces count as array layers in Vulkan
-        uint32_t arrayLayers = 1;
-        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
+        if ( !m_ImageSpecification.Data )
         {
-            flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-            arrayLayers = 6;
+            return Common::MakeError<bool>( "No cubemap data provided" );
         }
 
-        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::Attachment )
+        imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        imageInfo.usage =
+             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
+        imageInfo.arrayLayers = CUBEMAP_FACE_COUNT;
+        imageInfo.extent      = { m_ImageSpecification.Width / 4, m_ImageSpecification.Height / 3, 1 };
+
+        const uint32_t bytesPerPixel = Utils::GetBytesPerPixel( m_ImageSpecification.Format );
+        const uint32_t faceWidth     = m_ImageSpecification.Width / 4;
+        const uint32_t faceHeight    = m_ImageSpecification.Height / 3;
+
+        // Critical validation
+        if ( faceWidth * 4 != m_ImageSpecification.Width || faceHeight * 3 != m_ImageSpecification.Height )
         {
-            if ( Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) )
-                usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            else
-                usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            return Common::MakeError<bool>(
+                 "Image dimensions must be exactly divisible by 4 (width) and 3 (height)" );
+        }
+        if ( faceWidth != faceHeight )
+        {
+            return Common::MakeError<bool>( "Cubemap faces must be square" );
         }
 
-        else // Image2D
+        const uint32_t faceSize    = faceWidth * faceHeight * bytesPerPixel;
+        const uint32_t totalSize   = faceSize * CUBEMAP_FACE_COUNT;
+        const uint32_t srcRowPitch = m_ImageSpecification.Width * bytesPerPixel;
+
+        VkBuffer stagingBuffer;
+        auto     stagingAlloc = Utils::CreateStagingBuffer( allocator, totalSize, stagingBuffer );
+        if ( !stagingAlloc.IsSuccess() )
         {
-            usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            return Common::MakeError<bool>( stagingAlloc.GetError() );
         }
 
-        uint32_t faceWidth  = m_ImageSpecification.Width / 4;
-        uint32_t faceHeight = m_ImageSpecification.Height / 3;
+        uint8_t*       dstData = static_cast<uint8_t*>( allocator.MapMemory( stagingAlloc.GetValue() ) );
+        const uint8_t* srcData = reinterpret_cast<const uint8_t*>( *m_ImageSpecification.Data );
 
-        return VkImageCreateInfo{
-             .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-             .pNext       = nullptr,
-             .flags       = flags,
-             .imageType   = VK_IMAGE_TYPE_2D,
-             .format      = imageFormat,
-             .extent      = { .width  = ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
-                                             ? faceWidth
-                                             : m_ImageSpecification.Width,
-                              .height = ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube )
-                                             ? faceHeight
-                                             : m_ImageSpecification.Height,
-                              .depth  = 1 },
-             .mipLevels   = m_MipLevels,
-             .arrayLayers = arrayLayers,
-             .samples     = VK_SAMPLE_COUNT_1_BIT,
-             .tiling      = VK_IMAGE_TILING_OPTIMAL,
-             .usage       = usage,
-             .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
-             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+        const struct
+        {
+            uint32_t srcX, srcY; // Position in source image
+            uint32_t faceIndex;  // Vulkan cubemap face index
+        } faceMapping[6] = {
+             { 2, 1, 0 }, // +X (right)
+             { 0, 1, 1 }, // -X (left)
+             { 1, 0, 2 }, // +Y (top) - NOTE: Vulkan's Y axis points downward
+             { 1, 2, 3 }, // -Y (bottom)
+             { 1, 1, 4 }, // +Z (front)
+             { 3, 1, 5 }  // -Z (back)
+        };
+
+        for ( const auto& face : faceMapping )
+        {
+            const uint32_t faceOffset = face.faceIndex * faceSize;
+            const uint32_t srcFaceOffset =
+                 ( face.srcY * faceHeight * srcRowPitch ) + ( face.srcX * faceWidth * bytesPerPixel );
+
+            for ( uint32_t y = 0; y < faceHeight; y++ )
+            {
+                const uint32_t srcOffset = srcFaceOffset + y * srcRowPitch;
+                const uint32_t dstOffset = faceOffset + y * faceWidth * bytesPerPixel;
+                memcpy( dstData + dstOffset, srcData + srcOffset, faceWidth * bytesPerPixel );
+            }
+        }
+        allocator.UnmapMemory( stagingAlloc.GetValue() );
+
+        auto imageAlloc = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
+        if ( !imageAlloc.IsSuccess() )
+        {
+            return Common::MakeError<bool>( imageAlloc.GetError() );
+        }
+        m_VulkanImageInfo.MemoryAlloc = imageAlloc.GetValue();
+
+        auto cmdBuffer = Utils::GetCommandBuffer();
+        if ( !cmdBuffer.IsSuccess() )
+        {
+            return Common::MakeError<bool>( cmdBuffer.GetError() );
+        }
+
+        std::vector<VkBufferImageCopy> copyRegions;
+        for ( uint32_t face = 0; face < CUBEMAP_FACE_COUNT; face++ )
+        {
+            copyRegions.push_back( { .bufferOffset      = face * faceSize,
+                                     .bufferRowLength   = faceWidth,  // Important for proper row alignment
+                                     .bufferImageHeight = faceHeight, // Important for proper image height
+                                     .imageSubresource  = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                            .mipLevel       = 0,
+                                                            .baseArrayLayer = face,
+                                                            .layerCount     = 1 },
+                                     .imageExtent       = { faceWidth, faceHeight, 1 } } );
+        }
+
+        VkCommandBuffer commandBuffer = cmdBuffer.GetValue();
+
+        // Transition to DST_OPTIMAL
+        Utils::InsertImageMemoryBarrier( commandBuffer, m_VulkanImageInfo.Image, format, VK_IMAGE_LAYOUT_UNDEFINED,
+                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, CUBEMAP_FACE_COUNT, 1 );
+
+        vkCmdCopyBufferToImage( commandBuffer, stagingBuffer, m_VulkanImageInfo.Image,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>( copyRegions.size() ),
+                                copyRegions.data() );
+
+        // Transition to SHADER_READ layout
+        Utils::InsertImageMemoryBarrier( commandBuffer, m_VulkanImageInfo.Image, format,
+                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, CUBEMAP_FACE_COUNT, 1 );
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
+
+        auto viewResult = Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, true );
+        if ( !viewResult.IsSuccess() )
+        {
+            return Common::MakeError<bool>( viewResult.GetError() );
+        }
+        m_VulkanImageInfo.ImageView = viewResult.GetValue();
+
+        VkSamplerCreateInfo samplerInfo = { .sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                                            .magFilter    = VK_FILTER_LINEAR,
+                                            .minFilter    = VK_FILTER_LINEAR,
+                                            .mipmapMode   = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                                            .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                            .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                            .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                            .borderColor  = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK };
+        if ( vkCreateSampler( device, &samplerInfo, nullptr, &m_VulkanImageInfo.Sampler ) != VK_SUCCESS )
+        {
+            return Common::MakeError<bool>( "Failed to create cubemap sampler" );
+        }
+
+        return Common::MakeSuccess( true );
     }
 
-    VkFormat GetImageVulkanFormat( const Core::Formats::ImageFormat& imageFormat )
+    Common::BoolResult VulkanImage2D::CreateStorageImage( VkDevice device, VulkanAllocator& allocator,
+                                                          VkImageCreateInfo& imageInfo )
     {
-        switch ( imageFormat )
-        {
-            case Core::Formats::ImageFormat::RGBA8F:
-                return VK_FORMAT_R8G8B8A8_UNORM;
-            case Core::Formats::ImageFormat::BGRA8F:
-                return VK_FORMAT_B8G8R8A8_UNORM;
+        // Storage images require VK_IMAGE_USAGE_STORAGE_BIT
+        // Adding transfer flags enables CPU->GPU updates if needed
+        imageInfo.usage =
+             VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
-                // Add more formats if needed
-            default:
-                return VK_FORMAT_UNDEFINED; // Return an undefined format if not supported
+        auto imageAlloc = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
+        if ( !imageAlloc.IsSuccess() )
+        {
+            return Common::MakeError<bool>( "Failed to create storage image: " + imageAlloc.GetError() );
         }
+        m_VulkanImageInfo.MemoryAlloc = imageAlloc.GetValue();
+
+        auto cmdBuffer = Utils::GetCommandBuffer();
+        if ( !cmdBuffer.IsSuccess() )
+        {
+            return Common::MakeError<bool>( "Failed to get command buffer" );
+        }
+
+        // Storage images typically use VK_IMAGE_LAYOUT_GENERAL because:
+        // - They're both read and written in shaders
+        // - Provides best performance for atomic operations
+        Utils::InsertImageMemoryBarrier( cmdBuffer.GetValue(), m_VulkanImageInfo.Image, imageInfo.format,
+                                         VK_IMAGE_LAYOUT_UNDEFINED, // Initial layout
+                                         VK_IMAGE_LAYOUT_GENERAL,   // Storage-compatible layout
+                                         1,                         // array layers
+                                         imageInfo.mipLevels );
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmdBuffer.GetValue() );
+
+        auto viewResult =
+             Utils::CreateImageView( device, imageInfo.format, m_VulkanImageInfo.Image, imageInfo.mipLevels,
+                                     false,   // not a cubemap
+                                     false ); // not a depth/stencil image
+        if ( !viewResult.IsSuccess() )
+        {
+            return Common::MakeError<bool>( "Failed to create storage image view" );
+        }
+        m_VulkanImageInfo.ImageView = viewResult.GetValue();
+
+        // Most storage images are accessed via imageLoad/imageStore in shaders
+        // rather than through samplers
+        m_VulkanImageInfo.Sampler = VK_NULL_HANDLE;
+
+        VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_IMAGE, "StorageImage", m_VulkanImageInfo.Image );
+
+        return Common::MakeSuccess( true );
     }
 
+    VkImageCreateInfo VulkanImage2D::CreateImageInfo( VkFormat format )
+    {
+        VkImageCreateInfo createInfo = { .sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                                         .flags     = 0,
+                                         .imageType = VK_IMAGE_TYPE_2D,
+                                         .format    = format,
+                                         .extent = { m_ImageSpecification.Width, m_ImageSpecification.Height, 1 },
+                                         .mipLevels     = m_MipLevels,
+                                         .arrayLayers   = 1, // Default, overridden for cubemaps
+                                         .samples       = VK_SAMPLE_COUNT_1_BIT,
+                                         .tiling        = VK_IMAGE_TILING_OPTIMAL,
+                                         .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
+                                         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+
+        return createInfo;
+    }
 } // namespace Desert::Graphic::API::Vulkan

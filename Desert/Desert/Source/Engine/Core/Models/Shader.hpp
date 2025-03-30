@@ -19,7 +19,7 @@ namespace Desert::Core::Models
         uint32_t                   DescriptorSet = 0;
         uint32_t                   ArraySize     = 0;
         std::string                Name;
-        const Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::Fragment;
+        Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::Fragment;
     };
 
     struct StorageBuffer
