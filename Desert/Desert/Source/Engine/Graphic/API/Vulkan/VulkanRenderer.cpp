@@ -308,7 +308,7 @@ namespace Desert::Graphic::API::Vulkan
     std::shared_ptr<Desert::Graphic::Image2D>
     VulkanRendererAPI::EquirectangularToCubeMap( const Common::Filepath& filepath )
     {
-        static std::shared_ptr<Shader>    shader        = Shader::Create( "comute_test.glsl" );
+        static std::shared_ptr<Shader>    shader        = Shader::Create( "PanoramaToCubemapLayout.glsl" );
         static std::shared_ptr<Texture2D> imagePanorama = Texture2D::Create( filepath );
         const auto& imageVulkanCube = sp_cast<API::Vulkan::VulkanImage2D>( imagePanorama->GetImage2D() );
 
