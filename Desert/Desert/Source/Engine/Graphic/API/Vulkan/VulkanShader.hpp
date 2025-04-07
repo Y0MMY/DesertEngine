@@ -10,7 +10,8 @@ namespace Desert::Graphic::API::Vulkan
     enum class WriteDescriptorType
     {
         Uniform = 0,
-        Sampler
+        Sampler2D,
+        StorageSampler2D
     };
 
     class VulkanShader final : public Shader
@@ -42,7 +43,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Common::BoolResult Reload() override;
         virtual const std::string  GetName() const override
         {
-            return "TODO";
+            return m_ShaderName;
         }
 
         const VkWriteDescriptorSet GetWriteDescriptorSet( const WriteDescriptorType& type, uint32_t binding,
@@ -79,6 +80,7 @@ namespace Desert::Graphic::API::Vulkan
     private:
         std::vector<VkPipelineShaderStageCreateInfo> m_PipelineShaderStageCreateInfos;
         std::filesystem::path                        m_ShaderPath;
+        std::string m_ShaderName;
 
         ReflectionData                     m_ReflectionData;
         std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts; // set

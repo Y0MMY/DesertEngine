@@ -42,6 +42,14 @@ namespace Common::Logger
     }
 
     template <typename... Args>
+    constexpr void LogCritical( const std::string_view inMessage, Args&&... InArgs )
+    {
+        spdlog::set_level( spdlog::level::critical );
+        std::string message = fmt::vformat( inMessage, fmt::make_format_args( InArgs... ) );
+        spdlog::critical( message );
+    }
+
+    template <typename... Args>
     constexpr void LogTrace( const std::string_view inMessage, Args&&... InArgs )
     {
         spdlog::set_level( spdlog::level::trace );
@@ -53,5 +61,6 @@ namespace Common::Logger
 #define LOG_INFO( ... ) Common::Logger::LogInfo( __VA_ARGS__ );
 #define LOG_WARN( ... ) Common::Logger::LogWarn( __VA_ARGS__ );
 #define LOG_ERROR( ... ) Common::Logger::LogError( __VA_ARGS__ );
+#define LOG_CRITICAL( ... ) Common::Logger::LogCritical( __VA_ARGS__ );
 #define LOG_TRACE( ... ) Common::Logger::LogTrace( __VA_ARGS__ );
 #define LOG_DEBUG( ... ) Common::Logger::LogDebug( __VA_ARGS__ );

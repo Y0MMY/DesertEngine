@@ -24,7 +24,7 @@ namespace Desert::Graphic
         auto vkImage = std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>(
              m_SceneInfo.ActiveScene->GetEnvironment() );
 
-        auto info = vkImage->GetVulkanImageInfo();
+        auto info = sp_cast<API::Vulkan::VulkanImage2D>(vkImage)->GetVulkanImageInfo();
 
         VkDescriptorImageInfo imageInfo = {};
         imageInfo.sampler               = info.Sampler;
@@ -181,8 +181,6 @@ namespace Desert::Graphic
 
         auto& renderer = Renderer::GetInstance();
 
-        renderer.EquirectangularToCubeMap( "" );
-
         renderer.BeginFrame();
     }
 
@@ -233,7 +231,7 @@ namespace Desert::Graphic
 
         UpdateDescriptorSets2( dstSet, imageInfo.ImageView, imageInfo.Sampler );
         renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Composite.Pipeline );
-        //renderer.RenderImGui();
+        // renderer.RenderImGui();
 
         renderer.EndRenderPass();
     }
@@ -250,7 +248,7 @@ namespace Desert::Graphic
         for ( const auto& meshIno : m_SceneInfo.Renderdata.MeshInfo )
         {
             auto vp = m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
-            renderer.RenderMesh( m_SceneInfo.Renderdata.Geometry.Pipeline, meshIno.Mesh, vp);
+            renderer.RenderMesh( m_SceneInfo.Renderdata.Geometry.Pipeline, meshIno.Mesh, vp );
         }
 
         renderer.EndRenderPass();

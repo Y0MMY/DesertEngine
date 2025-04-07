@@ -25,22 +25,36 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipelineCompute::End()
     {
+         
         vkEndCommandBuffer( m_ActiveComputeCommandBuffer );
 
-        VkSubmitInfo submitInfo{};
+        VkSubmitInfo submitInfo       = {};
         submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers    = &m_ActiveComputeCommandBuffer;
 
+        VkFence fence;
+        // Create fence to ensure that the command buffer has finished executing
+        VkFenceCreateInfo fenceCreateInfo = {};
+        fenceCreateInfo.sType             = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceCreateInfo.flags             = 0;
+        const auto& device                = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        vkCreateFence( device, &fenceCreateInfo, nullptr, &fence );
         VkQueue computeQueue = VulkanLogicalDevice::GetInstance().GetComputeQueue();
-        vkQueueSubmit( computeQueue, 1, &submitInfo, VK_NULL_HANDLE );
-        vkQueueWaitIdle( computeQueue ); // TODO: fence
+        vkQueueSubmit( computeQueue, 1, &submitInfo, fence );
+
+        // Wait for the fence to signal that command buffer has finished executing
+        VK_CHECK_RESULT( vkWaitForFences( device, 1, &fence, VK_TRUE, UINT64_MAX ) );
+        vkDestroyFence( device, fence, nullptr );
 
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
     }
 
-    void VulkanPipelineCompute::Execute()
+    void VulkanPipelineCompute::Execute( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
     {
+        Begin();
+        Dispatch( groupCountX, groupCountY, groupCountZ );
+        End();
     }
 
     void VulkanPipelineCompute::Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )

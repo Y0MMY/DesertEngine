@@ -9,9 +9,12 @@
 #include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
+#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Core/EngineContext.h>
 
 #include <Engine/Graphic/API/Vulkan/imgui/ImGuiRenderer.hpp>
+
+#include "stb_image/stb_image_write.h"
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
@@ -305,48 +308,67 @@ namespace Desert::Graphic::API::Vulkan
     std::shared_ptr<Desert::Graphic::Image2D>
     VulkanRendererAPI::EquirectangularToCubeMap( const Common::Filepath& filepath )
     {
-        static std::shared_ptr<Shader> shader = Shader::Create( "comute_test.glsl" );
+        static std::shared_ptr<Shader>    shader        = Shader::Create( "comute_test.glsl" );
+        static std::shared_ptr<Texture2D> imagePanorama = Texture2D::Create( filepath );
+        const auto& imageVulkanCube = sp_cast<API::Vulkan::VulkanImage2D>( imagePanorama->GetImage2D() );
 
-        Core::Formats::ImageSpecification info;
-        info.Width                            = 3200;
-        info.Height                           = 2400;
-        info.Format = Core::Formats::ImageFormat::RGBA8F;
-        info.Usage = Core::Formats::ImageUsage::Storage;
+        Core::Formats::ImageSpecification outputImageInfo;
+        outputImageInfo.Width      = imagePanorama->GetImage2D()->GetWidth();
+        outputImageInfo.Height     = ( imagePanorama->GetImage2D()->GetHeight() * 1.5f );
+        outputImageInfo.Format     = Core::Formats::ImageFormat::RGBA32F;
+        outputImageInfo.Properties = Core::Formats::Storage;
 
-        static std::shared_ptr<Image2D> image = Image2D::Create(info);
-        const auto& imageVulkan = sp_cast<API::Vulkan::VulkanImage2D>(image);
-        imageVulkan->RT_Invalidate();
+        const std::shared_ptr<Image2D> outputImage       = Image2D::Create( outputImageInfo );
+        const auto&                    outputImageVulkan = sp_cast<API::Vulkan::VulkanImage2D>( outputImage );
+        outputImageVulkan->RT_Invalidate();
 
-        const auto& shaderVulkan = sp_cast<API::Vulkan::VulkanShader>(shader);
+        const auto& shaderVulkan = sp_cast<API::Vulkan::VulkanShader>( shader );
 
-        auto vulkanPipelineCompute = Graphic::PipelineCompute::Create( shader );
-        vulkanPipelineCompute->Invalidate();
-        vulkanPipelineCompute->Begin();
+        std::array<VkDescriptorImageInfo, 2> imageInfo = {};
+        imageInfo[0].imageView                         = outputImageVulkan->GetVulkanImageInfo().ImageView;
+        imageInfo[0].imageLayout                       = VK_IMAGE_LAYOUT_GENERAL;
 
-        VkDescriptorImageInfo imageInfo = {};
-        imageInfo.imageView             = imageVulkan->GetVulkanImageInfo().ImageView;
-        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfo[1].imageView   = imageVulkanCube->GetVulkanImageInfo().ImageView;
+        imageInfo[1].sampler     = imageVulkanCube->GetVulkanImageInfo().Sampler;
+        imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
-        VkWriteDescriptorSet descriptorWrite = {};
-        descriptorWrite.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrite.dstSet               = shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at(frameIndex).at(0);
-        descriptorWrite.dstBinding           = 1;
-        descriptorWrite.dstArrayElement      = 0;
-        descriptorWrite.descriptorType       = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        descriptorWrite.descriptorCount      = 1;
-        descriptorWrite.pImageInfo           = &imageInfo;
+        auto vulkanPipelineCompute = Graphic::PipelineCompute::Create( shader );
+        vulkanPipelineCompute->Invalidate();
 
-        VkDevice   device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        vkUpdateDescriptorSets( device, 1, &descriptorWrite, 0, nullptr );
+        std::array<VkWriteDescriptorSet, 2> descriptorWrite = {};
 
-        sp_cast<API::Vulkan::VulkanPipelineCompute>(vulkanPipelineCompute)->BindDS(descriptorWrite.dstSet);
+        auto descriptorSet = shaderVulkan->GetWriteDescriptorSet(
+             API::Vulkan::WriteDescriptorType::StorageSampler2D, 1, 0, frameIndex );
+        descriptorWrite[0] = descriptorSet;
+        descriptorWrite[0].dstSet =
+             shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+        descriptorWrite[0].pImageInfo = &imageInfo[0];
 
-        vulkanPipelineCompute->Dispatch( 3200 / 32 , 2800 / 32, 1 );
+        descriptorSet =
+             shaderVulkan->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Sampler2D, 0, 0, frameIndex );
+
+        descriptorWrite[1] = descriptorSet;
+        descriptorWrite[1].dstSet =
+             shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+        descriptorWrite[1].pImageInfo = &imageInfo[1];
+
+        VkDevice device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        vkUpdateDescriptorSets( device, descriptorWrite.size(), descriptorWrite.data(), 0, nullptr );
+
+        vulkanPipelineCompute->Begin();
+        sp_cast<API::Vulkan::VulkanPipelineCompute>( vulkanPipelineCompute )->BindDS( descriptorWrite[0].dstSet );
+        vulkanPipelineCompute->Dispatch( outputImageInfo.Width / 32, outputImageInfo.Height / 32, 1 );
         vulkanPipelineCompute->End();
 
-        return std::shared_ptr<Desert::Graphic::Image2D>( nullptr );
+       /* const auto& result = outputImage->GetImagePixels();
+
+        const char* outputPath = "output123.tga";
+        const auto  res        = std::get<std::vector<unsigned char>>( result );
+        int success = stbi_write_tga( outputPath, outputImageInfo.Width, outputImageInfo.Height, 4, res.data() );*/
+
+        return std::shared_ptr<Desert::Graphic::Image2D>( outputImage );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

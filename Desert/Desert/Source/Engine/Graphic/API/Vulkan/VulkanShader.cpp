@@ -194,7 +194,8 @@ namespace Desert::Graphic::API::Vulkan
 
     } // namespace Utils
 
-    VulkanShader::VulkanShader( const std::filesystem::path& path ) : m_ShaderPath( path )
+    VulkanShader::VulkanShader( const std::filesystem::path& path )
+         : m_ShaderPath( path ), m_ShaderName( path.filename().string() )
     {
         Utils::CreateDirectoriesIfNoExists(); // TODO: move to a better location
 
@@ -309,8 +310,8 @@ namespace Desert::Graphic::API::Vulkan
                 newImageSampler.BindingPoint = binding;
                 newImageSampler.Name         = name;
                 newImageSampler.ArraySize    = arraySize;
-                /*newImageSampler.ShaderStage =
-                     Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );*/
+                newImageSampler.ShaderStage =
+                     Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
                 ShaderResource::ShaderDescriptorSet::SamplerBufferPair insertPair = {
                      newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
@@ -442,7 +443,7 @@ namespace Desert::Graphic::API::Vulkan
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                layout.stageFlags         = Utils::GetVkShaderStageFlags( uniformBuffer.first.ShaderStage );
+                layout.stageFlags         = Utils::ShaderStageToVkShader( uniformBuffer.first.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1; // not array at now
             }
@@ -453,7 +454,7 @@ namespace Desert::Graphic::API::Vulkan
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                layout.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.first.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1;
             }
@@ -585,6 +586,14 @@ namespace Desert::Graphic::API::Vulkan
         {
             case WriteDescriptorType::Uniform:
                 return m_ReflectionData.ShaderDescriptorSets.at( set ).UniformBuffers.at( binding ).second.at(
+                     frame );
+
+            case WriteDescriptorType::Sampler2D:
+                return m_ReflectionData.ShaderDescriptorSets.at( set ).ImageSamplers.at( binding ).second.at(
+                     frame );
+
+            case WriteDescriptorType::StorageSampler2D:
+                return m_ReflectionData.ShaderDescriptorSets.at( set ).StorageImageSamplers.at( binding ).second.at(
                      frame );
         }
     }

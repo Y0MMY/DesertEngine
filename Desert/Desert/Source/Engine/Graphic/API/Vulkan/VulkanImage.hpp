@@ -53,6 +53,8 @@ namespace Desert::Graphic::API::Vulkan
             return m_ImageSpecification;
         }
 
+        virtual Core::Formats::ImagePixelData GetImagePixels() const override;
+
     private:
         VkImageCreateInfo  GetImageCreateInfo( VkFormat imageFormat );
         VkImageCreateInfo  CreateImageInfo( VkFormat format );

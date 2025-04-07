@@ -18,4 +18,17 @@ namespace Desert::Graphic
         static std::shared_ptr<Shader> Create( const std::string& filename );
     };
 
+    class ShaderLibrary final
+    {
+    public:
+        ShaderLibrary() = default;
+
+        static void                                    LoadShader( const std::shared_ptr<Shader>& shader );
+        static Common::Result<std::shared_ptr<Shader>> Get( const std::string& shaderName );
+        static inline bool IsShaderInLibrary(const std::string& shaderName);
+
+
+    private:
+        static inline std::unordered_map<std::string, std::shared_ptr<Shader>> s_AllShaders;
+    };
 } // namespace Desert::Graphic

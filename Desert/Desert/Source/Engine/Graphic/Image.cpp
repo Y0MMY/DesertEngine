@@ -27,4 +27,26 @@ namespace Desert::Graphic
             return false;
         }
     } // namespace Utils
+
+    uint32_t Image::GetBytesPerPixel( const Core::Formats::ImageFormat& format )
+    {
+
+        switch ( format )
+        {
+            case Core::Formats::ImageFormat::RGBA8F:
+                return 4; // RGBA = 4 channels, 8 bits each
+
+            case Core::Formats::ImageFormat::RGBA32F:
+                return 4 * 4;
+        }
+
+        return 0U;
+    }
+
+    uint32_t Image::CalculateImageSize( uint32_t width, uint32_t height, const Core::Formats::ImageFormat& format )
+    {
+        uint32_t pixelCount = width * height;
+        return pixelCount * GetBytesPerPixel( format );
+    }
+
 } // namespace Desert::Graphic

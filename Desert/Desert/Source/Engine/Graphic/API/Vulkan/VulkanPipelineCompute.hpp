@@ -13,8 +13,8 @@ namespace Desert::Graphic::API::Vulkan
         VulkanPipelineCompute( const std::shared_ptr<Shader>& shader );
 
         virtual void Begin() override;
-        virtual void Execute() override;
-        virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+        virtual void Execute( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
+        virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
         virtual void End() override;
 
         void BindDS( VkDescriptorSet descriptorSet );

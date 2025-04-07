@@ -14,6 +14,12 @@ namespace Desert::Graphic
         virtual bool                               IsLoaded() const               = 0;
         virtual void                               Use( uint32_t slot = 0 ) const = 0;
         virtual Core::Formats::ImageSpecification& GetImageSpecification()        = 0;
+        virtual Core::Formats::ImagePixelData      GetImagePixels() const         = 0;
+
+        static uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format );
+        // Calculates the byte size of an image based on dimensions and format
+        static uint32_t CalculateImageSize( uint32_t width, uint32_t height,
+                                            const Core::Formats::ImageFormat& format );
     };
 
     class Image2D : public Image
@@ -24,7 +30,8 @@ namespace Desert::Graphic
 
     namespace Utils
     {
-        bool IsDepthFormat( Core::Formats::ImageFormat format );
-    }
+        static inline uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format );
+        bool                   IsDepthFormat( Core::Formats::ImageFormat format );
+    } // namespace Utils
 
 } // namespace Desert::Graphic

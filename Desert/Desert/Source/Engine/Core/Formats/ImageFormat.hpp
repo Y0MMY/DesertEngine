@@ -6,7 +6,6 @@ namespace Desert::Core::Formats
     {
         Image2D,
         ImageCube,
-        Storage,
 
         Attachment
     };
@@ -14,24 +13,61 @@ namespace Desert::Core::Formats
     enum class ImageFormat
     {
         RGBA8F,
+        RGBA32F,
         BGRA8F,
 
         DEPTH32F
     };
 
-    /* enum ImageProperties
-     {
-         Store,
-     };*/
+    enum ImageProperties
+    {
+        Storage = 0x1,
+    };
+
+    using ImagePixelData =
+         std::variant<std::monostate, std::vector<float>, std::vector<unsigned char>, std::byte*>;
+    using EmptyPixelData = std::monostate;
+
+    inline bool HasData( const ImagePixelData& data )
+    {
+        return !std::holds_alternative<std::monostate>( data );
+    }
+
+    inline std::optional<std::vector<unsigned char>> GetUCharData( const ImagePixelData& data )
+    {
+        if ( const auto* vec = std::get_if<std::vector<unsigned char>>( &data ) )
+        {
+            return *vec;
+        }
+        return std::nullopt;
+    }
+
+    inline std::optional<std::vector<float>> GetFloatData( const ImagePixelData& data )
+    {
+        if ( const auto* vec = std::get_if<std::vector<float>>( &data ) )
+        {
+            return *vec;
+        }
+        return std::nullopt;
+    }
+
+    inline const std::byte* GetRawData( const ImagePixelData& data )
+    {
+        if ( const auto* ptr = std::get_if<std::byte*>( &data ) )
+        {
+            return *ptr;
+        }
+        return nullptr;
+    }
 
     struct ImageSpecification
     {
-        uint32_t                  Width;
-        uint32_t                  Height;
-        ImageFormat               Format;
-        uint32_t                  TextureSamples = 1;
-        std::optional<std::byte*> Data;
-        ImageUsage                Usage;
-        // ImageProperties           Properties;
+        uint32_t        Width;
+        uint32_t        Height;
+        ImageFormat     Format;
+        uint32_t        TextureSamples = 1;
+        ImagePixelData  Data;
+        ImageUsage      Usage;
+        ImageProperties Properties;
     };
 } // namespace Desert::Core::Formats
