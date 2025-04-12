@@ -25,7 +25,6 @@ namespace Desert::Graphic
         void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
         void BeginSwapChainRenderPass();
         void EndRenderPass();
-        void RenderImGui();
         void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                          const glm::mat4& mvp /*TEMP*/ );
 

@@ -1,25 +1,21 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
-
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipelineCompute.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
-#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
-#include <Engine/Core/EngineContext.h>
-
-#include <Engine/Graphic/API/Vulkan/imgui/ImGuiRenderer.hpp>
-
-#include "stb_image/stb_image_write.h"
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
-#include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/Texture.hpp>
+
+#include <Engine/Core/EngineContext.h>
+#include "stb_image/stb_image_write.h"
 
 #include <glm/glm.hpp>
+
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -268,11 +264,6 @@ namespace Desert::Graphic::API::Vulkan
     std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
     {
         return m_CompositeFramebuffer;
-    }
-
-    void VulkanRendererAPI::RenderImGui()
-    {
-        ImGui::VulkanImGuiRenderer::GetInstance().RenderImGui( m_CurrentCommandBuffer );
     }
 
     void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,

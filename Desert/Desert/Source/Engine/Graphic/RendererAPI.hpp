@@ -28,7 +28,6 @@ namespace Desert::Graphic
         virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) = 0;
         virtual Common::BoolResult BeginSwapChainRenderPass()                                       = 0;
         virtual Common::BoolResult EndRenderPass()                                                  = 0;
-        virtual void               RenderImGui()                                                    = 0;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                  const glm::mat4& mvp /*TEMP*/ )                                    = 0;
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,

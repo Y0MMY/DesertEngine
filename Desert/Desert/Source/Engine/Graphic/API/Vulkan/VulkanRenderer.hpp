@@ -1,16 +1,8 @@
 #pragma once
 
 #include <Engine/Graphic/RendererAPI.hpp>
-#include <Engine/Graphic/Framebuffer.hpp>
-#include <Engine/Graphic/Shader.hpp>
-#include <Engine/Graphic/Pipeline.hpp>
-#include <Engine/Graphic/RenderPass.hpp>
-#include <Engine/Graphic/VertexBuffer.hpp>
-#include <Engine/Graphic/UniformBuffer.hpp>
-#include <Engine/Graphic/Texture.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanTexture.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
+
+#include <vulkan/vulkan.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -26,7 +18,6 @@ namespace Desert::Graphic::API::Vulkan
                                    BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
         virtual Common::BoolResult BeginSwapChainRenderPass() override;
         virtual [[nodiscard]] Common::BoolResult EndRenderPass() override;
-        virtual void                             RenderImGui() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                  const glm::mat4& mvp /*TEMP*/ ) override;
 
@@ -41,7 +32,6 @@ namespace Desert::Graphic::API::Vulkan
         virtual std::shared_ptr<Image2D> CreateEnvironmentMap( const Common::Filepath& filepath ) override;
 
     private:
-        void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
         void SetViewportAndScissor();
 
     private:

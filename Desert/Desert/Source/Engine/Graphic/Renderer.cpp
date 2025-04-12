@@ -96,11 +96,6 @@ namespace Desert::Graphic
         return s_RendererAPI->GetCompositeFramebuffer();
     }
 
-    void Renderer::RenderImGui()
-    {
-        s_RendererAPI->RenderImGui();
-    }
-
     void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                const glm::mat4& mvp /*TEMP*/ )
     {
