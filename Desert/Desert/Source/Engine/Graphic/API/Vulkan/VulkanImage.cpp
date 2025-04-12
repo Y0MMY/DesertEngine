@@ -23,7 +23,7 @@ namespace Desert::Graphic::API::Vulkan
 
                      if constexpr ( std::is_same_v<T, std::monostate> )
                      {
-                         return; // Оставим dataPtr = nullptr
+                         return; // dataPtr = nullptr
                      }
                      else if constexpr ( std::is_same_v<T, std::byte*> )
                      {
@@ -69,6 +69,8 @@ namespace Desert::Graphic::API::Vulkan
                         std::vector<unsigned char>    result( bufferSize );
                         memcpy( result.data(), mappedData, bufferSize );
                         resultImageData = result;
+
+                        return resultImageData;
                         break;
                     }
 
@@ -92,6 +94,7 @@ namespace Desert::Graphic::API::Vulkan
                     memcpy( result.data(), mappedData, bufferSize );
                     resultImageData = result;
 
+                    return resultImageData;
                     break;
                 }
 

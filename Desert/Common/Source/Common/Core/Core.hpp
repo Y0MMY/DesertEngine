@@ -34,6 +34,7 @@ decltype( auto ) initializeDefaultValue()
 #define RA_GET_VALUE( var ) var.value_or( initializeDefaultValue<decltype( var )::value_type>() )
 #define IS_DERIVED_bool( T, X ) ( std::is_base_of<X, T>::value )
 #define NO_DISCARD [[nodiscard]]
+#define BOOLSUCCESS Common::MakeSuccess( true );
 
 #define EBABLE_IMGUI 1
 
@@ -70,7 +71,7 @@ namespace Common
     using serialized_str = std::string;
     class UUID;
     using AssetHandle = UUID;
-    using Filepath = std::filesystem::path;
+    using Filepath    = std::filesystem::path;
 } // namespace Common
 
 template <typename T, typename U>

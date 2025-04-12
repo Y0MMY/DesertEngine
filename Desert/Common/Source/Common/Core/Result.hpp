@@ -20,7 +20,7 @@ namespace Common
     template <typename T = bool>
     Result<T> MakeError( const std::string& message );
 
-    template <typename T, typename... Args>
+    template <typename T = bool, typename... Args>
     Result<T> MakeFormattedError( std::string_view format, Args&&... args );
 
     template <typename T = bool>
@@ -97,6 +97,11 @@ namespace Common
                 return s_NoError;
             }
             return std::get<Error>( m_Outcome ).GetMessage();
+        }
+
+        explicit operator bool() const
+        {
+            return m_IsSuccess;
         }
 
     private:

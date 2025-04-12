@@ -29,7 +29,48 @@ namespace Desert::Graphic::API::Vulkan
             }
             return arraySize;
         }
+#if 0
+        static Core::Formats::ShaderDataType SPIRTypeToShaderDataType( spirv_cross::SPIRType type )
+        {
+            switch ( type.basetype )
+            {
+                case spirv_cross::SPIRType::Boolean:
+                    return Core::Formats::ShaderDataType::Bool;
+                case spirv_cross::SPIRType::Int:
+                    if ( type.vecsize == 1 )
+                        return Core::Formats::ShaderDataType::Int;
+                    if ( type.vecsize == 2 )
+                        return Core::Formats::ShaderDataType::Int2;
+                    if ( type.vecsize == 3 )
+                        return Core::Formats::ShaderDataType::Int3;
+                    if ( type.vecsize == 4 )
+                        return Core::Formats::ShaderDataType::Int4;
 
+                case spirv_cross::SPIRType::UInt:
+                    return Core::Formats::ShaderDataType::UInt;
+                case spirv_cross::SPIRType::Float:
+                    if ( type.columns == 3 )
+                        return Core::Formats::ShaderDataType::Mat3;
+                    if ( type.columns == 4 )
+                        return Core::Formats::ShaderDataType::Mat4;
+
+                    if ( type.vecsize == 1 )
+                        return Core::Formats::ShaderDataType::Float;
+                    if ( type.vecsize == 2 )
+                        return Core::Formats::ShaderDataType::Float2;
+                    if ( type.vecsize == 3 )
+                        return Core::Formats::ShaderDataType::Float3;
+                    if ( type.vecsize == 4 )
+                        return Core::Formats::ShaderDataType::Float4;
+                    break;
+
+                case spirv_cross::SPIRType::Struct:
+                    return Core::Formats::ShaderDataType::Struct;
+            }
+            DESERT_VERIFY( false, "Unknown type!" );
+            return Core::Formats::ShaderDataType::None;
+        }
+#endif
         Core::Formats::ShaderStage GetShaderStageFlagBitsFromSPV( const spv::ExecutionModel& executionModel )
         {
             switch ( executionModel )
@@ -265,10 +306,14 @@ namespace Desert::Graphic::API::Vulkan
 
                 if ( uniformBuffers.find( binding ) == uniformBuffers.end() )
                 {
+                    uint32_t                     member_type_id = bufferType.member_types[0];
+                    const spirv_cross::SPIRType& member_type    = compiler.get_type( member_type_id );
+
                     Core::Models::UniformBuffer uniformBuffer;
                     uniformBuffer.BindingPoint = binding;
                     uniformBuffer.Size         = size;
                     uniformBuffer.Name         = name;
+                    // uniformBuffer.Type         = Utils::SPIRTypeToShaderDataType(member_type);
                     uniformBuffer.ShaderStage =
                          Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
@@ -551,6 +596,9 @@ namespace Desert::Graphic::API::Vulkan
                     writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
                     writeDescriptor.dstBinding      = uniformBuffer.first.BindingPoint;
                     writeDescriptor.descriptorCount = 1;
+
+
+                    //TODO: pBufferInfo !!!! or not create VkWriteDescriptorSet
                 }
 
                 for ( auto& [binding, sampler] : shaderDescriptorSet.ImageSamplers )
@@ -593,9 +641,10 @@ namespace Desert::Graphic::API::Vulkan
                      frame );
 
             case WriteDescriptorType::StorageSampler2D:
-                return m_ReflectionData.ShaderDescriptorSets.at( set ).StorageImageSamplers.at( binding ).second.at(
-                     frame );
+                return m_ReflectionData.ShaderDescriptorSets.at( set )
+                     .StorageImageSamplers.at( binding )
+                     .second.at( frame );
         }
     }
 
-} // namespace Desert::Graphic::API::Vulkan
+} // namespace Desert::Graphic::API::Vulkan 

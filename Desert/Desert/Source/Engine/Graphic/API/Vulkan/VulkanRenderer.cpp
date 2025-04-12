@@ -196,8 +196,11 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline )
+    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+                                                  const std::shared_ptr<Material>& material ) //TODO: clean up
     {
+        material->ApplyMaterial();
+
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         const auto shader =
@@ -306,15 +309,17 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     std::shared_ptr<Desert::Graphic::Image2D>
-    VulkanRendererAPI::EquirectangularToCubeMap( const Common::Filepath& filepath )
+    VulkanRendererAPI::CreateEnvironmentMap( const Common::Filepath& filepath )
     {
-        static std::shared_ptr<Shader>    shader        = Shader::Create( "PanoramaToCubemapLayout.glsl" );
-        static std::shared_ptr<Texture2D> imagePanorama = Texture2D::Create( filepath );
+        static std::shared_ptr<Shader> shader =
+             Shader::Create( /*"PanoramaToCubemapLayout.glsl"*/ "DiffuseIrradiance.glsl" );
+        std::shared_ptr<Texture2D> imagePanorama =
+             Texture2D::Create( "Cubes/Arches_E_PineTree_Radiance.tga" /*filepath*/ );
         const auto& imageVulkanCube = sp_cast<API::Vulkan::VulkanImage2D>( imagePanorama->GetImage2D() );
 
         Core::Formats::ImageSpecification outputImageInfo;
         outputImageInfo.Width      = imagePanorama->GetImage2D()->GetWidth();
-        outputImageInfo.Height     = ( imagePanorama->GetImage2D()->GetHeight() * 1.5f );
+        outputImageInfo.Height     = ( imagePanorama->GetImage2D()->GetHeight() /* 1.5f*/ );
         outputImageInfo.Format     = Core::Formats::ImageFormat::RGBA32F;
         outputImageInfo.Properties = Core::Formats::Storage;
 
@@ -362,11 +367,11 @@ namespace Desert::Graphic::API::Vulkan
         vulkanPipelineCompute->Dispatch( outputImageInfo.Width / 32, outputImageInfo.Height / 32, 1 );
         vulkanPipelineCompute->End();
 
-       /* const auto& result = outputImage->GetImagePixels();
+        const auto& result = outputImage->GetImagePixels();
 
-        const char* outputPath = "output123.tga";
-        const auto  res        = std::get<std::vector<unsigned char>>( result );
-        int success = stbi_write_tga( outputPath, outputImageInfo.Width, outputImageInfo.Height, 4, res.data() );*/
+        const char* outputPath = "output123.hdr";
+        const auto  res        = std::get<std::vector<float>>( result );
+        int success = stbi_write_hdr( outputPath, outputImageInfo.Width, outputImageInfo.Height, 4, res.data() );
 
         return std::shared_ptr<Desert::Graphic::Image2D>( outputImage );
     }

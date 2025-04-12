@@ -1,9 +1,4 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.h>
 
@@ -11,81 +6,6 @@
 
 namespace Desert::Graphic
 {
-    static struct ubo
-    {
-        glm::mat4 proj;
-        glm::mat4 view;
-    };
-
-    static std::shared_ptr<API::Vulkan::VulkanUniformBuffer> s_Uniformbuffer;
-
-    void SceneRenderer::UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline )
-    {
-        auto vkImage = std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>(
-             m_SceneInfo.ActiveScene->GetEnvironment() );
-
-        auto info = sp_cast<API::Vulkan::VulkanImage2D>(vkImage)->GetVulkanImageInfo();
-
-        VkDescriptorImageInfo imageInfo = {};
-        imageInfo.sampler               = info.Sampler;
-        imageInfo.imageView             = info.ImageView;
-        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-
-        VkDevice   device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        const auto shader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
-
-        VkWriteDescriptorSet writeDescriptorSet =
-             shader->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Uniform, 0, 0, frameIndex );
-
-        const auto pBufferInfo         = s_Uniformbuffer->GetDescriptorBufferInfo();
-        writeDescriptorSet.pBufferInfo = &pBufferInfo;
-
-        VkWriteDescriptorSet writeDescriptorSetImage = {};
-        writeDescriptorSetImage.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writeDescriptorSetImage.dstSet =
-             shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-        writeDescriptorSetImage.dstBinding      = 1;
-        writeDescriptorSetImage.dstArrayElement = 0;
-        writeDescriptorSetImage.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writeDescriptorSetImage.descriptorCount = 1;
-        writeDescriptorSetImage.pImageInfo      = &imageInfo;
-
-        vkUpdateDescriptorSets( device, 1, &writeDescriptorSet, 0, nullptr );
-        vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );
-
-        auto vp = m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
-
-        ubo ubob{ m_SceneInfo.ActiveCamera->GetProjectionMatrix(), m_SceneInfo.ActiveCamera->GetViewMatrix() };
-        s_Uniformbuffer->RT_SetData( &ubob, sizeof( ubo ) );
-    }
-
-    void SceneRenderer::UpdateDescriptorSets2( void* dst, void* imageview, void* sampler )
-    {
-
-        VkDescriptorImageInfo imageInfo = {};
-        imageInfo.sampler               = (VkSampler)sampler;
-        imageInfo.imageView             = (VkImageView)imageview;
-        imageInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-
-        VkDevice device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-
-        VkWriteDescriptorSet writeDescriptorSetImage = {};
-        writeDescriptorSetImage.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writeDescriptorSetImage.dstSet               = (VkDescriptorSet)dst;
-        writeDescriptorSetImage.dstBinding           = 2;
-        writeDescriptorSetImage.dstArrayElement      = 0;
-        writeDescriptorSetImage.descriptorType       = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writeDescriptorSetImage.descriptorCount      = 1;
-        writeDescriptorSetImage.pImageInfo           = &imageInfo;
-
-        vkUpdateDescriptorSets( device, 1, &writeDescriptorSetImage, 0, nullptr );
-    }
-
     void SceneRenderer::Init()
     {
         REGISTER_EVENT( this, OnEvent );
@@ -93,85 +13,110 @@ namespace Desert::Graphic
         uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
         uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
 
+        // ==================== Skybox Pass ====================
         {
-            RenderPassSpecification renderPassSpecSkybox;
-            renderPassSpecSkybox.DebugName = "Skybox";
+            auto&                      skybox    = m_SceneInfo.Renderdata.Skybox;
+            constexpr std::string_view debugName = "Skybox";
 
-            FramebufferSpecification TESTFramebufferFramebufferSpec;
-            TESTFramebufferFramebufferSpec.DebugName = "Skybox";
-            TESTFramebufferFramebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
+            // Framebuffer
+            FramebufferSpecification fbSpec;
+            fbSpec.DebugName = debugName;
+            fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
 
-            m_SceneInfo.Renderdata.Skybox.Framebuffer =
-                 Graphic::Framebuffer::Create( TESTFramebufferFramebufferSpec );
-            m_SceneInfo.Renderdata.Skybox.Framebuffer->Resize( width, height );
+            skybox.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
+            skybox.Framebuffer->Resize( width, height );
 
-            m_SceneInfo.Renderdata.Skybox.Shader = Graphic::Shader::Create( "skybox.glsl" );
-            Graphic::PipelineSpecification spec;
+            // RenderPass
+            RenderPassSpecification rpSpec;
+            rpSpec.DebugName         = debugName;
+            rpSpec.TargetFramebuffer = skybox.Framebuffer;
+            skybox.RenderPass        = Graphic::RenderPass::Create( rpSpec );
 
-            renderPassSpecSkybox.TargetFramebuffer   = m_SceneInfo.Renderdata.Skybox.Framebuffer;
-            m_SceneInfo.Renderdata.Skybox.RenderPass = Graphic::RenderPass::Create( renderPassSpecSkybox );
+            // Pipeline
+            skybox.Shader = Graphic::Shader::Create( "skybox.glsl" );
 
-            spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+            Graphic::PipelineSpecification pipeSpec;
+            pipeSpec.DebugName   = debugName;
+            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+            pipeSpec.Framebuffer = skybox.Framebuffer;
+            pipeSpec.Shader      = skybox.Shader;
 
-            spec.DebugName                         = "skybox";
-            spec.Framebuffer                       = m_SceneInfo.Renderdata.Skybox.Framebuffer;
-            spec.Shader                            = m_SceneInfo.Renderdata.Skybox.Shader;
-            m_SceneInfo.Renderdata.Skybox.Pipeline = Graphic::Pipeline::Create( spec );
-            m_SceneInfo.Renderdata.Skybox.Pipeline->Invalidate();
+            skybox.Pipeline = Graphic::Pipeline::Create( pipeSpec );
+            skybox.Pipeline->Invalidate();
+
+            // Material
+            skybox.Material = Material::Create( std::string( debugName ), skybox.Shader );
+            skybox.Material->Invalidate();
         }
 
-        // Composite
+        // ==================== Composite Pass ====================
         {
-            RenderPassSpecification renderPassSpec;
-            renderPassSpec.DebugName = "SceneComposite";
+            auto&                      composite = m_SceneInfo.Renderdata.Composite;
+            constexpr std::string_view debugName = "SceneComposite";
 
-            FramebufferSpecification framebufferSpec;
-            framebufferSpec.DebugName = "SceneComposite";
-            framebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::BGRA8F );
+            // Framebuffer
+            FramebufferSpecification fbSpec;
+            fbSpec.DebugName = debugName;
+            fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::BGRA8F );
 
-            m_SceneInfo.Renderdata.Composite.Framebuffer = Graphic::Framebuffer::Create( framebufferSpec );
-            m_SceneInfo.Renderdata.Composite.Framebuffer->Resize( width, height );
+            composite.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
+            composite.Framebuffer->Resize( width, height );
 
-            m_SceneInfo.Renderdata.Composite.Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
-            Graphic::PipelineSpecification spec;
+            // RenderPass
+            RenderPassSpecification rpSpec;
+            rpSpec.DebugName         = debugName;
+            rpSpec.TargetFramebuffer = composite.Framebuffer;
+            composite.RenderPass     = Graphic::RenderPass::Create( rpSpec );
 
-            renderPassSpec.TargetFramebuffer            = m_SceneInfo.Renderdata.Composite.Framebuffer;
-            m_SceneInfo.Renderdata.Composite.RenderPass = Graphic::RenderPass::Create( renderPassSpec );
+            // Pipeline
+            composite.Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
 
-            spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+            Graphic::PipelineSpecification pipeSpec;
+            pipeSpec.DebugName   = debugName;
+            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+            pipeSpec.Framebuffer = composite.Framebuffer;
+            pipeSpec.Shader      = composite.Shader;
 
-            spec.DebugName                            = "SceneComposite";
-            spec.Framebuffer                          = m_SceneInfo.Renderdata.Composite.Framebuffer;
-            spec.Shader                               = m_SceneInfo.Renderdata.Composite.Shader;
-            m_SceneInfo.Renderdata.Composite.Pipeline = Graphic::Pipeline::Create( spec );
-            m_SceneInfo.Renderdata.Composite.Pipeline->Invalidate();
+            composite.Pipeline = Graphic::Pipeline::Create( pipeSpec );
+            composite.Pipeline->Invalidate();
+
+            composite.Material = Material::Create( std::string( debugName ), composite.Shader );
+            composite.Material->Invalidate();
         }
 
-        // Geometry static pass
+        // ==================== Geometry Pass ====================
         {
-            FramebufferSpecification framebufferSpec;
-            framebufferSpec.DebugName = "SceneGeometry";
-            framebufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
+            auto&                      geometry  = m_SceneInfo.Renderdata.Geometry;
+            constexpr std::string_view debugName = "SceneGeometry";
 
-            m_SceneInfo.Renderdata.Geometry.Framebuffer = Graphic::Framebuffer::Create( framebufferSpec );
-            m_SceneInfo.Renderdata.Geometry.Framebuffer->Resize( width, height );
+            // Framebuffer
+            FramebufferSpecification fbSpec;
+            fbSpec.DebugName = debugName;
+            fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
 
-            RenderPassSpecification renderPassSpec;
-            renderPassSpec.DebugName         = "SceneGeometry";
-            renderPassSpec.TargetFramebuffer = m_SceneInfo.Renderdata.Geometry.Framebuffer;
+            geometry.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
+            geometry.Framebuffer->Resize( width, height );
 
-            PipelineSpecification pipelineSpecification;
-            pipelineSpecification.Layout      = { { ShaderDataType::Float3, "a_Position" } };
-            pipelineSpecification.DebugName   = "PBR-Static";
-            pipelineSpecification.Renderpass  = RenderPass::Create( renderPassSpec );
-            pipelineSpecification.Shader      = Graphic::Shader::Create( "StaticPBR.glsl" );
-            pipelineSpecification.Framebuffer = m_SceneInfo.Renderdata.Geometry.Framebuffer;
+            // RenderPass
+            RenderPassSpecification rpSpec;
+            rpSpec.DebugName         = debugName;
+            rpSpec.TargetFramebuffer = geometry.Framebuffer;
 
-            m_SceneInfo.Renderdata.Geometry.Pipeline = Pipeline::Create( pipelineSpecification );
-            m_SceneInfo.Renderdata.Geometry.Pipeline->Invalidate();
+            // Pipeline
+            PipelineSpecification pipeSpec;
+            pipeSpec.DebugName   = debugName;
+            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+            pipeSpec.Renderpass  = RenderPass::Create( rpSpec );
+            pipeSpec.Shader      = Graphic::Shader::Create( "StaticPBR.glsl" );
+            pipeSpec.Framebuffer = geometry.Framebuffer;
+            pipeSpec.Shader      = pipeSpec.Shader;
+
+            geometry.Pipeline = Pipeline::Create( pipeSpec );
+            geometry.Pipeline->Invalidate();
+
+            geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
+            geometry.Material->Invalidate();
         }
-
-        s_Uniformbuffer = std::make_shared<API::Vulkan::VulkanUniformBuffer>( sizeof( ubo ), 0 );
     }
 
     void SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>& scene, const Core::Camera& camera )
@@ -180,6 +125,11 @@ namespace Desert::Graphic
         m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
 
         auto& renderer = Renderer::GetInstance();
+        /*static bool a        = false;
+        if ( !a )
+            renderer.CreateEnvironmentMap( "Cubes/output123.hdr" );
+        a = true;*/
+        // renderer.CreateEnvironmentMap("HDR/pink_sunrise_4k.hdr");
 
         renderer.BeginFrame();
     }
@@ -218,21 +168,11 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
 
         renderer.BeginSwapChainRenderPass();
-        /*a temporary solution until we add a material system.*/
+        m_SceneInfo.Renderdata.Composite.Material->SetImage2D(
+             "u_GeometryTexture", m_SceneInfo.Renderdata.Skybox.Framebuffer->GetColorAttachmentImage() );
 
-        const auto imageInfo = sp_cast<API::Vulkan::VulkanImage2D>(
-                                    m_SceneInfo.Renderdata.Skybox.Framebuffer->GetColorAttachmentImage() )
-                                    ->GetVulkanImageInfo();
-
-        const auto dstSet = sp_cast<API::Vulkan::VulkanShader>( m_SceneInfo.Renderdata.Composite.Shader )
-                                 ->GetVulkanDescriptorSetInfo()
-                                 .DescriptorSets.at( frameIndex )
-                                 .at( 0 );
-
-        UpdateDescriptorSets2( dstSet, imageInfo.ImageView, imageInfo.Sampler );
-        renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Composite.Pipeline );
-        // renderer.RenderImGui();
-
+        renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Composite.Pipeline,
+                                       m_SceneInfo.Renderdata.Composite.Material );
         renderer.EndRenderPass();
     }
 
@@ -241,9 +181,22 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
 
         renderer.BeginRenderPass( m_SceneInfo.Renderdata.Skybox.RenderPass );
-        /*a temporary solution until we add a material system.*/
-        UpdateDescriptorSets( m_SceneInfo.Renderdata.Skybox.Pipeline );
-        renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Skybox.Pipeline );
+
+        struct
+        {
+            glm::mat4 m1;
+            glm::mat4 m2;
+        } camera;
+
+        camera.m1 = m_SceneInfo.ActiveCamera->GetProjectionMatrix();
+        camera.m2 = m_SceneInfo.ActiveCamera->GetViewMatrix();
+
+        m_SceneInfo.Renderdata.Skybox.Material->SetData( "camera", &camera, 128 );
+        m_SceneInfo.Renderdata.Skybox.Material->SetImage2D( "samplerCubeMap",
+                                                            m_SceneInfo.ActiveScene->GetEnvironment() );
+
+        renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Skybox.Pipeline,
+                                       m_SceneInfo.Renderdata.Skybox.Material );
 
         for ( const auto& meshIno : m_SceneInfo.Renderdata.MeshInfo )
         {

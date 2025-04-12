@@ -64,9 +64,10 @@ namespace Desert::Graphic
         s_RendererAPI->PresentFinalImage();
     }
 
-    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline )
+    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+                                         const std::shared_ptr<Material>& material )
     {
-        s_RendererAPI->SubmitFullscreenQuad( pipeline );
+        s_RendererAPI->SubmitFullscreenQuad( pipeline, material );
     }
 
     void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
@@ -100,15 +101,15 @@ namespace Desert::Graphic
         s_RendererAPI->RenderImGui();
     }
 
-    void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh, const glm::mat4& mvp /*TEMP*/)
+    void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
+                               const glm::mat4& mvp /*TEMP*/ )
     {
-        s_RendererAPI->RenderMesh(pipeline, mesh, mvp);
+        s_RendererAPI->RenderMesh( pipeline, mesh, mvp );
     }
 
-    std::shared_ptr<Desert::Graphic::Image2D>
-    Renderer::EquirectangularToCubeMap( const Common::Filepath& filepath )
+    std::shared_ptr<Desert::Graphic::Image2D> Renderer::CreateEnvironmentMap( const Common::Filepath& filepath )
     {
-        return s_RendererAPI->EquirectangularToCubeMap(filepath);
+        return s_RendererAPI->CreateEnvironmentMap( filepath );
     }
 
 } // namespace Desert::Graphic

@@ -6,9 +6,10 @@ namespace Desert::Core::Models
 {
     struct UniformBuffer
     {
-        uint32_t    Size         = 0;
-        uint32_t    BindingPoint = 0;
-        std::string Name;
+        uint32_t                      Size         = 0;
+        uint32_t                      BindingPoint = 0;
+        std::string                   Name;
+       // Core::Formats::ShaderDataType Type;
 
         Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::None;
     };

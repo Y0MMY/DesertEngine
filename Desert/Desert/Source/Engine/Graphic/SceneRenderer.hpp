@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/Material.hpp>
+#include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/Camera.hpp>
 
@@ -26,10 +28,6 @@ namespace Desert::Graphic
         void CompositeRenderPass();
         void GeometryRenderPass();
 
-        /*a temporary solution until we add a material system.*/
-        void UpdateDescriptorSets( const std::shared_ptr<Pipeline>& pipeline );
-        void UpdateDescriptorSets2( void* dst, void* imageview, void* sampler );
-
     private:
         bool OnWindowResize( Common::EventWindowResize& e );
 
@@ -45,6 +43,7 @@ namespace Desert::Graphic
             std::shared_ptr<Graphic::Framebuffer> Framebuffer;
             std::shared_ptr<Graphic::RenderPass>  RenderPass;
             std::shared_ptr<Graphic::Pipeline>    Pipeline;
+            std::shared_ptr<Graphic::Material>    Material;
         };
 
         struct

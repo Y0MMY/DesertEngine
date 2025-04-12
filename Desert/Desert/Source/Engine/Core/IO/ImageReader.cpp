@@ -21,7 +21,7 @@ namespace Desert::Core::IO
         returnData.Height   = (uint32_t)height;
         returnData.Channels = (uint32_t)nrChannels;
 
-        uint32_t size = width * height * nrChannels;
+        uint32_t size = width * height * 16;
         returnData.Data.resize( size );
 
         memcpy( returnData.Data.data(), data, size );
@@ -41,7 +41,7 @@ namespace Desert::Core::IO
         returnData.Height   = (uint32_t)height;
         returnData.Channels = (uint32_t)nrChannels;
 
-        uint32_t size = width * height * nrChannels;
+        uint32_t size = width * height * 4;
         returnData.Data.resize(size);
 
         memcpy( returnData.Data.data(), data, size );
