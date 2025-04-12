@@ -22,9 +22,10 @@ namespace Desert::Core
         Scene() = default;
         Scene( const std::string& sceneName, const std::shared_ptr<Graphic::SceneRenderer>& sceneRenderer );
 
-        void BeginScene( const Core::Camera& camera );
-        void EndScene();
-        void Init();
+        [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
+        [[nodiscard]] Common::BoolResult EndScene();
+
+        [[nodiscard]] Common::BoolResult Init();
 
         void SetEnvironment( const std::shared_ptr<Graphic::Image2D>& environment );
 

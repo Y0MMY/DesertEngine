@@ -9,13 +9,15 @@ namespace Desert
     public:
         EditorLayer( const std::string& layerName );
 
-        virtual void OnAttach() override;
-        virtual void OnDetach() override
+        [[nodiscard]] virtual Common::BoolResult OnAttach() override;
+        [[nodiscard]] virtual Common::BoolResult OnDetach() override
         {
+            return BOOLSUCCESS;
         }
-        virtual void OnUpdate( Common::Timestep ts ) override;
-        virtual void OnImGuiRender() override
+        [[nodiscard]] virtual Common::BoolResult OnUpdate( Common::Timestep ts ) override;
+        [[nodiscard]] virtual Common::BoolResult OnImGuiRender() override
         {
+            return BOOLSUCCESS;
         }
 
     private:

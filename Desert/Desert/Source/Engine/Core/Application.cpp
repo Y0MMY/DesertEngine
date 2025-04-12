@@ -43,7 +43,11 @@ namespace Desert::Engine
 #endif // EBABLE_IMGUI
             for ( const auto& layer : m_LayerStack )
             {
-                layer->OnUpdate( m_PrevTimestep );
+                const auto& result = layer->OnUpdate( m_PrevTimestep );
+                if ( !result )
+                {
+                    throw std::logic_error( result.GetError() );
+                }
             }
 
             m_Window->PresentFinalImage();

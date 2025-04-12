@@ -12,7 +12,8 @@ namespace Desert::Graphic
     static RendererAPI*                 s_RendererAPI = nullptr;
     static std::shared_ptr<Framebuffer> s_frame;
     static std::shared_ptr<Shader>      s_shader;
-    void                                Renderer::InitGraphicAPI()
+
+    [[nodiscard]] Common::BoolResult Renderer::InitGraphicAPI()
     {
         m_RendererContext =
              RendererContext::Create( EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw() );
@@ -29,23 +30,23 @@ namespace Desert::Graphic
             }
         }
         s_RendererAPI->Init();
+
+        return BOOLSUCCESS;
     }
 
     Common::BoolResult Renderer::Init()
     {
-        InitGraphicAPI();
-
-        return Common::MakeSuccess( true );
+        return InitGraphicAPI();
     }
 
-    void Renderer::EndFrame()
+    [[nodiscard]] Common::BoolResult Renderer::EndFrame()
     {
-        s_RendererAPI->EndFrame();
+        return s_RendererAPI->EndFrame();
     }
 
-    void Renderer::BeginFrame()
+    [[nodiscard]] Common::BoolResult Renderer::BeginFrame()
     {
-        s_RendererAPI->BeginFrame();
+        return s_RendererAPI->BeginFrame();
     }
 
     uint32_t Renderer::GetCurrentFrameIndex()

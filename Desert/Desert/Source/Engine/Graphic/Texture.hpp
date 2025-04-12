@@ -11,7 +11,8 @@ namespace Desert::Graphic
     class Texture
     {
     public:
-        virtual Core::Formats::ImageUsage GetType() const = 0;
+        virtual Core::Formats::ImageUsage GetType() const    = 0;
+        virtual Common::BoolResult        Invalidate()  = 0;
     };
 
     class Texture2D : public Texture

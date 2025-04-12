@@ -6,7 +6,7 @@
 
 namespace Desert::Graphic
 {
-    void SceneRenderer::Init()
+    NO_DISCARD Common::BoolResult SceneRenderer::Init()
     {
         REGISTER_EVENT( this, OnEvent );
 
@@ -117,9 +117,12 @@ namespace Desert::Graphic
             geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
             geometry.Material->Invalidate();
         }
+
+        return BOOLSUCCESS;
     }
 
-    void SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>& scene, const Core::Camera& camera )
+    NO_DISCARD Common::BoolResult SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>& scene,
+                                                             const Core::Camera&                 camera )
     {
         m_SceneInfo.ActiveScene  = scene;
         m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
@@ -131,17 +134,17 @@ namespace Desert::Graphic
         a = true;*/
         // renderer.CreateEnvironmentMap("HDR/pink_sunrise_4k.hdr");
 
-        renderer.BeginFrame();
+        return renderer.BeginFrame();
     }
 
-    void SceneRenderer::EndScene()
+    NO_DISCARD Common::BoolResult SceneRenderer::EndScene()
     {
         auto& renderer = Renderer::GetInstance();
 
         GeometryRenderPass();
         CompositeRenderPass();
 
-        renderer.EndFrame();
+        return renderer.EndFrame();
     }
 
     void SceneRenderer::OnEvent( Common::Event& e )

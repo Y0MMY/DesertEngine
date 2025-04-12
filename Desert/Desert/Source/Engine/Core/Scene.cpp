@@ -10,14 +10,14 @@ namespace Desert::Core
     {
     }
 
-    void Scene::BeginScene( const Core::Camera& camera )
+    NO_DISCARD Common::BoolResult Scene::BeginScene( const Core::Camera& camera )
     {
-        m_SceneRenderer->BeginScene( shared_from_this(), camera );
+        return m_SceneRenderer->BeginScene( shared_from_this(), camera );
     }
 
-    void Scene::Init()
+    NO_DISCARD Common::BoolResult Scene::Init()
     {
-        m_SceneRenderer->Init();
+        return m_SceneRenderer->Init();
     }
 
     void Scene::SetEnvironment( const std::shared_ptr<Graphic::Image2D>& environment )
@@ -30,9 +30,9 @@ namespace Desert::Core
         m_SceneRenderer->RenderMesh( mesh );
     }
 
-    void Scene::EndScene()
+    NO_DISCARD Common::BoolResult Scene::EndScene()
     {
-        m_SceneRenderer->EndScene();
+        return m_SceneRenderer->EndScene();
     }
 
 } // namespace Desert::Core

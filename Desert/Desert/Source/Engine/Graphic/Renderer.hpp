@@ -20,11 +20,11 @@ namespace Desert::Graphic
             return m_RendererContext;
         }
 
-        void BeginFrame();
-        void EndFrame();
-        void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
-        void BeginSwapChainRenderPass();
-        void EndRenderPass();
+        [[nodiscard]] Common::BoolResult BeginFrame();
+        [[nodiscard]] Common::BoolResult EndFrame();
+        void                             BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
+        void                             BeginSwapChainRenderPass();
+        void                             EndRenderPass();
         void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                          const glm::mat4& mvp /*TEMP*/ );
 
@@ -49,7 +49,7 @@ namespace Desert::Graphic
         }
 
     private:
-        void InitGraphicAPI();
+        [[nodiscard]] Common::BoolResult InitGraphicAPI();
 
     private:
         static Common::Memory::CommandBuffer& GetRenderCommandQueue();

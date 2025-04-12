@@ -15,6 +15,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_Image2D;
         }
 
+        virtual Common::BoolResult Invalidate() override;
+
+
     private:
         std::filesystem::path m_TexturePath;
 
@@ -30,6 +33,8 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_Image2D;
         }
+
+        virtual Common::BoolResult Invalidate() override;
 
     private:
         std::filesystem::path m_TexturePath;

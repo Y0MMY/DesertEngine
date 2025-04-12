@@ -66,7 +66,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         return imguiRenderPass;
     }
 
-    void VulkanImGui::OnAttach()
+    Common::BoolResult VulkanImGui::OnAttach()
     {
         //  1: create descriptor pool for IMGUI
         // the size of the pool is very oversize, but it's copied from imgui demo itself.
@@ -129,24 +129,30 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         ImGui_ImplVulkan_DestroyFontUploadObjects();
 
         s_RenderpassImgui = CreateImGuiRenderPass( device, swapchain->GetColorFormat() );
+
+        return BOOLSUCCESS;
     }
 
-    void VulkanImGui::OnDetach()
+    Common::BoolResult VulkanImGui::OnDetach()
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        vkDeviceWaitIdle(device);
+        vkDeviceWaitIdle( device );
 
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ::ImGui::DestroyContext();
 
         vkDestroyDescriptorPool( device, m_ImguiPool, nullptr );
+
+        return BOOLSUCCESS;
     }
 
-    void VulkanImGui::OnUpdate( Common::Timestep ts )
+    Common::BoolResult VulkanImGui::OnUpdate( Common::Timestep ts )
     {
         VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand( []() { ::ImGui::ShowDemoWindow(); } );
+
+        return BOOLSUCCESS;
     }
 
     void VulkanImGui::Begin()

@@ -10,17 +10,18 @@ namespace Desert::Graphic::API::Vulkan::ImGui
     class VulkanImGui : public Desert::ImGui::ImGuiLayer
     {
     public:
-        virtual void OnAttach() override;
-        virtual void OnDetach() override;
-        virtual void OnUpdate( Common::Timestep ts ) override;
-        virtual void Begin() override;
-        virtual void End() override;
+        virtual Common::BoolResult OnAttach() override;
+        virtual Common::BoolResult OnDetach() override;
+        virtual Common::BoolResult OnUpdate( Common::Timestep ts ) override;
+        virtual void               Begin() override;
+        virtual void               End() override;
 
-        virtual void OnImGuiRender() override
+        virtual Common::BoolResult OnImGuiRender() override
         {
+            return BOOLSUCCESS;
         }
+
     private:
         VkDescriptorPool m_ImguiPool;
-
     };
 } // namespace Desert::Graphic::API::Vulkan::ImGui

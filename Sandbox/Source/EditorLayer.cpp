@@ -8,29 +8,39 @@ namespace Desert
         m_testscene         = std::make_shared<Core::Scene>( "sdfsdf", m_testscenerenderer );
     }
 
-    void EditorLayer::OnAttach()
+    [[nodiscard]] Common::BoolResult EditorLayer::OnAttach()
     {
         m_testscene->Init();
-        m_Environment = Graphic::TextureCube::Create( "Arches_E_PineTree_Radiance.tga" );
+        m_Environment          = Graphic::TextureCube::Create( "output123.hdr" );
+        const auto& textureRes = m_Environment->Invalidate();
+        if ( !textureRes )
+        {
+            // return Common::MakeError( textureRes.GetError() );
+        }
         m_testscene->SetEnvironment( m_Environment->GetImage2D() );
 
-        m_Mesh = std::make_shared<Mesh>("Cube1m.fbx");
+        m_Mesh = std::make_shared<Mesh>( "Cube1m.fbx" );
         m_Mesh->Invalidate();
-        m_testscene->AddMeshToRenderList(m_Mesh);
+        m_testscene->AddMeshToRenderList( m_Mesh );
+
+        return BOOLSUCCESS;
     }
 
-    void EditorLayer::OnUpdate( Common::Timestep ts )
+    [[nodiscard]] Common::BoolResult EditorLayer::OnUpdate( Common::Timestep ts )
     {
         m_EditorCamera.OnUpdate();
-        m_testscene->BeginScene( m_EditorCamera );
-        m_testscene->EndScene( );
+        const auto&& beginResult = m_testscene->BeginScene( m_EditorCamera );
+        if ( !beginResult )
+        {
+            return Common::MakeError( beginResult.GetError() );
+        }
+        const auto&& endResult = m_testscene->EndScene();
+        if ( !endResult )
+        {
+            return Common::MakeError( endResult.GetError() );
+        }
 
-        /*auto& renderer = Graphic::Renderer::GetInstance();
-        renderer.BeginFrame();
-        renderer.BeginRenderPass()
-
-        renderer.RenderImGui();*/
-
+        return BOOLSUCCESS;
     }
 
 } // namespace Desert
