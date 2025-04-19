@@ -30,3 +30,6 @@ group ""
 
 include "Desert/"
 include "Sandbox/"
+group "Tests"
+include "Desert/Tests/"
+group ""

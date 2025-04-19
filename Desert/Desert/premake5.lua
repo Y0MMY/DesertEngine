@@ -43,38 +43,6 @@ project "Desert"
         "%{wks.location}/ThirdParty/",
     }
 
-    -- includedirs {
-    --     "../ThirdParty/spdlog/include/",
-    --     "../ThirdParty/GLFW/include/",
-    --     "../ThirdParty/glm/",
-    --     "../ThirdParty/VulkanSDK/shaderc/Include",
-    --     "../ThirdParty/VulkanSDK/spirv_cross/Include",
-    --     "../ThirdParty/VulkanSDK/include",
-    --     "../ThirdParty/Glad/include/",
-    --     "../ThirdParty/stb/include/",
-    --     "../ThirdParty/assimp/include",
-    --     "../ThirdParty/yaml-cpp/include",
-    --     "../ThirdParty/ImGUI/",
-    --     "%{IncludeDir.entt}",
-        
-    --     "../ThirdParty/",
-    -- }
-
-    -- links
-    -- {
-    --     "ImGui",
-    --     "yaml-cpp",
-        
-    --     "%{LibraryDir.shaderc_Debug}",
-    --     "%{LibraryDir.spirv_cross_core_Debug}",
-    --     "%{LibraryDir.spirv_cross_glsl_Debug}",
-    --     "%{LibraryDir.shaderc_shared_Debug}",
-    --     "%{LibraryDir.shaderc_combined_Debug}",
-    --     "%{LibraryDir.shaderc_util_Debug}",
-    --     "%{LibraryDir.vulkan1}",
-    --     "%{LibraryDir.assimp_Debug}",
-    --     "%{LibraryDir.OGLCompiler_Debug}",
-    -- }
     local allLinks = {
         "Common",
         "ImGui",
