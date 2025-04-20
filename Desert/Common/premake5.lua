@@ -1,9 +1,7 @@
-
 project "Common"
     kind "StaticLib"
 
     files { 
-        -- COMMON 
         "Source/Common/**.cpp", 
         "Source/Common/**.hpp",
     }
@@ -12,19 +10,25 @@ project "Common"
         "Source/",
         "Source/Common",
     }
-
-    includedirs {
-        "%{wks.location}/ThirdParty/spdlog/include/",
-        "%{wks.location}/ThirdParty/yaml-cpp/include",
-        "%{wks.location}/ThirdParty/glm/",
-        "%{wks.location}/ThirdParty/GLFW/include",
-    }
     
-    links{
-        "yaml-cpp",
-    }
+    for name, path in pairs(deps.Common.IncludeDir) do
+        includedirs { path }
+    end
+    
+    for name, path in pairs(deps.CommonSpecific.IncludeDir) do
+        includedirs { path }
+    end
+    
+    links { deps.Common.Libraries.yaml_cpp }
+    
+    for _, define in ipairs(deps.Common.Defines) do
+        defines { define }
+    end
+    
+    for _, define in ipairs(deps.CommonSpecific.Defines) do
+        defines { define }
+    end
 
-    defines { "YAML_CPP_STATIC_DEFINE" }
     filter "configurations:Debug"
         defines { "DESERT_CONFIG_DEBUG" }
         symbols "On"

@@ -3,7 +3,7 @@ import subprocess
 import sys
 import argparse
 
-def find_test_executables(bin_dir="../build/Bin/Tests", config="Debug"):
+def find_test_executables(bin_dir="../../build/Bin/Tests", config="Debug"):
     tests = []
     search_path = os.path.join(bin_dir, config)
     if not os.path.exists(search_path):

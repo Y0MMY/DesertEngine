@@ -12,20 +12,27 @@ def create_test_file(test_path):
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
     
     if os.path.exists(full_path):
-        print(f"File  {full_path} already exists!")
+        print(f"File {full_path} already exists!")
         return
+    
+    test_name = os.path.basename(full_path).replace('_test.cpp', '').replace('.cpp', '')
     
     test_template = f"""// {os.path.basename(full_path)}
 // Auto generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-    #include <gtest/gtest.h>
+#include <gtest/gtest.h>
 
-    TEST({os.path.basename(full_path).replace('.cpp', '')}, BasicTest) {{
-        EXPECT_TRUE(true);
-    }})
+TEST({test_name}, BasicTest) {{
+    EXPECT_TRUE(true);
+}}
+
+int main(int argc, char** argv) {{
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}}
 """
 
-    # Записываем файл
+    # Write the file
     with open(full_path, 'w', encoding='utf-8') as f:
         f.write(test_template)
     
