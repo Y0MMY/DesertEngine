@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Shader.hpp>
 #include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/UniformBuffer.hpp>
 
 #include <glm/glm.hpp>
 
@@ -12,9 +13,10 @@ namespace Desert::Graphic
     public:
         virtual ~Material() = default;
 
-        virtual Common::BoolResult SetVec3( const std::string& name, const glm::vec3& data )                 = 0;
-        virtual Common::BoolResult SetMat4( const std::string& name, const glm::mat4& data )                 = 0;
-        virtual Common::BoolResult SetData( const std::string& name, const void* data, const uint32_t size ) = 0;
+        /*virtual Common::BoolResult SetVec3( const std::string& name, const glm::vec3& data )                 = 0;
+        virtual Common::BoolResult SetMat4( const std::string& name, const glm::mat4& data )                 = 0;*/
+
+        virtual Common::BoolResult AddUniformToOverride( const std::shared_ptr<UniformBuffer>& uniformBuffer ) = 0;
 
         virtual Common::BoolResult SetImage2D( const std::string&              name,
                                                const std::shared_ptr<Image2D>& image2D ) = 0;

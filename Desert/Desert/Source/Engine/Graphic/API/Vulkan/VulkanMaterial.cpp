@@ -38,24 +38,13 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeFormattedError( "{}: shader was not attached", m_DebugName );
         }
 
-        m_Uniforms.clear();
+        m_OverriddenUniforms.clear();
 
         const auto& shaderDS = sp_cast<VulkanShader>( m_Shader )->GetShaderDescriptorSets();
         for ( const auto& descriptor : shaderDS )
         {
-            for ( const auto& uniform : descriptor.second.UniformBuffers )
-            {
-                const auto& uniformInfo = uniform.second.first;
-                auto        buffer = std::make_shared<VulkanUniformBuffer>( uniformInfo.Size, descriptor.first );
 
-                if ( !buffer )
-                {
-                    return Common::MakeError( "Failed to create uniform buffer" );
-                }
-
-                m_Uniforms[uniformInfo.Name] = { buffer, 0, uniformInfo.Size, uniformInfo.BindingPoint };
-            }
-
+            // TODO:
             for ( const auto& image : descriptor.second.ImageSamplers )
             {
                 const auto& imageInfo = image.second.first;
@@ -67,35 +56,23 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult VulkanMaterial::SetData( const std::string& name, const void* data, const uint32_t size )
+    // TODO: name -> Uniform buffer info
+
+    Common::BoolResult VulkanMaterial::AddUniformToOverride( const std::shared_ptr<UniformBuffer>& uniformBuffer )
     {
-        auto it = m_Uniforms.find( name );
-        if ( it == m_Uniforms.end() )
-        {
-            return Common::MakeFormattedError( "Uniform '{}' not found in material", name );
-        }
-
-        auto& uniform = it->second;
-        if ( size > uniform.Size )
-        {
-            return Common::MakeFormattedError( "Data size {} exceeds uniform '{}' size {}", size, name,
-                                               uniform.Size );
-        }
-
-        uniform.Buffer->SetData( data, size, uniform.Offset );
-
+        m_OverriddenUniforms.push_back( sp_cast<VulkanUniformBuffer>( uniformBuffer ) );
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult VulkanMaterial::SetVec3( const std::string& name, const glm::vec3& data )
-    {
-        return SetData( name, &data, sizeof( glm::vec3 ) );
-    }
+    /* Common::BoolResult VulkanMaterial::SetVec3( const std::string& name, const glm::vec3& data )
+     {
+         return SetData( name, &data, sizeof( glm::vec3 ) );
+     }
 
-    Common::BoolResult VulkanMaterial::SetMat4( const std::string& name, const glm::mat4& data )
-    {
-        return SetData( name, &data, sizeof( glm::vec3 ) );
-    }
+     Common::BoolResult VulkanMaterial::SetMat4( const std::string& name, const glm::mat4& data )
+     {
+         return SetData( name, &data, sizeof( glm::vec3 ) );
+     }*/
 
     Common::BoolResult VulkanMaterial::ApplyMaterial()
     {
@@ -104,16 +81,17 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-        writeDescriptorSets.reserve( ( m_Uniforms.size() + m_Images2D.size() ) );
+        writeDescriptorSets.reserve( ( m_OverriddenUniforms.size() + m_Images2D.size() ) );
 
         // Uniform
         {
-            for ( const auto& uniform : m_Uniforms )
+            for ( const auto& uniform : m_OverriddenUniforms )
             {
                 auto wds = sp_cast<VulkanShader>( m_Shader )
                                 ->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Uniform,
-                                                         uniform.second.Binding, SET, frameIndex );
-                const auto bufferInfo = uniform.second.Buffer->GetDescriptorBufferInfo();
+                                                         uniform->GetBinding(), SET, frameIndex);
+
+                const auto bufferInfo = uniform->GetDescriptorBufferInfo();
                 wds.pBufferInfo       = &bufferInfo;
                 writeDescriptorSets.push_back( std::move( wds ) );
             }

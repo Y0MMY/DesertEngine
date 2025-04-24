@@ -9,6 +9,8 @@
 #include <shaderc/shaderc.hpp>
 #include <spirv_cross/spirv_glsl.hpp>
 
+#include <ranges>
+
 namespace Desert::Graphic::API::Vulkan
 {
     namespace Utils
@@ -597,8 +599,7 @@ namespace Desert::Graphic::API::Vulkan
                     writeDescriptor.dstBinding      = uniformBuffer.first.BindingPoint;
                     writeDescriptor.descriptorCount = 1;
 
-
-                    //TODO: pBufferInfo !!!! or not create VkWriteDescriptorSet
+                    // TODO: pBufferInfo !!!! or not create VkWriteDescriptorSet
                 }
 
                 for ( auto& [binding, sampler] : shaderDescriptorSet.ImageSamplers )
@@ -647,4 +648,19 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-} // namespace Desert::Graphic::API::Vulkan 
+    const std::vector<Desert::Core::Models::UniformBuffer> VulkanShader::GetUniformModels() const
+    {
+        if (!m_ReflectionData.ShaderDescriptorSets.size()) [[unlikely]]
+        {
+            return {};
+        }
+        else [[likely]]
+        {
+            const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at(0).UniformBuffers;
+            auto        res =
+                uniformInfo | std::views::values | std::views::transform([](const auto& p) { return p.first; });
+            return { res.begin(), res.end() };
+        }
+    }
+
+} // namespace Desert::Graphic::API::Vulkan

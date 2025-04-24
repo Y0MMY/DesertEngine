@@ -13,11 +13,16 @@ namespace Desert::Graphic::API::Vulkan
         VulkanUniformBuffer( uint32_t size, uint32_t binding );
         virtual ~VulkanUniformBuffer();
 
-        virtual void     SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
-        virtual void     RT_SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
-        virtual uint32_t GetBinding() const override
+        virtual void           SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
+        virtual void           RT_SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
+        virtual const uint32_t GetBinding() const override
         {
             return m_Binding;
+        }
+
+        virtual const uint32_t GetSize() const override
+        {
+            return m_Size;
         }
 
         const VkDescriptorBufferInfo& GetDescriptorBufferInfo() const

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Graphic/Material.hpp>
+#include <Engine/Graphic/Materials/Material.hpp>
 
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Pipeline.hpp>

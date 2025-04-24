@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Renderer.hpp>
-#include <Engine/Graphic/Material.hpp>
+#include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/Camera.hpp>
@@ -40,11 +40,12 @@ namespace Desert::Graphic
 
         struct RenderInfo
         {
-            std::shared_ptr<Graphic::Shader>      Shader;
-            std::shared_ptr<Graphic::Framebuffer> Framebuffer;
-            std::shared_ptr<Graphic::RenderPass>  RenderPass;
-            std::shared_ptr<Graphic::Pipeline>    Pipeline;
-            std::shared_ptr<Graphic::Material>    Material;
+            std::shared_ptr<Graphic::Shader>               Shader;
+            std::shared_ptr<Graphic::Framebuffer>          Framebuffer;
+            std::shared_ptr<Graphic::RenderPass>           RenderPass;
+            std::shared_ptr<Graphic::Pipeline>             Pipeline;
+            std::shared_ptr<Graphic::Material>             Material;
+            std::shared_ptr<Graphic::UniformBufferManager> UBManager;
         };
 
         struct

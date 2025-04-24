@@ -3,7 +3,7 @@
 #include <Engine/Graphic/RendererContext.hpp>
 #include <Common/Core/Memory/CommandBuffer.hpp>
 
-#include <Engine/Graphic/Material.hpp>
+#include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Mesh.hpp>

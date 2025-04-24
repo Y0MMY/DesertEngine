@@ -26,7 +26,7 @@ namespace Desert::Graphic::API::Vulkan
         struct ReflectionData
         {
             std::unordered_map<SetPoint, ShaderResource::ShaderDescriptorSet>
-                 ShaderDescriptorSets; // uint32_t = set
+                 ShaderDescriptorSets; // SetPoint = set
 
             std::optional<Core::Models::PushConstant> PushConstantRanges;
         };
@@ -45,6 +45,8 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_ShaderName;
         }
+
+        virtual const std::vector<Core::Models::UniformBuffer> GetUniformModels() const override; // don't use it often!
 
         const VkWriteDescriptorSet GetWriteDescriptorSet( const WriteDescriptorType& type, uint32_t binding,
                                                           uint32_t set, uint32_t frame ) const;
@@ -80,7 +82,7 @@ namespace Desert::Graphic::API::Vulkan
     private:
         std::vector<VkPipelineShaderStageCreateInfo> m_PipelineShaderStageCreateInfos;
         std::filesystem::path                        m_ShaderPath;
-        std::string m_ShaderName;
+        std::string                                  m_ShaderName;
 
         ReflectionData                     m_ReflectionData;
         std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts; // set

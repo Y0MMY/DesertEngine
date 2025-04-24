@@ -47,6 +47,8 @@ namespace Desert::Graphic
             // Material
             skybox.Material = Material::Create( std::string( debugName ), skybox.Shader );
             skybox.Material->Invalidate();
+
+            skybox.UBManager = UniformBufferManager::Create( debugName, pipeSpec.Shader );
         }
 
         // ==================== Composite Pass ====================
@@ -82,6 +84,8 @@ namespace Desert::Graphic
 
             composite.Material = Material::Create( std::string( debugName ), composite.Shader );
             composite.Material->Invalidate();
+
+            composite.UBManager = UniformBufferManager::Create(debugName, pipeSpec.Shader );
         }
 
         // ==================== Geometry Pass ====================
@@ -116,6 +120,8 @@ namespace Desert::Graphic
 
             geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
             geometry.Material->Invalidate();
+
+            geometry.UBManager = UniformBufferManager::Create(debugName, pipeSpec.Shader );
         }
 
         return BOOLSUCCESS;
@@ -194,7 +200,10 @@ namespace Desert::Graphic
         camera.m1 = m_SceneInfo.ActiveCamera->GetProjectionMatrix();
         camera.m2 = m_SceneInfo.ActiveCamera->GetViewMatrix();
 
-        m_SceneInfo.Renderdata.Skybox.Material->SetData( "camera", &camera, 128 );
+        const auto& cameraUBRes = m_SceneInfo.Renderdata.Skybox.UBManager->GetUniformBuffer( "camera" );
+        const auto& cameraUB    = cameraUBRes.GetValue();
+        cameraUB->RT_SetData( &camera, 128, 0 );
+        m_SceneInfo.Renderdata.Skybox.Material->AddUniformToOverride( cameraUB );
         m_SceneInfo.Renderdata.Skybox.Material->SetImage2D( "samplerCubeMap",
                                                             m_SceneInfo.ActiveScene->GetEnvironment() );
 
