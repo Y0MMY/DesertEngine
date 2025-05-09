@@ -11,7 +11,7 @@ namespace Desert
     [[nodiscard]] Common::BoolResult EditorLayer::OnAttach()
     {
         m_testscene->Init();
-        m_Environment          = Graphic::TextureCube::Create( "output123.hdr" );
+        m_Environment          = Graphic::TextureCube::Create( {}, "output123.hdr" );
         const auto& textureRes = m_Environment->Invalidate();
         if ( !textureRes )
         {

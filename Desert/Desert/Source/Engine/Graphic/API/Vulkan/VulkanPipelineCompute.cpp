@@ -25,7 +25,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipelineCompute::End()
     {
-         
+
         vkEndCommandBuffer( m_ActiveComputeCommandBuffer );
 
         VkSubmitInfo submitInfo       = {};
@@ -80,6 +80,23 @@ namespace Desert::Graphic::API::Vulkan
         pipelineLayoutCreateInfo.setLayoutCount = (uint32_t)descriptorSetLayouts.size();
         pipelineLayoutCreateInfo.pSetLayouts    = descriptorSetLayouts.data();
 
+        const auto& pushConstantRange = vulkanShader->GetShaderPushConstant();
+
+        VkPushConstantRange vulkanPushConstantRange;
+        if ( pushConstantRange )
+        {
+            // TODO: should come from shader
+            {
+                const auto& pcValue                = pushConstantRange.value();
+                vulkanPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+                vulkanPushConstantRange.offset     = pcValue.Offset;
+                vulkanPushConstantRange.size       = pcValue.Size;
+            }
+
+            pipelineLayoutCreateInfo.pushConstantRangeCount = 1u;
+            pipelineLayoutCreateInfo.pPushConstantRanges    = &vulkanPushConstantRange;
+        }
+
         VK_CHECK_RESULT(
              vkCreatePipelineLayout( device, &pipelineLayoutCreateInfo, nullptr, &m_ComputePipelineLayout ) );
 
@@ -119,6 +136,12 @@ namespace Desert::Graphic::API::Vulkan
     {
         vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, 0 );
+    }
+
+    void VulkanPipelineCompute::PushConstant( uint32_t size, void* data )
+    {
+        vkCmdPushConstants( m_ActiveComputeCommandBuffer, m_ComputePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                            size, data );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

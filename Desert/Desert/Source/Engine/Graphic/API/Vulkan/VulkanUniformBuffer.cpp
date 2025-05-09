@@ -67,4 +67,20 @@ namespace Desert::Graphic::API::Vulkan
         VulkanAllocator::GetInstance().UnmapMemory( m_MemoryAlloc );
     }
 
+    //Common::Result<std::shared_ptr<Desert::Graphic::UniformBuffer>>
+    //VulkanUniformBufferManager::GetUniformBuffer( const std::string& name ) const
+    //{
+    //    const auto index        = m_UniformBuffers.size();
+    //    m_UniformBuffers[index] = std::move( buffer );
+    //    m_NameMap[name]         = index;
+
+    //    auto it = m_NameMap.find( name );
+    //    if ( it == m_NameMap.end() )
+    //    {
+
+    //        return Common::MakeFormattedError<std::shared_ptr<UniformBuffer>>(
+    //             "Uniform '{}' not found in material", name );
+    //    }
+    //}
+
 } // namespace Desert::Graphic::API::Vulkan

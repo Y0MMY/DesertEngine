@@ -19,10 +19,16 @@ namespace Desert::Core::Formats
         DEPTH32F
     };
 
-    enum ImageProperties
+    enum ImageProperties : uint32_t
     {
         Storage = 0x1,
+        Sample  = 0x2,
     };
+
+    constexpr ImageProperties operator|( ImageProperties a, ImageProperties b )
+    {
+        return static_cast<ImageProperties>( static_cast<uint32_t>( a ) | static_cast<uint32_t>( b ) );
+    }
 
     using ImagePixelData =
          std::variant<std::monostate, std::vector<float>, std::vector<unsigned char>, std::byte*>;
@@ -65,7 +71,7 @@ namespace Desert::Core::Formats
         uint32_t        Width;
         uint32_t        Height;
         ImageFormat     Format;
-        uint32_t        TextureSamples = 1;
+        uint32_t        Mips = 1;
         ImagePixelData  Data;
         ImageUsage      Usage;
         ImageProperties Properties;

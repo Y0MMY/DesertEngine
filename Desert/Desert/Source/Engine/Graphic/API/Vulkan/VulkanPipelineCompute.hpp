@@ -18,6 +18,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual void End() override;
 
         void BindDS( VkDescriptorSet descriptorSet );
+        void PushConstant( uint32_t size, void* data );
 
         void ReadBuffer( uint32_t bufferSize ); // TEMP
 

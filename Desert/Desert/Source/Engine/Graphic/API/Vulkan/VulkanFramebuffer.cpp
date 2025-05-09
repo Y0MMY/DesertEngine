@@ -107,8 +107,9 @@ namespace Desert::Graphic::API::Vulkan
         for ( const auto attachment : spec.Attachments.Attachments )
         {
             Core::Formats::ImageSpecification spec;
-            spec.Format = attachment;
-            spec.Usage  = Core::Formats::ImageUsage::Attachment;
+            spec.Format     = attachment;
+            spec.Usage      = Core::Formats::ImageUsage::Attachment;
+            spec.Properties = Core::Formats::Sample;
 
             if ( Graphic::Utils::IsDepthFormat( attachment ) )
             {

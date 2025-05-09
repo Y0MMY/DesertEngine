@@ -176,8 +176,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         // Creates a Vulkan image with specified parameters
-        inline Common::Result<VmaAllocation> CreateImage( VulkanAllocator& allocator, VkImageCreateInfo& imageInfo,
-                                                          VkImage& outImage )
+        inline Common::Result<VmaAllocation> CreateImage( VulkanAllocator&         allocator,
+                                                          const VkImageCreateInfo& imageInfo, VkImage& outImage )
         {
             return allocator.RT_AllocateImage( "VulkanImage", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, outImage );
         }
@@ -270,10 +270,14 @@ namespace Desert::Graphic::API::Vulkan
     // VulkanImage2D Implementation
     VulkanImage2D::VulkanImage2D( const Core::Formats::ImageSpecification& spec ) : m_ImageSpecification( spec )
     {
-        // For now just use 1 mip level
-        // Could calculate based on image dimensions:
-        // m_MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
-        m_MipLevels = MIN_MIP_LEVELS;
+        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube ) [[unlikely]]
+        {
+        }
+        else [[likely]]
+        {
+
+            m_MipLevels = m_ImageSpecification.Mips;
+        }
     }
 
     uint32_t VulkanImage2D::GetMipmapLevels() const
@@ -294,30 +298,63 @@ namespace Desert::Graphic::API::Vulkan
         VkFormat          format    = GetImageVulkanFormat( m_ImageSpecification.Format );
         VkImageCreateInfo imageInfo = CreateImageInfo( format );
 
+        Common::BoolResult result;
+
         // Handle different image usage cases
         switch ( m_ImageSpecification.Usage )
         {
             case Core::Formats::ImageUsage::Attachment:
+            {
                 if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage )
                 {
                     return Common::MakeError<bool>( "Attachment images don't support Storage property" );
                 }
-                return CreateAttachmentImage( device, allocator, imageInfo, format );
-
+                result = CreateAttachmentImage( device, allocator, imageInfo, format );
+                break;
+            }
             case Core::Formats::ImageUsage::ImageCube:
-                return CreateCubemapImage( device, allocator, imageInfo, format );
+            {
+                result = CreateCubemapImage( device, allocator, imageInfo, format );
+                break;
+            }
 
             default: // Regular 2D texture
-                return CreateTextureImage( device, allocator, imageInfo, format );
+            {
+                result = CreateTextureImage( device, allocator, imageInfo, format );
+                break;
+            }
         }
+
+        if ( !result.IsSuccess() )
+        {
+            return result;
+        }
+
+        bool isCubemap = m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube;
+        bool isDepth   = Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format );
+
+        // Create image view
+        auto viewResult =
+             Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, isCubemap, isDepth );
+        if ( !viewResult.IsSuccess() )
+        {
+            return Common::MakeError<bool>( viewResult.GetError() );
+        }
+        m_VulkanImageInfo.ImageView = viewResult.GetValue();
+
+        // Create sampler (only for non-storage images)
+        if ( ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Sample ) )
+        {
+            Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
+        }
+
+        return Common::MakeSuccess( true );
     }
 
     // Helper methods for different image types
     Common::BoolResult VulkanImage2D::CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
                                                              VkImageCreateInfo& imageInfo, VkFormat format )
     {
-        imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-
         if ( Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) )
             imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         else
@@ -329,32 +366,14 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( allocation.GetError() );
         }
 
-        bool isDepth = Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format );
-        auto viewResult =
-             Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, false, isDepth );
-
-        if ( !viewResult.IsSuccess() )
-        {
-            return Common::MakeError<bool>( viewResult.GetError() );
-        }
-
-        m_VulkanImageInfo.ImageView = viewResult.GetValue();
-        Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
-
         return Common::MakeSuccess( true );
     }
 
     Common::BoolResult VulkanImage2D::CreateTextureImage( VkDevice device, VulkanAllocator& allocator,
-                                                          VkImageCreateInfo& imageInfo, VkFormat format )
+                                                          const VkImageCreateInfo& imageInfo, VkFormat format )
     {
         if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage ) [[likely]]
         {
-
-            // Storage images require VK_IMAGE_USAGE_STORAGE_BIT
-            // Adding transfer flags enables CPU->GPU updates if needed
-            imageInfo.usage |=
-                 VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-
             return CreateStorageImage( device, allocator, imageInfo );
         }
         else [[unlikely]]
@@ -364,9 +383,6 @@ namespace Desert::Graphic::API::Vulkan
                 return Common::MakeError<bool>( "No image data provided" );
             }
         }
-
-        imageInfo.usage =
-             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
         uint32_t imageSize = Image::CalculateImageSize( m_ImageSpecification.Width, m_ImageSpecification.Height,
                                                         m_ImageSpecification.Format );
@@ -397,35 +413,16 @@ namespace Desert::Graphic::API::Vulkan
         Utils::CopyBufferToImage2D( cmdBuffer.GetValue(), stagingBuffer, format, m_VulkanImageInfo.Image,
                                     m_ImageSpecification.Width, m_ImageSpecification.Height, m_MipLevels );
 
-        auto viewResult = Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels );
-
-        if ( !viewResult.IsSuccess() )
-        {
-            return Common::MakeError<bool>( viewResult.GetError() );
-        }
-        m_VulkanImageInfo.ImageView = viewResult.GetValue();
-        Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
-
         VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_IMAGE, "Texture2D", m_VulkanImageInfo.Image );
 
         return Common::MakeSuccess( true );
     }
 
     Common::BoolResult VulkanImage2D::CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
-                                                          VkImageCreateInfo& imageInfo, VkFormat format )
+                                                          const VkImageCreateInfo& imageInfo, VkFormat format )
     {
-        imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-
-        imageInfo.arrayLayers = CUBEMAP_FACE_COUNT;
-        imageInfo.extent      = { m_ImageSpecification.Width / 4, m_ImageSpecification.Height / 3, 1 };
-
         if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage ) [[likely]]
         {
-            // Storage images require VK_IMAGE_USAGE_STORAGE_BIT
-            // Adding transfer flags enables CPU->GPU updates if needed
-            imageInfo.usage |=
-                 VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-
             return CreateStorageImage( device, allocator, imageInfo );
         }
         else [[unlikely]]
@@ -436,19 +433,10 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        imageInfo.usage =
-             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-
         const uint32_t bytesPerPixel = GetBytesPerPixel( m_ImageSpecification.Format );
         const uint32_t faceWidth     = m_ImageSpecification.Width / 4;
         const uint32_t faceHeight    = m_ImageSpecification.Height / 3;
 
-        // Critical validation
-        if ( faceWidth * 4 != m_ImageSpecification.Width || faceHeight * 3 != m_ImageSpecification.Height )
-        {
-            return Common::MakeError<bool>(
-                 "Image dimensions must be exactly divisible by 4 (width) and 3 (height)" );
-        }
         if ( faceWidth != faceHeight )
         {
             return Common::MakeError<bool>( "Cubemap faces must be square" );
@@ -546,31 +534,11 @@ namespace Desert::Graphic::API::Vulkan
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
 
-        auto viewResult = Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, true );
-        if ( !viewResult.IsSuccess() )
-        {
-            return Common::MakeError<bool>( viewResult.GetError() );
-        }
-        m_VulkanImageInfo.ImageView = viewResult.GetValue();
-
-        VkSamplerCreateInfo samplerInfo = { .sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-                                            .magFilter    = VK_FILTER_LINEAR,
-                                            .minFilter    = VK_FILTER_LINEAR,
-                                            .mipmapMode   = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-                                            .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                                            .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                                            .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                                            .borderColor  = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK };
-        if ( vkCreateSampler( device, &samplerInfo, nullptr, &m_VulkanImageInfo.Sampler ) != VK_SUCCESS )
-        {
-            return Common::MakeError<bool>( "Failed to create cubemap sampler" );
-        }
-
         return Common::MakeSuccess( true );
     }
 
     Common::BoolResult VulkanImage2D::CreateStorageImage( VkDevice device, VulkanAllocator& allocator,
-                                                          VkImageCreateInfo& imageInfo )
+                                                          const VkImageCreateInfo& imageInfo )
     {
         auto imageAlloc = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
         if ( !imageAlloc.IsSuccess() )
@@ -585,31 +553,19 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( "Failed to get command buffer" );
         }
 
+        uint32_t layerCount =
+             ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube ) ? CUBEMAP_FACE_COUNT : 1;
+
         // Storage images typically use VK_IMAGE_LAYOUT_GENERAL because:
         // - They're both read and written in shaders
         // - Provides best performance for atomic operations
         Utils::InsertImageMemoryBarrier( cmdBuffer.GetValue(), m_VulkanImageInfo.Image, imageInfo.format,
                                          VK_IMAGE_LAYOUT_UNDEFINED, // Initial layout
                                          VK_IMAGE_LAYOUT_GENERAL,   // Storage-compatible layout
-                                         1,                         // array layers
+                                         layerCount,                // array layers
                                          imageInfo.mipLevels );
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmdBuffer.GetValue() );
-
-        auto viewResult =
-             Utils::CreateImageView( device, imageInfo.format, m_VulkanImageInfo.Image, imageInfo.mipLevels,
-                                     false,   // not a cubemap
-                                     false ); // not a depth/stencil image
-        if ( !viewResult.IsSuccess() )
-        {
-            return Common::MakeError<bool>( "Failed to create storage image view" );
-        }
-        m_VulkanImageInfo.ImageView = viewResult.GetValue();
-
-        // Most storage images are accessed via imageLoad/imageStore in shaders
-        // rather than through samplers
-        // Utils::CreateTextureSampler(device, m_VulkanImageInfo.Sampler);
-        m_VulkanImageInfo.Sampler = VK_NULL_HANDLE;
 
         VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_IMAGE, "StorageImage", m_VulkanImageInfo.Image );
 
@@ -618,17 +574,60 @@ namespace Desert::Graphic::API::Vulkan
 
     VkImageCreateInfo VulkanImage2D::CreateImageInfo( VkFormat format )
     {
-        VkImageCreateInfo createInfo = { .sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                                         .flags     = 0,
-                                         .imageType = VK_IMAGE_TYPE_2D,
-                                         .format    = format,
-                                         .extent = { m_ImageSpecification.Width, m_ImageSpecification.Height, 1 },
-                                         .mipLevels     = m_MipLevels,
-                                         .arrayLayers   = 1, // Default, overridden for cubemaps
-                                         .samples       = VK_SAMPLE_COUNT_1_BIT,
-                                         .tiling        = VK_IMAGE_TILING_OPTIMAL,
-                                         .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
-                                         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+        VkImageCreateInfo createInfo = {
+             .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+             .flags         = 0,
+             .imageType     = VK_IMAGE_TYPE_2D,
+             .format        = format,
+             .extent        = { m_ImageSpecification.Width, m_ImageSpecification.Height, 1 },
+             .mipLevels     = m_MipLevels,
+             .arrayLayers   = 1, // Default, overridden for cubemaps
+             .samples       = VK_SAMPLE_COUNT_1_BIT,
+             .tiling        = VK_IMAGE_TILING_OPTIMAL,
+             .usage         = 0,
+             .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
+             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+
+        // Handle different image usage cases
+        switch ( m_ImageSpecification.Usage )
+        {
+            case Core::Formats::ImageUsage::Attachment:
+            {
+                if ( Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) )
+                {
+                    createInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+                }
+                else
+                {
+                    createInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                }
+                break;
+            }
+
+            case Core::Formats::ImageUsage::ImageCube:
+            {
+                createInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+                createInfo.arrayLayers = CUBEMAP_FACE_COUNT;
+                createInfo.extent      = { m_ImageSpecification.Width / 4, m_ImageSpecification.Height / 3, 1 };
+                createInfo.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                break;
+            }
+            default: // Regular texture or storage image
+            {
+                createInfo.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                break;
+            }
+        }
+
+        if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Sample )
+        {
+            createInfo.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        }
+        if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage )
+        {
+            createInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        }
 
         return createInfo;
     }

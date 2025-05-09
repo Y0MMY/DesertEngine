@@ -32,6 +32,8 @@ namespace Common
     class Result
     {
     public:
+        Result() = default;
+    public:
         class Error
         {
         public:
