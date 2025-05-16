@@ -11,6 +11,7 @@ namespace Desert::Graphic::API::Vulkan
         VkImage       Image       = nullptr;
         VkImageView   ImageView   = nullptr;
         VkSampler     Sampler     = nullptr;
+        VkImageLayout Layout      = (VkImageLayout)0;
         VmaAllocation MemoryAlloc = nullptr;
     };
 
@@ -55,7 +56,16 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual Core::Formats::ImagePixelData GetImagePixels() const override;
 
+        const auto GetMipImageView( const uint32_t level ) const
+        {
+            return m_MipImageViews[level];
+        }
+
     private:
+        Common::BoolResult GenerateMipmaps( bool readonly ) const;
+        void               GenerateMipmaps2D( VkCommandBuffer cmd ) const;
+        void               GenerateMipmapsCubemap( VkCommandBuffer cmd ) const;
+
         VkImageCreateInfo  GetImageCreateInfo( VkFormat imageFormat );
         VkImageCreateInfo  CreateImageInfo( VkFormat format );
         Common::BoolResult CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
@@ -69,8 +79,11 @@ namespace Desert::Graphic::API::Vulkan
         Common::BoolResult CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
                                                const VkImageCreateInfo& imageInfo, VkFormat format );
 
+        const VkImageLayout GetVkImageLayout( bool isStorage ) const;
+
     private:
         uint32_t                          m_MipLevels = 1u;
+        std::vector<VkImageView>          m_MipImageViews;
         Core::Formats::ImageSpecification m_ImageSpecification;
 
         bool m_Loaded = false;

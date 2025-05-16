@@ -46,6 +46,29 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
+    void Utils::InsertImageMemoryBarrier( VkCommandBuffer cmdbuffer, VkImage image,
+                                               VkAccessFlags srcAccessMask, VkAccessFlags dstAccessMask,
+                                               VkImageLayout oldImageLayout, VkImageLayout newImageLayout,
+                                               VkPipelineStageFlags    srcStageMask,
+                                               VkPipelineStageFlags    dstStageMask,
+                                               VkImageSubresourceRange subresourceRange )
+    {
+        VkImageMemoryBarrier imageMemoryBarrier{};
+        imageMemoryBarrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+        imageMemoryBarrier.srcAccessMask    = srcAccessMask;
+        imageMemoryBarrier.dstAccessMask    = dstAccessMask;
+        imageMemoryBarrier.oldLayout        = oldImageLayout;
+        imageMemoryBarrier.newLayout        = newImageLayout;
+        imageMemoryBarrier.image            = image;
+        imageMemoryBarrier.subresourceRange = subresourceRange;
+
+        vkCmdPipelineBarrier( cmdbuffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1,
+                              &imageMemoryBarrier );
+    }
+
     void Utils::InsertImageMemoryBarrier( VkCommandBuffer cmdBuf, VkImage Image, VkFormat Format,
                                           VkImageLayout OldLayout, VkImageLayout NewLayout, uint32_t layers,
                                           uint32_t mipLevels )
@@ -100,6 +123,26 @@ namespace Desert::Graphic::API::Vulkan
 
             sourceStage      = VK_PIPELINE_STAGE_TRANSFER_BIT;
             destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        }
+
+        else if ( OldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+                  NewLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL )
+        {
+            barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+            sourceStage      = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+            destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        }
+
+        else if ( OldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+                  NewLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL )
+        {
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+            sourceStage      = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         }
 
         if ( OldLayout == VK_IMAGE_LAYOUT_UNDEFINED && NewLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL )
@@ -203,8 +246,34 @@ namespace Desert::Graphic::API::Vulkan
             destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         }
 
-        else if ( OldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL &&
-                  NewLayout == VK_IMAGE_LAYOUT_GENERAL)
+        /* else if ( OldLayout == VK_IMAGE_LAYOUT_UNDEFINED && NewLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL )
+         {
+
+             barrier.srcAccessMask =
+                barrier.dstAccessMask =
+             sourceStage      =
+             destinationStage =
+         }*/
+
+        /* else if ( OldLayout == VK_IMAGE_LAYOUT_UNDEFINED && NewLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL )
+         {
+
+             barrier.srcAccessMask = 0;
+             barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+             sourceStage           = VK_PIPELINE_STAGE_TRANSFER_BIT;
+             destinationStage      = VK_PIPELINE_STAGE_TRANSFER_BIT;
+         }*/
+
+        else if ( OldLayout == VK_IMAGE_LAYOUT_GENERAL && NewLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL )
+        {
+            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+            sourceStage      = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        }
+
+        else if ( OldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && NewLayout == VK_IMAGE_LAYOUT_GENERAL )
         {
             barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;

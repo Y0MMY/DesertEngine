@@ -32,9 +32,10 @@ namespace Desert::Graphic
     {
         static inline uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format );
         bool                   IsDepthFormat( Core::Formats::ImageFormat format );
-        inline uint32_t        CalculateMipCount( uint32_t width, uint32_t height )
+        inline uint32_t        CalculateMipCount( uint32_t width, uint32_t height, uint32_t depth = 1 )
         {
-            return (uint32_t)std::floor( std::log2( std::min( width, height ) ) ) + 1;
+            uint32_t max_dim = std::max( { width, height, depth } );
+            return max_dim > 0 ? (uint32_t)std::log2( max_dim ) + 1 : 1;
         }
     } // namespace Utils
 

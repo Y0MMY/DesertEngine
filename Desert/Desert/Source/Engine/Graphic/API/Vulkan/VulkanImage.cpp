@@ -270,14 +270,7 @@ namespace Desert::Graphic::API::Vulkan
     // VulkanImage2D Implementation
     VulkanImage2D::VulkanImage2D( const Core::Formats::ImageSpecification& spec ) : m_ImageSpecification( spec )
     {
-        if ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube ) [[unlikely]]
-        {
-        }
-        else [[likely]]
-        {
-
-            m_MipLevels = m_ImageSpecification.Mips;
-        }
+        m_MipLevels = m_ImageSpecification.Mips;
     }
 
     uint32_t VulkanImage2D::GetMipmapLevels() const
@@ -341,11 +334,34 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( viewResult.GetError() );
         }
         m_VulkanImageInfo.ImageView = viewResult.GetValue();
+        m_VulkanImageInfo.Layout =
+             GetVkImageLayout( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage );
 
         // Create sampler (only for non-storage images)
         if ( ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Sample ) )
         {
             Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
+        }
+
+        m_MipImageViews.resize( m_MipLevels );
+
+        for ( uint32_t mip = 0; mip < m_MipLevels; ++mip )
+        {
+            VkImageViewCreateInfo viewInfo           = {};
+            viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image                           = m_VulkanImageInfo.Image;
+            viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format                          = format;
+            viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.baseMipLevel   = mip;
+            viewInfo.subresourceRange.levelCount     = 1;
+            viewInfo.subresourceRange.baseArrayLayer = 0;
+            viewInfo.subresourceRange.layerCount     = 1;
+
+            if ( vkCreateImageView( device, &viewInfo, nullptr, &m_MipImageViews[mip] ) != VK_SUCCESS )
+            {
+                return Common::MakeError( "Failed to create image view" );
+            }
         }
 
         return Common::MakeSuccess( true );
@@ -355,11 +371,6 @@ namespace Desert::Graphic::API::Vulkan
     Common::BoolResult VulkanImage2D::CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
                                                              VkImageCreateInfo& imageInfo, VkFormat format )
     {
-        if ( Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format ) )
-            imageInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        else
-            imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
         auto allocation = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
         if ( !allocation.IsSuccess() )
         {
@@ -615,7 +626,8 @@ namespace Desert::Graphic::API::Vulkan
             }
             default: // Regular texture or storage image
             {
-                createInfo.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                createInfo.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                    VK_IMAGE_USAGE_STORAGE_BIT;
                 break;
             }
         }
@@ -711,6 +723,94 @@ namespace Desert::Graphic::API::Vulkan
         vmaDestroyBuffer( VulkanAllocator::GetVMAAllocator(), stagingBuffer, stagingAllocation );
 
         return result;
+    }
+
+    void VulkanImage2D::GenerateMipmaps2D( VkCommandBuffer cmd ) const
+    {
+        uint32_t width  = m_ImageSpecification.Width;
+        uint32_t height = m_ImageSpecification.Height;
+
+        for ( uint32_t i = 1; i < 11; i++ )
+        {
+            VkImageBlit imageBlit{};
+
+            // Source
+            imageBlit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            imageBlit.srcSubresource.layerCount = 1;
+            imageBlit.srcSubresource.mipLevel   = i - 1;
+            imageBlit.srcOffsets[1].x           = int32_t( width >> ( i - 1 ) );
+            imageBlit.srcOffsets[1].y           = int32_t( height >> ( i - 1 ) );
+            imageBlit.srcOffsets[1].z           = 1;
+
+            // Destination
+            imageBlit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            imageBlit.dstSubresource.layerCount = 1;
+            imageBlit.dstSubresource.mipLevel   = i;
+            imageBlit.dstOffsets[1].x           = int32_t( width >> i );
+            imageBlit.dstOffsets[1].y           = int32_t( height >> i );
+            imageBlit.dstOffsets[1].z           = 1;
+
+            VkImageSubresourceRange mipSubRange = {};
+            mipSubRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
+            mipSubRange.baseMipLevel            = i;
+            mipSubRange.levelCount              = 1;
+            mipSubRange.layerCount              = 1;
+
+            // Prepare current mip level as image blit destination
+            Utils::InsertImageMemoryBarrier( cmd, m_VulkanImageInfo.Image, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                             mipSubRange );
+
+            // Blit from previous level
+            vkCmdBlitImage( cmd, m_VulkanImageInfo.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            m_VulkanImageInfo.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageBlit,
+                            VK_FILTER_LINEAR );
+
+            // Prepare current mip level as image blit source for next level
+            Utils::InsertImageMemoryBarrier( cmd, m_VulkanImageInfo.Image, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                             VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                             VK_PIPELINE_STAGE_TRANSFER_BIT, mipSubRange );
+        }
+
+        // After the loop, all mip layers are in TRANSFER_SRC layout, so transition all to SHADER_READ
+        VkImageSubresourceRange subresourceRange = {};
+        subresourceRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
+        subresourceRange.layerCount              = 1;
+        subresourceRange.levelCount              = m_MipLevels;
+
+        Utils::InsertImageMemoryBarrier( cmd, m_VulkanImageInfo.Image, VK_ACCESS_TRANSFER_READ_BIT,
+                                         VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, subresourceRange );
+    }
+
+    void VulkanImage2D::GenerateMipmapsCubemap( VkCommandBuffer cmd ) const
+    {
+    }
+
+    Common::BoolResult VulkanImage2D::GenerateMipmaps( bool readonly ) const
+    {
+        auto cmdBufferResult = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdBufferResult.IsSuccess() )
+            return Common::MakeError( "Failed to allocate command buffer" );
+
+        VkCommandBuffer blitCmd   = cmdBufferResult.GetValue();
+        const bool      isCubemap = ( m_ImageSpecification.Usage == Core::Formats::ImageUsage::ImageCube );
+
+        if ( isCubemap )
+            GenerateMipmapsCubemap( blitCmd );
+        else
+            GenerateMipmaps2D( blitCmd );
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( blitCmd );
+        return Common::MakeSuccess( true );
+    }
+
+    const VkImageLayout VulkanImage2D::GetVkImageLayout( bool isStorage ) const
+    {
+        return isStorage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

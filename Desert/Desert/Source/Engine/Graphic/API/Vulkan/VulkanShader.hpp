@@ -11,7 +11,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         Uniform = 0,
         Sampler2D,
-        StorageSampler2D
+        StorageImage
     };
 
     class VulkanShader final : public Shader

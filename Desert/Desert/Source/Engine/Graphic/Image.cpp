@@ -1,5 +1,6 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/RendererAPI.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 
@@ -13,7 +14,19 @@ namespace Desert::Graphic
             case RendererAPIType::None:
                 return nullptr;
             case RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanImage2D>( spec );
+            {
+                const auto& image = std::make_shared<API::Vulkan::VulkanImage2D>( spec );
+                image->RT_Invalidate();
+
+#ifdef DESERT_CONFIG_DEBUG
+                if ( spec.Mips > 1 )
+                {
+                    Renderer::GetInstance().GenerateMipMap( image );
+                }
+#endif // DESERT_CONFIG_DEBUG
+
+                return image;
+            }
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
     }

@@ -641,7 +641,7 @@ namespace Desert::Graphic::API::Vulkan
                 return m_ReflectionData.ShaderDescriptorSets.at( set ).ImageSamplers.at( binding ).second.at(
                      frame );
 
-            case WriteDescriptorType::StorageSampler2D:
+            case WriteDescriptorType::StorageImage:
                 return m_ReflectionData.ShaderDescriptorSets.at( set )
                      .StorageImageSamplers.at( binding )
                      .second.at( frame );

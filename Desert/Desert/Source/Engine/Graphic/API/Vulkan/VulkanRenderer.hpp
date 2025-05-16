@@ -29,10 +29,22 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 
+        virtual std::shared_ptr<Image2D> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath ) override;
+        virtual std::shared_ptr<Image2D> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
+        virtual std::shared_ptr<Image2D> CreatePrefilteredMap( const Common::Filepath& filepath ) override;
         virtual std::shared_ptr<Image2D> CreateEnvironmentMap( const Common::Filepath& filepath ) override;
+#ifdef DESERT_CONFIG_DEBUG
+        virtual [[nodiscard]] Common::BoolResult
+        GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
+#endif
 
     private:
         void SetViewportAndScissor();
+
+#ifdef DESERT_CONFIG_DEBUG
+        void GenerateMipmaps2D( const std::shared_ptr<Image2D>& image ) const;
+        void GenerateMipmapsCubemap( const std::shared_ptr<Image2D>& image ) const;
+#endif
 
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;

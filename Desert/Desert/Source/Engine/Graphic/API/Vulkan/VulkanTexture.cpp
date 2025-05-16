@@ -16,29 +16,32 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( isHDR ) // todo: optimize
         {
-            const auto& imageData     = Core::IO::ImageReader::ReadHDR( path );
-            imageSpecification.Width  = imageData.Width;
-            imageSpecification.Height = imageData.Height;
-            imageSpecification.Format = Core::Formats::ImageFormat::RGBA32F;
-            imageSpecification.Data   = imageData.Data;
+            const auto& imageData         = Core::IO::ImageReader::ReadHDR( path );
+            imageSpecification.Width      = imageData.Width;
+            imageSpecification.Height     = imageData.Height;
+            imageSpecification.Format     = Core::Formats::ImageFormat::RGBA32F;
+            imageSpecification.Data       = imageData.Data;
             imageSpecification.Properties = Core::Formats::Sample;
         }
         else
         {
-            const auto& imageData     = Core::IO::ImageReader::Read( path, alpha );
-            imageSpecification.Width  = imageData.Width;
-            imageSpecification.Height = imageData.Height;
-            imageSpecification.Format = Core::Formats::ImageFormat::RGBA8F;
-            imageSpecification.Data   = imageData.Data;
+            const auto& imageData         = Core::IO::ImageReader::Read( path, alpha );
+            imageSpecification.Width      = imageData.Width;
+            imageSpecification.Height     = imageData.Height;
+            imageSpecification.Format     = Core::Formats::ImageFormat::RGBA8F;
+            imageSpecification.Data       = imageData.Data;
             imageSpecification.Properties = Core::Formats::Sample;
         }
 
         if ( isCube )
         {
             imageSpecification.Usage = Core::Formats::ImageUsage::ImageCube;
+
+            imageSpecification.Mips = 1;
+                // Utils::CalculateMipCount( imageSpecification.Width / 4, imageSpecification.Height / 3 );
         }
 
-        if ( specification.GenerateMips )
+        else
         {
             imageSpecification.Mips =
                  Utils::CalculateMipCount( imageSpecification.Width, imageSpecification.Height );
@@ -61,7 +64,9 @@ namespace Desert::Graphic::API::Vulkan
         Core::Formats::ImageSpecification imageSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 
         m_Image2D = Image2D::Create( imageSpec );
-        return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
+
+        return Common::MakeSuccess(true);//TODO
+       // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
     }
 
     VulkanTextureCube::VulkanTextureCube( const TextureSpecification&  specification,

@@ -17,6 +17,11 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
         virtual void End() override;
 
+        const auto GetCommandBuffer() const
+        {
+            return m_ActiveComputeCommandBuffer;
+        }
+
         void BindDS( VkDescriptorSet descriptorSet );
         void PushConstant( uint32_t size, void* data );
 

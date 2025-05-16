@@ -59,6 +59,12 @@ namespace Desert::Graphic::API::Vulkan
                                        VkImageLayout OldLayout, VkImageLayout NewLayout, uint32_t layers = 1,
                                        uint32_t mipLevels = 1 );
 
+        void InsertImageMemoryBarrier( VkCommandBuffer cmdbuffer, VkImage image, VkAccessFlags srcAccessMask,
+                                       VkAccessFlags dstAccessMask, VkImageLayout oldImageLayout,
+                                       VkImageLayout newImageLayout, VkPipelineStageFlags srcStageMask,
+                                       VkPipelineStageFlags    dstStageMask,
+                                       VkImageSubresourceRange subresourceRange );
+
         Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
                                                      VkImageAspectFlags aspectFlags, VkImageViewType viewType,
                                                      uint32_t layerCount, uint32_t mipLeveles );

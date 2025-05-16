@@ -36,8 +36,16 @@ namespace Desert::Graphic
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
                                         const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) = 0;
 
-        virtual std::shared_ptr<Image2D> CreateEnvironmentMap( const Common::Filepath& filepath ) = 0;
+        virtual std::shared_ptr<Image2D> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath ) = 0;
+        virtual std::shared_ptr<Image2D> CreateDiffuseIrradiance( const Common::Filepath& filepath )      = 0;
+        virtual std::shared_ptr<Image2D> CreatePrefilteredMap( const Common::Filepath& filepath )         = 0;
+        virtual std::shared_ptr<Image2D> CreateEnvironmentMap( const Common::Filepath& filepath )         = 0;
 
+        // NOTE: In the release version we do not support direct generation of mips, they have to be uploaded
+#ifdef DESERT_CONFIG_DEBUG
+        virtual [[nodiscard]] Common::BoolResult
+        GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const = 0;
+#endif
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const = 0;
 
     public:
