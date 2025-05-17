@@ -29,11 +29,11 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 
-        virtual std::shared_ptr<Image2D> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath ) override;
-        virtual std::shared_ptr<Image2D> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
-        virtual std::shared_ptr<Image2D> CreatePrefilteredMap( const Common::Filepath& filepath ) override;
-        virtual std::shared_ptr<Image2D> CreateEnvironmentMap( const Common::Filepath& filepath ) override;
 #ifdef DESERT_CONFIG_DEBUG
+        virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath ) override;
+        virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
+        virtual Common::BoolResult CreatePrefilteredMap( const std::shared_ptr<Image2D>& imageCube ) override;
+        virtual std::shared_ptr<ImageCube> CreateEnvironmentMap( const Common::Filepath& filepath ) override;
         virtual [[nodiscard]] Common::BoolResult
         GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
 #endif
@@ -43,7 +43,7 @@ namespace Desert::Graphic::API::Vulkan
 
 #ifdef DESERT_CONFIG_DEBUG
         void GenerateMipmaps2D( const std::shared_ptr<Image2D>& image ) const;
-        void GenerateMipmapsCubemap( const std::shared_ptr<Image2D>& image ) const;
+        void GenerateMipmapsCubemap( const std::shared_ptr<ImageCube>& image ) const;
 #endif
 
     private:

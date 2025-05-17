@@ -2,11 +2,9 @@
 
 namespace Desert::Core::Formats
 {
-    enum class ImageUsage
+    enum class Image2DUsage
     {
         Image2D,
-        ImageCube,
-
         Attachment
     };
 
@@ -66,14 +64,24 @@ namespace Desert::Core::Formats
         return nullptr;
     }
 
-    struct ImageSpecification
+    struct Image2DSpecification
     {
         uint32_t        Width;
         uint32_t        Height;
         ImageFormat     Format;
         uint32_t        Mips = 1;
         ImagePixelData  Data;
-        ImageUsage      Usage;
+        Image2DUsage    Usage;
+        ImageProperties Properties;
+    };
+
+    struct ImageCubeSpecification
+    {
+        uint32_t        Width;
+        uint32_t        Height;
+        ImageFormat     Format;
+        uint32_t        Mips = 1;
+        ImagePixelData  Data;
         ImageProperties Properties;
     };
 } // namespace Desert::Core::Formats

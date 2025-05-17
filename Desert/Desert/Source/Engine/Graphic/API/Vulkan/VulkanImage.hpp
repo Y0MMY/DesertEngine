@@ -17,77 +17,140 @@ namespace Desert::Graphic::API::Vulkan
 
     VkFormat GetImageVulkanFormat( const Core::Formats::ImageFormat& imageFormat );
 
-    class VulkanImage2D final : public Image2D
+    class VulkanImageBase : public Image
     {
     public:
-        VulkanImage2D( const Core::Formats::ImageSpecification& specfication );
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const = 0;
+        virtual uint32_t               GetMipmapLevels() const    = 0;
+        virtual Common::BoolResult     RT_Invalidate()            = 0;
+    };
 
+    class VulkanImage2D final : public Image2D, public VulkanImageBase
+    {
+    public:
+        VulkanImage2D( const Core::Formats::Image2DSpecification& specification );
+
+        // Image2D interface
         virtual uint32_t GetWidth() const override
         {
             return m_ImageSpecification.Width;
         }
+
         virtual uint32_t GetHeight() const override
         {
             return m_ImageSpecification.Height;
         }
+
         virtual Core::Formats::ImageFormat GetImageFormat() const override
         {
             return m_ImageSpecification.Format;
         }
-        virtual uint32_t GetMipmapLevels() const override;
-        virtual bool     IsLoaded() const override
+
+        virtual uint32_t GetMipmapLevels() const override
+        {
+            return m_MipLevels;
+        }
+
+        virtual bool IsLoaded() const override
         {
             return m_Loaded;
         }
 
-        const VulkanImageInfo GetVulkanImageInfo() const
-        {
-            return m_VulkanImageInfo;
-        }
-
-        Common::BoolResult RT_Invalidate();
-
         virtual void Use( uint32_t slot = 0 ) const override;
 
-        virtual Core::Formats::ImageSpecification& GetImageSpecification() override
+        virtual Core::Formats::Image2DSpecification& GetImageSpecification() override
         {
             return m_ImageSpecification;
         }
 
         virtual Core::Formats::ImagePixelData GetImagePixels() const override;
 
-        const auto GetMipImageView( const uint32_t level ) const
+        // VulkanImageBase interface
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const override
+        {
+            return m_VulkanImageInfo;
+        }
+
+        Common::BoolResult RT_Invalidate() override;
+
+        const auto GetMipImageView( uint32_t level ) const
         {
             return m_MipImageViews[level];
         }
 
     private:
-        Common::BoolResult GenerateMipmaps( bool readonly ) const;
-        void               GenerateMipmaps2D( VkCommandBuffer cmd ) const;
-        void               GenerateMipmapsCubemap( VkCommandBuffer cmd ) const;
-
-        VkImageCreateInfo  GetImageCreateInfo( VkFormat imageFormat );
-        VkImageCreateInfo  CreateImageInfo( VkFormat format );
-        Common::BoolResult CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
-                                                  VkImageCreateInfo& imageInfo, VkFormat format );
         Common::BoolResult CreateTextureImage( VkDevice device, VulkanAllocator& allocator,
                                                const VkImageCreateInfo& imageInfo, VkFormat format );
+        Common::BoolResult CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
+                                                  VkImageCreateInfo& imageInfo, VkFormat format );
 
-        Common::BoolResult CreateStorageImage( VkDevice device, VulkanAllocator& allocator,
-                                               const VkImageCreateInfo& imageInfo );
-
-        Common::BoolResult CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
-                                               const VkImageCreateInfo& imageInfo, VkFormat format );
-
-        const VkImageLayout GetVkImageLayout( bool isStorage ) const;
+        VkImageCreateInfo CreateImageInfo( VkFormat format );
 
     private:
-        uint32_t                          m_MipLevels = 1u;
-        std::vector<VkImageView>          m_MipImageViews;
-        Core::Formats::ImageSpecification m_ImageSpecification;
+        uint32_t                            m_MipLevels = 1u;
+        std::vector<VkImageView>            m_MipImageViews;
+        Core::Formats::Image2DSpecification m_ImageSpecification;
+        bool                                m_Loaded = false;
+        VulkanImageInfo                     m_VulkanImageInfo;
+    };
 
-        bool m_Loaded = false;
+    class VulkanImageCube final : public ImageCube, public VulkanImageBase
+    {
+    public:
+        VulkanImageCube( const Core::Formats::ImageCubeSpecification& specification );
 
-        VulkanImageInfo m_VulkanImageInfo;
+        // ImageCube interface
+        virtual uint32_t GetWidth() const override
+        {
+            return m_FaceSize;
+        }
+        virtual uint32_t GetHeight() const override
+        {
+            return m_FaceSize;
+        }
+        virtual Core::Formats::ImageFormat GetImageFormat() const override
+        {
+            return m_ImageSpecification.Format;
+        }
+        virtual uint32_t GetMipmapLevels() const override
+        {
+            return m_MipLevels;
+        }
+        virtual bool IsLoaded() const override
+        {
+            return m_Loaded;
+        }
+        virtual void                                   Use( uint32_t slot = 0 ) const override;
+        virtual Core::Formats::ImageCubeSpecification& GetImageSpecification() override
+        {
+            return m_ImageSpecification;
+        }
+        virtual Core::Formats::ImagePixelData GetImagePixels() const override;
+
+        // VulkanImageBase interface
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const override
+        {
+            return m_VulkanImageInfo;
+        }
+
+        Common::BoolResult RT_Invalidate() override;
+
+        const auto GetMipImageView( uint32_t level ) const
+        {
+            return m_MipImageViews[level];
+        }
+
+    private:
+        Common::BoolResult CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
+                                               const VkImageCreateInfo& imageInfo, VkFormat format );
+        VkImageCreateInfo  CreateImageInfo( VkFormat format );
+
+    private:
+        uint32_t                              m_FaceSize  = 0u;
+        uint32_t                              m_MipLevels = 1u;
+        std::vector<VkImageView>              m_MipImageViews;
+        Core::Formats::ImageCubeSpecification m_ImageSpecification;
+        bool                                  m_Loaded = false;
+        VulkanImageInfo                       m_VulkanImageInfo;
     };
 } // namespace Desert::Graphic::API::Vulkan

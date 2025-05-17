@@ -19,7 +19,9 @@ namespace Desert::Graphic
         virtual Common::BoolResult AddUniformToOverride( const std::shared_ptr<UniformBuffer>& uniformBuffer ) = 0;
 
         virtual Common::BoolResult SetImage2D( const std::string&              name,
-                                               const std::shared_ptr<Image2D>& image2D ) = 0;
+                                               const std::shared_ptr<Image2D>& image2D )     = 0;
+        virtual Common::BoolResult SetImageCube( const std::string&                name,
+                                                 const std::shared_ptr<ImageCube>& imageCube ) = 0;
 
         virtual Common::BoolResult Invalidate()    = 0;
         virtual Common::BoolResult ApplyMaterial() = 0;

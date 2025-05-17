@@ -40,7 +40,7 @@ namespace Desert::Graphic
 #ifdef DESERT_CONFIG_DEBUG
         [[nodiscard]] Common::BoolResult GenerateMipMap( const std::shared_ptr<Image2D>& image );
 #endif
-        std::shared_ptr<Image2D> CreateEnvironmentMap( const Common::Filepath& filepath );
+        std::shared_ptr<ImageCube> CreateEnvironmentMap( const Common::Filepath& filepath );
 
         uint32_t GetCurrentFrameIndex();
 

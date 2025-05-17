@@ -27,11 +27,11 @@ namespace Desert::Core
 
         [[nodiscard]] Common::BoolResult Init();
 
-        void SetEnvironment( const std::shared_ptr<Graphic::Image2D>& environment );
+        void SetEnvironment( const std::shared_ptr<Graphic::ImageCube>& environment );
 
         void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const;
 
-        const std::shared_ptr<Graphic::Image2D>& GetEnvironment() const
+        const std::shared_ptr<Graphic::ImageCube>& GetEnvironment() const
         {
             return m_Environment;
         }
@@ -40,6 +40,6 @@ namespace Desert::Core
         std::string                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
 
-        std::shared_ptr<Graphic::Image2D> m_Environment;
+        std::shared_ptr<Graphic::ImageCube> m_Environment;
     };
 } // namespace Desert::Core

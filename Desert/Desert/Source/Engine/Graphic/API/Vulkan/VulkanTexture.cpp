@@ -5,16 +5,25 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
+    struct ImageBaseSpec
+    {
+        uint32_t                       Width;
+        uint32_t                       Height;
+        Core::Formats::ImageFormat     Format;
+        uint32_t                       Mips = 1;
+        Core::Formats::ImagePixelData  Data;
+        Core::Formats::ImageProperties Properties;
+    };
 
-    static Core::Formats::ImageSpecification LoadTexture( const std::filesystem::path& path, bool alpha,
-                                                          bool isCube, const TextureSpecification& specification )
+    static ImageBaseSpec LoadTexture( const std::filesystem::path& path, bool alpha, bool isCube,
+                                      const TextureSpecification& specification )
     {
 
         bool isHDR = Core::IO::ImageReader::IsHDR( path );
 
-        Core::Formats::ImageSpecification imageSpecification;
+        ImageBaseSpec imageSpecification;
 
-        if ( isHDR ) // todo: optimize
+        if ( isHDR )
         {
             const auto& imageData         = Core::IO::ImageReader::ReadHDR( path );
             imageSpecification.Width      = imageData.Width;
@@ -33,19 +42,7 @@ namespace Desert::Graphic::API::Vulkan
             imageSpecification.Properties = Core::Formats::Sample;
         }
 
-        if ( isCube )
-        {
-            imageSpecification.Usage = Core::Formats::ImageUsage::ImageCube;
-
-            imageSpecification.Mips = 1;
-                // Utils::CalculateMipCount( imageSpecification.Width / 4, imageSpecification.Height / 3 );
-        }
-
-        else
-        {
-            imageSpecification.Mips =
-                 Utils::CalculateMipCount( imageSpecification.Width, imageSpecification.Height );
-        }
+        imageSpecification.Mips = Utils::CalculateMipCount( imageSpecification.Width, imageSpecification.Height );
 
         LOG_INFO( "Loading texture {}, alpha channel = {}, HDR = {}",
                   Common::Utils::FileSystem::GetFileName( path ), alpha, isHDR );
@@ -61,12 +58,20 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanTexture2D::Invalidate()
     {
-        Core::Formats::ImageSpecification imageSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
+        const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
+
+        const Core::Formats::Image2DSpecification imageSpec = { .Width      = imageBaseSpec.Width,
+                                                                .Height     = imageBaseSpec.Height,
+                                                                .Format     = imageBaseSpec.Format,
+                                                                .Mips       = imageBaseSpec.Mips,
+                                                                .Data       = imageBaseSpec.Data,
+                                                                .Usage      = Core::Formats::Image2DUsage::Image2D,
+                                                                .Properties = imageBaseSpec.Properties };
 
         m_Image2D = Image2D::Create( imageSpec );
 
-        return Common::MakeSuccess(true);//TODO
-       // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
+        return Common::MakeSuccess( true ); // TODO
+        // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
     }
 
     VulkanTextureCube::VulkanTextureCube( const TextureSpecification&  specification,
@@ -77,10 +82,18 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanTextureCube::Invalidate()
     {
-        Core::Formats::ImageSpecification imageSpec = LoadTexture( m_TexturePath, true, true, m_Specification );
+        const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 
-        m_Image2D = Image2D::Create( imageSpec );
-        return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
+        const Core::Formats::ImageCubeSpecification imageSpec = { .Width      = imageBaseSpec.Width,
+                                                                .Height     = imageBaseSpec.Height,
+                                                                .Format     = imageBaseSpec.Format,
+                                                                .Mips       = 1u,
+                                                                .Data       = imageBaseSpec.Data,
+                                                                .Properties = imageBaseSpec.Properties };
+
+        m_ImageCube = ImageCube::Create( imageSpec );
+        return Common::MakeSuccess( true ); // TODO
+        // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -29,9 +29,9 @@ namespace Desert::Graphic::API::Vulkan
     public:
         VulkanTextureCube( const TextureSpecification& specification, const std::filesystem::path& path );
 
-        virtual const std::shared_ptr<Image2D>& GetImage2D() const override
+        virtual const std::shared_ptr<ImageCube>& GetImageCube() const override
         {
-            return m_Image2D;
+            return m_ImageCube;
         }
 
         virtual Common::BoolResult Invalidate() override;
@@ -40,6 +40,6 @@ namespace Desert::Graphic::API::Vulkan
         const std::filesystem::path m_TexturePath;
         const TextureSpecification& m_Specification;
 
-        std::shared_ptr<Image2D> m_Image2D;
+        std::shared_ptr<ImageCube> m_ImageCube;
     };
 } // namespace Desert::Graphic::API::Vulkan

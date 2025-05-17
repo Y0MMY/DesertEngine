@@ -44,12 +44,19 @@ namespace Desert::Graphic::API::Vulkan
         for ( const auto& descriptor : shaderDS )
         {
 
-            // TODO:
-            for ( const auto& image : descriptor.second.ImageSamplers )
+            // TODO: (comment: ????)
+            for ( const auto& image : descriptor.second.Image2DSamplers )
             {
                 const auto& imageInfo = image.second.first;
 
                 m_Images2D[imageInfo.Name] = { nullptr, imageInfo.BindingPoint };
+            }
+
+            for ( const auto& image : descriptor.second.ImageCubeSamplers )
+            {
+                const auto& imageInfo = image.second.first;
+
+                m_ImagesCube[imageInfo.Name] = { nullptr, imageInfo.BindingPoint };
             }
         }
 
@@ -89,7 +96,7 @@ namespace Desert::Graphic::API::Vulkan
             {
                 auto wds = sp_cast<VulkanShader>( m_Shader )
                                 ->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Uniform,
-                                                         uniform->GetBinding(), SET, frameIndex);
+                                                         uniform->GetBinding(), SET, frameIndex );
 
                 const auto bufferInfo = uniform->GetDescriptorBufferInfo();
                 wds.pBufferInfo       = &bufferInfo;
@@ -118,6 +125,27 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
+        // ImageCube
+        {
+            for ( const auto& image : m_ImagesCube )
+            {
+                const auto& imageInfo = image.second;
+                auto        info      = sp_cast<VulkanImageCube>( imageInfo.ImageCube )->GetVulkanImageInfo();
+
+                VkDescriptorImageInfo imageDescriptorInfo = {};
+                imageDescriptorInfo.sampler               = info.Sampler;
+                imageDescriptorInfo.imageView             = info.ImageView;
+                imageDescriptorInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+                auto wds = sp_cast<VulkanShader>( m_Shader )
+                                ->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::SamplerCube,
+                                                         imageInfo.Binding, SET, frameIndex );
+
+                wds.pImageInfo = &imageDescriptorInfo;
+                writeDescriptorSets.push_back( std::move( wds ) );
+            }
+        }
+
         const VkDevice device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
         vkUpdateDescriptorSets( device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, nullptr );
 
@@ -134,6 +162,18 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         m_Images2D[name].Image2D = image2D;
+    }
+
+    Common::BoolResult VulkanMaterial::SetImageCube( const std::string&                name,
+                                                     const std::shared_ptr<ImageCube>& imageCube )
+    {
+        auto it = m_ImagesCube.find( name );
+        if ( it == m_ImagesCube.end() )
+        {
+            return Common::MakeFormattedError( "Image '{}' not found in material", name );
+        }
+
+        m_ImagesCube[name].ImageCube = imageCube;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

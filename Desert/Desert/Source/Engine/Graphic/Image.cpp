@@ -7,7 +7,7 @@
 namespace Desert::Graphic
 {
 
-    std::shared_ptr<Image2D> Image2D::Create( const Core::Formats::ImageSpecification& spec )
+    std::shared_ptr<Image2D> Image2D::Create( const Core::Formats::Image2DSpecification& spec )
     {
         switch ( RendererAPI::GetAPIType() )
         {
@@ -15,15 +15,36 @@ namespace Desert::Graphic
                 return nullptr;
             case RendererAPIType::Vulkan:
             {
+
                 const auto& image = std::make_shared<API::Vulkan::VulkanImage2D>( spec );
                 image->RT_Invalidate();
 
+                // NOTE: In the release version we do not support direct generation of mips, they have to be
+                // uploaded
 #ifdef DESERT_CONFIG_DEBUG
                 if ( spec.Mips > 1 )
                 {
                     Renderer::GetInstance().GenerateMipMap( image );
                 }
 #endif // DESERT_CONFIG_DEBUG
+
+                return image;
+            }
+        }
+        DESERT_VERIFY( false, "Unknown RenderingAPI" );
+    }
+
+    std::shared_ptr<ImageCube> ImageCube::Create( const Core::Formats::ImageCubeSpecification& spec )
+    {
+        switch ( RendererAPI::GetAPIType() )
+        {
+            case RendererAPIType::None:
+                return nullptr;
+            case RendererAPIType::Vulkan:
+            {
+
+                const auto& image = std::make_shared<API::Vulkan::VulkanImageCube>( spec );
+                image->RT_Invalidate();
 
                 return image;
             }

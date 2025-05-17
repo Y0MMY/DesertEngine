@@ -11,6 +11,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         Uniform = 0,
         Sampler2D,
+        SamplerCube,
         StorageImage
     };
 

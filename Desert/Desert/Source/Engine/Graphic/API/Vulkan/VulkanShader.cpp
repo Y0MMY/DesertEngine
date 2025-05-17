@@ -121,16 +121,25 @@ namespace Desert::Graphic::API::Vulkan
                     poolSize.descriptorCount = uniformBuffers.size() * sets;
                 }
 
-                const auto& imageSamplers = shaderDescriptorSets.at( set ).ImageSamplers;
-                if ( !imageSamplers.empty() )
+                const auto& image2DSamplers = shaderDescriptorSets.at( set ).Image2DSamplers;
+                if ( !image2DSamplers.empty() )
                 {
                     auto& poolSize = poolSizes.emplace_back();
 
                     poolSize.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                    poolSize.descriptorCount = imageSamplers.size() * sets;
+                    poolSize.descriptorCount = image2DSamplers.size() * sets;
                 }
 
-                const auto& imageSamplersStorage = shaderDescriptorSets.at( set ).StorageImageSamplers;
+                const auto& imageCubeSamplers = shaderDescriptorSets.at( set ).ImageCubeSamplers;
+                if ( !imageCubeSamplers.empty() )
+                {
+                    auto& poolSize = poolSizes.emplace_back();
+
+                    poolSize.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    poolSize.descriptorCount = imageCubeSamplers.size() * sets;
+                }
+
+                const auto& imageSamplersStorage = shaderDescriptorSets.at( set ).StorageImage2DSamplers;
                 if ( !imageSamplersStorage.empty() )
                 {
                     auto& poolSize = poolSizes.emplace_back();
@@ -343,30 +352,68 @@ namespace Desert::Graphic::API::Vulkan
             uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
             auto&       imageType     = compiler.get_type( resource.base_type_id );
 
-            auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].ImageSamplers;
-
-            if ( imageSampler.find( binding ) == imageSampler.end() )
+            bool isCube = false;
+            if ( imageType.image.dim == spv::DimCube )
             {
-                uint32_t arraySize = 1;
-                if ( Utils::IsArray( imageType ) )
-                {
-                    arraySize = Utils::GetArraySize( imageType );
-                }
-
-                Core::Models::ImageSampler newImageSampler;
-                newImageSampler.BindingPoint = binding;
-                newImageSampler.Name         = name;
-                newImageSampler.ArraySize    = arraySize;
-                newImageSampler.ShaderStage =
-                     Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
-
-                ShaderResource::ShaderDescriptorSet::SamplerBufferPair insertPair = {
-                     newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
-
-                imageSampler.insert( { binding, insertPair } );
+                isCube = true;
             }
 
-            LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
+            // TODO: more readable
+            if ( !isCube )
+            {
+                auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].Image2DSamplers;
+
+                if ( imageSampler.find( binding ) == imageSampler.end() )
+                {
+                    uint32_t arraySize = 1;
+                    if ( Utils::IsArray( imageType ) )
+                    {
+                        arraySize = Utils::GetArraySize( imageType );
+                    }
+
+                    Core::Models::Image2DSampler newImageSampler;
+                    newImageSampler.BindingPoint = binding;
+                    newImageSampler.Name         = name;
+                    newImageSampler.ArraySize    = arraySize;
+                    newImageSampler.ShaderStage =
+                         Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+
+                    ShaderResource::ShaderDescriptorSet::Sampler2DBufferPair insertPair = {
+                         newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
+
+                    imageSampler.insert( { binding, insertPair } );
+                }
+
+                LOG_TRACE( "  {0} (type: 2D) ({1}, {2})", name, descriptorSet, binding );
+            }
+
+            else
+            {
+                auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].ImageCubeSamplers;
+
+                if ( imageSampler.find( binding ) == imageSampler.end() )
+                {
+                    uint32_t arraySize = 1;
+                    if ( Utils::IsArray( imageType ) )
+                    {
+                        arraySize = Utils::GetArraySize( imageType );
+                    }
+
+                    Core::Models::ImageCubeSampler newImageSampler;
+                    newImageSampler.BindingPoint = binding;
+                    newImageSampler.Name         = name;
+                    newImageSampler.ArraySize    = arraySize;
+                    newImageSampler.ShaderStage =
+                         Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+
+                    ShaderResource::ShaderDescriptorSet::SamplerCubeBufferPair insertPair = {
+                         newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
+
+                    imageSampler.insert( { binding, insertPair } );
+                }
+
+                LOG_TRACE( "  {0} (type: Cube) ({1}, {2})", name, descriptorSet, binding );
+            }
         }
 
         LOG_TRACE( "Storage Buffers: " );
@@ -437,7 +484,7 @@ namespace Desert::Graphic::API::Vulkan
             uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
             auto&       imageType     = compiler.get_type( resource.base_type_id );
 
-            auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].StorageImageSamplers;
+            auto& imageSampler = m_ReflectionData.ShaderDescriptorSets[descriptorSet].StorageImage2DSamplers;
 
             if ( imageSampler.find( binding ) == imageSampler.end() )
             {
@@ -447,14 +494,14 @@ namespace Desert::Graphic::API::Vulkan
                     arraySize = Utils::GetArraySize( imageType );
                 }
 
-                Core::Models::ImageSampler newImageSampler;
+                Core::Models::Image2DSampler newImageSampler;
                 newImageSampler.BindingPoint = binding;
                 newImageSampler.Name         = name;
                 newImageSampler.ArraySize    = arraySize;
                 newImageSampler.ShaderStage =
                      Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                ShaderResource::ShaderDescriptorSet::SamplerBufferPair insertPair = {
+                ShaderResource::ShaderDescriptorSet::Sampler2DBufferPair insertPair = {
                      newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
 
                 imageSampler.insert( { binding, insertPair } );
@@ -495,8 +542,19 @@ namespace Desert::Graphic::API::Vulkan
                 layout.descriptorCount    = 1; // not array at now
             }
 
-            // Samplers
-            for ( const auto& [binding, sampler] : shaderDescriptorSet.ImageSamplers )
+            // Samplers 2D
+            for ( const auto& [binding, sampler] : shaderDescriptorSet.Image2DSamplers )
+            {
+                auto& layout              = layoutBindings.emplace_back();
+                layout.binding            = binding;
+                layout.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.first.ShaderStage );
+                layout.pImmutableSamplers = nullptr;
+                layout.descriptorCount    = 1;
+            }
+
+            // Samplers Cube
+            for ( const auto& [binding, sampler] : shaderDescriptorSet.ImageCubeSamplers )
             {
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
@@ -507,7 +565,7 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             // Storage Samplers
-            for ( const auto& [binding, sampler] : shaderDescriptorSet.StorageImageSamplers )
+            for ( const auto& [binding, sampler] : shaderDescriptorSet.StorageImage2DSamplers )
             {
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
@@ -602,7 +660,7 @@ namespace Desert::Graphic::API::Vulkan
                     // TODO: pBufferInfo !!!! or not create VkWriteDescriptorSet
                 }
 
-                for ( auto& [binding, sampler] : shaderDescriptorSet.ImageSamplers )
+                for ( auto& [binding, sampler] : shaderDescriptorSet.Image2DSamplers )
                 {
                     VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
 
@@ -613,7 +671,18 @@ namespace Desert::Graphic::API::Vulkan
                     writeDescriptor.dstBinding      = sampler.first.BindingPoint;
                 }
 
-                for ( auto& [binding, sampler] : shaderDescriptorSet.StorageImageSamplers )
+                for ( auto& [binding, sampler] : shaderDescriptorSet.ImageCubeSamplers )
+                {
+                    VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
+
+                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
+                    writeDescriptor.descriptorCount = 1;
+                    writeDescriptor.dstBinding      = sampler.first.BindingPoint;
+                }
+
+                for ( auto& [binding, sampler] : shaderDescriptorSet.StorageImage2DSamplers )
                 {
                     VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
 
@@ -638,27 +707,31 @@ namespace Desert::Graphic::API::Vulkan
                      frame );
 
             case WriteDescriptorType::Sampler2D:
-                return m_ReflectionData.ShaderDescriptorSets.at( set ).ImageSamplers.at( binding ).second.at(
+                return m_ReflectionData.ShaderDescriptorSets.at( set ).Image2DSamplers.at( binding ).second.at(
+                     frame );
+
+            case WriteDescriptorType::SamplerCube:
+                return m_ReflectionData.ShaderDescriptorSets.at( set ).ImageCubeSamplers.at( binding ).second.at(
                      frame );
 
             case WriteDescriptorType::StorageImage:
                 return m_ReflectionData.ShaderDescriptorSets.at( set )
-                     .StorageImageSamplers.at( binding )
+                     .StorageImage2DSamplers.at( binding )
                      .second.at( frame );
         }
     }
 
     const std::vector<Desert::Core::Models::UniformBuffer> VulkanShader::GetUniformModels() const
     {
-        if (!m_ReflectionData.ShaderDescriptorSets.size()) [[unlikely]]
+        if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
         {
             return {};
         }
         else [[likely]]
         {
-            const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at(0).UniformBuffers;
-            auto        res =
-                uniformInfo | std::views::values | std::views::transform([](const auto& p) { return p.first; });
+            const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).UniformBuffers;
+            auto        res         = uniformInfo | std::views::values |
+                       std::views::transform( []( const auto& p ) { return p.first; } );
             return { res.begin(), res.end() };
         }
     }

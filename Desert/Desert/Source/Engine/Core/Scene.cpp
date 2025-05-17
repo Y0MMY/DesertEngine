@@ -20,7 +20,7 @@ namespace Desert::Core
         return m_SceneRenderer->Init();
     }
 
-    void Scene::SetEnvironment( const std::shared_ptr<Graphic::Image2D>& environment )
+    void Scene::SetEnvironment( const std::shared_ptr<Graphic::ImageCube>& environment )
     {
         m_Environment = environment;
     }

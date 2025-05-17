@@ -134,10 +134,10 @@ namespace Desert::Graphic
         m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
 
         auto& renderer = Renderer::GetInstance();
-        /*static bool a        = false;
+        static bool a        = false;
         if ( !a )
-            renderer.CreateEnvironmentMap( "Cubes/output123.hdr" );
-        a = true;*/
+            renderer.CreateEnvironmentMap( "HDR/env.hdr" );
+         a = true;
         // renderer.CreateEnvironmentMap("HDR/pink_sunrise_4k.hdr");
 
         return renderer.BeginFrame();
@@ -204,7 +204,7 @@ namespace Desert::Graphic
         const auto& cameraUB    = cameraUBRes.GetValue();
         cameraUB->RT_SetData( &camera, 128, 0 );
         m_SceneInfo.Renderdata.Skybox.Material->AddUniformToOverride( cameraUB );
-        m_SceneInfo.Renderdata.Skybox.Material->SetImage2D( "samplerCubeMap",
+        m_SceneInfo.Renderdata.Skybox.Material->SetImageCube( "samplerCubeMap",
                                                             m_SceneInfo.ActiveScene->GetEnvironment() );
 
         renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Skybox.Pipeline,
