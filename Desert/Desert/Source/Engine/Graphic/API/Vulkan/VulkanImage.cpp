@@ -25,7 +25,7 @@ namespace Desert::Graphic::API::Vulkan
                 VkImageViewCreateInfo viewInfo           = {};
                 viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
                 viewInfo.image                           = image;
-                viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+                viewInfo.viewType                        = isCubeMap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
                 viewInfo.format                          = format;
                 viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
                 viewInfo.subresourceRange.baseMipLevel   = mip;
@@ -655,7 +655,7 @@ namespace Desert::Graphic::API::Vulkan
         if ( ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Sample ) )
             Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
 
-      //  m_MipImageViews = Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, true );
+        m_MipImageViews = Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, true );
         if ( !m_MipImageViews.size() )
         {
             return Common::MakeError( "TODO" );
@@ -718,7 +718,7 @@ namespace Desert::Graphic::API::Vulkan
             {
                 const uint32_t srcOffset = srcFaceOffset + y * srcRowPitch;
                 const uint32_t dstOffset = faceOffset + y * m_FaceSize * bytesPerPixel;
-                memcpy( dstData + dstOffset, srcData + srcOffset, m_FaceSize* bytesPerPixel );
+                memcpy( dstData + dstOffset, srcData + srcOffset, m_FaceSize * bytesPerPixel );
             }
         }
         allocator.UnmapMemory( stagingAlloc.GetValue() );
@@ -740,7 +740,7 @@ namespace Desert::Graphic::API::Vulkan
         for ( uint32_t face = 0; face < CUBEMAP_FACE_COUNT; face++ )
         {
             copyRegions.push_back( { .bufferOffset      = face * faceSize,
-                                     .bufferRowLength   = m_FaceSize,  // Important for proper row alignment
+                                     .bufferRowLength   = m_FaceSize, // Important for proper row alignment
                                      .bufferImageHeight = m_FaceSize, // Important for proper image height
                                      .imageSubresource  = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
                                                             .mipLevel       = 0,

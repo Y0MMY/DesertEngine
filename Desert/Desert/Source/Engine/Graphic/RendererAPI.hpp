@@ -38,7 +38,7 @@ namespace Desert::Graphic
 #ifdef DESERT_CONFIG_DEBUG
         virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath )  = 0;
         virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath )       = 0;
-        virtual Common::BoolResult         CreatePrefilteredMap( const std::shared_ptr<Image2D>& imageCube ) = 0;
+        virtual Common::BoolResult         CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) = 0;
         virtual std::shared_ptr<ImageCube> CreateEnvironmentMap( const Common::Filepath& filepath )          = 0;
 
         // NOTE: In the release version we do not support direct generation of mips, they have to be uploaded

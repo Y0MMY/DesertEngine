@@ -6,7 +6,6 @@ layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 layout(binding = 0) uniform sampler2D u_InputTexture;
 layout(binding = 1) uniform writeonly image2D u_OutputTexture;
 
-
 void main() {
     ivec2 globalCoord = ivec2(gl_GlobalInvocationID.xy);
     ivec2 outputSize = imageSize(u_OutputTexture);

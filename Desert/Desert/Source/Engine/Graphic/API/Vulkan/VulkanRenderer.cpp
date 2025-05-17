@@ -28,8 +28,8 @@ namespace Desert::Graphic::API::Vulkan
 
     struct SpecularFilterPushConstants
     {
-        float    roughness;
         uint32_t mipLevel;
+        float    roughness;
     };
 
     struct ComputeImageProcessingInfo
@@ -43,6 +43,81 @@ namespace Desert::Graphic::API::Vulkan
 
     namespace Utils
     {
+
+        template <typename VulkanImageType>
+        Common::BoolResult GenerateMipmaps( const VulkanImageType& vulkanImage, uint32_t width, uint32_t height,
+                                            uint32_t mipLevels, uint32_t layers, const std::string& shaderName,
+                                            Vulkan::WriteDescriptorType inputDescriptorType )
+        {
+            static auto shader       = Shader::Create( shaderName );
+            const auto& shaderVulkan = sp_cast<VulkanShader>( shader );
+            uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
+
+            auto pipelineCompute = PipelineCompute::Create( shader );
+            pipelineCompute->Invalidate();
+            auto vulkanPipeline = sp_cast<VulkanPipelineCompute>( pipelineCompute );
+
+            for ( uint32_t mip = 1; mip < mipLevels; ++mip )
+            {
+                std::array<VkDescriptorImageInfo, 2> imageInfo = {};
+
+                // Input image (previous mip)
+                imageInfo[0].imageView   = ( mip == 1 ) ? vulkanImage.GetVulkanImageInfo().ImageView
+                                                        : vulkanImage.GetMipImageView( mip - 1 );
+                imageInfo[0].sampler     = vulkanImage.GetVulkanImageInfo().Sampler;
+                imageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+                // Output image (current mip)
+                imageInfo[1].imageView   = vulkanImage.GetMipImageView( mip );
+                imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+                // Update descriptor set
+                std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
+
+                descriptorWrites[0] = shaderVulkan->GetWriteDescriptorSet( inputDescriptorType, 0, 0, frameIndex );
+                descriptorWrites[0].dstSet =
+                     shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+                descriptorWrites[0].pImageInfo = &imageInfo[0];
+
+                descriptorWrites[1] = shaderVulkan->GetWriteDescriptorSet(
+                     Vulkan::WriteDescriptorType::StorageImage, 1, 0, frameIndex );
+                descriptorWrites[1].dstSet =
+                     shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+                descriptorWrites[1].pImageInfo = &imageInfo[1];
+
+                vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
+                                        descriptorWrites.size(), descriptorWrites.data(), 0, nullptr );
+
+                pipelineCompute->Begin();
+                const auto cmd = sp_cast<VulkanPipelineCompute>( pipelineCompute )->GetCommandBuffer();
+
+                // Transition current mip to GENERAL
+                Utils::InsertImageMemoryBarrier(
+                     cmd, vulkanImage.GetVulkanImageInfo().Image, 0, VK_ACCESS_SHADER_WRITE_BIT,
+                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                     VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, layers } );
+
+                vulkanPipeline->BindDS( descriptorWrites[0].dstSet );
+
+                // Dispatch compute
+                const uint32_t workGroupsX = std::max( 1u, ( width >> mip ) / kWorkGroups );
+                const uint32_t workGroupsY = std::max( 1u, ( height >> mip ) / kWorkGroups );
+                pipelineCompute->Dispatch( workGroupsX, workGroupsY, layers );
+
+                // Transition current mip to SHADER_READ_ONLY_OPTIMAL
+                Utils::InsertImageMemoryBarrier(
+                     cmd, vulkanImage.GetVulkanImageInfo().Image, VK_ACCESS_SHADER_WRITE_BIT,
+                     VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                     VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, layers } );
+
+                pipelineCompute->End();
+            }
+
+            return Common::MakeSuccess( true );
+        }
+
         std::shared_ptr<ImageCube> CreateProcessedImage( const std::shared_ptr<VulkanImage2D>& inputImage,
                                                          const ComputeImageProcessingInfo&     processingInfo )
         {
@@ -79,7 +154,8 @@ namespace Desert::Graphic::API::Vulkan
 
             std::array<VkWriteDescriptorSet, 2> descriptorWrite = {};
 
-            auto vulkanPipelineCompute = Graphic::PipelineCompute::Create( shader );
+            auto vulkanPipelineCompute =
+                 sp_cast<VulkanPipelineCompute>( Graphic::PipelineCompute::Create( shader ) );
             vulkanPipelineCompute->Invalidate();
 
             // Output image (storage)
@@ -102,6 +178,7 @@ namespace Desert::Graphic::API::Vulkan
             auto vulkanPipeline = sp_cast<API::Vulkan::VulkanPipelineCompute>( vulkanPipelineCompute );
 
             vulkanPipelineCompute->Begin();
+            const auto cmd = vulkanPipelineCompute->GetCommandBuffer();
             vulkanPipeline->BindDS( descriptorWrite[0].dstSet );
 
             if ( processingInfo.pushConstantsCallback )
@@ -116,6 +193,19 @@ namespace Desert::Graphic::API::Vulkan
 
                 vulkanPipelineCompute->Dispatch( workGroupsX, workGroupsY, workGroupsZ );
             }
+
+            VkImageSubresourceRange subresourceRange = {};
+            subresourceRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
+            subresourceRange.baseMipLevel            = 0;
+            subresourceRange.levelCount              = outputImageInfo.Mips;
+            subresourceRange.baseArrayLayer          = 0;
+            subresourceRange.layerCount              = 6;
+
+            Utils::InsertImageMemoryBarrier(
+                 cmd, outputImageVulkan->GetVulkanImageInfo().Image, 0, VK_ACCESS_SHADER_READ_BIT,
+                 VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, subresourceRange );
+
             vulkanPipelineCompute->End();
             return outputImage;
         }
@@ -405,8 +495,8 @@ namespace Desert::Graphic::API::Vulkan
     std::shared_ptr<Desert::Graphic::ImageCube>
     VulkanRendererAPI::CreateEnvironmentMap( const Common::Filepath& filepath )
     {
-        const auto& cube        = ConvertPanoramaToCubeMap_4x3( filepath );
-        //const auto& outputImage = CreatePrefilteredMap( cube );
+        const auto& cube = ConvertPanoramaToCubeMap_4x3( filepath );
+        CreatePrefilteredMap( cube );
 
         // const auto& result = outputImage->GetImagePixels();
 
@@ -427,8 +517,8 @@ namespace Desert::Graphic::API::Vulkan
 
         ComputeImageProcessingInfo processingInfo;
         processingInfo.shaderName = "PanoramaToCubemap.glsl";
-        processingInfo.width      = kEnvFaceMapSize * 4;
-        processingInfo.height     = kEnvFaceMapSize * 3;
+        processingInfo.width      = kEnvFaceMapSize * 2 * 4;
+        processingInfo.height     = kEnvFaceMapSize * 2 * 3;
 
         return Utils::CreateProcessedImage( imageVulkan, processingInfo );
     }
@@ -448,42 +538,17 @@ namespace Desert::Graphic::API::Vulkan
         return Utils::CreateProcessedImage( imageVulkan, processingInfo );
     }
 
-    Common::BoolResult VulkanRendererAPI::CreatePrefilteredMap( const std::shared_ptr<Image2D>& imageCube )
+    Common::BoolResult VulkanRendererAPI::CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube )
     {
-        // const auto& imageVulkan = sp_cast<API::Vulkan::VulkanImage2D>( imageCube );
+        const auto& vulkanImage = static_cast<const VulkanImageCube&>( *imageCube );
+        Utils::GenerateMipmaps<VulkanImageCube>( vulkanImage, imageCube->GetWidth(), imageCube->GetHeight(),
+                                                 imageCube->GetMipmapLevels(), 6, "GenerateMipMap_Cube.glsl",
+                                                 Vulkan::WriteDescriptorType::SamplerCube );
 
-        // const uint32_t numMipLevels   = Graphic::Utils::CalculateMipCount( kEnvFaceMapSize, kEnvFaceMapSize );
-        // const float    deltaRoughness = 1.0f / std::max( float( numMipLevels - 1 ), 1.0f );
-
-        // processingInfo.pushConstantsCallback =
-        //      [numMipLevels, deltaRoughness]( const std::shared_ptr<PipelineCompute>& pipeline )
-        //{
-        //     auto vulkanPipeline = sp_cast<API::Vulkan::VulkanPipelineCompute>( pipeline );
-
-        //    for ( uint32_t level = 1, size = kEnvFaceMapSize; level < numMipLevels; ++level, size /= 2 )
-        //    {
-        //        const SpecularFilterPushConstants pushConstants = {
-        //             level * deltaRoughness, // roughness
-        //             level                   // mipLevel
-        //        };
-
-        //        vulkanPipeline->PushConstant( sizeof( SpecularFilterPushConstants ), (void*)&pushConstants );
-
-        //        const uint32_t workGroups = std::max<uint32_t>( 1, size / 32 );
-        //        pipeline->Dispatch( workGroups, workGroups, 6 );
-        //    }
-        //};
-
-        return Common::MakeSuccess( true );
-    }
-
-    void VulkanRendererAPI::GenerateMipmaps2D( const std::shared_ptr<Image2D>& image ) const
-    {
-        auto&       vulkanImage = static_cast<const VulkanImage2D&>( *image );
-        const auto& spec        = image->GetImageSpecification();
+        const auto& spec        = imageCube->GetImageSpecification();
         VkDevice    device      = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        static auto shader       = Shader::Create( "GenerateMipMap_2D.glsl" );
+        static auto shader       = Shader::Create( "PrefilterEnvMap.glsl" );
         const auto& shaderVulkan = sp_cast<VulkanShader>( shader );
         uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
 
@@ -491,21 +556,20 @@ namespace Desert::Graphic::API::Vulkan
         pipelineCompute->Invalidate();
         auto vulkanPipeline = sp_cast<VulkanPipelineCompute>( pipelineCompute );
 
-        const uint32_t mipLevels = image->GetMipmapLevels();
-        const uint32_t width     = image->GetWidth();
-        const uint32_t height    = image->GetHeight();
+        const uint32_t mipLevels = imageCube->GetMipmapLevels();
+        const uint32_t width     = imageCube->GetWidth();
+        const uint32_t height    = imageCube->GetHeight();
+
+        const float deltaRoughness = 1.0f / std::max( float( mipLevels - 1 ), 1.0f );
 
         for ( uint32_t mip = 1; mip < mipLevels; ++mip )
         {
             std::array<VkDescriptorImageInfo, 2> imageInfo = {};
 
-            // Input image (previous mip)
-            imageInfo[0].imageView   = ( mip == 1 ) ? vulkanImage.GetVulkanImageInfo().ImageView
-                                                    : vulkanImage.GetMipImageView( mip - 1 );
+            imageInfo[0].imageView   = vulkanImage.GetVulkanImageInfo().ImageView;
             imageInfo[0].sampler     = vulkanImage.GetVulkanImageInfo().Sampler;
             imageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-            // Output image (current mip)
             imageInfo[1].imageView   = vulkanImage.GetMipImageView( mip );
             imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
@@ -513,7 +577,7 @@ namespace Desert::Graphic::API::Vulkan
             std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
 
             descriptorWrites[0] =
-                 shaderVulkan->GetWriteDescriptorSet( Vulkan::WriteDescriptorType::Sampler2D, 0, 0, frameIndex );
+                 shaderVulkan->GetWriteDescriptorSet( Vulkan::WriteDescriptorType::SamplerCube, 0, 0, frameIndex );
             descriptorWrites[0].dstSet =
                  shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
             descriptorWrites[0].pImageInfo = &imageInfo[0];
@@ -529,107 +593,45 @@ namespace Desert::Graphic::API::Vulkan
             pipelineCompute->Begin();
             const auto cmd = vulkanPipeline->GetCommandBuffer();
 
-            // Transition current mip to GENERAL
             Utils::InsertImageMemoryBarrier( cmd, vulkanImage.GetVulkanImageInfo().Image, 0,
-                                             VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                                             VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                             VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                             VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                             VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 1 } );
+                                             VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6 } );
 
             vulkanPipeline->BindDS( descriptorWrites[0].dstSet );
 
-            // Dispatch compute
+            const SpecularFilterPushConstants pushConstants = {
+                 mip - 1,              // mipLevel
+                 mip * deltaRoughness, // roughness
+            };
+
+            vulkanPipeline->PushConstant( sizeof( SpecularFilterPushConstants ), (void*)&pushConstants );
+
             const uint32_t workGroupsX = std::max( 1u, ( width >> mip ) / kWorkGroups );
             const uint32_t workGroupsY = std::max( 1u, ( height >> mip ) / kWorkGroups );
-            pipelineCompute->Dispatch( workGroupsX, workGroupsY, 1 );
+            pipelineCompute->Dispatch( workGroupsX, workGroupsY, 6 );
 
             Utils::InsertImageMemoryBarrier(
-                 cmd, vulkanImage.GetVulkanImageInfo().Image, VK_ACCESS_SHADER_WRITE_BIT,
-                 VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                 VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 1 } );
+                 cmd, vulkanImage.GetVulkanImageInfo().Image, VK_ACCESS_SHADER_WRITE_BIT, 0,
+                 VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                 VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6 } );
 
             pipelineCompute->End();
         }
+
+        return Common::MakeSuccess( true );
     }
 
-    // void VulkanRendererAPI::GenerateMipmapsCubemap( const std::shared_ptr<Image2D>& image ) const
-    //{
-    //     auto&       vulkanImage = static_cast<const VulkanImageCube&>( *image );
-    //     const auto& spec        = image->GetImageSpecification();
-    //     VkDevice    device      = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+    void VulkanRendererAPI::GenerateMipmaps2D( const std::shared_ptr<Image2D>& image ) const
+    {
+        auto& vulkanImage = static_cast<const VulkanImage2D&>( *image );
 
-    //    static auto shader       = Shader::Create( "GenerateMipMap_Cube.glsl" );
-    //    const auto& shaderVulkan = sp_cast<VulkanShader>( shader );
-    //    uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
-
-    //    auto pipelineCompute = PipelineCompute::Create( shader );
-    //    pipelineCompute->Invalidate();
-    //    auto vulkanPipeline = sp_cast<VulkanPipelineCompute>( pipelineCompute );
-
-    //    const uint32_t mipLevels = image->GetMipmapLevels();
-    //    const uint32_t width     = image->GetWidth();
-    //    const uint32_t height    = image->GetHeight();
-
-    //    for ( uint32_t mip = 1; mip < mipLevels; ++mip )
-    //    {
-    //        std::array<VkDescriptorImageInfo, 2> imageInfo = {};
-
-    //        // Input image (previous mip) - используем image view для кубической карты
-    //        imageInfo[0].imageView   = ( mip == 1 ) ? vulkanImage.GetVulkanImageInfo().ImageView
-    //                                                : vulkanImage.GetMipImageView( mip - 1 );
-    //        imageInfo[0].sampler     = vulkanImage.GetVulkanImageInfo().Sampler;
-    //        imageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    //        // Output image (current mip) - также image view для кубической карты
-    //        imageInfo[1].imageView   = vulkanImage.GetMipImageView( mip );
-    //        imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    //        // Update descriptor set
-    //        std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
-
-    //        descriptorWrites[0] =
-    //             shaderVulkan->GetWriteDescriptorSet( Vulkan::WriteDescriptorType::Sampler2D, 0, 0, frameIndex );
-    //        descriptorWrites[0].dstSet =
-    //             shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-    //        descriptorWrites[0].pImageInfo = &imageInfo[0];
-
-    //        descriptorWrites[1] = shaderVulkan->GetWriteDescriptorSet( Vulkan::WriteDescriptorType::StorageImage,
-    //                                                                   1, 0, frameIndex );
-    //        descriptorWrites[1].dstSet =
-    //             shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-    //        descriptorWrites[1].pImageInfo = &imageInfo[1];
-
-    //        vkUpdateDescriptorSets( device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr );
-
-    //        pipelineCompute->Begin();
-    //        const auto cmd = vulkanPipeline->GetCommandBuffer();
-
-    //        // Transition current mip to GENERAL для всех граней
-    //        Utils::InsertImageMemoryBarrier( cmd, vulkanImage.GetVulkanImageInfo().Image, 0,
-    //                                         VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-    //                                         VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-    //                                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-    //                                         VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6 }
-    //                                         );
-
-    //        vulkanPipeline->BindDS( descriptorWrites[0].dstSet );
-
-    //        // Dispatch compute - учитываем, что обрабатываем все 6 граней
-    //        const uint32_t workGroupsX = std::max( 1u, ( width >> mip ) / kWorkGroups );
-    //        const uint32_t workGroupsY = std::max( 1u, ( height >> mip ) / kWorkGroups );
-    //        pipelineCompute->Dispatch( workGroupsX, workGroupsY, 6 ); // 6 - для всех граней куба
-
-    //        // Переход обратно в read-only layout
-    //        Utils::InsertImageMemoryBarrier(
-    //             cmd, vulkanImage.GetVulkanImageInfo().Image, VK_ACCESS_SHADER_WRITE_BIT,
-    //             VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    //             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-    //             VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6 } );
-
-    //        pipelineCompute->End();
-    //    }
-    // }
+        Utils::GenerateMipmaps<VulkanImage2D>( vulkanImage, image->GetWidth(), image->GetHeight(),
+                                               image->GetMipmapLevels(), 1, "GenerateMipMap_2D.glsl",
+                                               Vulkan::WriteDescriptorType::Sampler2D );
+    }
 
     Common::BoolResult VulkanRendererAPI::GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const
     {

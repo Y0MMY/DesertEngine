@@ -1,4 +1,4 @@
-#pragma stage : compute
+﻿#pragma stage : compute
 
 #version 450
 

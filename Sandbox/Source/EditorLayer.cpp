@@ -17,7 +17,7 @@ namespace Desert
         {
             // return Common::MakeError( textureRes.GetError() );
         }
-        m_testscene->SetEnvironment( m_Environment->GetImage2D() );
+        m_testscene->SetEnvironment( m_Environment->GetImageCube() );
 
         m_Mesh = std::make_shared<Mesh>( "Cube1m.fbx" );
         m_Mesh->Invalidate();
