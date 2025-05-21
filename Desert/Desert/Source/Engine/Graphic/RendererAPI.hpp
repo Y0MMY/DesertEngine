@@ -14,6 +14,13 @@ namespace Desert::Graphic
         Vulkan = 1,
     };
 
+    struct PBRTextures
+    {
+        std::shared_ptr<ImageCube> EnvironmentMap;
+        std::shared_ptr<ImageCube> IrradianceMap;
+        std::shared_ptr<ImageCube> PrefilteredMap;
+    };
+
     class RendererAPI
     {
     public:
@@ -36,10 +43,11 @@ namespace Desert::Graphic
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
                                         const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) = 0;
 #ifdef DESERT_CONFIG_DEBUG
+
         virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath )  = 0;
         virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath )       = 0;
         virtual Common::BoolResult         CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) = 0;
-        virtual std::shared_ptr<ImageCube> CreateEnvironmentMap( const Common::Filepath& filepath )          = 0;
+        virtual PBRTextures CreateEnvironmentMap( const Common::Filepath& filepath )          = 0;
 
         // NOTE: In the release version we do not support direct generation of mips, they have to be uploaded
         virtual [[nodiscard]] Common::BoolResult

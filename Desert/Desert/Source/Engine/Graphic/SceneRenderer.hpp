@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/Camera.hpp>
@@ -52,6 +53,7 @@ namespace Desert::Graphic
         {
             std::shared_ptr<Core::Scene> ActiveScene;
             Core::Camera*                ActiveCamera;
+            Environment                  EnvironmentMap;
 
             struct
             {

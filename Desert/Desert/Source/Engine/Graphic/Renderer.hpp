@@ -10,6 +10,8 @@
 
 namespace Desert::Graphic
 {
+    struct PBRTextures;
+
     class Renderer : public Common::Singleton<Renderer>
     {
     public:
@@ -36,11 +38,11 @@ namespace Desert::Graphic
         void ResizeWindowEvent( uint32_t width, uint32_t height,
                                 const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
 
-        std::shared_ptr<Framebuffer>     GetCompositeFramebuffer();
+        std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
 #ifdef DESERT_CONFIG_DEBUG
         [[nodiscard]] Common::BoolResult GenerateMipMap( const std::shared_ptr<Image2D>& image );
 #endif
-        std::shared_ptr<ImageCube> CreateEnvironmentMap( const Common::Filepath& filepath );
+        PBRTextures CreateEnvironmentMap( const Common::Filepath& filepath );
 
         uint32_t GetCurrentFrameIndex();
 

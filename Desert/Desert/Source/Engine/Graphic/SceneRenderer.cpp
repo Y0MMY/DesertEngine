@@ -85,7 +85,7 @@ namespace Desert::Graphic
             composite.Material = Material::Create( std::string( debugName ), composite.Shader );
             composite.Material->Invalidate();
 
-            composite.UBManager = UniformBufferManager::Create(debugName, pipeSpec.Shader );
+            composite.UBManager = UniformBufferManager::Create( debugName, pipeSpec.Shader );
         }
 
         // ==================== Geometry Pass ====================
@@ -121,8 +121,10 @@ namespace Desert::Graphic
             geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
             geometry.Material->Invalidate();
 
-            geometry.UBManager = UniformBufferManager::Create(debugName, pipeSpec.Shader );
+            geometry.UBManager = UniformBufferManager::Create( debugName, pipeSpec.Shader );
         }
+
+        m_SceneInfo.EnvironmentMap = EnvironmentManager::Create( "HDR/env.hdr" );
 
         return BOOLSUCCESS;
     }
@@ -134,12 +136,6 @@ namespace Desert::Graphic
         m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
 
         auto& renderer = Renderer::GetInstance();
-        static bool a        = false;
-        if ( !a )
-            renderer.CreateEnvironmentMap( "HDR/env.hdr" );
-         a = true;
-        // renderer.CreateEnvironmentMap("HDR/pink_sunrise_4k.hdr");
-
         return renderer.BeginFrame();
     }
 
@@ -205,7 +201,7 @@ namespace Desert::Graphic
         cameraUB->RT_SetData( &camera, 128, 0 );
         m_SceneInfo.Renderdata.Skybox.Material->AddUniformToOverride( cameraUB );
         m_SceneInfo.Renderdata.Skybox.Material->SetImageCube( "samplerCubeMap",
-                                                            m_SceneInfo.ActiveScene->GetEnvironment() );
+                                                              m_SceneInfo.ActiveScene->GetEnvironment() );
 
         renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Skybox.Pipeline,
                                        m_SceneInfo.Renderdata.Skybox.Material );

@@ -21,7 +21,7 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    static constexpr uint32_t kEnvFaceMapSize    = 512;
+    static constexpr uint32_t kEnvFaceMapSize    = 1024;
     static constexpr uint32_t kIrradianceMapSize = 32;
     static constexpr uint32_t kBRDF_LUT_Size     = 256;
     static constexpr uint32_t kWorkGroups        = 32;
@@ -492,20 +492,14 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDrawIndexed( m_CurrentCommandBuffer, mesh->GetIndexBuffer()->GetCount(), 1, 0, 0, 0 );
     }
 #ifdef DESERT_CONFIG_DEBUG
-    std::shared_ptr<Desert::Graphic::ImageCube>
-    VulkanRendererAPI::CreateEnvironmentMap( const Common::Filepath& filepath )
+    PBRTextures VulkanRendererAPI::CreateEnvironmentMap( const Common::Filepath& filepath )
     {
-        const auto& cube = ConvertPanoramaToCubeMap_4x3( filepath );
-        CreatePrefilteredMap( cube );
+        const auto& envMap      = ConvertPanoramaToCubeMap_4x3( filepath );
+        const auto& irradiance  = CreateDiffuseIrradiance( filepath );
 
-        // const auto& result = outputImage->GetImagePixels();
-
-        /* const char* outputPath = "output123.hdr";
-         const auto  res        = std::get<std::vector<float>>( result );
-         int         success =
-              stbi_write_hdr( outputPath, outputImage->GetWidth(), outputImage->GetHeight(), 4, res.data() );*/
-
-        return std::shared_ptr<Desert::Graphic::ImageCube>( cube );
+        const auto& preFiltered = ConvertPanoramaToCubeMap_4x3( filepath );
+        CreatePrefilteredMap( preFiltered );
+        return { envMap, irradiance, preFiltered };
     }
 
     std::shared_ptr<Desert::Graphic::ImageCube>
@@ -517,8 +511,8 @@ namespace Desert::Graphic::API::Vulkan
 
         ComputeImageProcessingInfo processingInfo;
         processingInfo.shaderName = "PanoramaToCubemap.glsl";
-        processingInfo.width      = kEnvFaceMapSize * 2 * 4;
-        processingInfo.height     = kEnvFaceMapSize * 2 * 3;
+        processingInfo.width      = kEnvFaceMapSize * 4;
+        processingInfo.height     = kEnvFaceMapSize * 3;
 
         return Utils::CreateProcessedImage( imageVulkan, processingInfo );
     }
@@ -545,8 +539,8 @@ namespace Desert::Graphic::API::Vulkan
                                                  imageCube->GetMipmapLevels(), 6, "GenerateMipMap_Cube.glsl",
                                                  Vulkan::WriteDescriptorType::SamplerCube );
 
-        const auto& spec        = imageCube->GetImageSpecification();
-        VkDevice    device      = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        const auto& spec   = imageCube->GetImageSpecification();
+        VkDevice    device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
         static auto shader       = Shader::Create( "PrefilterEnvMap.glsl" );
         const auto& shaderVulkan = sp_cast<VulkanShader>( shader );

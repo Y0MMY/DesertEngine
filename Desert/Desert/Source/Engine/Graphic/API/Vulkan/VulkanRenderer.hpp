@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath ) override;
         virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
         virtual Common::BoolResult CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) override;
-        virtual std::shared_ptr<ImageCube> CreateEnvironmentMap( const Common::Filepath& filepath ) override;
+        virtual PBRTextures CreateEnvironmentMap( const Common::Filepath& filepath ) override;
         virtual [[nodiscard]] Common::BoolResult
         GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
 #endif

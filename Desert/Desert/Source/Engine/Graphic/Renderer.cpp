@@ -103,7 +103,7 @@ namespace Desert::Graphic
         s_RendererAPI->RenderMesh( pipeline, mesh, mvp );
     }
 
-    std::shared_ptr<Desert::Graphic::ImageCube> Renderer::CreateEnvironmentMap( const Common::Filepath& filepath )
+    PBRTextures Renderer::CreateEnvironmentMap( const Common::Filepath& filepath )
     {
         return s_RendererAPI->CreateEnvironmentMap( filepath );
     }
