@@ -459,8 +459,9 @@ namespace Desert::Graphic::API::Vulkan
         return m_CompositeFramebuffer;
     }
 
-    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,
-                                        const std::shared_ptr<Mesh>& mesh, const glm::mat4& mvp /*TEMP*/ )
+    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>&          pipeline,
+                                        const std::shared_ptr<Mesh>&              mesh,
+                                        const MaterialHelper::MateriaTtechniques& materiaTtechnique )
     {
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
@@ -487,15 +488,17 @@ namespace Desert::Graphic::API::Vulkan
 
         // VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        vkCmdPushConstants( m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, &mvp );
+        //vkCmdPushConstants( m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, &mvp );
+
+        materiaTtechnique.Bind();
 
         vkCmdDrawIndexed( m_CurrentCommandBuffer, mesh->GetIndexBuffer()->GetCount(), 1, 0, 0, 0 );
     }
 #ifdef DESERT_CONFIG_DEBUG
     PBRTextures VulkanRendererAPI::CreateEnvironmentMap( const Common::Filepath& filepath )
     {
-        const auto& envMap      = ConvertPanoramaToCubeMap_4x3( filepath );
-        const auto& irradiance  = CreateDiffuseIrradiance( filepath );
+        const auto& envMap     = ConvertPanoramaToCubeMap_4x3( filepath );
+        const auto& irradiance = CreateDiffuseIrradiance( filepath );
 
         const auto& preFiltered = ConvertPanoramaToCubeMap_4x3( filepath );
         CreatePrefilteredMap( preFiltered );

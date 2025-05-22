@@ -1,6 +1,7 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.h>
+#include <Engine/Graphic/Materials/PBR/PBRMaterialHelper.hpp>
 
 #include <glm/glm.hpp>
 
@@ -124,7 +125,7 @@ namespace Desert::Graphic
             geometry.UBManager = UniformBufferManager::Create( debugName, pipeSpec.Shader );
         }
 
-        m_SceneInfo.EnvironmentMap = EnvironmentManager::Create( "HDR/env.hdr" );
+        m_SceneInfo.EnvironmentData = EnvironmentManager::Create( "HDR/env.hdr" );
 
         return BOOLSUCCESS;
     }
@@ -208,8 +209,10 @@ namespace Desert::Graphic
 
         for ( const auto& meshIno : m_SceneInfo.Renderdata.MeshInfo )
         {
+            MaterialHelper::PBRMaterial PBRTechnique( m_SceneInfo.Renderdata.Geometry.Material );
+
             auto vp = m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
-            renderer.RenderMesh( m_SceneInfo.Renderdata.Geometry.Pipeline, meshIno.Mesh, vp );
+            renderer.RenderMesh( m_SceneInfo.Renderdata.Geometry.Pipeline, meshIno.Mesh, PBRTechnique );
         }
 
         renderer.EndRenderPass();
@@ -218,6 +221,16 @@ namespace Desert::Graphic
     void SceneRenderer::RenderMesh( const std::shared_ptr<Mesh>& mesh )
     {
         m_SceneInfo.Renderdata.MeshInfo.push_back( { mesh } );
+    }
+
+    const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
+    {
+        return EnvironmentManager::Create( filepath );
+    }
+
+    void SceneRenderer::SetEnvironment( const Environment& environment )
+    {
+        m_SceneInfo.EnvironmentData = environment;
     }
 
 } // namespace Desert::Graphic

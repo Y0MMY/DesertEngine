@@ -4,9 +4,12 @@
 #include <Common/Core/Memory/CommandBuffer.hpp>
 
 #include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialTechnique.hpp>
+
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Texture.hpp>
 
 namespace Desert::Graphic
 {
@@ -28,7 +31,7 @@ namespace Desert::Graphic
         void                             BeginSwapChainRenderPass();
         void                             EndRenderPass();
         void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                         const glm::mat4& mvp /*TEMP*/ );
+                         const MaterialHelper::MateriaTtechniques& materiaTtechnique );
 
         void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                    const std::shared_ptr<Material>& material );
@@ -37,6 +40,8 @@ namespace Desert::Graphic
 
         void ResizeWindowEvent( uint32_t width, uint32_t height,
                                 const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
+
+        const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
 #ifdef DESERT_CONFIG_DEBUG
@@ -59,6 +64,7 @@ namespace Desert::Graphic
         static Common::Memory::CommandBuffer& GetRenderCommandQueue();
 
     private:
-        std::shared_ptr<RendererContext> m_RendererContext;
+        std::shared_ptr<Graphic::Texture2D> m_BRDFTexture;
+        std::shared_ptr<RendererContext>    m_RendererContext;
     };
 } // namespace Desert::Graphic

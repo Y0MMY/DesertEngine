@@ -1,11 +1,7 @@
 #include <Engine/Graphic/Materials/PBR/PBRMaterialHelper.hpp>
 
-namespace Desert::Graphic::MaterialHelpers
+namespace Desert::Graphic::MaterialHelper
 {
-    PBRMaterial::PBRMaterial( const std::shared_ptr<Material>& baseMaterial ) : m_Material( baseMaterial )
-    {
-    }
-
     void PBRMaterial::SetAlbedo( const glm::vec3& color )
     {
         m_CurrentParams.Albedo = color;

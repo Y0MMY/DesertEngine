@@ -9,9 +9,7 @@
 
 namespace Desert::Graphic
 {
-    static RendererAPI*                 s_RendererAPI = nullptr;
-    static std::shared_ptr<Framebuffer> s_frame;
-    static std::shared_ptr<Shader>      s_shader;
+    static RendererAPI* s_RendererAPI = nullptr;
 
     [[nodiscard]] Common::BoolResult Renderer::InitGraphicAPI()
     {
@@ -36,7 +34,16 @@ namespace Desert::Graphic
 
     Common::BoolResult Renderer::Init()
     {
-        return InitGraphicAPI();
+        const auto& init = InitGraphicAPI();
+        if ( !init )
+        {
+            return Common::MakeError( init.GetError() );
+        }
+
+        Graphic::TextureSpecification spec;
+        m_BRDFTexture = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" );
+        m_BRDFTexture->Invalidate();
+        return Common::MakeSuccess( true );
     }
 
     [[nodiscard]] Common::BoolResult Renderer::EndFrame()
@@ -98,9 +105,9 @@ namespace Desert::Graphic
     }
 
     void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                               const glm::mat4& mvp /*TEMP*/ )
+                               const MaterialHelper::MateriaTtechniques& materiaTtechnique )
     {
-        s_RendererAPI->RenderMesh( pipeline, mesh, mvp );
+        s_RendererAPI->RenderMesh( pipeline, mesh, materiaTtechnique );
     }
 
     PBRTextures Renderer::CreateEnvironmentMap( const Common::Filepath& filepath )
@@ -113,5 +120,10 @@ namespace Desert::Graphic
         return s_RendererAPI->GenerateMipMaps( image );
     }
 #endif
+
+    const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const
+    {
+        return m_BRDFTexture;
+    }
 
 } // namespace Desert::Graphic

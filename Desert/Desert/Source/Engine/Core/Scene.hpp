@@ -1,12 +1,14 @@
 #pragma once
 
 #include <Engine/Graphic/Image.hpp>
+#include <Common/Core/Core.hpp>
 
 #include <Engine/Core/Camera.hpp>
 
 namespace Desert::Graphic
 {
     class SceneRenderer;
+    class Environment;
 }
 
 namespace Desert
@@ -27,11 +29,13 @@ namespace Desert::Core
 
         [[nodiscard]] Common::BoolResult Init();
 
+        [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
+
         void SetEnvironment( const std::shared_ptr<Graphic::ImageCube>& environment );
 
         void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const;
 
-        const std::shared_ptr<Graphic::ImageCube>& GetEnvironment() const
+        [[nodiscard]] const std::shared_ptr<Graphic::ImageCube>& GetEnvironment() const
         {
             return m_Environment;
         }

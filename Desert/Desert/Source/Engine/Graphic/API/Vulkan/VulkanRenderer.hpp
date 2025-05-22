@@ -19,7 +19,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Common::BoolResult BeginSwapChainRenderPass() override;
         virtual [[nodiscard]] Common::BoolResult EndRenderPass() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                                 const glm::mat4& mvp /*TEMP*/ ) override;
+                                 const MaterialHelper::MateriaTtechniques& materiaTtechnique ) override;
 
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                            const std::shared_ptr<Material>& material ) override;
@@ -30,10 +30,11 @@ namespace Desert::Graphic::API::Vulkan
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 
 #ifdef DESERT_CONFIG_DEBUG
-        virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath ) override;
+        virtual std::shared_ptr<ImageCube>
+        ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath ) override;
         virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
         virtual Common::BoolResult CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) override;
-        virtual PBRTextures CreateEnvironmentMap( const Common::Filepath& filepath ) override;
+        virtual PBRTextures        CreateEnvironmentMap( const Common::Filepath& filepath ) override;
         virtual [[nodiscard]] Common::BoolResult
         GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
 #endif

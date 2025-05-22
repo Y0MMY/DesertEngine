@@ -24,7 +24,9 @@ namespace Desert::Graphic
 
         void OnEvent( Common::Event& e );
 
-        void RenderMesh( const std::shared_ptr<Mesh>& mesh );
+        void              RenderMesh( const std::shared_ptr<Mesh>& mesh );
+        const Environment CreateEnvironment( const Common::Filepath& filepath );
+        void              SetEnvironment( const Environment& environment );
 
     private:
         void CompositeRenderPass();
@@ -53,7 +55,7 @@ namespace Desert::Graphic
         {
             std::shared_ptr<Core::Scene> ActiveScene;
             Core::Camera*                ActiveCamera;
-            Environment                  EnvironmentMap;
+            Environment                  EnvironmentData;
 
             struct
             {

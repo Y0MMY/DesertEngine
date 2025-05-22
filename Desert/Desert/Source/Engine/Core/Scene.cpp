@@ -35,4 +35,9 @@ namespace Desert::Core
         return m_SceneRenderer->EndScene();
     }
 
+    NO_DISCARD const Graphic::Environment Scene::CreateEnvironment( const Common::Filepath& filepath )
+    {
+        return m_SceneRenderer->CreateEnvironment( filepath );
+    }
+
 } // namespace Desert::Core

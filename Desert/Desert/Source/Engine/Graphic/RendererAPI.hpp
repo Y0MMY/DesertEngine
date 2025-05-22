@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialTechnique.hpp>
 
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
@@ -36,7 +37,7 @@ namespace Desert::Graphic
         virtual Common::BoolResult BeginSwapChainRenderPass()                                       = 0;
         virtual Common::BoolResult EndRenderPass()                                                  = 0;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                                 const glm::mat4& mvp /*TEMP*/ )                                    = 0;
+                                 const MaterialHelper::MateriaTtechniques& materiaTtechnique )      = 0;
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                            const std::shared_ptr<Material>& material )              = 0;
 
@@ -44,10 +45,10 @@ namespace Desert::Graphic
                                         const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) = 0;
 #ifdef DESERT_CONFIG_DEBUG
 
-        virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath )  = 0;
-        virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath )       = 0;
+        virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath )    = 0;
+        virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath )         = 0;
         virtual Common::BoolResult         CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) = 0;
-        virtual PBRTextures CreateEnvironmentMap( const Common::Filepath& filepath )          = 0;
+        virtual PBRTextures                CreateEnvironmentMap( const Common::Filepath& filepath )            = 0;
 
         // NOTE: In the release version we do not support direct generation of mips, they have to be uploaded
         virtual [[nodiscard]] Common::BoolResult
