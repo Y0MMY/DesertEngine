@@ -13,19 +13,10 @@ namespace Desert::Graphic::API::Vulkan
 
         struct ShaderDescriptorSet
         {
-
-            // NOTE: std::vector defines the number of frames, i.e. there will be a
-            // different VkWriteDescriptorSet for each frame
-            using UniformBufferPair   = std::pair<Core::Models::UniformBuffer, std::vector<VkWriteDescriptorSet>>;
-            using Sampler2DBufferPair = std::pair<Core::Models::Image2DSampler, std::vector<VkWriteDescriptorSet>>;
-            using SamplerCubeBufferPair =
-                 std::pair<Core::Models::ImageCubeSampler, std::vector<VkWriteDescriptorSet>>;
-            using StorageBufferPair = std::pair<Core::Models::StorageBuffer, std::vector<VkWriteDescriptorSet>>;
-
-            using UniformBufferMap    = std::unordered_map<BindingPoint, UniformBufferPair>;
-            using ImageSampler2DMap   = std::unordered_map<BindingPoint, Sampler2DBufferPair>;
-            using ImageSamplerCubeMap = std::unordered_map<BindingPoint, SamplerCubeBufferPair>;
-            using StorageBufferMap    = std::unordered_map<BindingPoint, StorageBufferPair>;
+            using UniformBufferMap    = std::unordered_map<BindingPoint, Core::Models::UniformBuffer>;
+            using ImageSampler2DMap   = std::unordered_map<BindingPoint, Core::Models::Image2DSampler>;
+            using ImageSamplerCubeMap = std::unordered_map<BindingPoint, Core::Models::ImageCubeSampler>;
+            using StorageBufferMap    = std::unordered_map<BindingPoint, Core::Models::StorageBuffer>;
 
             UniformBufferMap    UniformBuffers;
             ImageSampler2DMap   Image2DSamplers;

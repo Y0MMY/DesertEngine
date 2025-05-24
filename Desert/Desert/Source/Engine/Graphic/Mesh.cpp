@@ -14,7 +14,7 @@ namespace Desert
         static void Init()
         {
             using namespace Assimp;
-            const unsigned int severity = /*Logger::Debugging | Logger::Info |*/ Logger::Err | Logger::Warn;
+            const unsigned int severity = Logger::Debugging | Logger::Info | Logger::Err | Logger::Warn;
 
             DefaultLogger::create( "", Logger::VERBOSE );
             Assimp::DefaultLogger::get()->attachStream( new LogStream, severity );

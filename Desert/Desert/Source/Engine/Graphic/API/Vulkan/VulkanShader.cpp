@@ -13,6 +13,15 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
+
+#define ADD_DESCRIPTOR_POOL_SIZE( poolSizes, descriptorType, resources, sets )                                    \
+    if ( !resources.empty() )                                                                                     \
+    {                                                                                                             \
+        auto& poolSize           = poolSizes.emplace_back();                                                      \
+        poolSize.type            = descriptorType;                                                                \
+        poolSize.descriptorCount = resources.size() * sets;                                                       \
+    }
+
     namespace Utils
     {
         static bool IsArray( const spirv_cross::SPIRType& type )
@@ -113,40 +122,19 @@ namespace Desert::Graphic::API::Vulkan
             for ( SetPoint set = 0; set < sets; set++ )
             {
                 const auto& uniformBuffers = shaderDescriptorSets.at( set ).UniformBuffers;
-                if ( !uniformBuffers.empty() )
-                {
-                    auto& poolSize = poolSizes.emplace_back();
-
-                    poolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                    poolSize.descriptorCount = uniformBuffers.size() * sets;
-                }
+                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers, sets );
 
                 const auto& image2DSamplers = shaderDescriptorSets.at( set ).Image2DSamplers;
-                if ( !image2DSamplers.empty() )
-                {
-                    auto& poolSize = poolSizes.emplace_back();
-
-                    poolSize.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                    poolSize.descriptorCount = image2DSamplers.size() * sets;
-                }
+                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, image2DSamplers,
+                                          sets );
 
                 const auto& imageCubeSamplers = shaderDescriptorSets.at( set ).ImageCubeSamplers;
-                if ( !imageCubeSamplers.empty() )
-                {
-                    auto& poolSize = poolSizes.emplace_back();
-
-                    poolSize.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                    poolSize.descriptorCount = imageCubeSamplers.size() * sets;
-                }
+                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCubeSamplers,
+                                          sets );
 
                 const auto& imageSamplersStorage = shaderDescriptorSets.at( set ).StorageImage2DSamplers;
-                if ( !imageSamplersStorage.empty() )
-                {
-                    auto& poolSize = poolSizes.emplace_back();
-
-                    poolSize.type            = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                    poolSize.descriptorCount = imageSamplersStorage.size() * sets;
-                }
+                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageSamplersStorage,
+                                          sets );
             }
 
             return poolSizes;
@@ -289,8 +277,6 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         LOG_INFO( "The shader {} was created or reloaded", m_ShaderPath.filename().string() );
-
-        return BOOLSUCCESS;
     }
 
     void VulkanShader::Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary )
@@ -330,10 +316,7 @@ namespace Desert::Graphic::API::Vulkan
                     uniformBuffer.ShaderStage =
                          Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                    ShaderResource::ShaderDescriptorSet::UniformBufferPair insertPair = {
-                         uniformBuffer, {} /*is defined later in CreateDescriptorSets*/ };
-
-                    uniformBuffers.insert( { binding, insertPair } );
+                    uniformBuffers.insert( { binding, uniformBuffer } );
                 }
                 else
                 {
@@ -380,10 +363,7 @@ namespace Desert::Graphic::API::Vulkan
                     newImageSampler.ShaderStage =
                          Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                    ShaderResource::ShaderDescriptorSet::Sampler2DBufferPair insertPair = {
-                         newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
-
-                    imageSampler.insert( { binding, insertPair } );
+                    imageSampler.insert( { binding, newImageSampler } );
                 }
 
                 LOG_TRACE( "  {0} (type: 2D) ({1}, {2})", name, descriptorSet, binding );
@@ -408,10 +388,7 @@ namespace Desert::Graphic::API::Vulkan
                     newImageSampler.ShaderStage =
                          Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                    ShaderResource::ShaderDescriptorSet::SamplerCubeBufferPair insertPair = {
-                         newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
-
-                    imageSampler.insert( { binding, insertPair } );
+                    imageSampler.insert( { binding, newImageSampler } );
                 }
 
                 LOG_TRACE( "  {0} (type: Cube) ({1}, {2})", name, descriptorSet, binding );
@@ -434,10 +411,7 @@ namespace Desert::Graphic::API::Vulkan
                 storageBuffer.Name         = name;
                 storageBuffer.ShaderStage = Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                ShaderResource::ShaderDescriptorSet::StorageBufferPair insertPair = {
-                     storageBuffer, {} /*is defined later in CreateDescriptorSets*/ };
-
-                storageBuffers.insert( { binding, insertPair } );
+                storageBuffers.insert( { binding, storageBuffer } );
             }
 
             LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
@@ -503,10 +477,7 @@ namespace Desert::Graphic::API::Vulkan
                 newImageSampler.ShaderStage =
                      Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
-                ShaderResource::ShaderDescriptorSet::Sampler2DBufferPair insertPair = {
-                     newImageSampler, {} /*is defined later in CreateDescriptorSets*/ };
-
-                imageSampler.insert( { binding, insertPair } );
+                imageSampler.insert( { binding, newImageSampler } );
             }
         }
     }
@@ -539,7 +510,7 @@ namespace Desert::Graphic::API::Vulkan
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                layout.stageFlags         = Utils::ShaderStageToVkShader( uniformBuffer.first.ShaderStage );
+                layout.stageFlags         = Utils::ShaderStageToVkShader( uniformBuffer.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1; // not array at now
             }
@@ -550,7 +521,7 @@ namespace Desert::Graphic::API::Vulkan
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.first.ShaderStage );
+                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1;
             }
@@ -561,7 +532,7 @@ namespace Desert::Graphic::API::Vulkan
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.first.ShaderStage );
+                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1;
             }
@@ -572,7 +543,7 @@ namespace Desert::Graphic::API::Vulkan
                 auto& layout              = layoutBindings.emplace_back();
                 layout.binding            = binding;
                 layout.descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.first.ShaderStage );
+                layout.stageFlags         = Utils::ShaderStageToVkShader( sampler.ShaderStage );
                 layout.pImmutableSamplers = nullptr;
                 layout.descriptorCount    = 1;
             }
@@ -640,87 +611,6 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanShader::CreateDescriptorSets( uint32_t framesInFlight )
     {
         m_DescriptorSetInfo = AllocateDescriptorSets( framesInFlight );
-
-        auto& shaderDescriptorSets = m_ReflectionData.ShaderDescriptorSets;
-
-        for ( uint32_t frame = 0; frame < framesInFlight; frame++ )
-        {
-            for ( SetPoint set = 0; set < shaderDescriptorSets.size(); set++ )
-            {
-                auto& shaderDescriptorSet = shaderDescriptorSets[set];
-
-                for ( auto& [binding, uniformBuffer] : shaderDescriptorSet.UniformBuffers )
-                {
-                    VkWriteDescriptorSet& writeDescriptor = uniformBuffer.second.emplace_back();
-
-                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
-                    writeDescriptor.dstBinding      = uniformBuffer.first.BindingPoint;
-                    writeDescriptor.descriptorCount = 1;
-
-                    // TODO: pBufferInfo !!!! or not create VkWriteDescriptorSet
-                }
-
-                for ( auto& [binding, sampler] : shaderDescriptorSet.Image2DSamplers )
-                {
-                    VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
-
-                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
-                    writeDescriptor.descriptorCount = 1;
-                    writeDescriptor.dstBinding      = sampler.first.BindingPoint;
-                }
-
-                for ( auto& [binding, sampler] : shaderDescriptorSet.ImageCubeSamplers )
-                {
-                    VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
-
-                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
-                    writeDescriptor.descriptorCount = 1;
-                    writeDescriptor.dstBinding      = sampler.first.BindingPoint;
-                }
-
-                for ( auto& [binding, sampler] : shaderDescriptorSet.StorageImage2DSamplers )
-                {
-                    VkWriteDescriptorSet& writeDescriptor = sampler.second.emplace_back();
-
-                    writeDescriptor.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writeDescriptor.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                    writeDescriptor.dstSet          = m_DescriptorSetInfo.DescriptorSets[(uint32_t)frame][set];
-                    writeDescriptor.descriptorCount = 1;
-                    writeDescriptor.dstBinding      = sampler.first.BindingPoint;
-                }
-            }
-        }
-    }
-
-    const VkWriteDescriptorSet VulkanShader::GetWriteDescriptorSet( const WriteDescriptorType& type,
-                                                                    uint32_t binding, uint32_t set,
-                                                                    uint32_t frame ) const
-    {
-        switch ( type )
-        {
-            case WriteDescriptorType::Uniform:
-                return m_ReflectionData.ShaderDescriptorSets.at( set ).UniformBuffers.at( binding ).second.at(
-                     frame );
-
-            case WriteDescriptorType::Sampler2D:
-                return m_ReflectionData.ShaderDescriptorSets.at( set ).Image2DSamplers.at( binding ).second.at(
-                     frame );
-
-            case WriteDescriptorType::SamplerCube:
-                return m_ReflectionData.ShaderDescriptorSets.at( set ).ImageCubeSamplers.at( binding ).second.at(
-                     frame );
-
-            case WriteDescriptorType::StorageImage:
-                return m_ReflectionData.ShaderDescriptorSets.at( set )
-                     .StorageImage2DSamplers.at( binding )
-                     .second.at( frame );
-        }
     }
 
     const std::vector<Desert::Core::Models::UniformBuffer> VulkanShader::GetUniformModels() const
@@ -733,7 +623,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).UniformBuffers;
             auto        res         = uniformInfo | std::views::values |
-                       std::views::transform( []( const auto& p ) { return p.first; } );
+                       std::views::transform( []( const auto& p ) { return p; } );
             return { res.begin(), res.end() };
         }
     }

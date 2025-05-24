@@ -5,6 +5,8 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
 
@@ -28,7 +30,7 @@ namespace Desert::Graphic::API::Vulkan
 
     */
 
-    static constexpr uint32_t kMaxPushConstantsSize = 128u;
+    static constexpr uint32_t kMaxPushConstantsSize = 128U;
 
     VulkanMaterial::VulkanMaterial( const std::string& debugName, const std::shared_ptr<Shader>& shader )
          : m_Shader( shader ), m_DebugName( debugName )
@@ -48,19 +50,13 @@ namespace Desert::Graphic::API::Vulkan
         const auto& shaderDS = sp_cast<VulkanShader>( m_Shader )->GetShaderDescriptorSets();
         for ( const auto& descriptor : shaderDS )
         {
-
-            // TODO: (comment: ????)
-            for ( const auto& image : descriptor.second.Image2DSamplers )
+            for ( const auto& [_, imageInfo] : descriptor.second.Image2DSamplers )
             {
-                const auto& imageInfo = image.second.first;
-
                 m_Images2D[imageInfo.Name] = { nullptr, imageInfo.BindingPoint };
             }
 
-            for ( const auto& image : descriptor.second.ImageCubeSamplers )
+            for ( const auto& [_, imageInfo] : descriptor.second.ImageCubeSamplers )
             {
-                const auto& imageInfo = image.second.first;
-
                 m_ImagesCube[imageInfo.Name] = { nullptr, imageInfo.BindingPoint };
             }
         }
@@ -99,12 +95,9 @@ namespace Desert::Graphic::API::Vulkan
         {
             for ( const auto& uniform : m_OverriddenUniforms )
             {
-                auto wds = sp_cast<VulkanShader>( m_Shader )
-                                ->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Uniform,
-                                                         uniform->GetBinding(), SET, frameIndex );
-
-                const auto bufferInfo = uniform->GetDescriptorBufferInfo();
-                wds.pBufferInfo       = &bufferInfo;
+                auto wds = DescriptorSetBuilder::GetUniformWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
+                                                                uniform->GetBinding(), 1U,
+                                                                &uniform->GetDescriptorBufferInfo() );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }
@@ -121,11 +114,8 @@ namespace Desert::Graphic::API::Vulkan
                 imageDescriptorInfo.imageView             = info.ImageView;
                 imageDescriptorInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-                auto wds = sp_cast<VulkanShader>( m_Shader )
-                                ->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Sampler2D,
-                                                         imageInfo.Binding, SET, frameIndex );
-
-                wds.pImageInfo = &imageDescriptorInfo;
+                auto wds = DescriptorSetBuilder::GetSamplerWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
+                                                                imageInfo.Binding, 1U, &imageDescriptorInfo );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }
@@ -142,11 +132,8 @@ namespace Desert::Graphic::API::Vulkan
                 imageDescriptorInfo.imageView             = info.ImageView;
                 imageDescriptorInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-                auto wds = sp_cast<VulkanShader>( m_Shader )
-                                ->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::SamplerCube,
-                                                         imageInfo.Binding, SET, frameIndex );
-
-                wds.pImageInfo = &imageDescriptorInfo;
+                auto wds = DescriptorSetBuilder::GetSamplerWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
+                                                                imageInfo.Binding, 1U, &imageDescriptorInfo );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }

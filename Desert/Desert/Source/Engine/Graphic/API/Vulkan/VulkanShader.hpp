@@ -49,9 +49,6 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual const std::vector<Core::Models::UniformBuffer> GetUniformModels() const override; // don't use it often!
 
-        const VkWriteDescriptorSet GetWriteDescriptorSet( const WriteDescriptorType& type, uint32_t binding,
-                                                          uint32_t set, uint32_t frame ) const;
-
         const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
         {
             return m_PipelineShaderStageCreateInfos;

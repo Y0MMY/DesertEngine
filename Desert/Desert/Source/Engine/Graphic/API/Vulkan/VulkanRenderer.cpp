@@ -10,6 +10,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanMaterial.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
+
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
@@ -75,16 +77,11 @@ namespace Desert::Graphic::API::Vulkan
                 // Update descriptor set
                 std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
 
-                descriptorWrites[0] = shaderVulkan->GetWriteDescriptorSet( inputDescriptorType, 0, 0, frameIndex );
-                descriptorWrites[0].dstSet =
-                     shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-                descriptorWrites[0].pImageInfo = &imageInfo[0];
+                descriptorWrites[0] =
+                     DescriptorSetBuilder::GetSamplerWDS( shaderVulkan, frameIndex, 0U, 0, 1U, &imageInfo[0] );
 
-                descriptorWrites[1] = shaderVulkan->GetWriteDescriptorSet(
-                     Vulkan::WriteDescriptorType::StorageImage, 1, 0, frameIndex );
-                descriptorWrites[1].dstSet =
-                     shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-                descriptorWrites[1].pImageInfo = &imageInfo[1];
+                descriptorWrites[1] =
+                     DescriptorSetBuilder::GetStorageWDS( shaderVulkan, frameIndex, 0U, 1, 1U, &imageInfo[1] );
 
                 vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
                                         descriptorWrites.size(), descriptorWrites.data(), 0, nullptr );
@@ -146,41 +143,33 @@ namespace Desert::Graphic::API::Vulkan
             uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
 
             std::array<VkDescriptorImageInfo, 2> imageInfo = {};
-            imageInfo[0].imageView                         = outputImageVulkan->GetVulkanImageInfo().ImageView;
-            imageInfo[0].imageLayout                       = VK_IMAGE_LAYOUT_GENERAL;
+            imageInfo[0].imageView                         = inputImage->GetVulkanImageInfo().ImageView;
+            imageInfo[0].sampler                           = inputImage->GetVulkanImageInfo().Sampler;
+            imageInfo[0].imageLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-            imageInfo[1].imageView   = inputImage->GetVulkanImageInfo().ImageView;
-            imageInfo[1].sampler     = inputImage->GetVulkanImageInfo().Sampler;
-            imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo[1].imageView   = outputImageVulkan->GetVulkanImageInfo().ImageView;
+            imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            std::array<VkWriteDescriptorSet, 2> descriptorWrite = {};
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
 
             auto vulkanPipelineCompute =
                  sp_cast<VulkanPipelineCompute>( Graphic::PipelineCompute::Create( shader ) );
             vulkanPipelineCompute->Invalidate();
 
-            // Output image (storage)
-            descriptorWrite[0] = shaderVulkan->GetWriteDescriptorSet(
-                 API::Vulkan::WriteDescriptorType::StorageImage, 1, 0, frameIndex );
-            descriptorWrite[0].dstSet =
-                 shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-            descriptorWrite[0].pImageInfo = &imageInfo[0];
+            descriptorWrites[0] =
+                 DescriptorSetBuilder::GetSamplerWDS( shaderVulkan, frameIndex, 0U, 0, 1U, &imageInfo[0] );
 
-            // Input image (sampler)
-            descriptorWrite[1] = shaderVulkan->GetWriteDescriptorSet( API::Vulkan::WriteDescriptorType::Sampler2D,
-                                                                      0, 0, frameIndex );
-            descriptorWrite[1].dstSet =
-                 shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-            descriptorWrite[1].pImageInfo = &imageInfo[1];
+            descriptorWrites[1] =
+                 DescriptorSetBuilder::GetStorageWDS( shaderVulkan, frameIndex, 0U, 1, 1U, &imageInfo[1] );
 
             VkDevice device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-            vkUpdateDescriptorSets( device, descriptorWrite.size(), descriptorWrite.data(), 0, nullptr );
+            vkUpdateDescriptorSets( device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr );
 
             auto vulkanPipeline = sp_cast<API::Vulkan::VulkanPipelineCompute>( vulkanPipelineCompute );
 
             vulkanPipelineCompute->Begin();
             const auto cmd = vulkanPipelineCompute->GetCommandBuffer();
-            vulkanPipeline->BindDS( descriptorWrite[0].dstSet );
+            vulkanPipeline->BindDS( descriptorWrites[0].dstSet );
 
             if ( processingInfo.pushConstantsCallback )
             {
@@ -577,16 +566,10 @@ namespace Desert::Graphic::API::Vulkan
             std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
 
             descriptorWrites[0] =
-                 shaderVulkan->GetWriteDescriptorSet( Vulkan::WriteDescriptorType::SamplerCube, 0, 0, frameIndex );
-            descriptorWrites[0].dstSet =
-                 shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-            descriptorWrites[0].pImageInfo = &imageInfo[0];
+                 DescriptorSetBuilder::GetSamplerWDS( shaderVulkan, frameIndex, 0U, 0, 1U, &imageInfo[0] );
 
-            descriptorWrites[1] = shaderVulkan->GetWriteDescriptorSet( Vulkan::WriteDescriptorType::StorageImage,
-                                                                       1, 0, frameIndex );
-            descriptorWrites[1].dstSet =
-                 shaderVulkan->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
-            descriptorWrites[1].pImageInfo = &imageInfo[1];
+            descriptorWrites[1] =
+                 DescriptorSetBuilder::GetStorageWDS( shaderVulkan, frameIndex, 0U, 1, 1U, &imageInfo[1] );
 
             vkUpdateDescriptorSets( device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr );
 
