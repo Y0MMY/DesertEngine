@@ -1,6 +1,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanMaterial.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
+#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -26,9 +28,12 @@ namespace Desert::Graphic::API::Vulkan
 
     */
 
+    static constexpr uint32_t kMaxPushConstantsSize = 128u;
+
     VulkanMaterial::VulkanMaterial( const std::string& debugName, const std::shared_ptr<Shader>& shader )
          : m_Shader( shader ), m_DebugName( debugName )
     {
+        m_PushConstantBuffer.Allocate( kMaxPushConstantsSize );
     }
 
     Common::BoolResult VulkanMaterial::Invalidate()
@@ -174,6 +179,18 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         m_ImagesCube[name].ImageCube = imageCube;
+    }
+
+    Common::BoolResult VulkanMaterial::PushConstant( const void* buffer, const uint32_t bufferSize )
+    {
+#ifdef DESERT_CONFIG_DEBUG
+        if ( bufferSize > kMaxPushConstantsSize )
+        {
+            return Common::MakeError( "bufferSize > 128 bytes" );
+        }
+#endif // DESERT_CONFIG_DEBUG
+
+        m_PushConstantBuffer.Write( buffer, bufferSize );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

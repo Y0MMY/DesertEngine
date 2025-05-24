@@ -16,6 +16,10 @@ namespace Desert::Graphic::MaterialHelper
         {
             m_Material->ApplyMaterial();
         }
+        const auto& GetMaterialInstance() const
+        {
+            return m_Material;
+        }
 
     protected:
         std::shared_ptr<Material> m_Material;

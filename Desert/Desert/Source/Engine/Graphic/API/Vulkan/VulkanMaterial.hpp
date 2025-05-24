@@ -16,9 +16,16 @@ namespace Desert::Graphic::API::Vulkan
         virtual Common::BoolResult SetImage2D( const std::string&              name,
                                                const std::shared_ptr<Image2D>& image2D ) override;
         virtual Common::BoolResult SetImageCube( const std::string&                name,
-                                                 const std::shared_ptr<ImageCube>& imageCube) override;
+                                                 const std::shared_ptr<ImageCube>& imageCube ) override;
         virtual Common::BoolResult ApplyMaterial() override;
         virtual Common::BoolResult Invalidate() override;
+
+        virtual Common::BoolResult PushConstant( const void* buffer, const uint32_t bufferSize ) override;
+
+        const auto& GetPushConstantBuffer() const
+        {
+            return m_PushConstantBuffer;
+        }
 
     private:
     private:
@@ -39,6 +46,8 @@ namespace Desert::Graphic::API::Vulkan
 
         std::vector<std::shared_ptr<VulkanUniformBuffer>> m_OverriddenUniforms;
         std::unordered_map<std::string, Sampler2DData>    m_Images2D;
-        std::unordered_map<std::string, SamplerCubeData>    m_ImagesCube;
+        std::unordered_map<std::string, SamplerCubeData>  m_ImagesCube;
+
+        Common::Memory::Buffer m_PushConstantBuffer;
     };
 } // namespace Desert::Graphic::API::Vulkan

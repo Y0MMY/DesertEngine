@@ -209,9 +209,13 @@ namespace Desert::Graphic
 
         for ( const auto& meshIno : m_SceneInfo.Renderdata.MeshInfo )
         {
-            MaterialHelper::PBRMaterial PBRTechnique( m_SceneInfo.Renderdata.Geometry.Material );
+            const MaterialHelper::PBRMaterial PBRTechnique( m_SceneInfo.Renderdata.Geometry.Material );
+            const MaterialHelper::PBRUniforms pbr;
 
-            auto vp = m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
+            const auto& vp =
+                 m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
+            m_SceneInfo.Renderdata.Geometry.Material->PushConstant( &vp, sizeof( vp ) );
+
             renderer.RenderMesh( m_SceneInfo.Renderdata.Geometry.Pipeline, meshIno.Mesh, PBRTechnique );
         }
 

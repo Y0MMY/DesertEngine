@@ -7,6 +7,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanMaterial.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
@@ -487,8 +488,10 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
 
         // VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-
-        //vkCmdPushConstants( m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, &mvp );
+        const auto& pcBuffer =
+             sp_cast<VulkanMaterial>( materiaTtechnique.GetMaterialInstance() )->GetPushConstantBuffer();
+        vkCmdPushConstants( m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, pcBuffer.Size,
+                            pcBuffer.Data );
 
         materiaTtechnique.Bind();
 
