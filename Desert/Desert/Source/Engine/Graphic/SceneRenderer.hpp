@@ -9,10 +9,13 @@
 
 #include <Common/Core/Events/WindowEvents.hpp>
 
+namespace Desert::Core
+{
+    class Scene;
+};
+
 namespace Desert::Graphic
 {
-    class ::Desert::Core::Scene;
-
     class SceneRenderer final
     {
     public:

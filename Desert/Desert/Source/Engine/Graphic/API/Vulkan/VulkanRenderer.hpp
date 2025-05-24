@@ -11,13 +11,13 @@ namespace Desert::Graphic::API::Vulkan
     public:
         virtual void Init() override;
 
-        virtual [[nodiscard]] Common::BoolResult BeginFrame() override;
-        virtual [[nodiscard]] Common::BoolResult EndFrame() override;
-        virtual [[nodiscard]] Common::BoolResult PresentFinalImage() override;
-        virtual [[nodiscard]] Common::BoolResult
+        [[nodiscard]] virtual Common::BoolResult BeginFrame() override;
+        [[nodiscard]] virtual Common::BoolResult EndFrame() override;
+        [[nodiscard]] virtual Common::BoolResult PresentFinalImage() override;
+        [[nodiscard]] virtual Common::BoolResult
                                    BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
         virtual Common::BoolResult BeginSwapChainRenderPass() override;
-        virtual [[nodiscard]] Common::BoolResult EndRenderPass() override;
+        [[nodiscard]] virtual Common::BoolResult EndRenderPass() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                  const MaterialHelper::MateriaTtechniques& materiaTtechnique ) override;
 
@@ -35,7 +35,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
         virtual Common::BoolResult CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) override;
         virtual PBRTextures        CreateEnvironmentMap( const Common::Filepath& filepath ) override;
-        virtual [[nodiscard]] Common::BoolResult
+        [[nodiscard]] virtual Common::BoolResult
         GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
 #endif
 

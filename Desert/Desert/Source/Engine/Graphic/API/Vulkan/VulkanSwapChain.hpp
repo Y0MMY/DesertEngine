@@ -17,7 +17,7 @@ namespace Desert::Graphic::API::Vulkan
 
         Common::Result<VkResult> Create( uint32_t* width, uint32_t* height );
 
-        Common::Result<VkSurfaceFormatKHR> GetImageFormatAndColorSpace();
+        Common::Result<bool> GetImageFormatAndColorSpace();
 
         uint32_t GetImageCount() const
         {

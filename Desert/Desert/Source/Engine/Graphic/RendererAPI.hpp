@@ -51,7 +51,7 @@ namespace Desert::Graphic
         virtual PBRTextures                CreateEnvironmentMap( const Common::Filepath& filepath )            = 0;
 
         // NOTE: In the release version we do not support direct generation of mips, they have to be uploaded
-        virtual [[nodiscard]] Common::BoolResult
+        [[nodiscard]] virtual Common::BoolResult
         GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const = 0;
 #endif
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const = 0;

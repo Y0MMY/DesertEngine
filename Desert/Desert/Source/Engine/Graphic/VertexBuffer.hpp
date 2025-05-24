@@ -129,7 +129,7 @@ namespace Desert::Graphic
         virtual void Use( BindUsage use = BindUsage::Bind ) const              = 0;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const           = 0;
 
-        virtual [[nodiscard]] unsigned int GetSize() const = 0;
+        [[nodiscard]] virtual unsigned int GetSize() const = 0;
 
         [[nodiscard]] virtual Common::BoolResult Invalidate()    = 0;
         [[nodiscard]] virtual Common::BoolResult RT_Invalidate() = 0;

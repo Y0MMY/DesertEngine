@@ -135,7 +135,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( VK_SUCCESS );
     }
 
-    Common::Result<VkSurfaceFormatKHR> VulkanSwapChain::GetImageFormatAndColorSpace()
+    Common::Result<bool> VulkanSwapChain::GetImageFormatAndColorSpace()
     {
         VkPhysicalDevice physicalDevice = m_LogicalDevice->GetPhysicalDevice()->GetVulkanPhysicalDevice();
 
@@ -144,7 +144,7 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( !formatCount )
         {
-            return Common::MakeError<VkSurfaceFormatKHR>( "null format count" );
+            return Common::MakeError<bool>( "null format count" );
         }
 
         std::vector<VkSurfaceFormatKHR> surfaceFormats( formatCount );
@@ -181,6 +181,8 @@ namespace Desert::Graphic::API::Vulkan
                 m_ColorSpace  = surfaceFormats[0].colorSpace;
             }
         }
+
+        return BOOLSUCCESS;
     }
 
     Common::Result<VkResult> VulkanSwapChain::AcquireNextImage( VkSemaphore presentCompleteSemaphore,
@@ -295,7 +297,7 @@ namespace Desert::Graphic::API::Vulkan
         renderPassInfo.dependencyCount = 1;
         renderPassInfo.pDependencies   = &dependency;
 
-        VK_RETURN_RESULT_IF_FALSE( vkCreateRenderPass( m_LogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo,
+        VK_RETURN_RESULT( vkCreateRenderPass( m_LogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo,
                                                        nullptr, &m_VkRenderPass ) );
     }
 

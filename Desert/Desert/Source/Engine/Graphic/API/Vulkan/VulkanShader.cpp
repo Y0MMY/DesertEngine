@@ -289,6 +289,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         LOG_INFO( "The shader {} was created or reloaded", m_ShaderPath.filename().string() );
+
+        return BOOLSUCCESS;
     }
 
     void VulkanShader::Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary )

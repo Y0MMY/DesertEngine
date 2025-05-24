@@ -167,6 +167,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         m_Images2D[name].Image2D = image2D;
+
+        return BOOLSUCCESS;
     }
 
     Common::BoolResult VulkanMaterial::SetImageCube( const std::string&                name,
@@ -179,6 +181,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         m_ImagesCube[name].ImageCube = imageCube;
+
+        return BOOLSUCCESS;
     }
 
     Common::BoolResult VulkanMaterial::PushConstant( const void* buffer, const uint32_t bufferSize )
@@ -191,6 +195,8 @@ namespace Desert::Graphic::API::Vulkan
 #endif // DESERT_CONFIG_DEBUG
 
         m_PushConstantBuffer.Write( buffer, bufferSize );
+
+        return BOOLSUCCESS;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

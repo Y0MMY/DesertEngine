@@ -27,11 +27,11 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] Common::BoolResult Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device );
         [[nodiscard]] Common::BoolResult RT_Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device );
 
-        virtual [[nodiscard]] unsigned int GetSize() const override
+        [[nodiscard]] virtual unsigned int GetSize() const override
         {
             return m_Size;
         }
-        virtual [[nodiscard]] unsigned int GetCount() const override
+        [[nodiscard]] virtual unsigned int GetCount() const override
         {
             return m_Size / sizeof( uint32_t );
         }

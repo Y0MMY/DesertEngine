@@ -33,6 +33,7 @@ namespace Common
     {
     public:
         Result() = default;
+
     public:
         class Error
         {
@@ -135,25 +136,25 @@ namespace Common
     template <typename T>
     Result<T> MakeErrorWithCode( T&& errorCode, const std::string& message )
     {
-        return Result<T>( Result<T>::Error( errorCode, message ) );
+        return Result<T>( typename Result<T>::Error( errorCode, message ) );
     }
 
     template <typename T>
     Result<T> MakeError( const std::string& message )
     {
-        return Result<T>( Result<T>::Error( message ) );
+        return Result<T>( typename Result<T>::Error( message ) );
     }
 
     template <typename T, typename... Args>
     Result<T> MakeFormattedErrorWithCode( T&& errorCode, std::string_view format, Args&&... args )
     {
-        return Result<T>( Result<T>::Error( errorCode, format, std::forward<Args>( args )... ) );
+        return Result<T>( typename Result<T>::Error( errorCode, format, std::forward<Args>( args )... ) );
     }
 
     template <typename T, typename... Args>
     Result<T> MakeFormattedError( std::string_view format, Args&&... args )
     {
-        return Result<T>( Result<T>::Error( format, std::forward<Args>( args )... ) );
+        return Result<T>( typename Result<T>::Error( format, std::forward<Args>( args )... ) );
     }
 
     template <typename T>
