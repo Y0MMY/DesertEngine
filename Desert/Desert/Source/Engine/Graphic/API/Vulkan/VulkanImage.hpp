@@ -41,6 +41,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_ImageSpecification.Height;
         }
 
+        virtual const std::string GetHash() const override
+        {
+            return "TODO";
+        }
+
         virtual Core::Formats::ImageFormat GetImageFormat() const override
         {
             return m_ImageSpecification.Format;
@@ -104,27 +109,39 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_FaceSize;
         }
+
         virtual uint32_t GetHeight() const override
         {
             return m_FaceSize;
         }
+
         virtual Core::Formats::ImageFormat GetImageFormat() const override
         {
             return m_ImageSpecification.Format;
         }
+
         virtual uint32_t GetMipmapLevels() const override
         {
             return m_MipLevels;
         }
+
+        virtual const std::string GetHash() const override
+        {
+            return "TODO";
+        }
+
         virtual bool IsLoaded() const override
         {
             return m_Loaded;
         }
-        virtual void                                   Use( uint32_t slot = 0 ) const override;
+
+        virtual void Use( uint32_t slot = 0 ) const override;
+
         virtual Core::Formats::ImageCubeSpecification& GetImageSpecification() override
         {
             return m_ImageSpecification;
         }
+
         virtual Core::Formats::ImagePixelData GetImagePixels() const override;
 
         // VulkanImageBase interface

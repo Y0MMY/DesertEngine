@@ -7,13 +7,15 @@ namespace Desert::Graphic
     class Image
     {
     public:
-        virtual uint32_t                             GetWidth() const               = 0;
-        virtual uint32_t                             GetHeight() const              = 0;
-        virtual Core::Formats::ImageFormat           GetImageFormat() const         = 0;
-        virtual uint32_t                             GetMipmapLevels() const        = 0;
-        virtual bool                                 IsLoaded() const               = 0;
-        virtual void                                 Use( uint32_t slot = 0 ) const = 0;
-        virtual Core::Formats::ImagePixelData        GetImagePixels() const         = 0;
+        virtual uint32_t                      GetWidth() const               = 0;
+        virtual uint32_t                      GetHeight() const              = 0;
+        virtual Core::Formats::ImageFormat    GetImageFormat() const         = 0;
+        virtual uint32_t                      GetMipmapLevels() const        = 0;
+        virtual bool                          IsLoaded() const               = 0;
+        virtual void                          Use( uint32_t slot = 0 ) const = 0;
+        virtual Core::Formats::ImagePixelData GetImagePixels() const         = 0;
+
+        virtual const std::string GetHash() const = 0;
 
         static uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format );
         // Calculates the byte size of an image based on dimensions and format

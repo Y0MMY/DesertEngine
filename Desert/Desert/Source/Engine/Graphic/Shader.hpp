@@ -6,6 +6,8 @@
 
 namespace Desert::Graphic
 {
+    using ShaderDefines = std::vector<std::pair<std::string, std::string>>;
+
     class Shader
     {
     public:
@@ -17,7 +19,7 @@ namespace Desert::Graphic
         virtual const std::string                              GetName() const                                 = 0;
         virtual const std::vector<Core::Models::UniformBuffer> GetUniformModels() const                        = 0;
 
-        static std::shared_ptr<Shader> Create( const std::string& filename );
+        static std::shared_ptr<Shader> Create( const std::string& filename, const ShaderDefines& defines = {} );
     };
 
     class ShaderLibrary final
@@ -25,9 +27,10 @@ namespace Desert::Graphic
     public:
         ShaderLibrary() = default;
 
-        static void                                    LoadShader( const std::shared_ptr<Shader>& shader );
-        static Common::Result<std::shared_ptr<Shader>> Get( const std::string& shaderName );
-        static inline bool                             IsShaderInLibrary( const std::string& shaderName );
+        static void LoadShader( const std::shared_ptr<Shader>& shader, const ShaderDefines& defines );
+        static Common::Result<std::shared_ptr<Shader>> Get( const std::string&   shaderName,
+                                                            const ShaderDefines& defines );
+        static inline bool IsShaderInLibrary( const std::string& shaderName );
 
     private:
         static inline std::unordered_map<std::string, std::shared_ptr<Shader>> s_AllShaders;

@@ -2,6 +2,8 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
+#include <Common/Utilities/String.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
     // Constants

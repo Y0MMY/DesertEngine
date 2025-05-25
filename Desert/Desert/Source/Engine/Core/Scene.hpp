@@ -9,7 +9,7 @@ namespace Desert::Graphic
 {
     class SceneRenderer;
     class Environment;
-}
+} // namespace Desert::Graphic
 
 namespace Desert
 {
@@ -31,19 +31,14 @@ namespace Desert::Core
 
         [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
 
-        void SetEnvironment( const std::shared_ptr<Graphic::ImageCube>& environment );
+        void SetEnvironment( const Graphic::Environment& environment );
 
         void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const;
 
-        [[nodiscard]] const std::shared_ptr<Graphic::ImageCube>& GetEnvironment() const
-        {
-            return m_Environment;
-        }
+        [[nodiscard]] const Graphic::Environment& GetEnvironment() const;
 
     private:
         std::string                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
-
-        std::shared_ptr<Graphic::ImageCube> m_Environment;
     };
 } // namespace Desert::Core

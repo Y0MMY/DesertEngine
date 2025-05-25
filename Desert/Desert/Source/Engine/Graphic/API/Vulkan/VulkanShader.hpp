@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
         };
 
     public:
-        VulkanShader( const std::filesystem::path& path );
+        VulkanShader( const std::filesystem::path& path, const ShaderDefines& defines);
 
         virtual void Use( BindUsage use = BindUsage::Bind ) const override
         {

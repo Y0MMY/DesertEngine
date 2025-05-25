@@ -234,10 +234,10 @@ namespace Desert::Graphic::API::Vulkan
 
     } // namespace Utils
 
-    VulkanShader::VulkanShader( const std::filesystem::path& path )
+    VulkanShader::VulkanShader( const std::filesystem::path& path, const ShaderDefines& defines )
          : m_ShaderPath( path ), m_ShaderName( path.filename().string() )
     {
-        Utils::CreateDirectoriesIfNoExists(); // TODO: move to a better location
+        Utils::CreateDirectoriesIfNoExists(); // TODO: move to a better location (init project)
 
         Reload();
     }
@@ -622,8 +622,8 @@ namespace Desert::Graphic::API::Vulkan
         else [[likely]]
         {
             const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).UniformBuffers;
-            auto        res         = uniformInfo | std::views::values |
-                       std::views::transform( []( const auto& p ) { return p; } );
+            auto        res =
+                 uniformInfo | std::views::values | std::views::transform( []( const auto& p ) { return p; } );
             return { res.begin(), res.end() };
         }
     }

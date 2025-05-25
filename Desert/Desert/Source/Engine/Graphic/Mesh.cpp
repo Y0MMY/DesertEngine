@@ -60,20 +60,32 @@ namespace Desert
         {
             Vertex vertex;
             vertex.Position = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
-       //     vertex.Normal   = { mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z };
+            vertex.Normal   = { mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z };
+
+            if ( mesh->HasTangentsAndBitangents() )
+            {
+                vertex.Tangent   = { mesh->mTangents[i].x, mesh->mTangents[i].y, mesh->mTangents[i].z };
+                vertex.Bitangent = { mesh->mBitangents[i].x, mesh->mBitangents[i].y, mesh->mBitangents[i].z };
+            }
+
+            if ( mesh->HasTextureCoords( 0 ) )
+            {
+                vertex.TexCoord = { mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y };
+            }
+
             vertices.push_back( vertex );
         }
 
         for ( unsigned int i = 0; i < mesh->mNumFaces; i++ )
         {
             indices.emplace_back( mesh->mFaces[i].mIndices[0], mesh->mFaces[i].mIndices[1],
-                                   mesh->mFaces[i].mIndices[2] );
+                                  mesh->mFaces[i].mIndices[2] );
         }
 
-        m_VertexBuffer = Graphic::VertexBuffer::Create( vertices.data(), vertices.size() * sizeof(Vertex));
+        m_VertexBuffer = Graphic::VertexBuffer::Create( vertices.data(), vertices.size() * sizeof( Vertex ) );
         m_VertexBuffer->RT_Invalidate();
 
-        m_IndexBuffer  = Graphic::IndexBuffer::Create( indices.data(), indices.size() * sizeof(Index));
+        m_IndexBuffer = Graphic::IndexBuffer::Create( indices.data(), indices.size() * sizeof( Index ) );
         m_IndexBuffer->RT_Invalidate();
 
         return Common::MakeSuccess( true );

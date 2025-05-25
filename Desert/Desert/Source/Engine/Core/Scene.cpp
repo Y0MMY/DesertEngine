@@ -20,9 +20,9 @@ namespace Desert::Core
         return m_SceneRenderer->Init();
     }
 
-    void Scene::SetEnvironment( const std::shared_ptr<Graphic::ImageCube>& environment )
+    void Scene::SetEnvironment( const Graphic::Environment& environment )
     {
-        m_Environment = environment;
+        m_SceneRenderer->SetEnvironment( environment );
     }
 
     void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const
@@ -38,6 +38,11 @@ namespace Desert::Core
     NO_DISCARD const Graphic::Environment Scene::CreateEnvironment( const Common::Filepath& filepath )
     {
         return m_SceneRenderer->CreateEnvironment( filepath );
+    }
+
+    const Desert::Graphic::Environment& Scene::GetEnvironment() const
+    {
+        return m_SceneRenderer->GetEnvironment();
     }
 
 } // namespace Desert::Core

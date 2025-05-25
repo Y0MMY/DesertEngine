@@ -110,7 +110,11 @@ namespace Desert::Graphic
             // Pipeline
             PipelineSpecification pipeSpec;
             pipeSpec.DebugName   = debugName;
-            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                     { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                     { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                     { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                     { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
             pipeSpec.Renderpass  = RenderPass::Create( rpSpec );
             pipeSpec.Shader      = Graphic::Shader::Create( "StaticPBR.glsl" );
             pipeSpec.Framebuffer = geometry.Framebuffer;
@@ -202,7 +206,7 @@ namespace Desert::Graphic
         cameraUB->RT_SetData( &camera, 128, 0 );
         m_SceneInfo.Renderdata.Skybox.Material->AddUniformToOverride( cameraUB );
         m_SceneInfo.Renderdata.Skybox.Material->SetImageCube( "samplerCubeMap",
-                                                              m_SceneInfo.ActiveScene->GetEnvironment() );
+                                                              m_SceneInfo.EnvironmentData.RadianceMap );
 
         renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Skybox.Pipeline,
                                        m_SceneInfo.Renderdata.Skybox.Material );
@@ -235,6 +239,11 @@ namespace Desert::Graphic
     void SceneRenderer::SetEnvironment( const Environment& environment )
     {
         m_SceneInfo.EnvironmentData = environment;
+    }
+
+    const Environment& SceneRenderer::GetEnvironment()
+    {
+        return m_SceneInfo.EnvironmentData;
     }
 
 } // namespace Desert::Graphic

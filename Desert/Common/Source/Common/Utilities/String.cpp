@@ -2,7 +2,7 @@
 
 namespace Common::Utils
 {
-    std::string BytesToString( uint64_t bytes )
+    const std::string String::BytesToString( const uint64_t bytes )
     {
         const size_t KB = 1024;
         const size_t MB = KB * 1024;
@@ -34,6 +34,11 @@ namespace Common::Utils
         }
 
         return result;
+    }
+
+    const std::string String::GetPathHash( const Common::Filepath& path )
+    {
+        return std::to_string( std::hash<std::string>{}( path.string() ) );
     }
 
 } // namespace Common::Utils

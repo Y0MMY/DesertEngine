@@ -46,21 +46,22 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         m_OverriddenUniforms.clear();
+        m_AvalivaleImages2D.clear();
+        m_AvalivaleImagesCube.clear();
 
         const auto& shaderDS = sp_cast<VulkanShader>( m_Shader )->GetShaderDescriptorSets();
         for ( const auto& descriptor : shaderDS )
         {
             for ( const auto& [_, imageInfo] : descriptor.second.Image2DSamplers )
             {
-                m_Images2D[imageInfo.Name] = { nullptr, imageInfo.BindingPoint };
+                m_AvalivaleImages2D.push_back( { imageInfo.Name, imageInfo.BindingPoint } );
             }
 
             for ( const auto& [_, imageInfo] : descriptor.second.ImageCubeSamplers )
             {
-                m_ImagesCube[imageInfo.Name] = { nullptr, imageInfo.BindingPoint };
+                m_AvalivaleImagesCube.push_back( { imageInfo.Name, imageInfo.BindingPoint } );
             }
         }
-
         return BOOLSUCCESS;
     }
 
@@ -89,7 +90,8 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-        writeDescriptorSets.reserve( ( m_OverriddenUniforms.size() + m_Images2D.size() ) );
+        writeDescriptorSets.reserve(
+             ( m_OverriddenUniforms.size() + m_OverriddenImages2D.size() + m_OverriddenImagesCube.size() ) );
 
         // Uniform
         {
@@ -104,10 +106,9 @@ namespace Desert::Graphic::API::Vulkan
 
         // Image2D
         {
-            for ( const auto& image : m_Images2D )
+            for ( const auto& imageInfo : m_OverriddenImages2D )
             {
-                const auto& imageInfo = image.second;
-                auto        info      = sp_cast<VulkanImage2D>( imageInfo.Image2D )->GetVulkanImageInfo();
+                auto info = sp_cast<VulkanImage2D>( imageInfo.Image2D )->GetVulkanImageInfo();
 
                 VkDescriptorImageInfo imageDescriptorInfo = {};
                 imageDescriptorInfo.sampler               = info.Sampler;
@@ -122,10 +123,9 @@ namespace Desert::Graphic::API::Vulkan
 
         // ImageCube
         {
-            for ( const auto& image : m_ImagesCube )
+            for ( const auto& imageInfo : m_OverriddenImagesCube )
             {
-                const auto& imageInfo = image.second;
-                auto        info      = sp_cast<VulkanImageCube>( imageInfo.ImageCube )->GetVulkanImageInfo();
+                auto info = sp_cast<VulkanImageCube>( imageInfo.ImageCube )->GetVulkanImageInfo();
 
                 VkDescriptorImageInfo imageDescriptorInfo = {};
                 imageDescriptorInfo.sampler               = info.Sampler;
@@ -147,13 +147,15 @@ namespace Desert::Graphic::API::Vulkan
     Common::BoolResult VulkanMaterial::SetImage2D( const std::string&              name,
                                                    const std::shared_ptr<Image2D>& image2D )
     {
-        auto it = m_Images2D.find( name );
-        if ( it == m_Images2D.end() )
+        auto it = std::ranges::find( m_AvalivaleImages2D, name, []( const auto& pair ) { return pair.first; } );
+#ifdef DESERT_CONFIG_DEBUG
+        if ( it == m_AvalivaleImages2D.end() )
         {
             return Common::MakeFormattedError( "Image '{}' not found in material", name );
         }
+#endif // DESERT_CONFIG_DEBUG
 
-        m_Images2D[name].Image2D = image2D;
+        m_OverriddenImages2D.push_back( { image2D, it->second } );
 
         return BOOLSUCCESS;
     }
@@ -161,13 +163,15 @@ namespace Desert::Graphic::API::Vulkan
     Common::BoolResult VulkanMaterial::SetImageCube( const std::string&                name,
                                                      const std::shared_ptr<ImageCube>& imageCube )
     {
-        auto it = m_ImagesCube.find( name );
-        if ( it == m_ImagesCube.end() )
+        auto it = std::ranges::find( m_AvalivaleImagesCube, name, []( const auto& pair ) { return pair.first; } );
+#ifdef DESERT_CONFIG_DEBUG
+        if ( it == m_AvalivaleImagesCube.end() )
         {
             return Common::MakeFormattedError( "Image '{}' not found in material", name );
         }
+#endif // DESERT_CONFIG_DEBUG
 
-        m_ImagesCube[name].ImageCube = imageCube;
+        m_OverriddenImagesCube.push_back( { imageCube, it->second } );
 
         return BOOLSUCCESS;
     }

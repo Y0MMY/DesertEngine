@@ -45,8 +45,12 @@ namespace Desert::Graphic::API::Vulkan
         };
 
         std::vector<std::shared_ptr<VulkanUniformBuffer>> m_OverriddenUniforms;
-        std::unordered_map<std::string, Sampler2DData>    m_Images2D;
-        std::unordered_map<std::string, SamplerCubeData>  m_ImagesCube;
+
+        std::vector<std::pair<std::string, uint32_t>> m_AvalivaleImages2D;
+        std::vector<std::pair<std::string, uint32_t>> m_AvalivaleImagesCube;
+
+        std::vector<Sampler2DData>   m_OverriddenImages2D;
+        std::vector<SamplerCubeData> m_OverriddenImagesCube;
 
         Common::Memory::Buffer m_PushConstantBuffer;
     };
