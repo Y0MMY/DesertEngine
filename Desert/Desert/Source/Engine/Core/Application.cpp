@@ -114,7 +114,14 @@ namespace Desert::Engine
     {
         m_ImGuiLayer->Begin();
 
-        m_ImGuiLayer->OnUpdate( {} );
+        m_ImGuiLayer->Process(
+             [this]()
+             {
+                 for ( const auto& layer : m_LayerStack )
+                 {
+                    // layer->OnImGuiRender();
+                 }
+             } );
 
         m_ImGuiLayer->End();
     }

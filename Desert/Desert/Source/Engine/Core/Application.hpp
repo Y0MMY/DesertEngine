@@ -52,7 +52,7 @@ namespace Desert::Engine
         }
         void ProcessEvents( Common::Event& e );
 
-        [[maybe_unused]] void ProcessImGui();
+        void ProcessImGui();
 
     private:
         ApplicationInfo                 m_ApplicationInfo;

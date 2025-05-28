@@ -39,6 +39,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_ColorFormat;
         }
 
+        const uint32_t GetWidth() const { return m_Width; }
+        const uint32_t GetHeight() const { return m_Height; }
+
         VkColorSpaceKHR GetColorSpace() const
         {
             return m_ColorSpace;

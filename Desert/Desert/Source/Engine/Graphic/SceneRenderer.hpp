@@ -8,6 +8,7 @@
 #include <Engine/Core/Camera.hpp>
 
 #include <Common/Core/Events/WindowEvents.hpp>
+#include <Common/Core/EventRegistry.hpp>
 
 namespace Desert::Core
 {
@@ -16,7 +17,7 @@ namespace Desert::Core
 
 namespace Desert::Graphic
 {
-    class SceneRenderer final
+    class SceneRenderer final : public Common::EventHandler
     {
     public:
         [[nodiscard]] Common::BoolResult Init();
@@ -25,7 +26,7 @@ namespace Desert::Graphic
                                                      const Core::Camera&                         camera );
         [[nodiscard]] Common::BoolResult EndScene();
 
-        void OnEvent( Common::Event& e );
+        void OnEvent( Common::Event& e ) override;
 
         void               RenderMesh( const std::shared_ptr<Mesh>& mesh );
         const Environment  CreateEnvironment( const Common::Filepath& filepath );

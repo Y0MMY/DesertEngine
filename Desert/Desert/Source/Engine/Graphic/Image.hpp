@@ -1,10 +1,11 @@
 #pragma once
 
 #include <Engine/Core/Formats/ImageFormat.hpp>
+#include <Engine/Graphic/DynamicResources.hpp>
 
 namespace Desert::Graphic
 {
-    class Image
+    class Image : public DynamicResources
     {
     public:
         virtual uint32_t                      GetWidth() const               = 0;

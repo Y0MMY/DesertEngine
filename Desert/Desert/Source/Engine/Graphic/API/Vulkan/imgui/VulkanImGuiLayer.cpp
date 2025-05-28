@@ -155,6 +155,11 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         return BOOLSUCCESS;
     }
 
+    void VulkanImGui::Process( const std::function<void()>& func )
+    {
+        VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand( func );
+    }
+
     void VulkanImGui::Begin()
     {
         VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand(
@@ -199,6 +204,8 @@ namespace Desert::Graphic::API::Vulkan::ImGui
                  ImGui_ImplVulkan_RenderDrawData( ::ImGui::GetDrawData(), commandBuffer, 0 );
 
                  vkCmdEndRenderPass( commandBuffer );
+
+                 ::ImGui::UpdatePlatformWindows();
              } );
     }
 } // namespace Desert::Graphic::API::Vulkan::ImGui

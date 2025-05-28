@@ -11,17 +11,17 @@ namespace Desert::Graphic::API::Vulkan
     {
         std::string Tag;
         uint32_t    Size;
-        uint32_t    Offset; // NOTE: currently used to not have the field as TotalAllocatedBytes
     };
+
+#ifdef DESERT_CONFIG_DEBUG
+#define CHECK_RESOURCE_LEAKS_ALLOCATOR() VulkanAllocator::GetInstance().CheckResourceLeaks();
+#else
+#define CHECK_RESOURCE_LEAKS_ALLOCATOR()
+#endif
 
     class VulkanAllocator : public Common::Singleton<VulkanAllocator>
     {
     public:
-        static auto& GetAllocatedDataInfo()
-        {
-            return s_AllocatedDataInfo;
-        }
-
         Common::Result<VmaAllocation> RT_AllocateImage( const std::string&       tag,
                                                         const VkImageCreateInfo& imageCreateInfo,
                                                         VmaMemoryUsage usage, VkImage& outImage );
@@ -43,13 +43,17 @@ namespace Desert::Graphic::API::Vulkan
 
         void Init( const VulkanLogicalDevice& device, VkInstance instance );
 
+        void Shutdown();
+
+#ifdef DESERT_CONFIG_DEBUG
+        void CheckResourceLeaks();
+#endif
+
         static VmaAllocator& GetVMAAllocator();
 
         VulkanAllocator() = default;
 
     private:
-        static inline std::vector<AllocatedData> s_AllocatedDataInfo;
-
         friend class Common::Singleton<VulkanAllocator>;
     };
 } // namespace Desert::Graphic::API::Vulkan

@@ -1,4 +1,5 @@
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
+#include <unordered_map>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -9,17 +10,26 @@ namespace Desert::Graphic::API::Vulkan
 #define ALLOCATOR_LOG( ... )
 #endif
 
-    static VmaAllocator s_VmaAllocator;
+    static VmaAllocator                                s_VmaAllocator        = nullptr;
+    static uint32_t                                    s_TotalAllocatedBytes = 0U;
+    static std::unordered_map<VkBuffer, AllocatedData> s_BufferAllocationSizes;
+    static std::unordered_map<VkImage, AllocatedData>  s_ImageAllocationSizes;
+
+#ifdef DESERT_CONFIG_DEBUG
+#define CHECK_RESOURCE_LEAKS()                                                                                    \
+    DESERT_VERIFY( s_BufferAllocationSizes.empty() && s_ImageAllocationSizes.empty(),                             \
+                   "Not all Vulkan resources were released!" );
+#else
+#define CHECK_RESOURCE_LEAKS()
+#endif
 
     namespace
     {
-        AllocatedData MakeNewAllocatedInfoData( const std::string& tag, const VmaAllocationInfo& infoAllcation,
-                                                const std::vector<AllocatedData>& data )
+        AllocatedData MakeNewAllocatedInfoData( const std::string& tag, const VmaAllocationInfo& infoAllcation )
         {
             AllocatedData newData;
-            newData.Tag    = tag;
-            newData.Size   = infoAllcation.size;
-            newData.Offset = data.size() ? data.back().Offset + data.back().Size : 0;
+            newData.Tag  = tag;
+            newData.Size = infoAllcation.size;
 
             return newData;
         }
@@ -32,7 +42,7 @@ namespace Desert::Graphic::API::Vulkan
         if ( s_VmaAllocator == nullptr )
         {
             return Common::MakeError<VmaAllocation>(
-                 "VmaAllocator is nullptr. You should call `VulkanAllocator::Init` first. " );
+                 "VmaAllocator is nullptr. You must call `VulkanAllocator::Init` first. " );
         }
 
         VmaAllocationCreateInfo allocCreateInfo = {};
@@ -44,12 +54,13 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationInfo allocInfo;
         vmaGetAllocationInfo( s_VmaAllocator, allocation, &allocInfo );
 
-        const auto& infoData = MakeNewAllocatedInfoData( tag, allocInfo, s_AllocatedDataInfo);
+        const auto& infoData = MakeNewAllocatedInfoData( tag, allocInfo );
 
-        s_AllocatedDataInfo.push_back( infoData );
+        s_ImageAllocationSizes[outImage] = infoData;
+        s_TotalAllocatedBytes += allocInfo.size;
 
         ALLOCATOR_LOG( "Allocating image ( {} ); size: {}. ", tag, allocInfo.size );
-        ALLOCATOR_LOG( "\tTotal allocated : {}. ", infoData.Offset + infoData.Size );
+        ALLOCATOR_LOG( "\tTotal allocated : {}. ", s_TotalAllocatedBytes );
 
         return Common::MakeSuccess( allocation );
     }
@@ -94,19 +105,44 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationInfo allocInfo;
         vmaGetAllocationInfo( s_VmaAllocator, allocation, &allocInfo );
 
-        const auto& infoData = MakeNewAllocatedInfoData( tag, allocInfo, s_AllocatedDataInfo );
-
-        s_AllocatedDataInfo.push_back( infoData );
+        const auto& infoData               = MakeNewAllocatedInfoData( tag, allocInfo );
+        s_BufferAllocationSizes[outBuffer] = infoData;
+        s_TotalAllocatedBytes += allocInfo.size;
 
         ALLOCATOR_LOG( "Allocating buffer ( {} ); size: {}. ", tag, allocInfo.size );
-        ALLOCATOR_LOG( "\tTotal allocated : {}. ", infoData.Offset + infoData.Size );
+        ALLOCATOR_LOG( "\tTotal allocated : {}. ", s_TotalAllocatedBytes );
 
         return Common::MakeSuccess( allocation );
     }
 
     void VulkanAllocator::RT_DestroyBuffer( VkBuffer buffer, VmaAllocation allocation )
     {
+        auto it = s_BufferAllocationSizes.find( buffer );
+        if ( it != s_BufferAllocationSizes.end() )
+        {
+            s_TotalAllocatedBytes -= it->second.Size;
+            ALLOCATOR_LOG( "Deallocating buffer ( {} ); size: {}. ", it->second.Tag, it->second.Size );
+            ALLOCATOR_LOG( "\tTotal allocated : {}. ", s_TotalAllocatedBytes );
+
+            s_BufferAllocationSizes.erase( it );
+        }
         vmaDestroyBuffer( s_VmaAllocator, buffer, allocation );
+    }
+
+    void VulkanAllocator::Shutdown()
+    {
+        CheckResourceLeaks();
+
+        if ( s_VmaAllocator )
+        {
+            vmaDestroyAllocator( s_VmaAllocator );
+            s_VmaAllocator = nullptr;
+        }
+    }
+
+    void VulkanAllocator::CheckResourceLeaks()
+    {
+        CHECK_RESOURCE_LEAKS();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

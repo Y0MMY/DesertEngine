@@ -22,7 +22,6 @@ namespace Desert::Graphic::API::Vulkan
     public:
         virtual const VulkanImageInfo& GetVulkanImageInfo() const = 0;
         virtual uint32_t               GetMipmapLevels() const    = 0;
-        virtual Common::BoolResult     RT_Invalidate()            = 0;
     };
 
     class VulkanImage2D final : public Image2D, public VulkanImageBase
@@ -76,7 +75,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_VulkanImageInfo;
         }
 
-        Common::BoolResult RT_Invalidate() override;
+        Common::BoolResult RT_Invalidate();
+        Common::BoolResult Invalidate() override;
+        Common::BoolResult Release() override;
 
         const auto GetMipImageView( uint32_t level ) const
         {
@@ -84,10 +85,9 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        Common::BoolResult CreateTextureImage( VkDevice device, VulkanAllocator& allocator,
-                                               const VkImageCreateInfo& imageInfo, VkFormat format );
-        Common::BoolResult CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
-                                                  VkImageCreateInfo& imageInfo, VkFormat format );
+        Common::BoolResult CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo,
+                                               VkFormat format );
+        Common::BoolResult CreateAttachmentImage( VkDevice device, VkImageCreateInfo& imageInfo, VkFormat format );
 
         VkImageCreateInfo CreateImageInfo( VkFormat format );
 
@@ -150,7 +150,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_VulkanImageInfo;
         }
 
-        Common::BoolResult RT_Invalidate() override;
+        Common::BoolResult RT_Invalidate();
+        Common::BoolResult Invalidate() override;
+        Common::BoolResult Release() override;
 
         const auto GetMipImageView( uint32_t level ) const
         {
@@ -158,8 +160,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        Common::BoolResult CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
-                                               const VkImageCreateInfo& imageInfo, VkFormat format );
+        Common::BoolResult CreateCubemapImage( VkDevice device, const VkImageCreateInfo& imageInfo,
+                                               VkFormat format );
         VkImageCreateInfo  CreateImageInfo( VkFormat format );
 
     private:

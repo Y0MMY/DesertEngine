@@ -24,12 +24,12 @@ namespace Desert::Graphic::API::Vulkan
             std::vector<VkImageView> result( mipsLevel );
             for ( uint32_t mip = 0; mip < mipsLevel; ++mip )
             {
-                VkImageViewCreateInfo viewInfo           = {};
-                viewInfo.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-                viewInfo.image                           = image;
-                viewInfo.viewType                        = isCubeMap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
-                viewInfo.format                          = format;
-                viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                VkImageViewCreateInfo viewInfo       = {};
+                viewInfo.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                viewInfo.image                       = image;
+                viewInfo.viewType                    = isCubeMap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
+                viewInfo.format                      = format;
+                viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
                 viewInfo.subresourceRange.baseMipLevel   = mip;
                 viewInfo.subresourceRange.levelCount     = 1;
                 viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -156,28 +156,32 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         // Creates a temporary buffer for transferring image data to GPU
-        Common::Result<VmaAllocation> CreateStagingBuffer( VulkanAllocator& allocator, uint32_t bufferSize,
-                                                           VkBuffer& outBuffer )
+        Common::Result<VmaAllocation> CreateStagingBuffer( uint32_t bufferSize, VkBuffer& outBuffer )
         {
             VkBufferCreateInfo bufferInfo = { .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                               .size        = bufferSize,
                                               .usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
 
-            return allocator.RT_AllocateBuffer( "ImageStagingBuffer", bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU,
-                                                outBuffer );
+            return VulkanAllocator::GetInstance().RT_AllocateBuffer( "ImageStagingBuffer", bufferInfo,
+                                                                     VMA_MEMORY_USAGE_CPU_TO_GPU, outBuffer );
+        }
+
+        void ReleaseStagingBuffer( VkBuffer inBuffer, const VmaAllocation& allocation )
+        {
+
+            return VulkanAllocator::GetInstance().RT_DestroyBuffer( inBuffer, allocation );
         }
 
         // Copies image data to a staging buffer
-        void CopyToStagingBuffer( VulkanAllocator& allocator, VkBuffer stagingBuffer,
-                                  VmaAllocation stagingAllocation, uint32_t dataSize,
+        void CopyToStagingBuffer( VkBuffer stagingBuffer, VmaAllocation stagingAllocation, uint32_t dataSize,
                                   const Core::Formats::ImagePixelData& imageData,
                                   Core::Formats::ImageFormat           format )
         {
             if ( !Core::Formats::HasData( imageData ) )
                 return;
 
-            void* mappedData = allocator.MapMemory( stagingAllocation );
+            void* mappedData = VulkanAllocator::GetInstance().MapMemory( stagingAllocation );
 
             switch ( format )
             {
@@ -205,14 +209,14 @@ namespace Desert::Graphic::API::Vulkan
                     break;
             }
 
-            allocator.UnmapMemory( stagingAllocation );
+            VulkanAllocator::GetInstance().UnmapMemory( stagingAllocation );
         }
 
         // Creates a Vulkan image with specified parameters
-        inline Common::Result<VmaAllocation> CreateImage( VulkanAllocator&         allocator,
-                                                          const VkImageCreateInfo& imageInfo, VkImage& outImage )
+        inline Common::Result<VmaAllocation> CreateImage( const VkImageCreateInfo& imageInfo, VkImage& outImage )
         {
-            return allocator.RT_AllocateImage( "VulkanImage", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, outImage );
+            return VulkanAllocator::GetInstance().RT_AllocateImage( "VulkanImage", imageInfo,
+                                                                    VMA_MEMORY_USAGE_GPU_ONLY, outImage );
         }
 
         // Prepares a command buffer for image operations
@@ -284,11 +288,10 @@ namespace Desert::Graphic::API::Vulkan
             VK_CHECK_RESULT( vkCreateSampler( device, &samplerInfo, nullptr, &outSampler ) );
         }
 
-        Common::BoolResult CreateStorageImage( VkDevice device, VulkanAllocator& allocator,
-                                               const VkImageCreateInfo& imageInfo,
+        Common::BoolResult CreateStorageImage( VkDevice device, const VkImageCreateInfo& imageInfo,
                                                VulkanImageInfo& imageInfoVulkan, bool isCubeMap )
         {
-            auto imageAlloc = Utils::CreateImage( allocator, imageInfo, imageInfoVulkan.Image );
+            auto imageAlloc = Utils::CreateImage( imageInfo, imageInfoVulkan.Image );
             if ( !imageAlloc.IsSuccess() )
             {
                 return Common::MakeError<bool>( "Failed to create storage image: " + imageAlloc.GetError() );
@@ -351,8 +354,7 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanImage2D::RT_Invalidate()
     {
-        VkDevice         device    = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        VulkanAllocator& allocator = VulkanAllocator::GetInstance();
+        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
         VkFormat          format    = GetImageVulkanFormat( m_ImageSpecification.Format );
         VkImageCreateInfo imageInfo = CreateImageInfo( format );
@@ -368,13 +370,13 @@ namespace Desert::Graphic::API::Vulkan
                 {
                     return Common::MakeError<bool>( "Attachment images don't support Storage property" );
                 }
-                result = CreateAttachmentImage( device, allocator, imageInfo, format );
+                result = CreateAttachmentImage( device, imageInfo, format );
                 break;
             }
 
             default: // Regular 2D texture
             {
-                result = CreateTextureImage( device, allocator, imageInfo, format );
+                result = CreateTextureImage( device, imageInfo, format );
                 break;
             }
         }
@@ -410,10 +412,10 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     // Helper methods for different image types
-    Common::BoolResult VulkanImage2D::CreateAttachmentImage( VkDevice device, VulkanAllocator& allocator,
-                                                             VkImageCreateInfo& imageInfo, VkFormat format )
+    Common::BoolResult VulkanImage2D::CreateAttachmentImage( VkDevice device, VkImageCreateInfo& imageInfo,
+                                                             VkFormat format )
     {
-        auto allocation = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
+        auto allocation = Utils::CreateImage( imageInfo, m_VulkanImageInfo.Image );
         if ( !allocation.IsSuccess() )
         {
             return Common::MakeError<bool>( allocation.GetError() );
@@ -422,12 +424,12 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanImage2D::CreateTextureImage( VkDevice device, VulkanAllocator& allocator,
-                                                          const VkImageCreateInfo& imageInfo, VkFormat format )
+    Common::BoolResult VulkanImage2D::CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo,
+                                                          VkFormat format )
     {
         if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage ) [[likely]]
         {
-            return Utils::CreateStorageImage( device, allocator, imageInfo, m_VulkanImageInfo, false );
+            return Utils::CreateStorageImage( device, imageInfo, m_VulkanImageInfo, false );
         }
         else [[unlikely]]
         {
@@ -441,16 +443,16 @@ namespace Desert::Graphic::API::Vulkan
                                                         m_ImageSpecification.Format );
 
         VkBuffer stagingBuffer;
-        auto     stagingAlloc = Utils::CreateStagingBuffer( allocator, imageSize, stagingBuffer );
+        auto     stagingAlloc = Utils::CreateStagingBuffer( imageSize, stagingBuffer );
         if ( !stagingAlloc.IsSuccess() )
         {
             return Common::MakeError<bool>( stagingAlloc.GetError() );
         }
 
-        Utils::CopyToStagingBuffer( allocator, stagingBuffer, stagingAlloc.GetValue(), imageSize,
-                                    m_ImageSpecification.Data, m_ImageSpecification.Format );
+        Utils::CopyToStagingBuffer( stagingBuffer, stagingAlloc.GetValue(), imageSize, m_ImageSpecification.Data,
+                                    m_ImageSpecification.Format );
 
-        auto imageAlloc = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
+        auto imageAlloc = Utils::CreateImage( imageInfo, m_VulkanImageInfo.Image );
         if ( !imageAlloc.IsSuccess() )
         {
             return Common::MakeError<bool>( imageAlloc.GetError() );
@@ -610,6 +612,16 @@ namespace Desert::Graphic::API::Vulkan
         return result;
     }
 
+    Common::BoolResult VulkanImage2D::Invalidate()
+    {
+        return RT_Invalidate();
+    }
+
+    Common::BoolResult VulkanImage2D::Release()
+    {
+        return RT_Invalidate();
+    }
+
     //***************************************************************************************************//
 
     VulkanImageCube::VulkanImageCube( const Core::Formats::ImageCubeSpecification& spec )
@@ -638,9 +650,9 @@ namespace Desert::Graphic::API::Vulkan
 
         Common::BoolResult result;
         if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage )
-            result = Utils::CreateStorageImage( device, allocator, imageInfo, m_VulkanImageInfo, true );
+            result = Utils::CreateStorageImage( device, imageInfo, m_VulkanImageInfo, true );
         else
-            result = CreateCubemapImage( device, allocator, imageInfo, format );
+            result = CreateCubemapImage( device, imageInfo, format );
 
         if ( !result.IsSuccess() )
             return result;
@@ -666,8 +678,8 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanImageCube::CreateCubemapImage( VkDevice device, VulkanAllocator& allocator,
-                                                            const VkImageCreateInfo& imageInfo, VkFormat format )
+    Common::BoolResult VulkanImageCube::CreateCubemapImage( VkDevice device, const VkImageCreateInfo& imageInfo,
+                                                            VkFormat format )
     {
         if ( !Core::Formats::HasData( m_ImageSpecification.Data ) )
         {
@@ -681,13 +693,14 @@ namespace Desert::Graphic::API::Vulkan
         const uint32_t srcRowPitch = m_ImageSpecification.Width * bytesPerPixel;
 
         VkBuffer stagingBuffer;
-        auto     stagingAlloc = Utils::CreateStagingBuffer( allocator, totalSize, stagingBuffer );
+        auto     stagingAlloc = Utils::CreateStagingBuffer( totalSize, stagingBuffer );
         if ( !stagingAlloc.IsSuccess() )
         {
             return Common::MakeError<bool>( stagingAlloc.GetError() );
         }
 
-        uint8_t* dstData   = static_cast<uint8_t*>( allocator.MapMemory( stagingAlloc.GetValue() ) );
+        uint8_t* dstData =
+             static_cast<uint8_t*>( VulkanAllocator::GetInstance().MapMemory( stagingAlloc.GetValue() ) );
         auto srcDataResult = Utils::GetImageDataPointer( m_ImageSpecification.Data, m_ImageSpecification.Format );
 
         if ( !srcDataResult.IsSuccess() )
@@ -723,9 +736,9 @@ namespace Desert::Graphic::API::Vulkan
                 memcpy( dstData + dstOffset, srcData + srcOffset, m_FaceSize * bytesPerPixel );
             }
         }
-        allocator.UnmapMemory( stagingAlloc.GetValue() );
+        VulkanAllocator::GetInstance().UnmapMemory( stagingAlloc.GetValue() );
 
-        auto imageAlloc = Utils::CreateImage( allocator, imageInfo, m_VulkanImageInfo.Image );
+        auto imageAlloc = Utils::CreateImage( imageInfo, m_VulkanImageInfo.Image );
         if ( !imageAlloc.IsSuccess() )
         {
             return Common::MakeError<bool>( imageAlloc.GetError() );
@@ -805,6 +818,17 @@ namespace Desert::Graphic::API::Vulkan
             createInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
 
         return createInfo;
+    }
+
+    Common::BoolResult VulkanImageCube::Invalidate()
+    {
+        return RT_Invalidate();
+    }
+
+    Common::BoolResult VulkanImageCube::Release()
+    {
+        return RT_Invalidate();
+
     }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -329,7 +329,7 @@ namespace Desert::Graphic::API::Vulkan
         renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassBeginInfo.renderPass            = swapChain->GetRenderPass();
         renderPassBeginInfo.renderArea.offset     = { 0, 0 };
-        renderPassBeginInfo.renderArea.extent     = { 1920, 780 };
+        renderPassBeginInfo.renderArea.extent     = { swapChain->GetWidth(), swapChain->GetHeight() };
         renderPassBeginInfo.clearValueCount       = static_cast<uint32_t>( clearValues.size() );
         renderPassBeginInfo.pClearValues          = clearValues.data();
         renderPassBeginInfo.framebuffer           = framebuffer;
@@ -421,6 +421,27 @@ namespace Desert::Graphic::API::Vulkan
         {
             fb->Resize( width, height );
         }
+
+        auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+
+        for ( auto& image : swapChain->GetSwapChainVKImage() )
+        {
+            VkImageMemoryBarrier barrier{};
+            barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout                   = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image                       = image;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.layerCount = 1;
+
+            vkCmdPipelineBarrier( commandBuffer.GetValue(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier );
+        }
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer.GetValue() );
     }
 
     void VulkanRendererAPI::SetViewportAndScissor()
