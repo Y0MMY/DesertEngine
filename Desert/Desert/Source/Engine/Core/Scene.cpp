@@ -45,4 +45,9 @@ namespace Desert::Core
         return m_SceneRenderer->GetEnvironment();
     }
 
+    Desert::ECS::Entity Scene::CreateNewEntity( std::string&& entityName )
+    {
+        return ECS::Entity( std::move( entityName ), m_Registry.create() );
+    }
+
 } // namespace Desert::Core

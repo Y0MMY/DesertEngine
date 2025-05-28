@@ -9,8 +9,6 @@ namespace Desert::Graphic
 {
     NO_DISCARD Common::BoolResult SceneRenderer::Init()
     {
-        REGISTER_EVENT( this, OnEvent );
-
         uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
         uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
 
@@ -205,8 +203,6 @@ namespace Desert::Graphic
         const auto& cameraUB    = cameraUBRes.GetValue();
         cameraUB->RT_SetData( &camera, 128, 0 );
         m_SceneInfo.Renderdata.Skybox.Material->AddUniformToOverride( cameraUB );
-        m_SceneInfo.Renderdata.Skybox.Material->SetImageCube( "samplerCubeMap",
-                                                              m_SceneInfo.EnvironmentData.RadianceMap );
 
         renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Skybox.Pipeline,
                                        m_SceneInfo.Renderdata.Skybox.Material );
@@ -239,6 +235,9 @@ namespace Desert::Graphic
     void SceneRenderer::SetEnvironment( const Environment& environment )
     {
         m_SceneInfo.EnvironmentData = environment;
+
+        m_SceneInfo.Renderdata.Skybox.Material->SetImageCube( "samplerCubeMap",
+                                                              m_SceneInfo.EnvironmentData.RadianceMap );
     }
 
     const Environment& SceneRenderer::GetEnvironment()

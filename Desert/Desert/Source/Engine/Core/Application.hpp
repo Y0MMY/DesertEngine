@@ -52,7 +52,7 @@ namespace Desert::Engine
         }
         void ProcessEvents( Common::Event& e );
 
-        [[maybe_unused]]void ProcessImGui();
+        [[maybe_unused]] void ProcessImGui();
 
     private:
         ApplicationInfo                 m_ApplicationInfo;
@@ -64,7 +64,6 @@ namespace Desert::Engine
         bool             m_IsRunningApplication = true;
 
     public:
-        inline static std::vector<std::function<void( Common::Event& )>> s_RegisteredEvents;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer> m_ImGuiLayer;

@@ -12,7 +12,7 @@ namespace Desert::Core
 
     Camera::Camera()
     {
-        REGISTER_EVENT( this, OnEvent );
+       // REGISTER_EVENT( this, OnEvent );
 
         UpdateProjectionMatrix();
 
@@ -32,7 +32,7 @@ namespace Desert::Core
 
     Camera::Camera( const glm::mat4& projectionMatrix ) : m_ProjectionMatrix( projectionMatrix )
     {
-        REGISTER_EVENT( this, OnEvent );
+        // REGISTER_EVENT( this, OnEvent );
     }
 
     void Camera::OnEvent( Common::Event& e )

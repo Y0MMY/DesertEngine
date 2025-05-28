@@ -376,7 +376,7 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                                  const std::shared_ptr<Material>& material ) // TODO: clean up
+                                                  const std::shared_ptr<Material>& material )
     {
         material->ApplyMaterial();
 

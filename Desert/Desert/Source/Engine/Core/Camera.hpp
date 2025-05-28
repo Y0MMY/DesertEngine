@@ -5,11 +5,13 @@
 #include <Common/Core/Events/MouseEvents.hpp>
 #include <Engine/Core/Application.hpp>
 
+#include <Common/Core/EventRegistry.hpp>
+
 #include <glm/glm.hpp>
 
 namespace Desert::Core
 {
-    class Camera
+    class Camera : public Common::EventHandler
     {
     public:
         Camera();
@@ -26,12 +28,13 @@ namespace Desert::Core
         }
 
         void OnUpdate();
-        void OnEvent( Common::Event& e );
+        void OnEvent( Common::Event& e ) override;
 
         const auto GetDirection() const
         {
             return m_Direction;
         }
+
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
@@ -43,6 +46,7 @@ namespace Desert::Core
         glm::vec3 GetForwardDirection() const;
 
         void UpdateCameraView();
+
     private:
         glm::mat4 m_ProjectionMatrix = glm::mat4( 1.0f );
 

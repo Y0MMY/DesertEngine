@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Image.hpp>
 #include <Common/Core/Core.hpp>
+#include <Engine/ECS/Entity.hpp>
 
 #include <Engine/Core/Camera.hpp>
 
@@ -35,10 +36,13 @@ namespace Desert::Core
 
         void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const;
 
+        ECS::Entity CreateNewEntity( std::string&& entityName );
+
         [[nodiscard]] const Graphic::Environment& GetEnvironment() const;
 
     private:
         std::string                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
+        entt::registry m_Registry;
     };
 } // namespace Desert::Core

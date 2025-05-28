@@ -4,6 +4,8 @@
 #include <Engine/Core/EngineContext.h>
 #include <Engine/Graphic/Renderer.hpp>
 
+#include <Common/Core/EventRegistry.hpp>
+
 #include <GLFW/glfw3.h>
 
 namespace Desert::Engine
@@ -79,10 +81,7 @@ namespace Desert::Engine
                  return true;
              } );
 
-        for ( const auto& registeredEvent : s_RegisteredEvents )
-        {
-            registeredEvent( e );
-        }
+        Common::EventHandler::ForEach( [&]( Common::EventHandler& handler ) { handler.OnEvent( e ); } );
     }
 
     void Application::Init()
