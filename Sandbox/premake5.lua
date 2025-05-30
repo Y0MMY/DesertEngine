@@ -14,6 +14,7 @@ project "Sandbox"
         "%{wks.location}/ThirdParty/spdlog/include/",
         "%{wks.location}/ThirdParty/GLFW/include/",
         "%{wks.location}/ThirdParty/Glad/include/",
+        "%{wks.location}/ThirdParty/entt/include/",
         "%{wks.location}/ThirdParty/glm/",
         "%{wks.location}/ThirdParty/assimp/include",
         "%{wks.location}/ThirdParty/",
