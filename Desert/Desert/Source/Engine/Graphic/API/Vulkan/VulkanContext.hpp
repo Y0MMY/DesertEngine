@@ -9,7 +9,7 @@
 namespace Desert::Graphic::API::Vulkan
 {
 
-    class VulkanContext final : public RendererContext, public Common::Singleton<VulkanContext>
+    class VulkanContext final : public RendererContext
     {
     public:
         VulkanContext( GLFWwindow* window );
@@ -23,9 +23,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual void OnResize( uint32_t width, uint32_t height ) override
         {
         }
-        virtual void Shutdown() override
-        {
-        }
+        virtual void Shutdown() override;
 
         [[nodiscard]] static const VkInstance& GetVulkanInstance()
         {
@@ -49,8 +47,8 @@ namespace Desert::Graphic::API::Vulkan
         VkDebugReportCallbackEXT m_DebugReportCallback = VK_NULL_HANDLE;
         GLFWwindow*              m_GLFWwindow;
 
-        std::shared_ptr<VulkanSwapChain> m_SwapChain;
-        std::shared_ptr<VulkanQueue>     m_VulkanQueue;
+        std::unique_ptr<VulkanSwapChain> m_SwapChain;
+        std::unique_ptr<VulkanQueue>     m_VulkanQueue;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

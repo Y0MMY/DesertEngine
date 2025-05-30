@@ -2,12 +2,14 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
     Common::Result<bool> VulkanPhysicalDevice::CreateDevice()
     {
-        auto&    instance    = VulkanContext::GetInstance().GetVulkanInstance();
+        auto& instance = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
+                              ->GetVulkanInstance();
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices( instance, &deviceCount, nullptr );
         DESERT_VERIFY( deviceCount, "Failed to find GPUs with Vulkan support!" );

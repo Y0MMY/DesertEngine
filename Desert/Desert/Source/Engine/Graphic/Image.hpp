@@ -8,6 +8,8 @@ namespace Desert::Graphic
     class Image : public DynamicResources
     {
     public:
+        virtual ~Image() = default;
+
         virtual uint32_t                      GetWidth() const               = 0;
         virtual uint32_t                      GetHeight() const              = 0;
         virtual Core::Formats::ImageFormat    GetImageFormat() const         = 0;

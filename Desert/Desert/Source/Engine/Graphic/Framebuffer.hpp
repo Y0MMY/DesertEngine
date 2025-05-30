@@ -4,6 +4,8 @@
 #include <Engine/Graphic/RendererTypes.hpp>
 #include <Engine/Graphic/Image.hpp>
 
+#include <Engine/Graphic/DynamicResources.hpp>
+
 namespace Desert::Graphic
 {
     struct FramebufferAttachmentSpecification
@@ -25,7 +27,7 @@ namespace Desert::Graphic
         bool NoResizeble = false;
     };
 
-    class Framebuffer
+    class Framebuffer : public DynamicResources
     {
     public:
         virtual ~Framebuffer() = default;

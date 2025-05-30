@@ -6,10 +6,11 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    class VulkanPhysicalDevice
+    class VulkanPhysicalDevice final
     {
     public:
         VulkanPhysicalDevice() = default;
+        ~VulkanPhysicalDevice() = default;
 
         struct QueueFamilyIndices
         {
@@ -63,6 +64,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanLogicalDevice( const std::shared_ptr<VulkanPhysicalDevice>& physicalDevice );
+        ~VulkanLogicalDevice() = default;
 
         const auto& GetPhysicalDevice() const
         {

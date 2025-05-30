@@ -22,6 +22,8 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanAllocator : public Common::Singleton<VulkanAllocator>
     {
     public:
+        ~VulkanAllocator() = default;
+
         Common::Result<VmaAllocation> RT_AllocateImage( const std::string&       tag,
                                                         const VkImageCreateInfo& imageCreateInfo,
                                                         VmaMemoryUsage usage, VkImage& outImage );
@@ -31,6 +33,7 @@ namespace Desert::Graphic::API::Vulkan
                                                          VmaMemoryUsage usage, VkBuffer& outBuffer );
 
         void RT_DestroyBuffer( VkBuffer buffer, VmaAllocation allocation );
+        void RT_DestroyImage(VkImage image, VmaAllocation allocation);
 
         uint8_t* MapMemory( VmaAllocation allocation )
         {

@@ -17,7 +17,15 @@ namespace Desert::Core
 
     NO_DISCARD Common::BoolResult Scene::Init()
     {
-        return m_SceneRenderer->Init();
+        const auto res = m_SceneRenderer->Init();
+        if ( !res )
+        {
+            return Common::MakeError( res.GetError() );
+        }
+
+        SceneRendererManager::SceneRenderers.push_back( m_SceneRenderer );
+
+        return BOOLSUCCESS;
     }
 
     void Scene::SetEnvironment( const Graphic::Environment& environment )
@@ -28,6 +36,11 @@ namespace Desert::Core
     void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const
     {
         m_SceneRenderer->RenderMesh( mesh );
+    }
+
+    void Scene::OnUpdate()
+    {
+        m_SceneRenderer->OnUpdate();
     }
 
     NO_DISCARD Common::BoolResult Scene::EndScene()

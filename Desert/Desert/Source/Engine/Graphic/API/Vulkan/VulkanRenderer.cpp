@@ -126,14 +126,15 @@ namespace Desert::Graphic::API::Vulkan
             {
                 shader = Shader::Create( processingInfo.shaderName );
             }
-
-            Core::Formats::ImageCubeSpecification outputImageInfo;
-            outputImageInfo.Width  = processingInfo.width;
-            outputImageInfo.Height = processingInfo.height;
-            outputImageInfo.Mips =
+            const uint32_t mips =
                  Graphic::Utils::CalculateMipCount( processingInfo.width / 4, processingInfo.height / 3 );
-            outputImageInfo.Format     = processingInfo.format;
-            outputImageInfo.Properties = Core::Formats::Storage | Core::Formats::Sample;
+            Core::Formats::ImageCubeSpecification outputImageInfo = {
+                 .Width      = processingInfo.width,
+                 .Height     = processingInfo.height,
+                 .Format     = processingInfo.format,
+                 .Mips       = mips,
+                 .Properties = Core::Formats::Storage | Core::Formats::Sample,
+            };
 
             const std::shared_ptr<ImageCube> outputImage = ImageCube::Create( outputImageInfo );
             const auto& outputImageVulkan                = sp_cast<API::Vulkan::VulkanImageCube>( outputImage );
@@ -245,9 +246,7 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanRendererAPI::PresentFinalImage()
     {
-        std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
-             Renderer::GetInstance().GetRendererContext() )
-             ->PresentFinalImage();
+        static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PresentFinalImage();
 
         return Common::MakeSuccess( true );
     }
@@ -299,13 +298,13 @@ namespace Desert::Graphic::API::Vulkan
              renderPass->GetSpecification().TargetFramebuffer );
     }
 
-    std::shared_ptr<VulkanSwapChain> GetSwapChain()
+    const std::unique_ptr<VulkanSwapChain>& GetSwapChain()
     {
-        return sp_cast<Graphic::API::Vulkan::VulkanContext>( Renderer::GetInstance().GetRendererContext() )
+        return static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
              ->GetVulkanSwapChain();
     }
 
-    VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::shared_ptr<VulkanSwapChain>&   swapChain,
+    VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::unique_ptr<VulkanSwapChain>&   swapChain,
                                                      const std::shared_ptr<VulkanFramebuffer>& framebuffer,
                                                      const std::array<VkClearValue, 2>&        clearValues )
     {
@@ -321,7 +320,7 @@ namespace Desert::Graphic::API::Vulkan
         return renderPassBeginInfo;
     }
 
-    VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::shared_ptr<VulkanSwapChain>& swapChain,
+    VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::unique_ptr<VulkanSwapChain>& swapChain,
                                                      const VkFramebuffer                     framebuffer,
                                                      const std::array<VkClearValue, 2>&      clearValues )
     {
@@ -412,8 +411,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         vkDeviceWaitIdle( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice() );
 
-        const auto& swapChain = std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>(
-                                     Renderer::GetInstance().GetRendererContext() )
+        const auto& swapChain = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
                                      ->GetVulkanSwapChain();
 
         swapChain->OnResize( width, height );
@@ -638,6 +636,19 @@ namespace Desert::Graphic::API::Vulkan
         GenerateMipmaps2D( image );
         return Common::MakeSuccess( true );
     }
+
 #endif
+
+    void VulkanRendererAPI::Shutdown()
+    {
+        vkDeviceWaitIdle( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice() );
+
+        delete s_Data;
+    }
+
+    VkCommandBuffer VulkanRendererAPI::GetCurrentCmdBuffer() const
+    {
+        return m_CurrentCommandBuffer;
+    }
 
 } // namespace Desert::Graphic::API::Vulkan

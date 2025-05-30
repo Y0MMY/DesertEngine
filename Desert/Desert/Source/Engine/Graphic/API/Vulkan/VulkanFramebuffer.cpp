@@ -106,10 +106,9 @@ namespace Desert::Graphic::API::Vulkan
 
         for ( const auto attachment : spec.Attachments.Attachments )
         {
-            Core::Formats::Image2DSpecification spec;
-            spec.Format     = attachment;
-            spec.Usage      = Core::Formats::Image2DUsage::Attachment;
-            spec.Properties = Core::Formats::Sample;
+            Core::Formats::Image2DSpecification spec = { .Format     = attachment,
+                                                         .Usage      = Core::Formats::Image2DUsage::Attachment,
+                                                         .Properties = Core::Formats::Sample };
 
             if ( Graphic::Utils::IsDepthFormat( attachment ) )
             {
@@ -199,13 +198,18 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( frameBuffer );
     }
 
-    void VulkanFramebuffer::Release()
+    Common::BoolResult VulkanFramebuffer::Release()
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        m_ColorAttachment->Release();
+        // m_DepthAttachment->Release();
 
         vkDestroyFramebuffer( device, m_Framebuffer, VK_NULL_HANDLE );
 
         m_Framebuffer = VK_NULL_HANDLE;
+
+        return Common::MakeSuccess( true );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

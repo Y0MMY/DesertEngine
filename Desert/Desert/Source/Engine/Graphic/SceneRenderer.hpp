@@ -21,9 +21,13 @@ namespace Desert::Graphic
     {
     public:
         [[nodiscard]] Common::BoolResult Init();
+        void                             Shutdown();
 
         [[nodiscard]] Common::BoolResult BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene,
                                                      const Core::Camera&                         camera );
+
+        void OnUpdate();
+
         [[nodiscard]] Common::BoolResult EndScene();
 
         void OnEvent( Common::Event& e ) override;
@@ -33,8 +37,11 @@ namespace Desert::Graphic
         void               SetEnvironment( const Environment& environment );
         const Environment& GetEnvironment();
 
+        const std::shared_ptr<Image2D> GetFinalImage() const;
+
     private:
         void CompositeRenderPass();
+        void ToneMapRenderPass();
         void GeometryRenderPass();
 
     private:

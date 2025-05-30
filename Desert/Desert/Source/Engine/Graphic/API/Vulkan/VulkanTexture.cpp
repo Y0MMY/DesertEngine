@@ -7,6 +7,7 @@ namespace Desert::Graphic::API::Vulkan
 {
     struct ImageBaseSpec
     {
+        std::string                    Tag;
         uint32_t                       Width;
         uint32_t                       Height;
         Core::Formats::ImageFormat     Format;
@@ -22,26 +23,26 @@ namespace Desert::Graphic::API::Vulkan
         bool isHDR = Core::IO::ImageReader::IsHDR( path );
 
         ImageBaseSpec imageSpecification;
+        imageSpecification.Tag = Common::Utils::FileSystem::GetFileName( path );
 
         if ( isHDR )
         {
-            const auto& imageData         = Core::IO::ImageReader::ReadHDR( path );
-            imageSpecification.Width      = imageData.Width;
-            imageSpecification.Height     = imageData.Height;
-            imageSpecification.Format     = Core::Formats::ImageFormat::RGBA32F;
-            imageSpecification.Data       = imageData.Data;
-            imageSpecification.Properties = Core::Formats::Sample;
+            const auto& imageData     = Core::IO::ImageReader::ReadHDR( path );
+            imageSpecification.Width  = imageData.Width;
+            imageSpecification.Height = imageData.Height;
+            imageSpecification.Format = Core::Formats::ImageFormat::RGBA32F;
+            imageSpecification.Data   = imageData.Data;
         }
         else
         {
-            const auto& imageData         = Core::IO::ImageReader::Read( path, alpha );
-            imageSpecification.Width      = imageData.Width;
-            imageSpecification.Height     = imageData.Height;
-            imageSpecification.Format     = Core::Formats::ImageFormat::RGBA8F;
-            imageSpecification.Data       = imageData.Data;
-            imageSpecification.Properties = Core::Formats::Sample;
+            const auto& imageData     = Core::IO::ImageReader::Read( path, alpha );
+            imageSpecification.Width  = imageData.Width;
+            imageSpecification.Height = imageData.Height;
+            imageSpecification.Format = Core::Formats::ImageFormat::RGBA8F;
+            imageSpecification.Data   = imageData.Data;
         }
 
+        imageSpecification.Properties = Core::Formats::Sample;
         imageSpecification.Mips = Utils::CalculateMipCount( imageSpecification.Width, imageSpecification.Height );
 
         LOG_INFO( "Loading texture {}, alpha channel = {}, HDR = {}",
@@ -60,7 +61,8 @@ namespace Desert::Graphic::API::Vulkan
     {
         const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 
-        const Core::Formats::Image2DSpecification imageSpec = { .Width      = imageBaseSpec.Width,
+        const Core::Formats::Image2DSpecification imageSpec = { .Tag        = imageBaseSpec.Tag,
+                                                                .Width      = imageBaseSpec.Width,
                                                                 .Height     = imageBaseSpec.Height,
                                                                 .Format     = imageBaseSpec.Format,
                                                                 .Mips       = imageBaseSpec.Mips,
@@ -84,12 +86,13 @@ namespace Desert::Graphic::API::Vulkan
     {
         const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 
-        const Core::Formats::ImageCubeSpecification imageSpec = { .Width      = imageBaseSpec.Width,
-                                                                .Height     = imageBaseSpec.Height,
-                                                                .Format     = imageBaseSpec.Format,
-                                                                .Mips       = 1u,
-                                                                .Data       = imageBaseSpec.Data,
-                                                                .Properties = imageBaseSpec.Properties };
+        const Core::Formats::ImageCubeSpecification imageSpec = { .Tag        = imageBaseSpec.Tag,
+                                                                  .Width      = imageBaseSpec.Width,
+                                                                  .Height     = imageBaseSpec.Height,
+                                                                  .Format     = imageBaseSpec.Format,
+                                                                  .Mips       = 1u,
+                                                                  .Data       = imageBaseSpec.Data,
+                                                                  .Properties = imageBaseSpec.Properties };
 
         m_ImageCube = ImageCube::Create( imageSpec );
         return Common::MakeSuccess( true ); // TODO

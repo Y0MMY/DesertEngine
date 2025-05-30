@@ -36,7 +36,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_RenderPass;
         }
 
-        void Release();
+        Common::BoolResult Invalidate() override
+        {
+            return Common::MakeError( "Use Resize()" );
+        }
+        Common::BoolResult Release() override;
 
         virtual void Use( BindUsage = BindUsage::Bind ) const override;
 

@@ -7,6 +7,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 
+#include <Engine/Graphic/SceneRenderer.hpp> // remove
+
 namespace Desert::Graphic
 {
     static RendererAPI* s_RendererAPI = nullptr;
@@ -19,8 +21,7 @@ namespace Desert::Graphic
         {
             case RendererAPIType::Vulkan:
             {
-                std::static_pointer_cast<Graphic::API::Vulkan::VulkanContext>( m_RendererContext )
-                     ->CreateVKInstance();
+                static_cast<Graphic::API::Vulkan::VulkanContext*>( m_RendererContext.get() )->CreateVKInstance();
 
                 s_RendererAPI = new Graphic::API::Vulkan::VulkanRendererAPI;
 
@@ -124,6 +125,24 @@ namespace Desert::Graphic
     const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const
     {
         return m_BRDFTexture;
+    }
+
+    void Renderer::Shutdown()
+    {
+        s_RendererAPI->Shutdown();
+        m_BRDFTexture->GetImage2D()->Release();
+
+        for ( auto sceneRenderer : Core::SceneRendererManager::SceneRenderers )
+        {
+            sceneRenderer->Shutdown();
+        }
+        delete s_RendererAPI;
+        m_RendererContext->Shutdown();
+    }
+
+     Desert::Graphic::RendererAPI* Renderer::GetRendererAPI() const
+    {
+        return s_RendererAPI;
     }
 
 } // namespace Desert::Graphic

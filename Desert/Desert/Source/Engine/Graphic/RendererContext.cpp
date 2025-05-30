@@ -5,16 +5,14 @@
 
 namespace Desert::Graphic
 {
-    static std::shared_ptr<RendererContext> s_RendererContext = nullptr;
-
-    std::shared_ptr<RendererContext> RendererContext::Create( GLFWwindow* window )
+    std::unique_ptr<RendererContext> RendererContext::Create( GLFWwindow* window )
     {
         switch ( RendererAPI::GetAPIType() )
         {
             case RendererAPIType::Vulkan:
             {
 
-                return std::make_shared<API::Vulkan::VulkanContext>( window );
+                return std::make_unique<API::Vulkan::VulkanContext>( window );
             }
         }
 

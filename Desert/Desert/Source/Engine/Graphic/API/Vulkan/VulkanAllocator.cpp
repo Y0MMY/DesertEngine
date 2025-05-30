@@ -129,20 +129,42 @@ namespace Desert::Graphic::API::Vulkan
         vmaDestroyBuffer( s_VmaAllocator, buffer, allocation );
     }
 
+    void VulkanAllocator::RT_DestroyImage( VkImage image, VmaAllocation allocation )
+    {
+        auto it = s_ImageAllocationSizes.find( image );
+        if ( it != s_ImageAllocationSizes.end() )
+        {
+            s_TotalAllocatedBytes -= it->second.Size;
+            ALLOCATOR_LOG( "Deallocating image ( {} ); size: {}. ", it->second.Tag, it->second.Size );
+            ALLOCATOR_LOG( "\tTotal allocated: {}. ", s_TotalAllocatedBytes );
+
+            s_ImageAllocationSizes.erase( it );
+        }
+        vmaDestroyImage( s_VmaAllocator, image, allocation );
+    }
+
     void VulkanAllocator::Shutdown()
     {
+        for ( const auto& img : s_ImageAllocationSizes )
+        {
+            LOG_ERROR( "{} was not deallocated. Image", img.second.Tag );
+        }
+        for ( const auto& buff : s_BufferAllocationSizes )
+        {
+            LOG_ERROR( "{} was not deallocated. Buffer", buff.second.Tag );
+        }
+
         CheckResourceLeaks();
 
         if ( s_VmaAllocator )
         {
-            vmaDestroyAllocator( s_VmaAllocator );
+            //   vmaDestroyAllocator( s_VmaAllocator );
             s_VmaAllocator = nullptr;
         }
     }
 
     void VulkanAllocator::CheckResourceLeaks()
     {
-        CHECK_RESOURCE_LEAKS();
+        //  CHECK_RESOURCE_LEAKS();
     }
-
 } // namespace Desert::Graphic::API::Vulkan

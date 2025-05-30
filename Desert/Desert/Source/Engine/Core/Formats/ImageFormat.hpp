@@ -66,22 +66,24 @@ namespace Desert::Core::Formats
 
     struct Image2DSpecification
     {
-        uint32_t        Width;
-        uint32_t        Height;
-        ImageFormat     Format;
-        uint32_t        Mips = 1;
-        ImagePixelData  Data;
-        Image2DUsage    Usage;
-        ImageProperties Properties;
+        const std::string     Tag;
+        uint32_t              Width;
+        uint32_t              Height;
+        const ImageFormat     Format;
+        uint32_t              Mips = 1;
+        ImagePixelData        Data;
+        const Image2DUsage    Usage;
+        const ImageProperties Properties;
     };
 
     struct ImageCubeSpecification
     {
-        uint32_t        Width;
-        uint32_t        Height;
-        ImageFormat     Format;
-        uint32_t        Mips = 1;
-        ImagePixelData  Data;
-        ImageProperties Properties;
+        const std::string     Tag;
+        const uint32_t        Width;
+        const uint32_t        Height;
+        const ImageFormat     Format;
+        const uint32_t        Mips = 1;
+        const ImagePixelData  Data;
+        const ImageProperties Properties;
     };
 } // namespace Desert::Core::Formats

@@ -142,13 +142,16 @@ namespace Desert::Graphic
         return renderer.BeginFrame();
     }
 
+    void SceneRenderer::OnUpdate()
+    {
+        GeometryRenderPass();
+        ToneMapRenderPass();
+        CompositeRenderPass();
+    }
+
     NO_DISCARD Common::BoolResult SceneRenderer::EndScene()
     {
         auto& renderer = Renderer::GetInstance();
-
-        GeometryRenderPass();
-        CompositeRenderPass();
-
         return renderer.EndFrame();
     }
 
@@ -164,18 +167,29 @@ namespace Desert::Graphic
         auto&                                              renderer = Renderer::GetInstance();
         std::vector<std::shared_ptr<Graphic::Framebuffer>> framebuffers;
         framebuffers.push_back( m_SceneInfo.Renderdata.Skybox.Framebuffer );
+        framebuffers.push_back( m_SceneInfo.Renderdata.Composite.Framebuffer );
         renderer.ResizeWindowEvent( e.width, e.height, framebuffers );
         return false;
     }
 
     void SceneRenderer::CompositeRenderPass()
     {
-
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         auto& renderer = Renderer::GetInstance();
 
         renderer.BeginSwapChainRenderPass();
+        renderer.EndRenderPass();
+    }
+
+    void SceneRenderer::ToneMapRenderPass()
+    {
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.BeginRenderPass( m_SceneInfo.Renderdata.Composite.RenderPass );
+
         m_SceneInfo.Renderdata.Composite.Material->SetImage2D(
              "u_GeometryTexture", m_SceneInfo.Renderdata.Skybox.Framebuffer->GetColorAttachmentImage() );
 
@@ -245,4 +259,32 @@ namespace Desert::Graphic
         return m_SceneInfo.EnvironmentData;
     }
 
+    void SceneRenderer::Shutdown()
+    {
+        if ( m_SceneInfo.EnvironmentData.IrradianceMap )
+        {
+            m_SceneInfo.EnvironmentData.IrradianceMap->Release();
+            m_SceneInfo.EnvironmentData.IrradianceMap.reset();
+        }
+
+        if ( m_SceneInfo.EnvironmentData.PreFilteredMap )
+        {
+            m_SceneInfo.EnvironmentData.PreFilteredMap->Release();
+            m_SceneInfo.EnvironmentData.PreFilteredMap.reset();
+        }
+
+        if ( m_SceneInfo.EnvironmentData.RadianceMap )
+        {
+            m_SceneInfo.EnvironmentData.RadianceMap->Release();
+            m_SceneInfo.EnvironmentData.RadianceMap.reset();
+        }
+
+        m_SceneInfo.Renderdata.Composite.Framebuffer->Release();
+        m_SceneInfo.Renderdata.Composite.Framebuffer.reset();
+    }
+
+    const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage() const
+    {
+        return m_SceneInfo.Renderdata.Composite.Framebuffer->GetColorAttachmentImage();
+    }
 } // namespace Desert::Graphic

@@ -10,6 +10,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         virtual void Init() override;
+        virtual void Shutdown() override;
 
         [[nodiscard]] virtual Common::BoolResult BeginFrame() override;
         [[nodiscard]] virtual Common::BoolResult EndFrame() override;
@@ -38,7 +39,7 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] virtual Common::BoolResult
         GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
 #endif
-
+        VkCommandBuffer GetCurrentCmdBuffer() const;
     private:
         void SetViewportAndScissor();
 

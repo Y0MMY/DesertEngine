@@ -14,11 +14,13 @@
 namespace Desert::Graphic
 {
     struct PBRTextures;
+    class RendererAPI;
 
     class Renderer : public Common::Singleton<Renderer>
     {
     public:
         Common::BoolResult Init();
+        void               Shutdown();
 
         const auto& GetRendererContext() const
         {
@@ -40,6 +42,8 @@ namespace Desert::Graphic
 
         void ResizeWindowEvent( uint32_t width, uint32_t height,
                                 const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
+
+        RendererAPI* GetRendererAPI() const;
 
         const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
 
@@ -65,6 +69,6 @@ namespace Desert::Graphic
 
     private:
         std::shared_ptr<Graphic::Texture2D> m_BRDFTexture;
-        std::shared_ptr<RendererContext>    m_RendererContext;
+        std::unique_ptr<RendererContext>    m_RendererContext;
     };
 } // namespace Desert::Graphic

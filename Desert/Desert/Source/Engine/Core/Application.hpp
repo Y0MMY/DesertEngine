@@ -65,9 +65,6 @@ namespace Desert::Engine
 
     public:
 
-#ifdef EBABLE_IMGUI
-        std::shared_ptr<ImGui::ImGuiLayer> m_ImGuiLayer;
-#endif // EBABLE_IMGUI
     };
 
     Application* CreateApplicaton( int argc, char** argv );

@@ -19,6 +19,12 @@ namespace Desert
 
 namespace Desert::Core
 {
+    class SceneRendererManager // TODO: move to good space
+    {
+    public:
+        static inline std::vector<std::shared_ptr<Graphic::SceneRenderer>> SceneRenderers;
+    };
+
     class Scene final : public std::enable_shared_from_this<Scene>
     {
     public:
@@ -26,6 +32,7 @@ namespace Desert::Core
         Scene( const std::string& sceneName, const std::shared_ptr<Graphic::SceneRenderer>& sceneRenderer );
 
         [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
+        void OnUpdate();
         [[nodiscard]] Common::BoolResult EndScene();
 
         [[nodiscard]] Common::BoolResult Init();
@@ -43,6 +50,6 @@ namespace Desert::Core
     private:
         std::string                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
-        entt::registry m_Registry;
+        entt::registry                          m_Registry;
     };
 } // namespace Desert::Core

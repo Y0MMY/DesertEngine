@@ -20,6 +20,8 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanImageBase : public Image
     {
     public:
+        virtual ~VulkanImageBase() = default;
+
         virtual const VulkanImageInfo& GetVulkanImageInfo() const = 0;
         virtual uint32_t               GetMipmapLevels() const    = 0;
     };
@@ -28,6 +30,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanImage2D( const Core::Formats::Image2DSpecification& specification );
+        ~VulkanImage2D() override;
 
         // Image2D interface
         virtual uint32_t GetWidth() const override
@@ -103,6 +106,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanImageCube( const Core::Formats::ImageCubeSpecification& specification );
+        ~VulkanImageCube() override;
 
         // ImageCube interface
         virtual uint32_t GetWidth() const override

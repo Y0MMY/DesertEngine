@@ -320,7 +320,7 @@ namespace Desert::Graphic::API::Vulkan
             imageInfo.samples     = m_MSAASamples;
             imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-            VulkanAllocator::GetInstance().RT_AllocateImage( "sdf", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
+            VulkanAllocator::GetInstance().RT_AllocateImage( "Swapchain image color", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
                                                              m_ColorImages.Image );
 
             VkImageViewCreateInfo imageViewCI{};
@@ -357,7 +357,7 @@ namespace Desert::Graphic::API::Vulkan
             imageInfo.samples       = m_MSAASamples;
             imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
 
-            VulkanAllocator::GetInstance().RT_AllocateImage( "sdf", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
+            VulkanAllocator::GetInstance().RT_AllocateImage( "Swapchain image depth", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
                                                              m_DepthStencilImages.Image );
 
             VkImageViewCreateInfo imageViewCI{};

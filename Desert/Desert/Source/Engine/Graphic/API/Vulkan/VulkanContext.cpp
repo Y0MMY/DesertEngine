@@ -120,18 +120,16 @@ namespace Desert::Graphic::API::Vulkan
         auto& lDevice = Common::Singleton<VulkanLogicalDevice>::CreateInstance( pDevice );
         lDevice.CreateDevice();
 
-        VulkanAllocator::CreateInstance();
-        VulkanAllocator::GetInstance().Init( lDevice, s_VulkanInstance );
-
+        VulkanAllocator::CreateInstance().Init( lDevice, s_VulkanInstance );
         CommandBufferAllocator::CreateInstance( lDevice );
 
-        m_SwapChain = std::make_shared<VulkanSwapChain>();
+        m_SwapChain = std::make_unique<VulkanSwapChain>();
         m_SwapChain->Init( m_GLFWwindow, s_VulkanInstance, lDevice );
 
         uint32_t width, height;
         m_SwapChain->Create( &width, &height );
 
-        m_VulkanQueue = std::make_shared<VulkanQueue>( m_SwapChain.get() ); // TODO: make shared ptr
+        m_VulkanQueue = std::make_unique<VulkanQueue>( m_SwapChain.get() ); // TODO: make shared ptr
         m_VulkanQueue->Init();
 
         VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );
@@ -150,6 +148,11 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanContext::PresentFinalImage() const
     {
         m_VulkanQueue->Present();
+    }
+
+    void VulkanContext::Shutdown()
+    {
+        VulkanAllocator::GetInstance().Shutdown();
     }
 
 } // namespace Desert::Graphic::API::Vulkan
