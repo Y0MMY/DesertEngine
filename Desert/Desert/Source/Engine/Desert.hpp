@@ -1,5 +1,14 @@
 #pragma once
 
+#include <cstdint>   
+#include <variant>   
+#include <optional>  
+#include <vector>    
+#include <string>    
+#include <algorithm> 
+#include <cmath>     
+#include <memory>     
+
 // =================== Common =================== //
 
 #include <Common/Core/LayerStack.hpp>
@@ -23,4 +32,4 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/Mesh.hpp>
-#include <Engine/imgui/UI/ImGui.hpp>
+#include <Engine/Graphic/UICacheTexture.hpp>

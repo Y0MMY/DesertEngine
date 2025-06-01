@@ -148,4 +148,10 @@ namespace Desert::Platform::Windows
         Graphic::Renderer::GetInstance().GetRendererContext()->BeginFrame();
     }
 
+    void WindowsWindow::SetTitle( const std::string& title )
+    {
+        m_Data.Specification.Title = title;
+        glfwSetWindowTitle( m_GLFWWindow, title.c_str() );
+    }
+
 } // namespace Desert::Platform::Windows

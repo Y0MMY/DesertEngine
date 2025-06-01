@@ -1,6 +1,9 @@
 #pragma once
 
 #include <Engine/Desert.hpp>
+#include <imgui/imgui.h>
+#include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
+#include "Editor/Widgets/Panels/IPanel.hpp"
 
 namespace Desert
 {
@@ -32,7 +35,9 @@ namespace Desert
         ImVec2 m_Size;
 
 #ifdef EBABLE_IMGUI
-        std::shared_ptr<ImGui::ImGuiLayer> m_ImGuiLayer;
+        std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
+        std::unique_ptr<Editor::UI::UIHelper>        m_UIHelper;
+        std::vector<std::unique_ptr<Editor::IPanel>> m_Panels;
 #endif // EBABLE_IMGUI
     };
 } // namespace Desert

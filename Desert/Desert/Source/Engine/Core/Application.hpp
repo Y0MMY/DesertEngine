@@ -65,6 +65,12 @@ namespace Desert::Engine
         Common::Timestep m_PrevTimestep;
         bool             m_IsRunningApplication = true;
 
+        float    m_FPS        = 0.0f;
+        float    m_FPSTimer   = 0.0f;
+        uint32_t m_FPSCounter = 0;
+
+        bool m_Minimized = false;
+
     public:
     };
 

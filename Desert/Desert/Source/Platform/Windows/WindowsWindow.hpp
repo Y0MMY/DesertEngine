@@ -22,10 +22,7 @@ namespace Desert::Platform::Windows
         {
             return m_Data.Specification.Title;
         }
-        virtual void SetTitle( const std::string& title ) override
-        {
-            m_Data.Specification.Title = title;
-        }
+        virtual void SetTitle( const std::string& title ) override;
 
         virtual void                   SetWindowSize( uint32_t width, uint32_t height ) override;
         [[nodiscard]] virtual uint32_t GetWidth() const override;

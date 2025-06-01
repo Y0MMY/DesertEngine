@@ -1,6 +1,6 @@
 #include "EditorLayer.hpp"
 
-#include <imgui/imgui.h>
+#include "Editor/Widgets/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
 
 namespace Desert
 {
@@ -58,6 +58,10 @@ namespace Desert
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
         m_ImGuiLayer->OnAttach();
+        m_UIHelper->Init();
+
+        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_testscene ) );
+
 #endif // EBABLE_IMGUI
 
         return BOOLSUCCESS;
@@ -174,27 +178,16 @@ namespace Desert
                 m_Size = viewportSize;
             }
 
-//            ImGui::UI::Image( m_testscenerenderer->GetFinalImage(), viewportSize );
+            m_UIHelper->Image( m_testscenerenderer->GetFinalImage(), viewportSize );
         }
         ::ImGui::End();
 
-        ::ImGui::Begin( "Scene Hierarchy" );
+        for ( const auto& panel : m_Panels )
         {
-            // Scene hierarchy content
+            ::ImGui::Begin( panel->GetName().c_str() );
+            panel->OnUIRender();
+            ::ImGui::End();
         }
-        ::ImGui::End();
-
-        ::ImGui::Begin( "Properties" );
-        {
-            // Properties panel content
-        }
-        ::ImGui::End();
-
-        ::ImGui::Begin( "Console" );
-        {
-            // Console output
-        }
-        ::ImGui::End();
 
         ::ImGui::End(); // End dockspace
 
@@ -211,7 +204,7 @@ namespace Desert
     bool EditorLayer::OnWindowResize( Common::EventWindowResize& e )
 
     {
-        //m_ImGuiLayer->Resize( e.width, e.height );
+        // m_ImGuiLayer->Resize( e.width, e.height );
         m_testscenerenderer->Resize( e.width, e.height );
         return false;
     }
