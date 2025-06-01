@@ -1,4 +1,5 @@
 #pragma once
+#pragma once
 
 #include <Engine/Graphic/RendererAPI.hpp>
 
@@ -14,6 +15,7 @@ namespace Desert::Graphic::API::Vulkan
 
         [[nodiscard]] virtual Common::BoolResult BeginFrame() override;
         [[nodiscard]] virtual Common::BoolResult EndFrame() override;
+        [[nodiscard]] virtual Common::BoolResult PrepareNextFrame() override;
         [[nodiscard]] virtual Common::BoolResult PresentFinalImage() override;
         [[nodiscard]] virtual Common::BoolResult
                                    BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
@@ -25,8 +27,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                            const std::shared_ptr<Material>& material ) override;
 
-        virtual void ResizeWindowEvent( uint32_t width, uint32_t height,
-                                        const std::vector<std::shared_ptr<Framebuffer>>& framebuffers ) override;
+        virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
 
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 

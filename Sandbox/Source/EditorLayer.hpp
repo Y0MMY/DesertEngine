@@ -4,10 +4,10 @@
 
 namespace Desert
 {
-    class EditorLayer : public Common::Layer
+    class EditorLayer : public Common::Layer, public Common::EventHandler
     {
     public:
-        EditorLayer( const std::string& layerName );
+        explicit EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName );
         ~EditorLayer();
 
         [[nodiscard]] virtual Common::BoolResult OnAttach() override;
@@ -15,7 +15,13 @@ namespace Desert
         [[nodiscard]] virtual Common::BoolResult OnUpdate( Common::Timestep ts ) override;
         [[nodiscard]] virtual Common::BoolResult OnImGuiRender() override;
 
+        void OnEvent( Common::Event& e ) override;
+
     private:
+        bool OnWindowResize( Common::EventWindowResize& e );
+
+    private:
+        const std::shared_ptr<Common::Window>   m_Window;
         std::shared_ptr<Core::Scene>            m_testscene;
         std::shared_ptr<Graphic::SceneRenderer> m_testscenerenderer;
         std::shared_ptr<Graphic::TextureCube>   m_Skybox;

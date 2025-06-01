@@ -26,7 +26,6 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
         const auto  window = EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw();
 
-        VkDescriptorPool           descriptorPool;
         VkDescriptorPoolSize       pool_sizes[] = { { VK_DESCRIPTOR_TYPE_SAMPLER, 100 },
                                                     { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 },
                                                     { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 100 },
@@ -44,7 +43,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         pool_info.maxSets                       = 100 * IM_ARRAYSIZE( pool_sizes );
         pool_info.poolSizeCount                 = (uint32_t)IM_ARRAYSIZE( pool_sizes );
         pool_info.pPoolSizes                    = pool_sizes;
-        VK_CHECK_RESULT( vkCreateDescriptorPool( device, &pool_info, nullptr, &descriptorPool ) );
+        VK_CHECK_RESULT( vkCreateDescriptorPool( device, &pool_info, nullptr, &m_ImguiPool ) );
 
         const auto& context   = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() );
         const auto& swapchain = context->GetVulkanSwapChain();
@@ -58,7 +57,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         init_info.Device         = device;
         init_info.Queue          = VulkanLogicalDevice::GetInstance().GetGraphicsQueue();
         init_info.PipelineCache  = nullptr;
-        init_info.DescriptorPool = descriptorPool;
+        init_info.DescriptorPool = m_ImguiPool;
         init_info.Allocator      = nullptr;
         init_info.MinImageCount  = 3;
         init_info.ImageCount     = 3;
@@ -82,14 +81,17 @@ namespace Desert::Graphic::API::Vulkan::ImGui
     Common::BoolResult VulkanImGui::OnDetach()
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-
         vkDeviceWaitIdle( device );
 
-        ImGui_ImplVulkan_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ::ImGui::DestroyContext();
+        ImGui_ImplVulkan_Shutdown(); // Уничтожаем Vulkan-бэкенд
+        ImGui_ImplGlfw_Shutdown();   // Уничтожаем GLFW-бэкенд
+        ::ImGui::DestroyContext();   // Уничтожаем контекст ImGui
 
-        vkDestroyDescriptorPool( device, m_ImguiPool, nullptr );
+        if ( m_ImguiPool != VK_NULL_HANDLE )
+        {
+            vkDestroyDescriptorPool( device, m_ImguiPool, nullptr );
+            m_ImguiPool = VK_NULL_HANDLE;
+        }
 
         return BOOLSUCCESS;
     }
@@ -99,11 +101,6 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand( []() { ::ImGui::ShowDemoWindow(); } );
 
         return BOOLSUCCESS;
-    }
-
-    void VulkanImGui::Process( const std::function<void()>& func )
-    {
-        VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand( func );
     }
 
     void VulkanImGui::Begin()
@@ -129,9 +126,9 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         uint32_t commandBufferIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
-        VkCommandBuffer drawCommandBuffer = static_cast<Graphic::API::Vulkan::VulkanRendererAPI*>(
-                                                 Desert::Graphic::Renderer::GetInstance().GetRendererAPI() )
-                                                 ->GetCurrentCmdBuffer();
+        VkCommandBuffer drawCommandBuffer =
+             CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+
         VkRenderPassBeginInfo renderPassBeginInfo    = {};
         renderPassBeginInfo.sType                    = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassBeginInfo.renderPass               = swapChain->GetRenderPass();
@@ -145,9 +142,9 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         VkViewport viewport = {};
         viewport.x          = 0.0f;
-        viewport.y          = (float)height; 
+        viewport.y          = (float)height;
         viewport.width      = (float)width;
-        viewport.height     = -(float)height; 
+        viewport.height     = -(float)height;
         viewport.minDepth   = 0.0f;
         viewport.maxDepth   = 1.0f;
         vkCmdSetViewport( drawCommandBuffer, 0, 1, &viewport );
@@ -164,6 +161,8 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         vkCmdEndRenderPass( drawCommandBuffer );
 
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( drawCommandBuffer );
+
         ImGuiIO& io = ::ImGui::GetIO();
 
         (void)io;
@@ -174,4 +173,5 @@ namespace Desert::Graphic::API::Vulkan::ImGui
             ::ImGui::RenderPlatformWindowsDefault();
         }
     }
+
 } // namespace Desert::Graphic::API::Vulkan::ImGui

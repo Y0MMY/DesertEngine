@@ -21,7 +21,7 @@ namespace Common
     Result<T> MakeError( const std::string& message );
 
     template <typename T = bool, typename... Args>
-    Result<T> MakeFormattedError( std::string_view format, Args&&... args );
+    Result<T> MakeFormattedError( std::string&& format, Args&&... args );
 
     template <typename T = bool>
     auto MakeSuccess( const T& value );
@@ -130,7 +130,7 @@ namespace Common
         friend Result<U> MakeFormattedErrorWithCode( T&& errorCode, std::string_view format, Args&&... args );
 
         template <typename U, typename... Args>
-        friend Result<U> MakeFormattedError( std::string_view format, Args&&... args );
+        friend Result<U> MakeFormattedError( std::string&& format, Args&&... args );
     };
 
     template <typename T>
@@ -152,9 +152,9 @@ namespace Common
     }
 
     template <typename T, typename... Args>
-    Result<T> MakeFormattedError( std::string_view format, Args&&... args )
+    Result<T> MakeFormattedError( std::string&& format, Args&&... args )
     {
-        return Result<T>( typename Result<T>::Error( format, std::forward<Args>( args )... ) );
+        return Result<T>( typename Result<T>::Error( std::move( format ), std::forward<Args>( args )... ) );
     }
 
     template <typename T>

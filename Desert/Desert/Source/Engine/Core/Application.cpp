@@ -50,8 +50,6 @@ namespace Desert::Engine
 #endif // EBABLE_IMGUI
 
             m_Window->ProcessEvents();
-            m_Window->PresentFinalImage();
-
             m_PrevTimestep = Common::Timestep( timestep - Common::Timestep() );
         }
         Destroy();

@@ -4,7 +4,8 @@
 
 namespace Desert
 {
-    EditorLayer::EditorLayer( const std::string& layerName ) : Common::Layer( layerName )
+    EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
+         : Common::Layer( layerName ), m_Window( window )
     {
         m_testscenerenderer = std::make_shared<Graphic::SceneRenderer>();
         m_testscene         = std::make_shared<Core::Scene>( "sdfsdf", m_testscenerenderer );
@@ -12,12 +13,7 @@ namespace Desert
 
     EditorLayer::~EditorLayer()
     {
-        /* m_Mesh.reset();
-         m_Skybox.reset();
-         m_testscenerenderer.reset();
-         m_testscene.reset();*/
-
-        //        m_testscenerenderer->Shutdown();
+        m_testscenerenderer->Shutdown();
     }
 
     [[nodiscard]] Common::BoolResult EditorLayer::OnAttach()
@@ -60,7 +56,7 @@ namespace Desert
         m_testscene->AddMeshToRenderList( m_Mesh );
 
 #ifdef EBABLE_IMGUI
-        m_ImGuiLayer = ImGui::ImGuiLayer::Create(); // TODO: move to EditorLayer
+        m_ImGuiLayer = ImGui::ImGuiLayer::Create();
         m_ImGuiLayer->OnAttach();
 #endif // EBABLE_IMGUI
 
@@ -78,6 +74,14 @@ namespace Desert
 
         m_testscene->OnUpdate();
 
+        const auto& endResult = m_testscene->EndScene();
+        m_Window->PrepareNextFrame();
+
+        if ( !endResult )
+        {
+            return Common::MakeError( endResult.GetError() );
+        }
+
         {
             m_ImGuiLayer->Begin();
 
@@ -86,11 +90,7 @@ namespace Desert
             m_ImGuiLayer->End();
         }
 
-        const auto& endResult = m_testscene->EndScene();
-        if ( !endResult )
-        {
-            return Common::MakeError( endResult.GetError() );
-        }
+        m_Window->PresentFinalImage();
 
         return BOOLSUCCESS;
     }
@@ -167,12 +167,14 @@ namespace Desert
         ::ImGui::Begin( "Viewport" );
         {
             ImVec2 viewportSize = ::ImGui::GetContentRegionAvail();
-            if (m_Size.x != viewportSize.x && m_Size.y != viewportSize.y)
+            if ( m_Size.x != viewportSize.x || m_Size.y != viewportSize.y )
             {
-               // m_testscenerenderer->res
+                m_EditorCamera.UpdateProjectionMatrix( viewportSize.x, viewportSize.y );
+
+                m_Size = viewportSize;
             }
 
-            ImGui::UI::Image( m_testscenerenderer->GetFinalImage(), viewportSize );
+//            ImGui::UI::Image( m_testscenerenderer->GetFinalImage(), viewportSize );
         }
         ::ImGui::End();
 
@@ -197,6 +199,21 @@ namespace Desert
         ::ImGui::End(); // End dockspace
 
         return BOOLSUCCESS;
+    }
+
+    void EditorLayer::OnEvent( Common::Event& e )
+    {
+        Common::EventManager eventManager( e );
+        eventManager.Notify<Common::EventWindowResize>( [this]( Common::EventWindowResize& e )
+                                                        { return OnWindowResize( e ); } );
+    }
+
+    bool EditorLayer::OnWindowResize( Common::EventWindowResize& e )
+
+    {
+        //m_ImGuiLayer->Resize( e.width, e.height );
+        m_testscenerenderer->Resize( e.width, e.height );
+        return false;
     }
 
     Common::BoolResult EditorLayer::OnDetach()

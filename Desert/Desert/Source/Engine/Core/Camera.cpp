@@ -12,9 +12,12 @@ namespace Desert::Core
 
     Camera::Camera()
     {
-       // REGISTER_EVENT( this, OnEvent );
+        // REGISTER_EVENT( this, OnEvent );
 
-        UpdateProjectionMatrix();
+        const auto width  = EngineContext::GetInstance().GetCurrentWindowWidth();
+        const auto height = EngineContext::GetInstance().GetCurrentWindowHeight();
+
+        UpdateProjectionMatrix( width, height );
 
         constexpr glm::vec3 InitialPosition = { 5, 5, 5 };
         m_Distance                          = glm::distance( InitialPosition, m_FocalPoint );
@@ -45,11 +48,8 @@ namespace Desert::Core
                                                       { return this->OnMouseMove( e ); } );
     }
 
-    void Camera::UpdateProjectionMatrix()
+    void Camera::UpdateProjectionMatrix( const uint32_t width, const uint32_t height )
     {
-        const auto width  = 1920; // EngineContext::GetInstance().GetCurrentWindowWidth();
-        const auto height = 780;  // EngineContext::GetInstance().GetCurrentWindowHeight();
-
         m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), static_cast<float>( width / height ),
                                                m_NearPlane, m_FarPlane );
     }

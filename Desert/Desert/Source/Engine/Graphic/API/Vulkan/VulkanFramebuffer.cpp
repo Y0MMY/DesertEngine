@@ -202,6 +202,8 @@ namespace Desert::Graphic::API::Vulkan
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
+        vkDeviceWaitIdle(device);
+
         m_ColorAttachment->Release();
         // m_DepthAttachment->Release();
 

@@ -155,23 +155,16 @@ namespace Desert::Graphic
         return renderer.EndFrame();
     }
 
-    void SceneRenderer::OnEvent( Common::Event& e )
+    void SceneRenderer::Resize( const uint32_t width, const uint32_t height )
     {
-        Common::EventManager eventManager( e );
-        eventManager.Notify<Common::EventWindowResize>( [this]( Common::EventWindowResize& e )
-                                                        { return this->OnWindowResize( e ); } );
+        auto& renderer = Renderer::GetInstance();
+        renderer.ResizeWindowEvent( width, height );
+        m_SceneInfo.Renderdata.Skybox.Framebuffer->Resize( width, height );
+        m_SceneInfo.Renderdata.Composite.Framebuffer->Resize( width, height );
     }
 
-    bool SceneRenderer::OnWindowResize( Common::EventWindowResize& e )
-    {
-        auto&                                              renderer = Renderer::GetInstance();
-        std::vector<std::shared_ptr<Graphic::Framebuffer>> framebuffers;
-        framebuffers.push_back( m_SceneInfo.Renderdata.Skybox.Framebuffer );
-        framebuffers.push_back( m_SceneInfo.Renderdata.Composite.Framebuffer );
-        renderer.ResizeWindowEvent( e.width, e.height, framebuffers );
-        return false;
-    }
-
+    // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
+    // CompositePass!
     void SceneRenderer::CompositeRenderPass()
     {
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();

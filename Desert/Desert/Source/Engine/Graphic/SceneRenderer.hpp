@@ -17,7 +17,7 @@ namespace Desert::Core
 
 namespace Desert::Graphic
 {
-    class SceneRenderer final : public Common::EventHandler
+    class SceneRenderer final
     {
     public:
         [[nodiscard]] Common::BoolResult Init();
@@ -30,7 +30,7 @@ namespace Desert::Graphic
 
         [[nodiscard]] Common::BoolResult EndScene();
 
-        void OnEvent( Common::Event& e ) override;
+        void Resize( const uint32_t width, const uint32_t height );
 
         void               RenderMesh( const std::shared_ptr<Mesh>& mesh );
         const Environment  CreateEnvironment( const Common::Filepath& filepath );
@@ -45,8 +45,6 @@ namespace Desert::Graphic
         void GeometryRenderPass();
 
     private:
-        bool OnWindowResize( Common::EventWindowResize& e );
-
     private:
         struct MeshRenderInfo
         {

@@ -10,7 +10,7 @@ namespace Desert
 
     void Sandbox::OnCreate()
     {
-        PushLayer(new EditorLayer(""));
+        PushLayer(new EditorLayer(m_Window, ""));
     }
 
     void Sandbox::OnDestroy()

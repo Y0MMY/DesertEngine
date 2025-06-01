@@ -140,7 +140,12 @@ namespace Desert::Platform::Windows
 
     void WindowsWindow::PresentFinalImage() const
     {
-        Graphic::Renderer::GetInstance().GetRendererContext()->PresentFinalImage();
+        Graphic::Renderer::GetInstance().GetRendererContext()->EndFrame();
+    }
+
+    void WindowsWindow::PrepareNextFrame() const
+    {
+        Graphic::Renderer::GetInstance().GetRendererContext()->BeginFrame();
     }
 
 } // namespace Desert::Platform::Windows

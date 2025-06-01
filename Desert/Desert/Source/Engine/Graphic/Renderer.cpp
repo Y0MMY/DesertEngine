@@ -73,6 +73,11 @@ namespace Desert::Graphic
         s_RendererAPI->PresentFinalImage();
     }
 
+    void Renderer::PrepareNextFrame()
+    {
+        s_RendererAPI->PrepareNextFrame();
+    }
+
     void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                          const std::shared_ptr<Material>& material )
     {
@@ -94,10 +99,9 @@ namespace Desert::Graphic
         s_RendererAPI->EndRenderPass();
     }
 
-    void Renderer::ResizeWindowEvent( uint32_t width, uint32_t height,
-                                      const std::vector<std::shared_ptr<Framebuffer>>& framebuffers )
+    void Renderer::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
-        s_RendererAPI->ResizeWindowEvent( width, height, framebuffers );
+        s_RendererAPI->ResizeWindowEvent( width, height );
     }
 
     std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()
@@ -132,15 +136,15 @@ namespace Desert::Graphic
         s_RendererAPI->Shutdown();
         m_BRDFTexture->GetImage2D()->Release();
 
-        for ( auto sceneRenderer : Core::SceneRendererManager::SceneRenderers )
+     /*   for ( auto sceneRenderer : Core::SceneRendererManager::SceneRenderers )
         {
             sceneRenderer->Shutdown();
-        }
+        }*/
         delete s_RendererAPI;
         m_RendererContext->Shutdown();
     }
 
-     Desert::Graphic::RendererAPI* Renderer::GetRendererAPI() const
+    Desert::Graphic::RendererAPI* Renderer::GetRendererAPI() const
     {
         return s_RendererAPI;
     }

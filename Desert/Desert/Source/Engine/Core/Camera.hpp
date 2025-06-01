@@ -34,11 +34,11 @@ namespace Desert::Core
         {
             return m_Direction;
         }
+        void UpdateProjectionMatrix( const uint32_t width, const uint32_t height );
 
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
-        void UpdateProjectionMatrix();
 
         glm::quat GetOrientation() const;
         glm::vec3 GetUpDirection() const;

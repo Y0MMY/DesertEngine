@@ -139,13 +139,10 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanContext::BeginFrame() const
     {
+        m_VulkanQueue->PrepareFrame();
     }
 
     void VulkanContext::EndFrame() const
-    {
-    }
-
-    void VulkanContext::PresentFinalImage() const
     {
         m_VulkanQueue->Present();
     }

@@ -11,8 +11,10 @@ namespace Desert::Graphic::API::Vulkan
     public:
         VulkanQueue( VulkanSwapChain* swapChain );
 
+        void                     PrepareFrame();
         void                     Present();
         Common::Result<VkResult> Init();
+        void                     Release();
 
         const auto& GetDrawCommandBuffers() const
         {
@@ -28,6 +30,8 @@ namespace Desert::Graphic::API::Vulkan
         Common::Result<VkResult> QueuePresent( VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore );
 
     private:
+        uint32_t m_ImageIndex = ~0;
+
         VulkanSwapChain* m_SwapChain;
 
         struct
@@ -38,8 +42,9 @@ namespace Desert::Graphic::API::Vulkan
             VkSemaphore RenderComplete;
         } m_Semaphores;
 
-        std::vector<std::pair<VkCommandBuffer, VkCommandBuffer>> m_DrawCommandBuffers; // main command buffer | second command buffer
+        std::vector<std::pair<VkCommandBuffer, VkCommandBuffer>>
+                                     m_DrawCommandBuffers; // main command buffer | second command buffer
         std::vector<VkCommandBuffer> m_ComputeCommandBuffers;
-        std::vector<VkFence> m_WaitFences;
+        std::vector<VkFence>         m_WaitFences;
     };
 } // namespace Desert::Graphic::API::Vulkan

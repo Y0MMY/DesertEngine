@@ -38,10 +38,10 @@ namespace Desert::Graphic
         void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                    const std::shared_ptr<Material>& material );
 
+        void PrepareNextFrame();
         void PresentFinalImage();
 
-        void ResizeWindowEvent( uint32_t width, uint32_t height,
-                                const std::vector<std::shared_ptr<Framebuffer>>& framebuffers );
+        void ResizeWindowEvent( uint32_t width, uint32_t height );
 
         RendererAPI* GetRendererAPI() const;
 

@@ -40,6 +40,7 @@ namespace Desert::Platform::Windows
         virtual bool IsWindowMinimized() const override;
         virtual void Maximize() const override;
 
+        virtual void PrepareNextFrame() const override;
         virtual void PresentFinalImage() const override;
 
         virtual void SetEventCallback( const EventCallbackFn& e ) override

@@ -22,7 +22,7 @@ namespace Desert::Engine
         uint32_t    Height;
     };
 
-    class Application : public Common::Singleton<Application>
+    class Application
     {
     public:
         Application( const ApplicationInfo& appInfo );
@@ -55,16 +55,17 @@ namespace Desert::Engine
         void ProcessImGui();
 
     private:
-        ApplicationInfo                 m_ApplicationInfo;
-        std::shared_ptr<Common::Window> m_Window;
+        ApplicationInfo m_ApplicationInfo;
 
+    protected:
+        std::shared_ptr<Common::Window> m_Window; // TODO: unique ptr
+    private:
         Common::LayerStack m_LayerStack;
 
         Common::Timestep m_PrevTimestep;
         bool             m_IsRunningApplication = true;
 
     public:
-
     };
 
     Application* CreateApplicaton( int argc, char** argv );

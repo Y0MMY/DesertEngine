@@ -14,7 +14,6 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         virtual Common::BoolResult OnDetach() override;
         virtual Common::BoolResult OnUpdate( Common::Timestep ts ) override;
         virtual void               Begin() override;
-        virtual void               Process( const std::function<void()>& func ) override;
         virtual void               End() override;
 
         virtual Common::BoolResult OnImGuiRender() override

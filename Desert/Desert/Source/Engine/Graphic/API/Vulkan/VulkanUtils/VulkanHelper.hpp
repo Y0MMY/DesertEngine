@@ -42,8 +42,8 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
-            return Common::MakeFormattedError<VkResult>( "VkResult is 'NONE' in {1}:{2}. Type: {3} ", __FILE__,   \
-                                                         __LINE__, VkResultToString( res ) );                     \
+            return Common::MakeFormattedError<VkResult>( std::string(#f ) + std::string( " -> result: {}" ),    \
+                                                         VkResultToString( res ) );                               \
         }                                                                                                         \
         else                                                                                                      \
         {                                                                                                         \

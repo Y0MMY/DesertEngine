@@ -244,9 +244,16 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
+    Common::BoolResult VulkanRendererAPI::PrepareNextFrame()
+    {
+        //static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PrepareNextFrame();
+
+        return Common::MakeSuccess( true );
+    }
+
     Common::BoolResult VulkanRendererAPI::PresentFinalImage()
     {
-        static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PresentFinalImage();
+        //static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PresentFinalImage();
 
         return Common::MakeSuccess( true );
     }
@@ -406,21 +413,19 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDrawIndexed( m_CurrentCommandBuffer, s_Data->QuadIndexBuffer->GetCount(), 1, 0, 0, 0 );
     }
 
-    void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height,
-                                               const std::vector<std::shared_ptr<Framebuffer>>& framebuffers )
+    void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
-        vkDeviceWaitIdle( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice() );
+        const auto device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        vkDeviceWaitIdle( device );
 
         const auto& swapChain = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
                                      ->GetVulkanSwapChain();
+        if ( width == swapChain->GetWidth() && height == swapChain->GetHeight() )
+            return;
 
         swapChain->OnResize( width, height );
-        for ( auto& fb : framebuffers )
-        {
-            fb->Resize( width, height );
-        }
 
-        auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+         auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
 
         for ( auto& image : swapChain->GetSwapChainVKImage() )
         {
@@ -650,5 +655,4 @@ namespace Desert::Graphic::API::Vulkan
     {
         return m_CurrentCommandBuffer;
     }
-
 } // namespace Desert::Graphic::API::Vulkan

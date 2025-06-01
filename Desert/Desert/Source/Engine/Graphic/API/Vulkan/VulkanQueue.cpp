@@ -29,7 +29,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    void VulkanQueue::Present() // TODO: result
+    void VulkanQueue::PrepareFrame()
     {
         uint32_t currentIndex = EngineContext::GetInstance().m_CurrentBufferIndex;
 
@@ -49,13 +49,24 @@ namespace Desert::Graphic::API::Vulkan
 
         vkResetFences( device, 1, &m_WaitFences[currentIndex] );
 
-        uint32_t imageIndex = ~0U;
-        m_SwapChain->AcquireNextImage( m_Semaphores.PresentComplete, &imageIndex );
+        const auto acquire    = m_SwapChain->AcquireNextImage( m_Semaphores.PresentComplete, &m_ImageIndex);
+        if ( !acquire )
+        {
+            LOG_ERROR( "[AcquireNextImage] Error: {}", acquire.GetError() );
+        }
 
         // Submit to the graphics queue passing a wait fence
         VK_CHECK_RESULT( vkQueueSubmit( queue, 1, &submitInfo, m_WaitFences[currentIndex] ) );
+    }
 
-        const auto& queuePresent = QueuePresent( queue, imageIndex, m_Semaphores.RenderComplete );
+    void VulkanQueue::Present() // TODO: result
+    {
+        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentBufferIndex;
+
+        const auto& device = m_SwapChain->m_LogicalDevice->GetVulkanLogicalDevice();
+        const auto& queue  = m_SwapChain->m_LogicalDevice->GetGraphicsQueue();
+
+        const auto& queuePresent = QueuePresent( queue, m_ImageIndex, m_Semaphores.RenderComplete );
         if ( !queuePresent.IsSuccess() )
         {
             LOG_INFO( "[QueuePresent] Error: {}", queuePresent.GetError() );
@@ -129,10 +140,11 @@ namespace Desert::Graphic::API::Vulkan
             }
             m_DrawCommandBuffers[i].first = bufferDraw.GetValue();
 
-            const auto& bufferDrawSecondary = CommandBufferAllocator::GetInstance().RT_AllocateSecondCommandBufferGraphic();
+            const auto& bufferDrawSecondary =
+                 CommandBufferAllocator::GetInstance().RT_AllocateSecondCommandBufferGraphic();
             if ( !bufferDrawSecondary.IsSuccess() )
             {
-                return Common::MakeError<VkResult>(bufferDrawSecondary.GetError() );
+                return Common::MakeError<VkResult>( bufferDrawSecondary.GetError() );
             }
             m_DrawCommandBuffers[i].second = bufferDrawSecondary.GetValue();
 
@@ -159,5 +171,31 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         return Common::MakeSuccess( VK_SUCCESS );
+    }
+
+    void VulkanQueue::Release()
+    {
+        const auto& device = m_SwapChain->m_LogicalDevice->GetVulkanLogicalDevice();
+
+        if ( m_Semaphores.PresentComplete != VK_NULL_HANDLE )
+        {
+            vkDestroySemaphore( device, m_Semaphores.PresentComplete, nullptr );
+            m_Semaphores.PresentComplete = VK_NULL_HANDLE;
+        }
+
+        if ( m_Semaphores.RenderComplete != VK_NULL_HANDLE )
+        {
+            vkDestroySemaphore( device, m_Semaphores.RenderComplete, nullptr );
+            m_Semaphores.RenderComplete = VK_NULL_HANDLE;
+        }
+
+        for ( auto& fence : m_WaitFences )
+        {
+            if ( fence != VK_NULL_HANDLE )
+            {
+                vkDestroyFence( device, fence, nullptr );
+                fence = VK_NULL_HANDLE;
+            }
+        }
     }
 } // namespace Desert::Graphic::API::Vulkan
