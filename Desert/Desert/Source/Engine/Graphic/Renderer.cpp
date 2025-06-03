@@ -2,7 +2,7 @@
 
 #include <Engine/Graphic/RendererContext.hpp>
 #include <Engine/Graphic/RendererAPI.hpp>
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
@@ -59,7 +59,7 @@ namespace Desert::Graphic
 
     uint32_t Renderer::GetCurrentFrameIndex()
     {
-        return EngineContext::GetInstance().GetCurrentBufferIndex();
+        return EngineContext::GetInstance().GetCurrentFrameIndex();
     }
 
     Common::Memory::CommandBuffer& Renderer::GetRenderCommandQueue()

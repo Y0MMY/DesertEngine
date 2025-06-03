@@ -6,7 +6,7 @@
 #include <Common/Core/Events/WindowEvents.hpp>
 
 #include <Engine/Graphic/RendererAPI.hpp>
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Platform::Windows

@@ -3,10 +3,12 @@
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
 
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
+    static VmaAllocation s_VmaAllocation = nullptr;
+
     void VulkanSwapChain::Init( GLFWwindow* window, const VkInstance instance, VulkanLogicalDevice& device )
     {
         m_VulkanInstance = instance;
@@ -195,7 +197,6 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanSwapChain::OnResize( uint32_t width, uint32_t height )
     {
-
         Release();
         Create( &width, &height );
     }
@@ -220,6 +221,11 @@ namespace Desert::Graphic::API::Vulkan
             vkDestroyFramebuffer( device, framebuffer, VK_NULL_HANDLE );
         }
 
+        VulkanAllocator::GetInstance().RT_DestroyImage( m_ColorImages.Image,
+                                                        (VmaAllocation)m_VmaAllocation[0] ); // color
+        VulkanAllocator::GetInstance().RT_DestroyImage( m_DepthStencilImages.Image,
+                                                        (VmaAllocation)m_VmaAllocation[1] ); // depth stancil
+        m_VmaAllocation[0] = m_VmaAllocation[1] = nullptr;
         m_SwapChain = VK_NULL_HANDLE;
     }
 
@@ -290,15 +296,15 @@ namespace Desert::Graphic::API::Vulkan
 
         VkRenderPassCreateInfo renderPassInfo = {};
         renderPassInfo.sType                  = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1; 
-        renderPassInfo.pAttachments    = attachments.data();
-        renderPassInfo.subpassCount    = 1;
-        renderPassInfo.pSubpasses      = &subpassDescription;
-        renderPassInfo.dependencyCount = 1;
-        renderPassInfo.pDependencies   = &dependency;
+        renderPassInfo.attachmentCount        = 1;
+        renderPassInfo.pAttachments           = attachments.data();
+        renderPassInfo.subpassCount           = 1;
+        renderPassInfo.pSubpasses             = &subpassDescription;
+        renderPassInfo.dependencyCount        = 1;
+        renderPassInfo.pDependencies          = &dependency;
 
-        VK_RETURN_RESULT( vkCreateRenderPass( m_LogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo,
-                                                       nullptr, &m_VkRenderPass ) );
+        VK_RETURN_RESULT( vkCreateRenderPass( m_LogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo, nullptr,
+                                              &m_VkRenderPass ) );
     }
 
     Common::Result<VkResult> VulkanSwapChain::CreateColorAndDepthImages()
@@ -320,8 +326,14 @@ namespace Desert::Graphic::API::Vulkan
             imageInfo.samples     = m_MSAASamples;
             imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-            VulkanAllocator::GetInstance().RT_AllocateImage( "Swapchain image color", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
-                                                             m_ColorImages.Image );
+            const auto& resultAlloc = VulkanAllocator::GetInstance().RT_AllocateImage(
+                 "Swapchain image color", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, m_ColorImages.Image );
+            if ( !resultAlloc.IsSuccess() )
+            {
+                return Common::MakeError<VkResult>( resultAlloc.GetError() );
+            }
+
+            m_VmaAllocation[0] = resultAlloc.GetValue();
 
             VkImageViewCreateInfo imageViewCI{};
             imageViewCI.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -357,8 +369,15 @@ namespace Desert::Graphic::API::Vulkan
             imageInfo.samples       = m_MSAASamples;
             imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
 
-            VulkanAllocator::GetInstance().RT_AllocateImage( "Swapchain image depth", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
-                                                             m_DepthStencilImages.Image );
+            const auto& resultAlloc = VulkanAllocator::GetInstance().RT_AllocateImage(
+                 "Swapchain image depth", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, m_DepthStencilImages.Image );
+
+            if ( !resultAlloc.IsSuccess() )
+            {
+                return Common::MakeError<VkResult>( resultAlloc.GetError() );
+            }
+
+            m_VmaAllocation[1] = resultAlloc.GetValue();
 
             VkImageViewCreateInfo imageViewCI{};
             imageViewCI.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -376,6 +395,11 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         return Common::MakeSuccess( VK_SUCCESS );
+    }
+
+    VulkanSwapChain::~VulkanSwapChain()
+    {
+        //Release();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

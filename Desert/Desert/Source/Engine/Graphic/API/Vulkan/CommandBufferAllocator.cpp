@@ -1,6 +1,8 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
+#include <Engine/Core/EngineContext.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
     namespace
@@ -38,8 +40,35 @@ namespace Desert::Graphic::API::Vulkan
 
     CommandBufferAllocator::CommandBufferAllocator( const VulkanLogicalDevice& device )
     {
-        m_CommandGraphicPool = device.m_CommandGraphicPool;
-        m_ComputeCommandPool = device.m_ComputeCommandPool;
+        const uint32_t frames = 3U; // TODO
+
+        {
+            m_CommandGraphicPool.resize( frames );
+
+            VkCommandPoolCreateInfo cmdPoolInfo = {};
+            cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            cmdPoolInfo.queueFamilyIndex        = device.GetPhysicalDevice()->GetGraphicsFamily().value();
+            cmdPoolInfo.flags                   = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            for ( auto& cmdPool : m_CommandGraphicPool )
+            {
+                VK_CHECK_RESULT(
+                     vkCreateCommandPool( device.GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
+            }
+        }
+
+        {
+            m_ComputeCommandPool.resize( frames );
+
+            VkCommandPoolCreateInfo cmdPoolInfo = {};
+            cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            cmdPoolInfo.queueFamilyIndex        = device.GetPhysicalDevice()->GetComputeFamily().value();
+            cmdPoolInfo.flags                   = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            for ( auto& cmdPool : m_ComputeCommandPool )
+            {
+                VK_CHECK_RESULT(
+                     vkCreateCommandPool( device.GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
+            }
+        }
 
         m_GraphicsQueue = device.m_GraphicsQueue;
         m_ComputeQueue  = device.m_ComputeQueue;
@@ -49,11 +78,12 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::Result<VkCommandBuffer> CommandBufferAllocator::RT_GetCommandBufferCompute( bool begin /*= false */ )
     {
+        const auto                  frame = EngineContext::GetInstance().GetCurrentFrameIndex();
         VkCommandBufferAllocateInfo allocateInfo;
         allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocateInfo.commandBufferCount = 1;
-        allocateInfo.commandPool        = m_ComputeCommandPool;
+        allocateInfo.commandPool        = m_ComputeCommandPool[frame];
         allocateInfo.pNext              = VK_NULL_HANDLE;
 
         VkCommandBuffer cmdBuffer;
@@ -74,12 +104,14 @@ namespace Desert::Graphic::API::Vulkan
     Common::Result<VkCommandBuffer>
     CommandBufferAllocator::RT_AllocateCommandBufferGraphic( bool begin /*= false */ )
     {
+        const auto frame = EngineContext::GetInstance().GetCurrentFrameIndex();
+
         VkCommandBufferAllocateInfo allocateInfo;
         allocateInfo.pNext              = VK_NULL_HANDLE;
         allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocateInfo.commandBufferCount = 1;
-        allocateInfo.commandPool        = m_CommandGraphicPool;
+        allocateInfo.commandPool        = m_CommandGraphicPool[frame];
 
         VkCommandBuffer cmdBuffer;
         VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
@@ -98,19 +130,25 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::Result<VkResult> CommandBufferAllocator::RT_FlushCommandBufferCompute( VkCommandBuffer commandBuffer )
     {
-        return FlushCommandBuffer( m_LogicalDevice, m_ComputeCommandPool, commandBuffer, m_ComputeQueue );
+        const auto frame = EngineContext::GetInstance().GetCurrentFrameIndex();
+
+        return FlushCommandBuffer( m_LogicalDevice, m_ComputeCommandPool[frame], commandBuffer, m_ComputeQueue );
     }
 
     Common::Result<VkResult> CommandBufferAllocator::RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer )
     {
-        return FlushCommandBuffer( m_LogicalDevice, m_CommandGraphicPool, commandBuffer, m_GraphicsQueue );
+        const auto frame = EngineContext::GetInstance().GetCurrentFrameIndex();
+
+        return FlushCommandBuffer( m_LogicalDevice, m_CommandGraphicPool[frame], commandBuffer, m_GraphicsQueue );
     }
 
     Common::Result<VkCommandBuffer> CommandBufferAllocator::RT_AllocateSecondCommandBufferGraphic()
     {
+        const auto frame = EngineContext::GetInstance().GetCurrentFrameIndex();
+
         VkCommandBufferAllocateInfo allocateInfo = {};
         allocateInfo.sType                       = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocateInfo.commandPool                 = m_CommandGraphicPool;
+        allocateInfo.commandPool                 = m_CommandGraphicPool[frame];
         allocateInfo.level                       = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
         allocateInfo.commandBufferCount          = 1;
 

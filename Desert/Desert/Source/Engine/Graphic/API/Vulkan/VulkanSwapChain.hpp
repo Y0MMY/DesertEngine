@@ -12,6 +12,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanSwapChain() = default;
+        ~VulkanSwapChain() ;
 
         void Init( GLFWwindow* window, const VkInstance instance, VulkanLogicalDevice& device );
 
@@ -115,6 +116,8 @@ namespace Desert::Graphic::API::Vulkan
         std::vector<VkFramebuffer> m_SwapChainFramebuffers;
 
         VkRenderPass m_VkRenderPass = VK_NULL_HANDLE;
+
+        std::array<const void*, 2> m_VmaAllocation;
 
     private:
         friend class VulkanQueue;

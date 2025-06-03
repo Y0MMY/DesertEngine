@@ -10,7 +10,7 @@ namespace Desert::Graphic::API::Vulkan
 {
     class VulkanQueue;
     class VulkanSwapChain;
-}
+} // namespace Desert::Graphic::API::Vulkan
 
 namespace Desert
 {
@@ -31,9 +31,14 @@ namespace Desert
             return (GLFWwindow*)m_CurrentWindow->GetNativeWindow();
         }
 
-        uint32_t GetCurrentBufferIndex() const
+        uint32_t GetCurrentFrameIndex() const
         {
-            return m_CurrentBufferIndex;
+            return m_CurrentFrameIndex;
+        }
+
+        uint32_t GetPreviousFrameIndex() const
+        {
+            return m_PrevioustBufferIndex;
         }
 
         uint32_t GetFramesInFlight() const
@@ -44,8 +49,9 @@ namespace Desert
     private:
         std::shared_ptr<Common::Window> m_CurrentWindow;
 
-        uint32_t m_CurrentBufferIndex = 0;
-        uint32_t m_FramesInFlight = 2;
+        uint32_t m_CurrentFrameIndex = 0;
+        uint32_t m_FramesInFlight     = 2;
+        uint32_t m_PrevioustBufferIndex = m_FramesInFlight;
 
     private:
         friend class Desert::Engine::Application;

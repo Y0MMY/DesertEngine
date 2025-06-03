@@ -14,7 +14,7 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
-            LOG_ERROR( "VkResult is 'NONE' in {1}:{2}", __FILE__, __LINE__ );                                     \
+            LOG_ERROR( "VkResult is 'NONE' in {}:{}", __FILE__, __LINE__ );                                     \
             DESERT_VERIFY( false );                                                                               \
         }                                                                                                         \
     }
@@ -24,7 +24,7 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
-            return Common::MakeFormattedError<VkResult>( "VkResult is 'NONE' in {1}:{2}", __FILE__, __LINE__ );   \
+            return Common::MakeFormattedError<VkResult>( "VkResult is 'NONE' in {}:{}", __FILE__, __LINE__ );   \
         }                                                                                                         \
     }
 
@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
         VkResult res = ( f );                                                                                     \
         if ( res != VK_SUCCESS )                                                                                  \
         {                                                                                                         \
-            return Common::MakeFormattedError<type>( "VkResult is 'NONE' in {1}:{2}", __FILE__, __LINE__ );       \
+            return Common::MakeFormattedError<type>( "VkResult is 'NONE' in {}:{}", __FILE__, __LINE__ );       \
         }                                                                                                         \
     }
 

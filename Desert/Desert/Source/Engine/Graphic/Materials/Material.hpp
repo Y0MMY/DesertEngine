@@ -26,6 +26,7 @@ namespace Desert::Graphic
 
         virtual Common::BoolResult Invalidate()    = 0;
         virtual Common::BoolResult ApplyMaterial() = 0;
+        virtual void               Clear()         = 0; // TODO: better func name
 
         virtual Common::BoolResult PushConstant( const void* buffer, const uint32_t bufferSize ) = 0;
 

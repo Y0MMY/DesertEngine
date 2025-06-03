@@ -45,9 +45,7 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeFormattedError( "{}: shader was not attached", m_DebugName );
         }
 
-        m_OverriddenUniforms.clear();
-        m_AvalivaleImages2D.clear();
-        m_AvalivaleImagesCube.clear();
+        Clear();
 
         const auto& shaderDS = sp_cast<VulkanShader>( m_Shader )->GetShaderDescriptorSets();
         for ( const auto& descriptor : shaderDS )
@@ -188,6 +186,13 @@ namespace Desert::Graphic::API::Vulkan
         m_PushConstantBuffer.Write( buffer, bufferSize );
 
         return BOOLSUCCESS;
+    }
+
+    void VulkanMaterial::Clear()
+    {
+        m_OverriddenUniforms.clear();
+        m_AvalivaleImages2D.clear();
+        m_AvalivaleImagesCube.clear();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

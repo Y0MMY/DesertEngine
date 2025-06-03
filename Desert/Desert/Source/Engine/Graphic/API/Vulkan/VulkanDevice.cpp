@@ -148,15 +148,6 @@ namespace Desert::Graphic::API::Vulkan
 
         VK_CHECK_RESULT( vkCreateDevice( m_PhysicalDevice->GetVulkanPhysicalDevice(), &createInfo, nullptr,
                                          &m_LogicalDevice ) );
-        VkCommandPoolCreateInfo cmdPoolInfo = {};
-        cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        cmdPoolInfo.queueFamilyIndex        = *m_PhysicalDevice->m_QueueFamilyIndices.GraphicsFamily;
-        cmdPoolInfo.flags                   = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-        VK_CHECK_RESULT( vkCreateCommandPool( m_LogicalDevice, &cmdPoolInfo, nullptr, &m_CommandGraphicPool ) );
-
-        cmdPoolInfo.queueFamilyIndex = *m_PhysicalDevice->m_QueueFamilyIndices.ComputeFamily;
-        VK_CHECK_RESULT( vkCreateCommandPool( m_LogicalDevice, &cmdPoolInfo, nullptr, &m_ComputeCommandPool ) );
 
         vkGetDeviceQueue( m_LogicalDevice, *m_PhysicalDevice->m_QueueFamilyIndices.GraphicsFamily, 0,
                           &m_GraphicsQueue );

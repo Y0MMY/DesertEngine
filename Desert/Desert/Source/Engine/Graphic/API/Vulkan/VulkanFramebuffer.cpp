@@ -5,7 +5,7 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 
 #include <Engine/Graphic/Image.hpp>
 
@@ -202,12 +202,11 @@ namespace Desert::Graphic::API::Vulkan
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        vkDeviceWaitIdle(device);
-
         m_ColorAttachment->Release();
         // m_DepthAttachment->Release();
 
         vkDestroyFramebuffer( device, m_Framebuffer, VK_NULL_HANDLE );
+        vkDestroyRenderPass( device, m_RenderPass, VK_NULL_HANDLE );
 
         m_Framebuffer = VK_NULL_HANDLE;
 

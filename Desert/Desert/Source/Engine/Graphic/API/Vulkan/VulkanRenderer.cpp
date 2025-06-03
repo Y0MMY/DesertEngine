@@ -17,7 +17,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Texture.hpp>
 
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 #include "stb_image/stb_image_write.h"
 
 #include <glm/glm.hpp>
@@ -415,8 +415,13 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
+        if (width == 0 && height == 0)
+            return;
         const auto device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        vkDeviceWaitIdle( device );
+        uint32_t currentIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        const auto& pool = CommandBufferAllocator::GetInstance().GetCommandGraphicPool();
+        VK_CHECK_RESULT(vkResetCommandPool(device, pool[currentIndex], 0));
 
         const auto& swapChain = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
                                      ->GetVulkanSwapChain();
@@ -424,6 +429,7 @@ namespace Desert::Graphic::API::Vulkan
             return;
 
         swapChain->OnResize( width, height );
+
 
          auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
 
@@ -441,10 +447,11 @@ namespace Desert::Graphic::API::Vulkan
             barrier.subresourceRange.layerCount = 1;
 
             vkCmdPipelineBarrier( commandBuffer.GetValue(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier );
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier );
         }
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer.GetValue() );
+
     }
 
     void VulkanRendererAPI::SetViewportAndScissor()

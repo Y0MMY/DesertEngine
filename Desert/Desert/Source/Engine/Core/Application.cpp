@@ -1,7 +1,7 @@
 #include <Engine/Core/Application.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 #include <Common/Core/EventRegistry.hpp>
@@ -10,7 +10,6 @@
 
 namespace Desert::Engine
 {
-
     Application::Application( const ApplicationInfo& appInfo ) : m_ApplicationInfo( appInfo )
     {
         EngineContext::CreateInstance();
@@ -66,10 +65,6 @@ namespace Desert::Engine
                         throw std::logic_error( result.GetError() );
                     }
                 }
-
-#ifdef EBABLE_IMGUI
-                ProcessImGui();
-#endif // EBABLE_IMGUI
 
                 m_PrevTimestep = Common::Timestep( timestep - Common::Timestep() );
             }

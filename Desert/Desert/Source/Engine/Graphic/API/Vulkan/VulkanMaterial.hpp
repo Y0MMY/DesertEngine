@@ -19,6 +19,7 @@ namespace Desert::Graphic::API::Vulkan
                                                  const std::shared_ptr<ImageCube>& imageCube ) override;
         virtual Common::BoolResult ApplyMaterial() override;
         virtual Common::BoolResult Invalidate() override;
+        virtual void               Clear() override; // TODO: better func name
 
         virtual Common::BoolResult PushConstant( const void* buffer, const uint32_t bufferSize ) override;
 

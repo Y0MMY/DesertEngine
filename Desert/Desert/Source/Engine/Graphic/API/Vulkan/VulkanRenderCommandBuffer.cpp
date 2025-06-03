@@ -19,8 +19,8 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         return ( computeBuffer ? m_ComputeCommandBuffers[frameIndex]
-                               : ( secondCommandBuffer ? m_DrawCommandBuffers[frameIndex].second
-                                                       : m_DrawCommandBuffers[frameIndex].first ) );
+                               : ( secondCommandBuffer ? m_DrawCommandBuffers[frameIndex]
+                                                       : m_DrawCommandBuffers[frameIndex] ) );
     }
 
     void VulkanRenderCommandBuffer::RegisterUserCommand( std::function<void()> command )
@@ -30,7 +30,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRenderCommandBuffer::ExecuteUserCommands()
     {
-        for (const auto& func : m_UserCommands)
+        for ( const auto& func : m_UserCommands )
         {
             func();
         }

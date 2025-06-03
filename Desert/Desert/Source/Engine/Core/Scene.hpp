@@ -32,7 +32,7 @@ namespace Desert::Core
         Scene( const std::string& sceneName, const std::shared_ptr<Graphic::SceneRenderer>& sceneRenderer );
 
         [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
-        void OnUpdate();
+        void                             OnUpdate();
         [[nodiscard]] Common::BoolResult EndScene();
 
         [[nodiscard]] Common::BoolResult Init();
@@ -45,11 +45,18 @@ namespace Desert::Core
 
         ECS::Entity CreateNewEntity( std::string&& entityName );
 
+        [[nodiscard]] const auto& GetAllEntities() const
+        {
+            return m_Entitys;
+        }
+
         [[nodiscard]] const Graphic::Environment& GetEnvironment() const;
 
+        [[nodiscard]] auto& GetRegistry() { return m_Registry; }
     private:
         std::string                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         entt::registry                          m_Registry;
+        std::vector<ECS::Entity>                m_Entitys;
     };
 } // namespace Desert::Core

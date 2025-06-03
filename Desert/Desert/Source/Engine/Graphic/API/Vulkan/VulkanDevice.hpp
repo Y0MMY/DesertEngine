@@ -9,7 +9,7 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanPhysicalDevice final
     {
     public:
-        VulkanPhysicalDevice() = default;
+        VulkanPhysicalDevice()  = default;
         ~VulkanPhysicalDevice() = default;
 
         struct QueueFamilyIndices
@@ -31,6 +31,11 @@ namespace Desert::Graphic::API::Vulkan
         std::optional<int32_t> GetGraphicsFamily() const
         {
             return m_QueueFamilyIndices.GraphicsFamily;
+        }
+
+        std::optional<int32_t> GetComputeFamily() const
+        {
+            return m_QueueFamilyIndices.ComputeFamily;
         }
 
         Common::Result<bool> CreateDevice();
@@ -91,8 +96,6 @@ namespace Desert::Graphic::API::Vulkan
     private:
         std::shared_ptr<VulkanPhysicalDevice> m_PhysicalDevice;
         VkDevice                              m_LogicalDevice;
-
-        VkCommandPool m_CommandGraphicPool = nullptr, m_ComputeCommandPool = nullptr;
 
         VkQueue m_GraphicsQueue;
         VkQueue m_ComputeQueue;

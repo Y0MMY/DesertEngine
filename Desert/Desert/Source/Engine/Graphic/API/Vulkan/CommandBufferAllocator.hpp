@@ -17,8 +17,19 @@ namespace Desert::Graphic::API::Vulkan
         Common::Result<VkResult> RT_FlushCommandBufferCompute( VkCommandBuffer commandBuffer );
         Common::Result<VkResult> RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer );
 
+        const auto& GetCommandGraphicPool() const
+        {
+            return m_CommandGraphicPool;
+        }
+
+        const auto& GetCommandComputePool() const
+        {
+            return m_ComputeCommandPool;
+        }
+
     private:
-        VkCommandPool m_CommandGraphicPool = nullptr, m_ComputeCommandPool = nullptr;
+        std::vector<VkCommandPool> m_CommandGraphicPool;
+        std::vector<VkCommandPool> m_ComputeCommandPool;
 
         VkQueue m_GraphicsQueue;
         VkQueue m_ComputeQueue;

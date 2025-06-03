@@ -2,7 +2,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
@@ -66,6 +66,17 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         ImGui_ImplVulkan_Init( &init_info, swapchain->GetRenderPass() );
 
         {
+            ImGuiIO& io = ::ImGui::GetIO();
+
+            ImFont* mainFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Black.ttf", 16.0f, nullptr,
+                                                             io.Fonts->GetGlyphRangesCyrillic() );
+
+            if ( !mainFont )
+            {
+                mainFont = io.Fonts->AddFontDefault();
+            }
+            io.FontDefault = mainFont;
+
             const auto commandBuffer =
                  CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
             ImGui_ImplVulkan_CreateFontsTexture( commandBuffer.GetValue() );

@@ -4,7 +4,7 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -31,7 +31,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::PrepareFrame()
     {
-        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentBufferIndex;
+        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentFrameIndex;
 
         const auto& device = m_SwapChain->m_LogicalDevice->GetVulkanLogicalDevice();
         const auto& queue  = m_SwapChain->m_LogicalDevice->GetGraphicsQueue();
@@ -44,12 +44,12 @@ namespace Desert::Graphic::API::Vulkan
         submitInfo.waitSemaphoreCount      = 1;
         submitInfo.pSignalSemaphores       = &m_Semaphores.RenderComplete;
         submitInfo.signalSemaphoreCount    = 1;
-        submitInfo.pCommandBuffers         = &m_DrawCommandBuffers[currentIndex].first;
+        submitInfo.pCommandBuffers         = &m_DrawCommandBuffers[currentIndex];
         submitInfo.commandBufferCount      = 1;
 
         vkResetFences( device, 1, &m_WaitFences[currentIndex] );
 
-        const auto acquire    = m_SwapChain->AcquireNextImage( m_Semaphores.PresentComplete, &m_ImageIndex);
+        const auto acquire = m_SwapChain->AcquireNextImage( m_Semaphores.PresentComplete, &m_ImageIndex );
         if ( !acquire )
         {
             LOG_ERROR( "[AcquireNextImage] Error: {}", acquire.GetError() );
@@ -61,7 +61,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::Present() // TODO: result
     {
-        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentBufferIndex;
+        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentFrameIndex;
 
         const auto& device = m_SwapChain->m_LogicalDevice->GetVulkanLogicalDevice();
         const auto& queue  = m_SwapChain->m_LogicalDevice->GetGraphicsQueue();
@@ -72,8 +72,9 @@ namespace Desert::Graphic::API::Vulkan
             LOG_INFO( "[QueuePresent] Error: {}", queuePresent.GetError() );
         }
 
-        uint32_t newCurrentFrame                          = ( currentIndex + 1 ) % m_SwapChain->GetImageCount();
-        EngineContext::GetInstance().m_CurrentBufferIndex = newCurrentFrame;
+        uint32_t newCurrentFrame                            = ( currentIndex + 1 ) % m_SwapChain->GetImageCount();
+        EngineContext::GetInstance().m_CurrentFrameIndex    = newCurrentFrame;
+        EngineContext::GetInstance().m_PrevioustBufferIndex = currentIndex;
         vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
     }
 
@@ -92,19 +93,13 @@ namespace Desert::Graphic::API::Vulkan
             presentInfo.pWaitSemaphores    = &waitSemaphore;
             presentInfo.waitSemaphoreCount = 1;
         }
-        const auto res = ( vkQueuePresentKHR( queue, &presentInfo ) );
+        auto res = ( vkQueuePresentKHR( queue, &presentInfo ) );
         if ( res == VK_SUCCESS )
         {
             return Common::MakeSuccess( VK_SUCCESS );
         }
 
-        // Swap chain is no longer compatible with the surface and needs to be recreated
-        /*else if ( res == VK_ERROR_OUT_OF_DATE_KHR )
-        {
-            uint32_t width = 1;
-            uint32_t height = 1;
-            m_SwapChain->OnResize( width, height );
-        }*/
+        return Common::MakeFormattedError<VkResult>( "result: {}", VkResultToString( res ) );
     }
 
     Common::Result<VkResult> VulkanQueue::Init()
@@ -131,31 +126,34 @@ namespace Desert::Graphic::API::Vulkan
 
         for ( uint32_t i = 0; i < m_SwapChain->GetImageCount(); i++ )
         {
-            /*Graphic buffers*/
-
-            const auto& bufferDraw = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic();
-            if ( !bufferDraw.IsSuccess() )
+            // graphic
             {
-                return Common::MakeError<VkResult>( bufferDraw.GetError() );
-            }
-            m_DrawCommandBuffers[i].first = bufferDraw.GetValue();
+                const auto&                 gPool = CommandBufferAllocator::GetInstance().GetCommandGraphicPool();
+                VkCommandBufferAllocateInfo allocateInfo;
+                allocateInfo.pNext              = VK_NULL_HANDLE;
+                allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                allocateInfo.commandBufferCount = 1;
+                allocateInfo.commandPool        = gPool[i];
 
-            const auto& bufferDrawSecondary =
-                 CommandBufferAllocator::GetInstance().RT_AllocateSecondCommandBufferGraphic();
-            if ( !bufferDrawSecondary.IsSuccess() )
+                VK_RETURN_RESULT_IF_FALSE_TYPE(
+                     VkResult, vkAllocateCommandBuffers( device, &allocateInfo, &m_DrawCommandBuffers[i] ) );
+            }
+
+            // compute
             {
-                return Common::MakeError<VkResult>( bufferDrawSecondary.GetError() );
-            }
-            m_DrawCommandBuffers[i].second = bufferDrawSecondary.GetValue();
+                const auto& cPool = CommandBufferAllocator::GetInstance().GetCommandComputePool();
 
-            /*Compute buffers*/
+                VkCommandBufferAllocateInfo allocateInfo;
+                allocateInfo.pNext              = VK_NULL_HANDLE;
+                allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                allocateInfo.commandBufferCount = 1;
+                allocateInfo.commandPool        = cPool[i];
 
-            const auto& bufferCompute = CommandBufferAllocator::GetInstance().RT_GetCommandBufferCompute();
-            if ( !bufferCompute.IsSuccess() )
-            {
-                return Common::MakeError<VkResult>( bufferCompute.GetError() );
+                VK_RETURN_RESULT_IF_FALSE_TYPE(
+                     VkResult, vkAllocateCommandBuffers( device, &allocateInfo, &m_ComputeCommandBuffers[i] ) );
             }
-            m_ComputeCommandBuffers[i] = bufferCompute.GetValue();
         }
 
         m_WaitFences.resize( m_SwapChain->GetImageCount() );

@@ -1,5 +1,5 @@
 #include <Engine/Core/Camera.hpp>
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 #include <Common/Core/Input.hpp>
 
 #include <glm/gtc/quaternion.hpp>

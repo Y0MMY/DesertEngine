@@ -1,6 +1,6 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Core/Application.hpp>
-#include <Engine/Core/EngineContext.h>
+#include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/Materials/PBR/PBRMaterialHelper.hpp>
 
 #include <glm/glm.hpp>
@@ -147,6 +147,10 @@ namespace Desert::Graphic
         GeometryRenderPass();
         ToneMapRenderPass();
         CompositeRenderPass();
+
+        m_SceneInfo.Renderdata.Geometry.Material->Clear();
+        m_SceneInfo.Renderdata.Composite.Material->Clear();
+        m_SceneInfo.Renderdata.Skybox.Material->Clear();
     }
 
     NO_DISCARD Common::BoolResult SceneRenderer::EndScene()
@@ -157,6 +161,8 @@ namespace Desert::Graphic
 
     void SceneRenderer::Resize( const uint32_t width, const uint32_t height )
     {
+        if ( width == 0 && height == 0 )
+            return;
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
         m_SceneInfo.Renderdata.Skybox.Framebuffer->Resize( width, height );
@@ -178,8 +184,7 @@ namespace Desert::Graphic
     void SceneRenderer::ToneMapRenderPass()
     {
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-
-        auto& renderer = Renderer::GetInstance();
+        auto&    renderer   = Renderer::GetInstance();
 
         renderer.BeginRenderPass( m_SceneInfo.Renderdata.Composite.RenderPass );
 
