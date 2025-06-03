@@ -18,7 +18,7 @@
 #include <Engine/Graphic/Texture.hpp>
 
 #include <Engine/Core/EngineContext.h>
-#include "stb_image/stb_image_write.h"
+// #include <stb_image/stb_image_write.h>
 
 #include <glm/glm.hpp>
 

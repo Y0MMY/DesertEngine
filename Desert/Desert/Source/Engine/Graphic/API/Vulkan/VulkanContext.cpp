@@ -8,6 +8,13 @@
 
 #include <vulkan/vulkan.h>
 
+#if defined( DESERT_PLATFORM_LINUX )
+
+#include <xcb/xcb.h>
+#include <vulkan/vulkan_xcb.h>
+
+#endif
+
 namespace Desert::Graphic::API::Vulkan
 {
     static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugReportCallback( VkDebugReportFlagsEXT      flags,
@@ -49,7 +56,13 @@ namespace Desert::Graphic::API::Vulkan
         appInfo.apiVersion         = VK_API_VERSION_1_3;
 
         std::vector<const char*> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME,
-                                                        VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
+#ifdef DESERT_PLATFORM_WINDOWS
+                                                        VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+#elif defined( DESERT_PLATFORM_LINUX )
+                                                        VK_KHR_XCB_SURFACE_EXTENSION_NAME
+#endif
+        };
+
         if ( s_DebugValidation )
         {
             instanceExtensions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
@@ -135,7 +148,7 @@ namespace Desert::Graphic::API::Vulkan
         VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );
         VulkanLoadDebugUtilsExtensions( s_VulkanInstance );
         return Common::MakeSuccess( VK_SUCCESS );
-    }
+    } // namespace Desert::Graphic::API::Vulkan
 
     void VulkanContext::BeginFrame() const
     {

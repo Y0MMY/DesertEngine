@@ -50,6 +50,6 @@ namespace Desert::Core
     private:
         std::string                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
-        entt::registry                          m_Registry;
+    //    entt::registry                          m_Registry;
     };
 } // namespace Desert::Core

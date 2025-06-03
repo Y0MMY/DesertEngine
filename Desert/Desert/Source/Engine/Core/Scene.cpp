@@ -60,7 +60,7 @@ namespace Desert::Core
 
     Desert::ECS::Entity Scene::CreateNewEntity( std::string&& entityName )
     {
-        return ECS::Entity( std::move( entityName ), m_Registry.create() );
+        return ECS::Entity( std::move( entityName ), 0U );
     }
 
 } // namespace Desert::Core

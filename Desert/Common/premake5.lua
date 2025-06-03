@@ -10,6 +10,11 @@ project "Common"
         "Source/",
         "Source/Common",
     }
+
+    removefiles {
+        "Source/Common/Platform/Windows/*",
+        "Source/Common/Platform/Linux/*",
+    }
     
     for name, path in pairs(deps.Common.IncludeDir) do
         includedirs { path }
@@ -29,6 +34,15 @@ project "Common"
         defines { define }
     end
 
+    filter "toolset:clang"
+        buildoptions {
+        }
+
+        postbuildcommands {
+          --  "clang-tidy -p %{wks.location} Source/Common/**/*.cpp --quiet || true"
+        }
+        
+
     filter "configurations:Debug"
         defines { "DESERT_CONFIG_DEBUG" }
         symbols "On"
@@ -41,4 +55,11 @@ project "Common"
         files {
             "Source/Common/Platform/Windows/**.cpp",
             "Source/Common/Platform/Windows/**.hpp",
+        }
+
+    filter { "system:linux" }
+        defines { "DESERT_PLATFORM_LINUX" }
+        files {
+            "Source/Common/Platform/Linux/**.cpp",
+            "Source/Common/Platform/Linux/**.hpp",
         }

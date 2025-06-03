@@ -3,7 +3,7 @@
 #include <Engine/Graphic/Shader.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
-#include <Engine/Graphic/Vertexbuffer.hpp>
+#include <Engine/Graphic/VertexBuffer.hpp>
 
 namespace Desert::Graphic
 {

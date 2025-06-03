@@ -1,7 +1,10 @@
 #pragma once
 
 #include <iostream>
+
+#ifdef DESERT_PLATFORM_WINDOWS
 #include <windows.h>
+#endif
 
 // NOTE: This is a workaround for Microsoft macros so that
 // we can use names like CreateDirectory, etc

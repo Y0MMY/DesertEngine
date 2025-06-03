@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.hpp>
+#include <Common/Core/Core.hpp>
 
 inline PFN_vkSetDebugUtilsObjectNameEXT
      fpSetDebugUtilsObjectNameEXT; // Making it static randomly sets it to nullptr for some reason.

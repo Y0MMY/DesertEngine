@@ -49,7 +49,7 @@ decltype( auto ) initializeDefaultValue()
     if ( !( cond ) )                                                                                              \
     {                                                                                                             \
         Common::Logger::LogError( "Verify failed: {} at {}:{}", #cond, __FILE__, __LINE__ );                      \
-        __debugbreak();                                                                                           \
+        DESERT_DEBUG_BREAK;                                                                                        \
     }
 
 #define DESERT_VERIFY_WARN( cond, ... )                                                                           \

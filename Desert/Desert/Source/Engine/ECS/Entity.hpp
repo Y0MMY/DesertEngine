@@ -1,6 +1,12 @@
 #pragma once
 
-#include <entt/entt.hpp>
+//#include <entt/entt.hpp>
+
+
+namespace entt
+{
+    using entity = uint32_t;
+}
 
 namespace Desert::ECS
 {

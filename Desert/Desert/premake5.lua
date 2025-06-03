@@ -19,6 +19,11 @@ project "Desert"
         "%{wks.location}/Desert/Common/Source",
     }
     
+    removefiles {
+        "Source/Common/Platform/Windows/*",
+        "Source/Common/Platform/Linux/*",
+    }
+
     for name, path in pairs(deps.Common.IncludeDir) do
         includedirs { path }
     end
@@ -59,4 +64,10 @@ project "Desert"
         files {
             "Source/Platform/Windows/**.cpp",
             "Source/Platform/Windows/**.hpp",
+        }
+    filter { "system:linux" }
+        defines { "DESERT_PLATFORM_LINUX" }
+        files {
+            "Source/Common/Platform/Linux/**.cpp",
+            "Source/Common/Platform/Linux/**.hpp",
         }
