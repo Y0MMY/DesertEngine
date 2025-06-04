@@ -33,3 +33,8 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/Mesh.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
+
+// =================== ECS =================== //
+
+#include <Engine/ECS/Entity.hpp>
+#include <Engine/ECS/Components.hpp>

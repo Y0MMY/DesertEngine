@@ -9,13 +9,13 @@ namespace Desert::Editor
     class SceneHierarchyPanel final : public IPanel
     {
     public:
-        explicit SceneHierarchyPanel( const std::shared_ptr<Core::Scene>& scene )
+        explicit SceneHierarchyPanel( const std::shared_ptr<Desert::Core::Scene>& scene )
              : IPanel( "Scene Hierarchy" ), m_Scene( scene )
         {
         }
-        void OnUIRender() const override;
+        void OnUIRender() override;
 
     private:
-        const std::shared_ptr<Core::Scene> m_Scene;
+        const std::shared_ptr<Desert::Core::Scene> m_Scene;
     };
 } // namespace Desert::Editor

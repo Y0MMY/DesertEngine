@@ -1,8 +1,9 @@
 #pragma once
 
+#include <entt/entt.hpp>
+
 #include <Engine/Graphic/Image.hpp>
 #include <Common/Core/Core.hpp>
-#include <Engine/ECS/Entity.hpp>
 
 #include <Engine/Core/Camera.hpp>
 
@@ -15,7 +16,12 @@ namespace Desert::Graphic
 namespace Desert
 {
     class Mesh;
-}
+    namespace ECS
+    {
+        class Entity;
+    }
+
+} // namespace Desert
 
 namespace Desert::Core
 {
@@ -43,7 +49,7 @@ namespace Desert::Core
 
         void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const;
 
-        ECS::Entity CreateNewEntity( std::string&& entityName );
+        ECS::Entity& CreateNewEntity( std::string&& entityName );
 
         [[nodiscard]] const auto& GetAllEntities() const
         {
@@ -52,7 +58,16 @@ namespace Desert::Core
 
         [[nodiscard]] const Graphic::Environment& GetEnvironment() const;
 
-        [[nodiscard]] auto& GetRegistry() { return m_Registry; }
+        [[nodiscard]] auto& GetRegistry()
+        {
+            return m_Registry;
+        }
+
+        [[nodiscard]] auto& GetSceneName()
+        {
+            return m_SceneName;
+        }
+
     private:
         std::string                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;

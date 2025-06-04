@@ -1,6 +1,7 @@
 #include <Engine/Core/Scene.hpp>
 
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/ECS/Entity.hpp>
 
 namespace Desert::Core
 {
@@ -58,11 +59,9 @@ namespace Desert::Core
         return m_SceneRenderer->GetEnvironment();
     }
 
-    Desert::ECS::Entity Scene::CreateNewEntity( std::string&& entityName )
+    Desert::ECS::Entity& Scene::CreateNewEntity( std::string&& entityName )
     {
-        const auto& entity =
-             m_Entitys.emplace_back( std::move( entityName ), m_Registry.create(), std::ref( *this ) );
-        return entity;
+        return m_Entitys.emplace_back( std::move( entityName ), m_Registry.create(), this );
     }
 
 } // namespace Desert::Core

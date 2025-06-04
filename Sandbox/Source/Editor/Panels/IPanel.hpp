@@ -12,7 +12,7 @@ namespace Desert::Editor
         }
 
         virtual ~IPanel()               = default;
-        virtual void       OnUIRender() const = 0;
+        virtual void       OnUIRender() = 0;
         const std::string& GetName() const
         {
             return m_PanelName;

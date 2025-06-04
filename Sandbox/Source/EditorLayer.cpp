@@ -1,6 +1,8 @@
 #include "EditorLayer.hpp"
 
-#include "Editor/Widgets/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
+#include "Editor/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
+#include "Editor/Panels/SceneProperties/ScenePropertiesPanel.hpp"
+#include <ImGui/imgui_internal.h>
 
 namespace Desert
 {
@@ -61,6 +63,7 @@ namespace Desert
         m_UIHelper->Init();
 
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_testscene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>() );
 
 #endif // EBABLE_IMGUI
 
@@ -93,7 +96,6 @@ namespace Desert
 
             m_ImGuiLayer->End();
         }
-
         m_Window->PresentFinalImage();
 
         return BOOLSUCCESS;
@@ -160,7 +162,7 @@ namespace Desert
             {
                 if ( ::ImGui::MenuItem( "Exit" ) )
                 {
-                    // Handle exit
+                    
                 }
                 ::ImGui::EndMenu();
             }
@@ -168,25 +170,37 @@ namespace Desert
             ::ImGui::EndMenuBar();
         }
 
-        ::ImGui::Begin( "Viewport" );
+        // Apply company styling to the viewport
+        ::ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
+        ::ImGui::PushStyleVar( ImGuiStyleVar_WindowRounding, 4.0f );
+        ::ImGui::PushStyleVar( ImGuiStyleVar_WindowBorderSize, 0.0f );
+        ::ImGui::PushStyleColor( ImGuiCol_WindowBg, ImVec4( 0.15f, 0.15f, 0.17f, 1.0f ) );
+
+        ::ImGui::Begin( "Viewport", nullptr, ImGuiWindowFlags_NoScrollbar );
         {
             ImVec2 viewportSize = ::ImGui::GetContentRegionAvail();
             if ( m_Size.x != viewportSize.x || m_Size.y != viewportSize.y )
             {
                 m_EditorCamera.UpdateProjectionMatrix( viewportSize.x, viewportSize.y );
-
                 m_Size = viewportSize;
             }
 
             m_UIHelper->Image( m_testscenerenderer->GetFinalImage(), viewportSize );
         }
         ::ImGui::End();
+        ::ImGui::PopStyleColor( 1 );
+        ::ImGui::PopStyleVar( 3 );
 
         for ( const auto& panel : m_Panels )
         {
-            ::ImGui::Begin( panel->GetName().c_str() );
+            namespace ImGui = ::ImGui;
+            ImGuiWindowClass window_class;
+            window_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoTabBar;
+            ImGui::SetNextWindowClass( &window_class );
+
+            ImGui::Begin( panel->GetName().c_str() );
             panel->OnUIRender();
-            ::ImGui::End();
+            ImGui::End();
         }
 
         ::ImGui::End(); // End dockspace
