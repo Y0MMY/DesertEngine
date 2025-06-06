@@ -4,7 +4,7 @@
 
 #include <glm/glm.hpp>
 
-#include <rflcpp/rfl.hpp>
+//#include <rflcpp/rfl.hpp>
 
 namespace Desert::ECS
 {
@@ -25,7 +25,7 @@ namespace Desert::ECS
         glm::vec3 Scale;
     };
 
-    struct DirectionLight
+    struct DirectionLightComponent
     {
     };
 } // namespace Desert::ECS

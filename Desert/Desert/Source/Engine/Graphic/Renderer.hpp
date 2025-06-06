@@ -4,7 +4,7 @@
 #include <Common/Core/Memory/CommandBuffer.hpp>
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialTechnique.hpp>
+#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
 
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
@@ -33,7 +33,7 @@ namespace Desert::Graphic
         void                             BeginSwapChainRenderPass();
         void                             EndRenderPass();
         void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                         const MaterialHelper::MateriaTtechniques& materiaTtechnique );
+                         const std::shared_ptr<Material>& material );
 
         void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                    const std::shared_ptr<Material>& material );

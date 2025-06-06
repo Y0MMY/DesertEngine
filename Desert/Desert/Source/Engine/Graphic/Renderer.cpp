@@ -110,9 +110,9 @@ namespace Desert::Graphic
     }
 
     void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                               const MaterialHelper::MateriaTtechniques& materiaTtechnique )
+                               const std::shared_ptr<Material>& material )
     {
-        s_RendererAPI->RenderMesh( pipeline, mesh, materiaTtechnique );
+        s_RendererAPI->RenderMesh( pipeline, mesh, material );
     }
 
     PBRTextures Renderer::CreateEnvironmentMap( const Common::Filepath& filepath )
@@ -136,10 +136,6 @@ namespace Desert::Graphic
         s_RendererAPI->Shutdown();
         m_BRDFTexture->GetImage2D()->Release();
 
-     /*   for ( auto sceneRenderer : Core::SceneRendererManager::SceneRenderers )
-        {
-            sceneRenderer->Shutdown();
-        }*/
         delete s_RendererAPI;
         m_RendererContext->Shutdown();
     }

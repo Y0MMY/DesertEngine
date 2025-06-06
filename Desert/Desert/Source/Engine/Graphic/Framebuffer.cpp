@@ -14,7 +14,7 @@ namespace Desert::Graphic
             case RendererAPIType::Vulkan:
             {
                 const auto framebuffer = std::make_shared<API::Vulkan::VulkanFramebuffer>( spec );
-                FramebufferLibrary::s_Framebuffers.push_back( framebuffer );
+             //   FramebufferLibrary::s_Framebuffers.push_back( framebuffer );
 
                 return framebuffer;
             }

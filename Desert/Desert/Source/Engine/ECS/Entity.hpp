@@ -1,7 +1,5 @@
 #pragma once
 
-#include <entt/entt.hpp>
-
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Core/Scene.hpp>
 

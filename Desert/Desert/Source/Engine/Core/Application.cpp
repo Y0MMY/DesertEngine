@@ -33,40 +33,40 @@ namespace Desert::Engine
         OnCreate();
         Init();
 
-        float lastTime = glfwGetTime();
+        static float FpsUpdateInterval    = 1.0f;
+        static float FpsUpdateAccumulator = 0.0f;
+        static float FPS                  = 0.0f;
+
         while ( m_IsRunningApplication )
         {
             m_Window->ProcessEvents();
             if ( !m_Minimized )
             {
-                float currentTime = glfwGetTime();
-                float deltaTime   = currentTime - lastTime;
-                lastTime          = currentTime;
-
-                m_FPSTimer += deltaTime;
-                m_FPSCounter++;
-                if ( m_FPSTimer >= 1.0f )
-                {
-                    m_FPS        = static_cast<float>( m_FPSCounter ) / m_FPSTimer;
-                    m_FPSCounter = 0;
-                    m_FPSTimer   = 0.0f;
-
-                    std::string newTitle =
-                         m_ApplicationInfo.Title + " - FPS: " + std::to_string( static_cast<int>( m_FPS ) );
-                    m_Window->SetTitle( newTitle.c_str() );
-                }
-
-                Common::Timestep timestep;
                 for ( const auto& layer : m_LayerStack )
                 {
-                    const auto& result = layer->OnUpdate( m_PrevTimestep );
+                    const auto& result = layer->OnUpdate( m_TimeStep );
                     if ( !result )
                     {
                         throw std::logic_error( result.GetError() );
                     }
                 }
+            }
 
-                m_PrevTimestep = Common::Timestep( timestep - Common::Timestep() );
+            float currentTime = glfwGetTime();
+            m_Frametime       = Common::Timestep( currentTime - m_LastFrameTime );
+            m_TimeStep        = Common::Timestep( glm::min<float>( m_Frametime.GetSeconds(), 0.0333f ) );
+            m_LastFrameTime   = currentTime;
+
+            m_FPSCounter++;
+            FpsUpdateAccumulator += m_Frametime.GetSeconds();
+
+            if ( FpsUpdateAccumulator >= FpsUpdateInterval )
+            {
+                FPS                  = static_cast<float>( m_FPSCounter ) / FpsUpdateAccumulator;
+                m_FPSCounter         = 0;
+                FpsUpdateAccumulator = 0.0f;
+
+                m_Window->SetTitle( "FPS: " + std::to_string( (uint32_t)FPS ) );
             }
         }
         Destroy();

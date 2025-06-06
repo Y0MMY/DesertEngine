@@ -43,10 +43,11 @@ namespace Desert::Editor
         for ( auto& entity : view )
         {
             std::string& tag   = entity.GetComponent<ECS::TagComponent>().Tag;
-            const auto   UUIDs = entity.GetComponent<ECS::UUIDComponent>().UUID.ToString();
+            const auto   UUID  = entity.GetComponent<ECS::UUIDComponent>().UUID;
+            const auto   UUIDs = UUID.ToString();
 
             const auto& selectedEntity = Core::SelectionManager::GetSelected();
-            const bool  isSelected     = selectedEntity.has_value() && *selectedEntity->get() == entity;
+            const bool  isSelected     = selectedEntity.has_value() && *selectedEntity == UUID;
 
             if ( isSelected )
             {
@@ -74,7 +75,7 @@ namespace Desert::Editor
 
             if ( ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen() )
             {
-                Core::SelectionManager::SetSelected( (ECS::Entity*)&entity );
+                Core::SelectionManager::SetSelected( UUID );
             }
 
             if ( ImGui::BeginPopupContextItem() )
@@ -84,7 +85,7 @@ namespace Desert::Editor
 
                 if ( ImGui::MenuItem( "Delete" ) )
                 {
-                    if (isSelected)
+                    if ( isSelected )
                     {
                         Core::SelectionManager::ClearSelection();
                     }
@@ -115,7 +116,9 @@ namespace Desert::Editor
             ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
 
             if ( ImGui::MenuItem( "Empty Entity" ) )
+            {
                 m_Scene->CreateNewEntity( "New Entity" );
+            }
 
             if ( ImGui::BeginMenu( "3D Objects" ) )
             {
@@ -135,7 +138,7 @@ namespace Desert::Editor
             {
                 if ( ImGui::MenuItem( "Directional" ) )
                 {
-                    m_Scene->CreateNewEntity( "Directional Light" ).AddComponent<ECS::DirectionLight>();
+                    m_Scene->CreateNewEntity( "Directional Light" ).AddComponent<ECS::DirectionLightComponent>();
                 }
                 if ( ImGui::MenuItem( "Point" ) )
                 {

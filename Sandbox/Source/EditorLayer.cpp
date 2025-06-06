@@ -9,13 +9,12 @@ namespace Desert
     EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
          : Common::Layer( layerName ), m_Window( window )
     {
-        m_testscenerenderer = std::make_shared<Graphic::SceneRenderer>();
-        m_testscene         = std::make_shared<Core::Scene>( "sdfsdf", m_testscenerenderer );
+        m_testscene = std::make_shared<Core::Scene>( "sdfsdf" );
     }
 
     EditorLayer::~EditorLayer()
     {
-        m_testscenerenderer->Shutdown();
+        m_testscene->Shutdown();
     }
 
     [[nodiscard]] Common::BoolResult EditorLayer::OnAttach()
@@ -63,23 +62,23 @@ namespace Desert
         m_UIHelper->Init();
 
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_testscene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>() );
+        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_testscene ) );
 
 #endif // EBABLE_IMGUI
 
         return BOOLSUCCESS;
     }
 
-    [[nodiscard]] Common::BoolResult EditorLayer::OnUpdate( Common::Timestep ts )
+    [[nodiscard]] Common::BoolResult EditorLayer::OnUpdate( const Common::Timestep& ts )
     {
-        m_EditorCamera.OnUpdate();
+        m_EditorCamera.OnUpdate( ts );
         const auto& beginResult = m_testscene->BeginScene( m_EditorCamera );
         if ( !beginResult )
         {
             return Common::MakeError( beginResult.GetError() );
         }
 
-        m_testscene->OnUpdate();
+        m_testscene->OnUpdate( ts );
 
         const auto& endResult = m_testscene->EndScene();
         m_Window->PrepareNextFrame();
@@ -162,7 +161,6 @@ namespace Desert
             {
                 if ( ::ImGui::MenuItem( "Exit" ) )
                 {
-                    
                 }
                 ::ImGui::EndMenu();
             }
@@ -185,7 +183,7 @@ namespace Desert
                 m_Size = viewportSize;
             }
 
-            m_UIHelper->Image( m_testscenerenderer->GetFinalImage(), viewportSize );
+            m_UIHelper->Image( m_testscene->GetFinalImage(), viewportSize );
         }
         ::ImGui::End();
         ::ImGui::PopStyleColor( 1 );
@@ -219,7 +217,7 @@ namespace Desert
 
     {
         // m_ImGuiLayer->Resize( e.width, e.height );
-        m_testscenerenderer->Resize( e.width, e.height );
+        m_testscene->Resize( e.width, e.height );
         return false;
     }
 

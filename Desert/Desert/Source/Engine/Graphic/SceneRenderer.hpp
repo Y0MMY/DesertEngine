@@ -10,6 +10,10 @@
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/EventRegistry.hpp>
 
+#include <Engine/Graphic/Materials/Models/Lighting.hpp>
+#include <Engine/Graphic/Materials/Models/Global.hpp>
+#include <Engine/Graphic/Materials/Models/Camera.hpp>
+
 namespace Desert::Core
 {
     class Scene;
@@ -26,7 +30,7 @@ namespace Desert::Graphic
         [[nodiscard]] Common::BoolResult BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene,
                                                      const Core::Camera&                         camera );
 
-        void OnUpdate();
+        void OnUpdate( DTO::SceneRendererUpdate&& sceneRenderInfo );
 
         [[nodiscard]] Common::BoolResult EndScene();
 
@@ -51,6 +55,11 @@ namespace Desert::Graphic
             std::shared_ptr<Mesh> Mesh;
         };
 
+        struct LightsRenderInfo
+        {
+            std::unique_ptr<Models::LightingData> Lightning;
+        };
+
         struct RenderInfo
         {
             std::shared_ptr<Graphic::Shader>               Shader;
@@ -66,12 +75,22 @@ namespace Desert::Graphic
             std::shared_ptr<Core::Scene> ActiveScene;
             Core::Camera*                ActiveCamera;
             Environment                  EnvironmentData;
+            LightsRenderInfo             LightsInfo;
 
             struct
             {
-                RenderInfo Skybox;
+                struct
+                {
+                    RenderInfo                          InfoRender;
+                    std::unique_ptr<Models::CameraData> CameraUB;
+                } Skybox;
+
                 RenderInfo Composite;
-                RenderInfo Geometry;
+                struct
+                {
+                    RenderInfo                          InfoRender;
+                    std::unique_ptr<Models::GlobalData> GlobalUB;
+                } Geometry;
 
                 std::vector<MeshRenderInfo> MeshInfo;
             } Renderdata;

@@ -6,8 +6,8 @@
 namespace Desert::Core
 {
 
-    Scene::Scene( const std::string& sceneName, const std::shared_ptr<Graphic::SceneRenderer>& sceneRenderer )
-         : m_SceneName( sceneName ), m_SceneRenderer( sceneRenderer )
+    Scene::Scene( const std::string& sceneName )
+         : m_SceneName( sceneName ), m_SceneRenderer( std::make_unique<Graphic::SceneRenderer>() )
     {
     }
 
@@ -24,8 +24,6 @@ namespace Desert::Core
             return Common::MakeError( res.GetError() );
         }
 
-        SceneRendererManager::SceneRenderers.push_back( m_SceneRenderer );
-
         return BOOLSUCCESS;
     }
 
@@ -39,9 +37,17 @@ namespace Desert::Core
         m_SceneRenderer->RenderMesh( mesh );
     }
 
-    void Scene::OnUpdate()
+    void Scene::OnUpdate( const Common::Timestep& ts )
     {
-        m_SceneRenderer->OnUpdate();
+        Graphic::DTO::SceneRendererUpdate sceneRendererInfo;
+        sceneRendererInfo.Timestep = ts;
+
+        auto dirLightGroup = m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
+
+        dirLightGroup.each( [&]( const auto& light, const auto& transform )
+                            { sceneRendererInfo.DirLights.push_back( { transform.Position } ); } );
+
+        m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }
 
     NO_DISCARD Common::BoolResult Scene::EndScene()
@@ -61,7 +67,39 @@ namespace Desert::Core
 
     Desert::ECS::Entity& Scene::CreateNewEntity( std::string&& entityName )
     {
-        return m_Entitys.emplace_back( std::move( entityName ), m_Registry.create(), this );
+        const auto enttID = m_Registry.create();
+        auto&      entity = m_Entitys.emplace_back( std::move( entityName ), enttID, this );
+        m_EntitysMap[entity.GetComponent<ECS::UUIDComponent>().UUID] = m_Entitys.size() - 1;
+
+        return entity;
+    }
+
+    const std::shared_ptr<Desert::Graphic::Image2D> Scene::GetFinalImage() const
+    {
+        return m_SceneRenderer->GetFinalImage();
+    }
+
+    void Scene::Shutdown()
+    {
+        m_SceneRenderer.reset();
+    }
+
+    void Scene::Resize( const uint32_t width, const uint32_t height ) const
+    {
+        m_SceneRenderer->Resize( width, height );
+    }
+
+    std::optional<std::reference_wrapper<const Desert::ECS::Entity>>
+    Scene::FindEntityByID( const Common::UUID& uuid ) const
+    {
+        if ( auto it = m_EntitysMap.find( uuid ); it != m_EntitysMap.end() ) [[likely]]
+        {
+            return std::ref( m_Entitys.at( it->second ) );
+        }
+        else [[unlikely]]
+        {
+            return std::nullopt;
+        }
     }
 
 } // namespace Desert::Core

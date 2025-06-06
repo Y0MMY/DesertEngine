@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialTechnique.hpp>
 
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
@@ -39,7 +38,7 @@ namespace Desert::Graphic
         virtual Common::BoolResult BeginSwapChainRenderPass()                                       = 0;
         virtual Common::BoolResult EndRenderPass()                                                  = 0;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                                 const MaterialHelper::MateriaTtechniques& materiaTtechnique )      = 0;
+                                 const std::shared_ptr<Material>& material )                        = 0;
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                            const std::shared_ptr<Material>& material )              = 0;
 

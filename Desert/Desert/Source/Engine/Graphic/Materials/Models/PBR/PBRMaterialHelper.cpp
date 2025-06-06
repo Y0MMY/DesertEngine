@@ -1,6 +1,6 @@
-#include <Engine/Graphic/Materials/PBR/PBRMaterialHelper.hpp>
+#include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
 
-namespace Desert::Graphic::MaterialHelper
+namespace Desert::Graphic::Models::PBR
 {
 
     void PBRMaterial::Override( const PBRUniforms& pbr, const std::shared_ptr<UniformBuffer>& uniform ) const

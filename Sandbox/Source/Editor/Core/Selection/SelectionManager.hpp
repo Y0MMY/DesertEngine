@@ -7,9 +7,9 @@ namespace Desert::Editor::Core
     class SelectionManager final // maybe singleton?
     {
     public:
-        static void SetSelected( Common::Memory::not_null<ECS::Entity>&& entity )
+        static void SetSelected( const Common::UUID& uuid )
         {
-            m_SelctedEntity = std::make_optional( std::move( entity ) );
+            m_SelctedEntity = std::make_optional( uuid );
         }
         static const auto& GetSelected()
         {
@@ -25,6 +25,6 @@ namespace Desert::Editor::Core
         }
 
     private:
-        static inline std::optional<Common::Memory::not_null<ECS::Entity>> m_SelctedEntity;
+        static inline std::optional<Common::UUID> m_SelctedEntity;
     };
 } // namespace Desert::Editor::Core

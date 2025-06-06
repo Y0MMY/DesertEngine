@@ -1,9 +1,9 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialTechnique.hpp>
+#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
 
-namespace Desert::Graphic::MaterialHelper
+namespace Desert::Graphic::Models::PBR
 {
     struct alignas( 16 ) PBRUniforms
     {
@@ -14,10 +14,10 @@ namespace Desert::Graphic::MaterialHelper
         glm::vec3 Emissive{ 0.0f };
     };
 
-    class PBRMaterial : public MateriaTtechniques
+    class PBRMaterial : public MaterialHelper::MaterialWrapper
     {
     public:
-        using MateriaTtechniques::MateriaTtechniques;
+        using MaterialWrapper::MaterialWrapper;
 
         void Override( const PBRUniforms& pbr, const std::shared_ptr<UniformBuffer>& uniform ) const;
     };

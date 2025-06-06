@@ -107,7 +107,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult VulkanImGui::OnUpdate( Common::Timestep ts )
+    Common::BoolResult VulkanImGui::OnUpdate( const Common::Timestep& )
     {
         VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand( []() { ::ImGui::ShowDemoWindow(); } );
 

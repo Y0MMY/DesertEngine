@@ -14,6 +14,11 @@ namespace Common::Memory
         {
         }
 
+        ~not_null()
+        {
+            m_Ptr = nullptr;
+        }
+
         not_null( const not_null& )            = default;
         not_null& operator=( const not_null& ) = default;
         not_null( std::nullptr_t )             = delete;

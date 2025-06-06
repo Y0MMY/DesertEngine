@@ -8,16 +8,23 @@ namespace Desert::Graphic
 {
     class UniformBuffer;
 
+    /*
+      in the startup phase already prepares all the UB information from the shader. To use the UB, it is enough
+      just to get it from GetUniformBuffer()
+     */
     class UniformBufferManager final
     {
-        void AddBuffer( std::shared_ptr<UniformBuffer> buffer, const std::string& name );
-
     public:
         explicit UniformBufferManager( const std::string_view debugName, const std::shared_ptr<Shader>& shader );
 
+        // maybe std::reference_wrapper? 
         Common::Result<std::shared_ptr<UniformBuffer>> GetUniformBuffer( const std::string& name ) const;
 
-        static std::shared_ptr<UniformBufferManager> Create(const std::string_view debugName, const std::shared_ptr<Shader>& shader );
+        static std::shared_ptr<UniformBufferManager> Create( const std::string_view         debugName,
+                                                             const std::shared_ptr<Shader>& shader );
+
+    private:
+        void AddBuffer( std::shared_ptr<UniformBuffer>&& buffer, const std::string& name );
 
     private:
         std::vector<std::shared_ptr<UniformBuffer>> m_UniformBuffers;

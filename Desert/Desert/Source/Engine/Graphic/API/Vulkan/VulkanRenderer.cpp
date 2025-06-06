@@ -246,14 +246,14 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanRendererAPI::PrepareNextFrame()
     {
-        //static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PrepareNextFrame();
+        // static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PrepareNextFrame();
 
         return Common::MakeSuccess( true );
     }
 
     Common::BoolResult VulkanRendererAPI::PresentFinalImage()
     {
-        //static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PresentFinalImage();
+        // static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PresentFinalImage();
 
         return Common::MakeSuccess( true );
     }
@@ -415,13 +415,13 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
-        if (width == 0 && height == 0)
+        if ( width == 0 && height == 0 )
             return;
-        const auto device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        uint32_t currentIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        const auto device       = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        uint32_t   currentIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         const auto& pool = CommandBufferAllocator::GetInstance().GetCommandGraphicPool();
-        VK_CHECK_RESULT(vkResetCommandPool(device, pool[currentIndex], 0));
+        VK_CHECK_RESULT( vkResetCommandPool( device, pool[currentIndex], 0 ) );
 
         const auto& swapChain = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
                                      ->GetVulkanSwapChain();
@@ -430,8 +430,7 @@ namespace Desert::Graphic::API::Vulkan
 
         swapChain->OnResize( width, height );
 
-
-         auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
 
         for ( auto& image : swapChain->GetSwapChainVKImage() )
         {
@@ -447,11 +446,11 @@ namespace Desert::Graphic::API::Vulkan
             barrier.subresourceRange.layerCount = 1;
 
             vkCmdPipelineBarrier( commandBuffer.GetValue(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier );
+                                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                                  &barrier );
         }
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer.GetValue() );
-
     }
 
     void VulkanRendererAPI::SetViewportAndScissor()
@@ -480,9 +479,9 @@ namespace Desert::Graphic::API::Vulkan
         return m_CompositeFramebuffer;
     }
 
-    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>&          pipeline,
-                                        const std::shared_ptr<Mesh>&              mesh,
-                                        const MaterialHelper::MateriaTtechniques& materiaTtechnique )
+    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,
+                                        const std::shared_ptr<Mesh>&     mesh,
+                                        const std::shared_ptr<Material>& material )
     {
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
@@ -502,14 +501,14 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
 
         const auto& pcBuffer =
-             sp_cast<VulkanMaterial>( materiaTtechnique.GetMaterialInstance() )->GetPushConstantBuffer();
+             sp_cast<VulkanMaterial>( material )->GetPushConstantBuffer();
         if ( pcBuffer.Size )
         {
             vkCmdPushConstants( m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, pcBuffer.Size,
                                 pcBuffer.Data );
         }
 
-        materiaTtechnique.Bind();
+        material->ApplyMaterial();
 
         vkCmdDrawIndexed( m_CurrentCommandBuffer, mesh->GetIndexBuffer()->GetCount(), 1, 0, 0, 0 );
     }

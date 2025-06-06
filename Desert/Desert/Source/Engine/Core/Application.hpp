@@ -62,7 +62,9 @@ namespace Desert::Engine
     private:
         Common::LayerStack m_LayerStack;
 
-        Common::Timestep m_PrevTimestep;
+        Common::Timestep m_TimeStep;
+        Common::Timestep m_Frametime;
+        float m_LastFrameTime = 0.0f;
         bool             m_IsRunningApplication = true;
 
         float    m_FPS        = 0.0f;

@@ -7,6 +7,8 @@
 
 #include <Engine/Core/Camera.hpp>
 
+#include <Engine/Graphic/DTO/SceneRendererUpdate.hpp>
+
 namespace Desert::Graphic
 {
     class SceneRenderer;
@@ -25,23 +27,20 @@ namespace Desert
 
 namespace Desert::Core
 {
-    class SceneRendererManager // TODO: move to good space
-    {
-    public:
-        static inline std::vector<std::shared_ptr<Graphic::SceneRenderer>> SceneRenderers;
-    };
 
     class Scene final : public std::enable_shared_from_this<Scene>
     {
     public:
         Scene() = default;
-        Scene( const std::string& sceneName, const std::shared_ptr<Graphic::SceneRenderer>& sceneRenderer );
+        Scene( const std::string& sceneName );
 
         [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
-        void                             OnUpdate();
+        void                             OnUpdate( const Common::Timestep& ts );
         [[nodiscard]] Common::BoolResult EndScene();
 
         [[nodiscard]] Common::BoolResult Init();
+
+        void Shutdown();
 
         [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
 
@@ -49,12 +48,16 @@ namespace Desert::Core
 
         void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const;
 
+        const std::shared_ptr<Graphic::Image2D> GetFinalImage() const;
+
         ECS::Entity& CreateNewEntity( std::string&& entityName );
 
         [[nodiscard]] const auto& GetAllEntities() const
         {
             return m_Entitys;
         }
+
+        void Resize( const uint32_t width, const uint32_t height ) const;
 
         [[nodiscard]] const Graphic::Environment& GetEnvironment() const;
 
@@ -68,10 +71,14 @@ namespace Desert::Core
             return m_SceneName;
         }
 
+        [[nodiscard]] std::optional<std::reference_wrapper<const ECS::Entity>>
+        FindEntityByID( const Common::UUID& uuid ) const;
+
     private:
-        std::string                             m_SceneName;
-        std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
-        entt::registry                          m_Registry;
-        std::vector<ECS::Entity>                m_Entitys;
+        std::string                              m_SceneName;
+        std::unique_ptr<Graphic::SceneRenderer>  m_SceneRenderer;
+        entt::registry                           m_Registry;
+        std::vector<ECS::Entity>                 m_Entitys;
+        std::unordered_map<Common::UUID, size_t> m_EntitysMap;
     };
 } // namespace Desert::Core

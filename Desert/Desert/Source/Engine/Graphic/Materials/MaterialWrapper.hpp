@@ -4,17 +4,19 @@
 
 namespace Desert::Graphic::MaterialHelper
 {
-    class MateriaTtechniques
+    class MaterialWrapper
     {
     public:
-        explicit MateriaTtechniques( const std::shared_ptr<Material>& baseMaterial ) : m_Material( baseMaterial )
+        explicit MaterialWrapper( const std::shared_ptr<Material>& baseMaterial ) : m_Material( baseMaterial )
         {
         }
         //  virtual std::vector<std::pair<std::string, std::shared_ptr<Graphic::Image2D>>> GetBindlessData() = 0;
 
         void Bind() const
         {
-            m_Material->ApplyMaterial();
+            //TODO: apply only this material
+            
+            //m_Material->ApplyMaterial();
         }
         const auto& GetMaterialInstance() const
         {

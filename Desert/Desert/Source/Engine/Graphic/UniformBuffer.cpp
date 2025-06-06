@@ -22,7 +22,7 @@ namespace Desert::Graphic
         return nullptr;
     }
 
-    void UniformBufferManager::AddBuffer( std::shared_ptr<UniformBuffer> buffer, const std::string& name )
+    void UniformBufferManager::AddBuffer( std::shared_ptr<UniformBuffer>&& buffer, const std::string& name )
     {
         const auto index = m_UniformBuffers.size();
         m_UniformBuffers.push_back( std::move( buffer ) );

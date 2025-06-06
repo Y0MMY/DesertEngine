@@ -66,7 +66,7 @@ namespace Desert::Core
         return false;
     }
 
-    void Camera::OnUpdate()
+    void Camera::OnUpdate( const Common::Timestep& timestep )
     {
         auto             window = EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw();
         const glm::vec2& MousePosition{ Common::Input::Mouse::Get().GetMouseX( window ),
@@ -81,28 +81,28 @@ namespace Desert::Core
 
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::S, window ) )
             {
-                m_LocationDelta -= cameraSpeed * m_Direction;
+                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * m_Direction;
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::W, window ) )
             {
-                m_LocationDelta += cameraSpeed * m_Direction;
+                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * m_Direction;
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::A, window ) )
             {
-                m_LocationDelta -= cameraSpeed * m_RightDirection;
+                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * m_RightDirection;
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::D, window ) )
             {
-                m_LocationDelta += cameraSpeed * m_RightDirection;
+                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds()  * m_RightDirection;
             }
 
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::Q, window ) )
             {
-                m_LocationDelta -= cameraSpeed * glm::vec3{ 0.f, YAWSign, 0.f };
+                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f } ;
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::E, window ) )
             {
-                m_LocationDelta += cameraSpeed * glm::vec3{ 0.f, YAWSign, 0.f };
+                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f } ;
             }
 
             constexpr float maxRate = 0.12f;

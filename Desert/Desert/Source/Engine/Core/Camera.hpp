@@ -27,7 +27,7 @@ namespace Desert::Core
             return m_ViewMatrix;
         }
 
-        void OnUpdate();
+        void OnUpdate( const Common::Timestep& timestep );
         void OnEvent( Common::Event& e ) override;
 
         const auto GetDirection() const

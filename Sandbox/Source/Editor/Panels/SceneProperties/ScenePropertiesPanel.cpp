@@ -27,65 +27,72 @@ namespace Desert::Editor
         ImGui::Separator();
         ImGui::Dummy( ImVec2( 0, 6 ) );
 
-        auto selectedEntityOpt = Core::SelectionManager::GetSelected();
+        auto selectedOpt = Core::SelectionManager::GetSelected();
 
-        if ( selectedEntityOpt )
+        if ( selectedOpt )
         {
-            const auto& selectedEntity = selectedEntityOpt.value();
-
-            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.8f, 0.9f ) );
-            ImGui::Text( "ID: %s", selectedEntity->GetComponent<ECS::UUIDComponent>().UUID.ToString().c_str() );
-            ImGui::PopStyleColor();
-
-            ImGui::Dummy( ImVec2( 0, 8 ) );
-
-            if ( selectedEntity->HasComponent<ECS::TagComponent>() )
+            const auto& selectedEntityOpt = m_Scene->FindEntityByID( selectedOpt.value() );
+            if ( selectedEntityOpt )
             {
-                auto tag = &selectedEntity->GetComponent<ECS::TagComponent>().Tag[0];
+                const auto& selectedEntity = selectedEntityOpt.value().get();
 
-                ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0.11f, 0.11f, 0.12f, 1.0f ) );
-                ImGui::PushStyleColor( ImGuiCol_FrameBgHovered, ImVec4( 0.13f, 0.13f, 0.14f, 1.0f ) );
-                ImGui::PushStyleColor( ImGuiCol_FrameBgActive, ImVec4( 0.09f, 0.09f, 0.10f, 1.0f ) );
-                ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.95f, 0.95f, 0.95f, 1.0f ) );
-                ImGui::PushStyleVar( ImGuiStyleVar_FrameBorderSize, 1.0f );
-                ImGui::PushStyleColor( ImGuiCol_Border, ImVec4( 0.2f, 0.2f, 0.25f, 1.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.8f, 0.9f ) );
+                if ( selectedEntity.HasComponent<ECS::UUIDComponent>() )
+                    ImGui::Text( "ID: %s",
+                                 selectedEntity.GetComponent<ECS::UUIDComponent>().UUID.ToString().c_str() );
+                ImGui::PopStyleColor();
 
-                ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x );
-                if ( ImGui::InputText( "##EntityName", tag,
-                                       ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll ) )
+                ImGui::Dummy( ImVec2( 0, 8 ) );
+
+                if ( selectedEntity.HasComponent<ECS::TagComponent>() )
                 {
+                    auto tag = &selectedEntity.GetComponent<ECS::TagComponent>().Tag[0];
+
+                    ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0.11f, 0.11f, 0.12f, 1.0f ) );
+                    ImGui::PushStyleColor( ImGuiCol_FrameBgHovered, ImVec4( 0.13f, 0.13f, 0.14f, 1.0f ) );
+                    ImGui::PushStyleColor( ImGuiCol_FrameBgActive, ImVec4( 0.09f, 0.09f, 0.10f, 1.0f ) );
+                    ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.95f, 0.95f, 0.95f, 1.0f ) );
+                    ImGui::PushStyleVar( ImGuiStyleVar_FrameBorderSize, 1.0f );
+                    ImGui::PushStyleColor( ImGuiCol_Border, ImVec4( 0.2f, 0.2f, 0.25f, 1.0f ) );
+
+                    ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x );
+                    if ( ImGui::InputText( "##EntityName", tag,
+                                           ImGuiInputTextFlags_EnterReturnsTrue |
+                                                ImGuiInputTextFlags_AutoSelectAll ) )
+                    {
+                    }
+
+                    ImGui::PopStyleVar();
+                    ImGui::PopStyleColor( 5 );
+
+                    ImGui::Dummy( ImVec2( 0, 10 ) );
                 }
 
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor( 5 );
-
-                ImGui::Dummy( ImVec2( 0, 10 ) );
-            }
-
-            if ( selectedEntity->HasComponent<ECS::TransformComponent>() &&
-                 !selectedEntity->HasComponent<ECS::DirectionLight>() )
-            {
-                if ( ImGui::CollapsingHeader( "Transform", ImGuiTreeNodeFlags_DefaultOpen ) )
+                if ( selectedEntity.HasComponent<ECS::TransformComponent>() &&
+                     !selectedEntity.HasComponent<ECS::DirectionLightComponent>() )
                 {
-                    ImGui::Dummy( ImVec2( 0, 4 ) );
-                    auto& transform = selectedEntity->GetComponent<ECS::TransformComponent>();
+                    if ( ImGui::CollapsingHeader( "Transform", ImGuiTreeNodeFlags_DefaultOpen ) )
+                    {
+                        ImGui::Dummy( ImVec2( 0, 4 ) );
+                        auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
 
-                    Widgets::DrawVec3Control( "Position", transform.Position );
-                    ImGui::Dummy( ImVec2( 0, 6 ) );
-                    Widgets::DrawVec3Control( "Rotation", transform.Rotation );
-                    ImGui::Dummy( ImVec2( 0, 6 ) );
-                    Widgets::DrawVec3Control( "Scale", transform.Scale, 1.0f );
+                        Widgets::DrawVec3Control( "Position", transform.Position );
+                        ImGui::Dummy( ImVec2( 0, 6 ) );
+                        Widgets::DrawVec3Control( "Rotation", transform.Rotation );
+                        ImGui::Dummy( ImVec2( 0, 6 ) );
+                        Widgets::DrawVec3Control( "Scale", transform.Scale, 1.0f );
+                    }
                 }
-            }
 
-            else
-            {
-                if ( ImGui::CollapsingHeader( "Direction", ImGuiTreeNodeFlags_DefaultOpen ) )
+                else
                 {
-                    ImGui::Dummy( ImVec2( 0, 4 ) );
-                    auto& transform = selectedEntity->GetComponent<ECS::TransformComponent>();
+                    if ( ImGui::CollapsingHeader( "Direction", ImGuiTreeNodeFlags_DefaultOpen ) )
+                    {
+                        ImGui::Dummy( ImVec2( 0, 4 ) );
+                        auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
 
-                    Widgets::DrawVec3Control( "Direction", transform.Position );
+                        Widgets::DrawVec3Control( "Direction", transform.Position );
+                    }
                 }
             }
         }

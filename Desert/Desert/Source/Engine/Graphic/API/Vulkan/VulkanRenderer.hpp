@@ -22,7 +22,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Common::BoolResult BeginSwapChainRenderPass() override;
         [[nodiscard]] virtual Common::BoolResult EndRenderPass() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                                 const MaterialHelper::MateriaTtechniques& materiaTtechnique ) override;
+                                 const std::shared_ptr<Material>& material ) override;
 
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                            const std::shared_ptr<Material>& material ) override;
@@ -41,6 +41,7 @@ namespace Desert::Graphic::API::Vulkan
         GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
 #endif
         VkCommandBuffer GetCurrentCmdBuffer() const;
+
     private:
         void SetViewportAndScissor();
 

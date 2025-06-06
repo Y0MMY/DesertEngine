@@ -12,7 +12,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
     public:
         virtual Common::BoolResult OnAttach() override;
         virtual Common::BoolResult OnDetach() override;
-        virtual Common::BoolResult OnUpdate( Common::Timestep ts ) override;
+        virtual Common::BoolResult OnUpdate( const Common::Timestep& ts ) override;
         virtual void               Begin() override;
         virtual void               End() override;
 
