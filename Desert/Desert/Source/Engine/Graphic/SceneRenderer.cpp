@@ -98,7 +98,7 @@ namespace Desert::Graphic
             // Framebuffer
             FramebufferSpecification fbSpec;
             fbSpec.DebugName               = debugName;
-            //fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
+            fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
             fbSpec.ExternalAttachments.Load        = AttachmentLoad::Load;
             fbSpec.ExternalAttachments.ExternalAttachments.push_back( SKYBOX_RENDERINFO( Framebuffer ) );
 

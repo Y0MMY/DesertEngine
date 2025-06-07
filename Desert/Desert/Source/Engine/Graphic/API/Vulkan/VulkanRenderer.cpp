@@ -289,13 +289,13 @@ namespace Desert::Graphic::API::Vulkan
         // delete[] indices;
     }
 
-    std::array<VkClearValue, 2> CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
+    VkClearValue CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
     {
-        const auto                  clearColor = renderPass->GetSpecification().ClearColor;
-        std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = { clearColor.Color.x, clearColor.Color.y, clearColor.Color.z, clearColor.Color.w };
-        clearValues[1].depthStencil = { clearColor.DepthStencil.x,
-                                        static_cast<uint32_t>( clearColor.DepthStencil.y ) };
+        const auto   clearColor = renderPass->GetSpecification().ClearColor;
+        VkClearValue clearValues{};
+        clearValues.color = { clearColor.Color.x, clearColor.Color.y, clearColor.Color.z, clearColor.Color.w };
+        clearValues.depthStencil = { clearColor.DepthStencil.x,
+                                     static_cast<uint32_t>( clearColor.DepthStencil.y ) };
         return clearValues;
     }
 
@@ -313,7 +313,7 @@ namespace Desert::Graphic::API::Vulkan
 
     VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::unique_ptr<VulkanSwapChain>&   swapChain,
                                                      const std::shared_ptr<VulkanFramebuffer>& framebuffer,
-                                                     const std::array<VkClearValue, 2>&        clearValues )
+                                                     VkClearValue&                             clearValues )
     {
         VkRenderPassBeginInfo renderPassBeginInfo = {};
         renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -321,8 +321,8 @@ namespace Desert::Graphic::API::Vulkan
         renderPassBeginInfo.renderArea.offset     = { 0, 0 };
         renderPassBeginInfo.renderArea.extent     = { framebuffer->GetFramebufferWidth(),
                                                       framebuffer->GetFramebufferHeight() };
-        renderPassBeginInfo.clearValueCount       = static_cast<uint32_t>( clearValues.size() );
-        renderPassBeginInfo.pClearValues          = clearValues.data();
+        renderPassBeginInfo.clearValueCount       = 1U;
+        renderPassBeginInfo.pClearValues          = &clearValues;
         renderPassBeginInfo.framebuffer           = framebuffer->GetVKFramebuffer();
         return renderPassBeginInfo;
     }
