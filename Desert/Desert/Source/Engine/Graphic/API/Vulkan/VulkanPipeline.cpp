@@ -101,28 +101,33 @@ namespace Desert::Graphic::API::Vulkan
              .sampleShadingEnable  = VK_FALSE,
         };
 
+        const auto hasDepth = HasDepth();
+
         VkPipelineDepthStencilStateCreateInfo depthStencil = {
              .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-             .depthTestEnable       = VK_TRUE,
-             .depthWriteEnable      = VK_TRUE,
-             .depthCompareOp        = VK_COMPARE_OP_LESS,
+             .depthTestEnable       = hasDepth ? VK_TRUE : VK_FALSE,
+             .depthWriteEnable      = hasDepth ? VK_TRUE : VK_FALSE,
+             .depthCompareOp        = hasDepth ? VK_COMPARE_OP_LESS : VK_COMPARE_OP_ALWAYS,
              .depthBoundsTestEnable = VK_FALSE,
-             .stencilTestEnable     = VK_FALSE };
+             .stencilTestEnable     = VK_FALSE,
+             .minDepthBounds        = 0.0f,
+             .maxDepthBounds        = 1.0f };
 
-        VkPipelineColorBlendAttachmentState colorBlendAttachment = {
-             //.blendEnable    = VK_TRUE,
-             //.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-             //                VK_COLOR_COMPONENT_A_BIT
-             .blendEnable    = VK_FALSE,
-             .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-                               VK_COLOR_COMPONENT_A_BIT };
+        std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments;
+        colorBlendAttachments.resize( m_Specification.Framebuffer->GetColorAttachmentCount() );
+        for ( auto& attachment : colorBlendAttachments )
+        {
+            attachment.blendEnable    = VK_FALSE;
+            attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        }
 
         VkPipelineColorBlendStateCreateInfo colorBlending = {
              .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
              .logicOpEnable   = VK_FALSE,
              .logicOp         = VK_LOGIC_OP_COPY,
-             .attachmentCount = 1,
-             .pAttachments    = &colorBlendAttachment,
+             .attachmentCount = static_cast<uint32_t>( colorBlendAttachments.size() ),
+             .pAttachments    = colorBlendAttachments.data(),
              .blendConstants  = { 0.0f, 0.0f, 0.0f, 0.0f },
         };
 
@@ -140,10 +145,10 @@ namespace Desert::Graphic::API::Vulkan
         const auto& pushConstant = SetUpPushConstantRange();
 
         VkPipelineLayoutCreateInfo lyoutInfo = { .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                                  .setLayoutCount = (uint32_t)descriptorSetLayouts.size(),
-                                                  .pSetLayouts    = descriptorSetLayouts.data(),
-                                                  .pushConstantRangeCount = pushConstant.first,
-                                                  .pPushConstantRanges    = &pushConstant.second };
+                                                 .setLayoutCount = (uint32_t)descriptorSetLayouts.size(),
+                                                 .pSetLayouts    = descriptorSetLayouts.data(),
+                                                 .pushConstantRangeCount = pushConstant.first,
+                                                 .pPushConstantRanges    = &pushConstant.second };
 
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
@@ -219,6 +224,13 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         return { 1, pushConstantCI };
+    }
+
+    bool VulkanPipeline::HasDepth()
+    {
+        const auto& attachments = m_Specification.Framebuffer->GetSpecification().Attachments.Attachments;
+        return std::any_of( attachments.begin(), attachments.end(),
+                            []( const auto& attachment ) { return Utils::IsDepthFormat( attachment ); } );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

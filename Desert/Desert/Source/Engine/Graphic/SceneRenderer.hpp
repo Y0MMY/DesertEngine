@@ -13,6 +13,7 @@
 #include <Engine/Graphic/Materials/Models/Lighting.hpp>
 #include <Engine/Graphic/Materials/Models/Global.hpp>
 #include <Engine/Graphic/Materials/Models/Camera.hpp>
+#include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
 
 namespace Desert::Core
 {
@@ -47,6 +48,7 @@ namespace Desert::Graphic
         void CompositeRenderPass();
         void ToneMapRenderPass();
         void GeometryRenderPass();
+        void SkyboxRenderPass();
 
     private:
     private:
@@ -88,8 +90,9 @@ namespace Desert::Graphic
                 RenderInfo Composite;
                 struct
                 {
-                    RenderInfo                          InfoRender;
-                    std::unique_ptr<Models::GlobalData> GlobalUB;
+                    RenderInfo                                InfoRender;
+                    std::unique_ptr<Models::GlobalData>       GlobalUB;
+                    std::unique_ptr<Models::PBR::PBRMaterial> PBRUB;
                 } Geometry;
 
                 std::vector<MeshRenderInfo> MeshInfo;

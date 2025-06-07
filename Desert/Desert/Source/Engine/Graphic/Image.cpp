@@ -58,6 +58,8 @@ namespace Desert::Graphic
         {
             if ( format == Core::Formats::ImageFormat::DEPTH32F )
                 return true;
+            if ( format == Core::Formats::ImageFormat::DEPTH24STENCIL8 )
+                return true;
             return false;
         }
     } // namespace Utils

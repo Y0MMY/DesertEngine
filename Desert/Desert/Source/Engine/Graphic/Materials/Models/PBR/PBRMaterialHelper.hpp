@@ -9,9 +9,7 @@ namespace Desert::Graphic::Models::PBR
     {
         glm::vec3 Albedo{ 1.0f };
         float     Metallic  = 0.0f;
-        float     Roughness = 0.5f;
-        float     AO        = 1.0f;
-        glm::vec3 Emissive{ 0.0f };
+        float     Roughness = 0.0f;
     };
 
     class PBRMaterial : public MaterialHelper::MaterialWrapper
@@ -19,6 +17,8 @@ namespace Desert::Graphic::Models::PBR
     public:
         using MaterialWrapper::MaterialWrapper;
 
-        void Override( const PBRUniforms& pbr, const std::shared_ptr<UniformBuffer>& uniform ) const;
+        void UpdatePBR(  PBRUniforms&& pbr );
+    private:
+        PBRUniforms m_PBRUniforms;
     };
-} // namespace Desert::Graphic::MaterialHelper
+} // namespace Desert::Graphic::Models::PBR

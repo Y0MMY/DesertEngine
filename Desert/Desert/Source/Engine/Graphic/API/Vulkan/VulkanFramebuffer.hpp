@@ -36,19 +36,25 @@ namespace Desert::Graphic::API::Vulkan
             return m_RenderPass;
         }
 
+        uint32_t GetColorAttachmentCount() const override
+        {
+            return m_ColorAttachments.size() + m_ExternalColorAttachments.size();
+        }
+
+
         Common::BoolResult Invalidate() override
         {
             return Common::MakeError( "Use Resize()" );
         }
         Common::BoolResult Release() override;
 
-        virtual void Use( BindUsage = BindUsage::Bind ) const override;
+        virtual void Use( BindUsage = BindUsage::Bind ) const override{}
 
         virtual Common::BoolResult Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
 
         virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const override
         {
-            return m_ColorAttachment;
+            return m_ColorAttachments.at( index );
         }
         virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const override
         {
@@ -59,8 +65,11 @@ namespace Desert::Graphic::API::Vulkan
         Common::Result<VkFramebuffer> CreateFramebuffer( VkDevice device, uint32_t width, uint32_t height );
 
     private:
-        std::shared_ptr<Image2D> m_DepthAttachment;
-        std::shared_ptr<Image2D> m_ColorAttachment;
+        std::shared_ptr<Image2D>              m_DepthAttachment;
+        std::vector<std::shared_ptr<Image2D>> m_ColorAttachments;
+
+        std::shared_ptr<Image2D>              m_ExternalDepthAttachment;
+        std::vector<std::shared_ptr<Image2D>> m_ExternalColorAttachments;
 
         FramebufferSpecification m_FramebufferSpecification;
 

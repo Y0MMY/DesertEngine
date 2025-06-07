@@ -19,7 +19,7 @@ namespace Desert::Graphic::API::Vulkan
 
         inline std::vector<VkImageView> CreateMipImageViews( const uint32_t mipsLevel, const VkImage image,
                                                              const VkDevice device, const VkFormat format,
-                                                             bool isCubeMap )
+                                                             const bool isCubeMap, const bool isDepth )
         {
             std::vector<VkImageView> result( mipsLevel );
             for ( uint32_t mip = 0; mip < mipsLevel; ++mip )
@@ -29,7 +29,8 @@ namespace Desert::Graphic::API::Vulkan
                 viewInfo.image                       = image;
                 viewInfo.viewType                    = isCubeMap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
                 viewInfo.format                      = format;
-                viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                viewInfo.subresourceRange.aspectMask = isDepth ? (VkImageAspectFlags)VK_IMAGE_ASPECT_DEPTH_BIT
+                                                               : (VkImageAspectFlags)VK_IMAGE_ASPECT_COLOR_BIT;
                 viewInfo.subresourceRange.baseMipLevel   = mip;
                 viewInfo.subresourceRange.levelCount     = 1;
                 viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -268,8 +269,21 @@ namespace Desert::Graphic::API::Vulkan
                                                             uint32_t mipLevels, bool isCubemap = false,
                                                             bool isDepth = false )
         {
-            return Utils::CreateImageView( device, image, format,
-                                           isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+            VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+            if ( isDepth )
+            {
+                if ( format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT )
+                {
+                    aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                }
+                else
+                {
+                    aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                }
+            }
+
+            return Utils::CreateImageView( device, image, format, aspectMask,
                                            isCubemap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D,
                                            isCubemap ? CUBEMAP_FACE_COUNT : 1, mipLevels );
         }
@@ -355,6 +369,10 @@ namespace Desert::Graphic::API::Vulkan
                 return VK_FORMAT_R32G32B32A32_SFLOAT;
             case Core::Formats::ImageFormat::BGRA8F:
                 return VK_FORMAT_B8G8R8A8_UNORM;
+            case Core::Formats::ImageFormat::DEPTH32F:
+                return VK_FORMAT_D32_SFLOAT;
+            case Core::Formats::ImageFormat::DEPTH24STENCIL8:
+                return VulkanLogicalDevice::GetInstance().GetPhysicalDevice()->GetDepthFormat();
             default:
                 return VK_FORMAT_UNDEFINED;
         }
@@ -410,7 +428,7 @@ namespace Desert::Graphic::API::Vulkan
             return result;
         }
 
-        bool isDepth = Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format );
+        const bool isDepth = Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format );
 
         // Create image view
         auto viewResult =
@@ -430,7 +448,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         m_MipImageViews =
-             Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, false );
+             Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, false, isDepth );
 
         return Common::MakeSuccess( true );
     }
@@ -712,7 +730,8 @@ namespace Desert::Graphic::API::Vulkan
         if ( ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Sample ) )
             Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
 
-        m_MipImageViews = Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, true );
+        m_MipImageViews =
+             Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, true, false );
         if ( !m_MipImageViews.size() )
         {
             return Common::MakeError( "TODO" );

@@ -384,8 +384,6 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                                   const std::shared_ptr<Material>& material )
     {
-        material->ApplyMaterial();
-
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         const auto shader =
@@ -500,18 +498,23 @@ namespace Desert::Graphic::API::Vulkan
         const auto ibuffer = sp_cast<API::Vulkan::VulkanIndexBuffer>( mesh->GetIndexBuffer() )->GetVulkanBuffer();
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
 
-        const auto& pcBuffer =
-             sp_cast<VulkanMaterial>( material )->GetPushConstantBuffer();
+        const auto shader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( pipeline->GetSpecification().Shader );
+        const auto& desSet = shader->GetVulkanDescriptorSetInfo().DescriptorSets.at( frameIndex ).at( 0 );
+
+        vkCmdBindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &desSet, 0,
+                                 nullptr );
+
+        const auto& pcBuffer = sp_cast<VulkanMaterial>( material )->GetPushConstantBuffer();
         if ( pcBuffer.Size )
         {
             vkCmdPushConstants( m_CurrentCommandBuffer, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, pcBuffer.Size,
                                 pcBuffer.Data );
         }
 
-        material->ApplyMaterial();
-
         vkCmdDrawIndexed( m_CurrentCommandBuffer, mesh->GetIndexBuffer()->GetCount(), 1, 0, 0, 0 );
     }
+
 #ifdef DESERT_CONFIG_DEBUG
     PBRTextures VulkanRendererAPI::CreateEnvironmentMap( const Common::Filepath& filepath )
     {

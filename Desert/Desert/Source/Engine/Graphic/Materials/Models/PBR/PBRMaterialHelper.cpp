@@ -3,10 +3,11 @@
 namespace Desert::Graphic::Models::PBR
 {
 
-    void PBRMaterial::Override( const PBRUniforms& pbr, const std::shared_ptr<UniformBuffer>& uniform ) const
+    void PBRMaterial::UpdatePBR( PBRUniforms&& pbr )
     {
-        uniform->SetData( (void*)&pbr, sizeof( PBRUniforms ), 0 );
-        m_Material->AddUniformToOverride( uniform );
+        m_PBRUniforms = std::move(pbr);
+
+        m_Uniform->RT_SetData( &m_PBRUniforms, sizeof( PBRUniforms ), 0 );
     }
 
-} // namespace Desert::Graphic::MaterialHelper
+} // namespace Desert::Graphic::Models::PBR

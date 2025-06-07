@@ -12,11 +12,7 @@ namespace Desert::Graphic::Models
     class CameraData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit CameraData( const std::shared_ptr<UniformBuffer>& uniform,
-                             const std::shared_ptr<Material>&      material )
-             : MaterialHelper::MaterialWrapper( material ), m_UniformBuffer( uniform )
-        {
-        }
+        using MaterialHelper::MaterialWrapper::MaterialWrapper;
 
         void UpdateCameraUB( const Core::Camera& camera )
         {
@@ -29,11 +25,9 @@ namespace Desert::Graphic::Models
             cameraObj.m1 = camera.GetProjectionMatrix();
             cameraObj.m2 = camera.GetViewMatrix();
 
-            m_UniformBuffer->RT_SetData( &cameraObj, 128, 0U );
-            m_Material->AddUniformToOverride( m_UniformBuffer );
+            m_Uniform->RT_SetData( &cameraObj, 128, 0U );
         }
 
     private:
-        const std::shared_ptr<UniformBuffer> m_UniformBuffer;
     };
 } // namespace Desert::Graphic::Models

@@ -25,11 +25,11 @@ namespace Desert::Core
         m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
         m_Pitch = glm::pi<float>() / 4.0f;
 
-        m_Location                  = m_FocalPoint - GetForwardDirection() * m_Distance + m_LocationDelta;
+        m_Position                  = m_FocalPoint - GetForwardDirection() * m_Distance + m_LocationDelta;
         const glm::quat orientation = GetOrientation();
 
         m_Direction  = glm::eulerAngles( orientation ) * ( 180.f / glm::pi<float>() );
-        m_ViewMatrix = glm::translate( glm::mat4( 1.0 ), m_Location ) * glm::toMat4( orientation );
+        m_ViewMatrix = glm::translate( glm::mat4( 1.0 ), m_Position ) * glm::toMat4( orientation );
         m_ViewMatrix = glm::inverse( m_ViewMatrix );
     }
 
@@ -109,8 +109,8 @@ namespace Desert::Core
             m_YawDelta += glm::clamp( YAWSign * MouseDelta.x * rotationSpeed, -maxRate, maxRate );
             m_PitchDelta += glm::clamp( MouseDelta.y * rotationSpeed, -maxRate, maxRate );
 
-            const float distance = glm::distance( m_FocalPoint, m_Location );
-            m_FocalPoint         = m_Location + GetForwardDirection() * distance;
+            const float distance = glm::distance( m_FocalPoint, m_Position );
+            m_FocalPoint         = m_Position + GetForwardDirection() * distance;
             m_Distance           = distance;
 
             static constexpr float MaxPitch = glm::radians( 89.0f );
@@ -118,7 +118,7 @@ namespace Desert::Core
             m_Pitch                         = glm::clamp( m_Pitch, MinPitch, MaxPitch );
         }
         m_InitialMousePosition = MousePosition;
-        m_Location += m_LocationDelta;
+        m_Position += m_LocationDelta;
         m_Yaw += m_YawDelta;
         m_Pitch += m_PitchDelta;
         UpdateCameraView();
@@ -147,12 +147,12 @@ namespace Desert::Core
     void Camera::UpdateCameraView()
     {
         const float     YAWsign       = GetUpDirection().y > 0 ? 1 : -1;
-        const glm::vec3 lookDirection = m_Location + GetForwardDirection();
+        const glm::vec3 lookDirection = m_Position + GetForwardDirection();
         m_Direction                   = glm::normalize( GetForwardDirection() );
         m_Distance                    = glm::distance( lookDirection, m_FocalPoint );
         m_RightDirection              = glm::cross( m_Direction, glm::vec3{ 0.f, YAWsign, 0.f } );
 
-        m_ViewMatrix = glm::lookAt( m_Location, lookDirection, glm::vec3{ 0.f, YAWsign, 0.f } );
+        m_ViewMatrix = glm::lookAt( m_Position, lookDirection, glm::vec3{ 0.f, YAWsign, 0.f } );
 
         // Damping
         m_YawDelta *= 0.6f;

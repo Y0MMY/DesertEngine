@@ -17,7 +17,7 @@ namespace Desert::Graphic
     public:
         explicit UniformBufferManager( const std::string_view debugName, const std::shared_ptr<Shader>& shader );
 
-        // maybe std::reference_wrapper? 
+        // maybe std::reference_wrapper?
         Common::Result<std::shared_ptr<UniformBuffer>> GetUniformBuffer( const std::string& name ) const;
 
         static std::shared_ptr<UniformBufferManager> Create( const std::string_view         debugName,
@@ -44,7 +44,8 @@ namespace Desert::Graphic
         virtual const uint32_t GetSize() const    = 0;
 
     private:
-        static std::shared_ptr<UniformBuffer> Create( uint32_t size, uint32_t binding );
+        static std::shared_ptr<UniformBuffer> Create( const std::string_view debugName, uint32_t size,
+                                                      uint32_t binding );
 
         friend class UniformBufferManager;
     };

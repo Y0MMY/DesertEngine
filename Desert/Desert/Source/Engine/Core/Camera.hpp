@@ -36,6 +36,11 @@ namespace Desert::Core
         }
         void UpdateProjectionMatrix( const uint32_t width, const uint32_t height );
 
+        const auto& GetPosition() const
+        {
+            return m_Position;
+        }
+
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
@@ -50,7 +55,7 @@ namespace Desert::Core
     private:
         glm::mat4 m_ProjectionMatrix = glm::mat4( 1.0f );
 
-        glm::vec3 m_Location      = glm::vec3( 0.0f );
+        glm::vec3 m_Position      = glm::vec3( 0.0f );
         glm::vec3 m_Orientation   = glm::vec3( 0.0f, 0.0f, -1.0f );
         glm::vec3 m_FocalPoint    = glm::vec3( 0.0f );
         glm::vec3 m_LocationDelta = glm::vec3( 0.0f );

@@ -10,7 +10,7 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanUniformBuffer : public UniformBuffer
     {
     public:
-        VulkanUniformBuffer( uint32_t size, uint32_t binding );
+        VulkanUniformBuffer( const std::string_view debugName, uint32_t size, uint32_t binding );
         virtual ~VulkanUniformBuffer();
 
         virtual void           SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
@@ -40,6 +40,7 @@ namespace Desert::Graphic::API::Vulkan
         VkDescriptorBufferInfo m_DescriptorInfo{};
         uint32_t               m_Size    = 0;
         uint32_t               m_Binding = 0;
+        const std::string m_DebugName;
 
         Common::Memory::Buffer m_LocalStorage;
     };

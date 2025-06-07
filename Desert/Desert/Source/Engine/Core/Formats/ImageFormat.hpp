@@ -13,6 +13,7 @@ namespace Desert::Core::Formats
         RGBA8F,
         RGBA32F,
         BGRA8F,
+        DEPTH24STENCIL8,
 
         DEPTH32F
     };

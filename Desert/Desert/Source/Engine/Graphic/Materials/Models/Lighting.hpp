@@ -10,21 +10,19 @@ namespace Desert::Graphic::Models
     class LightingData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit LightingData( const std::shared_ptr<UniformBuffer>& uniform,
-                               const std::shared_ptr<Material>&      material )
-             : MaterialHelper::MaterialWrapper( material ), m_UniformBuffer( uniform )
+        explicit LightingData( glm::vec3&& direction, const std::shared_ptr<UniformBuffer>& uniform,
+                               const std::shared_ptr<Material>& material )
+             : MaterialHelper::MaterialWrapper( material, uniform ), m_Direction( std::move( direction ) )
         {
         }
 
         void UpdateDirection( glm::vec3&& direction )
         {
             m_Direction = std::move( direction );
-            m_UniformBuffer->SetData( &m_Direction[0], sizeof( glm::vec3 ) );
-            m_Material->AddUniformToOverride( m_UniformBuffer );
+            m_Uniform->SetData( &m_Direction[0], sizeof( glm::vec3 ) );
         }
 
     private:
-        glm::vec3                            m_Direction;
-        const std::shared_ptr<UniformBuffer> m_UniformBuffer;
+        glm::vec3 m_Direction;
     };
 } // namespace Desert::Graphic::Models

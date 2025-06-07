@@ -85,19 +85,32 @@ namespace Desert::Graphic::API::Vulkan
     {
         static constexpr uint32_t SET = 0u;
 
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
+        const auto& vulkanShader = sp_cast<VulkanShader>( m_Shader );
+
+        const auto& uniformBuffers    = vulkanShader->GetShaderDescriptorSets()[SET].UniformBuffers;
+        const auto& imageCubeSamplers = vulkanShader->GetShaderDescriptorSets()[SET].ImageCubeSamplers;
+        const auto& image2DSamplers   = vulkanShader->GetShaderDescriptorSets()[SET].Image2DSamplers;
+
+        const auto size = image2DSamplers.size() + imageCubeSamplers.size() + uniformBuffers.size();
+        const auto sizeComapre =
+             m_OverriddenUniforms.size() + m_OverriddenImages2D.size() + m_OverriddenImagesCube.size();
+        if ( size != sizeComapre )
+        {
+            LOG_ERROR( "{}: some data was not provided!", m_DebugName );
+            return Common::MakeFormattedError( "{}: some data was not provided!", m_DebugName );
+        }
 
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-        writeDescriptorSets.reserve(
-             ( m_OverriddenUniforms.size() + m_OverriddenImages2D.size() + m_OverriddenImagesCube.size() ) );
+        writeDescriptorSets.reserve( size );
 
         // Uniform
         {
             for ( const auto& uniform : m_OverriddenUniforms )
             {
-                auto wds = DescriptorSetBuilder::GetUniformWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
-                                                                uniform->GetBinding(), 1U,
-                                                                &uniform->GetDescriptorBufferInfo() );
+                auto wds =
+                     DescriptorSetBuilder::GetUniformWDS( vulkanShader, frameIndex, SET, uniform->GetBinding(), 1U,
+                                                          &uniform->GetDescriptorBufferInfo() );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }

@@ -30,6 +30,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
+        bool HasDepth();
+    private:
 
         std::pair<uint32_t, VkPushConstantRange> SetUpPushConstantRange() const;
     private:

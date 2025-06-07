@@ -91,7 +91,18 @@ namespace Desert::Editor
                         ImGui::Dummy( ImVec2( 0, 4 ) );
                         auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
 
-                        Widgets::DrawVec3Control( "Direction", transform.Position );
+                        Widgets::DrawDirectionWidget( "Direction", transform.Position );
+                    }
+
+                    ImGui::Dummy( ImVec2( 0, 3 ) );
+
+                    if ( ImGui::CollapsingHeader( "Attributes", ImGuiTreeNodeFlags_DefaultOpen ) )
+                    {
+                        ImGui::Dummy( ImVec2( 0, 4 ) );
+                        auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
+
+                        Widgets::DrawLightColorControl( "Light", transform.Position );
+                        Widgets::DrawLightIntensityControl( "Intensity", transform.Position.x );
                     }
                 }
             }

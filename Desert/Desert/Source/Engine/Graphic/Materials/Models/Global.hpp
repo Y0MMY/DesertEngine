@@ -15,20 +15,19 @@ namespace Desert::Graphic::Models
     class GlobalData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit GlobalData( const std::shared_ptr<UniformBuffer>& uniform,
-                                 const std::shared_ptr<Material>&      material )
-             : MaterialHelper::MaterialWrapper( material ), m_UniformBuffer( uniform )
+        explicit GlobalData( GlobalUB&& data, const std::shared_ptr<UniformBuffer>& uniform,
+                             const std::shared_ptr<Material>& material )
+             : MaterialHelper::MaterialWrapper( material, uniform ), m_GlobalUB( std::move( data ) )
         {
         }
 
         void UpdateUBGlobal( GlobalUB&& ubGlobal )
         {
             m_GlobalUB = std::move( ubGlobal );
-            m_Material->AddUniformToOverride( m_UniformBuffer );
+            m_Uniform->RT_SetData( &m_GlobalUB, sizeof(GlobalUB));
         }
 
     private:
-        GlobalUB                             m_GlobalUB;
-        const std::shared_ptr<UniformBuffer> m_UniformBuffer;
+        GlobalUB m_GlobalUB;
     };
-} // namespace Desert::Graphic
+} // namespace Desert::Graphic::Models

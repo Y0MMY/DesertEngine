@@ -8,6 +8,12 @@
 
 namespace Desert::Graphic
 {
+    enum class AttachmentLoad : uint8_t
+    {
+        Clear = 0,
+        Load  = 1
+    };
+
     struct FramebufferAttachmentSpecification
     {
         FramebufferAttachmentSpecification() = default;
@@ -19,12 +25,23 @@ namespace Desert::Graphic
         std::vector<Core::Formats::ImageFormat> Attachments;
     };
 
+    class Framebuffer;
+
+    struct ExternalFramebuffer
+    {
+        //  external attachments (e.g. Skybox texture)
+        std::vector<std::shared_ptr<Framebuffer>> ExternalAttachments;
+        AttachmentLoad                            Load = AttachmentLoad::Clear;
+    };
+
     struct FramebufferSpecification
     {
         uint32_t                           Samples = 2; // Multisampling
         FramebufferAttachmentSpecification Attachments;
-        std::string DebugName;
-        bool NoResizeble = false;
+        std::string                        DebugName;
+        bool                               NoResizeble = false;
+
+        ExternalFramebuffer ExternalAttachments;
     };
 
     class Framebuffer : public DynamicResources
@@ -39,6 +56,8 @@ namespace Desert::Graphic
 
         virtual uint32_t GetFramebufferWidth() const  = 0;
         virtual uint32_t GetFramebufferHeight() const = 0;
+
+        virtual uint32_t GetColorAttachmentCount() const = 0;
 
         virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const = 0;
         virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const                     = 0;
