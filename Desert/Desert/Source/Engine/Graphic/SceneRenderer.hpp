@@ -14,6 +14,7 @@
 #include <Engine/Graphic/Materials/Models/Global.hpp>
 #include <Engine/Graphic/Materials/Models/Camera.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
+#include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
 
 namespace Desert::Core
 {
@@ -90,9 +91,10 @@ namespace Desert::Graphic
                 RenderInfo Composite;
                 struct
                 {
-                    RenderInfo                                InfoRender;
-                    std::unique_ptr<Models::GlobalData>       GlobalUB;
-                    std::unique_ptr<Models::PBR::PBRMaterial> PBRUB;
+                    RenderInfo                                       InfoRender;
+                    std::unique_ptr<Models::GlobalData>              GlobalUB;
+                    std::unique_ptr<Models::PBR::PBRMaterial>        PBRUB;
+                    std::unique_ptr<Models::PBR::PBRMaterialTexture> PBRTextures;
                 } Geometry;
 
                 std::vector<MeshRenderInfo> MeshInfo;

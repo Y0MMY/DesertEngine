@@ -48,9 +48,6 @@ namespace Desert::Graphic
         const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
-#ifdef DESERT_CONFIG_DEBUG
-        [[nodiscard]] Common::BoolResult GenerateMipMap( const std::shared_ptr<Image2D>& image );
-#endif
         PBRTextures CreateEnvironmentMap( const Common::Filepath& filepath );
 
         uint32_t GetCurrentFrameIndex();

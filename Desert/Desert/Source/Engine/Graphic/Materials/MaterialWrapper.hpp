@@ -14,7 +14,10 @@ namespace Desert::Graphic::MaterialHelper
         }
         void Bind() const
         {
-            m_Material->AddUniformToOverride( m_Uniform );
+            if ( m_Uniform )
+            {
+                m_Material->AddUniformToOverride( m_Uniform );
+            }
         }
         const auto& GetMaterialInstance() const
         {

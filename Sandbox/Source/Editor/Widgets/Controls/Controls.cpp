@@ -91,13 +91,13 @@ namespace Desert::Editor
     {
         ImGui::PushID( label.c_str() );
 
-        const float widgetSize    = 120.0f; 
+        const float widgetSize    = 120.0f;
         const float markerRadius  = 8.0f;
         const float widgetPadding = 8.0f;
-        
-        const float inputHeight   = ImGui::GetFrameHeight();
-        const float buttonWidth   = 44.0f;
-        const float spacing       = 28.0f;
+
+        const float inputHeight = ImGui::GetFrameHeight();
+        const float buttonWidth = 44.0f;
+        const float spacing     = 28.0f;
 
         if ( glm::length( glm::vec2( direction.x, direction.y ) ) < 0.001f )
         {
@@ -171,78 +171,14 @@ namespace Desert::Editor
 
             ImGui::SameLine();
             ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x );
-            float zValue = -1.0f;
-            ImGui::DragFloat( "##Z", &zValue, 0.01f, -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_NoInput );
+            ImGui::DragFloat( "##Z", &direction.z, 0.01f, -1.0f, 1.0f, "%.2f" );
         }
         ImGui::EndGroup();
 
         ImGui::SetCursorPos( ImVec2( startCursorPos.x, startCursorPos.y + widgetSize ) );
 
-        direction.z = -1;
         ImGui::PopID();
     }
 
-    void Widgets::DrawLightColorControl(const std::string& label, glm::vec3& color)
-    {
-        ImGui::PushID(label.c_str());
-
-        ImGui::Columns(2);
-        ImGui::SetColumnWidth(0, 100.0f);
-
-        // Label
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 0.9f));
-        ImGui::TextUnformatted(label.c_str());
-        ImGui::PopStyleColor();
-
-        ImGui::NextColumn();
-
-        // Color picker
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.11f, 0.11f, 0.12f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.13f, 0.13f, 0.14f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.09f, 0.09f, 0.10f, 1.0f));
-        ImGui::ColorEdit3("##Color", &color[0],
-            ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_NoBorder);
-        ImGui::PopStyleColor(3);
-        ImGui::PopStyleVar();
-
-        ImGui::Columns(1);
-        ImGui::PopID();
-
-        ImGui::Dummy(ImVec2(0, 8));
-    }
-
-    void Widgets::DrawLightIntensityControl(const std::string& label, float& intensity, float min, float max)
-    {
-        ImGui::PushID(label.c_str());
-
-        ImGui::Columns(2);
-        ImGui::SetColumnWidth(0, 100.0f);
-
-        // Label
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 0.9f));
-        ImGui::TextUnformatted(label.c_str());
-        ImGui::PopStyleColor();
-
-        ImGui::NextColumn();
-
-        // Slider
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.11f, 0.11f, 0.12f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.13f, 0.13f, 0.14f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.09f, 0.09f, 0.10f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.22f, 0.42f, 0.69f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0.18f, 0.38f, 0.63f, 1.0f));
-
-        ImGui::SliderFloat("##Intensity", &intensity, min, max, "%.2f");
-
-        ImGui::PopStyleColor(5);
-        ImGui::PopStyleVar();
-
-        ImGui::Columns(1);
-        ImGui::PopID();
-
-        ImGui::Dummy(ImVec2(0, 8));
-    }
-
+   
 } // namespace Desert::Editor

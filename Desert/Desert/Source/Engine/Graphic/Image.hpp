@@ -3,6 +3,8 @@
 #include <Engine/Core/Formats/ImageFormat.hpp>
 #include <Engine/Graphic/DynamicResources.hpp>
 
+#include <Engine/Graphic/MipMapGenerator.hpp>
+
 namespace Desert::Graphic
 {
     class Image : public DynamicResources
@@ -31,7 +33,8 @@ namespace Desert::Graphic
     public:
         virtual Core::Formats::Image2DSpecification& GetImageSpecification() = 0;
 
-        static std::shared_ptr<Image2D> Create( const Core::Formats::Image2DSpecification& spec );
+        static std::shared_ptr<Image2D> Create( const Core::Formats::Image2DSpecification& spec,
+                                                const std::unique_ptr<MipMap2DGenerator>&  mipGenerator );
     };
 
     class ImageCube : public Image
@@ -39,7 +42,8 @@ namespace Desert::Graphic
     public:
         virtual Core::Formats::ImageCubeSpecification& GetImageSpecification() = 0;
 
-        static std::shared_ptr<ImageCube> Create( const Core::Formats::ImageCubeSpecification& spec );
+        static std::shared_ptr<ImageCube> Create( const Core::Formats::ImageCubeSpecification& spec,
+                                                  const std::unique_ptr<MipMapCubeGenerator>&  mipGenerator );
     };
 
     namespace Utils

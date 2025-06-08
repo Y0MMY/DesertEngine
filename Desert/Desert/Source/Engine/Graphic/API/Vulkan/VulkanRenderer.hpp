@@ -37,17 +37,11 @@ namespace Desert::Graphic::API::Vulkan
         virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
         virtual Common::BoolResult CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) override;
         virtual PBRTextures        CreateEnvironmentMap( const Common::Filepath& filepath ) override;
-        [[nodiscard]] virtual Common::BoolResult
-        GenerateMipMaps( const std::shared_ptr<Image2D>& image ) const override;
 #endif
         VkCommandBuffer GetCurrentCmdBuffer() const;
 
     private:
         void SetViewportAndScissor();
-
-#ifdef DESERT_CONFIG_DEBUG
-        void GenerateMipmaps2D( const std::shared_ptr<Image2D>& image ) const;
-#endif
 
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;

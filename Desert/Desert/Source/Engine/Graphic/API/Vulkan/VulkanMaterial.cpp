@@ -92,14 +92,8 @@ namespace Desert::Graphic::API::Vulkan
         const auto& imageCubeSamplers = vulkanShader->GetShaderDescriptorSets()[SET].ImageCubeSamplers;
         const auto& image2DSamplers   = vulkanShader->GetShaderDescriptorSets()[SET].Image2DSamplers;
 
-        const auto size = image2DSamplers.size() + imageCubeSamplers.size() + uniformBuffers.size();
-        const auto sizeComapre =
+        const auto size =
              m_OverriddenUniforms.size() + m_OverriddenImages2D.size() + m_OverriddenImagesCube.size();
-        if ( size != sizeComapre )
-        {
-            LOG_ERROR( "{}: some data was not provided!", m_DebugName );
-            return Common::MakeFormattedError( "{}: some data was not provided!", m_DebugName );
-        }
 
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
         writeDescriptorSets.reserve( size );

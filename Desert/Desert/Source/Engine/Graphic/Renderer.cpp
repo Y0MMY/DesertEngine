@@ -119,12 +119,6 @@ namespace Desert::Graphic
     {
         return s_RendererAPI->CreateEnvironmentMap( filepath );
     }
-#ifdef DESERT_CONFIG_DEBUG
-    [[nodiscard]] Common::BoolResult Renderer::GenerateMipMap( const std::shared_ptr<Image2D>& image )
-    {
-        return s_RendererAPI->GenerateMipMaps( image );
-    }
-#endif
 
     const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const
     {

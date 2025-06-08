@@ -101,8 +101,8 @@ namespace Desert::Editor
                         ImGui::Dummy( ImVec2( 0, 4 ) );
                         auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
 
-                        Widgets::DrawLightColorControl( "Light", transform.Position );
-                        Widgets::DrawLightIntensityControl( "Intensity", transform.Position.x );
+                  ///      Widgets::DrawLightColorControl( "Light", transform.Position );
+                      //  Widgets::DrawLightIntensityControl( "Intensity", transform.Position.x );
                     }
                 }
             }

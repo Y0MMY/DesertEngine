@@ -97,9 +97,9 @@ namespace Desert::Graphic
 
             // Framebuffer
             FramebufferSpecification fbSpec;
-            fbSpec.DebugName               = debugName;
-            fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
-            fbSpec.ExternalAttachments.Load        = AttachmentLoad::Load;
+            fbSpec.DebugName                = debugName;
+            fbSpec.Attachments.Attachments  = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
+            fbSpec.ExternalAttachments.Load = AttachmentLoad::Load;
             fbSpec.ExternalAttachments.ExternalAttachments.push_back( SKYBOX_RENDERINFO( Framebuffer ) );
 
             geometry.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
@@ -156,6 +156,9 @@ namespace Desert::Graphic
             }
             m_SceneInfo.Renderdata.Geometry.PBRUB = std::make_unique<Models::PBR::PBRMaterial>(
                  GEOMETRY_RENDERINFO( Material ), ubPBRRes.GetValue() );
+
+            m_SceneInfo.Renderdata.Geometry.PBRTextures =
+                 std::make_unique<Models::PBR::PBRMaterialTexture>( GEOMETRY_RENDERINFO( Material ), nullptr );
         }
 
         {
@@ -294,10 +297,14 @@ namespace Desert::Graphic
 
             m_SceneInfo.Renderdata.Geometry.GlobalUB->UpdateUBGlobal( std::move( globlal ) );
             m_SceneInfo.Renderdata.Geometry.PBRUB->UpdatePBR( {} );
+            /*m_SceneInfo.Renderdata.Geometry.PBRTextures->UpdatePBR(
+                 { .IrradianceMap  = m_SceneInfo.EnvironmentData.IrradianceMap,
+                   .PreFilteredMap = m_SceneInfo.EnvironmentData.PreFilteredMap } );*/
 
             m_SceneInfo.LightsInfo.Lightning->Bind(); // NOTE: data has already been updated
             m_SceneInfo.Renderdata.Geometry.GlobalUB->Bind();
             m_SceneInfo.Renderdata.Geometry.PBRUB->Bind();
+            //m_SceneInfo.Renderdata.Geometry.PBRTextures->Bind();
 
             GEOMETRY_RENDERINFO( Material )->ApplyMaterial();
             renderer.RenderMesh( GEOMETRY_RENDERINFO( Pipeline ), meshInfo.Mesh, GEOMETRY_RENDERINFO( Material ) );
