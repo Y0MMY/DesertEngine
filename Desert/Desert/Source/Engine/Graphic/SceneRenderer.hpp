@@ -48,6 +48,18 @@ namespace Desert::Graphic
         const std::shared_ptr<Image2D> GetFinalImage() const;
 
     private:
+        [[nodiscard]] Common::BoolResult InitSkyboxPass( const uint32_t width, const uint32_t height );
+        [[nodiscard]] Common::BoolResult InitCompositePass( const uint32_t width, const uint32_t height );
+        [[nodiscard]] Common::BoolResult InitGeometryPass( const uint32_t width, const uint32_t height );
+
+        [[nodiscard]] Common::BoolResult InitLightingUniforms();
+        [[nodiscard]] Common::BoolResult InitSkyboxUniforms();
+        [[nodiscard]] Common::BoolResult InitPBRUniforms();
+        [[nodiscard]] Common::BoolResult InitGlobalUniforms();
+        [[nodiscard]] Common::BoolResult InitCameraUniforms();
+        [[nodiscard]] Common::BoolResult InitToneMapUniforms();
+
+    private:
         void CompositeRenderPass();
         void ToneMapRenderPass();
         void GeometryRenderPass();

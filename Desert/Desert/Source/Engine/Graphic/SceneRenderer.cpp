@@ -16,218 +16,261 @@ namespace Desert::Graphic
         uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
         uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
 
-        // ==================== Skybox Pass ====================
+        if ( !InitSkyboxPass( width, height ) )
+            return Common::MakeError( "Failed to initialize Skybox pass" );
+        if ( !InitCompositePass( width, height ) )
+            return Common::MakeError( "Failed to initialize Composite pass" );
+        if ( !InitGeometryPass( width, height ) )
+            return Common::MakeError( "Failed to initialize Geometry pass" );
+
+        if ( !InitLightingUniforms() )
+            return Common::MakeError( "Failed to initialize lighting uniforms" );
+        if ( !InitSkyboxUniforms() )
+            return Common::MakeError( "Failed to initialize skybox uniforms" );
+        if ( !InitPBRUniforms() )
+            return Common::MakeError( "Failed to initialize PBR uniforms" );
+        if ( !InitGlobalUniforms() )
+            return Common::MakeError( "Failed to initialize global uniforms" );
+        if ( !InitCameraUniforms() )
+            return Common::MakeError( "Failed to initialize camera uniforms" );
+        if ( !InitToneMapUniforms() )
+            return Common::MakeError( "Failed to initialize tone map uniforms" );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitSkyboxPass(const  uint32_t width, const  uint32_t height )
+    {
+        auto&                      skybox    = m_SceneInfo.Renderdata.Skybox.InfoRender;
+        constexpr std::string_view debugName = "Skybox";
+
+        // Framebuffer
+        FramebufferSpecification fbSpec;
+        fbSpec.DebugName = debugName;
+        fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
+
+        skybox.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
+        skybox.Framebuffer->Resize( width, height );
+
+        // RenderPass
+        RenderPassSpecification rpSpec;
+        rpSpec.DebugName         = debugName;
+        rpSpec.TargetFramebuffer = skybox.Framebuffer;
+        skybox.RenderPass        = Graphic::RenderPass::Create( rpSpec );
+
+        // Pipeline
+        skybox.Shader = Graphic::Shader::Create( "skybox.glsl" );
+
+        Graphic::PipelineSpecification pipeSpec;
+        pipeSpec.DebugName   = debugName;
+        pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+        pipeSpec.Framebuffer = skybox.Framebuffer;
+        pipeSpec.Shader      = skybox.Shader;
+
+        skybox.Pipeline = Graphic::Pipeline::Create( pipeSpec );
+        skybox.Pipeline->Invalidate();
+
+        // Material
+        skybox.Material = Material::Create( std::string( debugName ), skybox.Shader );
+        skybox.Material->Invalidate();
+
+        skybox.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitCompositePass( const uint32_t width, const uint32_t height )
+    {
+        auto&                      composite = m_SceneInfo.Renderdata.Composite.InfoRender;
+        constexpr std::string_view debugName = "SceneComposite";
+
+        // Framebuffer
+        FramebufferSpecification fbSpec;
+        fbSpec.DebugName = debugName;
+        fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::BGRA8F );
+
+        composite.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
+        composite.Framebuffer->Resize( width, height );
+
+        // RenderPass
+        RenderPassSpecification rpSpec;
+        rpSpec.DebugName         = debugName;
+        rpSpec.TargetFramebuffer = composite.Framebuffer;
+        composite.RenderPass     = Graphic::RenderPass::Create( rpSpec );
+
+        // Pipeline
+        composite.Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
+
+        Graphic::PipelineSpecification pipeSpec;
+        pipeSpec.DebugName   = debugName;
+        pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
+        pipeSpec.Framebuffer = composite.Framebuffer;
+        pipeSpec.Shader      = composite.Shader;
+
+        composite.Pipeline = Graphic::Pipeline::Create( pipeSpec );
+        composite.Pipeline->Invalidate();
+
+        composite.Material = Material::Create( std::string( debugName ), composite.Shader );
+        composite.Material->Invalidate();
+
+        composite.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitGeometryPass(const  uint32_t width, const uint32_t height )
+    {
+        auto&                      geometry  = m_SceneInfo.Renderdata.Geometry.InfoRender;
+        constexpr std::string_view debugName = "SceneGeometry";
+
+        // Framebuffer
+        FramebufferSpecification fbSpec;
+        fbSpec.DebugName                = debugName;
+        fbSpec.Attachments.Attachments  = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
+        fbSpec.ExternalAttachments.Load = AttachmentLoad::Load;
+        fbSpec.ExternalAttachments.ExternalAttachments.push_back( SKYBOX_RENDERINFO( Framebuffer ) );
+
+        geometry.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
+        geometry.Framebuffer->Resize( width, height );
+
+        // RenderPass
+        RenderPassSpecification rpSpec;
+        rpSpec.DebugName         = debugName;
+        rpSpec.TargetFramebuffer = geometry.Framebuffer;
+        geometry.RenderPass      = RenderPass::Create( rpSpec );
+
+        // Pipeline
+        PipelineSpecification pipeSpec;
+        pipeSpec.DebugName   = debugName;
+        pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                 { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                 { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                 { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                 { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+        pipeSpec.Shader      = Graphic::Shader::Create( "StaticPBR.glsl" );
+        pipeSpec.Framebuffer = geometry.Framebuffer;
+        geometry.Shader      = pipeSpec.Shader;
+        pipeSpec.Renderpass  = geometry.RenderPass;
+
+        geometry.Pipeline = Pipeline::Create( pipeSpec );
+        geometry.Pipeline->Invalidate();
+
+        geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
+        geometry.Material->Invalidate();
+
+        geometry.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitLightingUniforms()
+    {
+        const auto ubLightRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "LightningUB" );
+        if ( !ubLightRes )
         {
-            auto&                      skybox    = m_SceneInfo.Renderdata.Skybox.InfoRender;
-            constexpr std::string_view debugName = "Skybox";
-
-            // Framebuffer
-            FramebufferSpecification fbSpec;
-            fbSpec.DebugName = debugName;
-            fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
-
-            skybox.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-            skybox.Framebuffer->Resize( width, height );
-
-            // RenderPass
-            RenderPassSpecification rpSpec;
-            rpSpec.DebugName         = debugName;
-            rpSpec.TargetFramebuffer = skybox.Framebuffer;
-            skybox.RenderPass        = Graphic::RenderPass::Create( rpSpec );
-
-            // Pipeline
-            skybox.Shader = Graphic::Shader::Create( "skybox.glsl" );
-
-            Graphic::PipelineSpecification pipeSpec;
-            pipeSpec.DebugName   = debugName;
-            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
-            pipeSpec.Framebuffer = skybox.Framebuffer;
-            pipeSpec.Shader      = skybox.Shader;
-
-            skybox.Pipeline = Graphic::Pipeline::Create( pipeSpec );
-            skybox.Pipeline->Invalidate();
-
-            // Material
-            skybox.Material = Material::Create( std::string( debugName ), skybox.Shader );
-            skybox.Material->Invalidate();
-
-            skybox.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
+            LOG_ERROR( "Lightning UB was not found!" );
+            return Common::MakeError( "Lightning UB was not found!" );
         }
 
-        // ==================== Composite Pass ====================
+        m_SceneInfo.LightsInfo.Lightning = std::make_unique<Models::LightingData>(
+             glm::vec3( 0 ), ubLightRes.GetValue(), GEOMETRY_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitSkyboxUniforms()
+    {
+        const auto ubSkyboxRes = SKYBOX_RENDERINFO( UBManager )->GetUniformImageCube( "samplerCubeMap" );
+        if ( !ubSkyboxRes )
         {
-            auto&                      composite = m_SceneInfo.Renderdata.Composite.InfoRender;
-            constexpr std::string_view debugName = "SceneComposite";
-
-            // Framebuffer
-            FramebufferSpecification fbSpec;
-            fbSpec.DebugName = debugName;
-            fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::BGRA8F );
-
-            composite.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-            composite.Framebuffer->Resize( width, height );
-
-            // RenderPass
-            RenderPassSpecification rpSpec;
-            rpSpec.DebugName         = debugName;
-            rpSpec.TargetFramebuffer = composite.Framebuffer;
-            composite.RenderPass     = Graphic::RenderPass::Create( rpSpec );
-
-            // Pipeline
-            composite.Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
-
-            Graphic::PipelineSpecification pipeSpec;
-            pipeSpec.DebugName   = debugName;
-            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
-            pipeSpec.Framebuffer = composite.Framebuffer;
-            pipeSpec.Shader      = composite.Shader;
-
-            composite.Pipeline = Graphic::Pipeline::Create( pipeSpec );
-            composite.Pipeline->Invalidate();
-
-            composite.Material = Material::Create( std::string( debugName ), composite.Shader );
-            composite.Material->Invalidate();
-
-            composite.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
+            LOG_ERROR( "Skybox UB was not found!" );
+            return Common::MakeError( "Skybox UB was not found!" );
         }
 
-        // ==================== Geometry Pass ====================
+        m_SceneInfo.Renderdata.Skybox.SkyboxUB =
+             std::make_unique<Models::SkyboxData>( ubSkyboxRes.GetValue(), SKYBOX_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitPBRUniforms()
+    {
+        const auto ubPBRRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "PBRData" );
+        if ( !ubPBRRes )
         {
-            auto&                      geometry  = m_SceneInfo.Renderdata.Geometry.InfoRender;
-            constexpr std::string_view debugName = "SceneGeometry";
-
-            // Framebuffer
-            FramebufferSpecification fbSpec;
-            fbSpec.DebugName                = debugName;
-            fbSpec.Attachments.Attachments  = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
-            fbSpec.ExternalAttachments.Load = AttachmentLoad::Load;
-            fbSpec.ExternalAttachments.ExternalAttachments.push_back( SKYBOX_RENDERINFO( Framebuffer ) );
-
-            geometry.Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-            geometry.Framebuffer->Resize( width, height );
-
-            // RenderPass
-            RenderPassSpecification rpSpec;
-            rpSpec.DebugName         = debugName;
-            rpSpec.TargetFramebuffer = geometry.Framebuffer;
-            geometry.RenderPass      = RenderPass::Create( rpSpec );
-
-            // Pipeline
-            PipelineSpecification pipeSpec;
-            pipeSpec.DebugName   = debugName;
-            pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" },
-                                     { Graphic::ShaderDataType::Float3, "a_Normal" },
-                                     { Graphic::ShaderDataType::Float3, "a_Tangent" },
-                                     { Graphic::ShaderDataType::Float3, "a_Bitangent" },
-                                     { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
-            pipeSpec.Shader      = Graphic::Shader::Create( "StaticPBR.glsl" );
-            pipeSpec.Framebuffer = geometry.Framebuffer;
-            geometry.Shader      = pipeSpec.Shader;
-            pipeSpec.Renderpass  = geometry.RenderPass;
-
-            geometry.Pipeline = Pipeline::Create( pipeSpec );
-            geometry.Pipeline->Invalidate();
-
-            geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
-            geometry.Material->Invalidate();
-
-            geometry.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
+            LOG_ERROR( "PBRData UB was not found!" );
+            return Common::MakeError( "PBRData UB was not found!" );
         }
 
+        m_SceneInfo.Renderdata.Geometry.PBRUB =
+             std::make_unique<Models::PBR::PBRMaterial>( GEOMETRY_RENDERINFO( Material ), ubPBRRes.GetValue() );
+
+        const auto ubIrradianceRes = GEOMETRY_RENDERINFO( UBManager )
+                                          ->GetUniformImageCube( std::string(
+                                               Models::PBR::PBRMaterialTexture::GetUniformIrradianceName() ) );
+        if ( !ubIrradianceRes )
         {
-            const auto ubLightRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "LightningUB" );
-            if ( !ubLightRes )
-            {
-                LOG_ERROR( "Lightning UB was not found!" );
-                //  return Common::MakeError( "Lightning UB was not found!" );
-            }
-            m_SceneInfo.LightsInfo.Lightning = std::make_unique<Models::LightingData>(
-                 glm::vec3( 0 ), ubLightRes.GetValue(), GEOMETRY_RENDERINFO( Material ) );
+            LOG_ERROR( "Irradiance UB was not found!" );
+            return Common::MakeError( "Irradiance UB was not found!" );
         }
 
-        // Skybox
+        const auto ubPreFilteredRes = GEOMETRY_RENDERINFO( UBManager )
+                                           ->GetUniformImageCube( std::string(
+                                                Models::PBR::PBRMaterialTexture::GetUniformPreFilteredName() ) );
+        if ( !ubPreFilteredRes )
         {
-            const auto ubSkyboxRes = SKYBOX_RENDERINFO( UBManager )->GetUniformImageCube( "samplerCubeMap" );
-            if ( !ubSkyboxRes )
-            {
-                LOG_ERROR( "Skybox UB was not found!" );
-                //  return Common::MakeError( "Lightning UB was not found!" );
-            }
-            m_SceneInfo.Renderdata.Skybox.SkyboxUB =
-                 std::make_unique<Models::SkyboxData>( ubSkyboxRes.GetValue(), SKYBOX_RENDERINFO( Material ) );
+            LOG_ERROR( "PreFiltered UB was not found!" );
+            return Common::MakeError( "PreFiltered UB was not found!" );
         }
 
-        // PBR
+        m_SceneInfo.Renderdata.Geometry.PBRTextures = std::make_unique<Models::PBR::PBRMaterialTexture>(
+             GEOMETRY_RENDERINFO( Material ), ubIrradianceRes.GetValue(), ubPreFilteredRes.GetValue() );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitGlobalUniforms()
+    {
+        const auto ubGlobalRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "GlobalUB" );
+        if ( !ubGlobalRes )
         {
-            const auto ubPBRRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "PBRData" );
-            if ( !ubPBRRes )
-            {
-                LOG_ERROR( "PBRData UB was not found!" );
-            }
-            m_SceneInfo.Renderdata.Geometry.PBRUB = std::make_unique<Models::PBR::PBRMaterial>(
-                 GEOMETRY_RENDERINFO( Material ), ubPBRRes.GetValue() );
-
-            const auto ubIrradianceRes = GEOMETRY_RENDERINFO( UBManager )
-                                              ->GetUniformImageCube( std::string(
-                                                   Models::PBR::PBRMaterialTexture::GetUniformIrradianceName() ) );
-            if ( !ubIrradianceRes )
-            {
-                LOG_ERROR( "Irradiance UB was not found!" );
-            }
-
-            const auto ubPreFilteredRes =
-                 GEOMETRY_RENDERINFO( UBManager )
-                      ->GetUniformImageCube(
-                           std::string( Models::PBR::PBRMaterialTexture::GetUniformPreFilteredName() ) );
-            if ( !ubPreFilteredRes )
-            {
-                LOG_ERROR( "PreFiltered UB was not found!" );
-            }
-
-            m_SceneInfo.Renderdata.Geometry.PBRTextures = std::make_unique<Models::PBR::PBRMaterialTexture>(
-                 GEOMETRY_RENDERINFO( Material ), ubIrradianceRes.GetValue(), ubPreFilteredRes.GetValue() );
+            LOG_ERROR( "GlobalUB UB was not found!" );
+            return Common::MakeError( "GlobalUB UB was not found!" );
         }
 
+        m_SceneInfo.Renderdata.Geometry.GlobalUB =
+             std::make_unique<Models::GlobalData>( Models::GlobalUB{ .CameraPosition = glm::vec3( 0 ) },
+                                                   ubGlobalRes.GetValue(), GEOMETRY_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitCameraUniforms()
+    {
+        const auto ubCameraRes = SKYBOX_RENDERINFO( UBManager )->GetUniformBuffer( "camera" );
+        if ( !ubCameraRes )
         {
-            const auto ubGlobalRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "GlobalUB" );
-            if ( !ubGlobalRes )
-            {
-                LOG_ERROR( "GlobalUB UB was not found!" );
-
-                // return Common::MakeError( "GlobalUB UB was not found!" );
-            }
-
-            m_SceneInfo.Renderdata.Geometry.GlobalUB =
-                 std::make_unique<Models::GlobalData>( Models::GlobalUB{ .CameraPosition = glm::vec3( 0 ) },
-                                                       ubGlobalRes.GetValue(), GEOMETRY_RENDERINFO( Material ) );
+            LOG_ERROR( "camera UB was not found!" );
+            return Common::MakeError( "camera UB was not found!" );
         }
 
+        m_SceneInfo.Renderdata.Skybox.CameraUB =
+             std::make_unique<Models::CameraData>( SKYBOX_RENDERINFO( Material ), ubCameraRes.GetValue() );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitToneMapUniforms()
+    {
+        const auto ubTonemapRes = COMPOSITE_RENDERINFO( UBManager )->GetUniformImage2D( "u_GeometryTexture" );
+        if ( !ubTonemapRes )
         {
-            const auto ubCameraRes = SKYBOX_RENDERINFO( UBManager )->GetUniformBuffer( "camera" );
-            if ( !ubCameraRes )
-            {
-                LOG_ERROR( "camera UB was not found!" );
-
-                // return Common::MakeError( "camera UB was not found!" );
-            }
-
-            m_SceneInfo.Renderdata.Skybox.CameraUB =
-                 std::make_unique<Models::CameraData>( SKYBOX_RENDERINFO( Material ), ubCameraRes.GetValue() );
+            LOG_ERROR( "u_GeometryTexture was not found!" );
+            return Common::MakeError( "u_GeometryTexture was not found!" );
         }
 
-        // ToneMap
-        {
-            const auto ubTonemapRes = COMPOSITE_RENDERINFO( UBManager )->GetUniformImage2D( "u_GeometryTexture" );
-            if ( !ubTonemapRes )
-            {
-                LOG_ERROR( "u_GeometryTexture was not found!" );
-
-                // return Common::MakeError( "camera UB was not found!" );
-            }
-
-            m_SceneInfo.Renderdata.Composite.ToneMapUB =
-                 std::make_unique<Models::ToneMap>( COMPOSITE_RENDERINFO( Material ), ubTonemapRes.GetValue() );
-        }
+        m_SceneInfo.Renderdata.Composite.ToneMapUB =
+             std::make_unique<Models::ToneMap>( COMPOSITE_RENDERINFO( Material ), ubTonemapRes.GetValue() );
 
         return BOOLSUCCESS;
     }
