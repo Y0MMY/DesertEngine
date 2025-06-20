@@ -9,8 +9,8 @@ const float Epsilon = 0.00001;
 const uint NumSamples = 64 * 1024;
 const float InvNumSamples = 1.0 / float(NumSamples);
 
-layout(set=0, binding=0) uniform sampler2D  inputTexture;
-layout(set=0, binding=1, rgba32f) restrict writeonly uniform imageCube outputTexture;
+layout(binding=0) uniform sampler2D  inputTexture;
+layout(binding=1, rgba32f) restrict writeonly uniform imageCube outputTexture;
 
 float radicalInverse_VdC(uint bits)
 {

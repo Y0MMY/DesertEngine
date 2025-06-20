@@ -39,7 +39,7 @@ namespace Desert::Graphic
         return BOOLSUCCESS;
     }
 
-    NO_DISCARD Common::BoolResult SceneRenderer::InitSkyboxPass(const  uint32_t width, const  uint32_t height )
+    NO_DISCARD Common::BoolResult SceneRenderer::InitSkyboxPass( const uint32_t width, const uint32_t height )
     {
         auto&                      skybox    = m_SceneInfo.Renderdata.Skybox.InfoRender;
         constexpr std::string_view debugName = "Skybox";
@@ -118,7 +118,7 @@ namespace Desert::Graphic
         return BOOLSUCCESS;
     }
 
-    NO_DISCARD Common::BoolResult SceneRenderer::InitGeometryPass(const  uint32_t width, const uint32_t height )
+    NO_DISCARD Common::BoolResult SceneRenderer::InitGeometryPass( const uint32_t width, const uint32_t height )
     {
         auto&                      geometry  = m_SceneInfo.Renderdata.Geometry.InfoRender;
         constexpr std::string_view debugName = "SceneGeometry";
@@ -169,7 +169,7 @@ namespace Desert::Graphic
         if ( !ubLightRes )
         {
             LOG_ERROR( "Lightning UB was not found!" );
-            return Common::MakeError( "Lightning UB was not found!" );
+            //  return Common::MakeError( "Lightning UB was not found!" );
         }
 
         m_SceneInfo.LightsInfo.Lightning = std::make_unique<Models::LightingData>(
@@ -184,7 +184,7 @@ namespace Desert::Graphic
         if ( !ubSkyboxRes )
         {
             LOG_ERROR( "Skybox UB was not found!" );
-            return Common::MakeError( "Skybox UB was not found!" );
+            // return Common::MakeError( "Skybox UB was not found!" );
         }
 
         m_SceneInfo.Renderdata.Skybox.SkyboxUB =
@@ -199,7 +199,7 @@ namespace Desert::Graphic
         if ( !ubPBRRes )
         {
             LOG_ERROR( "PBRData UB was not found!" );
-            return Common::MakeError( "PBRData UB was not found!" );
+            // return Common::MakeError( "PBRData UB was not found!" );
         }
 
         m_SceneInfo.Renderdata.Geometry.PBRUB =
@@ -211,7 +211,7 @@ namespace Desert::Graphic
         if ( !ubIrradianceRes )
         {
             LOG_ERROR( "Irradiance UB was not found!" );
-            return Common::MakeError( "Irradiance UB was not found!" );
+            // return Common::MakeError( "Irradiance UB was not found!" );
         }
 
         const auto ubPreFilteredRes = GEOMETRY_RENDERINFO( UBManager )
@@ -220,11 +220,21 @@ namespace Desert::Graphic
         if ( !ubPreFilteredRes )
         {
             LOG_ERROR( "PreFiltered UB was not found!" );
-            return Common::MakeError( "PreFiltered UB was not found!" );
+            // return Common::MakeError( "PreFiltered UB was not found!" );
+        }
+
+        const auto ubBRDFRes =
+             GEOMETRY_RENDERINFO( UBManager )
+                  ->GetUniformImage2D( std::string( Models::PBR::PBRMaterialTexture::GetUniformBRDFLutName() ) );
+        if ( !ubBRDFRes )
+        {
+            LOG_ERROR( "BRDF UB was not found!" );
+            //  return Common::MakeError( "BRDF UB was not found!" );
         }
 
         m_SceneInfo.Renderdata.Geometry.PBRTextures = std::make_unique<Models::PBR::PBRMaterialTexture>(
-             GEOMETRY_RENDERINFO( Material ), ubIrradianceRes.GetValue(), ubPreFilteredRes.GetValue() );
+             GEOMETRY_RENDERINFO( Material ), ubIrradianceRes.GetValue(), ubPreFilteredRes.GetValue(),
+             ubBRDFRes.GetValue() );
 
         return BOOLSUCCESS;
     }
@@ -235,7 +245,7 @@ namespace Desert::Graphic
         if ( !ubGlobalRes )
         {
             LOG_ERROR( "GlobalUB UB was not found!" );
-            return Common::MakeError( "GlobalUB UB was not found!" );
+            // return Common::MakeError( "GlobalUB UB was not found!" );
         }
 
         m_SceneInfo.Renderdata.Geometry.GlobalUB =
@@ -251,7 +261,7 @@ namespace Desert::Graphic
         if ( !ubCameraRes )
         {
             LOG_ERROR( "camera UB was not found!" );
-            return Common::MakeError( "camera UB was not found!" );
+            // return Common::MakeError( "camera UB was not found!" );
         }
 
         m_SceneInfo.Renderdata.Skybox.CameraUB =
@@ -266,7 +276,7 @@ namespace Desert::Graphic
         if ( !ubTonemapRes )
         {
             LOG_ERROR( "u_GeometryTexture was not found!" );
-            return Common::MakeError( "u_GeometryTexture was not found!" );
+            // return Common::MakeError( "u_GeometryTexture was not found!" );
         }
 
         m_SceneInfo.Renderdata.Composite.ToneMapUB =

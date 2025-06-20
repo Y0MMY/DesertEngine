@@ -32,7 +32,7 @@ namespace Desert::Uniforms::API::Vulkan
              sp_cast<Graphic::API::Vulkan::VulkanImageCube>( imageCube )->GetVulkanImageInfo();
         m_DescriptorInfo.imageView   = vulkanImageInfo.ImageView;
         m_DescriptorInfo.sampler     = vulkanImageInfo.Sampler;
-        m_DescriptorInfo.imageLayout = vulkanImageInfo.Layout;
+        m_DescriptorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; //vulkanImageInfo.Layout;
     }
 
 } // namespace Desert::Uniforms::API::Vulkan
