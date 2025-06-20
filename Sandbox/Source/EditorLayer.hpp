@@ -24,10 +24,10 @@ namespace Desert
         bool OnWindowResize( Common::EventWindowResize& e );
 
     private:
-        const std::shared_ptr<Common::Window>   m_Window;
-        std::shared_ptr<Core::Scene>            m_testscene;
-        std::shared_ptr<Graphic::TextureCube>   m_Skybox;
-        std::shared_ptr<Mesh>                   m_Mesh;
+        const std::shared_ptr<Common::Window> m_Window;
+        std::shared_ptr<Core::Scene>          m_MainScene;
+        Graphic::Environment                  m_Environment;
+        std::shared_ptr<Mesh>                 m_Mesh;
 
         Core::Camera m_EditorCamera;
 

@@ -1,11 +1,11 @@
 #pragma once
 
-#include <Engine/Graphic/UniformBuffer.hpp>
+#include <Engine/Uniforms/UniformBuffer.hpp>
 #include <Common/Core/Memory/Buffer.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 
-namespace Desert::Graphic::API::Vulkan
+namespace Desert::Uniforms::API::Vulkan
 {
     class VulkanUniformBuffer : public UniformBuffer
     {

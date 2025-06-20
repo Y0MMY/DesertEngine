@@ -1,6 +1,6 @@
-#include <Engine/Graphic/API/Vulkan/VulkanUniformBuffer.hpp>
+#include <Engine/Uniforms/API/Vulkan/VulkanUniformBuffer.hpp>
 
-namespace Desert::Graphic::API::Vulkan
+namespace Desert::Uniforms::API::Vulkan
 {
 
     VulkanUniformBuffer::VulkanUniformBuffer( const std::string_view debugName, uint32_t size, uint32_t binding )
@@ -40,7 +40,7 @@ namespace Desert::Graphic::API::Vulkan
         bufferInfo.usage              = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
         bufferInfo.size               = m_Size;
 
-        const auto allocatedBuffer = VulkanAllocator::GetInstance().RT_AllocateBuffer(
+        const auto allocatedBuffer = Graphic::API::Vulkan::VulkanAllocator::GetInstance().RT_AllocateBuffer(
              "UniformBuffer", bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffer );
 
         if ( !allocatedBuffer.IsSuccess() )
@@ -62,25 +62,9 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanUniformBuffer::RT_SetData( const void* data, uint32_t size, uint32_t offset )
     {
-        uint8_t* pData = VulkanAllocator::GetInstance().MapMemory( m_MemoryAlloc );
+        uint8_t* pData = Graphic::API::Vulkan::VulkanAllocator::GetInstance().MapMemory( m_MemoryAlloc );
         memcpy( pData, (const uint8_t*)data + offset, size );
-        VulkanAllocator::GetInstance().UnmapMemory( m_MemoryAlloc );
+        Graphic::API::Vulkan::VulkanAllocator::GetInstance().UnmapMemory( m_MemoryAlloc );
     }
 
-    // Common::Result<std::shared_ptr<Desert::Graphic::UniformBuffer>>
-    // VulkanUniformBufferManager::GetUniformBuffer( const std::string& name ) const
-    //{
-    //     const auto index        = m_UniformBuffers.size();
-    //     m_UniformBuffers[index] = std::move( buffer );
-    //     m_NameMap[name]         = index;
-
-    //    auto it = m_NameMap.find( name );
-    //    if ( it == m_NameMap.end() )
-    //    {
-
-    //        return Common::MakeFormattedError<std::shared_ptr<UniformBuffer>>(
-    //             "Uniform '{}' not found in material", name );
-    //    }
-    //}
-
-} // namespace Desert::Graphic::API::Vulkan
+} // namespace Desert::Uniforms::API::Vulkan

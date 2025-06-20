@@ -37,6 +37,7 @@ namespace Desert::Graphic::API::Vulkan
 
     struct ComputeImageProcessingInfo
     {
+        bool                       CalculateMips;
         std::string                shaderName;
         uint32_t                   width;
         uint32_t                   height;
@@ -62,13 +63,12 @@ namespace Desert::Graphic::API::Vulkan
                  .Width      = processingInfo.width,
                  .Height     = processingInfo.height,
                  .Format     = processingInfo.format,
-                 .Mips       = mips,
+                 .Mips       = processingInfo.CalculateMips ? mips : 1,
                  .Properties = Core::Formats::Storage | Core::Formats::Sample,
             };
 
-            const std::shared_ptr<ImageCube> outputImage = ImageCube::Create(
-                 outputImageInfo, MipMapCubeGenerator::Create( MipGenStrategy::ComputeShader ) );
-            const auto& outputImageVulkan = sp_cast<API::Vulkan::VulkanImageCube>( outputImage );
+            const std::shared_ptr<ImageCube> outputImage = ImageCube::Create( outputImageInfo, nullptr );
+            const auto& outputImageVulkan                = sp_cast<API::Vulkan::VulkanImageCube>( outputImage );
             outputImageVulkan->RT_Invalidate();
 
             const auto& shaderVulkan = sp_cast<API::Vulkan::VulkanShader>( shader );
@@ -449,25 +449,26 @@ namespace Desert::Graphic::API::Vulkan
 #ifdef DESERT_CONFIG_DEBUG
     PBRTextures VulkanRendererAPI::CreateEnvironmentMap( const Common::Filepath& filepath )
     {
-        const auto& envMap     = ConvertPanoramaToCubeMap_4x3( filepath );
+        const auto& envMap     = ConvertPanoramaToCubeMap_4x3( filepath, false );
         const auto& irradiance = CreateDiffuseIrradiance( filepath );
 
-        const auto& preFiltered = ConvertPanoramaToCubeMap_4x3( filepath );
+        const auto& preFiltered = ConvertPanoramaToCubeMap_4x3( filepath, true );
         CreatePrefilteredMap( preFiltered );
         return { envMap, irradiance, preFiltered };
     }
 
     std::shared_ptr<Desert::Graphic::ImageCube>
-    VulkanRendererAPI::ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath )
+    VulkanRendererAPI::ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath, bool calculateMips )
     {
         std::shared_ptr<Texture2D> imagePanorama = Texture2D::Create( { true }, filepath );
         imagePanorama->Invalidate();
         const auto& imageVulkan = sp_cast<API::Vulkan::VulkanImage2D>( imagePanorama->GetImage2D() );
 
         ComputeImageProcessingInfo processingInfo;
-        processingInfo.shaderName = "PanoramaToCubemap.glsl";
-        processingInfo.width      = kEnvFaceMapSize * 4;
-        processingInfo.height     = kEnvFaceMapSize * 3;
+        processingInfo.shaderName    = "PanoramaToCubemap.glsl";
+        processingInfo.width         = kEnvFaceMapSize * 4;
+        processingInfo.height        = kEnvFaceMapSize * 3;
+        processingInfo.CalculateMips = calculateMips;
 
         return Utils::CreateProcessedImage( imageVulkan, processingInfo );
     }
@@ -475,20 +476,24 @@ namespace Desert::Graphic::API::Vulkan
     std::shared_ptr<Desert::Graphic::ImageCube>
     VulkanRendererAPI::CreateDiffuseIrradiance( const Common::Filepath& filepath )
     {
-        std::shared_ptr<Texture2D> imagePanorama = Texture2D::Create( { true }, filepath );
+        std::shared_ptr<Texture2D> imagePanorama = Texture2D::Create( { false }, filepath );
         imagePanorama->Invalidate();
         const auto& imageVulkan = sp_cast<API::Vulkan::VulkanImage2D>( imagePanorama->GetImage2D() );
 
         ComputeImageProcessingInfo processingInfo;
-        processingInfo.shaderName = "DiffuseIrradiance.glsl";
-        processingInfo.width      = kIrradianceMapSize * 4;
-        processingInfo.height     = kIrradianceMapSize * 3;
+        processingInfo.shaderName    = "DiffuseIrradiance.glsl";
+        processingInfo.width         = kIrradianceMapSize * 4;
+        processingInfo.height        = kIrradianceMapSize * 3;
+        processingInfo.CalculateMips = false;
 
         return Utils::CreateProcessedImage( imageVulkan, processingInfo );
     }
 
     Common::BoolResult VulkanRendererAPI::CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube )
     {
+        const auto generatorMips = MipMapCubeGenerator::Create( MipGenStrategy::ComputeShader );
+        generatorMips->GenerateMips( imageCube );
+
         const auto& vulkanImage = static_cast<const VulkanImageCube&>( *imageCube );
 
         const auto& spec   = imageCube->GetImageSpecification();
@@ -512,10 +517,13 @@ namespace Desert::Graphic::API::Vulkan
         {
             std::array<VkDescriptorImageInfo, 2> imageInfo = {};
 
-            imageInfo[0].imageView   = vulkanImage.GetVulkanImageInfo().ImageView;
+            // Input image (previous mip)
+            imageInfo[0].imageView   = ( mip == 1 ) ? vulkanImage.GetVulkanImageInfo().ImageView
+                                                    : vulkanImage.GetMipImageView( mip - 1 );
             imageInfo[0].sampler     = vulkanImage.GetVulkanImageInfo().Sampler;
             imageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
+            // Output image (current mip)
             imageInfo[1].imageView   = vulkanImage.GetMipImageView( mip );
             imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 

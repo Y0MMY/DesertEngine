@@ -15,6 +15,8 @@
 #include <Engine/Graphic/Materials/Models/Camera.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
+#include <Engine/Graphic/Materials/Models/Skybox/Skybox.hpp>
+#include <Engine/Graphic/Materials/Models/ToneMap.hpp>
 
 namespace Desert::Core
 {
@@ -65,12 +67,12 @@ namespace Desert::Graphic
 
         struct RenderInfo
         {
-            std::shared_ptr<Graphic::Shader>               Shader;
-            std::shared_ptr<Graphic::Framebuffer>          Framebuffer;
-            std::shared_ptr<Graphic::RenderPass>           RenderPass;
-            std::shared_ptr<Graphic::Pipeline>             Pipeline;
-            std::shared_ptr<Graphic::Material>             Material;
-            std::shared_ptr<Graphic::UniformBufferManager> UBManager;
+            std::shared_ptr<Graphic::Shader>          Shader;
+            std::shared_ptr<Graphic::Framebuffer>     Framebuffer;
+            std::shared_ptr<Graphic::RenderPass>      RenderPass;
+            std::shared_ptr<Graphic::Pipeline>        Pipeline;
+            std::shared_ptr<Graphic::Material>        Material;
+            std::shared_ptr<Uniforms::UniformManager> UBManager;
         };
 
         struct
@@ -86,9 +88,15 @@ namespace Desert::Graphic
                 {
                     RenderInfo                          InfoRender;
                     std::unique_ptr<Models::CameraData> CameraUB;
+                    std::unique_ptr<Models::SkyboxData> SkyboxUB;
                 } Skybox;
 
-                RenderInfo Composite;
+                struct
+                {
+                    RenderInfo                       InfoRender;
+                    std::unique_ptr<Models::ToneMap> ToneMapUB;
+                } Composite;
+
                 struct
                 {
                     RenderInfo                                       InfoRender;

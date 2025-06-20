@@ -9,6 +9,8 @@ project "Sandbox"
 
     includedirs {
         "%{wks.location}/Desert/Desert/Source/",
+        "%{wks.location}/Sandbox/Source/",
+
         "%{wks.location}/Desert/Common/Source/",
 
         "%{wks.location}/ThirdParty/spdlog/include/",

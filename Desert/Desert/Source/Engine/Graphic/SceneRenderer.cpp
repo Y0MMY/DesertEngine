@@ -9,6 +9,7 @@ namespace Desert::Graphic
 {
 #define GEOMETRY_RENDERINFO( x ) m_SceneInfo.Renderdata.Geometry.InfoRender.x
 #define SKYBOX_RENDERINFO( x ) m_SceneInfo.Renderdata.Skybox.InfoRender.x
+#define COMPOSITE_RENDERINFO( x ) m_SceneInfo.Renderdata.Composite.InfoRender.x
 
     NO_DISCARD Common::BoolResult SceneRenderer::Init()
     {
@@ -50,12 +51,12 @@ namespace Desert::Graphic
             skybox.Material = Material::Create( std::string( debugName ), skybox.Shader );
             skybox.Material->Invalidate();
 
-            skybox.UBManager = UniformBufferManager::Create( debugName, pipeSpec.Shader );
+            skybox.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
         }
 
         // ==================== Composite Pass ====================
         {
-            auto&                      composite = m_SceneInfo.Renderdata.Composite;
+            auto&                      composite = m_SceneInfo.Renderdata.Composite.InfoRender;
             constexpr std::string_view debugName = "SceneComposite";
 
             // Framebuffer
@@ -87,7 +88,7 @@ namespace Desert::Graphic
             composite.Material = Material::Create( std::string( debugName ), composite.Shader );
             composite.Material->Invalidate();
 
-            composite.UBManager = UniformBufferManager::Create( debugName, pipeSpec.Shader );
+            composite.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
         }
 
         // ==================== Geometry Pass ====================
@@ -130,10 +131,8 @@ namespace Desert::Graphic
             geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
             geometry.Material->Invalidate();
 
-            geometry.UBManager = UniformBufferManager::Create( debugName, pipeSpec.Shader );
+            geometry.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
         }
-
-        m_SceneInfo.EnvironmentData = EnvironmentManager::Create( "HDR/env.hdr" );
 
         {
             const auto ubLightRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "LightningUB" );
@@ -146,19 +145,47 @@ namespace Desert::Graphic
                  glm::vec3( 0 ), ubLightRes.GetValue(), GEOMETRY_RENDERINFO( Material ) );
         }
 
+        // Skybox
+        {
+            const auto ubSkyboxRes = SKYBOX_RENDERINFO( UBManager )->GetUniformImageCube( "samplerCubeMap" );
+            if ( !ubSkyboxRes )
+            {
+                LOG_ERROR( "Skybox UB was not found!" );
+                //  return Common::MakeError( "Lightning UB was not found!" );
+            }
+            m_SceneInfo.Renderdata.Skybox.SkyboxUB =
+                 std::make_unique<Models::SkyboxData>( ubSkyboxRes.GetValue(), SKYBOX_RENDERINFO( Material ) );
+        }
+
         // PBR
         {
             const auto ubPBRRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "PBRData" );
             if ( !ubPBRRes )
             {
                 LOG_ERROR( "PBRData UB was not found!" );
-                //  return Common::MakeError( "Lightning UB was not found!" );
             }
             m_SceneInfo.Renderdata.Geometry.PBRUB = std::make_unique<Models::PBR::PBRMaterial>(
                  GEOMETRY_RENDERINFO( Material ), ubPBRRes.GetValue() );
 
-            m_SceneInfo.Renderdata.Geometry.PBRTextures =
-                 std::make_unique<Models::PBR::PBRMaterialTexture>( GEOMETRY_RENDERINFO( Material ), nullptr );
+            const auto ubIrradianceRes = GEOMETRY_RENDERINFO( UBManager )
+                                              ->GetUniformImageCube( std::string(
+                                                   Models::PBR::PBRMaterialTexture::GetUniformIrradianceName() ) );
+            if ( !ubIrradianceRes )
+            {
+                LOG_ERROR( "Irradiance UB was not found!" );
+            }
+
+            const auto ubPreFilteredRes =
+                 GEOMETRY_RENDERINFO( UBManager )
+                      ->GetUniformImageCube(
+                           std::string( Models::PBR::PBRMaterialTexture::GetUniformPreFilteredName() ) );
+            if ( !ubPreFilteredRes )
+            {
+                LOG_ERROR( "PreFiltered UB was not found!" );
+            }
+
+            m_SceneInfo.Renderdata.Geometry.PBRTextures = std::make_unique<Models::PBR::PBRMaterialTexture>(
+                 GEOMETRY_RENDERINFO( Material ), ubIrradianceRes.GetValue(), ubPreFilteredRes.GetValue() );
         }
 
         {
@@ -188,6 +215,20 @@ namespace Desert::Graphic
                  std::make_unique<Models::CameraData>( SKYBOX_RENDERINFO( Material ), ubCameraRes.GetValue() );
         }
 
+        // ToneMap
+        {
+            const auto ubTonemapRes = COMPOSITE_RENDERINFO( UBManager )->GetUniformImage2D( "u_GeometryTexture" );
+            if ( !ubTonemapRes )
+            {
+                LOG_ERROR( "u_GeometryTexture was not found!" );
+
+                // return Common::MakeError( "camera UB was not found!" );
+            }
+
+            m_SceneInfo.Renderdata.Composite.ToneMapUB =
+                 std::make_unique<Models::ToneMap>( COMPOSITE_RENDERINFO( Material ), ubTonemapRes.GetValue() );
+        }
+
         return BOOLSUCCESS;
     }
 
@@ -213,7 +254,7 @@ namespace Desert::Graphic
         CompositeRenderPass();
 
         GEOMETRY_RENDERINFO( Material )->Clear();
-        m_SceneInfo.Renderdata.Composite.Material->Clear();
+        COMPOSITE_RENDERINFO( Material )->Clear();
         SKYBOX_RENDERINFO( Material )->Clear();
     }
 
@@ -230,7 +271,7 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
         SKYBOX_RENDERINFO( Framebuffer )->Resize( width, height );
-        m_SceneInfo.Renderdata.Composite.Framebuffer->Resize( width, height );
+        COMPOSITE_RENDERINFO( Framebuffer )->Resize( width, height );
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
@@ -250,14 +291,13 @@ namespace Desert::Graphic
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
         auto&    renderer   = Renderer::GetInstance();
 
-        renderer.BeginRenderPass( m_SceneInfo.Renderdata.Composite.RenderPass );
+        renderer.BeginRenderPass( COMPOSITE_RENDERINFO( RenderPass ) );
 
-        m_SceneInfo.Renderdata.Composite.Material->SetImage2D(
-             "u_GeometryTexture", SKYBOX_RENDERINFO( Framebuffer )->GetColorAttachmentImage() );
+        m_SceneInfo.Renderdata.Composite.ToneMapUB->UpdateToneMap(
+             SKYBOX_RENDERINFO( Framebuffer )->GetColorAttachmentImage() );
 
-        m_SceneInfo.Renderdata.Composite.Material->ApplyMaterial();
-        renderer.SubmitFullscreenQuad( m_SceneInfo.Renderdata.Composite.Pipeline,
-                                       m_SceneInfo.Renderdata.Composite.Material );
+        COMPOSITE_RENDERINFO( Material )->ApplyMaterial();
+        renderer.SubmitFullscreenQuad( COMPOSITE_RENDERINFO( Pipeline ), COMPOSITE_RENDERINFO( Material ) );
         renderer.EndRenderPass();
     }
 
@@ -266,6 +306,8 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
 
         renderer.BeginRenderPass( SKYBOX_RENDERINFO( RenderPass ) );
+
+        m_SceneInfo.Renderdata.Skybox.SkyboxUB->UpdateSkybox( m_SceneInfo.EnvironmentData.RadianceMap );
 
         m_SceneInfo.Renderdata.Skybox.CameraUB->UpdateCameraUB( *m_SceneInfo.ActiveCamera ); // TODO: constant push
         m_SceneInfo.Renderdata.Skybox.CameraUB->Bind();
@@ -297,14 +339,14 @@ namespace Desert::Graphic
 
             m_SceneInfo.Renderdata.Geometry.GlobalUB->UpdateUBGlobal( std::move( globlal ) );
             m_SceneInfo.Renderdata.Geometry.PBRUB->UpdatePBR( {} );
-            /*m_SceneInfo.Renderdata.Geometry.PBRTextures->UpdatePBR(
+            m_SceneInfo.Renderdata.Geometry.PBRTextures->UpdatePBR(
                  { .IrradianceMap  = m_SceneInfo.EnvironmentData.IrradianceMap,
-                   .PreFilteredMap = m_SceneInfo.EnvironmentData.PreFilteredMap } );*/
+                   .PreFilteredMap = m_SceneInfo.EnvironmentData.PreFilteredMap } );
 
             m_SceneInfo.LightsInfo.Lightning->Bind(); // NOTE: data has already been updated
             m_SceneInfo.Renderdata.Geometry.GlobalUB->Bind();
             m_SceneInfo.Renderdata.Geometry.PBRUB->Bind();
-            //m_SceneInfo.Renderdata.Geometry.PBRTextures->Bind();
+            m_SceneInfo.Renderdata.Geometry.PBRTextures->Bind();
 
             GEOMETRY_RENDERINFO( Material )->ApplyMaterial();
             renderer.RenderMesh( GEOMETRY_RENDERINFO( Pipeline ), meshInfo.Mesh, GEOMETRY_RENDERINFO( Material ) );
@@ -326,8 +368,6 @@ namespace Desert::Graphic
     void SceneRenderer::SetEnvironment( const Environment& environment )
     {
         m_SceneInfo.EnvironmentData = environment;
-
-        SKYBOX_RENDERINFO( Material )->SetImageCube( "samplerCubeMap", m_SceneInfo.EnvironmentData.RadianceMap );
     }
 
     const Environment& SceneRenderer::GetEnvironment()
@@ -355,8 +395,8 @@ namespace Desert::Graphic
             m_SceneInfo.EnvironmentData.RadianceMap.reset();
         }
 
-        m_SceneInfo.Renderdata.Composite.Framebuffer->Release();
-        m_SceneInfo.Renderdata.Composite.Framebuffer.reset();
+        COMPOSITE_RENDERINFO( Framebuffer )->Release();
+        COMPOSITE_RENDERINFO( Framebuffer ).reset();
 
         GEOMETRY_RENDERINFO( Framebuffer )->Release();
         GEOMETRY_RENDERINFO( Framebuffer ).reset();
@@ -367,7 +407,7 @@ namespace Desert::Graphic
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage() const
     {
-        return m_SceneInfo.Renderdata.Composite.Framebuffer->GetColorAttachmentImage();
+        return COMPOSITE_RENDERINFO( Framebuffer )->GetColorAttachmentImage();
     }
 
 } // namespace Desert::Graphic

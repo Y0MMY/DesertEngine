@@ -2,7 +2,9 @@
 
 #include <Engine/Graphic/Shader.hpp>
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Graphic/UniformBuffer.hpp>
+#include <Engine/Uniforms/UniformBuffer.hpp>
+#include <Engine/Uniforms/UniformImageCube.hpp>
+#include <Engine/Uniforms/UniformImage2D.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 
 #include <glm/glm.hpp>
@@ -17,16 +19,15 @@ namespace Desert::Graphic
         /*virtual Common::BoolResult SetVec3( const std::string& name, const glm::vec3& data )                 = 0;
         virtual Common::BoolResult SetMat4( const std::string& name, const glm::mat4& data )                 = 0;*/
 
-        virtual Common::BoolResult AddUniformToOverride( const std::shared_ptr<UniformBuffer>& uniformBuffer ) = 0;
-
-        virtual Common::BoolResult SetImage2D( const std::string&              name,
-                                               const std::shared_ptr<Image2D>& image2D )       = 0;
-        virtual Common::BoolResult SetImageCube( const std::string&                name,
-                                                 const std::shared_ptr<ImageCube>& imageCube ) = 0;
-
-        virtual Common::BoolResult Invalidate()    = 0;
-        virtual Common::BoolResult ApplyMaterial() = 0;
-        virtual void               Clear()         = 0; // TODO: better func name
+        virtual Common::BoolResult
+        AddUniformBufferToOverride( const std::shared_ptr<Uniforms::UniformBuffer>& uniformBuffer ) = 0;
+        virtual Common::BoolResult
+        AddUniformCubeToOverride( const std::shared_ptr<Uniforms::UniformImageCube>& uniformCube ) = 0;
+        virtual Common::BoolResult
+        AddUniform2DToOverride( const std::shared_ptr<Uniforms::UniformImage2D>& uniform2D ) = 0;
+        virtual Common::BoolResult Invalidate()                                              = 0;
+        virtual Common::BoolResult ApplyMaterial()                                           = 0;
+        virtual void               Clear() = 0; // TODO: better func name
 
         virtual Common::BoolResult PushConstant( const void* buffer, const uint32_t bufferSize ) = 0;
 

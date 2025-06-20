@@ -94,17 +94,6 @@ namespace Desert::Graphic::API::Vulkan
     Common::BoolResult
     VulkanMipMapCubeGeneratorCS::GenerateMips( const std::shared_ptr<ImageCube>& imageCube ) const
     {
-        const auto allocator = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
-        for ( uint32_t mip = 0; mip < imageCube->GetMipmapLevels(); ++mip )
-        {
-            Utils::InsertImageMemoryBarrier(
-                 allocator.GetValue(),
-                 static_cast<const VulkanImageCube&>( *imageCube ).GetVulkanImageInfo().Image, 0,
-                 VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                 VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6 } );
-        }
-        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( allocator.GetValue() );
 
         return Utils::GenerateMipmaps<VulkanImageCube>(
              static_cast<const VulkanImageCube&>( *imageCube ), imageCube->GetWidth(), imageCube->GetHeight(),

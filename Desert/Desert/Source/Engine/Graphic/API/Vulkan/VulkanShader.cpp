@@ -613,7 +613,7 @@ namespace Desert::Graphic::API::Vulkan
         m_DescriptorSetInfo = AllocateDescriptorSets( framesInFlight );
     }
 
-    const std::vector<Desert::Core::Models::UniformBuffer> VulkanShader::GetUniformModels() const
+    const std::vector<Desert::Core::Models::UniformBuffer> VulkanShader::GetUniformBufferModels() const
     {
         if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
         {
@@ -622,6 +622,36 @@ namespace Desert::Graphic::API::Vulkan
         else [[likely]]
         {
             const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).UniformBuffers;
+            auto        res =
+                 uniformInfo | std::views::values | std::views::transform( []( const auto& p ) { return p; } );
+            return { res.begin(), res.end() };
+        }
+    }
+
+    const std::vector<Desert::Core::Models::ImageCubeSampler> VulkanShader::GetUniformImageCubeModels() const
+    {
+        if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
+        {
+            return {};
+        }
+        else [[likely]]
+        {
+            const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).ImageCubeSamplers;
+            auto        res =
+                 uniformInfo | std::views::values | std::views::transform( []( const auto& p ) { return p; } );
+            return { res.begin(), res.end() };
+        }
+    }
+
+    const std::vector<Desert::Core::Models::Image2DSampler> VulkanShader::GetUniformImage2DModels() const
+    {
+        if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
+        {
+            return {};
+        }
+        else [[likely]]
+        {
+            const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).Image2DSamplers;
             auto        res =
                  uniformInfo | std::views::values | std::views::transform( []( const auto& p ) { return p; } );
             return { res.begin(), res.end() };

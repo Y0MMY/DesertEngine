@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
         };
 
     public:
-        VulkanShader( const std::filesystem::path& path, const ShaderDefines& defines);
+        VulkanShader( const std::filesystem::path& path, const ShaderDefines& defines );
 
         virtual void Use( BindUsage use = BindUsage::Bind ) const override
         {
@@ -47,7 +47,10 @@ namespace Desert::Graphic::API::Vulkan
             return m_ShaderName;
         }
 
-        virtual const std::vector<Core::Models::UniformBuffer> GetUniformModels() const override; // don't use it often!
+        virtual const std::vector<Core::Models::UniformBuffer>
+        GetUniformBufferModels() const override; // don't use it often! TODO: cache
+        virtual const std::vector<Core::Models::ImageCubeSampler> GetUniformImageCubeModels() const override;
+        virtual const std::vector<Core::Models::Image2DSampler>   GetUniformImage2DModels() const override;
 
         const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
         {

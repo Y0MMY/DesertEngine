@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/MaterialWrapperTextureCubeArray.hpp>
 
 namespace Desert::Graphic::Models::PBR
 {
@@ -11,14 +11,21 @@ namespace Desert::Graphic::Models::PBR
         std::shared_ptr<ImageCube> PreFilteredMap;
     };
 
-    class PBRMaterialTexture : public MaterialHelper::MaterialWrapper
+    class PBRMaterialTexture final : public MaterialHelper::MaterialWrapperTextureCubeArray
     {
     public:
-        using MaterialWrapper::MaterialWrapper;
+        PBRMaterialTexture( const std::shared_ptr<Material>&                   baseMaterial,
+                            const std::shared_ptr<Uniforms::UniformImageCube>& uniformIrradianceMap,
+                            const std::shared_ptr<Uniforms::UniformImageCube>& uniformPreFilteredMap );
 
         void UpdatePBR( PBRTextures&& pbr );
 
+        static const std::string_view GetUniformIrradianceName();
+        static const std::string_view GetUniformPreFilteredName();
+
     private:
-        PBRTextures m_PBRPBRTextures;
+        std::shared_ptr<Uniforms::UniformImageCube> m_UniformIrradianceMap;
+        std::shared_ptr<Uniforms::UniformImageCube> m_UniformPreFilteredMap;
+        PBRTextures                                 m_PBRPBRTextures{};
     };
 } // namespace Desert::Graphic::Models::PBR

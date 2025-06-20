@@ -10,7 +10,7 @@ namespace Desert::Graphic::Models
     class LightingData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit LightingData( glm::vec3&& direction, const std::shared_ptr<UniformBuffer>& uniform,
+        explicit LightingData( glm::vec3&& direction, const std::shared_ptr<Uniforms::UniformBuffer>& uniform,
                                const std::shared_ptr<Material>& material )
              : MaterialHelper::MaterialWrapper( material, uniform ), m_Direction( std::move( direction ) )
         {

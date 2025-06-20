@@ -46,40 +46,32 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         Clear();
-
-        const auto& shaderDS = sp_cast<VulkanShader>( m_Shader )->GetShaderDescriptorSets();
-        for ( const auto& descriptor : shaderDS )
-        {
-            for ( const auto& [_, imageInfo] : descriptor.second.Image2DSamplers )
-            {
-                m_AvalivaleImages2D.push_back( { imageInfo.Name, imageInfo.BindingPoint } );
-            }
-
-            for ( const auto& [_, imageInfo] : descriptor.second.ImageCubeSamplers )
-            {
-                m_AvalivaleImagesCube.push_back( { imageInfo.Name, imageInfo.BindingPoint } );
-            }
-        }
         return BOOLSUCCESS;
     }
 
-    // TODO: name -> Uniform buffer info
-
-    Common::BoolResult VulkanMaterial::AddUniformToOverride( const std::shared_ptr<UniformBuffer>& uniformBuffer )
+    Common::BoolResult
+    VulkanMaterial::AddUniformBufferToOverride( const std::shared_ptr<Uniforms::UniformBuffer>& uniformBuffer )
     {
-        m_OverriddenUniforms.push_back( sp_cast<VulkanUniformBuffer>( uniformBuffer ) );
+        m_OverriddenUniforms.Buffers.push_back(
+             sp_cast<Uniforms::API::Vulkan::VulkanUniformBuffer>( uniformBuffer ) );
         return BOOLSUCCESS;
     }
 
-    /* Common::BoolResult VulkanMaterial::SetVec3( const std::string& name, const glm::vec3& data )
-     {
-         return SetData( name, &data, sizeof( glm::vec3 ) );
-     }
+    Common::BoolResult
+    VulkanMaterial::AddUniformCubeToOverride( const std::shared_ptr<Uniforms::UniformImageCube>& uniformCube )
+    {
+        m_OverriddenUniforms.ImageCubes.push_back(
+             sp_cast<Uniforms::API::Vulkan::VulkanUniformImageCube>( uniformCube ) );
+        return BOOLSUCCESS;
+    }
 
-     Common::BoolResult VulkanMaterial::SetMat4( const std::string& name, const glm::mat4& data )
-     {
-         return SetData( name, &data, sizeof( glm::vec3 ) );
-     }*/
+    Common::BoolResult
+    VulkanMaterial::AddUniform2DToOverride( const std::shared_ptr<Uniforms::UniformImage2D>& uniform2D )
+    {
+        m_OverriddenUniforms.Images2D.push_back(
+             sp_cast<Uniforms::API::Vulkan::VulkanUniformImage2D>( uniform2D ) );
+        return BOOLSUCCESS;
+    }
 
     Common::BoolResult VulkanMaterial::ApplyMaterial()
     {
@@ -88,19 +80,15 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
         const auto& vulkanShader = sp_cast<VulkanShader>( m_Shader );
 
-        const auto& uniformBuffers    = vulkanShader->GetShaderDescriptorSets()[SET].UniformBuffers;
-        const auto& imageCubeSamplers = vulkanShader->GetShaderDescriptorSets()[SET].ImageCubeSamplers;
-        const auto& image2DSamplers   = vulkanShader->GetShaderDescriptorSets()[SET].Image2DSamplers;
-
-        const auto size =
-             m_OverriddenUniforms.size() + m_OverriddenImages2D.size() + m_OverriddenImagesCube.size();
+        const auto size = m_OverriddenUniforms.Buffers.size() + m_OverriddenUniforms.ImageCubes.size() +
+                          m_OverriddenUniforms.Images2D.size();
 
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
         writeDescriptorSets.reserve( size );
 
         // Uniform
         {
-            for ( const auto& uniform : m_OverriddenUniforms )
+            for ( const auto& uniform : m_OverriddenUniforms.Buffers )
             {
                 auto wds =
                      DescriptorSetBuilder::GetUniformWDS( vulkanShader, frameIndex, SET, uniform->GetBinding(), 1U,
@@ -111,72 +99,28 @@ namespace Desert::Graphic::API::Vulkan
 
         // Image2D
         {
-            for ( const auto& imageInfo : m_OverriddenImages2D )
+            for ( const auto& uniform2D : m_OverriddenUniforms.Images2D )
             {
-                auto info = sp_cast<VulkanImage2D>( imageInfo.Image2D )->GetVulkanImageInfo();
-
-                VkDescriptorImageInfo imageDescriptorInfo = {};
-                imageDescriptorInfo.sampler               = info.Sampler;
-                imageDescriptorInfo.imageView             = info.ImageView;
-                imageDescriptorInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
                 auto wds = DescriptorSetBuilder::GetSamplerWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
-                                                                imageInfo.Binding, 1U, &imageDescriptorInfo );
+                                                                uniform2D->GetBinding(), 1U,
+                                                                &uniform2D->GetDescriptorImageInfo() );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }
 
         // ImageCube
         {
-            for ( const auto& imageInfo : m_OverriddenImagesCube )
+            for ( const auto& uniformCube : m_OverriddenUniforms.ImageCubes )
             {
-                auto info = sp_cast<VulkanImageCube>( imageInfo.ImageCube )->GetVulkanImageInfo();
-
-                VkDescriptorImageInfo imageDescriptorInfo = {};
-                imageDescriptorInfo.sampler               = info.Sampler;
-                imageDescriptorInfo.imageView             = info.ImageView;
-                imageDescriptorInfo.imageLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
                 auto wds = DescriptorSetBuilder::GetSamplerWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
-                                                                imageInfo.Binding, 1U, &imageDescriptorInfo );
+                                                                uniformCube->GetBinding(), 1U,
+                                                                &uniformCube->GetDescriptorImageInfo() );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }
 
         const VkDevice device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
         vkUpdateDescriptorSets( device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, nullptr );
-
-        return BOOLSUCCESS;
-    }
-
-    Common::BoolResult VulkanMaterial::SetImage2D( const std::string&              name,
-                                                   const std::shared_ptr<Image2D>& image2D )
-    {
-        auto it = std::ranges::find( m_AvalivaleImages2D, name, []( const auto& pair ) { return pair.first; } );
-#ifdef DESERT_CONFIG_DEBUG
-        if ( it == m_AvalivaleImages2D.end() )
-        {
-            return Common::MakeFormattedError( "Image '{}' not found in material", name );
-        }
-#endif // DESERT_CONFIG_DEBUG
-
-        m_OverriddenImages2D.push_back( { image2D, it->second } );
-
-        return BOOLSUCCESS;
-    }
-
-    Common::BoolResult VulkanMaterial::SetImageCube( const std::string&                name,
-                                                     const std::shared_ptr<ImageCube>& imageCube )
-    {
-        auto it = std::ranges::find( m_AvalivaleImagesCube, name, []( const auto& pair ) { return pair.first; } );
-#ifdef DESERT_CONFIG_DEBUG
-        if ( it == m_AvalivaleImagesCube.end() )
-        {
-            return Common::MakeFormattedError( "Image '{}' not found in material", name );
-        }
-#endif // DESERT_CONFIG_DEBUG
-
-        m_OverriddenImagesCube.push_back( { imageCube, it->second } );
 
         return BOOLSUCCESS;
     }
@@ -197,9 +141,9 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanMaterial::Clear()
     {
-        m_OverriddenUniforms.clear();
-        m_AvalivaleImages2D.clear();
-        m_AvalivaleImagesCube.clear();
+        m_OverriddenUniforms.Buffers.clear();
+        m_OverriddenUniforms.ImageCubes.clear();
+        m_OverriddenUniforms.Images2D.clear();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

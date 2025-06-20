@@ -53,7 +53,7 @@ namespace Desert::Graphic::API::Vulkan
                     attachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
                     attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                     attachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-                    attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+                    attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
                     depthAttachmentRef.attachment = static_cast<uint32_t>( attachmentIndex++ );
                     depthAttachmentRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;

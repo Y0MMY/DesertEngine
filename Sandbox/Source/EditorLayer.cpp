@@ -9,12 +9,12 @@ namespace Desert
     EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
          : Common::Layer( layerName ), m_Window( window )
     {
-        m_testscene = std::make_shared<Core::Scene>( "sdfsdf" );
+        m_MainScene = std::make_shared<Core::Scene>( "sdfsdf" );
     }
 
     EditorLayer::~EditorLayer()
     {
-        m_testscene->Shutdown();
+        m_MainScene->Shutdown();
     }
 
     [[nodiscard]] Common::BoolResult EditorLayer::OnAttach()
@@ -40,29 +40,22 @@ namespace Desert
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
         }
 
-        m_testscene->Init();
-        m_Skybox               = Graphic::TextureCube::Create( {}, "output123.hdr" );
-        const auto& textureRes = m_Skybox->Invalidate();
-        if ( !textureRes )
-        {
-            // return Common::MakeError( textureRes.GetError() );
-        }
+        m_MainScene->Init();
+        m_Environment = Graphic::EnvironmentManager::Create( "HDR/birchwood_4k.hdr" );
 
-        Graphic::Environment env;
-        env.RadianceMap = m_Skybox->GetImageCube();
-        m_testscene->SetEnvironment( env );
+         m_MainScene->SetEnvironment( m_Environment );
 
         m_Mesh = std::make_shared<Mesh>( "Cube1m.fbx" );
         m_Mesh->Invalidate();
-        m_testscene->AddMeshToRenderList( m_Mesh );
+        m_MainScene->AddMeshToRenderList( m_Mesh );
 
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
         m_ImGuiLayer->OnAttach();
         m_UIHelper->Init();
 
-        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_testscene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_testscene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene ) );
 
 #endif // EBABLE_IMGUI
 
@@ -72,15 +65,15 @@ namespace Desert
     [[nodiscard]] Common::BoolResult EditorLayer::OnUpdate( const Common::Timestep& ts )
     {
         m_EditorCamera.OnUpdate( ts );
-        const auto& beginResult = m_testscene->BeginScene( m_EditorCamera );
+        const auto& beginResult = m_MainScene->BeginScene( m_EditorCamera );
         if ( !beginResult )
         {
             return Common::MakeError( beginResult.GetError() );
         }
 
-        m_testscene->OnUpdate( ts );
+        m_MainScene->OnUpdate( ts );
 
-        const auto& endResult = m_testscene->EndScene();
+        const auto& endResult = m_MainScene->EndScene();
         m_Window->PrepareNextFrame();
 
         if ( !endResult )
@@ -96,6 +89,14 @@ namespace Desert
             m_ImGuiLayer->End();
         }
         m_Window->PresentFinalImage();
+
+        /*static uint32_t sdfsdf = 0U;
+        if (sdfsdf < 5)
+        {
+            Graphic::EnvironmentManager::Create("HDR/birchwood_4k.hdr");
+        }
+        sdfsdf++*/
+        ;
 
         return BOOLSUCCESS;
     }
@@ -183,7 +184,7 @@ namespace Desert
                 m_Size = viewportSize;
             }
 
-            m_UIHelper->Image( m_testscene->GetFinalImage(), viewportSize );
+            m_UIHelper->Image( m_MainScene->GetFinalImage(), viewportSize );
         }
         ::ImGui::End();
         ::ImGui::PopStyleColor( 1 );
@@ -217,7 +218,7 @@ namespace Desert
 
     {
         // m_ImGuiLayer->Resize( e.width, e.height );
-        m_testscene->Resize( e.width, e.height );
+        m_MainScene->Resize( e.width, e.height );
         return false;
     }
 
