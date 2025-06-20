@@ -40,7 +40,7 @@ namespace Desert::Graphic
 
         void Resize( const uint32_t width, const uint32_t height );
 
-        void               RenderMesh( const std::shared_ptr<Mesh>& mesh );
+        void               AddToRenderMeshList( const std::shared_ptr<Mesh>& mesh );
         const Environment  CreateEnvironment( const Common::Filepath& filepath );
         void               SetEnvironment( const Environment& environment );
         const Environment& GetEnvironment();

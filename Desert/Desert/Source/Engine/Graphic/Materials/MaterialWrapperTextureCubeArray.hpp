@@ -14,14 +14,12 @@ namespace Desert::Graphic::MaterialHelper
              const std::vector<std::shared_ptr<Uniforms::UniformImageCube>>& uniforms )
              : m_Material( baseMaterial ), m_Uniforms( uniforms )
         {
-        }
-        void Bind() const
-        {
             for ( const auto& uniform : m_Uniforms )
             {
                 m_Material->AddUniformCubeToOverride( uniform );
             }
         }
+
         const auto& GetMaterialInstance() const
         {
             return m_Material;

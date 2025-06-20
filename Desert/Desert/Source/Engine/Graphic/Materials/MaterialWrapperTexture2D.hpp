@@ -13,14 +13,12 @@ namespace Desert::Graphic::MaterialHelper
                                            const std::shared_ptr<Uniforms::UniformImage2D>& uniform )
              : m_Material( baseMaterial ), m_Uniform( uniform )
         {
-        }
-        void Bind() const
-        {
             if ( m_Uniform )
             {
                 m_Material->AddUniform2DToOverride( m_Uniform );
             }
         }
+
         const auto& GetMaterialInstance() const
         {
             return m_Material;

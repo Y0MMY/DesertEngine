@@ -38,10 +38,4 @@ namespace Desert::Graphic::Models::PBR
     {
         return Constatns::SpecularBRDF_LUT;
     }
-
-    void PBRMaterialTexture::Bind()
-    {
-        MaterialWrapperTextureCubeArray::Bind();
-        MaterialWrapperTexture2D::Bind();
-    }
 } // namespace Desert::Graphic::Models::PBR

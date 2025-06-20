@@ -22,7 +22,6 @@ namespace Desert::Graphic::Models::PBR
                             const std::shared_ptr<Uniforms::UniformImage2D>&   uniformBRDF );
 
         void UpdatePBR( PBRTextures&& pbr );
-        void Bind();
 
         static const std::string_view GetUniformIrradianceName();
         static const std::string_view GetUniformPreFilteredName();

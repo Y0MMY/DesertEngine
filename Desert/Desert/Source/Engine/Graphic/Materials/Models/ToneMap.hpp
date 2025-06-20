@@ -21,7 +21,6 @@ namespace Desert::Graphic::Models
         {
             m_ToneMapImage = toneMapImage;
             m_Uniform->SetImage2D( m_ToneMapImage );
-            Bind();
         }
 
     private:

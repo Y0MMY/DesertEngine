@@ -12,9 +12,6 @@ namespace Desert::Graphic::MaterialHelper
                                   const std::shared_ptr<Uniforms::UniformBuffer>& uniform )
              : m_Material( baseMaterial ), m_Uniform( uniform )
         {
-        }
-        void Bind() const
-        {
             if ( m_Uniform )
             {
                 m_Material->AddUniformBufferToOverride( m_Uniform );

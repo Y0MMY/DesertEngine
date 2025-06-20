@@ -34,7 +34,10 @@ namespace Desert::Core
 
     void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const
     {
-        m_SceneRenderer->RenderMesh( mesh );
+        if ( mesh )
+        {
+            m_SceneRenderer->AddToRenderMeshList( mesh );
+        }
     }
 
     void Scene::OnUpdate( const Common::Timestep& ts )
@@ -42,10 +45,22 @@ namespace Desert::Core
         Graphic::DTO::SceneRendererUpdate sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
 
-        auto dirLightGroup = m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
+        // Dir lights
+        {
+            auto dirLightGroup =
+                 m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
-        dirLightGroup.each( [&]( const auto& light, const auto& transform )
-                            { sceneRendererInfo.DirLights.push_back( { transform.Position } ); } );
+            dirLightGroup.each( [&]( const auto& light, const auto& transform )
+                                { sceneRendererInfo.DirLights.push_back( { transform.Position } ); } );
+        }
+
+        // Mesh
+        {
+            auto dirLightGroup = m_Registry.group<ECS::StaticMeshComponent>( entt::get<ECS::TransformComponent> );
+
+            dirLightGroup.each( [&]( const auto& staticMesh, const auto& transform )
+                                { AddMeshToRenderList( staticMesh.Mesh ); } );
+        }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }

@@ -4,7 +4,9 @@
 
 #include <glm/glm.hpp>
 
-//#include <rflcpp/rfl.hpp>
+#include <Engine/Graphic/Mesh.hpp>
+
+// #include <rflcpp/rfl.hpp>
 
 namespace Desert::ECS
 {
@@ -16,6 +18,12 @@ namespace Desert::ECS
     struct UUIDComponent
     {
         Common::UUID UUID;
+    };
+
+    struct StaticMeshComponent
+    {
+        Common::Filepath      Filepath;
+        std::shared_ptr<Mesh> Mesh;
     };
 
     struct TransformComponent

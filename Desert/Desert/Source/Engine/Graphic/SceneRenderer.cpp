@@ -306,9 +306,7 @@ namespace Desert::Graphic
         ToneMapRenderPass();
         CompositeRenderPass();
 
-        GEOMETRY_RENDERINFO( Material )->Clear();
-        COMPOSITE_RENDERINFO( Material )->Clear();
-        SKYBOX_RENDERINFO( Material )->Clear();
+        m_SceneInfo.Renderdata.MeshInfo.clear();
     }
 
     NO_DISCARD Common::BoolResult SceneRenderer::EndScene()
@@ -363,7 +361,6 @@ namespace Desert::Graphic
         m_SceneInfo.Renderdata.Skybox.SkyboxUB->UpdateSkybox( m_SceneInfo.EnvironmentData.RadianceMap );
 
         m_SceneInfo.Renderdata.Skybox.CameraUB->UpdateCameraUB( *m_SceneInfo.ActiveCamera ); // TODO: constant push
-        m_SceneInfo.Renderdata.Skybox.CameraUB->Bind();
         SKYBOX_RENDERINFO( Material )->ApplyMaterial();
         renderer.SubmitFullscreenQuad( SKYBOX_RENDERINFO( Pipeline ), SKYBOX_RENDERINFO( Material ) );
 
@@ -396,10 +393,6 @@ namespace Desert::Graphic
                  { .IrradianceMap  = m_SceneInfo.EnvironmentData.IrradianceMap,
                    .PreFilteredMap = m_SceneInfo.EnvironmentData.PreFilteredMap } );
 
-            m_SceneInfo.LightsInfo.Lightning->Bind(); // NOTE: data has already been updated
-            m_SceneInfo.Renderdata.Geometry.GlobalUB->Bind();
-            m_SceneInfo.Renderdata.Geometry.PBRUB->Bind();
-            m_SceneInfo.Renderdata.Geometry.PBRTextures->Bind();
 
             GEOMETRY_RENDERINFO( Material )->ApplyMaterial();
             renderer.RenderMesh( GEOMETRY_RENDERINFO( Pipeline ), meshInfo.Mesh, GEOMETRY_RENDERINFO( Material ) );
@@ -408,7 +401,7 @@ namespace Desert::Graphic
         renderer.EndRenderPass();
     }
 
-    void SceneRenderer::RenderMesh( const std::shared_ptr<Mesh>& mesh )
+    void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>& mesh )
     {
         m_SceneInfo.Renderdata.MeshInfo.push_back( { mesh } );
     }

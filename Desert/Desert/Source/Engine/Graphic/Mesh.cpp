@@ -25,16 +25,16 @@ namespace Desert
         {
             LOG_ERROR( "Assimp error: {}", message );
         }
-
-        ~LogStream()
-        {
-            Assimp::DefaultLogger::kill();
-        }
     };
+
+    static std::unique_ptr<LogStream> s_LogStream = nullptr;
 
     Mesh::Mesh( const std::string& filename ) : m_Filename( filename )
     {
-        LogStream::Init();
+        if ( !s_LogStream )
+        {
+            ( s_LogStream = std::make_unique<LogStream>() )->Init();
+        }
     }
 
     Common::BoolResult Mesh::Invalidate()

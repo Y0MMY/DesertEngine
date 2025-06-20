@@ -29,6 +29,8 @@ namespace Desert::Graphic
         virtual Common::BoolResult ApplyMaterial()                                           = 0;
         virtual void               Clear() = 0; // TODO: better func name
 
+       /// virtual std::shared_ptr<Uniforms::UniformImage2D> GetOverridedUniform2D() const = 0;
+
         virtual Common::BoolResult PushConstant( const void* buffer, const uint32_t bufferSize ) = 0;
 
         static std::shared_ptr<Material> Create( const std::string&             debugName,

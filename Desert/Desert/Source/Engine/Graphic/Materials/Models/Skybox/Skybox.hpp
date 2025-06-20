@@ -21,7 +21,6 @@ namespace Desert::Graphic::Models
         {
             m_SkyboxImage = skyboxImage;
             m_Uniform->SetImageCube( m_SkyboxImage );
-            Bind();
         }
     private:
         std::shared_ptr<ImageCube> m_SkyboxImage;
