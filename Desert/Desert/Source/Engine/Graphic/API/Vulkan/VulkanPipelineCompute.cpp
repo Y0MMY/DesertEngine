@@ -4,6 +4,7 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -66,49 +67,35 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        const auto vulkanShader         = std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Shader );
+        const auto vulkanShader         = sp_cast<VulkanShader>( m_Shader );
         auto       descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
-
-        const auto descriptorSets = vulkanShader->GetShaderDescriptorSets();
-        if ( !descriptorSets.empty() )
-        {
-            vulkanShader->CreateDescriptorSets( 3 ); // TODO: frame in flight
-        }
 
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
         pipelineLayoutCreateInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutCreateInfo.setLayoutCount = (uint32_t)descriptorSetLayouts.size();
+        pipelineLayoutCreateInfo.setLayoutCount = static_cast<uint32_t>( descriptorSetLayouts.size() );
         pipelineLayoutCreateInfo.pSetLayouts    = descriptorSetLayouts.data();
 
         const auto& pushConstantRange = vulkanShader->GetShaderPushConstant();
-
-        VkPushConstantRange vulkanPushConstantRange;
         if ( pushConstantRange )
         {
-            // TODO: should come from shader
-            {
-                const auto& pcValue                = pushConstantRange.value();
-                vulkanPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-                vulkanPushConstantRange.offset     = pcValue.Offset;
-                vulkanPushConstantRange.size       = pcValue.Size;
-            }
+            VkPushConstantRange vulkanPushConstantRange{ .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                                         .offset     = pushConstantRange->Offset,
+                                                         .size       = pushConstantRange->Size };
 
-            pipelineLayoutCreateInfo.pushConstantRangeCount = 1u;
+            pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
             pipelineLayoutCreateInfo.pPushConstantRanges    = &vulkanPushConstantRange;
         }
 
         VK_CHECK_RESULT(
              vkCreatePipelineLayout( device, &pipelineLayoutCreateInfo, nullptr, &m_ComputePipelineLayout ) );
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage  = vulkanShader->GetPipelineShaderStageCreateInfos()[0];
-        pipelineInfo.layout = m_ComputePipelineLayout;
-
-        VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
-        pipelineCacheCreateInfo.sType                     = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-
+        VkPipelineCacheCreateInfo pipelineCacheCreateInfo{ .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
         VK_CHECK_RESULT( vkCreatePipelineCache( device, &pipelineCacheCreateInfo, nullptr, &m_PipelineCache ) );
+
+        VkComputePipelineCreateInfo pipelineInfo{ .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                                  .stage  = vulkanShader->GetPipelineShaderStageCreateInfos()[0],
+                                                  .layout = m_ComputePipelineLayout };
+
         VK_CHECK_RESULT(
              vkCreateComputePipelines( device, m_PipelineCache, 1, &pipelineInfo, nullptr, &m_ComputePipeline ) );
 
@@ -118,24 +105,54 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipelineCompute::ReadBuffer( uint32_t bufferSize )
     {
-        /* auto& allocator = VulkanAllocator::GetInstance();
-
-         VkBufferCreateInfo bufferCreateInfo;
-         bufferCreateInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-         bufferCreateInfo.size        = bufferSize;
-         bufferCreateInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-         bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-
-         VkBuffer buffer;
-         const auto buffer = allocator.RT_AllocateBuffer( "STAGING", bufferCreateInfo, VMA_MEMORY_USAGE_GPU_ONLY,
-         buffer);*/
     }
 
-    void VulkanPipelineCompute::BindDS( VkDescriptorSet descriptorSet )
+    Common::Result<VkDescriptorSet> VulkanPipelineCompute::GetDescriptorSet( uint32_t frameIndex,
+                                                                             uint32_t setIndex )
     {
-        vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                 m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, 0 );
+        auto rendererAPI = static_cast<VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() );
+        auto result = rendererAPI->GetDescriptorManager()->GetDescriptorSet( sp_cast<VulkanShader>( m_Shader ),
+                                                                             frameIndex, setIndex );
+
+        if ( result.IsSuccess() )
+        {
+            return Common::MakeSuccess( result.GetValue().Set );
+        }
+        return Common::MakeError<VkDescriptorSet>( "Failed to get descriptor set" );
+    }
+
+    void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t                                 frameIndex,
+                                                     const std::vector<VkWriteDescriptorSet>& writes,
+                                                     uint32_t                                 setIndex )
+    {
+        auto result = GetDescriptorSet( frameIndex, setIndex );
+        if ( !result.IsSuccess() )
+            return;
+
+        std::vector<VkWriteDescriptorSet> modifiedWrites = writes;
+        for ( auto& write : modifiedWrites )
+        {
+            write.dstSet = result.GetValue();
+        }
+
+        vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
+                                static_cast<uint32_t>( modifiedWrites.size() ), modifiedWrites.data(), 0,
+                                nullptr );
+    }
+
+    void VulkanPipelineCompute::BindDescriptorSets( uint32_t frameIndex )
+    {
+        auto vulkanShader = sp_cast<VulkanShader>( m_Shader );
+        for ( uint32_t set = 0; set < vulkanShader->GetDescriptorSetLayoutCount(); ++set )
+        {
+            auto result = GetDescriptorSet( frameIndex, set );
+            if ( result.IsSuccess() )
+            {
+                const auto& resultVal = result.GetValue();
+                vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                         m_ComputePipelineLayout, set, 1, &resultVal, 0, nullptr );
+            }
+        }
     }
 
     void VulkanPipelineCompute::PushConstant( uint32_t size, void* data )

@@ -41,7 +41,6 @@ namespace Desert
         }
 
         m_MainScene->Init();
-        m_Environment = Graphic::EnvironmentManager::Create( "HDR/birchwood_4k.hdr" );
 
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();

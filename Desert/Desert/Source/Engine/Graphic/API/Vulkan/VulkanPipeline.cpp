@@ -143,11 +143,6 @@ namespace Desert::Graphic::API::Vulkan
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader );
 
         const auto descriptorSets = vulkanShader->GetShaderDescriptorSets();
-        if ( !descriptorSets.empty() )
-        {
-            vulkanShader->CreateDescriptorSets( 3 ); // TODO: frame in flight
-        }
-
         const auto descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
 
         const auto& pushConstant = SetUpPushConstantRange();

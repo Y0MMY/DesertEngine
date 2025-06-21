@@ -2,6 +2,7 @@
 #pragma once
 
 #include <Engine/Graphic/RendererAPI.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanDescriptorManager.hpp>
 
 #include <vulkan/vulkan.hpp>
 
@@ -29,7 +30,7 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
 
-        virtual std::shared_ptr<Framebuffer>            GetCompositeFramebuffer() const override;
+        virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 
 #ifdef DESERT_CONFIG_DEBUG
         virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath,
@@ -40,10 +41,17 @@ namespace Desert::Graphic::API::Vulkan
 #endif
         VkCommandBuffer GetCurrentCmdBuffer() const;
 
+        const auto& GetDescriptorManager() const
+        {
+            return m_DescriptorManager;
+        }
+
     private:
         void SetViewportAndScissor();
 
     private:
+        std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
+
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
 
         std::shared_ptr<Framebuffer> m_CompositeFramebuffer;

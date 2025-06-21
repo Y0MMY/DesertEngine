@@ -22,7 +22,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_ActiveComputeCommandBuffer;
         }
 
-        void BindDS( VkDescriptorSet descriptorSet );
+        Common::Result<VkDescriptorSet> GetDescriptorSet( uint32_t frameIndex, uint32_t setIndex = 0 );
+        void UpdateDescriptorSet( uint32_t frameIndex, const std::vector<VkWriteDescriptorSet>& writes,
+                                  uint32_t setIndex = 0 );
+        void BindDescriptorSets( uint32_t frameIndex );
+
         void PushConstant( uint32_t size, void* data );
 
         void ReadBuffer( uint32_t bufferSize ); // TEMP

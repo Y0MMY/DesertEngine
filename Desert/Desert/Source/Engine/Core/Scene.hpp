@@ -71,8 +71,9 @@ namespace Desert::Core
         FindEntityByID( const Common::UUID& uuid ) const;
 
     private:
-        void AddMeshToRenderList(const std::shared_ptr<Mesh>& mesh) const;
+        void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh, const glm::mat4& transform ) const;
         void SetEnvironment( const Graphic::Environment& environment );
+
     private:
         std::string                              m_SceneName;
         std::unique_ptr<Graphic::SceneRenderer>  m_SceneRenderer;

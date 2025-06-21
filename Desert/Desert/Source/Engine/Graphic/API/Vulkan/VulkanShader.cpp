@@ -13,15 +13,6 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-
-#define ADD_DESCRIPTOR_POOL_SIZE( poolSizes, descriptorType, resources, sets )                                    \
-    if ( !resources.empty() )                                                                                     \
-    {                                                                                                             \
-        auto& poolSize           = poolSizes.emplace_back();                                                      \
-        poolSize.type            = descriptorType;                                                                \
-        poolSize.descriptorCount = resources.size() * sets;                                                       \
-    }
-
     namespace Utils
     {
         static bool IsArray( const spirv_cross::SPIRType& type )
@@ -111,33 +102,6 @@ namespace Desert::Graphic::API::Vulkan
                     return VK_SHADER_STAGE_COMPUTE_BIT;
             }
             return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
-        }
-
-        std::vector<VkDescriptorPoolSize> GetDescriptorPoolSize(
-             const std::unordered_map<SetPoint, ShaderResource::ShaderDescriptorSet>& shaderDescriptorSets )
-        {
-            std::vector<VkDescriptorPoolSize> poolSizes;
-            uint32_t                          sets = shaderDescriptorSets.size();
-
-            for ( SetPoint set = 0; set < sets; set++ )
-            {
-                const auto& uniformBuffers = shaderDescriptorSets.at( set ).UniformBuffers;
-                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers, sets );
-
-                const auto& image2DSamplers = shaderDescriptorSets.at( set ).Image2DSamplers;
-                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, image2DSamplers,
-                                          sets );
-
-                const auto& imageCubeSamplers = shaderDescriptorSets.at( set ).ImageCubeSamplers;
-                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCubeSamplers,
-                                          sets );
-
-                const auto& imageSamplersStorage = shaderDescriptorSets.at( set ).StorageImage2DSamplers;
-                ADD_DESCRIPTOR_POOL_SIZE( poolSizes, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, imageSamplersStorage,
-                                          sets );
-            }
-
-            return poolSizes;
         }
 
         void CreateDirectoriesIfNoExists()
@@ -269,7 +233,7 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             Reflect( Utils::ShaderStageToVkShader( stage ), compileResult.GetValue() );
-            const auto createDescriptorsResult = CreateDescriptors();
+            const auto createDescriptorsResult = CreateDescriptorsLayout();
             if ( !createDescriptorsResult.IsSuccess() )
             {
                 return Common::MakeError<bool>( createDescriptorsResult.GetError() );
@@ -482,17 +446,6 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    Common::BoolResult VulkanShader::CreateDescriptors()
-    {
-        const auto result = CreateDescriptorsLayout();
-        if ( !result.IsSuccess() )
-        {
-            return Common::MakeError<bool>( result.GetError() );
-        }
-
-        return Common::MakeSuccess( true );
-    }
-
     Common::BoolResult VulkanShader::CreateDescriptorsLayout()
     {
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
@@ -563,54 +516,6 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         return Common::MakeSuccess( true );
-    }
-
-    std::vector<VkDescriptorSetLayout> VulkanShader::GetAllDescriptorSetLayouts()
-    {
-        return m_DescriptorSetLayouts;
-    }
-
-    VulkanShader::DescriptorSetInfo VulkanShader::AllocateDescriptorSets( uint32_t framesInFlight )
-    {
-        DescriptorSetInfo result;
-
-        VkDevice    device    = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        const auto& poolSizes = Utils::GetDescriptorPoolSize( m_ReflectionData.ShaderDescriptorSets );
-        uint32_t    sets      = m_ReflectionData.ShaderDescriptorSets.size();
-
-        result.Pool.resize( framesInFlight );
-        result.DescriptorSets.resize( framesInFlight );
-
-        for ( uint32_t frame = 0; frame < framesInFlight; frame++ )
-        {
-            VkDescriptorPoolCreateInfo poolInfo = {};
-            poolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-            poolInfo.poolSizeCount              = poolSizes.size();
-            poolInfo.pPoolSizes                 = poolSizes.data();
-            poolInfo.maxSets                    = sets;
-
-            VK_CHECK_RESULT( vkCreateDescriptorPool( device, &poolInfo, nullptr, &result.Pool[frame] ) );
-
-            result.DescriptorSets[frame].resize( sets );
-        }
-
-        for ( uint32_t frame = 0; frame < framesInFlight; frame++ )
-        {
-            VkDescriptorSetAllocateInfo allocInfo = {};
-            allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool              = result.Pool[frame];
-            allocInfo.descriptorSetCount          = sets;
-            allocInfo.pSetLayouts                 = m_DescriptorSetLayouts.data();
-
-            VK_CHECK_RESULT( vkAllocateDescriptorSets( device, &allocInfo, result.DescriptorSets[frame].data() ) );
-        }
-
-        return result;
-    }
-
-    void VulkanShader::CreateDescriptorSets( uint32_t framesInFlight )
-    {
-        m_DescriptorSetInfo = AllocateDescriptorSets( framesInFlight );
     }
 
     const std::vector<Desert::Core::Models::UniformBuffer> VulkanShader::GetUniformBufferModels() const

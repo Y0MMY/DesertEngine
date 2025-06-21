@@ -18,13 +18,7 @@ namespace Desert::Core
 
     NO_DISCARD Common::BoolResult Scene::Init()
     {
-        const auto res = m_SceneRenderer->Init();
-        if ( !res )
-        {
-            return Common::MakeError( res.GetError() );
-        }
-
-        return BOOLSUCCESS;
+        return m_SceneRenderer->Init();
     }
 
     void Scene::SetEnvironment( const Graphic::Environment& environment )
@@ -32,12 +26,9 @@ namespace Desert::Core
         m_SceneRenderer->SetEnvironment( environment );
     }
 
-    void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh ) const
+    void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh, const glm::mat4& transform ) const
     {
-        if ( mesh )
-        {
-            m_SceneRenderer->AddToRenderMeshList( mesh );
-        }
+        m_SceneRenderer->AddToRenderMeshList( mesh, transform );
     }
 
     void Scene::OnUpdate( const Common::Timestep& ts )
@@ -51,7 +42,7 @@ namespace Desert::Core
             for ( const auto skyboxEntity : skyboxes )
             {
                 const auto& skybox = m_Registry.get<ECS::SkyboxComponent>( skyboxEntity );
-                SetEnvironment(skybox.Env);
+                SetEnvironment( skybox.Env );
             }
         }
 
@@ -69,7 +60,7 @@ namespace Desert::Core
             auto dirLightGroup = m_Registry.group<ECS::StaticMeshComponent>( entt::get<ECS::TransformComponent> );
 
             dirLightGroup.each( [&]( const auto& staticMesh, const auto& transform )
-                                { AddMeshToRenderList( staticMesh.Mesh ); } );
+                                { AddMeshToRenderList( staticMesh.Mesh, transform.GetTransform() ); } );
         }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );

@@ -2,6 +2,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
@@ -101,9 +102,9 @@ namespace Desert::Graphic::API::Vulkan
         {
             for ( const auto& uniform2D : m_OverriddenUniforms.Images2D )
             {
-                auto wds = DescriptorSetBuilder::GetSamplerWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
-                                                                uniform2D->GetBinding(), 1U,
-                                                                &uniform2D->GetDescriptorImageInfo() );
+                auto wds =
+                     DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex, SET, uniform2D->GetBinding(),
+                                                          1U, &uniform2D->GetDescriptorImageInfo() );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }
@@ -112,15 +113,16 @@ namespace Desert::Graphic::API::Vulkan
         {
             for ( const auto& uniformCube : m_OverriddenUniforms.ImageCubes )
             {
-                auto wds = DescriptorSetBuilder::GetSamplerWDS( sp_cast<VulkanShader>( m_Shader ), frameIndex, SET,
-                                                                uniformCube->GetBinding(), 1U,
-                                                                &uniformCube->GetDescriptorImageInfo() );
+                auto wds =
+                     DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex, SET, uniformCube->GetBinding(),
+                                                          1U, &uniformCube->GetDescriptorImageInfo() );
                 writeDescriptorSets.push_back( std::move( wds ) );
             }
         }
 
-        const VkDevice device = API::Vulkan::VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        vkUpdateDescriptorSets( device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, nullptr );
+        static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
+             ->GetDescriptorManager()
+             ->UpdateDescriptorSet( vulkanShader, frameIndex, 0, writeDescriptorSets );
 
         return BOOLSUCCESS;
     }

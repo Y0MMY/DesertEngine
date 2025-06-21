@@ -1,4 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -9,12 +11,22 @@ namespace Desert::Graphic::API::Vulkan
                                                               const uint32_t                descriptorCount,
                                                               const VkDescriptorBufferInfo* pBufferInfo )
     {
-        const auto& dstSet = vulkanShader->GetVulkanDescriptorSetInfo().DescriptorSets[frame][set];
+        const auto& descriptorSetResult =
+             static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
+                  ->GetDescriptorManager()
+                  ->GetLast( vulkanShader, frame, set );
+        if ( !descriptorSetResult.IsSuccess() )
+        {
+            VkWriteDescriptorSet writeDescriptor = {};
+            writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            return writeDescriptor;
+        }
 
         VkWriteDescriptorSet writeDescriptor = {};
         writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writeDescriptor.dstSet               = dstSet;
+        writeDescriptor.dstSet               = descriptorSetResult.GetValue().Set;
         writeDescriptor.dstBinding           = dstBinding;
         writeDescriptor.descriptorCount      = descriptorCount;
         writeDescriptor.pBufferInfo          = pBufferInfo;
@@ -28,12 +40,22 @@ namespace Desert::Graphic::API::Vulkan
                                                               const uint32_t               descriptorCount,
                                                               const VkDescriptorImageInfo* pImageInfo )
     {
-        const auto& dstSet = vulkanShader->GetVulkanDescriptorSetInfo().DescriptorSets[frame][set];
+        const auto& descriptorSetResult =
+             static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
+                  ->GetDescriptorManager()
+                  ->GetLast( vulkanShader, frame, set );
+        if ( !descriptorSetResult.IsSuccess() )
+        {
+            VkWriteDescriptorSet writeDescriptor = {};
+            writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            return writeDescriptor;
+        }
 
         VkWriteDescriptorSet writeDescriptor = {};
         writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writeDescriptor.dstSet               = dstSet;
+        writeDescriptor.dstSet               = descriptorSetResult.GetValue().Set;
         writeDescriptor.dstBinding           = dstBinding;
         writeDescriptor.descriptorCount      = descriptorCount;
         writeDescriptor.pImageInfo           = pImageInfo;
@@ -46,12 +68,23 @@ namespace Desert::Graphic::API::Vulkan
                                                               const uint32_t               descriptorCount,
                                                               const VkDescriptorImageInfo* pImageInfo )
     {
-        const auto& dstSet = vulkanShader->GetVulkanDescriptorSetInfo().DescriptorSets[frame][set];
+        const auto& descriptorSetResult =
+             static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
+                  ->GetDescriptorManager()
+                  ->GetLast( vulkanShader, frame, set );
+
+        if ( !descriptorSetResult.IsSuccess() )
+        {
+            VkWriteDescriptorSet writeDescriptor = {};
+            writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            return writeDescriptor;
+        }
 
         VkWriteDescriptorSet writeDescriptor = {};
         writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writeDescriptor.dstSet               = dstSet;
+        writeDescriptor.dstSet               = descriptorSetResult.GetValue().Set;
         writeDescriptor.dstBinding           = dstBinding;
         writeDescriptor.descriptorCount      = descriptorCount;
         writeDescriptor.pImageInfo           = pImageInfo;

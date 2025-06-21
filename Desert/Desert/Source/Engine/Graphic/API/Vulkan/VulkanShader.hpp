@@ -56,9 +56,20 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_PipelineShaderStageCreateInfos;
         }
-        std::vector<VkDescriptorSetLayout> GetAllDescriptorSetLayouts();
-        void                               CreateDescriptorSets( uint32_t framesInFlight );
-        DescriptorSetInfo                  AllocateDescriptorSets( uint32_t framesInFlight );
+        const auto& GetDescriptorSetLayout( uint32_t set ) const
+        {
+            return m_DescriptorSetLayouts[set];
+        }
+
+        const auto GetDescriptorSetLayoutCount() const
+        {
+            return m_DescriptorSetLayouts.size();
+        }
+
+        const auto& GetAllDescriptorSetLayouts() const
+        {
+            return m_DescriptorSetLayouts;
+        }
 
         auto& GetShaderDescriptorSets()
         {
@@ -78,7 +89,6 @@ namespace Desert::Graphic::API::Vulkan
     private:
         void               Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
         Common::BoolResult CreateDescriptorsLayout();
-        Common::BoolResult CreateDescriptors();
 
     private:
         std::vector<VkPipelineShaderStageCreateInfo> m_PipelineShaderStageCreateInfos;

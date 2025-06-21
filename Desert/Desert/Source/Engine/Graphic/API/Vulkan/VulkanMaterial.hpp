@@ -30,6 +30,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_PushConstantBuffer;
         }
 
+        virtual std::shared_ptr<Shader> GetShader() const
+        {
+            return m_Shader;
+        }
+
     private:
     private:
         const std::shared_ptr<Shader> m_Shader;

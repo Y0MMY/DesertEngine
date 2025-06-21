@@ -18,13 +18,11 @@ namespace Desert::Graphic::API::Vulkan
         Common::BoolResult GenerateMipmaps( const VulkanImageType& vulkanImage, uint32_t width, uint32_t height,
                                             uint32_t mipLevels, uint32_t layers, const std::string& shaderName )
         {
-            static auto shader       = Shader::Create( shaderName );
-            const auto& shaderVulkan = sp_cast<VulkanShader>( shader );
-            uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
+            static auto shader     = Shader::Create( shaderName );
+            uint32_t    frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
             auto pipelineCompute = PipelineCompute::Create( shader );
-            pipelineCompute->Invalidate();
-            auto vulkanPipeline = sp_cast<VulkanPipelineCompute>( pipelineCompute );
+            auto vulkanPipeline  = sp_cast<VulkanPipelineCompute>( pipelineCompute );
 
             for ( uint32_t mip = 1; mip < mipLevels; ++mip )
             {
@@ -40,20 +38,19 @@ namespace Desert::Graphic::API::Vulkan
                 imageInfo[1].imageView   = vulkanImage.GetMipImageView( mip );
                 imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-                // Update descriptor set
-                std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
+                std::vector<VkWriteDescriptorSet> descriptorWrites;
 
-                descriptorWrites[0] =
-                     DescriptorSetBuilder::GetSamplerWDS( shaderVulkan, frameIndex, 0U, 0, 1U, &imageInfo[0] );
+                descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerWDS(
+                     sp_cast<VulkanShader>( shader ), frameIndex, 0, 0, 1, &imageInfo[0] ) );
 
-                descriptorWrites[1] =
-                     DescriptorSetBuilder::GetStorageWDS( shaderVulkan, frameIndex, 0U, 1, 1U, &imageInfo[1] );
+                descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS(
+                     sp_cast<VulkanShader>( shader ), frameIndex, 0, 1, 1, &imageInfo[1] ) );
 
-                vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
-                                        descriptorWrites.size(), descriptorWrites.data(), 0, nullptr );
+                vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites );
 
                 pipelineCompute->Begin();
-                const auto cmd = sp_cast<VulkanPipelineCompute>( pipelineCompute )->GetCommandBuffer();
+
+                VkCommandBuffer cmd = vulkanPipeline->GetCommandBuffer();
 
                 // Transition current mip to GENERAL
                 Utils::InsertImageMemoryBarrier(
@@ -62,7 +59,7 @@ namespace Desert::Graphic::API::Vulkan
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                      VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, layers } );
 
-                vulkanPipeline->BindDS( descriptorWrites[0].dstSet );
+                vulkanPipeline->BindDescriptorSets( frameIndex );
 
                 // Dispatch compute
                 const uint32_t workGroupsX = std::max( 1u, ( width >> mip ) / kWorkGroups );

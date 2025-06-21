@@ -76,6 +76,12 @@ namespace Desert::Graphic
 
         skybox.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
 
+        const auto& texture = Renderer::GetInstance().GetFallbackTextures()->GetFallbackTextureCube(
+             Core::Formats::ImageFormat::RGBA8F );
+
+        m_SceneInfo.EnvironmentData.RadianceMap    = texture;
+        m_SceneInfo.EnvironmentData.IrradianceMap  = texture;
+        m_SceneInfo.EnvironmentData.PreFilteredMap = texture;
         return BOOLSUCCESS;
     }
 
@@ -347,7 +353,6 @@ namespace Desert::Graphic
         m_SceneInfo.Renderdata.Composite.ToneMapUB->UpdateToneMap(
              SKYBOX_RENDERINFO( Framebuffer )->GetColorAttachmentImage() );
 
-        COMPOSITE_RENDERINFO( Material )->ApplyMaterial();
         renderer.SubmitFullscreenQuad( COMPOSITE_RENDERINFO( Pipeline ), COMPOSITE_RENDERINFO( Material ) );
         renderer.EndRenderPass();
     }
@@ -358,14 +363,9 @@ namespace Desert::Graphic
 
         renderer.BeginRenderPass( SKYBOX_RENDERINFO( RenderPass ) );
 
-        const auto& skyboxRadiance = m_SceneInfo.EnvironmentData.RadianceMap
-                                          ? m_SceneInfo.EnvironmentData.RadianceMap
-                                          : Renderer::GetInstance().GetFallbackTextures()->GetFallbackTextureCube(
-                                                 Core::Formats::ImageFormat::RGBA8F );
-        m_SceneInfo.Renderdata.Skybox.SkyboxUB->UpdateSkybox( skyboxRadiance );
+        m_SceneInfo.Renderdata.Skybox.SkyboxUB->UpdateSkybox( m_SceneInfo.EnvironmentData.RadianceMap );
 
         m_SceneInfo.Renderdata.Skybox.CameraUB->UpdateCameraUB( *m_SceneInfo.ActiveCamera ); // TODO: constant push
-        SKYBOX_RENDERINFO( Material )->ApplyMaterial();
         renderer.SubmitFullscreenQuad( SKYBOX_RENDERINFO( Pipeline ), SKYBOX_RENDERINFO( Material ) );
 
         renderer.EndRenderPass();
@@ -381,12 +381,13 @@ namespace Desert::Graphic
         {
             struct VP
             {
-                glm::mat4 Project;
-                glm::mat4 View;
+                glm::mat4 ViewProject;
+                glm::mat4 Transform;
             };
 
-            const VP vp{ .Project = m_SceneInfo.ActiveCamera->GetProjectionMatrix(),
-                         .View    = m_SceneInfo.ActiveCamera->GetViewMatrix() };
+            const VP vp{ .ViewProject = m_SceneInfo.ActiveCamera->GetProjectionMatrix() *
+                                        m_SceneInfo.ActiveCamera->GetViewMatrix(),
+                         .Transform = meshInfo.Transform };
             m_SceneInfo.Renderdata.Geometry.InfoRender.Material->PushConstant( &vp, sizeof( vp ) );
 
             Models::GlobalUB globlal = { .CameraPosition = m_SceneInfo.ActiveCamera->GetPosition() };
@@ -397,16 +398,18 @@ namespace Desert::Graphic
                  { .IrradianceMap  = m_SceneInfo.EnvironmentData.IrradianceMap,
                    .PreFilteredMap = m_SceneInfo.EnvironmentData.PreFilteredMap } );
 
-            GEOMETRY_RENDERINFO( Material )->ApplyMaterial();
             renderer.RenderMesh( GEOMETRY_RENDERINFO( Pipeline ), meshInfo.Mesh, GEOMETRY_RENDERINFO( Material ) );
         }
 
         renderer.EndRenderPass();
     }
 
-    void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>& mesh )
+    void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>& mesh, const glm::mat4& transform )
     {
-        m_SceneInfo.Renderdata.MeshInfo.push_back( { mesh } );
+        if ( mesh )
+        {
+            m_SceneInfo.Renderdata.MeshInfo.push_back( { mesh, transform } );
+        }
     }
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
@@ -416,7 +419,10 @@ namespace Desert::Graphic
 
     void SceneRenderer::SetEnvironment( const Environment& environment )
     {
-        m_SceneInfo.EnvironmentData = environment;
+        if ( environment )
+        {
+            m_SceneInfo.EnvironmentData = environment;
+        }
     }
 
     const Environment& SceneRenderer::GetEnvironment()
