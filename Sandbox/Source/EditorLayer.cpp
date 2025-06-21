@@ -9,7 +9,7 @@ namespace Desert
     EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
          : Common::Layer( layerName ), m_Window( window )
     {
-        m_MainScene = std::make_shared<Core::Scene>( "sdfsdf" );
+        m_MainScene = std::make_shared<Core::Scene>( "New Scene" );
     }
 
     EditorLayer::~EditorLayer()
@@ -42,12 +42,6 @@ namespace Desert
 
         m_MainScene->Init();
         m_Environment = Graphic::EnvironmentManager::Create( "HDR/birchwood_4k.hdr" );
-
-         m_MainScene->SetEnvironment( m_Environment );
-
-        m_Mesh = std::make_shared<Mesh>( "Cube1m.fbx" );
-        m_Mesh->Invalidate();
-        m_MainScene->AddMeshToRenderList( m_Mesh );
 
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
@@ -89,15 +83,6 @@ namespace Desert
             m_ImGuiLayer->End();
         }
         m_Window->PresentFinalImage();
-
-        /*static uint32_t sdfsdf = 0U;
-        if (sdfsdf < 5)
-        {
-            Graphic::EnvironmentManager::Create("HDR/birchwood_4k.hdr");
-        }
-        sdfsdf++*/
-        ;
-
         return BOOLSUCCESS;
     }
 

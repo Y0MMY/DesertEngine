@@ -44,8 +44,6 @@ namespace Desert::Core
 
         [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
 
-        void SetEnvironment( const Graphic::Environment& environment );
-
         const std::shared_ptr<Graphic::Image2D> GetFinalImage() const;
 
         ECS::Entity& CreateNewEntity( std::string&& entityName );
@@ -74,6 +72,7 @@ namespace Desert::Core
 
     private:
         void AddMeshToRenderList(const std::shared_ptr<Mesh>& mesh) const;
+        void SetEnvironment( const Graphic::Environment& environment );
     private:
         std::string                              m_SceneName;
         std::unique_ptr<Graphic::SceneRenderer>  m_SceneRenderer;

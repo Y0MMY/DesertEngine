@@ -10,6 +10,7 @@
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Mesh.hpp>
 #include <Engine/Graphic/Texture.hpp>
+#include <Engine/Graphic/FallbackTextures.hpp>
 
 namespace Desert::Graphic
 {
@@ -46,9 +47,10 @@ namespace Desert::Graphic
         RendererAPI* GetRendererAPI() const;
 
         const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
+        const std::shared_ptr<FallbackTextures>   GetFallbackTextures() const;
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
-        PBRTextures CreateEnvironmentMap( const Common::Filepath& filepath );
+        PBRTextures                  CreateEnvironmentMap( const Common::Filepath& filepath );
 
         uint32_t GetCurrentFrameIndex();
 
@@ -65,7 +67,8 @@ namespace Desert::Graphic
         static Common::Memory::CommandBuffer& GetRenderCommandQueue();
 
     private:
-        std::shared_ptr<Graphic::Texture2D> m_BRDFTexture;
-        std::unique_ptr<RendererContext>    m_RendererContext;
+        std::shared_ptr<Texture2D>        m_BRDFTexture;
+        std::shared_ptr<FallbackTextures> m_FallbackTextures;
+        std::unique_ptr<RendererContext>  m_RendererContext;
     };
 } // namespace Desert::Graphic

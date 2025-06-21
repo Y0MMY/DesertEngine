@@ -3,6 +3,8 @@
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
 
+#include <Common/Utilities/FileSystem.hpp>
+
 #include <ImGui/imgui.h>
 
 namespace Desert::Editor
@@ -68,6 +70,101 @@ namespace Desert::Editor
                     ImGui::Dummy( ImVec2( 0, 10 ) );
                 }
 
+                if ( selectedEntity.HasComponent<ECS::SkyboxComponent>() )
+                {
+                    if ( ImGui::CollapsingHeader( "Skybox", ImGuiTreeNodeFlags_DefaultOpen ) )
+                    {
+                        ImGui::Dummy( ImVec2( 0, 4 ) );
+                        auto& skyboxComponent = selectedEntity.GetComponent<ECS::SkyboxComponent>();
+
+                        const char* skyboxTypes[] = { "Cubemap", "Procedural", "Gradient" };
+                        static int  currentType   = 0;
+                        ImGui::Combo( "Type", &currentType, skyboxTypes, IM_ARRAYSIZE( skyboxTypes ) );
+
+                        if ( currentType == 0 ) // Cubemap
+                        {
+                            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
+                            ImGui::Text( "Current Cubemap:" );
+                            ImGui::PopStyleColor();
+
+                            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.75f, 1.0f ) );
+                            ImGui::TextWrapped( "%s", skyboxComponent.Filepath.empty()
+                                                           ? "None"
+                                                           : skyboxComponent.Filepath.string().c_str() );
+                            ImGui::PopStyleColor();
+
+                            ImGui::Dummy( ImVec2( 0, 6 ) );
+
+                            if ( ImGui::Button( "Load Cubemap", ImVec2( ImGui::GetContentRegionAvail().x, 24 ) ) )
+                            {
+                                auto path = Common::Utils::FileSystem::OpenFileDialog(
+                                     "Cubemap Files (*.hdr;*.exr)\0*.hdr;*.exr\0All Files (*.*)\0*.*\0" );
+                                if ( !path.empty() )
+                                {
+                                    skyboxComponent.Filepath = path.string();
+                                    skyboxComponent.Env = Graphic::EnvironmentManager::Create( path.string() );
+                                }
+                            }
+                        }
+                        else if ( currentType == 1 ) // Procedural
+                        {
+                            // Widgets::DrawFloatControl( "Sun Size", skyboxComponent.SunSize, 0.01f, 0.0f, 1.0f );
+                            // Widgets::DrawFloatControl( "Sun Power", skyboxComponent.SunPower, 0.1f, 0.0f, 10.0f
+                            // ); Widgets::DrawFloatControl( "Exposure", skyboxComponent.Exposure, 0.1f, 0.0f, 5.0f
+                            // );
+                        }
+                        else if ( currentType == 2 ) // Gradient
+                        {
+                            // Widgets::DrawColorControl( "Top Color", skyboxComponent.TopColor );
+                            // Widgets::DrawColorControl( "Middle Color", skyboxComponent.MiddleColor );
+                            // Widgets::DrawColorControl( "Bottom Color", skyboxComponent.BottomColor );
+                        }
+
+                        ImGui::Dummy( ImVec2( 0, 10 ) );
+                        // Widgets::DrawFloatControl( "Intensity", skyboxComponent.Intensity, 0.05f, 0.0f, 5.0f );
+                        // Widgets::DrawToggleControl( "Enable Rotation", skyboxComponent.RotationEnabled );
+                        // if ( skyboxComponent.RotationEnabled )
+                        //{
+                        //     Widgets::DrawFloatControl( "Rotation Speed", skyboxComponent.RotationSpeed, 0.1f,
+                        //                                -5.0f, 5.0f );
+                        // }
+                    }
+                }
+
+                if ( selectedEntity.HasComponent<ECS::StaticMeshComponent>() )
+                {
+                    if ( ImGui::CollapsingHeader( "Static Mesh", ImGuiTreeNodeFlags_DefaultOpen ) )
+                    {
+                        ImGui::Dummy( ImVec2( 0, 4 ) );
+                        auto& meshComponent = selectedEntity.GetComponent<ECS::StaticMeshComponent>();
+
+                        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
+                        ImGui::Text( "Current Mesh:" );
+                        ImGui::PopStyleColor();
+
+                        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.75f, 1.0f ) );
+                        ImGui::TextWrapped( "%s", meshComponent.Filepath.empty()
+                                                       ? "None"
+                                                       : meshComponent.Filepath.string().c_str() );
+                        ImGui::PopStyleColor();
+
+                        ImGui::Dummy( ImVec2( 0, 6 ) );
+
+                        if ( ImGui::Button( "Select Mesh", ImVec2( ImGui::GetContentRegionAvail().x, 24 ) ) )
+                        {
+                            auto path = Common::Utils::FileSystem::OpenFileDialog(
+                                 "Mesh Files (*.fbx;*.obj;*.gltf)\0*.fbx;*.obj;*.gltf\0All Files "
+                                 "(*.*)\0*.*\0" );
+                            if ( !path.empty() )
+                            {
+                                meshComponent.Filepath = path.string();
+                                meshComponent.Mesh     = std::make_shared<Mesh>( path.string() );
+                                meshComponent.Mesh->Invalidate();
+                            }
+                        }
+                    }
+                }
+
                 if ( selectedEntity.HasComponent<ECS::TransformComponent>() &&
                      !selectedEntity.HasComponent<ECS::DirectionLightComponent>() )
                 {
@@ -83,7 +180,6 @@ namespace Desert::Editor
                         Widgets::DrawVec3Control( "Scale", transform.Scale, 1.0f );
                     }
                 }
-
                 else
                 {
                     if ( ImGui::CollapsingHeader( "Direction", ImGuiTreeNodeFlags_DefaultOpen ) )
@@ -101,8 +197,8 @@ namespace Desert::Editor
                         ImGui::Dummy( ImVec2( 0, 4 ) );
                         auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
 
-                  ///      Widgets::DrawLightColorControl( "Light", transform.Position );
-                      //  Widgets::DrawLightIntensityControl( "Intensity", transform.Position.x );
+                        ///      Widgets::DrawLightColorControl("Light", transform.Position);
+                        //  Widgets::DrawLightIntensityControl("Intensity", transform.Position.x);
                     }
                 }
             }

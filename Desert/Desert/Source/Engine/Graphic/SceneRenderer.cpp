@@ -358,7 +358,11 @@ namespace Desert::Graphic
 
         renderer.BeginRenderPass( SKYBOX_RENDERINFO( RenderPass ) );
 
-        m_SceneInfo.Renderdata.Skybox.SkyboxUB->UpdateSkybox( m_SceneInfo.EnvironmentData.RadianceMap );
+        const auto& skyboxRadiance = m_SceneInfo.EnvironmentData.RadianceMap
+                                          ? m_SceneInfo.EnvironmentData.RadianceMap
+                                          : Renderer::GetInstance().GetFallbackTextures()->GetFallbackTextureCube(
+                                                 Core::Formats::ImageFormat::RGBA8F );
+        m_SceneInfo.Renderdata.Skybox.SkyboxUB->UpdateSkybox( skyboxRadiance );
 
         m_SceneInfo.Renderdata.Skybox.CameraUB->UpdateCameraUB( *m_SceneInfo.ActiveCamera ); // TODO: constant push
         SKYBOX_RENDERINFO( Material )->ApplyMaterial();
@@ -392,7 +396,6 @@ namespace Desert::Graphic
             m_SceneInfo.Renderdata.Geometry.PBRTextures->UpdatePBR(
                  { .IrradianceMap  = m_SceneInfo.EnvironmentData.IrradianceMap,
                    .PreFilteredMap = m_SceneInfo.EnvironmentData.PreFilteredMap } );
-
 
             GEOMETRY_RENDERINFO( Material )->ApplyMaterial();
             renderer.RenderMesh( GEOMETRY_RENDERINFO( Pipeline ), meshInfo.Mesh, GEOMETRY_RENDERINFO( Material ) );

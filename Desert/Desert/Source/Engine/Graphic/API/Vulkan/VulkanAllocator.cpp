@@ -99,8 +99,14 @@ namespace Desert::Graphic::API::Vulkan
         VmaAllocationCreateInfo allocCreateInfo = {};
         allocCreateInfo.usage                   = usage;
 
-        VmaAllocation allocation;
-        vmaCreateBuffer( s_VmaAllocator, &bufferCreateInfo, &allocCreateInfo, &outBuffer, &allocation, nullptr );
+        VmaAllocation  allocation;
+        const VkResult resultAllocation = vmaCreateBuffer( s_VmaAllocator, &bufferCreateInfo, &allocCreateInfo,
+                                                           &outBuffer, &allocation, nullptr );
+
+        if (resultAllocation != VK_SUCCESS)
+        {
+            return Common::MakeError<VmaAllocation>("error while allocating buffer");
+        }
 
         VmaAllocationInfo allocInfo;
         vmaGetAllocationInfo( s_VmaAllocator, allocation, &allocInfo );

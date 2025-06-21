@@ -443,7 +443,11 @@ namespace Desert::Graphic::API::Vulkan
                                 pcBuffer.Data );
         }
 
-        vkCmdDrawIndexed( m_CurrentCommandBuffer, mesh->GetIndexBuffer()->GetCount(), 1, 0, 0, 0 );
+        const auto& submeshes = mesh->GetSubmeshes();
+        for ( const auto& submesh : submeshes )
+        {
+            vkCmdDrawIndexed( m_CurrentCommandBuffer, submesh.IndexCount, 1, submesh.IndexOffset, submesh.VertexOffset, 0 );
+        }
     }
 
 #ifdef DESERT_CONFIG_DEBUG

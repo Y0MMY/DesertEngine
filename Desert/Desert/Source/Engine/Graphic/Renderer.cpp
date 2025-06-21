@@ -45,6 +45,8 @@ namespace Desert::Graphic
         spec.GenerateMips = false;
         m_BRDFTexture     = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" );
         m_BRDFTexture->Invalidate();
+
+        m_FallbackTextures = FallbackTextures::Create();
         return Common::MakeSuccess( true );
     }
 
@@ -105,6 +107,11 @@ namespace Desert::Graphic
         s_RendererAPI->ResizeWindowEvent( width, height );
     }
 
+    const std::shared_ptr<Desert::Graphic::FallbackTextures> Renderer::GetFallbackTextures() const
+    {
+        return m_FallbackTextures;
+    }
+
     std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()
     {
         return s_RendererAPI->GetCompositeFramebuffer();
@@ -130,6 +137,7 @@ namespace Desert::Graphic
     {
         s_RendererAPI->Shutdown();
         m_BRDFTexture->GetImage2D()->Release();
+        m_FallbackTextures->Release();
 
         delete s_RendererAPI;
         m_RendererContext->Shutdown();
@@ -139,5 +147,4 @@ namespace Desert::Graphic
     {
         return s_RendererAPI;
     }
-
 } // namespace Desert::Graphic

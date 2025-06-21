@@ -19,9 +19,15 @@ namespace Desert::Graphic::Models
 
         void UpdateSkybox( const std::shared_ptr<ImageCube>& skyboxImage )
         {
+            if ( !skyboxImage )
+            {
+                return;
+            }
+
             m_SkyboxImage = skyboxImage;
             m_Uniform->SetImageCube( m_SkyboxImage );
         }
+
     private:
         std::shared_ptr<ImageCube> m_SkyboxImage;
     };

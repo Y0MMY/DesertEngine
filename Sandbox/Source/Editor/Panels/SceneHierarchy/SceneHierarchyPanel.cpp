@@ -120,6 +120,11 @@ namespace Desert::Editor
                 m_Scene->CreateNewEntity( "New Entity" );
             }
 
+            if ( ImGui::MenuItem( "Mesh" ) )
+            {
+                m_Scene->CreateNewEntity( "Mesh" ).AddComponent<ECS::StaticMeshComponent>();
+            }
+
             if ( ImGui::BeginMenu( "3D Objects" ) )
             {
                 if ( ImGui::MenuItem( "Cube" ) )
@@ -145,6 +150,19 @@ namespace Desert::Editor
                 }
                 if ( ImGui::MenuItem( "Spot" ) )
                 {
+                }
+                ImGui::EndMenu();
+            }
+
+            if ( ImGui::BeginMenu( "Environment" ) )
+            {
+                if ( ImGui::MenuItem( "Skybox" ) )
+                {
+                   m_Scene->CreateNewEntity( "Skybox" ).AddComponent<ECS::SkyboxComponent>();
+                }
+                if ( ImGui::MenuItem( "Fog" ) )
+                {
+                   // m_Scene->CreateNewEntity( "Fog" ).AddComponent<ECS::FogComponent>();
                 }
                 ImGui::EndMenu();
             }

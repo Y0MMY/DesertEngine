@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 // #include <rflcpp/rfl.hpp>
 
@@ -35,5 +36,11 @@ namespace Desert::ECS
 
     struct DirectionLightComponent
     {
+    };
+
+    struct SkyboxComponent
+    {
+        Common::Filepath     Filepath;
+        Graphic::Environment Env;
     };
 } // namespace Desert::ECS

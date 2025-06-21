@@ -52,34 +52,59 @@ namespace Desert
             return Common::MakeError( std::string( importer->GetErrorString() ) );
         }
 
-        aiMesh*             mesh = scene->mMeshes[0];
         std::vector<Vertex> vertices;
         std::vector<Index>  indices;
 
-        for ( unsigned int i = 0; i < mesh->mNumVertices; i++ )
-        {
-            Vertex vertex;
-            vertex.Position = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
-            vertex.Normal   = { mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z };
+        m_Submeshes.reserve( scene->mNumMeshes );
+        m_TriangleCache.resize( scene->mNumMeshes );
 
-            if ( mesh->HasTangentsAndBitangents() )
+        for ( uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; meshIdx++ )
+        {
+            aiMesh*  mesh        = scene->mMeshes[meshIdx];
+            Submesh& submesh     = m_Submeshes.emplace_back();
+            submesh.Name         = mesh->mName.C_Str();
+            submesh.VertexOffset = static_cast<uint32_t>( vertices.size() );
+            submesh.IndexOffset  = static_cast<uint32_t>( indices.size() );
+            submesh.VertexCount  = mesh->mNumVertices;
+            submesh.IndexCount   = mesh->mNumFaces * 3;
+
+            m_TriangleCache[meshIdx].reserve( mesh->mNumFaces );
+
+            for ( unsigned int vertexIdx = 0; vertexIdx < mesh->mNumVertices; vertexIdx++ )
             {
-                vertex.Tangent   = { mesh->mTangents[i].x, mesh->mTangents[i].y, mesh->mTangents[i].z };
-                vertex.Bitangent = { mesh->mBitangents[i].x, mesh->mBitangents[i].y, mesh->mBitangents[i].z };
+                Vertex vertex;
+                vertex.Position = { mesh->mVertices[vertexIdx].x, mesh->mVertices[vertexIdx].y,
+                                    mesh->mVertices[vertexIdx].z };
+                vertex.Normal   = { mesh->mNormals[vertexIdx].x, mesh->mNormals[vertexIdx].y,
+                                    mesh->mNormals[vertexIdx].z };
+
+                if ( mesh->HasTangentsAndBitangents() )
+                {
+                    vertex.Tangent   = { mesh->mTangents[vertexIdx].x, mesh->mTangents[vertexIdx].y,
+                                         mesh->mTangents[vertexIdx].z };
+                    vertex.Bitangent = { mesh->mBitangents[vertexIdx].x, mesh->mBitangents[vertexIdx].y,
+                                         mesh->mBitangents[vertexIdx].z };
+                }
+
+                if ( mesh->HasTextureCoords( 0 ) )
+                {
+                    vertex.TexCoord = { mesh->mTextureCoords[0][vertexIdx].x,
+                                        mesh->mTextureCoords[0][vertexIdx].y };
+                }
+
+                vertices.push_back( vertex );
             }
 
-            if ( mesh->HasTextureCoords( 0 ) )
+            for ( unsigned int meshIndex = 0; meshIndex < mesh->mNumFaces; meshIndex++ )
             {
-                vertex.TexCoord = { mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y };
+                const auto& index = indices.emplace_back( mesh->mFaces[meshIndex].mIndices[0],
+                                                          mesh->mFaces[meshIndex].mIndices[1],
+                                                          mesh->mFaces[meshIndex].mIndices[2] );
+
+                m_TriangleCache[meshIdx].emplace_back( vertices[submesh.VertexOffset + index.V1],
+                                                       vertices[submesh.VertexOffset + index.V2],
+                                                       vertices[submesh.VertexOffset + index.V3] );
             }
-
-            vertices.push_back( vertex );
-        }
-
-        for ( unsigned int i = 0; i < mesh->mNumFaces; i++ )
-        {
-            indices.emplace_back( mesh->mFaces[i].mIndices[0], mesh->mFaces[i].mIndices[1],
-                                  mesh->mFaces[i].mIndices[2] );
         }
 
         m_VertexBuffer = Graphic::VertexBuffer::Create( vertices.data(), vertices.size() * sizeof( Vertex ) );

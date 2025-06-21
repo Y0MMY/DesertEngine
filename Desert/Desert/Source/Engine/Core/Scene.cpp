@@ -45,6 +45,16 @@ namespace Desert::Core
         Graphic::DTO::SceneRendererUpdate sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
 
+        // Skybox
+        {
+            const auto& skyboxes = m_Registry.view<ECS::SkyboxComponent>();
+            for ( const auto skyboxEntity : skyboxes )
+            {
+                const auto& skybox = m_Registry.get<ECS::SkyboxComponent>( skyboxEntity );
+                SetEnvironment(skybox.Env);
+            }
+        }
+
         // Dir lights
         {
             auto dirLightGroup =

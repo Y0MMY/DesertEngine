@@ -84,7 +84,7 @@ namespace Desert::Core::Formats
         const uint32_t        Height;
         const ImageFormat     Format;
         const uint32_t        Mips = 1;
-        const ImagePixelData  Data;
+        ImagePixelData        Data;
         const ImageProperties Properties;
     };
 } // namespace Desert::Core::Formats

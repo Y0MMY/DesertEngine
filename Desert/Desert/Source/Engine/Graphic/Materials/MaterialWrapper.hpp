@@ -17,6 +17,7 @@ namespace Desert::Graphic::MaterialHelper
                 m_Material->AddUniformBufferToOverride( m_Uniform );
             }
         }
+
         const auto& GetMaterialInstance() const
         {
             return m_Material;
