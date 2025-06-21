@@ -22,7 +22,14 @@ namespace Desert::Graphic::API::Vulkan
             uint32_t    frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
             auto pipelineCompute = PipelineCompute::Create( shader );
-            auto vulkanPipeline  = sp_cast<VulkanPipelineCompute>( pipelineCompute );
+            pipelineCompute->Invalidate();
+            auto vulkanPipeline = sp_cast<VulkanPipelineCompute>( pipelineCompute );
+
+            auto descriptorSetResult = vulkanPipeline->GetDescriptorSet( frameIndex, 0 );
+            if ( !descriptorSetResult.IsSuccess() )
+            {
+                return Common::MakeError( "Failed to allocate descriptor set" );
+            }
 
             for ( uint32_t mip = 1; mip < mipLevels; ++mip )
             {
@@ -46,7 +53,8 @@ namespace Desert::Graphic::API::Vulkan
                 descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS(
                      sp_cast<VulkanShader>( shader ), frameIndex, 0, 1, 1, &imageInfo[1] ) );
 
-                vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites );
+                vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites,
+                                                     descriptorSetResult.GetValue() );
 
                 pipelineCompute->Begin();
 
@@ -59,7 +67,7 @@ namespace Desert::Graphic::API::Vulkan
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                      VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, layers } );
 
-                vulkanPipeline->BindDescriptorSets( frameIndex );
+                vulkanPipeline->BindDescriptorSets( descriptorSetResult.GetValue(), frameIndex );
 
                 // Dispatch compute
                 const uint32_t workGroupsX = std::max( 1u, ( width >> mip ) / kWorkGroups );

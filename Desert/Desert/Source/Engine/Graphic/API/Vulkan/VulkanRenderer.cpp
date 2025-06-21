@@ -79,6 +79,12 @@ namespace Desert::Graphic::API::Vulkan
             auto vulkanPipeline  = sp_cast<VulkanPipelineCompute>( pipelineCompute );
             vulkanPipeline->Invalidate();
 
+            auto descriptorSetResult = vulkanPipeline->GetDescriptorSet( frameIndex, 0 );
+            if ( !descriptorSetResult.IsSuccess() )
+            {
+                // return Common::MakeError( "Failed to allocate descriptor set" );
+            }
+
             std::array<VkDescriptorImageInfo, 2> imageInfo = {};
 
             // Input image
@@ -98,13 +104,13 @@ namespace Desert::Graphic::API::Vulkan
             descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS(
                  sp_cast<VulkanShader>( shader ), frameIndex, 0, 1, 1, &imageInfo[1] ) );
 
-            vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites );
+            vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites, descriptorSetResult.GetValue() );
 
             pipelineCompute->Begin();
 
             const auto cmd = vulkanPipeline->GetCommandBuffer();
 
-            vulkanPipeline->BindDescriptorSets( frameIndex );
+            vulkanPipeline->BindDescriptorSets( descriptorSetResult.GetValue(), frameIndex );
 
             if ( processingInfo.pushConstantsCallback )
             {
@@ -518,16 +524,22 @@ namespace Desert::Graphic::API::Vulkan
         const auto& vulkanImage = static_cast<const VulkanImageCube&>( *imageCube );
         const auto& spec        = imageCube->GetImageSpecification();
 
+        uint32_t    frameIndex      = Renderer::GetInstance().GetCurrentFrameIndex();
         static auto shader          = Shader::Create( "PrefilterEnvMap.glsl" );
         auto        pipelineCompute = PipelineCompute::Create( shader );
         auto        vulkanPipeline  = sp_cast<VulkanPipelineCompute>( pipelineCompute );
         pipelineCompute->Invalidate();
 
+        auto descriptorSetResult = vulkanPipeline->GetDescriptorSet( frameIndex, 0 );
+        if ( !descriptorSetResult.IsSuccess() )
+        {
+            return Common::MakeError( "Failed to allocate descriptor set" );
+        }
+
         const uint32_t mipLevels      = imageCube->GetMipmapLevels();
         const uint32_t width          = imageCube->GetWidth();
         const uint32_t height         = imageCube->GetHeight();
         const float    deltaRoughness = 1.0f / std::max( float( mipLevels - 1 ), 1.0f );
-        uint32_t       frameIndex     = Renderer::GetInstance().GetCurrentFrameIndex();
 
         for ( uint32_t mip = 1; mip < mipLevels; ++mip )
         {
@@ -551,7 +563,7 @@ namespace Desert::Graphic::API::Vulkan
             descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS(
                  sp_cast<VulkanShader>( shader ), frameIndex, 0, 1, 1, &imageInfo[1] ) );
 
-            vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites );
+            vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites, descriptorSetResult.GetValue() );
 
             pipelineCompute->Begin();
             const auto cmd = vulkanPipeline->GetCommandBuffer();
@@ -562,7 +574,7 @@ namespace Desert::Graphic::API::Vulkan
                                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                              VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6 } );
 
-            vulkanPipeline->BindDescriptorSets( frameIndex );
+            vulkanPipeline->BindDescriptorSets( descriptorSetResult.GetValue(), frameIndex );
 
             const SpecularFilterPushConstants pushConstants = {
                  mip - 1,              // mipLevel

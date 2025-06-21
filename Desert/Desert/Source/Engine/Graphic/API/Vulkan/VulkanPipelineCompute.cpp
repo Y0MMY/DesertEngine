@@ -5,6 +5,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
+#include <Engine/Core/EngineContext.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -49,6 +50,10 @@ namespace Desert::Graphic::API::Vulkan
         vkDestroyFence( device, fence, nullptr );
 
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
+
+        static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
+             ->GetDescriptorManager()
+             ->CleanupFrame( EngineContext::GetInstance().GetFramesInFlight() );
     }
 
     void VulkanPipelineCompute::Execute( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
@@ -123,16 +128,12 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t                                 frameIndex,
                                                      const std::vector<VkWriteDescriptorSet>& writes,
-                                                     uint32_t                                 setIndex )
+                                                     VkDescriptorSet descriptorSet, uint32_t setIndex )
     {
-        auto result = GetDescriptorSet( frameIndex, setIndex );
-        if ( !result.IsSuccess() )
-            return;
-
         std::vector<VkWriteDescriptorSet> modifiedWrites = writes;
         for ( auto& write : modifiedWrites )
         {
-            write.dstSet = result.GetValue();
+            write.dstSet = descriptorSet;
         }
 
         vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
@@ -140,19 +141,11 @@ namespace Desert::Graphic::API::Vulkan
                                 nullptr );
     }
 
-    void VulkanPipelineCompute::BindDescriptorSets( uint32_t frameIndex )
+    void VulkanPipelineCompute::BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex )
     {
         auto vulkanShader = sp_cast<VulkanShader>( m_Shader );
-        for ( uint32_t set = 0; set < vulkanShader->GetDescriptorSetLayoutCount(); ++set )
-        {
-            auto result = GetDescriptorSet( frameIndex, set );
-            if ( result.IsSuccess() )
-            {
-                const auto& resultVal = result.GetValue();
-                vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                         m_ComputePipelineLayout, set, 1, &resultVal, 0, nullptr );
-            }
-        }
+        vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                 m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, nullptr );
     }
 
     void VulkanPipelineCompute::PushConstant( uint32_t size, void* data )

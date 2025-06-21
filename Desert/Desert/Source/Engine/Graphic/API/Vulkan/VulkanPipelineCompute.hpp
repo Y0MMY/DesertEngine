@@ -24,8 +24,8 @@ namespace Desert::Graphic::API::Vulkan
 
         Common::Result<VkDescriptorSet> GetDescriptorSet( uint32_t frameIndex, uint32_t setIndex = 0 );
         void UpdateDescriptorSet( uint32_t frameIndex, const std::vector<VkWriteDescriptorSet>& writes,
-                                  uint32_t setIndex = 0 );
-        void BindDescriptorSets( uint32_t frameIndex );
+                                  VkDescriptorSet descriptorSet, uint32_t setIndex = 0 );
+        void BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex );
 
         void PushConstant( uint32_t size, void* data );
 
