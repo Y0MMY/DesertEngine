@@ -16,9 +16,6 @@ namespace Desert::Graphic
     public:
         virtual ~Material() = default;
 
-        /*virtual Common::BoolResult SetVec3( const std::string& name, const glm::vec3& data )                 = 0;
-        virtual Common::BoolResult SetMat4( const std::string& name, const glm::mat4& data )                 = 0;*/
-
         virtual Common::BoolResult
         AddUniformBufferToOverride( const std::shared_ptr<Uniforms::UniformBuffer>& uniformBuffer ) = 0;
         virtual Common::BoolResult
@@ -30,8 +27,6 @@ namespace Desert::Graphic
         virtual void               Clear() = 0; // TODO: better func name
 
         virtual std::shared_ptr<Shader> GetShader() const = 0;
-
-        /// virtual std::shared_ptr<Uniforms::UniformImage2D> GetOverridedUniform2D() const = 0;
 
         virtual Common::BoolResult PushConstant( const void* buffer, const uint32_t bufferSize ) = 0;
 

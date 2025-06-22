@@ -59,8 +59,12 @@ namespace Desert::Core
         {
             auto dirLightGroup = m_Registry.group<ECS::StaticMeshComponent>( entt::get<ECS::TransformComponent> );
 
-            dirLightGroup.each( [&]( const auto& staticMesh, const auto& transform )
-                                { AddMeshToRenderList( staticMesh.Mesh, transform.GetTransform() ); } );
+            dirLightGroup.each(
+                 [&]( const auto& staticMesh, const auto& transform )
+                 {
+                     AddMeshToRenderList( staticMesh.AssetMesh ? staticMesh.AssetMesh->GetMesh() : nullptr,
+                                          transform.GetTransform() );
+                 } );
         }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );

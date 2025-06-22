@@ -10,6 +10,8 @@
 #include <Engine/Graphic/Mesh.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+
 // #include <rflcpp/rfl.hpp>
 
 namespace Desert::ECS
@@ -26,14 +28,13 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Common::Filepath      Filepath;
-        std::shared_ptr<Mesh> Mesh;
+        Assets::Asset<Assets::MeshAsset> AssetMesh;
     };
 
     struct TransformComponent
     {
         glm::vec3 Position{ 1.0 };
-        glm::vec3 Rotation{ 1.0 };
+        glm::vec3 Rotation;
         glm::vec3 Scale{ 1.0 };
 
         glm::mat4 GetTransform() const

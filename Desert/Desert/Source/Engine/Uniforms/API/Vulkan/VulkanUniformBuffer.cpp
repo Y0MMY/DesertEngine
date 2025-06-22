@@ -19,9 +19,9 @@ namespace Desert::Uniforms::API::Vulkan
         if ( !m_MemoryAlloc )
             return;
 
+        Graphic::API::Vulkan::VulkanAllocator::GetInstance().RT_DestroyBuffer( m_Buffer, m_MemoryAlloc );
         m_Buffer      = nullptr;
         m_MemoryAlloc = nullptr;
-
         m_LocalStorage.Release();
     }
 

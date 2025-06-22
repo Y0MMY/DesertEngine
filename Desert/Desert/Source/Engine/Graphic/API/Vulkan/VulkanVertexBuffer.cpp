@@ -120,4 +120,20 @@ namespace Desert::Graphic::API::Vulkan
     {
         m_StorageBuffer.Allocate( size );
     }
+
+    Common::BoolResult VulkanVertexBuffer::Release()
+    {
+        m_StorageBuffer.Release();
+
+        VulkanAllocator::GetInstance().RT_DestroyBuffer( m_VulkanBuffer, m_MemoryAllocation );
+        m_VulkanBuffer     = nullptr;
+        m_MemoryAllocation = nullptr;
+        return BOOLSUCCESS;
+    }
+
+    VulkanVertexBuffer::~VulkanVertexBuffer()
+    {
+        Release();
+    }
+
 } // namespace Desert::Graphic::API::Vulkan

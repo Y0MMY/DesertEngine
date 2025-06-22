@@ -13,15 +13,17 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanVertexBuffer : public VertexBuffer
     {
     public:
+        virtual ~VulkanVertexBuffer();
+
         VulkanVertexBuffer( void* data, uint32_t size, BufferUsage usage = BufferUsage::Static );
         VulkanVertexBuffer( uint32_t size, BufferUsage usage = BufferUsage::Dynamic );
 
-        virtual ~VulkanVertexBuffer() = default;
         virtual void SetData( void* data, uint32_t size, uint32_t offset = 0 ) override;
         virtual void Use( BindUsage use = BindUsage::Bind ) const override;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override;
 
         [[nodiscard]] virtual Common::BoolResult Invalidate() override;
+        [[nodiscard]] virtual Common::BoolResult Release() override;
         [[nodiscard]] virtual Common::BoolResult RT_Invalidate() override;
 
         virtual unsigned int GetSize() const override

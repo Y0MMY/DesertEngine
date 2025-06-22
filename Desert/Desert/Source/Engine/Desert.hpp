@@ -38,3 +38,7 @@
 
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+
+// =================== Assets =================== //
+
+#include <Engine/Assets/AssetManager.hpp>

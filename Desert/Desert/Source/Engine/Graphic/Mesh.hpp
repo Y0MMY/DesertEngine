@@ -39,6 +39,7 @@ namespace Desert
     {
     public:
         explicit Mesh( const std::string& filename );
+
         Common::BoolResult Invalidate();
 
         [[nodiscard]] const auto& GetSubmeshes() const

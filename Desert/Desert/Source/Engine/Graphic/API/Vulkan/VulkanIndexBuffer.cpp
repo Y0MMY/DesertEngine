@@ -115,9 +115,24 @@ namespace Desert::Graphic::API::Vulkan
 
             CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmdVal );
 
-            allocator.RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL);
+            allocator.RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL );
         }
         return Common::MakeSuccess( true );
+    }
+
+    VulkanIndexBuffer::~VulkanIndexBuffer()
+    {
+        Release();
+    }
+
+    Common::BoolResult VulkanIndexBuffer::Release()
+    {
+        m_StorageBuffer.Release();
+
+        VulkanAllocator::GetInstance().RT_DestroyBuffer( m_VulkanBuffer, m_MemoryAllocation );
+        m_VulkanBuffer     = nullptr;
+        m_MemoryAllocation = nullptr;
+        return BOOLSUCCESS;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

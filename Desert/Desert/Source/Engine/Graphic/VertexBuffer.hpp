@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/RendererTypes.hpp>
+#include <Engine/Graphic/DynamicResources.hpp>
 
 namespace Desert::Graphic
 {
@@ -121,7 +122,7 @@ namespace Desert::Graphic
         std::uint32_t                    m_Stride = 0;
     };
 
-    class VertexBuffer
+    class VertexBuffer : public DynamicResources
     {
     public:
         virtual ~VertexBuffer()                                                = default;
@@ -131,7 +132,6 @@ namespace Desert::Graphic
 
         [[nodiscard]] virtual unsigned int GetSize() const = 0;
 
-        [[nodiscard]] virtual Common::BoolResult Invalidate()    = 0;
         [[nodiscard]] virtual Common::BoolResult RT_Invalidate() = 0;
 
         static std::shared_ptr<VertexBuffer> Create( void* data, uint32_t size,

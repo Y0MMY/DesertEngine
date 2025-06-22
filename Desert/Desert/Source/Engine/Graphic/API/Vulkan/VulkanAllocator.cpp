@@ -103,9 +103,9 @@ namespace Desert::Graphic::API::Vulkan
         const VkResult resultAllocation = vmaCreateBuffer( s_VmaAllocator, &bufferCreateInfo, &allocCreateInfo,
                                                            &outBuffer, &allocation, nullptr );
 
-        if (resultAllocation != VK_SUCCESS)
+        if ( resultAllocation != VK_SUCCESS )
         {
-            return Common::MakeError<VmaAllocation>("error while allocating buffer");
+            return Common::MakeError<VmaAllocation>( "error while allocating buffer" );
         }
 
         VmaAllocationInfo allocInfo;
@@ -164,13 +164,13 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( s_VmaAllocator )
         {
-            //   vmaDestroyAllocator( s_VmaAllocator );
+            vmaDestroyAllocator( s_VmaAllocator );
             s_VmaAllocator = nullptr;
         }
     }
 
     void VulkanAllocator::CheckResourceLeaks()
     {
-        //  CHECK_RESOURCE_LEAKS();
+        CHECK_RESOURCE_LEAKS();
     }
 } // namespace Desert::Graphic::API::Vulkan

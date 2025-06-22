@@ -16,16 +16,14 @@ namespace Desert::Graphic::API::Vulkan
         VulkanIndexBuffer( const void* data, uint32_t size, BufferUsage usage = BufferUsage::Static );
         VulkanIndexBuffer( uint32_t size, BufferUsage usage = BufferUsage::Dynamic );
 
-        virtual ~VulkanIndexBuffer() = default;
+        virtual ~VulkanIndexBuffer();
         virtual void SetData() override;
         virtual void Use( BindUsage use = BindUsage::Bind ) const override;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override;
 
         [[nodiscard]] virtual Common::BoolResult Invalidate() override;
         [[nodiscard]] virtual Common::BoolResult RT_Invalidate() override;
-
-        [[nodiscard]] Common::BoolResult Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device );
-        [[nodiscard]] Common::BoolResult RT_Invalidate( const std::shared_ptr<VulkanLogicalDevice>& device );
+        [[nodiscard]] virtual Common::BoolResult Release() override;
 
         [[nodiscard]] virtual unsigned int GetSize() const override
         {

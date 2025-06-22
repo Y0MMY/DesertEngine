@@ -7,7 +7,7 @@
 
 namespace Desert::Graphic
 {
-    class Image : public DynamicResources
+    class Image
     {
     public:
         virtual ~Image() = default;
@@ -28,7 +28,7 @@ namespace Desert::Graphic
                                             const Core::Formats::ImageFormat& format );
     };
 
-    class Image2D : public Image
+    class Image2D : public Image, public DynamicResources
     {
     public:
         virtual Core::Formats::Image2DSpecification& GetImageSpecification() = 0;
@@ -37,7 +37,7 @@ namespace Desert::Graphic
                                                 const std::unique_ptr<MipMap2DGenerator>&  mipGenerator );
     };
 
-    class ImageCube : public Image
+    class ImageCube : public Image, public DynamicResources
     {
     public:
         virtual Core::Formats::ImageCubeSpecification& GetImageSpecification() = 0;
