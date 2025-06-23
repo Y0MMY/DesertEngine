@@ -22,12 +22,17 @@ namespace Desert::Assets
 
         virtual bool IsReadyForUse() const
         {
-           return m_ReadyForUse;
+            return m_ReadyForUse;
+        }
+
+        static AssetTypeID GetTypeID() 
+        {
+            return AssetTypeID::Mesh;
         }
 
     private:
         std::shared_ptr<Mesh> m_Mesh;
-        bool m_ReadyForUse = false;
+        bool                  m_ReadyForUse = false;
     };
 
 } // namespace Desert::Assets

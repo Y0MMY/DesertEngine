@@ -27,7 +27,7 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Assets::Asset<Assets::MeshAsset> AssetMesh;
+        Assets::AssetHandle MeshHandle;
     };
 
     struct TransformComponent
@@ -49,7 +49,7 @@ namespace Desert::ECS
 
     struct MaterialComponent
     {
-        Assets::Asset<Assets::MaterialAsset> AssetMaterial;
+        Assets::AssetHandle MaterialHandle;
     };
 
     struct SkyboxComponent

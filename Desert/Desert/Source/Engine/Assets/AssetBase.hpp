@@ -20,6 +20,13 @@ namespace Desert::Assets
         High   = 2,
     };
 
+    enum class AssetTypeID
+    {
+        Unknown = 0,
+        Mesh,
+        Material,
+    };
+
     class MeshAsset;
 
     class AssetBase

@@ -40,6 +40,11 @@ namespace Desert::Assets
             return m_MaterialsTexture[static_cast<std::uint8_t>( texture )].has_value();
         }
 
+        static AssetTypeID GetTypeID()
+        {
+            return AssetTypeID::Material;
+        }
+
     private:
         static const std::uint8_t                     m_MeshTexturesCount = 3U;
         std::array<MaterialInfo, m_MeshTexturesCount> m_MaterialsTexture;

@@ -9,6 +9,8 @@
 
 #include <Engine/Graphic/DTO/SceneRendererUpdate.hpp>
 
+#include <Engine/Assets/AssetManager.hpp>
+
 namespace Desert::Graphic
 {
     class SceneRenderer;
@@ -32,7 +34,7 @@ namespace Desert::Core
     {
     public:
         Scene() = default;
-        Scene( const std::string& sceneName );
+        Scene( const std::string& sceneName, const std::shared_ptr<Assets::AssetManager>& assetManager );
 
         [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
         void                             OnUpdate( const Common::Timestep& ts );
@@ -73,14 +75,15 @@ namespace Desert::Core
         void Serialize() const;
 
     private:
-        void AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh, const glm::mat4& transform ) const;
+        void AddMeshToRenderList( const Assets::AssetHandle handle, const glm::mat4& transform ) const;
         void SetEnvironment( const Graphic::Environment& environment );
 
     private:
-        std::string                              m_SceneName;
-        std::unique_ptr<Graphic::SceneRenderer>  m_SceneRenderer;
-        entt::registry                           m_Registry;
-        std::vector<ECS::Entity>                 m_Entitys;
-        std::unordered_map<Common::UUID, size_t> m_EntitysMap;
+        std::string                                 m_SceneName;
+        std::unique_ptr<Graphic::SceneRenderer>     m_SceneRenderer;
+        const std::shared_ptr<Assets::AssetManager> m_AssetManager;
+        entt::registry                              m_Registry;
+        std::vector<ECS::Entity>                    m_Entitys;
+        std::unordered_map<Common::UUID, size_t>    m_EntitysMap;
     };
 } // namespace Desert::Core

@@ -94,7 +94,9 @@ namespace Desert::Core
         };
     } // namespace internal
 
-    SceneSerializer::SceneSerializer( const Scene* scene ) : m_Scene( (Scene*)scene )
+    SceneSerializer::SceneSerializer( const Scene*                                 scene,
+                                      const std::shared_ptr<Assets::AssetManager>& assetManager )
+         : m_Scene( (Scene*)scene ), m_AssetManager( assetManager )
     {
     }
 
@@ -106,7 +108,6 @@ namespace Desert::Core
         for ( const auto& entity : m_Scene->GetAllEntities() )
         {
             internal::EntitySer entitySer;
-            entitySer.Name = entity.GetComponent<ECS::TagComponent>().Tag;
 
             if ( entity.HasComponent<ECS::TagComponent>() )
             {
@@ -129,16 +130,19 @@ namespace Desert::Core
 
             if ( entity.HasComponent<ECS::StaticMeshComponent>() )
             {
-                auto& mesh           = entity.GetComponent<ECS::StaticMeshComponent>();
-                entitySer.StaticMesh = internal::StaticMeshComponentSer{
-                     mesh.AssetMesh ? mesh.AssetMesh->GetFilepath().string() : "" };
+                auto&       meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
+                const auto& mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );
+                entitySer.StaticMesh =
+                     internal::StaticMeshComponentSer{ mesh ? mesh->GetFilepath().string() : "" };
             }
 
             if ( entity.HasComponent<ECS::MaterialComponent>() )
             {
-                auto& material     = entity.GetComponent<ECS::MaterialComponent>();
-                entitySer.Material = internal::MaterialComponentSer{
-                     material.AssetMaterial ? material.AssetMaterial->GetFilepath().string() : "" };
+                auto&       materialhComponent = entity.GetComponent<ECS::MaterialComponent>();
+                const auto& material =
+                     m_AssetManager->FindByHandle<Assets::MeshAsset>( materialhComponent.MaterialHandle );
+                entitySer.Material =
+                     internal::MaterialComponentSer{ material ? material->GetFilepath().string() : "" };
             }
 
             if ( entity.HasComponent<ECS::SkyboxComponent>() )

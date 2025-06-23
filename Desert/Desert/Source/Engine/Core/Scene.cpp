@@ -8,8 +8,9 @@
 namespace Desert::Core
 {
 
-    Scene::Scene( const std::string& sceneName )
-         : m_SceneName( sceneName ), m_SceneRenderer( std::make_unique<Graphic::SceneRenderer>() )
+    Scene::Scene( const std::string& sceneName, const std::shared_ptr<Assets::AssetManager>& assetManager )
+         : m_SceneName( sceneName ), m_SceneRenderer( std::make_unique<Graphic::SceneRenderer>() ),
+           m_AssetManager( assetManager )
     {
     }
 
@@ -28,9 +29,10 @@ namespace Desert::Core
         m_SceneRenderer->SetEnvironment( environment );
     }
 
-    void Scene::AddMeshToRenderList( const std::shared_ptr<Mesh>& mesh, const glm::mat4& transform ) const
+    void Scene::AddMeshToRenderList( const Assets::AssetHandle handle, const glm::mat4& transform ) const
     {
-        m_SceneRenderer->AddToRenderMeshList( mesh, transform );
+        const auto& assetMesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( handle );
+        m_SceneRenderer->AddToRenderMeshList( assetMesh ? assetMesh->GetMesh() : nullptr, transform );
     }
 
     void Scene::OnUpdate( const Common::Timestep& ts )
@@ -61,12 +63,8 @@ namespace Desert::Core
         {
             auto dirLightGroup = m_Registry.group<ECS::StaticMeshComponent>( entt::get<ECS::TransformComponent> );
 
-            dirLightGroup.each(
-                 [&]( const auto& staticMesh, const auto& transform )
-                 {
-                     AddMeshToRenderList( staticMesh.AssetMesh ? staticMesh.AssetMesh->GetMesh() : nullptr,
-                                          transform.GetTransform() );
-                 } );
+            dirLightGroup.each( [&]( const auto& staticMesh, const auto& transform )
+                                { AddMeshToRenderList( staticMesh.MeshHandle, transform.GetTransform() ); } );
         }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
@@ -126,8 +124,8 @@ namespace Desert::Core
 
     void Scene::Serialize() const
     {
-        SceneSerializer serializer(this);
-        return  serializer.SaveToFile();
+        SceneSerializer serializer( this, m_AssetManager );
+        return serializer.SaveToFile();
     }
 
 } // namespace Desert::Core
