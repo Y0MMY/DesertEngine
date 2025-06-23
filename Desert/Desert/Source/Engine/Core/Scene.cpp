@@ -3,6 +3,8 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/ECS/Entity.hpp>
 
+#include <Engine/Core/Serialize/SceneSerializer.hpp>
+
 namespace Desert::Core
 {
 
@@ -120,6 +122,12 @@ namespace Desert::Core
         {
             return std::nullopt;
         }
+    }
+
+    void Scene::Serialize() const
+    {
+        SceneSerializer serializer(this);
+        return  serializer.SaveToFile();
     }
 
 } // namespace Desert::Core

@@ -11,8 +11,7 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
-
-// #include <rflcpp/rfl.hpp>
+#include <Engine/Assets/Mesh/MaterialAsset.hpp>
 
 namespace Desert::ECS
 {
@@ -46,6 +45,11 @@ namespace Desert::ECS
 
     struct DirectionLightComponent
     {
+    };
+
+    struct MaterialComponent
+    {
+        Assets::Asset<Assets::MaterialAsset> AssetMaterial;
     };
 
     struct SkyboxComponent

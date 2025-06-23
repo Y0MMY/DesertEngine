@@ -70,6 +70,10 @@ namespace Desert::Editor
                     ImGui::Dummy( ImVec2( 0, 10 ) );
                 }
 
+                if ( selectedEntity.HasComponent<ECS::MaterialComponent>() )
+                {
+                }
+
                 if ( selectedEntity.HasComponent<ECS::SkyboxComponent>() )
                 {
                     if ( ImGui::CollapsingHeader( "Skybox", ImGuiTreeNodeFlags_DefaultOpen ) )
@@ -143,9 +147,10 @@ namespace Desert::Editor
                         ImGui::PopStyleColor();
 
                         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.75f, 1.0f ) );
-                        ImGui::TextWrapped( "%s", meshComponent.Filepath.empty()
-                                                       ? "None"
-                                                       : meshComponent.Filepath.string().c_str() );
+                        ImGui::TextWrapped(
+                             "%s", ( !meshComponent.AssetMesh || meshComponent.AssetMesh->GetFilepath().empty() )
+                                        ? "None"
+                                        : meshComponent.AssetMesh->GetFilepath().string().c_str() );
                         ImGui::PopStyleColor();
 
                         ImGui::Dummy( ImVec2( 0, 6 ) );
@@ -157,12 +162,14 @@ namespace Desert::Editor
                                  "(*.*)\0*.*\0" );
                             if ( !path.empty() )
                             {
-                                meshComponent.Filepath = path.string();
-                                meshComponent.Mesh     = std::make_shared<Mesh>( path.string() );
-                                meshComponent.Mesh->Invalidate();
+                                ( meshComponent.AssetMesh = m_AssetManager->CreateAsset<Assets::MeshAsset>(
+                                       Assets::AssetPriority::Low, path ) )
+                                     ->Load();
                             }
                         }
                     }
+
+                    DrawMaterialEntity( selectedEntity );
                 }
 
                 if ( selectedEntity.HasComponent<ECS::TransformComponent>() &&
@@ -216,6 +223,94 @@ namespace Desert::Editor
         ImGui::End();
         ImGui::PopStyleColor( 2 );
         ImGui::PopStyleVar( 4 );
+    }
+
+    void ScenePropertiesPanel::DrawMaterialEditor( Assets::Asset<Assets::MaterialAsset>& material )
+    {
+        auto DrawTextureSlot = [&]( const char* label, Assets::MaterialAsset::MaterialTextureName type )
+        {
+            ImGui::PushID( label );
+
+            ImGui::Text( "%s:", label );
+            std::string path =
+                 material->HasMaterial( type ) ? ( *material->GetMaterial( type ) ).first.string() : "None";
+
+            if ( material->HasMaterial( type ) )
+            {
+                auto texture = ( *material->GetMaterial( type ) ).second;
+                ImGui::SameLine();
+                ImGui::TextColored( ImVec4( 0.8f, 0.8f, 0.8f, 1.0f ), "%s (%dx%d)", path.c_str(),
+                                    texture->GetWidth(), texture->GetHeight() );
+            }
+            else
+            {
+                ImGui::SameLine();
+                ImGui::TextColored( ImVec4( 0.5f, 0.5f, 0.5f, 1.0f ), "%s", path.c_str() );
+            }
+
+            ImGui::PopID();
+        };
+
+        ImGui::Dummy( ImVec2( 0, 10 ) );
+        DrawTextureSlot( "Albedo", Assets::MaterialAsset::MaterialTextureName::Albedo );
+        DrawTextureSlot( "Metallic", Assets::MaterialAsset::MaterialTextureName::Metallic );
+        DrawTextureSlot( "Roughness", Assets::MaterialAsset::MaterialTextureName::Roughness );
+    }
+
+    void ScenePropertiesPanel::DrawMaterialEntity( const ECS::Entity& entity )
+    {
+        const bool  hasMaterial   = entity.HasComponent<ECS::MaterialComponent>();
+        const auto& meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
+
+        if ( hasMaterial )
+        {
+            auto& materialComponent = entity.GetComponent<ECS::MaterialComponent>();
+            if ( !materialComponent.AssetMaterial || !materialComponent.AssetMaterial->IsReadyForUse() )
+            {
+                if ( meshComponent.AssetMesh )
+                {
+                    ( materialComponent.AssetMaterial = m_AssetManager->CreateAsset<Assets::MaterialAsset>(
+                           Assets::AssetPriority::Low, meshComponent.AssetMesh->GetFilepath() ) )
+                         ->Load();
+                }
+            }
+
+            if ( ImGui::CollapsingHeader( "Materials", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                ImGui::TextColored( ImVec4( 0.8f, 0.8f, 0.2f, 1.0f ), "Material Status:" );
+                ImGui::SameLine();
+                ImGui::Text(
+                     ( !materialComponent.AssetMaterial || !materialComponent.AssetMaterial->IsReadyForUse() )
+                          ? "Not Ready..."
+                          : "Ready" );
+                if ( materialComponent.AssetMaterial )
+                {
+
+                    int loadedTexturesCount = 0;
+                    if ( materialComponent.AssetMaterial->IsReadyForUse() )
+                    {
+                        for ( int i = 0; i < 3; i++ )
+                        {
+                            if ( materialComponent.AssetMaterial->HasMaterial(
+                                      static_cast<Assets::MaterialAsset::MaterialTextureName>( i ) ) )
+                            {
+                                loadedTexturesCount++;
+                            }
+                        }
+                    }
+
+                    ImGui::Text( "Textures loaded:" );
+                    ImGui::SameLine();
+                    ImGui::Text( "%d/3", loadedTexturesCount );
+
+                    DrawMaterialEditor( materialComponent.AssetMaterial );
+                }
+                if ( ImGui::Button( "Remove Material", ImVec2( ImGui::GetContentRegionAvail().x, 24 ) ) )
+                {
+                    // selectedEntity.RemoveComponent<ECS::MaterialComponent>();
+                }
+            }
+        }
     }
 
 } // namespace Desert::Editor

@@ -20,5 +20,6 @@ namespace Common::Constants // TODO: should be merge from config
         const std::string SPIRV_BINARY_EXTENSION_VERT = ".spvbin_vert";
         const std::string SPIRV_BINARY_EXTENSION_FRAG = ".spvbin_frag";
         const std::string SPIRV_BINARY_EXTENSION_COMP = ".spvbin_comp";
+        const std::string SCENE_EXTENSION = ".desce";
     } // namespace Extensions
 } // namespace Common::Constants

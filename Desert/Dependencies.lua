@@ -47,6 +47,7 @@ Dependencies = {
                 OGLCompiler = baseDir .. "/VulkanSDK/Lib/OGLCompilerd.lib",
                 shaderc_combined = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_combinedd.lib",
                 shaderc_util = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_utild.lib",
+                reflect_cpp = baseDir .. "/reflect-cpp/bin/Debug/reflectcpp.lib",
             },
             Release = {
                 assimp = baseDir .. "/assimp/bin/Release/assimp-vc142-mt.lib",

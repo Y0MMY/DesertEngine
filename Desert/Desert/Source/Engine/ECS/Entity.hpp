@@ -41,6 +41,11 @@ namespace Desert::ECS
             return m_Scene.get() == other.m_Scene.get() && m_Handle == other.m_Handle;
         }
 
+        const auto GetHandle() const
+        {
+            return m_Handle;
+        }
+
     private:
         entt::entity                                m_Handle;
         const Common::Memory::not_null<Core::Scene> m_Scene;

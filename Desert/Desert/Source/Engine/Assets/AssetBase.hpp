@@ -45,6 +45,8 @@ namespace Desert::Assets
         virtual Common::BoolResult Load()   = 0;
         virtual Common::BoolResult Unload() = 0;
 
+        virtual bool IsReadyForUse() const = 0;
+
         explicit AssetBase( const AssetPriority priority, const Common::Filepath& filepath )
              : m_Handle( Common::UUID() ), m_Priority( priority ), m_Filepath( filepath )
         {

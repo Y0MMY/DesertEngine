@@ -20,8 +20,14 @@ namespace Desert::Assets
             return m_Mesh;
         }
 
+        virtual bool IsReadyForUse() const
+        {
+           return m_ReadyForUse;
+        }
+
     private:
         std::shared_ptr<Mesh> m_Mesh;
+        bool m_ReadyForUse = false;
     };
 
 } // namespace Desert::Assets

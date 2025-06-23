@@ -12,6 +12,37 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
+    void SceneHierarchyPanel::AddComponent( const ECS::Entity& entity )
+    {
+        if ( ImGui::BeginMenu( "Add Component" ) )
+        {
+            if ( !entity.HasComponent<ECS::StaticMeshComponent>() && ImGui::MenuItem( "Static Mesh" ) )
+            {
+                auto& newEtity = entity.AddComponent<ECS::StaticMeshComponent>();
+            }
+
+            if ( !entity.HasComponent<ECS::MaterialComponent>() && ImGui::MenuItem( "Material" ) )
+            {
+                entity.AddComponent<ECS::MaterialComponent>();
+            }
+
+            if ( !entity.HasComponent<ECS::SkyboxComponent>() && ImGui::MenuItem( "Skybox" ) )
+            {
+                entity.AddComponent<ECS::SkyboxComponent>();
+            }
+
+            if ( !entity.HasComponent<ECS::DirectionLightComponent>() && ImGui::MenuItem( "Directional Light" ) )
+            {
+                entity.AddComponent<ECS::DirectionLightComponent>();
+            }
+
+            ImGui::EndMenu();
+        }
+
+        ImGui::PopStyleColor( 2 );
+        ImGui::EndPopup();
+    }
+
     void SceneHierarchyPanel::OnUIRender()
 
     {
@@ -91,8 +122,9 @@ namespace Desert::Editor
                     }
                 }
 
-                ImGui::PopStyleColor( 2 );
-                ImGui::EndPopup();
+                ImGui::Separator();
+
+                AddComponent(entity                           );
             }
 
             if ( nodeOpen )
@@ -158,11 +190,11 @@ namespace Desert::Editor
             {
                 if ( ImGui::MenuItem( "Skybox" ) )
                 {
-                   m_Scene->CreateNewEntity( "Skybox" ).AddComponent<ECS::SkyboxComponent>();
+                    m_Scene->CreateNewEntity( "Skybox" ).AddComponent<ECS::SkyboxComponent>();
                 }
                 if ( ImGui::MenuItem( "Fog" ) )
                 {
-                   // m_Scene->CreateNewEntity( "Fog" ).AddComponent<ECS::FogComponent>();
+                    // m_Scene->CreateNewEntity( "Fog" ).AddComponent<ECS::FogComponent>();
                 }
                 ImGui::EndMenu();
             }

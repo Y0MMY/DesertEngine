@@ -17,6 +17,15 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual Common::BoolResult Invalidate() override;
 
+        virtual uint32_t GetWidth() const
+        {
+            return m_Image2D->GetWidth();
+        }
+
+        virtual uint32_t GetHeight() const
+        {
+            return m_Image2D->GetHeight();
+        }
     private:
         const std::filesystem::path m_TexturePath;
         const TextureSpecification& m_Specification;
@@ -36,6 +45,15 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual Common::BoolResult Invalidate() override;
 
+        virtual uint32_t GetWidth() const
+        {
+            return m_ImageCube->GetWidth();
+        }
+
+        virtual uint32_t GetHeight() const
+        {
+            return m_ImageCube->GetHeight();
+        }
     private:
         const std::filesystem::path m_TexturePath;
         const TextureSpecification& m_Specification;

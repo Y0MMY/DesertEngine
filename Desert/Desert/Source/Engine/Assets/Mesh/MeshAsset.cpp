@@ -7,6 +7,7 @@ namespace Desert::Assets
         m_Mesh = std::make_shared<Mesh>( m_Filepath.string() );
         m_Mesh->Invalidate();
 
+        m_ReadyForUse = true;
         return BOOLSUCCESS;
     }
 

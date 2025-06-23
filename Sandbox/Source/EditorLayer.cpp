@@ -41,14 +41,14 @@ namespace Desert
         }
 
         m_MainScene->Init();
-
+        m_AssetManager = std::make_shared<Assets::AssetManager>();
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
         m_ImGuiLayer->OnAttach();
         m_UIHelper->Init();
 
-        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager ) );
 
 #endif // EBABLE_IMGUI
 
@@ -146,6 +146,11 @@ namespace Desert
             {
                 if ( ::ImGui::MenuItem( "Exit" ) )
                 {
+                }
+
+                if ( ::ImGui::MenuItem( "Save scene" ) )
+                {
+                    m_MainScene->Serialize();
                 }
                 ::ImGui::EndMenu();
             }

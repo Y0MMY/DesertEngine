@@ -31,6 +31,8 @@ namespace Desert
 
         ImVec2 m_Size;
 
+        std::shared_ptr<Assets::AssetManager> m_AssetManager;
+
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
         std::unique_ptr<Editor::UI::UIHelper>        m_UIHelper;
