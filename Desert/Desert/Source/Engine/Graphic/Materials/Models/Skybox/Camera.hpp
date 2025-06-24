@@ -12,7 +12,10 @@ namespace Desert::Graphic::Models
     class CameraData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        using MaterialHelper::MaterialWrapper::MaterialWrapper;
+        explicit CameraData( const std::shared_ptr<Material>& material )
+             : MaterialHelper::MaterialWrapper( material, "camera")
+        {
+        }
 
         void UpdateCameraUB( const Core::Camera& camera )
         {
@@ -25,7 +28,7 @@ namespace Desert::Graphic::Models
             cameraObj.m1 = camera.GetProjectionMatrix();
             cameraObj.m2 = camera.GetViewMatrix();
 
-            m_Uniform->RT_SetData( &cameraObj, 128, 0U );
+            m_UniformProperty->SetData( &cameraObj, 128 );
         }
 
     private:

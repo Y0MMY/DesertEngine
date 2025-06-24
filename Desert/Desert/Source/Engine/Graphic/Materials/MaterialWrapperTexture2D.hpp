@@ -2,21 +2,17 @@
 
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Uniforms/UniformManager.hpp>
 
 namespace Desert::Graphic::MaterialHelper
 {
     class MaterialWrapperTexture2D
     {
     public:
-        explicit MaterialWrapperTexture2D( const std::shared_ptr<Material>&                 baseMaterial,
-                                           const std::shared_ptr<Uniforms::UniformImage2D>& uniform )
-             : m_Material( baseMaterial ), m_Uniform( uniform )
+        explicit MaterialWrapperTexture2D( const std::shared_ptr<Material>& baseMaterial,
+                                           const std::string&               uniformName )
+             : m_Material( baseMaterial ), m_UniformName( uniformName )
         {
-            if ( m_Uniform )
-            {
-                m_Material->AddUniform2DToOverride( m_Uniform );
-            }
+            m_UniformProperty = m_Material->GetTexture2DProperty( uniformName );
         }
 
         const auto& GetMaterialInstance() const
@@ -25,8 +21,9 @@ namespace Desert::Graphic::MaterialHelper
         }
 
     protected:
-        std::shared_ptr<Material>                 m_Material;
-        std::shared_ptr<Uniforms::UniformImage2D> m_Uniform;
+        std::shared_ptr<Material>          m_Material;
+        std::string                        m_UniformName;
+        std::shared_ptr<Texture2DProperty> m_UniformProperty;
     };
 
 } // namespace Desert::Graphic::MaterialHelper

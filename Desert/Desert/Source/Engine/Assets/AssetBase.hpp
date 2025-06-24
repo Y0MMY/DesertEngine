@@ -59,6 +59,11 @@ namespace Desert::Assets
         {
         }
 
+        inline static Common::Filepath GetAssetKey( const Common::Filepath& filepath )
+        {
+            return filepath;
+        }
+
     protected:
         AssetHandle      m_Handle;
         AssetPriority    m_Priority;

@@ -2,22 +2,18 @@
 
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Uniforms/UniformManager.hpp>
 
 namespace Desert::Graphic::MaterialHelper
 {
     class MaterialWrapperTextureCube
     {
     public:
-        explicit MaterialWrapperTextureCube( const std::shared_ptr<Material>&                   baseMaterial,
-                                             const std::shared_ptr<Uniforms::UniformImageCube>& uniform )
-             : m_Material( baseMaterial ), m_Uniform( uniform )
+        explicit MaterialWrapperTextureCube( const std::shared_ptr<Material>& baseMaterial,
+                                             const std::string&               uniformName )
+             : m_Material( baseMaterial ), m_UniformName( uniformName )
 
         {
-            if ( m_Uniform )
-            {
-                m_Material->AddUniformCubeToOverride( m_Uniform );
-            }
+            m_UniformProperty = m_Material->GetTextureCubeProperty( uniformName );
         }
 
         const auto& GetMaterialInstance() const
@@ -26,8 +22,9 @@ namespace Desert::Graphic::MaterialHelper
         }
 
     protected:
-        std::shared_ptr<Material>                   m_Material;
-        std::shared_ptr<Uniforms::UniformImageCube> m_Uniform;
+        std::shared_ptr<Material>            m_Material;
+        std::string                          m_UniformName;
+        std::shared_ptr<TextureCubeProperty> m_UniformProperty;
     };
 
 } // namespace Desert::Graphic::MaterialHelper

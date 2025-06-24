@@ -9,7 +9,8 @@ namespace Desert
     EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
          : Common::Layer( layerName ), m_Window( window )
     {
-        m_MainScene = std::make_shared<Core::Scene>( "New Scene" );
+        m_AssetManager = std::make_shared<Assets::AssetManager>();
+        m_MainScene = std::make_shared<Core::Scene>( "New Scene", m_AssetManager);
     }
 
     EditorLayer::~EditorLayer()
@@ -41,7 +42,6 @@ namespace Desert
         }
 
         m_MainScene->Init();
-        m_AssetManager = std::make_shared<Assets::AssetManager>();
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
         m_ImGuiLayer->OnAttach();

@@ -11,16 +11,15 @@ namespace Desert::Graphic::Models
     class ToneMap final : public MaterialHelper::MaterialWrapperTexture2D
     {
     public:
-        explicit ToneMap( const std::shared_ptr<Material>&                 material,
-                          const std::shared_ptr<Uniforms::UniformImage2D>& uniform )
-             : MaterialHelper::MaterialWrapperTexture2D( material, uniform )
+        explicit ToneMap( const std::shared_ptr<Material>& material )
+             : MaterialHelper::MaterialWrapperTexture2D( material, "u_GeometryTexture")
         {
         }
 
         void UpdateToneMap( const std::shared_ptr<Image2D>& toneMapImage )
         {
             m_ToneMapImage = toneMapImage;
-            m_Uniform->SetImage2D( m_ToneMapImage );
+            m_UniformProperty->SetTexture( m_ToneMapImage );
         }
 
     private:

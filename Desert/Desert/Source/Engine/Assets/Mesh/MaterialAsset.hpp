@@ -12,7 +12,8 @@ namespace Desert::Assets
     class MaterialAsset final : public AssetBase
     {
     public:
-        using AssetBase::AssetBase;
+        MaterialAsset( const AssetPriority priority, const Common::Filepath& filepath );
+
         using MaterialInfo = std::optional<std::pair<Common::Filepath, std::shared_ptr<Graphic::Texture2D>>>;
 
         enum class MaterialTextureName : std::uint8_t
@@ -45,10 +46,12 @@ namespace Desert::Assets
             return AssetTypeID::Material;
         }
 
+        static AssetManager::KeyHandle GetAssetKey( const Common::Filepath& filepath );
+
     private:
         static const std::uint8_t                     m_MeshTexturesCount = 3U;
         std::array<MaterialInfo, m_MeshTexturesCount> m_MaterialsTexture;
-        bool m_ReadyForUse = false;
+        bool                                          m_ReadyForUse = false;
     };
 
 } // namespace Desert::Assets

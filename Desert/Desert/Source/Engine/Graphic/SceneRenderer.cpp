@@ -39,6 +39,61 @@ namespace Desert::Graphic
         return BOOLSUCCESS;
     }
 
+    NO_DISCARD Common::BoolResult SceneRenderer::InitLightingUniforms()
+    {
+
+        m_SceneInfo.LightsInfo.Lightning =
+             std::make_unique<Models::LightingData>( glm::vec3( 0 ), GEOMETRY_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitSkyboxUniforms()
+    {
+        m_SceneInfo.Renderdata.Skybox.SkyboxUB =
+             std::make_unique<Models::SkyboxData>( SKYBOX_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitPBRUniforms()
+    {
+        m_SceneInfo.Renderdata.Geometry.PBRUB =
+             std::make_unique<Models::PBR::PBRMaterial>( GEOMETRY_RENDERINFO( Material ) );
+
+        m_SceneInfo.Renderdata.Geometry.PBRTextures =
+             std::make_unique<Models::PBR::PBRMaterialTexture>( GEOMETRY_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitGlobalUniforms()
+    {
+
+        m_SceneInfo.Renderdata.Geometry.GlobalUB = std::make_unique<Models::GlobalData>(
+             Models::GlobalUB{ .CameraPosition = glm::vec3( 0 ) }, GEOMETRY_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitCameraUniforms()
+    {
+
+        m_SceneInfo.Renderdata.Skybox.CameraUB =
+             std::make_unique<Models::CameraData>( SKYBOX_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
+    NO_DISCARD Common::BoolResult SceneRenderer::InitToneMapUniforms()
+    {
+
+        m_SceneInfo.Renderdata.Composite.ToneMapUB =
+             std::make_unique<Models::ToneMap>( COMPOSITE_RENDERINFO( Material ) );
+
+        return BOOLSUCCESS;
+    }
+
     NO_DISCARD Common::BoolResult SceneRenderer::InitSkyboxPass( const uint32_t width, const uint32_t height )
     {
         auto&                      skybox    = m_SceneInfo.Renderdata.Skybox.InfoRender;
@@ -72,9 +127,6 @@ namespace Desert::Graphic
 
         // Material
         skybox.Material = Material::Create( std::string( debugName ), skybox.Shader );
-        skybox.Material->Invalidate();
-
-        skybox.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
 
         const auto& texture = Renderer::GetInstance().GetFallbackTextures()->GetFallbackTextureCube(
              Core::Formats::ImageFormat::RGBA8F );
@@ -117,9 +169,6 @@ namespace Desert::Graphic
         composite.Pipeline->Invalidate();
 
         composite.Material = Material::Create( std::string( debugName ), composite.Shader );
-        composite.Material->Invalidate();
-
-        composite.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
 
         return BOOLSUCCESS;
     }
@@ -162,132 +211,6 @@ namespace Desert::Graphic
         geometry.Pipeline->Invalidate();
 
         geometry.Material = Material::Create( std::string( debugName ), geometry.Shader );
-        geometry.Material->Invalidate();
-
-        geometry.UBManager = Uniforms::UniformManager::Create( debugName, pipeSpec.Shader );
-
-        return BOOLSUCCESS;
-    }
-
-    NO_DISCARD Common::BoolResult SceneRenderer::InitLightingUniforms()
-    {
-        const auto ubLightRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "LightningUB" );
-        if ( !ubLightRes )
-        {
-            LOG_ERROR( "Lightning UB was not found!" );
-            //  return Common::MakeError( "Lightning UB was not found!" );
-        }
-
-        m_SceneInfo.LightsInfo.Lightning = std::make_unique<Models::LightingData>(
-             glm::vec3( 0 ), ubLightRes.GetValue(), GEOMETRY_RENDERINFO( Material ) );
-
-        return BOOLSUCCESS;
-    }
-
-    NO_DISCARD Common::BoolResult SceneRenderer::InitSkyboxUniforms()
-    {
-        const auto ubSkyboxRes = SKYBOX_RENDERINFO( UBManager )->GetUniformImageCube( "samplerCubeMap" );
-        if ( !ubSkyboxRes )
-        {
-            LOG_ERROR( "Skybox UB was not found!" );
-            // return Common::MakeError( "Skybox UB was not found!" );
-        }
-
-        m_SceneInfo.Renderdata.Skybox.SkyboxUB =
-             std::make_unique<Models::SkyboxData>( ubSkyboxRes.GetValue(), SKYBOX_RENDERINFO( Material ) );
-
-        return BOOLSUCCESS;
-    }
-
-    NO_DISCARD Common::BoolResult SceneRenderer::InitPBRUniforms()
-    {
-        const auto ubPBRRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "PBRData" );
-        if ( !ubPBRRes )
-        {
-            LOG_ERROR( "PBRData UB was not found!" );
-            // return Common::MakeError( "PBRData UB was not found!" );
-        }
-
-        m_SceneInfo.Renderdata.Geometry.PBRUB =
-             std::make_unique<Models::PBR::PBRMaterial>( GEOMETRY_RENDERINFO( Material ), ubPBRRes.GetValue() );
-
-        const auto ubIrradianceRes = GEOMETRY_RENDERINFO( UBManager )
-                                          ->GetUniformImageCube( std::string(
-                                               Models::PBR::PBRMaterialTexture::GetUniformIrradianceName() ) );
-        if ( !ubIrradianceRes )
-        {
-            LOG_ERROR( "Irradiance UB was not found!" );
-            // return Common::MakeError( "Irradiance UB was not found!" );
-        }
-
-        const auto ubPreFilteredRes = GEOMETRY_RENDERINFO( UBManager )
-                                           ->GetUniformImageCube( std::string(
-                                                Models::PBR::PBRMaterialTexture::GetUniformPreFilteredName() ) );
-        if ( !ubPreFilteredRes )
-        {
-            LOG_ERROR( "PreFiltered UB was not found!" );
-            // return Common::MakeError( "PreFiltered UB was not found!" );
-        }
-
-        const auto ubBRDFRes =
-             GEOMETRY_RENDERINFO( UBManager )
-                  ->GetUniformImage2D( std::string( Models::PBR::PBRMaterialTexture::GetUniformBRDFLutName() ) );
-        if ( !ubBRDFRes )
-        {
-            LOG_ERROR( "BRDF UB was not found!" );
-            //  return Common::MakeError( "BRDF UB was not found!" );
-        }
-
-        m_SceneInfo.Renderdata.Geometry.PBRTextures = std::make_unique<Models::PBR::PBRMaterialTexture>(
-             GEOMETRY_RENDERINFO( Material ), ubIrradianceRes.GetValue(), ubPreFilteredRes.GetValue(),
-             ubBRDFRes.GetValue() );
-
-        return BOOLSUCCESS;
-    }
-
-    NO_DISCARD Common::BoolResult SceneRenderer::InitGlobalUniforms()
-    {
-        const auto ubGlobalRes = GEOMETRY_RENDERINFO( UBManager )->GetUniformBuffer( "GlobalUB" );
-        if ( !ubGlobalRes )
-        {
-            LOG_ERROR( "GlobalUB UB was not found!" );
-            // return Common::MakeError( "GlobalUB UB was not found!" );
-        }
-
-        m_SceneInfo.Renderdata.Geometry.GlobalUB =
-             std::make_unique<Models::GlobalData>( Models::GlobalUB{ .CameraPosition = glm::vec3( 0 ) },
-                                                   ubGlobalRes.GetValue(), GEOMETRY_RENDERINFO( Material ) );
-
-        return BOOLSUCCESS;
-    }
-
-    NO_DISCARD Common::BoolResult SceneRenderer::InitCameraUniforms()
-    {
-        const auto ubCameraRes = SKYBOX_RENDERINFO( UBManager )->GetUniformBuffer( "camera" );
-        if ( !ubCameraRes )
-        {
-            LOG_ERROR( "camera UB was not found!" );
-            // return Common::MakeError( "camera UB was not found!" );
-        }
-
-        m_SceneInfo.Renderdata.Skybox.CameraUB =
-             std::make_unique<Models::CameraData>( SKYBOX_RENDERINFO( Material ), ubCameraRes.GetValue() );
-
-        return BOOLSUCCESS;
-    }
-
-    NO_DISCARD Common::BoolResult SceneRenderer::InitToneMapUniforms()
-    {
-        const auto ubTonemapRes = COMPOSITE_RENDERINFO( UBManager )->GetUniformImage2D( "u_GeometryTexture" );
-        if ( !ubTonemapRes )
-        {
-            LOG_ERROR( "u_GeometryTexture was not found!" );
-            // return Common::MakeError( "u_GeometryTexture was not found!" );
-        }
-
-        m_SceneInfo.Renderdata.Composite.ToneMapUB =
-             std::make_unique<Models::ToneMap>( COMPOSITE_RENDERINFO( Material ), ubTonemapRes.GetValue() );
-
         return BOOLSUCCESS;
     }
 
@@ -364,8 +287,8 @@ namespace Desert::Graphic
         renderer.BeginRenderPass( SKYBOX_RENDERINFO( RenderPass ) );
 
         m_SceneInfo.Renderdata.Skybox.SkyboxUB->UpdateSkybox( m_SceneInfo.EnvironmentData.RadianceMap );
-
         m_SceneInfo.Renderdata.Skybox.CameraUB->UpdateCameraUB( *m_SceneInfo.ActiveCamera ); // TODO: constant push
+
         renderer.SubmitFullscreenQuad( SKYBOX_RENDERINFO( Pipeline ), SKYBOX_RENDERINFO( Material ) );
 
         renderer.EndRenderPass();

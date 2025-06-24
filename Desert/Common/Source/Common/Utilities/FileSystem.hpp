@@ -25,27 +25,27 @@ namespace Common::Utils
     public:
         [[nodiscard]] static const std::string GetFileName( const std::filesystem::path& filepath );
         [[nodiscard]] static const std::string GetFileName( const std::string& filepath );
+        [[nodiscard]] static const std::string
+        GetFileNameWithoutExtension( const std::filesystem::path& filepath );
 
     public:
         [[nodiscard]] static const std::string ReadFileContent( const std::filesystem::path& filepath );
-        static const void                      WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );
+        static const void WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );
         [[nodiscard]] static const std::vector<uint32_t>
         ReadByteFileContent( const std::filesystem::path& filepath );
 
     public:
         [[nodiscard]] static const std::filesystem::path GetParentPath( const std::filesystem::path& filepath );
-        [[nodiscard]] static const std::string
-        GetFileNameWithoutExtension( const std::filesystem::path& filepath );
-        [[nodiscard]] static const std::string GetFileExtension( const std::filesystem::path& filepath );
-        [[nodiscard]] static const uint32_t    GetFileSize( const std::filesystem::path& filepath );
-        static bool                            CreateDirectory( const std::filesystem::path& directory );
-        static bool                            CreateDirectory( const std::string& directory );
-        static void                            CreateFile( const std::string& path );
-        static void                            CreateFile( const std::filesystem::path& path );
-        static bool                            Exists( const std::filesystem::path& filepath );
-        static bool                            Exists( const std::string& filepath );
-        static std::string                     GetFileDirectoryString( const std::filesystem::path& filepath );
-        static std::filesystem::path           GetFileDirectory( const std::filesystem::path& filepath );
+        [[nodiscard]] static const std::string           GetFileExtension( const std::filesystem::path& filepath );
+        [[nodiscard]] static const uint32_t              GetFileSize( const std::filesystem::path& filepath );
+        static bool                                      CreateDirectory( const std::filesystem::path& directory );
+        static bool                                      CreateDirectory( const std::string& directory );
+        static void                                      CreateFile( const std::string& path );
+        static void                                      CreateFile( const std::filesystem::path& path );
+        static bool                                      Exists( const std::filesystem::path& filepath );
+        static bool                                      Exists( const std::string& filepath );
+        static std::string           GetFileDirectoryString( const std::filesystem::path& filepath );
+        static std::filesystem::path GetFileDirectory( const std::filesystem::path& filepath );
 
     public:
         static std::filesystem::path OpenFileDialog( const char* filter = "All\0*.*\0" );
@@ -60,4 +60,4 @@ namespace Common::Utils
     public:
         std::string ReadFileAndSkipBOM( const std::filesystem::path& filepath );
     };
-} // namespace Radiant::Utils
+} // namespace Common::Utils

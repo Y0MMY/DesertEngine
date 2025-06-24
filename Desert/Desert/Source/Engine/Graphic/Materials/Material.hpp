@@ -1,11 +1,13 @@
 #pragma once
 
 #include <Engine/Graphic/Shader.hpp>
-#include <Engine/Graphic/Image.hpp>
-#include <Engine/Uniforms/UniformBuffer.hpp>
-#include <Engine/Uniforms/UniformImageCube.hpp>
-#include <Engine/Uniforms/UniformImage2D.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
+
+#include <Common/Core/Memory/Buffer.hpp>
+
+#include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/TextureCubeProperty.hpp>
 
 #include <glm/glm.hpp>
 
@@ -14,23 +16,60 @@ namespace Desert::Graphic
     class Material
     {
     public:
+        Material( std::string&& debugName, const std::shared_ptr<Shader>& shader,
+                  std::unique_ptr<MaterialBackend>&& materialBackend );
+
         virtual ~Material() = default;
 
-        virtual Common::BoolResult
-        AddUniformBufferToOverride( const std::shared_ptr<Uniforms::UniformBuffer>& uniformBuffer ) = 0;
-        virtual Common::BoolResult
-        AddUniformCubeToOverride( const std::shared_ptr<Uniforms::UniformImageCube>& uniformCube ) = 0;
-        virtual Common::BoolResult
-        AddUniform2DToOverride( const std::shared_ptr<Uniforms::UniformImage2D>& uniform2D ) = 0;
-        virtual Common::BoolResult Invalidate()                                              = 0;
-        virtual Common::BoolResult ApplyMaterial()                                           = 0;
-        virtual void               Clear() = 0; // TODO: better func name
+        const auto& GetUniformBufferProperties() const
+        {
+            return m_UniformBufferProperties;
+        }
+        const auto& GetTexture2DProperties() const
+        {
+            return m_Texture2DProperties;
+        }
+        const auto& GetTextureCubeProperties() const
+        {
+            return m_TextureCubeProperties;
+        }
 
-        virtual std::shared_ptr<Shader> GetShader() const = 0;
+        const auto& GetPushConstantBuffer() const
+        {
+            return m_PushConstantBuffer;
+        }
 
-        virtual Common::BoolResult PushConstant( const void* buffer, const uint32_t bufferSize ) = 0;
+        // NOTE:temporary solution! in the future it is worth getting when parsing
+        void PushConstant( const void* buffer, const uint32_t bufferSize )
+        {
+            m_PushConstantBuffer.Write(buffer, bufferSize);
+        }
 
-        static std::shared_ptr<Material> Create( const std::string&             debugName,
-                                                 const std::shared_ptr<Shader>& shader );
+        std::shared_ptr<UniformBufferProperty> GetUniformBufferProperty( const std::string& name ) const;
+        std::shared_ptr<Texture2DProperty>     GetTexture2DProperty( const std::string& name ) const;
+        std::shared_ptr<TextureCubeProperty>   GetTextureCubeProperty( const std::string& name ) const;
+
+        void                    Apply();
+        std::shared_ptr<Shader> GetShader() const
+        {
+            return m_Shader;
+        }
+
+        static std::shared_ptr<Material> Create( std::string&& debugName, const std::shared_ptr<Shader>& shader );
+
+    protected:
+        void InitializeProperties();
+
+    private:
+        std::string                      m_DebugName;
+        std::unique_ptr<MaterialBackend> m_MaterialBackend;
+        std::shared_ptr<Shader>          m_Shader;
+
+    protected:
+        Common::Memory::Buffer m_PushConstantBuffer;
+
+        std::unordered_map<std::string, std::shared_ptr<UniformBufferProperty>> m_UniformBufferProperties;
+        std::unordered_map<std::string, std::shared_ptr<TextureCubeProperty>>   m_TextureCubeProperties;
+        std::unordered_map<std::string, std::shared_ptr<Texture2DProperty>>     m_Texture2DProperties;
     };
 } // namespace Desert::Graphic

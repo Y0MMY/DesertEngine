@@ -4,65 +4,65 @@ namespace Desert::Uniforms
 {
     void UniformManager::AddBuffer( std::shared_ptr<UniformBuffer>&& buffer, const std::string& name )
     {
-        const auto index = m_Data.Buffers.size();
-        m_Data.Buffers.push_back( std::move( buffer ) );
-        m_UniformNames.Buffers[name] = index;
+        const auto index = m_BufferData.Data.size();
+        m_BufferData.Data.push_back( std::move( buffer ) );
+        m_BufferData.Names[name] = index;
     }
 
     void UniformManager::AddImageCube( std::shared_ptr<UniformImageCube>&& buffer, const std::string& name )
     {
-        const auto index = m_Data.ImageCubes.size();
-        m_Data.ImageCubes.push_back( std::move( buffer ) );
-        m_UniformNames.ImageCubes[name] = index;
+        const auto index = m_ImageCubeData.Data.size();
+        m_ImageCubeData.Data.push_back( std::move( buffer ) );
+        m_ImageCubeData.Names[name] = index;
     }
 
     void UniformManager::AddImage2D( std::shared_ptr<UniformImage2D>&& buffer, const std::string& name )
     {
-        const auto index = m_Data.Image2D.size();
-        m_Data.Image2D.push_back( std::move( buffer ) );
-        m_UniformNames.Image2D[name] = index;
+        const auto index = m_Image2DData.Data.size();
+        m_Image2DData.Data.push_back( std::move( buffer ) );
+        m_Image2DData.Names[name] = index;
     }
 
     Common::Result<std::shared_ptr<UniformBuffer>>
     UniformManager::GetUniformBuffer( const std::string& name ) const
     {
-        auto it = m_UniformNames.Buffers.find( name );
-        if ( it == m_UniformNames.Buffers.end() )
+        auto it = m_BufferData.Names.find( name );
+        if ( it == m_BufferData.Names.end() )
         {
 
             return Common::MakeFormattedError<std::shared_ptr<UniformBuffer>>(
                  "Uniform '{}' not found in material", name );
         }
 
-        return Common::MakeSuccess( m_Data.Buffers[it->second] );
+        return Common::MakeSuccess( m_BufferData.Data[it->second] );
     }
 
     Common::Result<std::shared_ptr<UniformImageCube>>
     UniformManager::GetUniformImageCube( const std::string& name ) const
     {
-        auto it = m_UniformNames.ImageCubes.find( name );
-        if ( it == m_UniformNames.ImageCubes.end() )
+        auto it = m_ImageCubeData.Names.find( name );
+        if ( it == m_ImageCubeData.Names.end() )
         {
 
             return Common::MakeFormattedError<std::shared_ptr<UniformImageCube>>(
                  "Uniform '{}' not found in material", name );
         }
 
-        return Common::MakeSuccess( m_Data.ImageCubes[it->second] );
+        return Common::MakeSuccess( m_ImageCubeData.Data[it->second] );
     }
 
     Common::Result<std::shared_ptr<Desert::Uniforms::UniformImage2D>>
     UniformManager::GetUniformImage2D( const std::string& name ) const
     {
-        auto it = m_UniformNames.Image2D.find( name );
-        if ( it == m_UniformNames.Image2D.end() )
+        auto it = m_Image2DData.Names.find( name );
+        if ( it == m_Image2DData.Names.end() )
         {
 
             return Common::MakeFormattedError<std::shared_ptr<UniformImage2D>>(
                  "Uniform '{}' not found in material", name );
         }
 
-        return Common::MakeSuccess( m_Data.Image2D[it->second] );
+        return Common::MakeSuccess( m_Image2DData.Data[it->second] );
     }
 
     std::shared_ptr<UniformManager> UniformManager::Create( const std::string_view                  debugName,
@@ -79,8 +79,8 @@ namespace Desert::Uniforms
         // Buffers
         {
             const auto& models = shader->GetUniformBufferModels();
-            m_Data.Buffers.reserve( models.size() );
-            m_UniformNames.Buffers.reserve( models.size() );
+            m_BufferData.Data.reserve( models.size() );
+            m_BufferData.Names.reserve( models.size() );
 
             for ( const auto& model : models )
             {
@@ -91,8 +91,8 @@ namespace Desert::Uniforms
         // ImageCube
         {
             const auto& models = shader->GetUniformImageCubeModels();
-            m_Data.ImageCubes.reserve( models.size() );
-            m_UniformNames.ImageCubes.reserve( models.size() );
+            m_ImageCubeData.Data.reserve( models.size() );
+            m_ImageCubeData.Names.reserve( models.size() );
 
             for ( const auto& model : models )
             {
@@ -103,8 +103,8 @@ namespace Desert::Uniforms
         // Image2D
         {
             const auto& models = shader->GetUniformImage2DModels();
-            m_Data.Image2D.reserve( models.size() );
-            m_UniformNames.Image2D.reserve( models.size() );
+            m_Image2DData.Data.reserve( models.size() );
+            m_Image2DData.Names.reserve( models.size() );
 
             for ( const auto& model : models )
             {

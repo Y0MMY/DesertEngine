@@ -16,10 +16,7 @@ namespace Desert::Graphic::Models::PBR
                                      MaterialHelper::MaterialWrapperTexture2D
     {
     public:
-        PBRMaterialTexture( const std::shared_ptr<Material>&                   baseMaterial,
-                            const std::shared_ptr<Uniforms::UniformImageCube>& uniformIrradianceMap,
-                            const std::shared_ptr<Uniforms::UniformImageCube>& uniformPreFilteredMap,
-                            const std::shared_ptr<Uniforms::UniformImage2D>&   uniformBRDF );
+        PBRMaterialTexture( const std::shared_ptr<Material>& baseMaterial );
 
         void UpdatePBR( PBRTextures&& pbr );
 
@@ -28,9 +25,6 @@ namespace Desert::Graphic::Models::PBR
         static const std::string_view GetUniformBRDFLutName();
 
     private:
-        std::shared_ptr<Uniforms::UniformImageCube> m_UniformIrradianceMap;
-        std::shared_ptr<Uniforms::UniformImageCube> m_UniformPreFilteredMap;
-        std::shared_ptr<Uniforms::UniformImage2D>   m_UniformBRDF;
-        PBRTextures                                 m_PBRPBRTextures{};
+        PBRTextures m_PBRPBRTextures{};
     };
 } // namespace Desert::Graphic::Models::PBR

@@ -7,7 +7,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanMaterial.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
@@ -338,7 +337,7 @@ namespace Desert::Graphic::API::Vulkan
             return;
         }
 
-        material->ApplyMaterial();
+        material->Apply();
 
         const auto& vulkanLayout  = std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline );
         const auto& descriptorSet = descriptorSetResult.GetValue();
@@ -440,7 +439,7 @@ namespace Desert::Graphic::API::Vulkan
             return;
         }
 
-        material->ApplyMaterial();
+        material->Apply();
 
         const auto& vulkanLayout  = std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline );
         const auto& descriptorSet = descriptorSetResult.GetValue();
@@ -458,7 +457,7 @@ namespace Desert::Graphic::API::Vulkan
         const auto ibuffer = sp_cast<API::Vulkan::VulkanIndexBuffer>( mesh->GetIndexBuffer() )->GetVulkanBuffer();
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
 
-        const auto& pcBuffer = sp_cast<VulkanMaterial>( material )->GetPushConstantBuffer();
+        const auto& pcBuffer = material->GetPushConstantBuffer();
         if ( pcBuffer.Size )
         {
             vkCmdPushConstants( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),

@@ -10,6 +10,20 @@
 
 namespace Desert::Assets
 {
+
+    static Common::Filepath GetMaterialFilename( const Common::Filepath& filepath )
+    {
+        const auto materialPath = Common::Constants::Path::MATERIAL_PATH.string() +
+                                  Common::Utils::FileSystem::GetFileNameWithoutExtension( filepath );
+
+        return materialPath + Common::Constants::Extensions::MATERIAL_EXTENSION;
+    }
+
+    MaterialAsset::MaterialAsset( const AssetPriority priority, const Common::Filepath& filepath )
+         : AssetBase( priority, filepath )
+    {
+    }
+
     Common::BoolResult MaterialAsset::Load()
     {
         const std::string modelPath = m_Filepath.string();
@@ -64,6 +78,11 @@ namespace Desert::Assets
     Common::BoolResult MaterialAsset::Unload()
     {
         return BOOLSUCCESS;
+    }
+
+    AssetManager::KeyHandle MaterialAsset::GetAssetKey( const Common::Filepath& filepath )
+    {
+        return GetMaterialFilename( filepath );
     }
 
 } // namespace Desert::Assets

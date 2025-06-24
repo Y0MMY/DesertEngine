@@ -1,21 +1,17 @@
 #pragma once
 
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Uniforms/UniformManager.hpp>
+#include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 
 namespace Desert::Graphic::MaterialHelper
 {
     class MaterialWrapper
     {
     public:
-        explicit MaterialWrapper( const std::shared_ptr<Material>&      baseMaterial,
-                                  const std::shared_ptr<Uniforms::UniformBuffer>& uniform )
-             : m_Material( baseMaterial ), m_Uniform( uniform )
+        explicit MaterialWrapper( const std::shared_ptr<Material>& baseMaterial, const std::string& uniformName )
+             : m_Material( baseMaterial ), m_UniformName( uniformName )
         {
-            if ( m_Uniform )
-            {
-                m_Material->AddUniformBufferToOverride( m_Uniform );
-            }
+            m_UniformProperty = m_Material->GetUniformBufferProperty( uniformName );
         }
 
         const auto& GetMaterialInstance() const
@@ -24,7 +20,8 @@ namespace Desert::Graphic::MaterialHelper
         }
 
     protected:
-        std::shared_ptr<Material>      m_Material;
-        std::shared_ptr<Uniforms::UniformBuffer> m_Uniform;
+        std::shared_ptr<Material>              m_Material;
+        std::string                            m_UniformName;
+        std::shared_ptr<UniformBufferProperty> m_UniformProperty;
     };
 } // namespace Desert::Graphic::MaterialHelper

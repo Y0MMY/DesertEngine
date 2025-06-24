@@ -5,23 +5,20 @@
 
 namespace Desert::Graphic::Models::PBR
 {
-    PBRMaterialTexture::PBRMaterialTexture(
-         const std::shared_ptr<Material>&                   baseMaterial,
-         const std::shared_ptr<Uniforms::UniformImageCube>& uniformIrradianceMap,
-         const std::shared_ptr<Uniforms::UniformImageCube>& uniformPreFilteredMap,
-         const std::shared_ptr<Uniforms::UniformImage2D>&   uniformBRDF )
-         : MaterialWrapperTextureCubeArray( baseMaterial, { uniformIrradianceMap, uniformPreFilteredMap } ),
-           MaterialWrapperTexture2D( baseMaterial, uniformBRDF ), m_UniformIrradianceMap( uniformIrradianceMap ),
-           m_UniformPreFilteredMap( uniformPreFilteredMap ), m_UniformBRDF( uniformBRDF ), m_PBRPBRTextures( {} )
+    PBRMaterialTexture::PBRMaterialTexture( const std::shared_ptr<Material>& baseMaterial )
+         : MaterialWrapperTextureCubeArray( baseMaterial, { std::string( Constatns::IrradianceTexture ),
+                                                            std::string( Constatns::SpecularTexture ) } ),
+           MaterialWrapperTexture2D( baseMaterial, std::string( Constatns::SpecularBRDF_LUT ) ),
+           m_PBRPBRTextures( {} )
     {
     }
 
     void PBRMaterialTexture::UpdatePBR( PBRTextures&& pbr )
     {
         m_PBRPBRTextures = std::move( pbr );
-        m_UniformPreFilteredMap->SetImageCube( m_PBRPBRTextures.PreFilteredMap );
-        m_UniformIrradianceMap->SetImageCube( m_PBRPBRTextures.IrradianceMap );
-        m_UniformBRDF->SetImage2D( Renderer::GetInstance().GetBRDFTexture()->GetImage2D() );
+        m_UniformProperties[1]->SetTexture( m_PBRPBRTextures.PreFilteredMap );
+        m_UniformProperties[0]->SetTexture( m_PBRPBRTextures.IrradianceMap );
+        m_UniformProperty->SetTexture( Renderer::GetInstance().GetBRDFTexture()->GetImage2D() );
     }
 
     const std::string_view PBRMaterialTexture::GetUniformIrradianceName()

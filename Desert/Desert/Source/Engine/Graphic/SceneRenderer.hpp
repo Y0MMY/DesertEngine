@@ -12,10 +12,10 @@
 
 #include <Engine/Graphic/Materials/Models/Lighting.hpp>
 #include <Engine/Graphic/Materials/Models/Global.hpp>
-#include <Engine/Graphic/Materials/Models/Camera.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
 #include <Engine/Graphic/Materials/Models/Skybox/Skybox.hpp>
+#include <Engine/Graphic/Materials/Models/Skybox/Camera.hpp>
 #include <Engine/Graphic/Materials/Models/ToneMap.hpp>
 
 namespace Desert::Core
@@ -58,13 +58,11 @@ namespace Desert::Graphic
         [[nodiscard]] Common::BoolResult InitGlobalUniforms();
         [[nodiscard]] Common::BoolResult InitCameraUniforms();
         [[nodiscard]] Common::BoolResult InitToneMapUniforms();
-
     private:
         void CompositeRenderPass();
         void ToneMapRenderPass();
         void GeometryRenderPass();
         void SkyboxRenderPass();
-
     private:
     private:
         struct MeshRenderInfo
@@ -85,7 +83,6 @@ namespace Desert::Graphic
             std::shared_ptr<Graphic::RenderPass>      RenderPass;
             std::shared_ptr<Graphic::Pipeline>        Pipeline;
             std::shared_ptr<Graphic::Material>        Material;
-            std::shared_ptr<Uniforms::UniformManager> UBManager;
         };
 
         struct

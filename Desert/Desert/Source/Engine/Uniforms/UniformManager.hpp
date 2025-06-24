@@ -16,10 +16,43 @@ namespace Desert::Uniforms
         explicit UniformManager( const std::string_view                  debugName,
                                  const std::shared_ptr<Graphic::Shader>& shader );
 
+        struct BuffersData
+        {
+            std::vector<std::shared_ptr<UniformBuffer>> Data;
+            std::unordered_map<std::string, uint32_t>   Names;
+        };
+
+        struct ImageCubeData
+        {
+            std::vector<std::shared_ptr<UniformImageCube>> Data;
+            std::unordered_map<std::string, uint32_t>      Names;
+        };
+
+        struct Image2DData
+        {
+            std::vector<std::shared_ptr<UniformImage2D>> Data;
+            std::unordered_map<std::string, uint32_t>    Names;
+        };
+
         // maybe std::reference_wrapper?
         Common::Result<std::shared_ptr<UniformBuffer>>    GetUniformBuffer( const std::string& name ) const;
         Common::Result<std::shared_ptr<UniformImageCube>> GetUniformImageCube( const std::string& name ) const;
         Common::Result<std::shared_ptr<UniformImage2D>>   GetUniformImage2D( const std::string& name ) const;
+
+        const auto& GetUniformBufferTotal()
+        {
+            return m_BufferData;
+        }
+
+        const auto& GetUniformImageCubeTotal() const
+        {
+            return m_ImageCubeData;
+        }
+
+        const auto& GetUniformImage2DTotal() const
+        {
+            return m_Image2DData;
+        }
 
         static std::shared_ptr<UniformManager> Create( const std::string_view                  debugName,
                                                        const std::shared_ptr<Graphic::Shader>& shader );
@@ -30,19 +63,10 @@ namespace Desert::Uniforms
         void AddImage2D( std::shared_ptr<UniformImage2D>&& buffer, const std::string& name );
 
     private:
-        struct
-        {
-            std::vector<std::shared_ptr<UniformBuffer>>    Buffers;
-            std::vector<std::shared_ptr<UniformImageCube>> ImageCubes;
-            std::vector<std::shared_ptr<UniformImage2D>>   Image2D;
-        } m_Data;
+        BuffersData   m_BufferData;
+        ImageCubeData m_ImageCubeData;
+        Image2DData   m_Image2DData;
 
-        struct
-        {
-            std::unordered_map<std::string, uint32_t> Buffers;
-            std::unordered_map<std::string, uint32_t> ImageCubes;
-            std::unordered_map<std::string, uint32_t> Image2D;
-        } m_UniformNames;
         const std::string_view m_DebugName;
     };
 } // namespace Desert::Uniforms

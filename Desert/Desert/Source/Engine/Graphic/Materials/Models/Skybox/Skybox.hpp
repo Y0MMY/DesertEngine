@@ -11,9 +11,8 @@ namespace Desert::Graphic::Models
     class SkyboxData final : public MaterialHelper::MaterialWrapperTextureCube
     {
     public:
-        explicit SkyboxData( const std::shared_ptr<Uniforms::UniformImageCube>& uniform,
-                             const std::shared_ptr<Material>&                   material )
-             : MaterialHelper::MaterialWrapperTextureCube( material, uniform )
+        explicit SkyboxData( const std::shared_ptr<Material>& material )
+             : MaterialHelper::MaterialWrapperTextureCube( material, "samplerCubeMap" )
         {
         }
 
@@ -25,7 +24,7 @@ namespace Desert::Graphic::Models
             }
 
             m_SkyboxImage = skyboxImage;
-            m_Uniform->SetImageCube( m_SkyboxImage );
+            m_UniformProperty->SetTexture( m_SkyboxImage );
         }
 
     private:

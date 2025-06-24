@@ -15,7 +15,10 @@ namespace Desert::Graphic::Models::PBR
     class PBRMaterial : public MaterialHelper::MaterialWrapper
     {
     public:
-        using MaterialWrapper::MaterialWrapper;
+        explicit PBRMaterial( const std::shared_ptr<Material>& material )
+             : MaterialHelper::MaterialWrapper( material, "PBRData")
+        {
+        }
 
         void UpdatePBR(  PBRUniforms&& pbr );
     private:
