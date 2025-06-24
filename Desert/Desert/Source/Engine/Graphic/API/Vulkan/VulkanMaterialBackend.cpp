@@ -22,40 +22,64 @@ namespace Desert::Graphic::API::Vulkan
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
 
         // Process uniform buffers
-        for ( const auto& [name, prop] : material->GetUniformBufferProperties() )
+        for ( const auto& [name, index] : material->GetUniformBufferProperties() )
         {
-            const auto& bufferInfo = prop->GetUniform();
-            auto        vulkanBufferInfo =
-                 sp_cast<Uniforms::API::Vulkan::VulkanUniformBuffer>( bufferInfo )->GetDescriptorBufferInfo();
-
-            auto wds = DescriptorSetBuilder::GetUniformWDS( vulkanShader, frameIndex,
-                                                            0, // set 0
-                                                            bufferInfo->GetBinding(), 1U, &vulkanBufferInfo );
-            writeDescriptorSets.push_back( wds );
+            if ( auto property = material->GetUniformBufferProperty( name ) )
+            {
+                if ( auto bufferInfo = property->GetUniform() )
+                {
+                    if ( auto vulkanBuffer = sp_cast<Uniforms::API::Vulkan::VulkanUniformBuffer>( bufferInfo ) )
+                    {
+                        auto& bufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
+                        auto  wds =
+                             DescriptorSetBuilder::GetUniformWDS( vulkanShader, frameIndex,
+                                                                  0, // set 0
+                                                                  vulkanBuffer->GetBinding(), 1U, &bufferInfo );
+                        writeDescriptorSets.push_back( wds );
+                    }
+                }
+            }
         }
 
         // Process 2D textures
-        for ( const auto& [name, prop] : material->GetTexture2DProperties() )
+        for ( const auto& [name, index] : material->GetTexture2DProperties() )
         {
-            const auto& imageInfo = sp_cast<Uniforms::API::Vulkan::VulkanUniformImage2D>( prop->GetUniform() );
-
-            auto wds = DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex,
-                                                            0, // set 0
-                                                            imageInfo->GetBinding(), 1U,
-                                                            &imageInfo->GetDescriptorImageInfo() );
-            writeDescriptorSets.push_back( wds );
+            if ( auto property = material->GetTexture2DProperty( name ) )
+            {
+                if ( auto imageUniform = property->GetUniform() )
+                {
+                    if ( auto vulkanImage = sp_cast<Uniforms::API::Vulkan::VulkanUniformImage2D>( imageUniform ) )
+                    {
+                        auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
+                        auto  wds =
+                             DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex,
+                                                                  0, // set 0
+                                                                  vulkanImage->GetBinding(), 1U, &imageInfo );
+                        writeDescriptorSets.push_back( wds );
+                    }
+                }
+            }
         }
 
-        // Process cube  textures
-        for ( const auto& [name, prop] : material->GetTextureCubeProperties() )
+        // Process cube textures
+        for ( const auto& [name, index] : material->GetTextureCubeProperties() )
         {
-            const auto& imageInfo = sp_cast<Uniforms::API::Vulkan::VulkanUniformImageCube>( prop->GetUniform() );
-
-            auto wds = DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex,
-                                                            0, // set 0
-                                                            imageInfo->GetBinding(), 1U,
-                                                            &imageInfo->GetDescriptorImageInfo() );
-            writeDescriptorSets.push_back( wds );
+            if ( auto property = material->GetTextureCubeProperty( name ) )
+            {
+                if ( auto imageUniform = property->GetUniform() )
+                {
+                    if ( auto vulkanImage =
+                              sp_cast<Uniforms::API::Vulkan::VulkanUniformImageCube>( imageUniform ) )
+                    {
+                        auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
+                        auto  wds =
+                             DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex,
+                                                                  0, // set 0
+                                                                  vulkanImage->GetBinding(), 1U, &imageInfo );
+                        writeDescriptorSets.push_back( wds );
+                    }
+                }
+            }
         }
 
         if ( !writeDescriptorSets.empty() )

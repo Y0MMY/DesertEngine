@@ -23,15 +23,15 @@ namespace Desert::Graphic
 
         const auto& GetUniformBufferProperties() const
         {
-            return m_UniformBufferProperties;
+            return m_UniformBufferPropertiesLookup;
         }
         const auto& GetTexture2DProperties() const
         {
-            return m_Texture2DProperties;
+            return m_Texture2DPropertiesLookup;
         }
         const auto& GetTextureCubeProperties() const
         {
-            return m_TextureCubeProperties;
+            return m_TextureCubePropertiesLookup;
         }
 
         const auto& GetPushConstantBuffer() const
@@ -42,7 +42,7 @@ namespace Desert::Graphic
         // NOTE:temporary solution! in the future it is worth getting when parsing
         void PushConstant( const void* buffer, const uint32_t bufferSize )
         {
-            m_PushConstantBuffer.Write(buffer, bufferSize);
+            m_PushConstantBuffer.Write( buffer, bufferSize );
         }
 
         std::shared_ptr<UniformBufferProperty> GetUniformBufferProperty( const std::string& name ) const;
@@ -66,10 +66,22 @@ namespace Desert::Graphic
         std::shared_ptr<Shader>          m_Shader;
 
     protected:
+        template <typename T>
+        using PropertyStorage = std::vector<std::shared_ptr<T>>;
+
+        template <typename T>
+        using PropertyLookup = std::unordered_map<std::string, size_t>;
+
         Common::Memory::Buffer m_PushConstantBuffer;
 
-        std::unordered_map<std::string, std::shared_ptr<UniformBufferProperty>> m_UniformBufferProperties;
-        std::unordered_map<std::string, std::shared_ptr<TextureCubeProperty>>   m_TextureCubeProperties;
-        std::unordered_map<std::string, std::shared_ptr<Texture2DProperty>>     m_Texture2DProperties;
+        // Compact storage
+        PropertyStorage<UniformBufferProperty> m_UniformBufferPropertiesStorage;
+        PropertyStorage<Texture2DProperty>     m_Texture2DPropertiesStorage;
+        PropertyStorage<TextureCubeProperty>   m_TextureCubePropertiesStorage;
+
+        // Fast lookup
+        PropertyLookup<UniformBufferProperty> m_UniformBufferPropertiesLookup;
+        PropertyLookup<Texture2DProperty>     m_Texture2DPropertiesLookup;
+        PropertyLookup<TextureCubeProperty>   m_TextureCubePropertiesLookup;
     };
 } // namespace Desert::Graphic
