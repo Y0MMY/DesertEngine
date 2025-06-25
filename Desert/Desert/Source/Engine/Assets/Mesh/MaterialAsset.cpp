@@ -20,7 +20,7 @@ namespace Desert::Assets
     }
 
     MaterialAsset::MaterialAsset( const AssetPriority priority, const Common::Filepath& filepath )
-         : AssetBase( priority, filepath )
+         : AssetBase( priority, filepath ), m_MaterialAssetPath( GetMaterialFilename( filepath ) )
     {
     }
 
@@ -30,8 +30,7 @@ namespace Desert::Assets
         const std::string directory = Common::Utils::FileSystem::GetFileDirectoryString( m_Filepath );
 
         Assimp::Importer importer;
-
-        const aiScene* scene = importer.ReadFile( modelPath, 0 );
+        const aiScene*   scene = importer.ReadFile( modelPath, 0 );
 
         if ( !scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode ||
              scene->mNumMaterials == 0 )
@@ -42,7 +41,8 @@ namespace Desert::Assets
 
         aiMaterial* material = scene->mMaterials[0];
 
-        auto loadTexture = [&]( aiTextureType type, MaterialTextureName textureName ) -> bool
+        auto loadTexture = [&]( aiTextureType type, TextureAsset::Type textureType,
+                                const glm::vec4& defaultColor ) -> bool
         {
             if ( material->GetTextureCount( type ) > 0 )
             {
@@ -51,10 +51,15 @@ namespace Desert::Assets
                 {
                     const Common::Filepath fullPath = directory + texturePath.C_Str();
 
-                    auto texture = Graphic::Texture2D::Create( { true }, fullPath );
-                    if ( texture->Invalidate() )
+                    auto textureSlot = std::make_unique<TextureSlot>();
+                    textureSlot->Texture =
+                         std::make_unique<TextureAsset>( AssetPriority::Low, fullPath, textureType );
+                    textureSlot->DefaultColor = defaultColor;
+
+                    if ( textureSlot->Texture->Load() )
                     {
-                        m_MaterialsTexture[static_cast<uint8_t>( textureName )] = { fullPath, texture };
+                        m_TextureSlots.push_back( std::move( textureSlot ) );
+                        m_TextureLookup[textureType] = std::prev( m_TextureSlots.end() );
                         return true;
                     }
                 }
@@ -62,16 +67,14 @@ namespace Desert::Assets
             return false;
         };
 
-        bool hasAlbedo    = loadTexture( aiTextureType_DIFFUSE, MaterialTextureName::Albedo );
-        bool hasMetallic  = loadTexture( aiTextureType_METALNESS, MaterialTextureName::Metallic );
-        bool hasRoughness = loadTexture( aiTextureType_DIFFUSE_ROUGHNESS, MaterialTextureName::Roughness );
-
-        LOG_TRACE( "Albedo was{}load", hasAlbedo ? " " : " not " )
-        LOG_TRACE( "Metallic was{}load", hasMetallic ? " " : " not " )
-        LOG_TRACE( "Roughness was{}load", hasRoughness ? " " : " not " )
+        loadTexture( aiTextureType_DIFFUSE, TextureAsset::Type::Albedo, glm::vec4( 1.0f ) );
+        loadTexture( aiTextureType_NORMALS, TextureAsset::Type::Normal, glm::vec4( 0.5f, 0.5f, 1.0f, 1.0f ) );
+        loadTexture( aiTextureType_METALNESS, TextureAsset::Type::Metallic, glm::vec4( 0.0f ) );
+        loadTexture( aiTextureType_DIFFUSE_ROUGHNESS, TextureAsset::Type::Roughness, glm::vec4( 1.0f ) );
+        loadTexture( aiTextureType_AMBIENT_OCCLUSION, TextureAsset::Type::AO, glm::vec4( 1.0f ) );
+        loadTexture( aiTextureType_EMISSIVE, TextureAsset::Type::Emissive, glm::vec4( 0.0f ) );
 
         m_ReadyForUse = true;
-
         return BOOLSUCCESS;
     }
 

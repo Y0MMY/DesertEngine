@@ -49,7 +49,7 @@ namespace Desert::ECS
 
     struct MaterialComponent
     {
-        Assets::AssetHandle MaterialHandle;
+        Assets::Asset<Assets::MaterialAsset> Material;
     };
 
     struct SkyboxComponent

@@ -25,7 +25,9 @@ namespace Desert::Assets
                 return sp_cast<AssetType>( m_AssetsCache[it->second].second );
             }
 
-            auto asset = std::make_shared<AssetType>( priority, key);
+            // NOTE:Perhaps the creation of an asset via the Create() method should be defined for each type
+            // separately, and then call AssetType::Create()
+            auto asset = std::make_shared<AssetType>( priority, filepath );
             if ( loadAfterCreate )
             {
                 asset->Load();

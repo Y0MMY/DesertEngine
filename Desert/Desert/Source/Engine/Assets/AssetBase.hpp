@@ -25,6 +25,7 @@ namespace Desert::Assets
         Unknown = 0,
         Mesh,
         Material,
+        Texture2D,
     };
 
     class MeshAsset;
@@ -44,7 +45,7 @@ namespace Desert::Assets
             return m_Handle;
         }
 
-        virtual const Common::Filepath& GetFilepath() const final
+        virtual const Common::Filepath& GetBaseFilepath() const final
         {
             return m_Filepath;
         }
@@ -63,6 +64,11 @@ namespace Desert::Assets
         {
             return filepath;
         }
+
+       /* static Asset<AssetBase> Create( const AssetPriority priority, const Common::Filepath& filepath )
+        {
+            return std::make_shared<AssetBase>( priority, filepath );
+        }*/
 
     protected:
         AssetHandle      m_Handle;
