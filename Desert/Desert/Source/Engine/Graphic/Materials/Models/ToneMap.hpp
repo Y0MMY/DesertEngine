@@ -19,7 +19,7 @@ namespace Desert::Graphic::Models
         void UpdateToneMap( const std::shared_ptr<Image2D>& toneMapImage )
         {
             m_ToneMapImage = toneMapImage;
-            m_UniformProperty->SetTexture( m_ToneMapImage );
+            m_UniformProperty->SetImage( m_ToneMapImage );
         }
 
     private:

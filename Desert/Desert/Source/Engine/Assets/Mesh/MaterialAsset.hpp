@@ -38,7 +38,7 @@ namespace Desert::Assets
         {
             auto it = m_TextureLookup.find( type );
             if ( it != m_TextureLookup.end() )
-                return it->second->get(); 
+                return it->second->get();
             return nullptr;
         }
 
@@ -51,6 +51,11 @@ namespace Desert::Assets
                 return ( *it->second )->Texture->GetTexture();
             }
             return nullptr;
+        }
+
+        const auto& GetTextureLookup() const
+        {
+            return m_TextureLookup;
         }
 
         static AssetManager::KeyHandle GetAssetKey( const Common::Filepath& filepath );

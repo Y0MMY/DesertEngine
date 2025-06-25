@@ -5,6 +5,8 @@
 
 #include <Common/Utilities/FileSystem.hpp>
 
+#include <Engine/Graphic/Materials/MaterialFactory.hpp>
+
 #include <ImGui/imgui.h>
 
 namespace Desert::Editor
@@ -261,6 +263,53 @@ namespace Desert::Editor
         DrawTextureSlot( "Roughness", Assets::TextureAsset::Type::Roughness );
     }
 
+    bool NeedCreateMaterialAsset( const ECS::MaterialComponent&               materialComponent,
+                                  const Assets::Asset<Assets::MaterialAsset>& materialAsset )
+    {
+        return !materialComponent.MaterialInstance.SourceAsset || !materialAsset ||
+               !materialAsset->IsReadyForUse();
+    }
+
+    void CreateMaterialAsset( ECS::MaterialComponent&                      materialComponent,
+                              const std::shared_ptr<Assets::AssetManager>& assetManager,
+                              const std::shared_ptr<Assets::MeshAsset>&    meshAsset )
+    {
+        if ( meshAsset )
+        {
+            materialComponent.MaterialInstance =
+                 Graphic::MaterialFactory::CreateFromAsset( assetManager->CreateAsset<Assets::MaterialAsset>(
+                      Assets::AssetPriority::Low, meshAsset->GetBaseFilepath() ) );
+        }
+    }
+
+    void ScenePropertiesPanel::DrawMaterialInfo( Assets::Asset<Assets::MaterialAsset>& materialAsset )
+    {
+        if ( !materialAsset )
+            return;
+
+        ImGui::TextColored( ImVec4( 0.8f, 0.8f, 0.2f, 1.0f ), "Material Status:" );
+        ImGui::SameLine();
+        ImGui::Text( materialAsset->IsReadyForUse() ? "Ready" : "Not Ready..." );
+
+        if ( materialAsset->IsReadyForUse() )
+        {
+            int loadedTexturesCount = 0;
+            for ( int i = 0; i < 3; i++ )
+            {
+                if ( materialAsset->HasTexture( static_cast<Assets::TextureAsset::Type>( i ) ) )
+                {
+                    loadedTexturesCount++;
+                }
+            }
+
+            ImGui::Text( "Textures loaded:" );
+            ImGui::SameLine();
+            ImGui::Text( "%d/3", loadedTexturesCount );
+
+            DrawMaterialEditor( materialAsset );
+        }
+    }
+
     void ScenePropertiesPanel::DrawMaterialEntity( const ECS::Entity& entity )
     {
         const bool  hasMaterial   = entity.HasComponent<ECS::MaterialComponent>();
@@ -269,51 +318,22 @@ namespace Desert::Editor
 
         if ( hasMaterial )
         {
-            auto&                                materialComponent = entity.GetComponent<ECS::MaterialComponent>();
-            Assets::Asset<Assets::MaterialAsset> materialAsset     = nullptr;
+            auto& materialComponent = entity.GetComponent<ECS::MaterialComponent>();
 
-            bool needCreateAsset = !materialComponent.Material;
+            auto materialAsset = materialComponent.MaterialInstance.SourceAsset
+                                      ? m_AssetManager->FindByHandle<Assets::MaterialAsset>(
+                                             materialComponent.MaterialInstance.SourceAsset )
+                                      : nullptr;
 
-            if ( !needCreateAsset )
+            if ( NeedCreateMaterialAsset( materialComponent, materialAsset ) )
             {
-                materialAsset = m_AssetManager->FindByHandle<Assets::MaterialAsset>(
-                     materialComponent.Material->GetHandle() );
-                needCreateAsset = !materialAsset || !materialAsset->IsReadyForUse();
-            }
-
-            if ( needCreateAsset && meshAsset )
-            {
-                materialAsset = m_AssetManager->CreateAsset<Assets::MaterialAsset>( Assets::AssetPriority::Low,
-                                                                                    meshAsset->GetBaseFilepath() );
-                materialComponent.Material = materialAsset;
+                CreateMaterialAsset( materialComponent, m_AssetManager, meshAsset );
             }
 
             if ( ImGui::CollapsingHeader( "Materials", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
-                ImGui::TextColored( ImVec4( 0.8f, 0.8f, 0.2f, 1.0f ), "Material Status:" );
-                ImGui::SameLine();
-                ImGui::Text( ( !materialAsset || !materialAsset->IsReadyForUse() ) ? "Not Ready..." : "Ready" );
-                if ( materialAsset )
-                {
+                DrawMaterialInfo( materialAsset );
 
-                    int loadedTexturesCount = 0;
-                    if ( materialAsset->IsReadyForUse() )
-                    {
-                        for ( int i = 0; i < 3; i++ )
-                        {
-                            if ( materialAsset->HasTexture( static_cast<Assets::TextureAsset::Type>( i ) ) )
-                            {
-                                loadedTexturesCount++;
-                            }
-                        }
-                    }
-
-                    ImGui::Text( "Textures loaded:" );
-                    ImGui::SameLine();
-                    ImGui::Text( "%d/3", loadedTexturesCount );
-
-                    DrawMaterialEditor( materialAsset );
-                }
                 if ( ImGui::Button( "Remove Material", ImVec2( ImGui::GetContentRegionAvail().x, 24 ) ) )
                 {
                     // selectedEntity.RemoveComponent<ECS::MaterialComponent>();

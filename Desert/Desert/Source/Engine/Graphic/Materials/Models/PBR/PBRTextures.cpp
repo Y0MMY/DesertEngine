@@ -18,7 +18,7 @@ namespace Desert::Graphic::Models::PBR
         m_PBRPBRTextures = std::move( pbr );
         m_UniformProperties[1]->SetTexture( m_PBRPBRTextures.PreFilteredMap );
         m_UniformProperties[0]->SetTexture( m_PBRPBRTextures.IrradianceMap );
-        m_UniformProperty->SetTexture( Renderer::GetInstance().GetBRDFTexture()->GetImage2D() );
+        m_UniformProperty->SetImage( Renderer::GetInstance().GetBRDFTexture()->GetImage2D() );
     }
 
     const std::string_view PBRMaterialTexture::GetUniformIrradianceName()

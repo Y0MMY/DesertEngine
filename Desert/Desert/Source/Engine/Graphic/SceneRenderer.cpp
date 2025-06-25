@@ -327,7 +327,9 @@ namespace Desert::Graphic
         renderer.EndRenderPass();
     }
 
-    void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>& mesh, const glm::mat4& transform )
+    void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>&     mesh,
+                                             const std::shared_ptr<Material>& material,
+                                             const glm::mat4&                 transform )
     {
         if ( mesh )
         {

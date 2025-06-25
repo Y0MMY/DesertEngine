@@ -133,17 +133,17 @@ namespace Desert::Core
                 auto&       meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
                 const auto& mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );
                 entitySer.StaticMesh =
-                     internal::StaticMeshComponentSer{ mesh ? mesh->GetFilepath().string() : "" };
+                     internal::StaticMeshComponentSer{ mesh ? mesh->GetBaseFilepath().string() : "" };
             }
 
-            if ( entity.HasComponent<ECS::MaterialComponent>() )
+           /* if ( entity.HasComponent<ECS::MaterialComponent>() )
             {
                 auto&       materialhComponent = entity.GetComponent<ECS::MaterialComponent>();
                 const auto& material =
                      m_AssetManager->FindByHandle<Assets::MeshAsset>( materialhComponent.MaterialHandle );
                 entitySer.Material =
                      internal::MaterialComponentSer{ material ? material->GetFilepath().string() : "" };
-            }
+            }*/
 
             if ( entity.HasComponent<ECS::SkyboxComponent>() )
             {

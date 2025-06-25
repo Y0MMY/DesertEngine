@@ -20,6 +20,8 @@ namespace Desert::Editor
         void DrawMaterialEditor( Assets::Asset<Assets::MaterialAsset>& material );
         void DrawMaterialEntity( const ECS::Entity& entity );
 
+        void DrawMaterialInfo(  Assets::Asset<Assets::MaterialAsset>& materialAsset );
+
     private:
         std::shared_ptr<Desert::Core::Scene>        m_Scene;
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;

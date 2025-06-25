@@ -75,7 +75,9 @@ namespace Desert::Core
         void Serialize() const;
 
     private:
-        void AddMeshToRenderList( const Assets::AssetHandle handle, const glm::mat4& transform ) const;
+        void AddMeshToRenderList( const Assets::AssetHandle                   handle,
+                                  const Assets::Asset<Assets::MaterialAsset>& material,
+                                  const glm::mat4&                            transform ) const;
         void SetEnvironment( const Graphic::Environment& environment );
 
     private:

@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Materials/Properties/MaterialProperty.hpp>
 
+#include <Engine/Graphic/Texture.hpp>
 #include <Engine/Uniforms/UniformImage2D.hpp>
 
 namespace Desert::Graphic
@@ -32,7 +33,13 @@ namespace Desert::Graphic
             return nullptr;
         }
 
-        void SetTexture( std::shared_ptr<Image2D> texture )
+        void SetTexture( std::shared_ptr<Texture2D> texture )
+        {
+            m_Texture = texture->GetImage2D();
+            m_Uniform->SetImage2D( m_Texture );
+        }
+
+        void SetImage( std::shared_ptr<Image2D> texture )
         {
             m_Texture = texture;
             m_Uniform->SetImage2D( m_Texture );
