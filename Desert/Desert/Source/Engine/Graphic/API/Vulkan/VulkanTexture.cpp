@@ -79,6 +79,11 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanTexture2D::~VulkanTexture2D()
     {
+        Release();
+    }
+
+    void VulkanTexture2D::Release()
+    {
         m_Image2D->Release();
     }
 
@@ -108,6 +113,11 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     VulkanTextureCube::~VulkanTextureCube()
+    {
+        Release();
+    }
+
+    void VulkanTextureCube::Release()
     {
         m_ImageCube->Release();
     }

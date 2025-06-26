@@ -17,16 +17,7 @@ namespace Desert::Graphic::API::Vulkan
 
     VkFormat GetImageVulkanFormat( const Core::Formats::ImageFormat& imageFormat );
 
-    class VulkanImageBase : public Image
-    {
-    public:
-        virtual ~VulkanImageBase() = default;
-
-        virtual const VulkanImageInfo& GetVulkanImageInfo() const = 0;
-        virtual uint32_t               GetMipmapLevels() const    = 0;
-    };
-
-    class VulkanImage2D final : public Image2D, public VulkanImageBase
+    class VulkanImage2D final : public Image2D
     {
     public:
         VulkanImage2D( const Core::Formats::Image2DSpecification& specification );
@@ -73,7 +64,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Core::Formats::ImagePixelData GetImagePixels() const override;
 
         // VulkanImageBase interface
-        virtual const VulkanImageInfo& GetVulkanImageInfo() const override
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const 
         {
             return m_VulkanImageInfo;
         }
@@ -102,7 +93,7 @@ namespace Desert::Graphic::API::Vulkan
         VulkanImageInfo                     m_VulkanImageInfo;
     };
 
-    class VulkanImageCube final : public ImageCube, public VulkanImageBase
+    class VulkanImageCube final : public ImageCube
     {
     public:
         VulkanImageCube( const Core::Formats::ImageCubeSpecification& specification );
@@ -149,7 +140,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Core::Formats::ImagePixelData GetImagePixels() const override;
 
         // VulkanImageBase interface
-        virtual const VulkanImageInfo& GetVulkanImageInfo() const override
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const 
         {
             return m_VulkanImageInfo;
         }

@@ -17,6 +17,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         virtual Common::BoolResult Invalidate() override;
+        virtual void               Release() override;
 
         virtual uint32_t GetWidth() const
         {
@@ -46,6 +47,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         virtual Common::BoolResult Invalidate() override;
+        virtual void               Release() override;
 
         virtual uint32_t GetWidth() const
         {

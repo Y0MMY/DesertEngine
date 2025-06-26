@@ -32,6 +32,7 @@ namespace Desert::Graphic::API::Vulkan
         void ReadBuffer( uint32_t bufferSize ); // TEMP
 
         virtual void Invalidate() override;
+        virtual void Release() override;
 
     private:
         std::shared_ptr<Shader> m_Shader;

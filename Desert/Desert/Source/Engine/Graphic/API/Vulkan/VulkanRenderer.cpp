@@ -138,6 +138,8 @@ namespace Desert::Graphic::API::Vulkan
 
             pipelineCompute->End();
 
+            inputImage->Release();
+
             return outputImage;
         }
 

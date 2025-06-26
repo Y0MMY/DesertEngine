@@ -40,6 +40,7 @@ namespace Desert::Graphic
         virtual void End()                                                                        = 0;
 
         virtual void Invalidate() = 0;
+        virtual void Release() = 0;
 
         static std::shared_ptr<PipelineCompute> Create( const std::shared_ptr<Shader>& shader );
     };

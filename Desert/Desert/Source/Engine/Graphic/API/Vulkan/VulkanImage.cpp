@@ -38,7 +38,11 @@ namespace Desert::Graphic::API::Vulkan
 
                 if ( vkCreateImageView( device, &viewInfo, nullptr, &result[mip] ) != VK_SUCCESS )
                 {
-                    return {};
+                    for ( uint32_t i = 0; i < mip; ++i )
+                    {
+                        vkDestroyImageView( device, result[i], nullptr );
+                    }
+                    LOG_ERROR( "Failed to create image view for mip level " + std::to_string( mip ) );
                 }
             }
 
@@ -453,6 +457,11 @@ namespace Desert::Graphic::API::Vulkan
 
         m_MipImageViews =
              Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, false, isDepth );
+        if ( m_MipImageViews.empty() || m_MipImageViews.size() != m_MipLevels )
+        {
+            Release();
+            return Common::MakeError<bool>( "Failed to create mip image views" );
+        }
 
         return Common::MakeSuccess( true );
     }
@@ -679,15 +688,20 @@ namespace Desert::Graphic::API::Vulkan
             m_MipImageViews[i] = nullptr;
         }
 
-        return Utils::DestroyImageInfo( device, m_VulkanImageInfo );
+        m_MipImageViews.clear();
+
+        if ( m_VulkanImageInfo.Image )
+        {
+            Utils::DestroyImageInfo( device, m_VulkanImageInfo );
+            m_VulkanImageInfo = VulkanImageInfo{};
+        }
+
+        return BOOLSUCCESS;
     }
 
     VulkanImage2D::~VulkanImage2D()
     {
-        if ( m_VulkanImageInfo.Image )
-        {
-            Release();
-        }
+        Release();
     }
 
     //***************************************************************************************************//
@@ -700,6 +714,11 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanImageCube::RT_Invalidate()
     {
+        if ( m_VulkanImageInfo.Image )
+        {
+            Release();
+        }
+
         const uint32_t faceWidth  = m_ImageSpecification.Width / 4;
         const uint32_t faceHeight = m_ImageSpecification.Height / 3;
 
@@ -729,7 +748,10 @@ namespace Desert::Graphic::API::Vulkan
         auto viewResult =
              Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, true, false );
         if ( !viewResult.IsSuccess() )
+        {
+            Release();
             return Common::MakeError<bool>( viewResult.GetError() );
+        }
 
         m_VulkanImageInfo.ImageView = viewResult.GetValue();
         m_VulkanImageInfo.Layout =
@@ -756,64 +778,65 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( "No image data provided for cubemap" );
         }
 
+        struct StagingBuffer
+        {
+            VkBuffer      buffer     = VK_NULL_HANDLE;
+            VmaAllocation allocation = nullptr;
+
+            ~StagingBuffer()
+            {
+                if ( buffer )
+                {
+                    VulkanAllocator::GetInstance().RT_DestroyBuffer( buffer, allocation );
+                }
+            }
+        } stagingBuffer;
+
         const uint32_t bytesPerPixel = GetBytesPerPixel( m_ImageSpecification.Format );
         const uint32_t faceSize      = m_FaceSize * m_FaceSize * bytesPerPixel;
         const uint32_t totalSize     = faceSize * CUBEMAP_FACE_COUNT;
-        const uint32_t srcRowPitch   = m_ImageSpecification.Width * bytesPerPixel;
 
-        VkBuffer      stagingBuffer     = VK_NULL_HANDLE;
-        VmaAllocation stagingAllocation = nullptr;
         {
-            auto stagingAlloc = Utils::CreateStagingBuffer( totalSize, stagingBuffer );
+            auto stagingAlloc = Utils::CreateStagingBuffer( totalSize, stagingBuffer.buffer );
             if ( !stagingAlloc.IsSuccess() )
             {
                 return Common::MakeError<bool>( "Failed to create staging buffer: " + stagingAlloc.GetError() );
             }
-            stagingAllocation = stagingAlloc.GetValue();
+            stagingBuffer.allocation = stagingAlloc.GetValue();
         }
 
         {
-            uint8_t* dstData =
-                 static_cast<uint8_t*>( VulkanAllocator::GetInstance().MapMemory( stagingAllocation ) );
             auto srcDataResult =
                  Utils::GetImageDataPointer( m_ImageSpecification.Data, m_ImageSpecification.Format );
-
             if ( !srcDataResult.IsSuccess() )
             {
-                VulkanAllocator::GetInstance().RT_DestroyBuffer( stagingBuffer, stagingAllocation );
                 return Common::MakeError<bool>( "Failed to get image data: " + srcDataResult.GetError() );
             }
 
-            const uint8_t* srcData = srcDataResult.GetValue();
-            CopyImageDataToCubemapFaces( srcData, dstData, srcRowPitch, faceSize, bytesPerPixel );
-            VulkanAllocator::GetInstance().UnmapMemory( stagingAllocation );
+            uint8_t* dstData =
+                 static_cast<uint8_t*>( VulkanAllocator::GetInstance().MapMemory( stagingBuffer.allocation ) );
+            CopyImageDataToCubemapFaces( srcDataResult.GetValue(), dstData,
+                                         m_ImageSpecification.Width * bytesPerPixel, faceSize, bytesPerPixel );
+            VulkanAllocator::GetInstance().UnmapMemory( stagingBuffer.allocation );
         }
 
+        auto imageAlloc =
+             Utils::CreateImage( imageInfo, m_VulkanImageInfo.Image, m_ImageSpecification.Tag + " (cube)" );
+        if ( !imageAlloc.IsSuccess() )
         {
-            auto imageAlloc =
-                 Utils::CreateImage( imageInfo, m_VulkanImageInfo.Image, m_ImageSpecification.Tag + " (cube)" );
-            if ( !imageAlloc.IsSuccess() )
-            {
-                VulkanAllocator::GetInstance().RT_DestroyBuffer( stagingBuffer, stagingAllocation );
-                return Common::MakeError<bool>( "Failed to create cube image: " + imageAlloc.GetError() );
-            }
-            m_VulkanImageInfo.MemoryAlloc = imageAlloc.GetValue();
+            return Common::MakeError<bool>( "Failed to create cube image: " + imageAlloc.GetError() );
         }
+        m_VulkanImageInfo.MemoryAlloc = imageAlloc.GetValue();
 
+        auto cmdBuffer = Utils::GetCommandBuffer();
+        if ( !cmdBuffer.IsSuccess() )
         {
-            auto cmdBuffer = Utils::GetCommandBuffer();
-            if ( !cmdBuffer.IsSuccess() )
-            {
-                VulkanAllocator::GetInstance().RT_DestroyBuffer( stagingBuffer, stagingAllocation );
-                Release();
-                return Common::MakeError<bool>( "Failed to get command buffer: " + cmdBuffer.GetError() );
-            }
-
-            CopyStagingToGpuImage( cmdBuffer.GetValue(), stagingBuffer, format, faceSize );
-            CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmdBuffer.GetValue() );
+            Release(); 
+            return Common::MakeError<bool>( "Failed to get command buffer: " + cmdBuffer.GetError() );
         }
 
-        VulkanAllocator::GetInstance().RT_DestroyBuffer( stagingBuffer, stagingAllocation );
+        CopyStagingToGpuImage( cmdBuffer.GetValue(), stagingBuffer.buffer, format, faceSize );
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmdBuffer.GetValue() );
 
         return Common::MakeSuccess( true );
     }
@@ -936,7 +959,13 @@ namespace Desert::Graphic::API::Vulkan
         }
         m_MipImageViews.clear();
 
-        return Utils::DestroyImageInfo( device, m_VulkanImageInfo );
+        if ( m_VulkanImageInfo.Image )
+        {
+            Utils::DestroyImageInfo( device, m_VulkanImageInfo );
+            m_VulkanImageInfo = VulkanImageInfo{};
+        }
+
+        return BOOLSUCCESS;
     }
 
     VulkanImageCube::~VulkanImageCube()

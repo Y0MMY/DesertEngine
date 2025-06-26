@@ -154,4 +154,29 @@ namespace Desert::Graphic::API::Vulkan
                             size, data );
     }
 
+    void VulkanPipelineCompute::Release()
+    {
+        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        if ( m_ComputePipeline != VK_NULL_HANDLE )
+        {
+            vkDestroyPipeline( device, m_ComputePipeline, nullptr );
+            m_ComputePipeline = VK_NULL_HANDLE;
+        }
+
+        if ( m_ComputePipelineLayout != VK_NULL_HANDLE )
+        {
+            vkDestroyPipelineLayout( device, m_ComputePipelineLayout, nullptr );
+            m_ComputePipelineLayout = VK_NULL_HANDLE;
+        }
+
+        if ( m_PipelineCache != VK_NULL_HANDLE )
+        {
+            vkDestroyPipelineCache( device, m_PipelineCache, nullptr );
+            m_PipelineCache = VK_NULL_HANDLE;
+        }
+
+        m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
+    }
+
 } // namespace Desert::Graphic::API::Vulkan
