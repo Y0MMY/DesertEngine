@@ -113,6 +113,7 @@ namespace Desert::Core
 
     void Scene::Shutdown()
     {
+        m_SceneRenderer->Shutdown();
         m_SceneRenderer.reset();
     }
 

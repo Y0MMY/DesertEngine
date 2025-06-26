@@ -17,6 +17,7 @@ namespace Desert::Graphic
     class Texture
     {
     public:
+        virtual ~Texture()                      = default;
         virtual Common::BoolResult Invalidate() = 0;
 
         virtual uint32_t GetWidth() const  = 0;
@@ -26,6 +27,8 @@ namespace Desert::Graphic
     class Texture2D : public Texture
     {
     public:
+        virtual ~Texture2D() = default;
+
         Core::Formats::Image2DUsage GetType() const
         {
             return Core::Formats::Image2DUsage::Image2D;
@@ -39,6 +42,8 @@ namespace Desert::Graphic
     class TextureCube : public Texture
     {
     public:
+        virtual ~TextureCube() = default;
+
         virtual const std::shared_ptr<ImageCube>& GetImageCube() const = 0;
 
         static std::shared_ptr<TextureCube> Create( const TextureSpecification&  specification,

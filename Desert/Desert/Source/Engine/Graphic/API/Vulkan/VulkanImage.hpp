@@ -168,6 +168,12 @@ namespace Desert::Graphic::API::Vulkan
                                                VkFormat format );
         VkImageCreateInfo  CreateImageInfo( VkFormat format );
 
+        void CopyStagingToGpuImage( VkCommandBuffer commandBuffer, VkBuffer stagingBuffer, VkFormat format,
+                                    uint32_t faceSize );
+
+        void CopyImageDataToCubemapFaces( const uint8_t* srcData, uint8_t* dstData, uint32_t srcRowPitch,
+                                          uint32_t faceSize, uint32_t bytesPerPixel );
+
     private:
         uint32_t                              m_FaceSize  = 0u;
         uint32_t                              m_MipLevels = 1u;

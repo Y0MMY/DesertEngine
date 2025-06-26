@@ -77,6 +77,11 @@ namespace Desert::Graphic::API::Vulkan
         // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
     }
 
+    VulkanTexture2D::~VulkanTexture2D()
+    {
+        m_Image2D->Release();
+    }
+
     VulkanTextureCube::VulkanTextureCube( const TextureSpecification&  specification,
                                           const std::filesystem::path& path )
          : m_TexturePath( path ), m_Specification( specification )
@@ -100,6 +105,11 @@ namespace Desert::Graphic::API::Vulkan
         m_ImageCube = ImageCube::Create( imageSpec, mipGenerator );
         return Common::MakeSuccess( true ); // TODO
         // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
+    }
+
+    VulkanTextureCube::~VulkanTextureCube()
+    {
+        m_ImageCube->Release();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

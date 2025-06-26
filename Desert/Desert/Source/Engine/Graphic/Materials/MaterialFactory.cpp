@@ -12,8 +12,8 @@ namespace Desert::Graphic
 
         for ( const auto& [type, iterator] : asset->GetTextureLookup() )
         {
-            /*material->GetTexture2DProperty( Assets::Mapper::GetTextureType( type ) )
-                 ->SetTexture( asset->GetTexture( type ) );*/
+            material->GetTexture2DProperty( Assets::Mapper::GetTextureType( type ) )
+                 ->SetTexture( asset->GetTexture( type ) );
         }
 
         return MaterialAssetLink{ material, asset->GetHandle() };

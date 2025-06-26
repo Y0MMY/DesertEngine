@@ -61,6 +61,7 @@ namespace Desert::Graphic::API::Vulkan
                  Graphic::Utils::CalculateMipCount( processingInfo.width / 4, processingInfo.height / 3 );
 
             Core::Formats::ImageCubeSpecification outputImageInfo = {
+                 .Tag        = inputImage->GetImageSpecification().Tag + "_" + processingInfo.shaderName,
                  .Width      = processingInfo.width,
                  .Height     = processingInfo.height,
                  .Format     = processingInfo.format,
@@ -603,7 +604,12 @@ namespace Desert::Graphic::API::Vulkan
     {
         vkDeviceWaitIdle( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice() );
 
+        m_DescriptorManager.reset();
+        s_Data->QuadVertexBuffer->Release();
+        s_Data->QuadIndexBuffer->Release();
+
         delete s_Data;
+        s_Data = nullptr;
     }
 
     VkCommandBuffer VulkanRendererAPI::GetCurrentCmdBuffer() const

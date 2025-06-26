@@ -170,7 +170,8 @@ namespace Desert::Graphic::API::Vulkan
         // Create our own attachments
         for ( const auto attachment : spec.Attachments.Attachments )
         {
-            Core::Formats::Image2DSpecification imageSpec = { .Format = attachment,
+            Core::Formats::Image2DSpecification imageSpec = { .Tag    = spec.DebugName,
+                                                              .Format = attachment,
                                                               .Usage  = Core::Formats::Image2DUsage::Attachment,
                                                               .Properties = Core::Formats::Sample };
 
@@ -226,6 +227,7 @@ namespace Desert::Graphic::API::Vulkan
             auto& spec  = colorAttachment->GetImageSpecification();
             spec.Width  = width;
             spec.Height = height;
+
             sp_cast<VulkanImage2D>( colorAttachment )->RT_Invalidate();
         }
 

@@ -9,7 +9,7 @@ namespace Desert::Assets::Mapper
         switch ( type )
         {
             case Desert::Assets::TextureAsset::Type::Albedo:
-                return "";
+                return "u_AlbedoTexture";
             case Desert::Assets::TextureAsset::Type::Normal:
                 break;
             case Desert::Assets::TextureAsset::Type::Metallic:

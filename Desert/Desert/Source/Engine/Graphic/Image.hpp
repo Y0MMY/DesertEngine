@@ -31,6 +31,8 @@ namespace Desert::Graphic
     class Image2D : public Image, public DynamicResources
     {
     public:
+        virtual ~Image2D() = default;
+
         virtual Core::Formats::Image2DSpecification& GetImageSpecification() = 0;
 
         static std::shared_ptr<Image2D> Create( const Core::Formats::Image2DSpecification& spec,
@@ -40,6 +42,8 @@ namespace Desert::Graphic
     class ImageCube : public Image, public DynamicResources
     {
     public:
+        virtual ~ImageCube() = default;
+
         virtual Core::Formats::ImageCubeSpecification& GetImageSpecification() = 0;
 
         static std::shared_ptr<ImageCube> Create( const Core::Formats::ImageCubeSpecification& spec,
