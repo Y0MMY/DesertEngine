@@ -88,17 +88,17 @@ namespace Desert::Graphic::API::Vulkan
             std::array<VkDescriptorImageInfo, 2> imageInfo = {};
 
             // Input image
-            imageInfo[0].imageView   = inputImage->GetVulkanImageInfo().ImageView;
-            imageInfo[0].sampler     = inputImage->GetVulkanImageInfo().Sampler;
+            imageInfo[0].imageView   = inputImage->GetVulkanImageInfo().ImageInfo.imageView;
+            imageInfo[0].sampler     = inputImage->GetVulkanImageInfo().ImageInfo.sampler;
             imageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
             // Output image
-            imageInfo[1].imageView   = outputImageVulkan->GetVulkanImageInfo().ImageView;
+            imageInfo[1].imageView   = outputImageVulkan->GetVulkanImageInfo().ImageInfo.imageView;
             imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
             std::vector<VkWriteDescriptorSet> descriptorWrites;
 
-            descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerWDS(
+            descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
                  sp_cast<VulkanShader>( shader ), frameIndex, 0, 0, 1, &imageInfo[0] ) );
 
             descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS(
@@ -548,9 +548,9 @@ namespace Desert::Graphic::API::Vulkan
             std::array<VkDescriptorImageInfo, 2> imageInfo = {};
 
             // Input image (previous mip)
-            imageInfo[0].imageView   = ( mip == 1 ) ? vulkanImage.GetVulkanImageInfo().ImageView
+            imageInfo[0].imageView   = ( mip == 1 ) ? vulkanImage.GetVulkanImageInfo().ImageInfo.imageView
                                                     : vulkanImage.GetMipImageView( mip - 1 );
-            imageInfo[0].sampler     = vulkanImage.GetVulkanImageInfo().Sampler;
+            imageInfo[0].sampler     = vulkanImage.GetVulkanImageInfo().ImageInfo.sampler;
             imageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
             // Output image (current mip)
@@ -559,7 +559,7 @@ namespace Desert::Graphic::API::Vulkan
 
             std::vector<VkWriteDescriptorSet> descriptorWrites;
 
-            descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerWDS(
+            descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
                  sp_cast<VulkanShader>( shader ), frameIndex, 0, 0, 1, &imageInfo[0] ) );
 
             descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS(

@@ -261,24 +261,25 @@ namespace Desert::Graphic::API::Vulkan
 
         for ( const auto& colorAttachment : m_ColorAttachments )
         {
-            attachments.push_back( sp_cast<VulkanImage2D>( colorAttachment )->GetVulkanImageInfo().ImageView );
+            attachments.push_back(
+                 sp_cast<VulkanImage2D>( colorAttachment )->GetVulkanImageInfo().ImageInfo.imageView );
         }
 
         if ( m_DepthAttachment )
         {
-            attachments.push_back( sp_cast<VulkanImage2D>( m_DepthAttachment )->GetVulkanImageInfo().ImageView );
+            attachments.push_back( sp_cast<VulkanImage2D>( m_DepthAttachment )->GetVulkanImageInfo().ImageInfo.imageView);
         }
 
         for ( const auto& externalColorAttachment : m_ExternalColorAttachments )
         {
             attachments.push_back(
-                 sp_cast<VulkanImage2D>( externalColorAttachment )->GetVulkanImageInfo().ImageView );
+                 sp_cast<VulkanImage2D>( externalColorAttachment )->GetVulkanImageInfo().ImageInfo.imageView);
         }
 
         if ( m_ExternalDepthAttachment )
         {
             attachments.push_back(
-                 sp_cast<VulkanImage2D>( m_ExternalDepthAttachment )->GetVulkanImageInfo().ImageView );
+                 sp_cast<VulkanImage2D>( m_ExternalDepthAttachment )->GetVulkanImageInfo().ImageInfo.imageView);
         }
 
         VkFramebufferCreateInfo framebufferCreateInfo = {};

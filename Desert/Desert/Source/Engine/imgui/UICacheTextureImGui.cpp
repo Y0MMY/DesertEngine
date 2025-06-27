@@ -21,19 +21,19 @@ namespace Desert::ImGui
 
             const auto vulkanImageInfo =
                  sp_cast<Graphic::API::Vulkan::VulkanImage2D>( image )->GetVulkanImageInfo();
-            if ( !vulkanImageInfo.ImageView )
+            if ( !vulkanImageInfo.ImageInfo.imageView)
                 return nullptr;
 
-            auto it = g_TextureCache.find( vulkanImageInfo.ImageView );
+            auto it = g_TextureCache.find( vulkanImageInfo.ImageInfo.imageView);
             if ( it != g_TextureCache.end() )
             {
                 return it->second;
             }
 
             ImTextureID textureID = ImGui_ImplVulkan_AddTexture(
-                 vulkanImageInfo.Sampler, vulkanImageInfo.ImageView, vulkanImageInfo.Layout );
+                 vulkanImageInfo.ImageInfo.sampler, vulkanImageInfo.ImageInfo.imageView, vulkanImageInfo.ImageInfo.imageLayout);
 
-            g_TextureCache[vulkanImageInfo.ImageView] = textureID;
+            g_TextureCache[vulkanImageInfo.ImageInfo.imageView] = textureID;
             return textureID;
         }
     }

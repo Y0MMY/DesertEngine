@@ -8,10 +8,9 @@ namespace Desert::Graphic::API::Vulkan
 {
     struct VulkanImageInfo
     {
-        VkImage       Image       = nullptr;
-        VkImageView   ImageView   = nullptr;
-        VkSampler     Sampler     = nullptr;
-        VkImageLayout Layout      = (VkImageLayout)0;
+        VkImage               Image = nullptr;
+        VkDescriptorImageInfo ImageInfo{};
+
         VmaAllocation MemoryAlloc = nullptr;
     };
 
@@ -64,7 +63,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Core::Formats::ImagePixelData GetImagePixels() const override;
 
         // VulkanImageBase interface
-        virtual const VulkanImageInfo& GetVulkanImageInfo() const 
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const
         {
             return m_VulkanImageInfo;
         }
@@ -140,7 +139,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Core::Formats::ImagePixelData GetImagePixels() const override;
 
         // VulkanImageBase interface
-        virtual const VulkanImageInfo& GetVulkanImageInfo() const 
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const
         {
             return m_VulkanImageInfo;
         }

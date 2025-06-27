@@ -128,8 +128,7 @@ namespace Desert::Graphic
         // Material
         skybox.Material = Material::Create( std::string( debugName ), skybox.Shader );
 
-        const auto& texture = Renderer::GetInstance().GetFallbackTextures()->GetFallbackTextureCube(
-             Core::Formats::ImageFormat::RGBA8F );
+        const auto& texture = FallbackTextures::Get().GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F );
 
         m_SceneInfo.EnvironmentData.RadianceMap    = texture;
         m_SceneInfo.EnvironmentData.IrradianceMap  = texture;

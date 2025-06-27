@@ -5,19 +5,23 @@
 
 namespace Desert::Graphic
 {
-    std::shared_ptr<FallbackTextures> FallbackTextures::Create()
+    static std::unique_ptr<FallbackTextures> s_Instance;
+
+    FallbackTextures& FallbackTextures::Get()
     {
-        switch ( RendererAPI::GetAPIType() )
+        if ( !s_Instance )
         {
-            case RendererAPIType::None:
-                return nullptr;
-            case RendererAPIType::Vulkan:
+            switch ( RendererAPI::GetAPIType() )
             {
-                return std::make_shared<API::Vulkan::VulkanFallbackTextures>();
+                case RendererAPIType::Vulkan:
+                    s_Instance = std::make_unique<API::Vulkan::VulkanFallbackTextures>();
+                    break;
+                case RendererAPIType::None:
+                default:
+                    DESERT_VERIFY( false, "Unsupported RendererAPI" );
             }
         }
-        DESERT_VERIFY( false, "Unknown RendererAPI" );
-        return nullptr;
+        return *s_Instance;
     }
 
 } // namespace Desert::Graphic

@@ -52,7 +52,7 @@ namespace Desert::Graphic::API::Vulkan
                     {
                         auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
                         auto  wds =
-                             DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex,
+                             DescriptorSetBuilder::GetSampler2DWDS( vulkanShader, frameIndex,
                                                                   0, // set 0
                                                                   vulkanImage->GetBinding(), 1U, &imageInfo );
                         writeDescriptorSets.push_back( wds );
@@ -73,7 +73,7 @@ namespace Desert::Graphic::API::Vulkan
                     {
                         auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
                         auto  wds =
-                             DescriptorSetBuilder::GetSamplerWDS( vulkanShader, frameIndex,
+                             DescriptorSetBuilder::GetSamplerCubeWDS( vulkanShader, frameIndex,
                                                                   0, // set 0
                                                                   vulkanImage->GetBinding(), 1U, &imageInfo );
                         writeDescriptorSets.push_back( wds );

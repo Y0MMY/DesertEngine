@@ -13,6 +13,13 @@ namespace Desert::Graphic
         virtual const std::shared_ptr<ImageCube>&
         GetFallbackTextureCube( Core::Formats::ImageFormat format ) const = 0;
 
-        static std::shared_ptr<FallbackTextures> Create();
+    public:
+        FallbackTextures( const FallbackTextures& )            = delete;
+        FallbackTextures& operator=( const FallbackTextures& ) = delete;
+
+        static FallbackTextures& Get();
+
+    protected:
+        FallbackTextures() = default;
     };
 } // namespace Desert::Graphic

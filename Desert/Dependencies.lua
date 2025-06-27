@@ -35,6 +35,7 @@ Dependencies = {
             VulkanInc = baseDir .. "/VulkanSDK/include/",
             shaderc = baseDir .. "/VulkanSDK/shaderc/Include",
             spirv_cross = baseDir .. "/VulkanSDK/spirv_cross/Include",
+            reflect_cpp = baseDir .. "/reflect-cpp/include",
         },
         Libraries = {
             Debug = {

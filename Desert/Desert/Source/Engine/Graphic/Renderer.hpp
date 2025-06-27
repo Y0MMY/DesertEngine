@@ -47,7 +47,6 @@ namespace Desert::Graphic
         RendererAPI* GetRendererAPI() const;
 
         const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
-        const std::shared_ptr<FallbackTextures>   GetFallbackTextures() const;
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
         PBRTextures                  CreateEnvironmentMap( const Common::Filepath& filepath );
@@ -68,7 +67,6 @@ namespace Desert::Graphic
 
     private:
         std::shared_ptr<Texture2D>        m_BRDFTexture;
-        std::shared_ptr<FallbackTextures> m_FallbackTextures;
         std::unique_ptr<RendererContext>  m_RendererContext;
     };
 } // namespace Desert::Graphic

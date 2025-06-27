@@ -14,10 +14,15 @@ namespace Desert::Graphic::API::Vulkan
                                                    const uint32_t dstBinding, const uint32_t descriptorCount,
                                                    const VkDescriptorBufferInfo* pBufferInfo );
 
-        static VkWriteDescriptorSet GetSamplerWDS( const std::shared_ptr<VulkanShader>& vulkanShader,
-                                                   const uint32_t frame, const uint32_t set,
-                                                   const uint32_t dstBinding, const uint32_t descriptorCount,
-                                                   const VkDescriptorImageInfo* pImageInfo );
+        static VkWriteDescriptorSet GetSampler2DWDS( const std::shared_ptr<VulkanShader>& vulkanShader,
+                                                     const uint32_t frame, const uint32_t set,
+                                                     const uint32_t dstBinding, const uint32_t descriptorCount,
+                                                     const VkDescriptorImageInfo* pImageInfo );
+
+        static VkWriteDescriptorSet GetSamplerCubeWDS( const std::shared_ptr<VulkanShader>& vulkanShader,
+                                                       const uint32_t frame, const uint32_t set,
+                                                       const uint32_t dstBinding, const uint32_t descriptorCount,
+                                                       const VkDescriptorImageInfo* pImageInfo );
 
         static VkWriteDescriptorSet GetStorageWDS( const std::shared_ptr<VulkanShader>& vulkanShader,
                                                    const uint32_t frame, const uint32_t set,

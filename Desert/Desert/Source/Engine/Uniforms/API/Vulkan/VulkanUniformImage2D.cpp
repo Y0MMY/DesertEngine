@@ -30,9 +30,9 @@ namespace Desert::Uniforms::API::Vulkan
 
         const auto& vulkanImageInfo =
              sp_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->GetVulkanImageInfo();
-        m_DescriptorInfo.imageView   = vulkanImageInfo.ImageView;
-        m_DescriptorInfo.sampler     = vulkanImageInfo.Sampler;
-        m_DescriptorInfo.imageLayout = vulkanImageInfo.Layout;
+        m_DescriptorInfo.imageView   = vulkanImageInfo.ImageInfo.imageView;
+        m_DescriptorInfo.sampler     = vulkanImageInfo.ImageInfo.sampler;
+        m_DescriptorInfo.imageLayout = vulkanImageInfo.ImageInfo.imageLayout;
     }
 
 } // namespace Desert::Uniforms::API::Vulkan

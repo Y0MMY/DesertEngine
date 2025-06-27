@@ -314,14 +314,14 @@ namespace Desert::Graphic::API::Vulkan
 
         inline Common::BoolResult DestroyImageInfo( const VkDevice device, VulkanImageInfo& info )
         {
-            vkDestroyImageView( device, info.ImageView, nullptr );
-            vkDestroySampler( device, info.Sampler, nullptr );
+            vkDestroyImageView( device, info.ImageInfo.imageView, nullptr );
+            vkDestroySampler( device, info.ImageInfo.sampler, nullptr );
 
             Utils::ReleaseImage( info.Image, info.MemoryAlloc );
-            info.MemoryAlloc = nullptr;
-            info.Image       = nullptr;
-            info.ImageView   = nullptr;
-            info.Sampler     = nullptr;
+            info.MemoryAlloc         = nullptr;
+            info.Image               = nullptr;
+            info.ImageInfo.imageView = nullptr;
+            info.ImageInfo.sampler   = nullptr;
 
             return BOOLSUCCESS;
         }
@@ -445,14 +445,14 @@ namespace Desert::Graphic::API::Vulkan
         {
             return Common::MakeError<bool>( viewResult.GetError() );
         }
-        m_VulkanImageInfo.ImageView = viewResult.GetValue();
-        m_VulkanImageInfo.Layout =
+        m_VulkanImageInfo.ImageInfo.imageView = viewResult.GetValue();
+        m_VulkanImageInfo.ImageInfo.imageLayout=
              Utils::GetVkImageLayout( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage );
 
         // Create sampler (only for non-storage images)
         if ( ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Sample ) )
         {
-            Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
+            Utils::CreateTextureSampler( device, m_VulkanImageInfo.ImageInfo.sampler );
         }
 
         m_MipImageViews =
@@ -753,12 +753,12 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( viewResult.GetError() );
         }
 
-        m_VulkanImageInfo.ImageView = viewResult.GetValue();
-        m_VulkanImageInfo.Layout =
+        m_VulkanImageInfo.ImageInfo.imageView = viewResult.GetValue();
+        m_VulkanImageInfo.ImageInfo.imageLayout =
              Utils::GetVkImageLayout( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage );
 
         if ( ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Sample ) )
-            Utils::CreateTextureSampler( device, m_VulkanImageInfo.Sampler );
+            Utils::CreateTextureSampler( device, m_VulkanImageInfo.ImageInfo.sampler );
 
         m_MipImageViews =
              Utils::CreateMipImageViews( m_MipLevels, m_VulkanImageInfo.Image, device, format, true, false );
@@ -831,7 +831,7 @@ namespace Desert::Graphic::API::Vulkan
         auto cmdBuffer = Utils::GetCommandBuffer();
         if ( !cmdBuffer.IsSuccess() )
         {
-            Release(); 
+            Release();
             return Common::MakeError<bool>( "Failed to get command buffer: " + cmdBuffer.GetError() );
         }
 
