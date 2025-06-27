@@ -5,7 +5,7 @@
 
 namespace Desert::Graphic
 {
-    MaterialAssetLink MaterialFactory::CreateFromAsset( const Assets::Asset<Assets::MaterialAsset>& asset )
+    /*MaterialAssetLink MaterialFactory::CreateFromAsset( const Assets::Asset<Assets::MaterialAsset>& asset )
     {
         auto material = Material::Create( "MaterialFromAsset_StaticPBR.glsl",
                                           ShaderLibrary::Get( "StaticPBR.glsl", {} ).GetValue() );
@@ -17,6 +17,14 @@ namespace Desert::Graphic
         }
 
         return MaterialAssetLink{ material, asset->GetHandle() };
+    }*/
+
+    std::shared_ptr<Desert::Graphic::MaterialInstance>
+    MaterialFactory::Create( const std::shared_ptr<Assets::AssetManager>& assetManager,
+                             const Common::Filepath&                      filepath )
+    {
+        return std::make_shared<MaterialInstance>(
+             assetManager->CreateAsset<Assets::MaterialAsset>( Assets::AssetPriority::Low, filepath ) );
     }
 
 } // namespace Desert::Graphic
