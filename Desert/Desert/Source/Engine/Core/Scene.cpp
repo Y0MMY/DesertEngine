@@ -2,16 +2,19 @@
 
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/ECS/Entity.hpp>
+#include <Engine/ECS/System/MeshRenderSystem.hpp>
 
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
 namespace Desert::Core
 {
-
-    Scene::Scene( const std::string& sceneName, const std::shared_ptr<Assets::AssetManager>& assetManager )
-         : m_SceneName( sceneName ), m_SceneRenderer( std::make_unique<Graphic::SceneRenderer>() ),
-           m_AssetManager( assetManager )
+    Scene::Scene( std::string&&                                           sceneName,
+                  const std::shared_ptr<Runtime::RuntimeResourceManager>& resourceManager )
+         : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( std::make_shared<Graphic::SceneRenderer>() ),
+           m_RuntimeResourceManager( resourceManager ), m_Systems()
     {
+
+        RegisterSystem<ECS::MeshRenderSystem>( m_SceneRenderer, m_RuntimeResourceManager );
     }
 
     NO_DISCARD Common::BoolResult Scene::BeginScene( const Core::Camera& camera )
@@ -33,14 +36,18 @@ namespace Desert::Core
                                      const Assets::Asset<Assets::MaterialAsset>& material,
                                      const glm::mat4&                            transform ) const
     {
-        const auto& assetMesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( handle );
-        m_SceneRenderer->AddToRenderMeshList( assetMesh ? assetMesh->GetMesh() : nullptr, nullptr /*material*/,  transform );
+        // const auto& assetMesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( handle );
+        // m_SceneRenderer->AddToRenderMeshList( assetMesh ? assetMesh->GetMesh() : nullptr, nullptr /*material*/,
+        //                                       transform );
     }
 
     void Scene::OnUpdate( const Common::Timestep& ts )
     {
         Graphic::DTO::SceneRendererUpdate sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
+
+        std::for_each( m_Systems.begin(), m_Systems.end(),
+                       [&]( const auto& system ) { system->Update( m_Registry, ts ); } );
 
         // Skybox
         {
@@ -62,22 +69,22 @@ namespace Desert::Core
         }
 
         // Mesh
-        {
-            auto meshView = m_Registry.view<ECS::StaticMeshComponent, ECS::TransformComponent>();
-            meshView.each(
-                 [&]( const auto entity, const auto& staticMesh, const auto& transform )
-                 {
-                     if ( m_Registry.has<ECS::MaterialComponent>( entity ) )
-                     {
-                         const auto& material = m_Registry.get<ECS::MaterialComponent>( entity );
-                         AddMeshToRenderList( staticMesh.MeshHandle, nullptr, transform.GetTransform() );
-                     }
-                     else
-                     {
-                         AddMeshToRenderList( staticMesh.MeshHandle, nullptr, transform.GetTransform() );
-                     }
-                 } );
-        }
+        /* {
+             auto meshView = m_Registry.view<ECS::StaticMeshComponent, ECS::TransformComponent>();
+             meshView.each(
+                  [&]( const auto entity, const auto& staticMesh, const auto& transform )
+                  {
+                      if ( m_Registry.has<ECS::MaterialComponent>( entity ) )
+                      {
+                          const auto& material = m_Registry.get<ECS::MaterialComponent>( entity );
+                          AddMeshToRenderList( staticMesh.MeshHandle, nullptr, transform.GetTransform() );
+                      }
+                      else
+                      {
+                          AddMeshToRenderList( staticMesh.MeshHandle, nullptr, transform.GetTransform() );
+                      }
+                  } );
+         }*/
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }
@@ -137,8 +144,8 @@ namespace Desert::Core
 
     void Scene::Serialize() const
     {
-        SceneSerializer serializer( this, m_AssetManager );
-        return serializer.SaveToFile();
+        //   SceneSerializer serializer( this, m_AssetManager );
+        // return serializer.SaveToFile();
     }
 
 } // namespace Desert::Core

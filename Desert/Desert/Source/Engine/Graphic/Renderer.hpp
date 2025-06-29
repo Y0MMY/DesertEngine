@@ -8,7 +8,7 @@
 
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
-#include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 

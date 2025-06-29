@@ -2,12 +2,13 @@
 
 #include <Engine/Assets/AssetBase.hpp>
 #include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/AssetEvents.hpp>
 
-#include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 
 namespace Desert::Assets
 {
-    class MeshAsset final : public AssetBase
+    class MeshAsset final : public AssetBase, public AssetsEventSystem
     {
     public:
         using AssetBase::AssetBase;
@@ -25,7 +26,7 @@ namespace Desert::Assets
             return m_ReadyForUse;
         }
 
-        static AssetTypeID GetTypeID() 
+        static AssetTypeID GetTypeID()
         {
             return AssetTypeID::Mesh;
         }

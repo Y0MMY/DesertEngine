@@ -7,12 +7,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-#include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
-#include <Engine/Assets/Mesh/MeshAsset.hpp>
-#include <Engine/Graphic/Materials/MaterialInstance.hpp>
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Runtime/Handle.hpp>
 
 namespace Desert::ECS
 {
@@ -28,7 +26,8 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Assets::AssetHandle MeshHandle;
+        Runtime::ResourceHandle MeshHandle;
+        Runtime::ResourceHandle MaterialHandle;
     };
 
     struct TransformComponent
@@ -46,11 +45,6 @@ namespace Desert::ECS
 
     struct DirectionLightComponent
     {
-    };
-
-    struct MaterialComponent
-    {
-        std::shared_ptr<Graphic::MaterialInstance> MaterialInstance;
     };
 
     struct SkyboxComponent

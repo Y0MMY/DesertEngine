@@ -1,15 +1,16 @@
 #pragma once
 
-#include <entt/entt.hpp>
-
 #include <Engine/Graphic/Image.hpp>
-#include <Common/Core/Core.hpp>
-
-#include <Engine/Core/Camera.hpp>
-
 #include <Engine/Graphic/DTO/SceneRendererUpdate.hpp>
 
+#include <Common/Core/Core.hpp>
+#include <Engine/Core/Camera.hpp>
+
 #include <Engine/Assets/AssetManager.hpp>
+
+#include <Engine/Runtime/RuntimeResourceManager.hpp>
+
+#include <Engine/ECS/System/System.hpp>
 
 namespace Desert::Graphic
 {
@@ -34,7 +35,7 @@ namespace Desert::Core
     {
     public:
         Scene() = default;
-        Scene( const std::string& sceneName, const std::shared_ptr<Assets::AssetManager>& assetManager );
+        Scene( std::string&& sceneName, const std::shared_ptr<Runtime::RuntimeResourceManager>& resourceManager );
 
         [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
         void                             OnUpdate( const Common::Timestep& ts );
@@ -75,17 +76,26 @@ namespace Desert::Core
         void Serialize() const;
 
     private:
+        template <typename System, typename... Args>
+        void RegisterSystem( Args&&... args )
+        {
+            m_Systems.emplace_back( std::make_unique<System>( std::forward<Args>( args )... ) );
+        }
+
+    private:
         void AddMeshToRenderList( const Assets::AssetHandle                   handle,
                                   const Assets::Asset<Assets::MaterialAsset>& material,
                                   const glm::mat4&                            transform ) const;
         void SetEnvironment( const Graphic::Environment& environment );
 
     private:
-        std::string                                 m_SceneName;
-        std::unique_ptr<Graphic::SceneRenderer>     m_SceneRenderer;
-        const std::shared_ptr<Assets::AssetManager> m_AssetManager;
-        entt::registry                              m_Registry;
-        std::vector<ECS::Entity>                    m_Entitys;
-        std::unordered_map<Common::UUID, size_t>    m_EntitysMap;
+        std::string                                            m_SceneName;
+        std::shared_ptr<Graphic::SceneRenderer>                m_SceneRenderer;
+        const std::shared_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;
+        std::vector<std::unique_ptr<ECS::System>>              m_Systems;
+
+        entt::registry                           m_Registry;
+        std::vector<ECS::Entity>                 m_Entitys;
+        std::unordered_map<Common::UUID, size_t> m_EntitysMap;
     };
 } // namespace Desert::Core

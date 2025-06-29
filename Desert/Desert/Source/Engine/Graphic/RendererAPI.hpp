@@ -4,7 +4,7 @@
 
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
-#include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 
 namespace Desert::Graphic
 {

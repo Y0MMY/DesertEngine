@@ -21,10 +21,10 @@ namespace Desert::Editor
                 auto& newEtity = entity.AddComponent<ECS::StaticMeshComponent>();
             }
 
-            if ( !entity.HasComponent<ECS::MaterialComponent>() && ImGui::MenuItem( "Material" ) )
+            /*if ( !entity.HasComponent<ECS::MaterialComponent>() && ImGui::MenuItem( "Material" ) )
             {
                 entity.AddComponent<ECS::MaterialComponent>();
-            }
+            }*/
 
             if ( !entity.HasComponent<ECS::SkyboxComponent>() && ImGui::MenuItem( "Skybox" ) )
             {

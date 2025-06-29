@@ -8,6 +8,7 @@ namespace Desert::Assets
         m_Mesh->Invalidate();
 
         m_ReadyForUse = true;
+        Notify( EventType::OnReady );
         return BOOLSUCCESS;
     }
 

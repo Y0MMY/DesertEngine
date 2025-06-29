@@ -27,11 +27,12 @@ namespace Desert
         const std::shared_ptr<Common::Window> m_Window;
         std::shared_ptr<Core::Scene>          m_MainScene;
         Graphic::Environment                  m_Environment;
-        Core::Camera m_EditorCamera;
+        Core::Camera                          m_EditorCamera;
 
         ImVec2 m_Size;
 
-        std::shared_ptr<Assets::AssetManager> m_AssetManager;
+        std::shared_ptr<Assets::AssetManager>            m_AssetManager;
+        std::shared_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;

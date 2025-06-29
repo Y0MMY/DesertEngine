@@ -2,7 +2,7 @@
 
 #include <Engine/Assets/TextureAsset.hpp>
 
-#include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 
 namespace Desert::Assets
 {

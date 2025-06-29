@@ -128,13 +128,13 @@ namespace Desert::Core
                      internal::TransformComponentSer{ transform.Position, transform.Rotation, transform.Scale };
             }
 
-            if ( entity.HasComponent<ECS::StaticMeshComponent>() )
+           /* if ( entity.HasComponent<ECS::StaticMeshComponent>() )
             {
                 auto&       meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
                 const auto& mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );
                 entitySer.StaticMesh =
                      internal::StaticMeshComponentSer{ mesh ? mesh->GetBaseFilepath().string() : "" };
-            }
+            }*/
 
            /* if ( entity.HasComponent<ECS::MaterialComponent>() )
             {
@@ -157,7 +157,7 @@ namespace Desert::Core
         }
 
         // Convert to JSON
-        return rfl::json::write( scene );
+        return rfl::json::write(scene);
     }
 
     void SceneSerializer::SaveToFile() const

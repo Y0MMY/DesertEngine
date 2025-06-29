@@ -31,8 +31,12 @@
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
-#include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
+
+// =================== Runtime =================== //
+
+#include <Engine/Runtime/RuntimeResourceManager.hpp>
 
 // =================== ECS =================== //
 

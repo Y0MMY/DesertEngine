@@ -7,7 +7,7 @@
 
 namespace Desert::Editor
 {
-    class MaterialsPanel
+    /*class MaterialsPanel
     {
     public:
         MaterialsPanel( const std::shared_ptr<Assets::AssetManager>& assetManager )
@@ -15,20 +15,21 @@ namespace Desert::Editor
         {
         }
 
-        void DrawMaterialEditor( Assets::Asset<Assets::MaterialAsset>& material );
-        void DrawMaterialEntity( const ECS::Entity& entity );
+        void DrawMaterialEditor( std::shared_ptr<Graphic::MaterialInstance>& material );
+        void DrawMaterialEntity( const ECS::Entity& entity, const Assets::Asset<Assets::MeshAsset>& meshAsset );
         void DrawMaterialInfo( std::shared_ptr<Graphic::MaterialInstance>& materialInstance );
+
+        void CreateMaterialAsset( const ECS::Entity&                              selectedEntity,
+                                  const std::shared_ptr<Assets::MeshAsset>& meshAsset );
 
     private:
         bool NeedCreateMaterialAsset( const ECS::MaterialComponent& materialComponent );
-        void CreateMaterialAsset( ECS::MaterialComponent&                   materialComponent,
-                                  const std::shared_ptr<Assets::MeshAsset>& meshAsset );
 
         void DrawTextureSlot( const char* label, Assets::TextureAsset::Type type,
-                              Assets::Asset<Assets::MaterialAsset>& material );
-        void DrawMaterialProperties( Assets::Asset<Assets::MaterialAsset>& material );
+                              std::shared_ptr<Graphic::MaterialInstance>& material );
+        void DrawMaterialProperties( std::shared_ptr<Graphic::MaterialInstance>& material );
 
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
-    };
+    };*/
 
 } // namespace Desert::Editor

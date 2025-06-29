@@ -12,21 +12,19 @@ namespace Desert::Editor
     public:
         explicit ScenePropertiesPanel( const std::shared_ptr<Desert::Core::Scene>&  scene,
                                        const std::shared_ptr<Assets::AssetManager>& assetManager )
-             : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetManager( assetManager ),
-               m_MaterialsPanel( std::make_shared<MaterialsPanel>( m_AssetManager ) )
+             : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetManager( assetManager )
+            //  m_MaterialsPanel( std::make_shared<MaterialsPanel>( m_AssetManager ) )
         {
         }
         void OnUIRender() override;
 
     private:
         void DrawMaterialEditor( Assets::Asset<Assets::MaterialAsset>& material );
-        void DrawMaterialEntity( const ECS::Entity& entity );
-
-        void DrawMaterialInfo( std::shared_ptr<Graphic::MaterialInstance>& materialInstance );
+        void DrawMaterialEntity( const ECS::Entity& entity, const Assets::Asset<Assets::MeshAsset>& meshAsset );
 
     private:
         std::shared_ptr<Desert::Core::Scene>        m_Scene;
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
-        const std::shared_ptr<MaterialsPanel>       m_MaterialsPanel;
+      //  const std::shared_ptr<MaterialsPanel>       m_MaterialsPanel;
     };
 } // namespace Desert::Editor

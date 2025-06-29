@@ -9,8 +9,9 @@ namespace Desert
     EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
          : Common::Layer( layerName ), m_Window( window )
     {
-        m_AssetManager = std::make_shared<Assets::AssetManager>();
-        m_MainScene = std::make_shared<Core::Scene>( "New Scene", m_AssetManager);
+        m_AssetManager           = std::make_shared<Assets::AssetManager>();
+        m_RuntimeResourceManager = std::make_shared<Runtime::RuntimeResourceManager>( m_AssetManager );
+        m_MainScene              = std::make_shared<Core::Scene>( "New Scene", m_RuntimeResourceManager);
     }
 
     EditorLayer::~EditorLayer()

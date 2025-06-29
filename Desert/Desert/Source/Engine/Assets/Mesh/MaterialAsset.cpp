@@ -75,6 +75,7 @@ namespace Desert::Assets
         loadTexture( aiTextureType_EMISSIVE, TextureAsset::Type::Emissive, glm::vec4( 0.0f ) );
 
         m_ReadyForUse = true;
+
         return BOOLSUCCESS;
     }
 

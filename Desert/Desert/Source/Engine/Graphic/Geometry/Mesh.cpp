@@ -1,4 +1,4 @@
-#include <Engine/Graphic/Mesh.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 
 #include <assimp/Importer.hpp>
 #include <assimp/LogStream.hpp>

@@ -72,9 +72,9 @@ namespace Desert::Editor
                     ImGui::Dummy( ImVec2( 0, 10 ) );
                 }
 
-                if ( selectedEntity.HasComponent<ECS::MaterialComponent>() )
-                {
-                }
+                /* if ( selectedEntity.HasComponent<ECS::MaterialComponent>() )
+                 {
+                 }*/
 
                 if ( selectedEntity.HasComponent<ECS::SkyboxComponent>() )
                 {
@@ -139,10 +139,13 @@ namespace Desert::Editor
 
                 if ( selectedEntity.HasComponent<ECS::StaticMeshComponent>() )
                 {
+                    /* auto&      meshComponent = selectedEntity.GetComponent<ECS::StaticMeshComponent>();
+                     const auto assetMesh =
+                          m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );*/
+
                     if ( ImGui::CollapsingHeader( "Static Mesh", ImGuiTreeNodeFlags_DefaultOpen ) )
                     {
-                        ImGui::Dummy( ImVec2( 0, 4 ) );
-                        auto& meshComponent = selectedEntity.GetComponent<ECS::StaticMeshComponent>();
+                        /*ImGui::Dummy( ImVec2( 0, 4 ) );
 
                         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
                         ImGui::Text( "Current Mesh:" );
@@ -150,8 +153,6 @@ namespace Desert::Editor
 
                         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.75f, 1.0f ) );
 
-                        const auto assetMesh =
-                             m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );
                         const std::string path = ( assetMesh && !assetMesh->GetBaseFilepath().empty() )
                                                       ? assetMesh->GetBaseFilepath().string()
                                                       : "None";
@@ -169,12 +170,15 @@ namespace Desert::Editor
                             {
                                 const auto& assetMesh = m_AssetManager->CreateAsset<Assets::MeshAsset>(
                                      Assets::AssetPriority::Low, path );
+
+
                                 meshComponent.MeshHandle = assetMesh->GetHandle();
                             }
                         }
-                    }
+                    }*/
 
-                    DrawMaterialEntity( selectedEntity );
+                        // DrawMaterialEntity( selectedEntity, assetMesh );
+                    }
                 }
 
                 if ( selectedEntity.HasComponent<ECS::TransformComponent>() &&
@@ -263,9 +267,10 @@ namespace Desert::Editor
         DrawTextureSlot( "Roughness", Assets::TextureAsset::Type::Roughness );
     }
 
-    void ScenePropertiesPanel::DrawMaterialEntity( const ECS::Entity& entity )
+    void ScenePropertiesPanel::DrawMaterialEntity( const ECS::Entity&                      entity,
+                                                   const Assets::Asset<Assets::MeshAsset>& meshAsset )
     {
-        m_MaterialsPanel->DrawMaterialEntity( entity );
+        // m_MaterialsPanel->DrawMaterialEntity( entity, meshAsset );
     }
 
 } // namespace Desert::Editor
