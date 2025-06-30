@@ -24,9 +24,8 @@ namespace Desert::ECS
                      if ( !meshAsset )
                          return;
 
-                     
                      // Add to render list
-                    // m_Renderer->AddToRenderMeshList( meshAsset->GetMesh(), material, transform.GetTransform() );
+                     m_Renderer->AddToRenderMeshList( meshAsset->GetMesh(), nullptr, transform.GetTransform() );
                  } );
         }
 

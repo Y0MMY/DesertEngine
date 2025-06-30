@@ -14,10 +14,13 @@ namespace Desert::Runtime
         explicit MeshCache( const std::shared_ptr<Assets::AssetManager>& assetManager );
 
         ResourceHandle Create( Assets::AssetHandle meshHandle );
+        ResourceHandle Create( const Common::Filepath& filepath );
         void           Destroy( ResourceHandle handle );
 
         Graphic::MeshInstance*       Get( ResourceHandle handle );
         const Graphic::MeshInstance* Get( ResourceHandle handle ) const;
+
+        void Release();
 
     private:
         struct MeshEntry

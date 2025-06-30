@@ -13,7 +13,9 @@ namespace Desert::Graphic
             InheritBaseMaterialProperties();
         }
 
-        m_Material = Graphic::Material::Create( "MaterialInstance", /*shader*/ nullptr );
+        const auto& shader = Graphic::ShaderLibrary::Get( "StaticPBR.glsl", {} );
+
+        m_Material = Graphic::Material::Create( "MaterialInstance", shader.GetValue() );
     }
 
     void MaterialInstance::SetBaseMaterial( std::shared_ptr<Assets::MaterialAsset> asset )

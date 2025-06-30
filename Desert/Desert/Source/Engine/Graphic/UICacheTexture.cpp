@@ -5,9 +5,9 @@
 namespace Desert::Graphic
 {
 
-    std::shared_ptr<UICacheTexture> UICacheTexture::Create()
+    std::unique_ptr<UICacheTexture> UICacheTexture::Create()
     {
-        return std::make_shared<ImGui::UICacheTextureImGui>();
+        return std::make_unique<ImGui::UICacheTextureImGui>();
     }
 
 } // namespace Desert::Graphic

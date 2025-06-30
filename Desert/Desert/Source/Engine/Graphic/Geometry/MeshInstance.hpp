@@ -17,10 +17,15 @@ namespace Desert::Graphic
             return m_BaseMeshAsset;
         }
 
-        // Geometry access
-        const Mesh* GetMesh() const
+        bool IsReady() const
         {
-            return ( m_BaseMeshAsset->GetMesh().get() );
+            return m_BaseMeshAsset && m_BaseMeshAsset->IsReadyForUse();
+        }
+
+        // Geometry access
+        const std::shared_ptr<Mesh> GetMesh() const
+        {
+            return m_BaseMeshAsset->GetMesh();
         }
 
     private:

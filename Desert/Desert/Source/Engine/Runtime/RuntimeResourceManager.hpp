@@ -36,6 +36,10 @@ namespace Desert::Runtime
             return *m_MeshCache;
         }
 
+        void Shutdown()
+        {
+        }
+
     private:
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
         const std::unique_ptr<MaterialCache>        m_MaterialCache;

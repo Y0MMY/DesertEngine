@@ -35,6 +35,32 @@ namespace Desert::Runtime
         return ResourceHandle{ index };
     }
 
+    ResourceHandle MeshCache::Create( const Common::Filepath& filepath )
+    {
+        uint32_t index;
+        if ( !m_FreeList.empty() )
+        {
+            index = m_FreeList.front();
+            m_FreeList.pop();
+        }
+        else
+        {
+            index = static_cast<uint32_t>( m_Entries.size() );
+            m_Entries.emplace_back();
+        }
+
+        auto meshAsset = m_AssetManager->CreateAsset<Assets::MeshAsset>( Assets::AssetPriority::Low, filepath );
+        if ( !meshAsset )
+        {
+            return { ResourceHandle::InvalidIndex };
+        }
+
+        m_Entries[index].Mesh    = Graphic::MeshFactory::Create( meshAsset );
+        m_Entries[index].IsAlive = true;
+
+        return ResourceHandle{ index };
+    }
+
     void MeshCache::Destroy( ResourceHandle handle )
     {
     }
@@ -55,6 +81,11 @@ namespace Desert::Runtime
             return m_Entries[handle.Index].Mesh.get();
         }
         return nullptr;
+    }
+
+    void MeshCache::Release()
+    {
+
     }
 
 } // namespace Desert::Runtime

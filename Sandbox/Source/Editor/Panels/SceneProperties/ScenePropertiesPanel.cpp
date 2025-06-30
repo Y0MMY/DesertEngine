@@ -72,10 +72,6 @@ namespace Desert::Editor
                     ImGui::Dummy( ImVec2( 0, 10 ) );
                 }
 
-                /* if ( selectedEntity.HasComponent<ECS::MaterialComponent>() )
-                 {
-                 }*/
-
                 if ( selectedEntity.HasComponent<ECS::SkyboxComponent>() )
                 {
                     if ( ImGui::CollapsingHeader( "Skybox", ImGuiTreeNodeFlags_DefaultOpen ) )
@@ -139,13 +135,13 @@ namespace Desert::Editor
 
                 if ( selectedEntity.HasComponent<ECS::StaticMeshComponent>() )
                 {
-                    /* auto&      meshComponent = selectedEntity.GetComponent<ECS::StaticMeshComponent>();
-                     const auto assetMesh =
-                          m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );*/
+                    auto&       meshComponent = selectedEntity.GetComponent<ECS::StaticMeshComponent>();
+                    const auto* meshInstance =
+                         m_RuntimeResourceManager->GetMeshCache().Get( meshComponent.MeshHandle );
 
                     if ( ImGui::CollapsingHeader( "Static Mesh", ImGuiTreeNodeFlags_DefaultOpen ) )
                     {
-                        /*ImGui::Dummy( ImVec2( 0, 4 ) );
+                        ImGui::Dummy( ImVec2( 0, 4 ) );
 
                         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
                         ImGui::Text( "Current Mesh:" );
@@ -153,9 +149,16 @@ namespace Desert::Editor
 
                         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.75f, 1.0f ) );
 
-                        const std::string path = ( assetMesh && !assetMesh->GetBaseFilepath().empty() )
-                                                      ? assetMesh->GetBaseFilepath().string()
-                                                      : "None";
+                        std::string path = "None";
+                        if ( meshInstance && meshInstance->IsReady() )
+                        {
+                            auto meshAsset = meshInstance->GetMeshAsset();
+                            if ( meshAsset && !meshAsset->GetBaseFilepath().empty() )
+                            {
+                                path = meshAsset->GetBaseFilepath().string();
+                            }
+                        }
+
                         ImGui::TextWrapped( "%s", path.c_str() );
                         ImGui::PopStyleColor();
 
@@ -168,17 +171,14 @@ namespace Desert::Editor
                                  "(*.*)\0*.*\0" );
                             if ( !path.empty() )
                             {
-                                const auto& assetMesh = m_AssetManager->CreateAsset<Assets::MeshAsset>(
-                                     Assets::AssetPriority::Low, path );
-
-
-                                meshComponent.MeshHandle = assetMesh->GetHandle();
+                                meshComponent.MeshHandle = m_RuntimeResourceManager->GetMeshCache().Create( path );
+                                meshComponent.MaterialHandle =
+                                     m_RuntimeResourceManager->GetMaterialCache().Create( path );
                             }
                         }
-                    }*/
-
-                        // DrawMaterialEntity( selectedEntity, assetMesh );
                     }
+
+                    DrawMaterialEntity( selectedEntity );
                 }
 
                 if ( selectedEntity.HasComponent<ECS::TransformComponent>() &&
@@ -234,43 +234,10 @@ namespace Desert::Editor
         ImGui::PopStyleVar( 4 );
     }
 
-    void ScenePropertiesPanel::DrawMaterialEditor( Assets::Asset<Assets::MaterialAsset>& material )
+   
+    void ScenePropertiesPanel::DrawMaterialEntity( const ECS::Entity& entity )
     {
-        auto DrawTextureSlot = [&]( const char* label, Assets::TextureAsset::Type type )
-        {
-            ImGui::PushID( label );
-
-            ImGui::Text( "%s:", label );
-            std::string path = material->HasTexture( type )
-                                    ? ( *material->GetTextureSlot( type ) ).Texture->GetBaseFilepath().string()
-                                    : "None";
-
-            if ( material->HasTexture( type ) )
-            {
-                const auto& texture = ( material->GetTexture( type ) );
-                ImGui::SameLine();
-                ImGui::TextColored( ImVec4( 0.8f, 0.8f, 0.8f, 1.0f ), "%s (%dx%d)", path.c_str(),
-                                    texture->GetWidth(), texture->GetHeight() );
-            }
-            else
-            {
-                ImGui::SameLine();
-                ImGui::TextColored( ImVec4( 0.5f, 0.5f, 0.5f, 1.0f ), "%s", path.c_str() );
-            }
-
-            ImGui::PopID();
-        };
-
-        ImGui::Dummy( ImVec2( 0, 10 ) );
-        DrawTextureSlot( "Albedo", Assets::TextureAsset::Type::Albedo );
-        DrawTextureSlot( "Metallic", Assets::TextureAsset::Type::Metallic );
-        DrawTextureSlot( "Roughness", Assets::TextureAsset::Type::Roughness );
-    }
-
-    void ScenePropertiesPanel::DrawMaterialEntity( const ECS::Entity&                      entity,
-                                                   const Assets::Asset<Assets::MeshAsset>& meshAsset )
-    {
-        // m_MaterialsPanel->DrawMaterialEntity( entity, meshAsset );
+        m_MaterialsPanel->DrawMaterialEntity( entity );
     }
 
 } // namespace Desert::Editor

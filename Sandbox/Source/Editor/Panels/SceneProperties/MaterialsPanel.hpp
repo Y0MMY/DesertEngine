@@ -4,32 +4,31 @@
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <ImGui/imgui.h>
+#include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 
 namespace Desert::Editor
 {
-    /*class MaterialsPanel
+    class MaterialsPanel
     {
     public:
-        MaterialsPanel( const std::shared_ptr<Assets::AssetManager>& assetManager )
-             : m_AssetManager( assetManager )
+        MaterialsPanel( const std::shared_ptr<Runtime::RuntimeResourceManager>& resourceManager )
+             : m_ResourceManager( resourceManager ), m_UIHelper( std::make_unique<Editor::UI::UIHelper>() )
         {
+            m_UIHelper->Init();
         }
 
-        void DrawMaterialEditor( std::shared_ptr<Graphic::MaterialInstance>& material );
-        void DrawMaterialEntity( const ECS::Entity& entity, const Assets::Asset<Assets::MeshAsset>& meshAsset );
-        void DrawMaterialInfo( std::shared_ptr<Graphic::MaterialInstance>& materialInstance );
-
-        void CreateMaterialAsset( const ECS::Entity&                              selectedEntity,
-                                  const std::shared_ptr<Assets::MeshAsset>& meshAsset );
+        void DrawMaterialEditor( Graphic::MaterialInstance* material );
+        void DrawMaterialEntity( const ECS::Entity& entity );
+        void DrawMaterialInfo( Graphic::MaterialInstance* material );
 
     private:
-        bool NeedCreateMaterialAsset( const ECS::MaterialComponent& materialComponent );
-
         void DrawTextureSlot( const char* label, Assets::TextureAsset::Type type,
-                              std::shared_ptr<Graphic::MaterialInstance>& material );
-        void DrawMaterialProperties( std::shared_ptr<Graphic::MaterialInstance>& material );
+                              Graphic::MaterialInstance* material );
+        void DrawMaterialProperties( Graphic::MaterialInstance* material );
 
-        const std::shared_ptr<Assets::AssetManager> m_AssetManager;
-    };*/
+    private:
+        const std::shared_ptr<Runtime::RuntimeResourceManager> m_ResourceManager;
+        std::unique_ptr<Editor::UI::UIHelper>                  m_UIHelper;
+    };
 
 } // namespace Desert::Editor

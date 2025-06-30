@@ -7,213 +7,300 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    //void MaterialsPanel::DrawMaterialEditor( std::shared_ptr<Graphic::MaterialInstance>& material )
-    //{
-    //    if ( !material )
-    //        return;
+    // =========================================================================
+    // Main Material Editor Function
+    // =========================================================================
+    void MaterialsPanel::DrawMaterialEditor( Graphic::MaterialInstance* material )
+    {
+        if ( !material )
+            return;
 
-    //    ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8, 8 ) );
+        // Setup editor styling
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8, 6 ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 4, 3 ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 3.0f );
+        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 10, 8 ) );
 
-    //    // Draw texture slots
-    //    DrawTextureSlot( "Albedo", Assets::TextureAsset::Type::Albedo, material );
-    //    DrawTextureSlot( "Metallic", Assets::TextureAsset::Type::Metallic, material );
-    //    DrawTextureSlot( "Roughness", Assets::TextureAsset::Type::Roughness, material );
-    //    DrawTextureSlot( "Normal", Assets::TextureAsset::Type::Normal, material );
-    //    DrawTextureSlot( "AO", Assets::TextureAsset::Type::AO, material );
-    //    DrawTextureSlot( "Emissive", Assets::TextureAsset::Type::Emissive, material );
+        // Draw editor sections
+        DrawMaterialInfo( material );
+        ImGui::Separator();
+        DrawMaterialProperties( material );
 
-    //    ImGui::Separator();
-    //    ImGui::Dummy( ImVec2( 0, 5 ) );
+        // Restore original style
+        ImGui::PopStyleVar( 4 );
+    }
 
-    //    // Draw material properties
-    //    DrawMaterialProperties( material );
+    // =========================================================================
+    // Material Editor for Entity
+    // =========================================================================
+    void MaterialsPanel::DrawMaterialEntity( const ECS::Entity& entity )
+    {
+        // Only proceed if entity has a mesh component
+        if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+            return;
 
-    //    ImGui::PopStyleVar();
-    //}
+        // Get mesh components and validate
+        auto& meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
+        auto* meshInstance  = m_ResourceManager->GetMeshCache().Get( meshComponent.MeshHandle );
+        if ( !meshInstance || !meshInstance->IsReady() )
+            return;
 
-    //void MaterialsPanel::DrawMaterialEntity( const ECS::Entity&                      entity,
-    //                                         const Assets::Asset<Assets::MeshAsset>& meshAsset )
-    //{
-    //    if ( !entity.HasComponent<ECS::MaterialComponent>() )
-    //        return;
+        // Get mesh asset
+        auto meshAsset = meshInstance->GetMeshAsset();
+        if ( !meshAsset )
+            return;
 
-    //    auto& materialComponent = entity.GetComponent<ECS::MaterialComponent>();
-    //    CreateMaterialAsset( entity, meshAsset );
+        // Validate material handle
+        auto materialHandle = meshComponent.MaterialHandle;
+        if ( !materialHandle.IsValid() )
+            return;
 
-    //    if ( ImGui::CollapsingHeader( "Material", ImGuiTreeNodeFlags_DefaultOpen ) )
-    //    {
-    //        if ( !materialComponent.MaterialInstance )
-    //            return;
+        // Get material instance
+        auto material = m_ResourceManager->GetMaterialCache().Get( materialHandle );
+        if ( !material )
+            return;
 
-    //        ImGui::Dummy( ImVec2( 0, 4 ) );
-    //        DrawMaterialInfo( materialComponent.MaterialInstance );
-    //    }
-    //}
+        // Draw collapsible material panel
+        if ( ImGui::CollapsingHeader( "Material", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::Dummy( ImVec2( 0, 4 ) );
+            DrawMaterialEditor( material );
+        }
+    }
 
-    //void MaterialsPanel::DrawMaterialInfo( std::shared_ptr<Graphic::MaterialInstance>& materialInstance )
-    //{
-    //    if ( !materialInstance )
-    //        return;
+    // =========================================================================
+    // Material Information Section
+    // =========================================================================
+    void MaterialsPanel::DrawMaterialInfo( Graphic::MaterialInstance* material )
+    {
+        // Section header styling
+        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
+        ImGui::Text( "Material Info" );
+        ImGui::PopStyleColor();
+        ImGui::Dummy( ImVec2( 0, 4 ) );
 
-    //    // Display base material info if exists
-    //    if ( materialInstance->IsUsingBaseMaterial() )
-    //    {
-    //        const auto& baseMaterial = materialInstance->GetBaseMaterial();
-    //        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
-    //        ImGui::Text( "Base Material:" );
-    //        ImGui::PopStyleColor();
+        // Display base material information
+        if ( material->IsUsingBaseMaterial() )
+        {
+            auto baseMaterial = material->GetBaseMaterial();
+            ImGui::Text( "Base Material: %s", "Name" );
+        }
+        else
+        {
+            ImGui::Text( "Base Material: None (Custom)" );
+        }
 
-    //        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.75f, 1.0f ) );
-    //        ImGui::TextWrapped( "%s", baseMaterial->GetMaterialAssetPath().string().c_str() );
-    //        ImGui::PopStyleColor();
+        // Draw texture slots with spacing
+        ImGui::Dummy( ImVec2( 0, 6 ) );
+        DrawTextureSlot( "Albedo", Assets::TextureAsset::Type::Albedo, material );
+        DrawTextureSlot( "Normal", Assets::TextureAsset::Type::Normal, material );
+        DrawTextureSlot( "Metallic", Assets::TextureAsset::Type::Metallic, material );
+        DrawTextureSlot( "Roughness", Assets::TextureAsset::Type::Roughness, material );
+        DrawTextureSlot( "AO", Assets::TextureAsset::Type::AO, material );
+    }
 
-    //        ImGui::Dummy( ImVec2( 0, 10 ) );
-    //    }
+    // =========================================================================
+    // Texture Slot UI Element
+    // =========================================================================
+    void MaterialsPanel::DrawTextureSlot( const char* label, Assets::TextureAsset::Type type,
+                                          Graphic::MaterialInstance* material )
+    {
+        bool hasTexture = material->HasFinalTexture( type );
+        ImGui::PushID( label );
 
-    //    DrawMaterialEditor( materialInstance );
-    //}
+        // Two-column layout for label and button
+        ImGui::Columns( 2, nullptr, false );
+        ImGui::SetColumnWidth( 0, 100.0f );
 
-    //bool MaterialsPanel::NeedCreateMaterialAsset( const ECS::MaterialComponent& materialComponent )
-    //{
-    //    if ( !materialComponent.MaterialInstance )
-    //        return false;
-    //    return true;
-    //}
+        // Texture slot label
+        ImGui::Text( "%s", label );
+        ImGui::NextColumn();
 
-    //void MaterialsPanel::CreateMaterialAsset( const ECS::Entity&                        selectedEntity,
-    //                                          const std::shared_ptr<Assets::MeshAsset>& meshAsset )
-    //{
-    //    if ( !selectedEntity.HasComponent<ECS::MaterialComponent>() )
-    //    {
-    //        return;
-    //    }
+        // Button logic based on texture presence
+        if ( hasTexture )
+        {
+            // Styling for remove button
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.3f, 0.3f, 0.3f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.4f, 0.4f, 0.4f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 0.25f, 0.25f, 0.25f, 1.0f ) );
 
-    //    auto& materialComponent = selectedEntity.GetComponent<ECS::MaterialComponent>();
-    //    if ( !NeedCreateMaterialAsset( materialComponent ) )
-    //        return;
+            // Remove texture button
+            if ( ImGui::Button( "Remove", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+            {
+                material->RemoveTexture( type );
+            }
 
-    //    // Create a new material instance if none exists
-    //    if ( !materialComponent.MaterialInstance )
-    //    {
-    //        materialComponent.MaterialInstance =
-    //             Graphic::MaterialFactory::Create( m_AssetManager, meshAsset->GetBaseFilepath() );
-    //    }
-    //}
+            // Texture preview tooltip on hover
+            if ( ImGui::IsItemHovered() )
+            {
+                ImGui::BeginTooltip();
+                ImGui::Text( "Preview:" );
+                auto texture = material->GetFinalTexture( type );
+                if ( texture )
+                {
+                    float previewSize = 128.0f;
+                    m_UIHelper->Image( texture->GetImage2D(), ImVec2( previewSize, previewSize ), ImVec2( 0, 1 ),
+                                       ImVec2( 1, 0 ) );
+                }
+                ImGui::EndTooltip();
+            }
 
-    //void MaterialsPanel::DrawTextureSlot( const char* label, Assets::TextureAsset::Type type,
-    //                                      std::shared_ptr<Graphic::MaterialInstance>& material )
-    //{
-    //    if ( !material )
-    //        return;
+            ImGui::PopStyleColor( 3 );
+        }
+        else
+        {
+            // Styling for add button
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.2f, 0.2f, 0.2f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.3f, 0.3f, 0.3f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 0.15f, 0.15f, 0.15f, 1.0f ) );
 
-    //    ImGui::PushID( label );
+            // Add texture button with file dialog
+            if ( ImGui::Button( "Add", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+            {
+                auto path = Common::Utils::FileSystem::OpenFileDialog(
+                     "Image Files (*.png;*.jpg;*.jpeg;*.tga;*.bmp)\0*.png;*.jpg;*.jpeg;*.tga;*.bmp\0All Files "
+                     "(*.*)\0*.*\0" );
+                if ( !path.empty() )
+                {
+                    // TODO: Load and assign texture
+                }
+            }
 
-    //    ImGui::Text( "%s:", label );
+            ImGui::PopStyleColor( 3 );
+        }
 
-    //    std::string path       = "None";
-    //    bool        hasTexture = material->HasFinalTexture( type );
+        // Restore single-column layout
+        ImGui::Columns( 1 );
+        ImGui::PopID();
+    }
 
-    //    if ( hasTexture )
-    //    {
-    //        const auto& texture = material->GetFinalTexture( type );
-    //        path = material->GetTexture( type ) ? material->GetTexture( type )->GetBaseFilepath().string()
-    //                                            : "From Base Material";
+    // =========================================================================
+    // Material Properties Section with Tabs
+    // =========================================================================
+    void MaterialsPanel::DrawMaterialProperties( Graphic::MaterialInstance* material )
+    {
+        // Section header styling
+        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
+        ImGui::Text( "Material Properties" );
+        ImGui::PopStyleColor();
+        ImGui::Dummy( ImVec2( 0, 4 ) );
 
-    //        ImGui::SameLine();
-    //        ImGui::TextColored( ImVec4( 0.8f, 0.8f, 0.8f, 1.0f ), "%s (%dx%d)", path.c_str(), texture->GetWidth(),
-    //                            texture->GetHeight() );
-    //    }
-    //    else
-    //    {
-    //        ImGui::SameLine();
-    //        ImGui::TextColored( ImVec4( 0.5f, 0.5f, 0.5f, 1.0f ), "%s", path.c_str() );
-    //    }
+        // Create tab bar for material properties
+        if ( ImGui::BeginTabBar( "MaterialPropertiesTabs" ) )
+        {
+            // -----------------------------------------------------------------
+            // Albedo Tab
+            // -----------------------------------------------------------------
+            if ( ImGui::BeginTabItem( "Albedo" ) )
+            {
+                ImGui::Dummy( ImVec2( 0, 4 ) );
+                auto albedoColor = material->GetAlbedoColor();
 
-    //    // Remove texture button if there's an override
-    //    if ( material->HasTexture( type ) )
-    //    {
-    //        ImGui::SameLine();
-    //        if ( ImGui::Button( "Remove", ImVec2( 80, 0 ) ) )
-    //        {
-    //            material->RemoveTexture( type );
-    //        }
-    //    }
+                // Color picker styling
+                ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0.11f, 0.11f, 0.12f, 1.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_FrameBgHovered, ImVec4( 0.13f, 0.13f, 0.14f, 1.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_FrameBgActive, ImVec4( 0.09f, 0.09f, 0.10f, 1.0f ) );
 
-    //    ImGui::PopID();
-    //}
+                // Albedo color editor
+                if ( ImGui::ColorEdit3( "Color", &albedoColor[0] ) )
+                {
+                    material->SetAlbedo( albedoColor, material->GetAlbedoBlend() );
+                }
+                ImGui::PopStyleColor( 3 );
 
-    //void MaterialsPanel::DrawMaterialProperties( std::shared_ptr<Graphic::MaterialInstance>& material )
-    //{
-    //    if ( !material )
-    //        return;
+                // Albedo blend slider
+                float albedoBlend = material->GetAlbedoBlend();
+                if ( ImGui::SliderFloat( "Blend", &albedoBlend, 0.0f, 1.0f, "%.2f" ) )
+                {
+                    material->SetAlbedo( material->GetAlbedoColor(), albedoBlend );
+                }
 
-    //    // Albedo color control
-    //    /* if ( ImGui::ColorEdit3( "Albedo Color", &material->GetAlbedoColor()[0] ) )
-    //     {
-    //         material->UpdateRenderParameters();
-    //     }*/
+                ImGui::EndTabItem();
+            }
 
-    //    // Albedo blend control
-    //    float albedoBlend = material->GetAlbedoBlend();
-    //    if ( ImGui::SliderFloat( "Albedo Blend", &albedoBlend, 0.0f, 1.0f ) )
-    //    {
-    //        material->SetAlbedo( material->GetAlbedoColor(), albedoBlend );
-    //    }
+            // -----------------------------------------------------------------
+            // Metallic/Roughness Tab
+            // -----------------------------------------------------------------
+            if ( ImGui::BeginTabItem( "Metallic/Roughness" ) )
+            {
+                ImGui::Dummy( ImVec2( 0, 4 ) );
 
-    //    ImGui::Separator();
+                // Metallic controls
+                float metallic = material->GetMetallicValue();
+                if ( ImGui::SliderFloat( "Metallic", &metallic, 0.0f, 1.0f, "%.2f" ) )
+                {
+                    material->SetMetallic( metallic, material->GetMetallicBlend() );
+                }
 
-    //    // Metallic control
-    //    float metallicValue = material->GetMetallicValue();
-    //    if ( ImGui::SliderFloat( "Metallic", &metallicValue, 0.0f, 1.0f ) )
-    //    {
-    //        material->SetMetallic( metallicValue, material->GetMetallicBlend() );
-    //    }
+                float metallicBlend = material->GetMetallicBlend();
+                if ( ImGui::SliderFloat( "Metallic Blend", &metallicBlend, 0.0f, 1.0f, "%.2f" ) )
+                {
+                    material->SetMetallic( material->GetMetallicValue(), metallicBlend );
+                }
 
-    //    // Metallic blend control
-    //    float metallicBlend = material->GetMetallicBlend();
-    //    if ( ImGui::SliderFloat( "Metallic Blend", &metallicBlend, 0.0f, 1.0f ) )
-    //    {
-    //        material->SetMetallic( material->GetMetallicValue(), metallicBlend );
-    //    }
+                ImGui::Dummy( ImVec2( 0, 6 ) );
 
-    //    ImGui::Separator();
+                // Roughness controls
+                float roughness = material->GetRoughnessValue();
+                if ( ImGui::SliderFloat( "Roughness", &roughness, 0.0f, 1.0f, "%.2f" ) )
+                {
+                    material->SetRoughness( roughness, material->GetRoughnessBlend() );
+                }
 
-    //    // Roughness control
-    //    float roughnessValue = material->GetRoughnessValue();
-    //    if ( ImGui::SliderFloat( "Roughness", &roughnessValue, 0.0f, 1.0f ) )
-    //    {
-    //        material->SetRoughness( roughnessValue, material->GetRoughnessBlend() );
-    //    }
+                float roughnessBlend = material->GetRoughnessBlend();
+                if ( ImGui::SliderFloat( "Roughness Blend", &roughnessBlend, 0.0f, 1.0f, "%.2f" ) )
+                {
+                    material->SetRoughness( material->GetRoughnessValue(), roughnessBlend );
+                }
 
-    //    // Roughness blend control
-    //    float roughnessBlend = material->GetRoughnessBlend();
-    //    if ( ImGui::SliderFloat( "Roughness Blend", &roughnessBlend, 0.0f, 1.0f ) )
-    //    {
-    //        material->SetRoughness( material->GetRoughnessValue(), roughnessBlend );
-    //    }
+                ImGui::EndTabItem();
+            }
 
-    //    ImGui::Separator();
+            // -----------------------------------------------------------------
+            // Emission Tab
+            // -----------------------------------------------------------------
+            if ( ImGui::BeginTabItem( "Emission" ) )
+            {
+                ImGui::Dummy( ImVec2( 0, 4 ) );
+                auto emissionColor = material->GetEmissionColor();
 
-    //    // Emission controls
-    //    glm::vec3 emissionColor = material->GetEmissionColor();
-    //    if ( ImGui::ColorEdit3( "Emission Color", &emissionColor[0] ) )
-    //    {
-    //        material->SetEmission( emissionColor, material->GetEmissionStrength() );
-    //    }
+                // Color picker styling
+                ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0.11f, 0.11f, 0.12f, 1.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_FrameBgHovered, ImVec4( 0.13f, 0.13f, 0.14f, 1.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_FrameBgActive, ImVec4( 0.09f, 0.09f, 0.10f, 1.0f ) );
 
-    //    float emissionStrength = material->GetEmissionStrength();
-    //    if ( ImGui::SliderFloat( "Emission Strength", &emissionStrength, 0.0f, 10.0f ) )
-    //    {
-    //        material->SetEmission( material->GetEmissionColor(), emissionStrength );
-    //    }
+                // Emission color editor
+                if ( ImGui::ColorEdit3( "Color", &emissionColor[0] ) )
+                {
+                    material->SetEmission( emissionColor, material->GetEmissionStrength() );
+                }
+                ImGui::PopStyleColor( 3 );
 
-    //    ImGui::Separator();
+                // Emission strength slider
+                float emissionStrength = material->GetEmissionStrength();
+                if ( ImGui::SliderFloat( "Strength", &emissionStrength, 0.0f, 10.0f, "%.2f" ) )
+                {
+                    material->SetEmission( material->GetEmissionColor(), emissionStrength );
+                }
 
-    //    // AO control
-    //    float aoValue = material->GetAOValue();
-    //    if ( ImGui::SliderFloat( "Ambient Occlusion", &aoValue, 0.0f, 1.0f ) )
-    //    {
-    //        material->SetAO( aoValue );
-    //    }
-    //}
+                ImGui::EndTabItem();
+            }
+
+            // -----------------------------------------------------------------
+            // Ambient Occlusion Tab
+            // -----------------------------------------------------------------
+            if ( ImGui::BeginTabItem( "AO" ) )
+            {
+                ImGui::Dummy( ImVec2( 0, 4 ) );
+                float ao = material->GetAOValue();
+                if ( ImGui::SliderFloat( "Intensity", &ao, 0.0f, 1.0f, "%.2f" ) )
+                {
+                    material->SetAO( ao );
+                }
+                ImGui::EndTabItem();
+            }
+
+            ImGui::EndTabBar();
+        }
+    }
 } // namespace Desert::Editor
