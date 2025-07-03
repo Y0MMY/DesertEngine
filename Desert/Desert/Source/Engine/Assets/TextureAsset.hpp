@@ -31,7 +31,7 @@ namespace Desert::Assets
             return m_IsReadyForUse;
         }
 
-        std::shared_ptr<Graphic::Texture2D> GetTexture() const
+        const std::shared_ptr<Graphic::Texture2D>& GetTexture() const
         {
             return m_Texture;
         }

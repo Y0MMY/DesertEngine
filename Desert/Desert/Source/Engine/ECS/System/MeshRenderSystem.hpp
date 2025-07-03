@@ -16,17 +16,22 @@ namespace Desert::ECS
         void Update( entt::registry& registry, const Common::Timestep& ts ) override
         {
             // Process static meshes
-            auto meshView = registry.view<StaticMeshComponent, TransformComponent>();
-            meshView.each(
-                 [&]( auto entity, const auto& mesh, const auto& transform )
-                 {
-                     auto meshAsset = m_ResourceManager->GetMeshCache().Get( mesh.MeshHandle );
-                     if ( !meshAsset )
-                         return;
+            const auto& renderer        = m_Renderer.lock();
+            const auto& resourceManager = m_ResourceManager.lock();
+            if ( renderer && resourceManager )
+            {
+                auto meshView = registry.view<StaticMeshComponent, TransformComponent>();
+                meshView.each(
+                     [&]( auto entity, const auto& mesh, const auto& transform )
+                     {
+                         auto meshAsset = resourceManager->GetMeshCache().Get( mesh.MeshHandle );
+                         if ( !meshAsset )
+                             return;
 
-                     // Add to render list
-                     m_Renderer->AddToRenderMeshList( meshAsset->GetMesh(), nullptr, transform.GetTransform() );
-                 } );
+                         // Add to render list
+                         renderer->AddToRenderMeshList( meshAsset->GetMesh(), nullptr, transform.GetTransform() );
+                     } );
+            }
         }
 
         void OnInit( entt::registry& registry ) override

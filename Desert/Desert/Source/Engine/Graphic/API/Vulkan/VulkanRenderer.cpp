@@ -425,7 +425,11 @@ namespace Desert::Graphic::API::Vulkan
 
     std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
     {
-        return m_CompositeFramebuffer;
+        if ( const auto& framebuffer = m_CompositeFramebuffer.lock() ) [[likely]]
+        {
+            return framebuffer;
+        }
+        return nullptr;
     }
 
     void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,

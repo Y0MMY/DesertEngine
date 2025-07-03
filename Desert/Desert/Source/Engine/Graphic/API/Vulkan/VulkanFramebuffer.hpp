@@ -41,14 +41,15 @@ namespace Desert::Graphic::API::Vulkan
             return m_ColorAttachments.size() + m_ExternalColorAttachments.size();
         }
 
-
         Common::BoolResult Invalidate() override
         {
             return Common::MakeError( "Use Resize()" );
         }
         Common::BoolResult Release() override;
 
-        virtual void Use( BindUsage = BindUsage::Bind ) const override{}
+        virtual void Use( BindUsage = BindUsage::Bind ) const override
+        {
+        }
 
         virtual Common::BoolResult Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
 
@@ -56,6 +57,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_ColorAttachments.at( index );
         }
+
         virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const override
         {
             return m_DepthAttachment;
@@ -68,8 +70,8 @@ namespace Desert::Graphic::API::Vulkan
         std::shared_ptr<Image2D>              m_DepthAttachment;
         std::vector<std::shared_ptr<Image2D>> m_ColorAttachments;
 
-        std::shared_ptr<Image2D>              m_ExternalDepthAttachment;
-        std::vector<std::shared_ptr<Image2D>> m_ExternalColorAttachments;
+        std::weak_ptr<Image2D>              m_ExternalDepthAttachment;
+        std::vector<std::weak_ptr<Image2D>> m_ExternalColorAttachments;
 
         FramebufferSpecification m_FramebufferSpecification;
 

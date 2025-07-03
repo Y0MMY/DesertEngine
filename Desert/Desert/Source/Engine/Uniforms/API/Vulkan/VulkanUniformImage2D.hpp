@@ -30,9 +30,9 @@ namespace Desert::Uniforms::API::Vulkan
         void Release();
 
     private:
-        VkDescriptorImageInfo                   m_DescriptorInfo{};
-        const std::string                       m_DebugName;
-        uint32_t                                m_Binding = 0;
+        VkDescriptorImageInfo             m_DescriptorInfo{};
+        const std::string                 m_DebugName;
+        uint32_t                          m_Binding = 0;
         std::shared_ptr<Graphic::Image2D> m_Image2D;
     };
 } // namespace Desert::Uniforms::API::Vulkan

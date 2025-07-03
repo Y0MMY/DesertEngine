@@ -19,16 +19,38 @@ namespace Desert
     public:
         uint32_t GetCurrentWindowWidth()
         {
-            return m_CurrentWindow->GetWidth();
+            if ( auto window = m_CurrentWindow.lock() ) [[likely]]
+            {
+                return window->GetWidth();
+            }
+            else [[unlikely]]
+            {
+                return ~0;
+            }
         }
+
         uint32_t GetCurrentWindowHeight()
         {
-            return m_CurrentWindow->GetHeight();
+            if ( auto window = m_CurrentWindow.lock() ) [[likely]]
+            {
+                return window->GetHeight();
+            }
+            else
+            {
+                return ~0;
+            }
         }
 
         GLFWwindow* GetCurrentPointerToGLFWwinodw()
         {
-            return (GLFWwindow*)m_CurrentWindow->GetNativeWindow();
+            if (auto window = m_CurrentWindow.lock()) [[likely]]
+            {
+                return (GLFWwindow*)window->GetNativeWindow();
+            }
+            else
+            {
+                return nullptr;
+            }
         }
 
         uint32_t GetCurrentFrameIndex() const
@@ -47,10 +69,10 @@ namespace Desert
         }
 
     private:
-        std::shared_ptr<Common::Window> m_CurrentWindow;
+        std::weak_ptr<Common::Window> m_CurrentWindow;
 
-        uint32_t m_CurrentFrameIndex = 0;
-        uint32_t m_FramesInFlight     = 2;
+        uint32_t m_CurrentFrameIndex    = 0;
+        uint32_t m_FramesInFlight       = 2;
         uint32_t m_PrevioustBufferIndex = m_FramesInFlight;
 
     private:

@@ -14,11 +14,15 @@ namespace Desert::Graphic
         void                                   SetBaseMaterial( std::shared_ptr<Assets::MaterialAsset> asset );
         std::shared_ptr<Assets::MaterialAsset> GetBaseMaterial() const
         {
-            return m_BaseMaterial;
+            if ( auto material = m_BaseMaterial.lock() )
+            {
+                return material;
+            }
+            return nullptr;
         }
         bool IsUsingBaseMaterial() const
         {
-            return m_BaseMaterial != nullptr;
+            return m_BaseMaterial.lock() != nullptr;
         }
 
         // Albedo properties
@@ -94,7 +98,9 @@ namespace Desert::Graphic
         }
 
     private:
-        std::shared_ptr<Assets::MaterialAsset> m_BaseMaterial;
+        // weak_ptr because AssetManager owns MaterialAsset
+        // MaterialInstance only observes the base material
+        std::weak_ptr<Assets::MaterialAsset> m_BaseMaterial;
         std::unordered_map<Assets::TextureAsset::Type, std::shared_ptr<Assets::TextureAsset>>
              m_Textures; // TODO: Move TextureAsset::Type to models
 

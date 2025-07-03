@@ -54,7 +54,7 @@ namespace Desert::Graphic::API::Vulkan
 
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
 
-        std::shared_ptr<Framebuffer> m_CompositeFramebuffer;
+        std::weak_ptr<Framebuffer> m_CompositeFramebuffer;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -14,21 +14,29 @@ namespace Desert::Graphic
 
         Assets::Asset<Assets::MeshAsset> GetMeshAsset() const
         {
-            return m_BaseMeshAsset;
+            return m_BaseMeshAsset.lock();
         }
 
         bool IsReady() const
         {
-            return m_BaseMeshAsset && m_BaseMeshAsset->IsReadyForUse();
+            if ( const auto& baseMeshAsset = m_BaseMeshAsset.lock() )
+            {
+                return baseMeshAsset->IsReadyForUse();
+            }
+            return false;
         }
 
         // Geometry access
         const std::shared_ptr<Mesh> GetMesh() const
         {
-            return m_BaseMeshAsset->GetMesh();
+            if ( const auto& baseMeshAsset = m_BaseMeshAsset.lock() )
+            {
+                return baseMeshAsset->GetMesh();
+            }
+            return nullptr;
         }
 
     private:
-        Assets::Asset<Assets::MeshAsset> m_BaseMeshAsset;
+        std::weak_ptr<Assets::MeshAsset> m_BaseMeshAsset;
     };
 } // namespace Desert::Graphic

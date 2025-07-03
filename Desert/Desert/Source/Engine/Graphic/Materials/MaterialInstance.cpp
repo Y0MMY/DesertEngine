@@ -8,7 +8,7 @@ namespace Desert::Graphic
          : m_BaseMaterial( std::move( baseAsset ) )
     {
         // Create a new material instance based on the base asset
-        if ( m_BaseMaterial )
+        if ( const auto& baseMaterial = m_BaseMaterial.lock(); baseMaterial )
         {
             InheritBaseMaterialProperties();
         }
@@ -20,7 +20,7 @@ namespace Desert::Graphic
 
     void MaterialInstance::SetBaseMaterial( std::shared_ptr<Assets::MaterialAsset> asset )
     {
-        if ( m_BaseMaterial != asset )
+        if ( const auto& baseMaterial = m_BaseMaterial.lock(); baseMaterial != asset )
         {
             m_BaseMaterial = std::move( asset );
             InheritBaseMaterialProperties();
@@ -30,13 +30,14 @@ namespace Desert::Graphic
 
     void MaterialInstance::InheritBaseMaterialProperties()
     {
-        if ( !m_BaseMaterial )
+        const auto& baseMaterial = m_BaseMaterial.lock();
+        if ( !baseMaterial )
             return;
 
         // Inherit properties from base material if they haven't been overridden
         if ( m_AlbedoBlend == 1.0f ) // Default value means not overridden
         {
-            if ( auto albedoSlot = m_BaseMaterial->GetTextureSlot( Assets::TextureAsset::Type::Albedo ) )
+            if ( auto albedoSlot = baseMaterial->GetTextureSlot( Assets::TextureAsset::Type::Albedo ) )
             {
                 m_AlbedoColor = albedoSlot->DefaultColor;
             }
@@ -134,10 +135,11 @@ namespace Desert::Graphic
             return it->second->GetTexture();
         }
 
+        const auto& baseMaterial = m_BaseMaterial.lock();
         // Then check base material
-        if ( m_BaseMaterial )
+        if ( baseMaterial )
         {
-            return m_BaseMaterial->GetTexture( type );
+            return baseMaterial->GetTexture( type );
         }
 
         return nullptr;

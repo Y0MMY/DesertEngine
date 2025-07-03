@@ -108,7 +108,7 @@ namespace Desert::Graphic::API::Vulkan
              .depthTestEnable       = hasDepth ? VK_TRUE : VK_FALSE,
              .depthWriteEnable      = hasDepth ? VK_TRUE : VK_FALSE,
              .depthCompareOp        = VK_COMPARE_OP_LESS,
-             .depthBoundsTestEnable =  VK_FALSE,
+             .depthBoundsTestEnable = VK_FALSE,
              .stencilTestEnable     = hasDepth ? VK_TRUE : VK_FALSE,
              .front                 = { .failOp      = VK_STENCIL_OP_KEEP,
                                         .passOp      = VK_STENCIL_OP_KEEP,
@@ -139,10 +139,10 @@ namespace Desert::Graphic::API::Vulkan
              .blendConstants  = { 0.0f, 0.0f, 0.0f, 0.0f },
         };
 
-        std::shared_ptr<VulkanShader> vulkanShader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader );
+        VulkanShader* vulkanShader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
 
-        const auto descriptorSets = vulkanShader->GetShaderDescriptorSets();
+        const auto descriptorSets       = vulkanShader->GetShaderDescriptorSets();
         const auto descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
 
         const auto& pushConstant = SetUpPushConstantRange();
@@ -190,8 +190,8 @@ namespace Desert::Graphic::API::Vulkan
 
     std::pair<uint32_t, VkPushConstantRange> VulkanPipeline::SetUpPushConstantRange() const
     {
-        std::shared_ptr<VulkanShader> vulkanShader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader );
+        VulkanShader* vulkanShader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
 
         const auto& pushConstant = vulkanShader->GetShaderPushConstant();
         if ( !pushConstant )

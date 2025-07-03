@@ -4,7 +4,7 @@
 
 namespace Desert::Runtime
 {
-    MeshCache::MeshCache( const std::shared_ptr<Assets::AssetManager>& assetManager )
+    MeshCache::MeshCache( const std::weak_ptr<Assets::AssetManager>& assetManager )
          : m_AssetManager( assetManager )
     {
     }
@@ -23,16 +23,20 @@ namespace Desert::Runtime
             m_Entries.emplace_back();
         }
 
-        auto meshAsset = m_AssetManager->FindByHandle<Assets::MeshAsset>( meshHandle );
-        if ( !meshAsset )
+        if ( const auto& assetManager = m_AssetManager.lock() )
         {
-            return { ResourceHandle::InvalidIndex };
+            auto meshAsset = assetManager->FindByHandle<Assets::MeshAsset>( meshHandle );
+            if ( !meshAsset )
+            {
+                return { ResourceHandle::InvalidIndex };
+            }
+
+            m_Entries[index].Mesh    = Graphic::MeshFactory::Create( meshAsset );
+            m_Entries[index].IsAlive = true;
+
+            return ResourceHandle{ index };
         }
-
-        m_Entries[index].Mesh    = Graphic::MeshFactory::Create( meshAsset );
-        m_Entries[index].IsAlive = true;
-
-        return ResourceHandle{ index };
+        return { ResourceHandle::InvalidIndex };
     }
 
     ResourceHandle MeshCache::Create( const Common::Filepath& filepath )
@@ -49,16 +53,20 @@ namespace Desert::Runtime
             m_Entries.emplace_back();
         }
 
-        auto meshAsset = m_AssetManager->CreateAsset<Assets::MeshAsset>( Assets::AssetPriority::Low, filepath );
-        if ( !meshAsset )
+        if ( const auto& assetManager = m_AssetManager.lock() )
         {
-            return { ResourceHandle::InvalidIndex };
+            auto meshAsset = assetManager->CreateAsset<Assets::MeshAsset>( Assets::AssetPriority::Low, filepath );
+            if ( !meshAsset )
+            {
+                return { ResourceHandle::InvalidIndex };
+            }
+
+            m_Entries[index].Mesh    = Graphic::MeshFactory::Create( meshAsset );
+            m_Entries[index].IsAlive = true;
+
+            return ResourceHandle{ index };
         }
-
-        m_Entries[index].Mesh    = Graphic::MeshFactory::Create( meshAsset );
-        m_Entries[index].IsAlive = true;
-
-        return ResourceHandle{ index };
+        return { ResourceHandle::InvalidIndex };
     }
 
     void MeshCache::Destroy( ResourceHandle handle )
@@ -85,7 +93,6 @@ namespace Desert::Runtime
 
     void MeshCache::Release()
     {
-
     }
 
 } // namespace Desert::Runtime

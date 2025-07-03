@@ -83,16 +83,13 @@ namespace Desert::Core
         }
 
     private:
-        void AddMeshToRenderList( const Assets::AssetHandle                   handle,
-                                  const Assets::Asset<Assets::MaterialAsset>& material,
-                                  const glm::mat4&                            transform ) const;
         void SetEnvironment( const Graphic::Environment& environment );
 
     private:
-        std::string                                            m_SceneName;
-        std::shared_ptr<Graphic::SceneRenderer>                m_SceneRenderer;
-        const std::shared_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;
-        std::vector<std::unique_ptr<ECS::System>>              m_Systems;
+        std::string                                          m_SceneName;
+        std::shared_ptr<Graphic::SceneRenderer>              m_SceneRenderer;
+        const std::weak_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;
+        std::vector<std::unique_ptr<ECS::System>>            m_Systems;
 
         entt::registry                           m_Registry;
         std::vector<ECS::Entity>                 m_Entitys;

@@ -41,8 +41,8 @@ namespace Desert::Runtime
         }
 
     private:
-        const std::shared_ptr<Assets::AssetManager> m_AssetManager;
-        const std::unique_ptr<MaterialCache>        m_MaterialCache;
-        const std::unique_ptr<MeshCache>            m_MeshCache;
+        const std::weak_ptr<Assets::AssetManager> m_AssetManager;
+        const std::unique_ptr<MaterialCache>      m_MaterialCache;
+        const std::unique_ptr<MeshCache>          m_MeshCache;
     };
 } // namespace Desert::Runtime

@@ -11,7 +11,7 @@ namespace Desert::Runtime
     class MaterialCache
     {
     public:
-        explicit MaterialCache( const std::shared_ptr<Assets::AssetManager>& assetManager );
+        explicit MaterialCache( const std::weak_ptr<Assets::AssetManager>& assetManager );
 
         ResourceHandle Create( Assets::AssetHandle materialHandle );
         ResourceHandle Create( const Common::Filepath& path );
@@ -29,9 +29,9 @@ namespace Desert::Runtime
             bool                                       IsAlive = false;
         };
 
-        std::shared_ptr<Assets::AssetManager> m_AssetManager;
-        std::vector<MaterialEntry>            m_Entries;
-        std::queue<uint32_t>                  m_FreeList;
-        std::vector<ResourceHandle>           m_DirtyMaterials;
+        std::weak_ptr<Assets::AssetManager> m_AssetManager;
+        std::vector<MaterialEntry>          m_Entries;
+        std::queue<uint32_t>                m_FreeList;
+        std::vector<ResourceHandle>         m_DirtyMaterials;
     };
 } // namespace Desert::Runtime

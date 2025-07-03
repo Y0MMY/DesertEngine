@@ -11,7 +11,7 @@ namespace Desert::Runtime
     class MeshCache
     {
     public:
-        explicit MeshCache( const std::shared_ptr<Assets::AssetManager>& assetManager );
+        explicit MeshCache( const std::weak_ptr<Assets::AssetManager>& assetManager );
 
         ResourceHandle Create( Assets::AssetHandle meshHandle );
         ResourceHandle Create( const Common::Filepath& filepath );
@@ -29,8 +29,8 @@ namespace Desert::Runtime
             bool                                   IsAlive = false;
         };
 
-        std::shared_ptr<Assets::AssetManager> m_AssetManager;
-        std::vector<MeshEntry>                m_Entries;
-        std::queue<uint32_t>                  m_FreeList;
+        std::weak_ptr<Assets::AssetManager> m_AssetManager;
+        std::vector<MeshEntry>              m_Entries;
+        std::queue<uint32_t>                m_FreeList;
     };
 } // namespace Desert::Runtime

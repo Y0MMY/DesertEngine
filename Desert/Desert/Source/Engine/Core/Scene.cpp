@@ -32,15 +32,6 @@ namespace Desert::Core
         m_SceneRenderer->SetEnvironment( environment );
     }
 
-    void Scene::AddMeshToRenderList( const Assets::AssetHandle                   handle,
-                                     const Assets::Asset<Assets::MaterialAsset>& material,
-                                     const glm::mat4&                            transform ) const
-    {
-        // const auto& assetMesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( handle );
-        // m_SceneRenderer->AddToRenderMeshList( assetMesh ? assetMesh->GetMesh() : nullptr, nullptr /*material*/,
-        //                                       transform );
-    }
-
     void Scene::OnUpdate( const Common::Timestep& ts )
     {
         Graphic::DTO::SceneRendererUpdate sceneRendererInfo;
@@ -67,24 +58,6 @@ namespace Desert::Core
             dirLightGroup.each( [&]( const auto& light, const auto& transform )
                                 { sceneRendererInfo.DirLights.push_back( { transform.Position } ); } );
         }
-
-        // Mesh
-        /* {
-             auto meshView = m_Registry.view<ECS::StaticMeshComponent, ECS::TransformComponent>();
-             meshView.each(
-                  [&]( const auto entity, const auto& staticMesh, const auto& transform )
-                  {
-                      if ( m_Registry.has<ECS::MaterialComponent>( entity ) )
-                      {
-                          const auto& material = m_Registry.get<ECS::MaterialComponent>( entity );
-                          AddMeshToRenderList( staticMesh.MeshHandle, nullptr, transform.GetTransform() );
-                      }
-                      else
-                      {
-                          AddMeshToRenderList( staticMesh.MeshHandle, nullptr, transform.GetTransform() );
-                      }
-                  } );
-         }*/
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }

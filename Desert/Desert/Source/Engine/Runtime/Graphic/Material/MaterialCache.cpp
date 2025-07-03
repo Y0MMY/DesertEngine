@@ -4,7 +4,7 @@
 
 namespace Desert::Runtime
 {
-    MaterialCache::MaterialCache( const std::shared_ptr<Assets::AssetManager>& assetManager )
+    MaterialCache::MaterialCache( const std::weak_ptr<Assets::AssetManager>& assetManager )
          : m_AssetManager( assetManager )
     {
     }
@@ -24,19 +24,19 @@ namespace Desert::Runtime
             m_Entries.push_back( {} );
         }
 
-        auto materialAsset = m_AssetManager->FindByHandle<Assets::MaterialAsset>( materialHandle );
-        if ( !materialAsset )
+        if ( const auto& assetManager = m_AssetManager.lock() )
         {
-            return { ResourceHandle::InvalidIndex };
+            auto materialAsset = assetManager->FindByHandle<Assets::MaterialAsset>( materialHandle );
+
+            m_Entries[index].Instance = Graphic::MaterialFactory::Create( materialAsset );
+            m_Entries[index].IsAlive  = true;
+
+            ResourceHandle handle{ index };
+            m_DirtyMaterials.push_back( handle );
+
+            return handle;
         }
-
-        m_Entries[index].Instance = Graphic::MaterialFactory::Create( materialAsset );
-        m_Entries[index].IsAlive  = true;
-
-        ResourceHandle handle{ index };
-        m_DirtyMaterials.push_back( handle );
-
-        return handle;
+        return { ResourceHandle::InvalidIndex };
     }
 
     ResourceHandle MaterialCache::Create( const Common::Filepath& path )
@@ -54,20 +54,24 @@ namespace Desert::Runtime
             m_Entries.push_back( {} );
         }
 
-        auto materialAsset =
-             m_AssetManager->CreateAsset<Assets::MaterialAsset>( Assets::AssetPriority::Low, path );
-        if ( !materialAsset )
+        if ( const auto& assetManager = m_AssetManager.lock() )
         {
-            return { ResourceHandle::InvalidIndex };
+            auto materialAsset =
+                 assetManager->CreateAsset<Assets::MaterialAsset>( Assets::AssetPriority::Low, path );
+            if ( !materialAsset )
+            {
+                return { ResourceHandle::InvalidIndex };
+            }
+
+            m_Entries[index].Instance = Graphic::MaterialFactory::Create( materialAsset );
+            m_Entries[index].IsAlive  = true;
+
+            ResourceHandle handle{ index };
+            m_DirtyMaterials.push_back( handle );
+
+            return handle;
         }
-
-        m_Entries[index].Instance = Graphic::MaterialFactory::Create( materialAsset );
-        m_Entries[index].IsAlive  = true;
-
-        ResourceHandle handle{ index };
-        m_DirtyMaterials.push_back( handle );
-
-        return handle;
+        return { ResourceHandle::InvalidIndex };
     }
 
     void MaterialCache::Destroy( ResourceHandle handle )

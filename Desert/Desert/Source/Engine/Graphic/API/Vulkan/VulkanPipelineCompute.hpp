@@ -35,10 +35,10 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Release() override;
 
     private:
-        std::shared_ptr<Shader> m_Shader;
-        VkPipeline              m_ComputePipeline;
-        VkPipelineLayout        m_ComputePipelineLayout;
-        VkPipelineCache         m_PipelineCache;
+        std::weak_ptr<Shader> m_Shader;
+        VkPipeline            m_ComputePipeline;
+        VkPipelineLayout      m_ComputePipelineLayout;
+        VkPipelineCache       m_PipelineCache;
 
         VkCommandBuffer m_ActiveComputeCommandBuffer = nullptr;
     };

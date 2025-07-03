@@ -72,7 +72,13 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        const auto vulkanShader         = sp_cast<VulkanShader>( m_Shader );
+        const auto& shader = m_Shader.lock();
+        if ( !shader )
+        {
+            return;
+        }
+
+        const auto vulkanShader         = sp_cast<VulkanShader>( shader );
         auto       descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
 
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
@@ -104,8 +110,7 @@ namespace Desert::Graphic::API::Vulkan
         VK_CHECK_RESULT(
              vkCreateComputePipelines( device, m_PipelineCache, 1, &pipelineInfo, nullptr, &m_ComputePipeline ) );
 
-        VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_PIPELINE, m_Shader->GetName(),
-                                          m_ComputePipeline );
+        VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_PIPELINE, shader->GetName(), m_ComputePipeline );
     }
 
     void VulkanPipelineCompute::ReadBuffer( uint32_t bufferSize )
@@ -115,9 +120,14 @@ namespace Desert::Graphic::API::Vulkan
     Common::Result<VkDescriptorSet> VulkanPipelineCompute::GetDescriptorSet( uint32_t frameIndex,
                                                                              uint32_t setIndex )
     {
+        const auto& shader = m_Shader.lock();
+        if ( !shader )
+        {
+            return Common::MakeError<VkDescriptorSet>( "Shader for some reasone was destoyed!" );
+        }
         auto rendererAPI = static_cast<VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() );
-        auto result = rendererAPI->GetDescriptorManager()->GetDescriptorSet( sp_cast<VulkanShader>( m_Shader ),
-                                                                             frameIndex, setIndex );
+        auto result      = rendererAPI->GetDescriptorManager()->GetDescriptorSet( sp_cast<VulkanShader>( shader ),
+                                                                                  frameIndex, setIndex );
 
         if ( result.IsSuccess() )
         {
@@ -143,7 +153,12 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipelineCompute::BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex )
     {
-        auto vulkanShader = sp_cast<VulkanShader>( m_Shader );
+        const auto& shader = m_Shader.lock();
+        if ( !shader )
+        {
+            return;
+        }
+        auto vulkanShader = sp_cast<VulkanShader>( shader );
         vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, nullptr );
     }

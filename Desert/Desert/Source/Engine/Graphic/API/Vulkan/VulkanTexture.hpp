@@ -30,7 +30,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     private:
         const std::filesystem::path m_TexturePath;
-        const TextureSpecification& m_Specification;
+        const TextureSpecification m_Specification;
 
         std::shared_ptr<Image2D> m_Image2D;
     };
@@ -60,7 +60,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     private:
         const std::filesystem::path m_TexturePath;
-        const TextureSpecification& m_Specification;
+        const TextureSpecification m_Specification;
 
         std::shared_ptr<ImageCube> m_ImageCube;
     };
