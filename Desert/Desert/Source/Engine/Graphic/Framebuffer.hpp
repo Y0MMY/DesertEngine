@@ -58,6 +58,7 @@ namespace Desert::Graphic
         virtual uint32_t GetFramebufferHeight() const = 0;
 
         virtual uint32_t GetColorAttachmentCount() const = 0;
+        virtual uint32_t GetDepthAttachmentCount() const = 0;
 
         virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const = 0;
         virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const                     = 0;

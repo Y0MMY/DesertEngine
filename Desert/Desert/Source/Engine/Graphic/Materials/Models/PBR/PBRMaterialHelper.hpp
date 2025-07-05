@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 namespace Desert::Graphic::Models::PBR
 {
@@ -16,11 +16,12 @@ namespace Desert::Graphic::Models::PBR
     {
     public:
         explicit PBRMaterial( const std::shared_ptr<Material>& material )
-             : MaterialHelper::MaterialWrapper( material, "PBRData")
+             : MaterialHelper::MaterialWrapper( material, "PBRData" )
         {
         }
 
-        void UpdatePBR(  PBRUniforms&& pbr );
+        void UpdatePBR( const PBRUniforms& pbr );
+
     private:
         PBRUniforms m_PBRUniforms;
     };

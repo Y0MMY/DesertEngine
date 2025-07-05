@@ -145,11 +145,11 @@ namespace Desert::Core
                      internal::MaterialComponentSer{ material ? material->GetFilepath().string() : "" };
             }*/
 
-            if ( entity.HasComponent<ECS::SkyboxComponent>() )
+            /*if ( entity.HasComponent<ECS::SkyboxComponent>() )
             {
                 auto& skybox     = entity.GetComponent<ECS::SkyboxComponent>();
                 entitySer.Skybox = internal::SkyboxComponentSer{ skybox.Filepath.string() };
-            }
+            }*/
 
             entitySer.HasDirectionLight = entity.HasComponent<ECS::DirectionLightComponent>();
 

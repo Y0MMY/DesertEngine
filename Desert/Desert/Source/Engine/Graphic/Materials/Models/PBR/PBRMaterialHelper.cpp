@@ -3,9 +3,9 @@
 namespace Desert::Graphic::Models::PBR
 {
 
-    void PBRMaterial::UpdatePBR( PBRUniforms&& pbr )
+    void PBRMaterial::UpdatePBR( const PBRUniforms& pbr )
     {
-        m_PBRUniforms = std::move( pbr );
+        m_PBRUniforms = pbr;
 
         m_UniformProperty->SetData( &m_PBRUniforms, sizeof( PBRUniforms ) );
     }

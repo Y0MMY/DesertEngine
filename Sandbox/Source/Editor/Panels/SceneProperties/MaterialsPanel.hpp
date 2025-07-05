@@ -17,14 +17,14 @@ namespace Desert::Editor
             m_UIHelper->Init();
         }
 
-        void DrawMaterialEditor( Graphic::MaterialInstance* material );
+        void DrawMaterialEditor( const std::shared_ptr<Graphic::MaterialPBR>& material );
         void DrawMaterialEntity( const ECS::Entity& entity );
-        void DrawMaterialInfo( Graphic::MaterialInstance* material );
+        void DrawMaterialInfo( const std::shared_ptr<Graphic::MaterialPBR>& material );
 
     private:
         void DrawTextureSlot( const char* label, Assets::TextureAsset::Type type,
-                              Graphic::MaterialInstance* material );
-        void DrawMaterialProperties( Graphic::MaterialInstance* material );
+                              const std::shared_ptr<Graphic::MaterialPBR>& material );
+        void DrawMaterialProperties( const std::shared_ptr<Graphic::MaterialPBR>& material );
 
     private:
         const std::shared_ptr<Runtime::RuntimeResourceManager> m_ResourceManager;

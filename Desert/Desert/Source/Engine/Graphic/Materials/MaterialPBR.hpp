@@ -3,15 +3,20 @@
 #include <Engine/Assets/Mesh/MaterialAsset.hpp>
 #include <Engine/Graphic/Materials/Material.hpp>
 
+#include <Engine/Graphic/Materials/Models/Global.hpp>
+#include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
+#include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
+#include <Engine/Graphic/Materials/Models/PBR/MaterialProperties.hpp>
+
+#include <Engine/Core/Camera.hpp>
+
 namespace Desert::Graphic
 {
-    class MaterialInstance
+    class MaterialPBR
     {
     public:
-        explicit MaterialInstance( std::shared_ptr<Assets::MaterialAsset> baseAsset );
+        explicit MaterialPBR( const std::shared_ptr<Assets::MaterialAsset>& baseAsset );
 
-        // Base material operations
-        void                                   SetBaseMaterial( std::shared_ptr<Assets::MaterialAsset> asset );
         std::shared_ptr<Assets::MaterialAsset> GetBaseMaterial() const
         {
             if ( auto material = m_BaseMaterial.lock() )
@@ -23,6 +28,11 @@ namespace Desert::Graphic
         bool IsUsingBaseMaterial() const
         {
             return m_BaseMaterial.lock() != nullptr;
+        }
+
+        const auto& GetMaterial() const
+        {
+            return m_Material;
         }
 
         // Albedo properties
@@ -91,7 +101,7 @@ namespace Desert::Graphic
         bool                                HasFinalTexture( Assets::TextureAsset::Type type ) const;
 
         // Parameter updates
-        void UpdateRenderParameters( bool forceUpdate = false );
+        void UpdateRenderParameters( const Core::Camera& camera );
         bool IsDirty() const
         {
             return m_ParametersDirty;
@@ -99,7 +109,7 @@ namespace Desert::Graphic
 
     private:
         // weak_ptr because AssetManager owns MaterialAsset
-        // MaterialInstance only observes the base material
+        // MaterialPBR only observes the base material
         std::weak_ptr<Assets::MaterialAsset> m_BaseMaterial;
         std::unordered_map<Assets::TextureAsset::Type, std::shared_ptr<Assets::TextureAsset>>
              m_Textures; // TODO: Move TextureAsset::Type to models
@@ -121,7 +131,7 @@ namespace Desert::Graphic
 
         float m_AOValue = 1.0f;
 
-        bool m_ParametersDirty = true;
+        bool m_ParametersDirty = false;
 
         // Helper methods
         void InheritBaseMaterialProperties();
@@ -129,5 +139,11 @@ namespace Desert::Graphic
         {
             m_ParametersDirty = true;
         }
+
+    private:
+        std::unique_ptr<Models::GlobalData>              m_GlobalUB;
+        std::unique_ptr<Models::PBR::PBRMaterial>        m_PBRUB;
+        std::unique_ptr<Models::PBR::PBRMaterialTexture> m_PBRTextures;
+        std::unique_ptr<Models::PBR::MaterialProperties> m_MaterialProperties;
     };
 } // namespace Desert::Graphic

@@ -107,7 +107,7 @@ namespace Desert::Graphic::API::Vulkan
              .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
              .depthTestEnable       = hasDepth ? VK_TRUE : VK_FALSE,
              .depthWriteEnable      = hasDepth ? VK_TRUE : VK_FALSE,
-             .depthCompareOp        = VK_COMPARE_OP_LESS,
+             .depthCompareOp        = VK_COMPARE_OP_GREATER,
              .depthBoundsTestEnable = VK_FALSE,
              .stencilTestEnable     = hasDepth ? VK_TRUE : VK_FALSE,
              .front                 = { .failOp      = VK_STENCIL_OP_KEEP,

@@ -24,12 +24,14 @@ namespace Desert::ECS
                 meshView.each(
                      [&]( auto entity, const auto& mesh, const auto& transform )
                      {
-                         auto meshAsset = resourceManager->GetMeshCache().Get( mesh.MeshHandle );
-                         if ( !meshAsset )
+                         auto meshAsset     = resourceManager->GetMeshCache().Get( mesh.MeshHandle );
+                         auto materialAsset = resourceManager->GetMaterialCache().Get( mesh.MaterialHandle );
+                         if ( !meshAsset || !materialAsset)
                              return;
 
                          // Add to render list
-                         renderer->AddToRenderMeshList( meshAsset->GetMesh(), nullptr, transform.GetTransform() );
+                         renderer->AddToRenderMeshList( meshAsset->GetMesh(), materialAsset,
+                                                        transform.GetTransform() );
                      } );
             }
         }

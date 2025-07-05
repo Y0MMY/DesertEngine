@@ -14,7 +14,7 @@ namespace Desert::Graphic::MaterialHelper
             m_UniformProperty = m_Material->GetUniformBufferProperty( uniformName );
         }
 
-        const auto& GetMaterialInstance() const
+        const auto& GetMaterialPBR() const
         {
             return m_Material;
         }

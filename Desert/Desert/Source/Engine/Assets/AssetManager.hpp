@@ -12,9 +12,9 @@ namespace Desert::Assets
         using AssetContainer = std::vector<std::pair<KeyHandle, Asset<AssetBase>>>;
         using AssetIterator  = uint32_t;
 
-        template <typename AssetType>
+        template <typename AssetType, typename... Args>
         Asset<AssetType> CreateAsset( const AssetPriority priority, const Common::Filepath& filepath,
-                                      bool loadAfterCreate = true )
+                                      bool loadAfterCreate = true, Args&&... args)
         {
             static_assert( std::is_base_of_v<AssetBase, AssetType>, "AssetType must inherit from AssetBase" );
 
@@ -27,7 +27,7 @@ namespace Desert::Assets
 
             // NOTE:Perhaps the creation of an asset via the Create() method should be defined for each type
             // separately, and then call AssetType::Create()
-            auto asset = std::make_shared<AssetType>( priority, filepath );
+            auto asset = std::make_shared<AssetType>( priority, filepath, std::forward<Args>( args )... );
             if ( loadAfterCreate )
             {
                 asset->Load();

@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapperTextureCube.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperTextureCube.hpp>
 
 namespace Desert::Graphic::Models
 {

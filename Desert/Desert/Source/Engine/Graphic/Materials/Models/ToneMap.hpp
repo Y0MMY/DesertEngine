@@ -3,11 +3,10 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapperTexture2D.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperTexture2D.hpp>
 
 namespace Desert::Graphic::Models
 {
-
     class ToneMap final : public MaterialHelper::MaterialWrapperTexture2D
     {
     public:

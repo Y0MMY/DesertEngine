@@ -1,15 +1,15 @@
-#include "MaterialCache.hpp"
+#include "SkyboxCache.hpp"
 
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 
 namespace Desert::Runtime
 {
-    MaterialCache::MaterialCache( const std::weak_ptr<Assets::AssetManager>& assetManager )
+    SkyboxCache::SkyboxCache( const std::weak_ptr<Assets::AssetManager>& assetManager )
          : m_AssetManager( assetManager )
     {
     }
 
-    ResourceHandle MaterialCache::Create( Assets::AssetHandle materialHandle )
+    ResourceHandle SkyboxCache::Create( Assets::AssetHandle materialHandle )
     {
         uint32_t index;
 
@@ -26,9 +26,9 @@ namespace Desert::Runtime
 
         if ( const auto& assetManager = m_AssetManager.lock() )
         {
-            auto materialAsset = assetManager->FindByHandle<Assets::MaterialAsset>( materialHandle );
+            auto materialAsset = assetManager->FindByHandle<Assets::TextureAsset>( materialHandle );
 
-            m_Entries[index].Instance = Graphic::MaterialFactory::CreatePBR( materialAsset );
+            m_Entries[index].Instance = Graphic::MaterialFactory::CreateSkybox( materialAsset );
             m_Entries[index].IsAlive  = true;
 
             ResourceHandle handle{ index };
@@ -39,7 +39,7 @@ namespace Desert::Runtime
         return { ResourceHandle::InvalidIndex };
     }
 
-    ResourceHandle MaterialCache::Create( const Common::Filepath& path )
+    ResourceHandle SkyboxCache::Create( const Common::Filepath& path )
     {
         uint32_t index;
 
@@ -56,14 +56,14 @@ namespace Desert::Runtime
 
         if ( const auto& assetManager = m_AssetManager.lock() )
         {
-            auto materialAsset =
-                 assetManager->CreateAsset<Assets::MaterialAsset>( Assets::AssetPriority::Low, path );
+            auto materialAsset = assetManager->CreateAsset<Assets::TextureAsset>(
+                 Assets::AssetPriority::Low, path, true, Assets::TextureAsset::Type::Skybox );
             if ( !materialAsset )
             {
                 return { ResourceHandle::InvalidIndex };
             }
 
-            m_Entries[index].Instance = Graphic::MaterialFactory::CreatePBR( materialAsset );
+            m_Entries[index].Instance = Graphic::MaterialFactory::CreateSkybox( materialAsset );
             m_Entries[index].IsAlive  = true;
 
             ResourceHandle handle{ index };
@@ -74,11 +74,11 @@ namespace Desert::Runtime
         return { ResourceHandle::InvalidIndex };
     }
 
-    void MaterialCache::Destroy( ResourceHandle handle )
+    void SkyboxCache::Destroy( ResourceHandle handle )
     {
     }
 
-    std::shared_ptr<Graphic::MaterialPBR> MaterialCache::Get( ResourceHandle handle )
+    std::shared_ptr<Graphic::MaterialSkybox> SkyboxCache::Get( ResourceHandle handle )
     {
         if ( !handle.IsValid() || handle.Index >= m_Entries.size() || !m_Entries[handle.Index].IsAlive )
         {
@@ -87,17 +87,13 @@ namespace Desert::Runtime
         return m_Entries[handle.Index].Instance;
     }
 
-    const std::shared_ptr<Graphic::MaterialPBR> MaterialCache::Get( ResourceHandle handle ) const
+    const std::shared_ptr<Graphic::MaterialSkybox> SkyboxCache::Get( ResourceHandle handle ) const
     {
         if ( !handle.IsValid() || handle.Index >= m_Entries.size() || !m_Entries[handle.Index].IsAlive )
         {
             return nullptr;
         }
         return m_Entries[handle.Index].Instance;
-    }
-
-    void MaterialCache::UpdateDirtyMaterials()
-    {
     }
 
 } // namespace Desert::Runtime

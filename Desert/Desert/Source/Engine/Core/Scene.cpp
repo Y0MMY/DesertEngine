@@ -3,6 +3,7 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/System/MeshRenderSystem.hpp>
+#include <Engine/ECS/System/SkyboxRenderSystem.hpp>
 
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
@@ -15,6 +16,7 @@ namespace Desert::Core
     {
 
         RegisterSystem<ECS::MeshRenderSystem>( m_SceneRenderer, m_RuntimeResourceManager );
+        RegisterSystem<ECS::SkyboxRenderSystem>( m_SceneRenderer, m_RuntimeResourceManager );
     }
 
     NO_DISCARD Common::BoolResult Scene::BeginScene( const Core::Camera& camera )
@@ -27,11 +29,6 @@ namespace Desert::Core
         return m_SceneRenderer->Init();
     }
 
-    void Scene::SetEnvironment( const Graphic::Environment& environment )
-    {
-        m_SceneRenderer->SetEnvironment( environment );
-    }
-
     void Scene::OnUpdate( const Common::Timestep& ts )
     {
         Graphic::DTO::SceneRendererUpdate sceneRendererInfo;
@@ -39,16 +36,6 @@ namespace Desert::Core
 
         std::for_each( m_Systems.begin(), m_Systems.end(),
                        [&]( const auto& system ) { system->Update( m_Registry, ts ); } );
-
-        // Skybox
-        {
-            const auto& skyboxes = m_Registry.view<ECS::SkyboxComponent>();
-            for ( const auto skyboxEntity : skyboxes )
-            {
-                const auto& skybox = m_Registry.get<ECS::SkyboxComponent>( skyboxEntity );
-                SetEnvironment( skybox.Env );
-            }
-        }
 
         // Dir lights
         {

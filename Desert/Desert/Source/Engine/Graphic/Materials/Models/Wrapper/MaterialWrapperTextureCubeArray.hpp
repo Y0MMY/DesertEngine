@@ -19,7 +19,7 @@ namespace Desert::Graphic::MaterialHelper
             }
         }
 
-        const auto& GetMaterialInstance() const
+        const auto& GetMaterialPBR() const
         {
             return m_Material;
         }

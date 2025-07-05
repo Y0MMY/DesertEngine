@@ -1,8 +1,8 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapperTextureCubeArray.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapperTexture2D.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperTextureCubeArray.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperTexture2D.hpp>
 
 namespace Desert::Graphic::Models::PBR
 {
@@ -18,7 +18,7 @@ namespace Desert::Graphic::Models::PBR
     public:
         PBRMaterialTexture( const std::shared_ptr<Material>& baseMaterial );
 
-        void UpdatePBR( PBRTextures&& pbr );
+        void UpdatePBR( const PBRTextures& pbr );
 
         static const std::string_view GetUniformIrradianceName();
         static const std::string_view GetUniformPreFilteredName();

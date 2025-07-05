@@ -1,32 +1,30 @@
 #pragma once
 
 #include <Engine/Assets/AssetManager.hpp>
-#include <Engine/Graphic/Materials/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/MaterialSkybox.hpp>
 #include <Engine/Runtime/Handle.hpp>
 
 #include <queue>
 
 namespace Desert::Runtime
 {
-    class MaterialCache
+    class SkyboxCache
     {
     public:
-        explicit MaterialCache( const std::weak_ptr<Assets::AssetManager>& assetManager );
+        explicit SkyboxCache( const std::weak_ptr<Assets::AssetManager>& assetManager );
 
         ResourceHandle Create( Assets::AssetHandle materialHandle );
         ResourceHandle Create( const Common::Filepath& path );
         void           Destroy( ResourceHandle handle );
 
-        std::shared_ptr<Graphic::MaterialPBR>       Get( ResourceHandle handle );
-        const std::shared_ptr<Graphic::MaterialPBR> Get( ResourceHandle handle ) const;
-
-        void UpdateDirtyMaterials();
+        std::shared_ptr<Graphic::MaterialSkybox>       Get( ResourceHandle handle );
+        const std::shared_ptr<Graphic::MaterialSkybox> Get( ResourceHandle handle ) const;
 
     private:
         struct MaterialEntry
         {
-            std::shared_ptr<Graphic::MaterialPBR> Instance;
-            bool                                       IsAlive = false;
+            std::shared_ptr<Graphic::MaterialSkybox> Instance;
+            bool                                     IsAlive = false;
         };
 
         std::weak_ptr<Assets::AssetManager> m_AssetManager;

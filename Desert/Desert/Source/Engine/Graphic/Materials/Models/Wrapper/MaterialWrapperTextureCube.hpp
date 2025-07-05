@@ -16,7 +16,7 @@ namespace Desert::Graphic::MaterialHelper
             m_UniformProperty = m_Material->GetTextureCubeProperty( uniformName );
         }
 
-        const auto& GetMaterialInstance() const
+        const auto& GetMaterialPBR() const
         {
             return m_Material;
         }

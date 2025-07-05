@@ -74,6 +74,10 @@ namespace Desert::Editor
 
                 if ( selectedEntity.HasComponent<ECS::SkyboxComponent>() )
                 {
+                    auto& skyboxComponent = selectedEntity.GetComponent<ECS::SkyboxComponent>();
+                    const std::shared_ptr<Graphic::MaterialSkybox> skyboxInstance =
+                         m_RuntimeResourceManager->GetSkyboxCache().Get( skyboxComponent.SkyboxHandle );
+
                     if ( ImGui::CollapsingHeader( "Skybox", ImGuiTreeNodeFlags_DefaultOpen ) )
                     {
                         ImGui::Dummy( ImVec2( 0, 4 ) );
@@ -90,9 +94,18 @@ namespace Desert::Editor
                             ImGui::PopStyleColor();
 
                             ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.7f, 0.7f, 0.75f, 1.0f ) );
-                            ImGui::TextWrapped( "%s", skyboxComponent.Filepath.empty()
-                                                           ? "None"
-                                                           : skyboxComponent.Filepath.string().c_str() );
+
+                            std::string path = "None";
+                            if ( skyboxInstance && skyboxInstance->IsReady() )
+                            {
+                                auto skyboxAsset = skyboxInstance->GetBaseMaterial();
+                                if ( skyboxAsset && !skyboxAsset->GetBaseFilepath().empty() )
+                                {
+                                    path = skyboxAsset->GetBaseFilepath().string();
+                                }
+                            }
+
+                            ImGui::TextWrapped( "%s", path.c_str() );
                             ImGui::PopStyleColor();
 
                             ImGui::Dummy( ImVec2( 0, 6 ) );
@@ -103,8 +116,9 @@ namespace Desert::Editor
                                      "Cubemap Files (*.hdr;*.exr)\0*.hdr;*.exr\0All Files (*.*)\0*.*\0" );
                                 if ( !path.empty() )
                                 {
-                                    skyboxComponent.Filepath = path.string();
-                                    skyboxComponent.Env = Graphic::EnvironmentManager::Create( path.string() );
+
+                                    skyboxComponent.SkyboxHandle =
+                                         m_RuntimeResourceManager->GetSkyboxCache().Create( path );
                                 }
                             }
                         }
@@ -234,7 +248,6 @@ namespace Desert::Editor
         ImGui::PopStyleVar( 4 );
     }
 
-   
     void ScenePropertiesPanel::DrawMaterialEntity( const ECS::Entity& entity )
     {
         m_MaterialsPanel->DrawMaterialEntity( entity );

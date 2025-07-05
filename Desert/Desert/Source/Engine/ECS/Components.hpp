@@ -49,7 +49,6 @@ namespace Desert::ECS
 
     struct SkyboxComponent
     {
-        Common::Filepath     Filepath;
-        Graphic::Environment Env;
+        Runtime::ResourceHandle SkyboxHandle;
     };
 } // namespace Desert::ECS

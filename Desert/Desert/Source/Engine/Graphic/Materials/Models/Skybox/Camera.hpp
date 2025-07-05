@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 #include <Engine/Core/Camera.hpp>
 

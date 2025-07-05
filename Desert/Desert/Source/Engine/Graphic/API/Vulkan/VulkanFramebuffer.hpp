@@ -41,6 +41,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_ColorAttachments.size() + m_ExternalColorAttachments.size();
         }
 
+        uint32_t GetDepthAttachmentCount() const override
+        {
+            return ( m_DepthAttachment || m_ExternalDepthAttachment.lock() ) ? 1U : 0U;
+        }
+
         Common::BoolResult Invalidate() override
         {
             return Common::MakeError( "Use Resize()" );

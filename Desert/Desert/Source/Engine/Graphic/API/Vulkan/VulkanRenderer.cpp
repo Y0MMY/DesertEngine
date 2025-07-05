@@ -236,13 +236,32 @@ namespace Desert::Graphic::API::Vulkan
         // delete[] indices;
     }
 
-    VkClearValue CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
+    std::vector<VkClearValue> CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
     {
-        const auto   clearColor = renderPass->GetSpecification().ClearColor;
-        VkClearValue clearValues{};
-        clearValues.color = { clearColor.Color.x, clearColor.Color.y, clearColor.Color.z, clearColor.Color.w };
-        clearValues.depthStencil = { clearColor.DepthStencil.x,
-                                     static_cast<uint32_t>( clearColor.DepthStencil.y ) };
+        const auto&               clearColor = renderPass->GetSpecification().ClearColor;
+        std::vector<VkClearValue> clearValues;
+
+        const auto& framebuffer = renderPass->GetSpecification().TargetFramebuffer;
+
+        const uint32_t colorAttachmentCount = framebuffer->GetColorAttachmentCount();
+        for ( uint32_t i = 0; i < colorAttachmentCount; ++i )
+        {
+            VkClearValue clearValue{};
+            clearValue.color = {
+                 { clearColor.Color.r, clearColor.Color.g, clearColor.Color.b, clearColor.Color.a } };
+            clearValues.push_back( clearValue );
+        }
+
+        const uint32_t depthAttachmentCount = framebuffer->GetDepthAttachmentCount();
+
+        for ( uint32_t i = 0; i < depthAttachmentCount; ++i )
+        {
+            VkClearValue depthClearValue{};
+            depthClearValue.depthStencil = { clearColor.DepthStencil.x,
+                                             static_cast<uint32_t>( clearColor.DepthStencil.y ) };
+            clearValues.push_back( depthClearValue );
+        }
+
         return clearValues;
     }
 
@@ -260,7 +279,7 @@ namespace Desert::Graphic::API::Vulkan
 
     VkRenderPassBeginInfo CreateRenderPassBeginInfo( const std::unique_ptr<VulkanSwapChain>&   swapChain,
                                                      const std::shared_ptr<VulkanFramebuffer>& framebuffer,
-                                                     VkClearValue&                             clearValues )
+                                                     const std::vector<VkClearValue>&          clearValues )
     {
         VkRenderPassBeginInfo renderPassBeginInfo = {};
         renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -268,8 +287,8 @@ namespace Desert::Graphic::API::Vulkan
         renderPassBeginInfo.renderArea.offset     = { 0, 0 };
         renderPassBeginInfo.renderArea.extent     = { framebuffer->GetFramebufferWidth(),
                                                       framebuffer->GetFramebufferHeight() };
-        renderPassBeginInfo.clearValueCount       = 1U;
-        renderPassBeginInfo.pClearValues          = &clearValues;
+        renderPassBeginInfo.clearValueCount       = clearValues.size();
+        renderPassBeginInfo.pClearValues          = clearValues.data();
         renderPassBeginInfo.framebuffer           = framebuffer->GetVKFramebuffer();
         return renderPassBeginInfo;
     }

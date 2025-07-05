@@ -17,7 +17,9 @@ namespace Desert::Assets
             Metallic,
             Roughness,
             AO,
-            Emissive
+            Emissive,
+            //******//
+            Skybox
         };
 
         explicit TextureAsset( AssetPriority priority, const Common::Filepath& filepath, Type type );

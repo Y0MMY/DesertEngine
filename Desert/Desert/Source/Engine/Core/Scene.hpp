@@ -83,9 +83,6 @@ namespace Desert::Core
         }
 
     private:
-        void SetEnvironment( const Graphic::Environment& environment );
-
-    private:
         std::string                                          m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer>              m_SceneRenderer;
         const std::weak_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;

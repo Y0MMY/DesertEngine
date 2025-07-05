@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 namespace Desert::Graphic::Models
 {
@@ -15,15 +15,14 @@ namespace Desert::Graphic::Models
     class GlobalData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit GlobalData( GlobalUB&& data, 
-                             const std::shared_ptr<Material>& material )
-             : MaterialHelper::MaterialWrapper( material, "GlobalUB"), m_GlobalUB(std::move(data))
+        explicit GlobalData( const std::shared_ptr<Material>& material )
+             : MaterialHelper::MaterialWrapper( material, "GlobalUB" ), m_GlobalUB( {} )
         {
         }
 
-        void UpdateUBGlobal( GlobalUB&& ubGlobal )
+        void UpdateUBGlobal( const GlobalUB& ubGlobal )
         {
-            m_GlobalUB = std::move( ubGlobal );
+            m_GlobalUB = ubGlobal;
             m_UniformProperty->SetData( &m_GlobalUB, sizeof( GlobalUB ) );
         }
 

@@ -4,7 +4,6 @@
 #include <Common/Core/Memory/CommandBuffer.hpp>
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
 
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
@@ -66,7 +65,7 @@ namespace Desert::Graphic
         static Common::Memory::CommandBuffer& GetRenderCommandQueue();
 
     private:
-        std::shared_ptr<Texture2D>        m_BRDFTexture;
-        std::unique_ptr<RendererContext>  m_RendererContext;
+        std::shared_ptr<Texture2D>              m_BRDFTexture;
+        std::unique_ptr<RendererContext>        m_RendererContext;
     };
 } // namespace Desert::Graphic

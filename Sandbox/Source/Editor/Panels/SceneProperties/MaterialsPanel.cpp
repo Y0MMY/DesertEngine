@@ -10,7 +10,7 @@ namespace Desert::Editor
     // =========================================================================
     // Main Material Editor Function
     // =========================================================================
-    void MaterialsPanel::DrawMaterialEditor( Graphic::MaterialInstance* material )
+    void MaterialsPanel::DrawMaterialEditor( const std::shared_ptr<Graphic::MaterialPBR>& material )
     {
         if ( !material )
             return;
@@ -71,7 +71,7 @@ namespace Desert::Editor
     // =========================================================================
     // Material Information Section
     // =========================================================================
-    void MaterialsPanel::DrawMaterialInfo( Graphic::MaterialInstance* material )
+    void MaterialsPanel::DrawMaterialInfo( const std::shared_ptr<Graphic::MaterialPBR>& material )
     {
         // Section header styling
         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
@@ -103,7 +103,7 @@ namespace Desert::Editor
     // Texture Slot UI Element
     // =========================================================================
     void MaterialsPanel::DrawTextureSlot( const char* label, Assets::TextureAsset::Type type,
-                                          Graphic::MaterialInstance* material )
+                                          const std::shared_ptr<Graphic::MaterialPBR>& material )
     {
         bool hasTexture = material->HasFinalTexture( type );
         ImGui::PushID( label );
@@ -177,7 +177,7 @@ namespace Desert::Editor
     // =========================================================================
     // Material Properties Section with Tabs
     // =========================================================================
-    void MaterialsPanel::DrawMaterialProperties( Graphic::MaterialInstance* material )
+    void MaterialsPanel::DrawMaterialProperties( const std::shared_ptr<Graphic::MaterialPBR>& material )
     {
         // Section header styling
         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
