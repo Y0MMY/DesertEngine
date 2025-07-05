@@ -27,6 +27,10 @@ namespace Desert::Uniforms::API::Vulkan
     void VulkanUniformImageCube::SetImageCube( const std::shared_ptr<Graphic::ImageCube>& imageCube ) 
     {
         m_ImageCube = imageCube;
+        if(!m_ImageCube)
+        {
+            return;
+        }
 
         const auto& vulkanImageInfo =
              sp_cast<Graphic::API::Vulkan::VulkanImageCube>( imageCube )->GetVulkanImageInfo();

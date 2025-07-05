@@ -4,6 +4,7 @@
 #include <Engine/Core/Camera.hpp>
 
 #include <Engine/Graphic/DTO/MeshRenderData.hpp>
+#include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 namespace Desert::Graphic::System
 {
@@ -14,7 +15,7 @@ namespace Desert::Graphic::System
                                  const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal );
         void               Shutdown();
 
-        void BeginScene( const Core::Camera& camera );
+        void BeginScene( const Core::Camera& camera, const std::optional<Environment>& environment );
         void Submit( const DTO::MeshRenderData& renderData );
         void EndScene();
 
@@ -24,8 +25,14 @@ namespace Desert::Graphic::System
         }
 
     private:
-        bool SetupGeometryPass( const uint32_t width, const uint32_t height, const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal);
+        bool                                    SetupGeometryPass( const uint32_t width, const uint32_t height,
+                                                                   const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal );
+        std::optional<Models::PBR::PBRTextures> PreparePBRTextures() const;
 
+    private:
+        std::optional<Environment> m_Environment;
+
+    private:
         std::vector<DTO::MeshRenderData> m_RenderQueue;
         Core::Camera*                    m_ActiveCamera = nullptr;
 

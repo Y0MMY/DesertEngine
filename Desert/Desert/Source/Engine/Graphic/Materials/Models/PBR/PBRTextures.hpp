@@ -18,7 +18,7 @@ namespace Desert::Graphic::Models::PBR
     public:
         PBRMaterialTexture( const std::shared_ptr<Material>& baseMaterial );
 
-        void UpdatePBR( const PBRTextures& pbr );
+        void UpdatePBR( const std::optional<PBRTextures>& pbr );
 
         static const std::string_view GetUniformIrradianceName();
         static const std::string_view GetUniformPreFilteredName();

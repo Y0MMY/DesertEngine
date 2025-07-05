@@ -150,13 +150,15 @@ namespace Desert::Graphic
         glm::mat4 Transform;
     };
 
-    void MaterialPBR::UpdateRenderParameters( const Core::Camera& camera )
+    void MaterialPBR::UpdateRenderParameters( const Core::Camera&                            camera,
+                                              const std::optional<Models::PBR::PBRTextures>& pbrTextures )
     {
         const VP vp{ .ViewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(),
                      .Transform      = glm::mat4( 1.0 ) };
 
         m_GlobalUB->UpdateUBGlobal( Models::GlobalUB{ .CameraPosition = camera.GetPosition() } );
         m_PBRUB->UpdatePBR( {} );
+        m_PBRTextures->UpdatePBR( pbrTextures );
         m_Material->PushConstant( &vp, sizeof( vp ) );
 
         // Here we would update the actual Material object with our parameters

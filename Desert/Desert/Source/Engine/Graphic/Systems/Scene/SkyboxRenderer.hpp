@@ -20,6 +20,15 @@ namespace Desert::Graphic::System
         }
         void EndScene();
 
+        const std::optional<Environment> GetEnvironment() const
+        {
+            if ( const auto& material = m_MaterialSkybox.lock() )
+            {
+                return material->GetEnvironment();
+            }
+            return std::nullopt;
+        }
+
         const auto& GetFramebuffer() const
         {
             return m_Framebuffer;

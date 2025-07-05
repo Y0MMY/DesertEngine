@@ -27,10 +27,11 @@ namespace Desert::Graphic::System
         m_ActiveCamera = nullptr;
     }
 
-    void MeshRenderer::BeginScene( const Core::Camera& camera )
+    void MeshRenderer::BeginScene( const Core::Camera& camera, const std::optional<Environment>& environment )
     {
         m_ActiveCamera = const_cast<Core::Camera*>( &camera );
         m_RenderQueue.clear();
+        m_Environment = environment;
     }
 
     void MeshRenderer::Submit( const DTO::MeshRenderData& renderData )
@@ -38,15 +39,26 @@ namespace Desert::Graphic::System
         m_RenderQueue.push_back( renderData );
     }
 
+    std::optional<Models::PBR::PBRTextures> MeshRenderer::PreparePBRTextures() const
+    {
+        if ( !m_Environment || !m_Environment->IrradianceMap || !m_Environment->PreFilteredMap )
+            return std::nullopt;
+
+        return Models::PBR::PBRTextures{ .IrradianceMap  = m_Environment->IrradianceMap,
+                                         .PreFilteredMap = m_Environment->PreFilteredMap };
+    }
+
     void MeshRenderer::EndScene()
     {
         auto& renderer = Renderer::GetInstance();
         renderer.BeginRenderPass( m_RenderPass );
 
+        const auto textures = PreparePBRTextures();
+
         // Render all meshes in queue
         for ( const auto& renderData : m_RenderQueue )
         {
-            renderData.Material->UpdateRenderParameters( *m_ActiveCamera );
+            renderData.Material->UpdateRenderParameters( *m_ActiveCamera, textures );
             renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
         }
 

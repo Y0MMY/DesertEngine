@@ -28,7 +28,7 @@ namespace Desert::Graphic
         m_SceneInfo.ActiveScene  = scene;
         m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
         m_SkyboxRenderer->BeginScene( camera );
-        m_MeshRenderer->BeginScene( camera );
+        m_MeshRenderer->BeginScene( camera, m_SkyboxRenderer->GetEnvironment() );
         auto& renderer = Renderer::GetInstance();
         return renderer.BeginFrame();
     }
