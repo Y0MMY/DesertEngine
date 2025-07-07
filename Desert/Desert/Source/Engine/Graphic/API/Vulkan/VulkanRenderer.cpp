@@ -248,13 +248,12 @@ namespace Desert::Graphic::API::Vulkan
         {
             VkClearValue clearValue{};
             clearValue.color = {
-                 { clearColor.Color.r, clearColor.Color.g, clearColor.Color.b, clearColor.Color.a } };
+                 { clearColor.Color.r, clearColor.Color.g, clearColor.Color.b, 1.0 } };
             clearValues.push_back( clearValue );
         }
-
         const uint32_t depthAttachmentCount = framebuffer->GetDepthAttachmentCount();
 
-        for ( uint32_t i = 0; i < depthAttachmentCount; ++i )
+        if ( depthAttachmentCount > 0 )
         {
             VkClearValue depthClearValue{};
             depthClearValue.depthStencil = { clearColor.DepthStencil.x,
@@ -347,8 +346,8 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                                  const std::shared_ptr<Material>& material )
+    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
+                                                  const std::shared_ptr<MaterialExecutor>& material )
     {
         uint32_t    frameIndex          = Renderer::GetInstance().GetCurrentFrameIndex();
         const auto& vulkanShader        = sp_cast<API::Vulkan::VulkanShader>( material->GetShader() );
@@ -451,9 +450,9 @@ namespace Desert::Graphic::API::Vulkan
         return nullptr;
     }
 
-    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,
-                                        const std::shared_ptr<Mesh>&     mesh,
-                                        const std::shared_ptr<Material>& material )
+    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>&         pipeline,
+                                        const std::shared_ptr<Mesh>&             mesh,
+                                        const std::shared_ptr<MaterialExecutor>& material )
     {
 
         uint32_t    frameIndex          = Renderer::GetInstance().GetCurrentFrameIndex();

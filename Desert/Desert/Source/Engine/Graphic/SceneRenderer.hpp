@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Renderer.hpp>
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Core/Scene.hpp>
@@ -10,8 +10,8 @@
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/EventRegistry.hpp>
 
-#include "Systems/Scene/MeshRenderer.hpp"
-#include "Systems/Scene/SkyboxRenderer.hpp"
+#include "Systems/Scene/Mesh/MeshRenderer.hpp"
+#include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
 
 namespace Desert::Core
 {
@@ -29,7 +29,7 @@ namespace Desert::Graphic
         [[nodiscard]] Common::BoolResult BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene,
                                                      const Core::Camera&                         camera );
 
-        void OnUpdate( const DTO::SceneRendererUpdate& sceneRenderInfo );
+        void OnUpdate( const SceneRendererUpdate& sceneRenderInfo );
 
         [[nodiscard]] Common::BoolResult EndScene();
 
@@ -46,6 +46,8 @@ namespace Desert::Graphic
     private:
         void CompositeRenderPass();
         void ToneMapRenderPass();
+
+        const glm::vec3 BuildDirectionLight( const std::vector<DirectionLight>& dirLights );
 
     private:
         struct

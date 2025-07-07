@@ -11,7 +11,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual void ApplyTexture2D( MaterialProperty* prop ) override;
         virtual void ApplyTextureCube( MaterialProperty* prop ) override;
 
-        virtual void ApplyProperties( Material* material ) override;
-        virtual void ApplyPushConstants( Material* material, Pipeline* pipeline ) override;
+        virtual void ApplyProperties( MaterialExecutor* material ) override;
+        virtual void ApplyPushConstants( MaterialExecutor* material, Pipeline* pipeline ) override;
     };
 } // namespace Desert::Graphic::API::Vulkan

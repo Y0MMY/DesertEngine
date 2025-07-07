@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 namespace Desert::Graphic::Models
@@ -15,7 +15,7 @@ namespace Desert::Graphic::Models
     class GlobalData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit GlobalData( const std::shared_ptr<Material>& material )
+        explicit GlobalData( const std::shared_ptr<MaterialExecutor>& material )
              : MaterialHelper::MaterialWrapper( material, "GlobalUB" ), m_GlobalUB( {} )
         {
         }

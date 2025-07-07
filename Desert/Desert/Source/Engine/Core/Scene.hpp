@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Graphic/DTO/SceneRendererUpdate.hpp>
+#include <Engine/Graphic/Models/SceneRendererUpdate.hpp>
 
 #include <Common/Core/Core.hpp>
 #include <Engine/Core/Camera.hpp>

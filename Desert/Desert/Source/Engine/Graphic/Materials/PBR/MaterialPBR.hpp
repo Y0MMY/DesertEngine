@@ -1,12 +1,13 @@
 #pragma once
 
 #include <Engine/Assets/Mesh/MaterialAsset.hpp>
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 #include <Engine/Graphic/Materials/Models/Global.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
-#include <Engine/Graphic/Materials/Models/PBR/MaterialProperties.hpp>
+#include <Engine/Graphic/Materials/Models/PBR/MaterialPBRProperties.hpp>
+#include <Engine/Graphic/Materials/Models/Lighting.hpp>
 
 #include <Engine/Core/Camera.hpp>
 
@@ -101,7 +102,7 @@ namespace Desert::Graphic
         bool                                HasFinalTexture( Assets::TextureAsset::Type type ) const;
 
         // Parameter updates
-        void UpdateRenderParameters( const Core::Camera&                            camera,
+        void UpdateRenderParameters( const Core::Camera& camera, const glm::vec3& directionLight,
                                      const std::optional<Models::PBR::PBRTextures>& pbrTextures );
         bool IsDirty() const
         {
@@ -115,7 +116,7 @@ namespace Desert::Graphic
         std::unordered_map<Assets::TextureAsset::Type, std::shared_ptr<Assets::TextureAsset>>
              m_Textures; // TODO: Move TextureAsset::Type to models
 
-        std::shared_ptr<Material> m_Material;
+        std::shared_ptr<MaterialExecutor> m_Material;
 
         // Material properties
         glm::vec3 m_AlbedoColor = glm::vec3( 0.8f );
@@ -142,9 +143,10 @@ namespace Desert::Graphic
         }
 
     private:
-        std::unique_ptr<Models::GlobalData>              m_GlobalUB;
-        std::unique_ptr<Models::PBR::PBRMaterial>        m_PBRUB;
-        std::unique_ptr<Models::PBR::PBRMaterialTexture> m_PBRTextures;
-        std::unique_ptr<Models::PBR::MaterialProperties> m_MaterialProperties;
+        std::unique_ptr<Models::LightingData>               m_LightingData;
+        std::unique_ptr<Models::GlobalData>                 m_GlobalUB;
+        std::unique_ptr<Models::PBR::PBRMaterial>           m_PBRUB;
+        std::unique_ptr<Models::PBR::PBRMaterialTexture>    m_PBRTextures;
+        std::unique_ptr<Models::PBR::MaterialPBRProperties> m_MaterialProperties;
     };
 } // namespace Desert::Graphic

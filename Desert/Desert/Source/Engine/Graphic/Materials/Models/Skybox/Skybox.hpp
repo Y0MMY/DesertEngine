@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperTextureCube.hpp>
 
 namespace Desert::Graphic::Models
@@ -11,7 +11,7 @@ namespace Desert::Graphic::Models
     class SkyboxData final : public MaterialHelper::MaterialWrapperTextureCube
     {
     public:
-        explicit SkyboxData( const std::shared_ptr<Material>& material )
+        explicit SkyboxData( const std::shared_ptr<MaterialExecutor>& material )
              : MaterialHelper::MaterialWrapperTextureCube( material, "samplerCubeMap" )
         {
         }

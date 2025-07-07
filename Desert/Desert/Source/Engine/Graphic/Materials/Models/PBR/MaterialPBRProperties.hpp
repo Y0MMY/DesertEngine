@@ -1,11 +1,10 @@
-// MaterialProperties.h
 #pragma once
 #include <glm/glm.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 namespace Desert::Graphic::Models::PBR
 {
-    struct MaterialPropertiesUB
+    struct PBRMaterialPropertiesUB
     {
         glm::vec3 AlbedoColor;
         float     AlbedoBlend;
@@ -18,21 +17,21 @@ namespace Desert::Graphic::Models::PBR
         float     AOValue;
     };
 
-    class MaterialProperties final : public MaterialHelper::MaterialWrapper
+    class MaterialPBRProperties final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit MaterialProperties( const std::shared_ptr<Material>& material )
+        explicit MaterialPBRProperties( const std::shared_ptr<MaterialExecutor>& material )
              : MaterialWrapper( material, "MaterialProperties" ), m_Data( {} )
         {
         }
 
-        void Update( const MaterialPropertiesUB& props )
+        void Update( const PBRMaterialPropertiesUB& props )
         {
             m_Data = props;
-            m_UniformProperty->SetData( &m_Data, sizeof( MaterialPropertiesUB ) );
+            m_UniformProperty->SetData( &m_Data, sizeof( PBRMaterialPropertiesUB ) );
         }
 
     private:
-        MaterialPropertiesUB m_Data;
+        PBRMaterialPropertiesUB m_Data;
     };
 } // namespace Desert::Graphic::Models

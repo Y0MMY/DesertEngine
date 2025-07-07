@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Assets/AssetManager.hpp>
-#include <Engine/Graphic/Materials/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/PBR/MaterialPBR.hpp>
 #include <Engine/Runtime/Handle.hpp>
 
 #include <queue>

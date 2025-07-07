@@ -16,6 +16,7 @@ namespace Desert::Graphic
 
         if ( !m_SkyboxRenderer->Init( width, height ) )
             return Common::MakeError( "Failed to initialize SkyboxRenderer system" );
+
         if ( !m_MeshRenderer->Init( width, height, m_SkyboxRenderer->GetFramebuffer() ) )
             return Common::MakeError( "Failed to initialize MeshRenderer system" );
 
@@ -33,11 +34,10 @@ namespace Desert::Graphic
         return renderer.BeginFrame();
     }
 
-    void SceneRenderer::OnUpdate( const DTO::SceneRendererUpdate& sceneRenderInfo )
+    void SceneRenderer::OnUpdate( const SceneRendererUpdate& sceneRenderInfo )
     {
-        /*if ( sceneRenderInfo.DirLights.size() )
-            m_SceneInfo.LightsInfo.Lightning->UpdateDirection(
-                 std::move( sceneRenderInfo.DirLights[0].Direction ) );*/
+        m_MeshRenderer->SubmitLight( BuildDirectionLight(
+             sceneRenderInfo.DirLights ) /*{ sceneRenderInfo.DirLights[0].Direction, {}, 0.0 } */ );
 
         m_SkyboxRenderer->EndScene();
         m_MeshRenderer->EndScene();
@@ -109,7 +109,7 @@ namespace Desert::Graphic
 
     const Environment& SceneRenderer::GetEnvironment()
     {
-        return {};//m_SkyboxRenderer->GetEnvironment();
+        return {}; // m_SkyboxRenderer->GetEnvironment();
     }
 
     void SceneRenderer::Shutdown()
@@ -146,7 +146,18 @@ namespace Desert::Graphic
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage() const
     {
-        return m_SkyboxRenderer->GetFramebuffer()->GetColorAttachmentImage(); // COMPOSITE_RENDERINFO(Framebuffer)->GetColorAttachmentImage();
+        return m_SkyboxRenderer->GetFramebuffer()
+             ->GetColorAttachmentImage(); // COMPOSITE_RENDERINFO(Framebuffer)->GetColorAttachmentImage();
+    }
+
+    const glm::vec3 SceneRenderer::BuildDirectionLight( const std::vector<DirectionLight>& dirLights )
+    {
+        if ( !dirLights.empty() )
+        {
+            return dirLights[0].Direction;
+        }
+
+        return glm::vec3( 0.0f );
     }
 
 } // namespace Desert::Graphic

@@ -1,4 +1,4 @@
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/RendererAPI.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
@@ -9,7 +9,7 @@ static constexpr uint32_t kMaxPushConstantsSize = 128U;
 
 namespace Desert::Graphic
 {
-    Material::Material( std::string&& debugName, const std::shared_ptr<Shader>& shader,
+    MaterialExecutor::MaterialExecutor( std::string&& debugName, const std::shared_ptr<Shader>& shader,
                         std::unique_ptr<MaterialBackend>&& materialBackend )
          : m_DebugName( std::move( debugName ) ), m_MaterialBackend( std::move( materialBackend ) ),
            m_Shader( shader )
@@ -18,7 +18,7 @@ namespace Desert::Graphic
         InitializeProperties();
     }
 
-    void Material::InitializeProperties()
+    void MaterialExecutor::InitializeProperties()
     {
         auto uniformManager = Uniforms::UniformManager::Create( "Material_" + m_Shader->GetName(), m_Shader );
 
@@ -50,7 +50,7 @@ namespace Desert::Graphic
         }
     }
 
-    void Material::Apply()
+    void MaterialExecutor::Apply()
     {
         m_MaterialBackend->ApplyProperties( this );
         if ( m_PushConstantBuffer.Size )
@@ -59,7 +59,7 @@ namespace Desert::Graphic
         }
     }
 
-    std::shared_ptr<Material> Material::Create( std::string&& debugName, const std::shared_ptr<Shader>& shader )
+    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&& debugName, const std::shared_ptr<Shader>& shader )
     {
         switch ( RendererAPI::GetAPIType() )
         {
@@ -67,7 +67,7 @@ namespace Desert::Graphic
                 return nullptr;
             case RendererAPIType::Vulkan:
             {
-                return std::make_shared<Material>(
+                return std::make_shared<MaterialExecutor>(
                      std::move( debugName ), shader,
                      std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>() ) );
             }
@@ -76,7 +76,7 @@ namespace Desert::Graphic
         return nullptr;
     }
 
-    std::shared_ptr<UniformBufferProperty> Material::GetUniformBufferProperty( const std::string& name ) const
+    std::shared_ptr<UniformBufferProperty> MaterialExecutor::GetUniformBufferProperty( const std::string& name ) const
     {
         auto it = m_UniformBufferPropertiesLookup.find( name );
         if ( it != m_UniformBufferPropertiesLookup.end() )
@@ -86,7 +86,7 @@ namespace Desert::Graphic
         return nullptr;
     }
 
-    std::shared_ptr<Texture2DProperty> Material::GetTexture2DProperty( const std::string& name ) const
+    std::shared_ptr<Texture2DProperty> MaterialExecutor::GetTexture2DProperty( const std::string& name ) const
     {
         auto it = m_Texture2DPropertiesLookup.find( name );
         if ( it != m_Texture2DPropertiesLookup.end() )
@@ -96,7 +96,7 @@ namespace Desert::Graphic
         return nullptr;
     }
 
-    std::shared_ptr<TextureCubeProperty> Material::GetTextureCubeProperty( const std::string& name ) const
+    std::shared_ptr<TextureCubeProperty> MaterialExecutor::GetTextureCubeProperty( const std::string& name ) const
     {
         auto it = m_TextureCubePropertiesLookup.find( name );
         if ( it != m_TextureCubePropertiesLookup.end() )

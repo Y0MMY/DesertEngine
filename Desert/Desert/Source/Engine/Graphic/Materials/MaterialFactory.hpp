@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Engine/Graphic/Materials/MaterialPBR.hpp>
-#include <Engine/Graphic/Materials/MaterialSkybox.hpp>
+#include <Engine/Graphic/Materials/PBR/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 
 namespace Desert::Graphic

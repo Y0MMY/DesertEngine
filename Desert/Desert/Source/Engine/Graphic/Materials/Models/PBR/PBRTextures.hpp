@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperTextureCubeArray.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperTexture2D.hpp>
 
@@ -16,7 +16,7 @@ namespace Desert::Graphic::Models::PBR
                                      MaterialHelper::MaterialWrapperTexture2D
     {
     public:
-        PBRMaterialTexture( const std::shared_ptr<Material>& baseMaterial );
+        PBRMaterialTexture( const std::shared_ptr<MaterialExecutor>& baseMaterial );
 
         void UpdatePBR( const std::optional<PBRTextures>& pbr );
 

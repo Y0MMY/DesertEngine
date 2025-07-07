@@ -3,7 +3,7 @@
 #include <Engine/Graphic/RendererContext.hpp>
 #include <Common/Core/Memory/CommandBuffer.hpp>
 
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
@@ -33,10 +33,10 @@ namespace Desert::Graphic
         void                             BeginSwapChainRenderPass();
         void                             EndRenderPass();
         void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                         const std::shared_ptr<Material>& material );
+                         const std::shared_ptr<MaterialExecutor>& material );
 
         void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                   const std::shared_ptr<Material>& material );
+                                   const std::shared_ptr<MaterialExecutor>& material );
 
         void PrepareNextFrame();
         void PresentFinalImage();

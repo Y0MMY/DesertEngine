@@ -1,6 +1,7 @@
 #include <Engine/Core/Scene.hpp>
 
 #include <Engine/Graphic/SceneRenderer.hpp>
+
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/System/MeshRenderSystem.hpp>
 #include <Engine/ECS/System/SkyboxRenderSystem.hpp>
@@ -31,7 +32,7 @@ namespace Desert::Core
 
     void Scene::OnUpdate( const Common::Timestep& ts )
     {
-        Graphic::DTO::SceneRendererUpdate sceneRendererInfo;
+        Graphic::SceneRendererUpdate sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
 
         std::for_each( m_Systems.begin(), m_Systems.end(),

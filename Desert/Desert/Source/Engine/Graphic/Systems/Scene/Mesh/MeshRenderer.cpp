@@ -34,9 +34,14 @@ namespace Desert::Graphic::System
         m_Environment = environment;
     }
 
-    void MeshRenderer::Submit( const DTO::MeshRenderData& renderData )
+    void MeshRenderer::Submit( const MeshRenderData& renderData )
     {
         m_RenderQueue.push_back( renderData );
+    }
+
+    void MeshRenderer::SubmitLight( const glm::vec3& directionLight )
+    {
+        m_DirectionLight = directionLight;
     }
 
     std::optional<Models::PBR::PBRTextures> MeshRenderer::PreparePBRTextures() const
@@ -58,7 +63,7 @@ namespace Desert::Graphic::System
         // Render all meshes in queue
         for ( const auto& renderData : m_RenderQueue )
         {
-            renderData.Material->UpdateRenderParameters( *m_ActiveCamera, textures );
+            renderData.Material->UpdateRenderParameters( *m_ActiveCamera, m_DirectionLight, textures );
             renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
         }
 
@@ -105,5 +110,4 @@ namespace Desert::Graphic::System
 
         return true;
     }
-
 } // namespace Desert::Graphic::System

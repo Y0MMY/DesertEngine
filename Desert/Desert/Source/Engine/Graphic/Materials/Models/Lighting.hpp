@@ -2,22 +2,22 @@
 
 #include <glm/glm.hpp>
 
-#include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 namespace Desert::Graphic::Models
 {
     class LightingData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit LightingData( glm::vec3&& direction, const std::shared_ptr<Material>& material )
-             : MaterialHelper::MaterialWrapper( material, "LightningUB" ), m_Direction( std::move( direction ) )
+        explicit LightingData( const std::shared_ptr<MaterialExecutor>& material )
+             : MaterialHelper::MaterialWrapper( material, "LightningUB" ), m_Direction( glm::vec3( 0 ) )
         {
         }
 
-        void UpdateDirection( glm::vec3&& direction )
+        void UpdateDirection( const glm::vec3& direction )
         {
-            m_Direction = std::move( direction );
+            m_Direction = direction;
             m_UniformProperty->SetData( &m_Direction[0], sizeof( glm::vec3 ) );
         }
 

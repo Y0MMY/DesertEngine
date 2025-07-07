@@ -11,7 +11,7 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    void VulkanMaterialBackend::ApplyProperties( Material* material )
+    void VulkanMaterialBackend::ApplyProperties( MaterialExecutor* material )
     {
         if ( !material )
             return;
@@ -90,7 +90,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    void VulkanMaterialBackend::ApplyPushConstants( Material* material, Pipeline* pipeline )
+    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* material, Pipeline* pipeline )
     {
     }
 

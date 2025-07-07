@@ -5,7 +5,7 @@
 
 namespace Desert::Graphic::Models::PBR
 {
-    PBRMaterialTexture::PBRMaterialTexture( const std::shared_ptr<Material>& baseMaterial )
+    PBRMaterialTexture::PBRMaterialTexture( const std::shared_ptr<MaterialExecutor>& baseMaterial )
          : MaterialWrapperTextureCubeArray( baseMaterial, { std::string( Constatns::IrradianceTexture ),
                                                             std::string( Constatns::SpecularTexture ) } ),
            MaterialWrapperTexture2D( baseMaterial, std::string( Constatns::SpecularBRDF_LUT ) ),

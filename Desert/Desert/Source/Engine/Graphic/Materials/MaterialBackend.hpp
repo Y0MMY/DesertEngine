@@ -5,7 +5,7 @@
 
 namespace Desert::Graphic
 {
-    class Material;
+    class MaterialExecutor;
     class MaterialProperty;
 
     class MaterialBackend
@@ -17,7 +17,7 @@ namespace Desert::Graphic
         virtual void ApplyTexture2D( MaterialProperty* prop )     = 0;
         virtual void ApplyTextureCube( MaterialProperty* prop )   = 0;
 
-        virtual void ApplyProperties( Material* material )                        = 0;
-        virtual void ApplyPushConstants( Material* material, Pipeline* pipeline ) = 0;
+        virtual void ApplyProperties( MaterialExecutor* material )                        = 0;
+        virtual void ApplyPushConstants( MaterialExecutor* material, Pipeline* pipeline ) = 0;
     };
 } // namespace Desert::Graphic

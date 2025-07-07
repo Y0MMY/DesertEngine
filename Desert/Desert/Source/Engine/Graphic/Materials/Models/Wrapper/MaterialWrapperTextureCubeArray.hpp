@@ -1,14 +1,14 @@
 #pragma once
 
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 namespace Desert::Graphic::MaterialHelper
 {
     class MaterialWrapperTextureCubeArray
     {
     public:
-        explicit MaterialWrapperTextureCubeArray( const std::shared_ptr<Material>& baseMaterial,
+        explicit MaterialWrapperTextureCubeArray( const std::shared_ptr<MaterialExecutor>& baseMaterial,
                                                   const std::vector<std::string>&  uniformNames )
              : m_Material( baseMaterial ), m_UniformNames( uniformNames )
         {
@@ -25,7 +25,7 @@ namespace Desert::Graphic::MaterialHelper
         }
 
     protected:
-        std::shared_ptr<Material>                         m_Material;
+        std::shared_ptr<MaterialExecutor>                         m_Material;
         std::vector<std::string>                          m_UniformNames;
         std::vector<std::shared_ptr<TextureCubeProperty>> m_UniformProperties;
     };

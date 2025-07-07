@@ -1,8 +1,8 @@
 #pragma once
 
-#include <Engine/Graphic/Materials/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/PBR/MaterialPBR.hpp>
 
-namespace Desert::Graphic::DTO
+namespace Desert::Graphic
 {
     struct MeshRenderData
     {
@@ -10,4 +10,4 @@ namespace Desert::Graphic::DTO
         glm::mat4                    Transform;
         std::shared_ptr<MaterialPBR> Material;
     };
-} // namespace Desert::Graphic::DTO
+} // namespace Desert::Graphic

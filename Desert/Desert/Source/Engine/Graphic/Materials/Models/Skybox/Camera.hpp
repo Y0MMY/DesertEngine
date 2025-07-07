@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 #include <Engine/Core/Camera.hpp>
@@ -12,7 +12,7 @@ namespace Desert::Graphic::Models
     class CameraData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit CameraData( const std::shared_ptr<Material>& material )
+        explicit CameraData( const std::shared_ptr<MaterialExecutor>& material )
              : MaterialHelper::MaterialWrapper( material, "camera")
         {
         }

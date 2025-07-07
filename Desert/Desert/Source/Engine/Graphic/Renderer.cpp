@@ -81,7 +81,7 @@ namespace Desert::Graphic
     }
 
     void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                         const std::shared_ptr<Material>& material )
+                                         const std::shared_ptr<MaterialExecutor>& material )
     {
         s_RendererAPI->SubmitFullscreenQuad( pipeline, material );
     }
@@ -112,7 +112,7 @@ namespace Desert::Graphic
     }
 
     void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                               const std::shared_ptr<Material>& material )
+                               const std::shared_ptr<MaterialExecutor>& material )
     {
         s_RendererAPI->RenderMesh( pipeline, mesh, material );
     }

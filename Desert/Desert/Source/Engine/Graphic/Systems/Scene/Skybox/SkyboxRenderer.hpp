@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
-#include <Engine/Graphic/Materials/MaterialSkybox.hpp>
+#include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 
 namespace Desert::Graphic::System
 {

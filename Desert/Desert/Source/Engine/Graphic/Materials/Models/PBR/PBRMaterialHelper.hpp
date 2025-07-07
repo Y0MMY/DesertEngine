@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
 
 namespace Desert::Graphic::Models::PBR
@@ -15,7 +15,7 @@ namespace Desert::Graphic::Models::PBR
     class PBRMaterial : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit PBRMaterial( const std::shared_ptr<Material>& material )
+        explicit PBRMaterial( const std::shared_ptr<MaterialExecutor>& material )
              : MaterialHelper::MaterialWrapper( material, "PBRData" )
         {
         }

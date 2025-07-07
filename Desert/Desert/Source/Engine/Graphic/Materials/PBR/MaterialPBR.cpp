@@ -1,6 +1,6 @@
-#include <Engine/Graphic/Materials/MaterialPBR.hpp>
+#include "MaterialPBR.hpp"
 
-#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 namespace Desert::Graphic
 {
@@ -15,12 +15,13 @@ namespace Desert::Graphic
 
         const auto& shader = Graphic::ShaderLibrary::Get( "StaticPBR.glsl", {} );
 
-        m_Material = Graphic::Material::Create( "MaterialPBR", shader.GetValue() );
+        m_Material = Graphic::MaterialExecutor::Create( "MaterialPBR", shader.GetValue() );
 
+        m_LightingData       = std::make_unique<Models::LightingData>( m_Material );
         m_GlobalUB           = std::make_unique<Models::GlobalData>( m_Material );
         m_PBRUB              = std::make_unique<Models::PBR::PBRMaterial>( m_Material );
         m_PBRTextures        = std::make_unique<Models::PBR::PBRMaterialTexture>( m_Material );
-        m_MaterialProperties = std::make_unique<Models::PBR::MaterialProperties>( m_Material );
+        m_MaterialProperties = std::make_unique<Models::PBR::MaterialPBRProperties>( m_Material );
     }
 
     void MaterialPBR::InheritBaseMaterialProperties()
@@ -150,12 +151,13 @@ namespace Desert::Graphic
         glm::mat4 Transform;
     };
 
-    void MaterialPBR::UpdateRenderParameters( const Core::Camera&                            camera,
+    void MaterialPBR::UpdateRenderParameters( const Core::Camera& camera, const glm::vec3& directionLight,
                                               const std::optional<Models::PBR::PBRTextures>& pbrTextures )
     {
         const VP vp{ .ViewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(),
                      .Transform      = glm::mat4( 1.0 ) };
 
+        m_LightingData->UpdateDirection( directionLight );
         m_GlobalUB->UpdateUBGlobal( Models::GlobalUB{ .CameraPosition = camera.GetPosition() } );
         m_PBRUB->UpdatePBR( {} );
         m_PBRTextures->UpdatePBR( pbrTextures );

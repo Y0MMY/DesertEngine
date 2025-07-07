@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Assets/AssetManager.hpp>
-#include <Engine/Graphic/Materials/MaterialSkybox.hpp>
+#include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Runtime/Handle.hpp>
 
 #include <queue>

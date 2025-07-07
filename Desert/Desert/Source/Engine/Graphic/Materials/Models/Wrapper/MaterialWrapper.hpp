@@ -8,7 +8,7 @@ namespace Desert::Graphic::MaterialHelper
     class MaterialWrapper
     {
     public:
-        explicit MaterialWrapper( const std::shared_ptr<Material>& baseMaterial, const std::string& uniformName )
+        explicit MaterialWrapper( const std::shared_ptr<MaterialExecutor>& baseMaterial, const std::string& uniformName )
              : m_Material( baseMaterial ), m_UniformName( uniformName )
         {
             m_UniformProperty = m_Material->GetUniformBufferProperty( uniformName );
@@ -20,7 +20,7 @@ namespace Desert::Graphic::MaterialHelper
         }
 
     protected:
-        std::shared_ptr<Material>              m_Material;
+        std::shared_ptr<MaterialExecutor>              m_Material;
         std::string                            m_UniformName;
         std::shared_ptr<UniformBufferProperty> m_UniformProperty;
     };

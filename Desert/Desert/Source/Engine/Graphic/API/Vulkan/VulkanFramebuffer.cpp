@@ -26,105 +26,118 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        Common::Result<VkRenderPass> CreateRenderPass( VkDevice                                       device,
-                                                       const std::vector<Core::Formats::ImageFormat>& attachments,
-                                                       const ExternalFramebuffer& externalAttachments,
-                                                       AttachmentLoad             defaultLoadOp )
+        Common::Result<VkRenderPass>
+        CreateRenderPass( VkDevice device, const std::vector<Core::Formats::ImageFormat>& colorAttachments,
+                          const std::optional<Core::Formats::ImageFormat>& depthAttachment,
+                          const std::vector<std::shared_ptr<Framebuffer>>& externalColorAttachments,
+                          const std::optional<std::weak_ptr<Image2D>>&     externalDepthAttachment,
+                          AttachmentLoad                                   defaultLoadOp )
         {
             std::vector<VkAttachmentDescription> attachmentDescriptions;
             std::vector<VkAttachmentReference>   colorAttachmentRefs;
-            VkAttachmentReference                depthAttachmentRef = {};
+            std::optional<VkAttachmentReference> depthAttachmentRef;
 
-            bool     hasDepthAttachment = false;
-            uint32_t attachmentIndex    = 0;
-
-            // Process main attachments
-            for ( size_t i = 0; i < attachments.size(); ++i )
+            // Process color attachments first
+            for ( size_t i = 0; i < colorAttachments.size(); ++i )
             {
-                const auto&             attachment            = attachments[i];
-                VkAttachmentDescription attachmentDescription = {};
-                attachmentDescription.format                  = GetImageVulkanFormat( attachment );
-                attachmentDescription.samples                 = VK_SAMPLE_COUNT_1_BIT;
+                const auto& format = colorAttachments[i];
 
-                if ( Graphic::Utils::IsDepthFormat( attachment ) )
-                {
-                    attachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                    attachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-                    attachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                    attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                    attachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-                    attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                VkAttachmentDescription desc{};
+                desc.format         = GetImageVulkanFormat( format );
+                desc.samples        = VK_SAMPLE_COUNT_1_BIT;
+                desc.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                desc.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                desc.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                desc.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-                    depthAttachmentRef.attachment = static_cast<uint32_t>( attachmentIndex++ );
-                    depthAttachmentRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-                    hasDepthAttachment            = true;
-                }
-                else
-                {
-                    attachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                    attachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-                    attachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                    attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                    attachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-                    attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                VkAttachmentReference ref{};
+                ref.attachment = static_cast<uint32_t>( attachmentDescriptions.size() );
+                ref.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-                    VkAttachmentReference colorAttachmentRef = {};
-                    colorAttachmentRef.attachment            = static_cast<uint32_t>( attachmentIndex++ );
-                    colorAttachmentRef.layout                = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                    colorAttachmentRefs.push_back( colorAttachmentRef );
-                }
-
-                attachmentDescriptions.push_back( attachmentDescription );
+                attachmentDescriptions.push_back( desc );
+                colorAttachmentRefs.push_back( ref );
             }
 
-            // Process external attachments
-            for ( const auto& externalFb : externalAttachments.ExternalAttachments )
+            // Process external color attachments
+            for ( const auto& externalFb : externalColorAttachments )
             {
                 const auto& extAttachments = externalFb->GetSpecification().Attachments.Attachments;
-                for ( size_t i = 0; i < extAttachments.size(); ++i )
+                for ( const auto& format : extAttachments )
                 {
-                    const auto&             attachment            = extAttachments[i];
-                    VkAttachmentDescription attachmentDescription = {};
-                    attachmentDescription.format                  = GetImageVulkanFormat( attachment );
-                    attachmentDescription.samples                 = VK_SAMPLE_COUNT_1_BIT;
+                    if ( Graphic::Utils::IsDepthFormat( format ) )
+                        continue;
 
-                    if ( Graphic::Utils::IsDepthFormat( attachment ) )
-                    {
-                        attachmentDescription.loadOp         = GetVkAttachmentLoadOp( externalAttachments.Load );
-                        attachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-                        attachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                        attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                        attachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                        attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+                    VkAttachmentDescription desc{};
+                    desc.format         = GetImageVulkanFormat( format );
+                    desc.samples        = VK_SAMPLE_COUNT_1_BIT;
+                    desc.loadOp         = GetVkAttachmentLoadOp( defaultLoadOp );
+                    desc.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                    desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                    desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                    desc.initialLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    desc.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-                        depthAttachmentRef.attachment = static_cast<uint32_t>( attachmentIndex++ );
-                        depthAttachmentRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-                        hasDepthAttachment            = true;
-                    }
-                    else
-                    {
-                        attachmentDescription.loadOp         = GetVkAttachmentLoadOp( externalAttachments.Load );
-                        attachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-                        attachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                        attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                        attachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                        attachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    VkAttachmentReference ref{};
+                    ref.attachment = static_cast<uint32_t>( attachmentDescriptions.size() );
+                    ref.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-                        VkAttachmentReference colorAttachmentRef = {};
-                        colorAttachmentRef.attachment            = static_cast<uint32_t>( attachmentIndex++ );
-                        colorAttachmentRef.layout                = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                        colorAttachmentRefs.push_back( colorAttachmentRef );
-                    }
-
-                    attachmentDescriptions.push_back( attachmentDescription );
+                    attachmentDescriptions.push_back( desc );
+                    colorAttachmentRefs.push_back( ref );
                 }
             }
 
-            VkSubpassDescription subpass    = {};
+            // Process depth attachment (if exists)
+            if ( depthAttachment )
+            {
+                VkAttachmentDescription desc{};
+                desc.format         = GetImageVulkanFormat( *depthAttachment );
+                desc.samples        = VK_SAMPLE_COUNT_1_BIT;
+                desc.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                desc.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                desc.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                desc.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+                VkAttachmentReference ref{};
+                ref.attachment = static_cast<uint32_t>( attachmentDescriptions.size() );
+                ref.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+                attachmentDescriptions.push_back( desc );
+                depthAttachmentRef = ref;
+            }
+
+            // Process external depth attachment (if exists)
+            if ( externalDepthAttachment && !externalDepthAttachment->expired() )
+            {
+                auto depthImage = externalDepthAttachment->lock();
+                auto format     = depthImage->GetImageSpecification().Format;
+
+                VkAttachmentDescription desc{};
+                desc.format         = GetImageVulkanFormat( format );
+                desc.samples        = VK_SAMPLE_COUNT_1_BIT;
+                desc.loadOp         = GetVkAttachmentLoadOp( defaultLoadOp );
+                desc.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                desc.initialLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                desc.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+                VkAttachmentReference ref{};
+                ref.attachment = static_cast<uint32_t>( attachmentDescriptions.size() );
+                ref.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+                attachmentDescriptions.push_back( desc );
+                depthAttachmentRef = ref;
+            }
+
+            VkSubpassDescription subpass{};
             subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
             subpass.colorAttachmentCount    = static_cast<uint32_t>( colorAttachmentRefs.size() );
             subpass.pColorAttachments       = colorAttachmentRefs.data();
-            subpass.pDepthStencilAttachment = hasDepthAttachment ? &depthAttachmentRef : nullptr;
+            subpass.pDepthStencilAttachment = depthAttachmentRef ? &( *depthAttachmentRef ) : nullptr;
 
             std::vector<VkSubpassDependency> dependencies( 2 );
 
@@ -145,14 +158,14 @@ namespace Desert::Graphic::API::Vulkan
             dependencies[1].dstAccessMask   = VK_ACCESS_MEMORY_READ_BIT;
             dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
-            VkRenderPassCreateInfo renderPassCreateInfo = {};
-            renderPassCreateInfo.sType                  = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-            renderPassCreateInfo.attachmentCount        = static_cast<uint32_t>( attachmentDescriptions.size() );
-            renderPassCreateInfo.pAttachments           = attachmentDescriptions.data();
-            renderPassCreateInfo.subpassCount           = 1;
-            renderPassCreateInfo.pSubpasses             = &subpass;
-            renderPassCreateInfo.dependencyCount        = static_cast<uint32_t>( dependencies.size() );
-            renderPassCreateInfo.pDependencies          = dependencies.data();
+            VkRenderPassCreateInfo renderPassCreateInfo{};
+            renderPassCreateInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+            renderPassCreateInfo.attachmentCount = static_cast<uint32_t>( attachmentDescriptions.size() );
+            renderPassCreateInfo.pAttachments    = attachmentDescriptions.data();
+            renderPassCreateInfo.subpassCount    = 1;
+            renderPassCreateInfo.pSubpasses      = &subpass;
+            renderPassCreateInfo.dependencyCount = static_cast<uint32_t>( dependencies.size() );
+            renderPassCreateInfo.pDependencies   = dependencies.data();
 
             VkRenderPass renderPass;
             if ( vkCreateRenderPass( device, &renderPassCreateInfo, nullptr, &renderPass ) != VK_SUCCESS )
@@ -167,15 +180,15 @@ namespace Desert::Graphic::API::Vulkan
     VulkanFramebuffer::VulkanFramebuffer( const FramebufferSpecification& spec )
          : m_FramebufferSpecification( spec )
     {
-        // Create our own attachments
-        for ( const auto attachment : spec.Attachments.Attachments )
+        // Separate color and depth attachments during construction
+        for ( const auto format : spec.Attachments.Attachments )
         {
-            Core::Formats::Image2DSpecification imageSpec = { .Tag    = spec.DebugName,
-                                                              .Format = attachment,
-                                                              .Usage  = Core::Formats::Image2DUsage::Attachment,
-                                                              .Properties = Core::Formats::Sample };
+            Core::Formats::Image2DSpecification imageSpec{ .Tag        = spec.DebugName,
+                                                           .Format     = format,
+                                                           .Usage      = Core::Formats::Image2DUsage::Attachment,
+                                                           .Properties = Core::Formats::Sample };
 
-            if ( Graphic::Utils::IsDepthFormat( attachment ) )
+            if ( Graphic::Utils::IsDepthFormat( format ) )
             {
                 m_DepthAttachment = std::make_shared<VulkanImage2D>( imageSpec );
             }
@@ -185,13 +198,14 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        // Store references to external attachments
+        // Process external attachments
         for ( const auto& externalFb : spec.ExternalAttachments.ExternalAttachments )
         {
-            for ( size_t i = 0; i < externalFb->GetSpecification().Attachments.Attachments.size(); ++i )
+            const auto& extAttachments = externalFb->GetSpecification().Attachments.Attachments;
+            for ( size_t i = 0; i < extAttachments.size(); ++i )
             {
-                const auto& attachment = externalFb->GetSpecification().Attachments.Attachments[i];
-                if ( Graphic::Utils::IsDepthFormat( attachment ) )
+                const auto& format = extAttachments[i];
+                if ( Graphic::Utils::IsDepthFormat( format ) )
                 {
                     m_ExternalDepthAttachment = externalFb->GetDepthAttachmentImage();
                 }
@@ -213,22 +227,22 @@ namespace Desert::Graphic::API::Vulkan
         m_Width  = width;
         m_Height = height;
 
-        // Resize our own attachments
+        // Resize color attachments
+        for ( auto& colorAttachment : m_ColorAttachments )
+        {
+            auto& spec  = colorAttachment->GetImageSpecification();
+            spec.Width  = width;
+            spec.Height = height;
+            sp_cast<VulkanImage2D>( colorAttachment )->RT_Invalidate();
+        }
+
+        // Resize depth attachment
         if ( m_DepthAttachment )
         {
             auto& spec  = m_DepthAttachment->GetImageSpecification();
             spec.Width  = width;
             spec.Height = height;
             sp_cast<VulkanImage2D>( m_DepthAttachment )->RT_Invalidate();
-        }
-
-        for ( auto& colorAttachment : m_ColorAttachments )
-        {
-            auto& spec  = colorAttachment->GetImageSpecification();
-            spec.Width  = width;
-            spec.Height = height;
-
-            sp_cast<VulkanImage2D>( colorAttachment )->RT_Invalidate();
         }
 
         const auto& device = Common::Singleton<VulkanLogicalDevice>::GetInstance().GetVulkanLogicalDevice();
@@ -246,10 +260,25 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( m_RenderPass == nullptr )
         {
-            const auto renderPassResult =
-                 CreateRenderPass( device, m_FramebufferSpecification.Attachments.Attachments,
-                                   m_FramebufferSpecification.ExternalAttachments,
-                                   m_FramebufferSpecification.ExternalAttachments.Load );
+            // Prepare color attachment formats
+            std::vector<Core::Formats::ImageFormat> colorFormats;
+            for ( const auto& attachment : m_ColorAttachments )
+            {
+                colorFormats.push_back( attachment->GetImageSpecification().Format );
+            }
+
+            // Prepare depth attachment format (if exists)
+            std::optional<Core::Formats::ImageFormat> depthFormat;
+            if ( m_DepthAttachment )
+            {
+                depthFormat = m_DepthAttachment->GetImageSpecification().Format;
+            }
+
+            const auto renderPassResult = CreateRenderPass(
+                 device, colorFormats, depthFormat,
+                 m_FramebufferSpecification.ExternalAttachments.ExternalAttachments, m_ExternalDepthAttachment,
+                 m_FramebufferSpecification.ExternalAttachments.Load );
+
             if ( !renderPassResult.IsSuccess() )
             {
                 return Common::MakeError<VkFramebuffer>( renderPassResult.GetError() );
@@ -259,18 +288,14 @@ namespace Desert::Graphic::API::Vulkan
 
         std::vector<VkImageView> attachments;
 
+        // Add color attachments first
         for ( const auto& colorAttachment : m_ColorAttachments )
         {
             attachments.push_back(
                  sp_cast<VulkanImage2D>( colorAttachment )->GetVulkanImageInfo().ImageInfo.imageView );
         }
 
-        if ( m_DepthAttachment )
-        {
-            attachments.push_back(
-                 sp_cast<VulkanImage2D>( m_DepthAttachment )->GetVulkanImageInfo().ImageInfo.imageView );
-        }
-
+        // Add external color attachments
         for ( const auto& externalColorAttachment : m_ExternalColorAttachments )
         {
             if ( const auto& attachment = externalColorAttachment.lock() )
@@ -280,20 +305,28 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
+        // Add depth attachment (if exists)
+        if ( m_DepthAttachment )
+        {
+            attachments.push_back(
+                 sp_cast<VulkanImage2D>( m_DepthAttachment )->GetVulkanImageInfo().ImageInfo.imageView );
+        }
+
+        // Add external depth attachment (if exists)
         if ( const auto& externalDepthAttachment = m_ExternalDepthAttachment.lock() )
         {
             attachments.push_back(
                  sp_cast<VulkanImage2D>( externalDepthAttachment )->GetVulkanImageInfo().ImageInfo.imageView );
         }
 
-        VkFramebufferCreateInfo framebufferCreateInfo = {};
-        framebufferCreateInfo.sType                   = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebufferCreateInfo.renderPass              = m_RenderPass;
-        framebufferCreateInfo.attachmentCount         = static_cast<uint32_t>( attachments.size() );
-        framebufferCreateInfo.pAttachments            = attachments.data();
-        framebufferCreateInfo.width                   = width;
-        framebufferCreateInfo.height                  = height;
-        framebufferCreateInfo.layers                  = 1;
+        VkFramebufferCreateInfo framebufferCreateInfo{};
+        framebufferCreateInfo.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferCreateInfo.renderPass      = m_RenderPass;
+        framebufferCreateInfo.attachmentCount = static_cast<uint32_t>( attachments.size() );
+        framebufferCreateInfo.pAttachments    = attachments.data();
+        framebufferCreateInfo.width           = width;
+        framebufferCreateInfo.height          = height;
+        framebufferCreateInfo.layers          = 1;
 
         if ( vkCreateFramebuffer( device, &framebufferCreateInfo, nullptr, &m_Framebuffer ) != VK_SUCCESS )
         {
@@ -310,22 +343,35 @@ namespace Desert::Graphic::API::Vulkan
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
+        // Release color attachments
         for ( auto& colorAttachment : m_ColorAttachments )
         {
             colorAttachment->Release();
             colorAttachment.reset();
         }
+        m_ColorAttachments.clear();
 
+        // Release depth attachment
         if ( m_DepthAttachment )
         {
             m_DepthAttachment->Release();
             m_DepthAttachment.reset();
         }
 
+        // Clear external attachments
+        m_ExternalColorAttachments.clear();
+        m_ExternalDepthAttachment.reset();
+
         if ( m_Framebuffer != VK_NULL_HANDLE )
         {
             vkDestroyFramebuffer( device, m_Framebuffer, nullptr );
             m_Framebuffer = VK_NULL_HANDLE;
+        }
+
+        if ( m_RenderPass != VK_NULL_HANDLE )
+        {
+            vkDestroyRenderPass( device, m_RenderPass, nullptr );
+            m_RenderPass = VK_NULL_HANDLE;
         }
 
         return Common::MakeSuccess( true );

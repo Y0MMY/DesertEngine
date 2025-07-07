@@ -5,7 +5,7 @@
 
 #include <glm/glm.hpp>
 
-namespace Desert::Graphic::DTO
+namespace Desert::Graphic
 {
     struct DirectionLight
     {
@@ -17,4 +17,4 @@ namespace Desert::Graphic::DTO
         Common::Timestep            Timestep;
         std::vector<DirectionLight> DirLights;
     };
-} // namespace Desert::Graphic::DTO
+} // namespace Desert::Graphic::Models

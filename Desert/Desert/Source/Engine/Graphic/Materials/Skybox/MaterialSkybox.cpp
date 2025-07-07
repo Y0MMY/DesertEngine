@@ -8,7 +8,7 @@ namespace Desert::Graphic
 
         const auto& shader = Graphic::ShaderLibrary::Get( "skybox.glsl", {} );
 
-        m_Material = Graphic::Material::Create( "MaterialSkybox", shader.GetValue() );
+        m_Material = Graphic::MaterialExecutor::Create( "MaterialSkybox", shader.GetValue() );
 
         m_CameraModel = std::make_unique<Models::CameraData>( m_Material );
         m_SkyboxModel = std::make_unique<Models::SkyboxData>( m_Material );

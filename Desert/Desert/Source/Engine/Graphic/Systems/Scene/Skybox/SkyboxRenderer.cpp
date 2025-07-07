@@ -50,7 +50,7 @@ namespace Desert::Graphic::System
         if ( const auto& material = m_MaterialSkybox.lock() )
         {
             material->UpdateRenderParameters( *m_ActiveCamera );
-            renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterial() );
+            renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
         }
         renderer.EndRenderPass();
     }

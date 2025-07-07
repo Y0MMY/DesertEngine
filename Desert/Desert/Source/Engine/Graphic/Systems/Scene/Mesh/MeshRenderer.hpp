@@ -3,7 +3,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
 
-#include <Engine/Graphic/DTO/MeshRenderData.hpp>
+#include <Engine/Graphic/Models/MeshRenderData.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 namespace Desert::Graphic::System
@@ -16,7 +16,8 @@ namespace Desert::Graphic::System
         void               Shutdown();
 
         void BeginScene( const Core::Camera& camera, const std::optional<Environment>& environment );
-        void Submit( const DTO::MeshRenderData& renderData );
+        void Submit( const MeshRenderData& renderData );
+        void SubmitLight( const glm::vec3& directionLight );
         void EndScene();
 
         std::shared_ptr<Framebuffer> GetFramebuffer() const
@@ -33,8 +34,9 @@ namespace Desert::Graphic::System
         std::optional<Environment> m_Environment;
 
     private:
-        std::vector<DTO::MeshRenderData> m_RenderQueue;
-        Core::Camera*                    m_ActiveCamera = nullptr;
+        std::vector<MeshRenderData> m_RenderQueue;
+        glm::vec3                   m_DirectionLight;
+        Core::Camera*               m_ActiveCamera = nullptr;
 
         std::shared_ptr<Framebuffer> m_Framebuffer;
         std::shared_ptr<RenderPass>  m_RenderPass;

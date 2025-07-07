@@ -3,7 +3,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
 
-#include <Engine/Graphic/DTO/MeshRenderData.hpp>
+#include <Engine/Graphic/Models/MeshRenderData.hpp>
 
 namespace Desert::Graphic::System
 {
