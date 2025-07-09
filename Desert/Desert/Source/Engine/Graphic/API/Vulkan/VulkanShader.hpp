@@ -86,6 +86,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_DescriptorSetInfo;
         }
 
+        virtual const ShaderDefines& GetDefines() const override
+        {
+            return {};
+        }
+
     private:
         void               Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
         Common::BoolResult CreateDescriptorsLayout();

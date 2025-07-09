@@ -11,7 +11,7 @@ namespace Desert::Graphic::System
     {
     public:
         Common::BoolResult Init( const uint32_t width, const uint32_t height );
-        void               Shutdown();
+        void               Shutdown() {}
 
         void Process( const std::shared_ptr<Framebuffer>& inputFramebuffer );
 

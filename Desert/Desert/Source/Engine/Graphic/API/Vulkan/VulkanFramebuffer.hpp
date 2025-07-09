@@ -10,7 +10,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanFramebuffer( const FramebufferSpecification& spec );
-        virtual ~VulkanFramebuffer() = default;
+        virtual ~VulkanFramebuffer();
 
         virtual const FramebufferSpecification GetSpecification() const override
         {

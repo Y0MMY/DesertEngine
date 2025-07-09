@@ -20,6 +20,7 @@ namespace Desert::Graphic
         virtual const std::vector<Core::Models::UniformBuffer> GetUniformBufferModels() const                  = 0;
         virtual const std::vector<Core::Models::ImageCubeSampler> GetUniformImageCubeModels() const            = 0;
         virtual const std::vector<Core::Models::Image2DSampler>   GetUniformImage2DModels() const              = 0;
+        virtual const ShaderDefines&                              GetDefines() const                           = 0;
 
         static std::shared_ptr<Shader> Create( const std::string& filename, const ShaderDefines& defines = {} );
     };
@@ -33,6 +34,10 @@ namespace Desert::Graphic
         static Common::Result<std::shared_ptr<Shader>> Get( const std::string&   shaderName,
                                                             const ShaderDefines& defines );
         static inline bool                             IsShaderInLibrary( const std::string& shaderName );
+        static auto&                                   GetAll()
+        {
+            return s_AllShaders;
+        }
 
     private:
         static inline std::unordered_map<std::string, std::shared_ptr<Shader>> s_AllShaders;

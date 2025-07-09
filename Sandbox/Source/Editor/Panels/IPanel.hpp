@@ -2,12 +2,15 @@
 
 #include <string>
 
+#include <ImGui/imgui.h>
+
 namespace Desert::Editor
 {
     class IPanel
     {
     public:
-        explicit IPanel( std::string&& panelName ) : m_PanelName( std::move( panelName ) )
+        explicit IPanel( std::string&& panelName, bool showPanel = true )
+             : m_PanelName( std::move( panelName ) ), m_SowPanel( showPanel )
         {
         }
 
@@ -18,7 +21,18 @@ namespace Desert::Editor
             return m_PanelName;
         }
 
+        virtual void ToggleVisibility() final
+        {
+            m_SowPanel = !m_SowPanel;
+        }
+
+        virtual bool GetVisibility() const
+        {
+            return m_SowPanel;
+        }
+
     protected:
         const std::string m_PanelName;
+        bool              m_SowPanel;
     };
 } // namespace Desert::Editor

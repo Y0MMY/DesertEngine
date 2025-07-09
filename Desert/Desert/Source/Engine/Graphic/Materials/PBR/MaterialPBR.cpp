@@ -151,11 +151,12 @@ namespace Desert::Graphic
         glm::mat4 Transform;
     };
 
-    void MaterialPBR::UpdateRenderParameters( const Core::Camera& camera, const glm::vec3& directionLight,
+    void MaterialPBR::UpdateRenderParameters( const Core::Camera& camera, const glm::mat4& meshTransform,
+                                              const glm::vec3& directionLight,
                                               const std::optional<Models::PBR::PBRTextures>& pbrTextures )
     {
         const VP vp{ .ViewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(),
-                     .Transform      = glm::mat4( 1.0 ) };
+                     .Transform      = meshTransform };
 
         m_LightingData->UpdateDirection( directionLight );
         m_GlobalUB->UpdateUBGlobal( Models::GlobalUB{ .CameraPosition = camera.GetPosition() } );

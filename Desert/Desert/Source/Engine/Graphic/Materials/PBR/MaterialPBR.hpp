@@ -102,7 +102,8 @@ namespace Desert::Graphic
         bool                                HasFinalTexture( Assets::TextureAsset::Type type ) const;
 
         // Parameter updates
-        void UpdateRenderParameters( const Core::Camera& camera, const glm::vec3& directionLight,
+        void UpdateRenderParameters( const Core::Camera& camera, const glm::mat4& meshTransform,
+                                     const glm::vec3&                               directionLight,
                                      const std::optional<Models::PBR::PBRTextures>& pbrTextures );
         bool IsDirty() const
         {

@@ -2,7 +2,6 @@
 
 #include "SceneHierarchyPanel.hpp"
 
-#include <ImGui/imgui.h>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 

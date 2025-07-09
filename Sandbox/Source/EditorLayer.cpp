@@ -2,6 +2,7 @@
 
 #include "Editor/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
 #include "Editor/Panels/SceneProperties/ScenePropertiesPanel.hpp"
+#include "Editor/Panels/Debug/ShaderLibraryPanel.hpp"
 #include <ImGui/imgui_internal.h>
 
 namespace Desert
@@ -53,6 +54,7 @@ namespace Desert
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_RuntimeResourceManager ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
 
 #endif // EBABLE_IMGUI
 
@@ -156,6 +158,12 @@ namespace Desert
                 {
                     m_MainScene->Serialize();
                 }
+
+                if ( ::ImGui::MenuItem( "Show shaders info" ) )
+                {
+                    static_cast<Editor::ShaderLibraryPanel*>( m_Panels[2].get() )
+                         ->ToggleVisibility(); // HACK (bad way)
+                }
                 ::ImGui::EndMenu();
             }
 
@@ -173,7 +181,6 @@ namespace Desert
             ImVec2 viewportSize = ::ImGui::GetContentRegionAvail();
             if ( m_Size.x != viewportSize.x || m_Size.y != viewportSize.y )
             {
-                m_EditorCamera.UpdateProjectionMatrix( viewportSize.x, viewportSize.y );
                 m_Size = viewportSize;
             }
 
@@ -185,6 +192,11 @@ namespace Desert
 
         for ( const auto& panel : m_Panels )
         {
+            if(!panel->GetVisibility())
+            {
+                continue;
+            }
+
             namespace ImGui = ::ImGui;
             ImGuiWindowClass window_class;
             window_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoTabBar;
@@ -211,6 +223,7 @@ namespace Desert
 
     {
         // m_ImGuiLayer->Resize( e.width, e.height );
+        m_EditorCamera.UpdateProjectionMatrix( e.width, e.height );
         m_MainScene->Resize( e.width, e.height );
         return false;
     }

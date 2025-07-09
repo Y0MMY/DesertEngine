@@ -63,7 +63,8 @@ namespace Desert::Graphic::System
         // Render all meshes in queue
         for ( const auto& renderData : m_RenderQueue )
         {
-            renderData.Material->UpdateRenderParameters( *m_ActiveCamera, m_DirectionLight, textures );
+            renderData.Material->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform, m_DirectionLight,
+                                                         textures );
             renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
         }
 

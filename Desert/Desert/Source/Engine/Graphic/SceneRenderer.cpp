@@ -61,8 +61,8 @@ namespace Desert::Graphic
             return;
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
-        // SKYBOX_RENDERINFO( Framebuffer )->Resize( width, height );
-        // COMPOSITE_RENDERINFO( Framebuffer )->Resize( width, height );
+        m_SkyboxRenderer->GetFramebuffer()->Resize(width, height);
+        m_MeshRenderer->GetFramebuffer()->Resize(width, height);
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting

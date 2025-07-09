@@ -347,16 +347,24 @@ namespace Desert::Graphic::API::Vulkan
         for ( auto& colorAttachment : m_ColorAttachments )
         {
             colorAttachment->Release();
-            colorAttachment.reset();
         }
-        m_ColorAttachments.clear();
 
         // Release depth attachment
         if ( m_DepthAttachment )
         {
             m_DepthAttachment->Release();
-            m_DepthAttachment.reset();
         }
+
+        return BOOLSUCCESS;
+    }
+
+    VulkanFramebuffer::~VulkanFramebuffer()
+    {
+        Release();
+
+        const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        m_ColorAttachments.clear();
 
         // Clear external attachments
         m_ExternalColorAttachments.clear();
@@ -373,7 +381,5 @@ namespace Desert::Graphic::API::Vulkan
             vkDestroyRenderPass( device, m_RenderPass, nullptr );
             m_RenderPass = VK_NULL_HANDLE;
         }
-
-        return Common::MakeSuccess( true );
     }
 } // namespace Desert::Graphic::API::Vulkan
