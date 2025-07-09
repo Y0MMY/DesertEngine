@@ -11,14 +11,18 @@ namespace Desert::Graphic
         const uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
         const uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
 
-        m_SkyboxRenderer = std::make_unique<System::SkyboxRenderer>();
-        m_MeshRenderer   = std::make_unique<System::MeshRenderer>();
+        m_SkyboxRenderer  = std::make_unique<System::SkyboxRenderer>();
+        m_MeshRenderer    = std::make_unique<System::MeshRenderer>();
+        m_TonemapRenderer = std::make_unique<System::TonemapRenderer>();
 
         if ( !m_SkyboxRenderer->Init( width, height ) )
             return Common::MakeError( "Failed to initialize SkyboxRenderer system" );
 
         if ( !m_MeshRenderer->Init( width, height, m_SkyboxRenderer->GetFramebuffer() ) )
             return Common::MakeError( "Failed to initialize MeshRenderer system" );
+
+        if ( !m_TonemapRenderer->Init( width, height ) )
+            return Common::MakeError( "Failed to initialize TonemapRenderer system" );
 
         return BOOLSUCCESS;
     }
@@ -41,7 +45,7 @@ namespace Desert::Graphic
 
         m_SkyboxRenderer->EndScene();
         m_MeshRenderer->EndScene();
-        ToneMapRenderPass();
+        m_TonemapRenderer->Process(m_SkyboxRenderer->GetFramebuffer() );
         CompositeRenderPass();
     }
 
@@ -73,20 +77,6 @@ namespace Desert::Graphic
         renderer.EndRenderPass();
     }
 
-    void SceneRenderer::ToneMapRenderPass()
-    {
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        auto&    renderer   = Renderer::GetInstance();
-
-        /* renderer.BeginRenderPass( COMPOSITE_RENDERINFO( RenderPass ) );
-
-         m_SceneInfo.Renderdata.Composite.ToneMapUB->UpdateToneMap(
-              SKYBOX_RENDERINFO( Framebuffer )->GetColorAttachmentImage() );
-
-         renderer.SubmitFullscreenQuad( COMPOSITE_RENDERINFO( Pipeline ), COMPOSITE_RENDERINFO( Material ) );
-         renderer.EndRenderPass();*/
-    }
-
     void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>&        mesh,
                                              const std::shared_ptr<MaterialPBR>& material,
                                              const glm::mat4&                    transform )
@@ -116,38 +106,12 @@ namespace Desert::Graphic
     {
         m_SkyboxRenderer->Shutdown();
         m_MeshRenderer->Shutdown();
-        /* if ( m_SceneInfo.EnvironmentData.IrradianceMap )
-         {
-             m_SceneInfo.EnvironmentData.IrradianceMap->Release();
-             m_SceneInfo.EnvironmentData.IrradianceMap.reset();
-         }
-
-         if ( m_SceneInfo.EnvironmentData.PreFilteredMap )
-         {
-             m_SceneInfo.EnvironmentData.PreFilteredMap->Release();
-             m_SceneInfo.EnvironmentData.PreFilteredMap.reset();
-         }
-
-         if ( m_SceneInfo.EnvironmentData.RadianceMap )
-         {
-             m_SceneInfo.EnvironmentData.RadianceMap->Release();
-             m_SceneInfo.EnvironmentData.RadianceMap.reset();
-         }
-
-         COMPOSITE_RENDERINFO( Framebuffer )->Release();
-         COMPOSITE_RENDERINFO( Framebuffer ).reset();
-
-         GEOMETRY_RENDERINFO( Framebuffer )->Release();
-         GEOMETRY_RENDERINFO( Framebuffer ).reset();
-
-         SKYBOX_RENDERINFO( Framebuffer )->Release();
-         SKYBOX_RENDERINFO( Framebuffer ).reset();*/
+        m_TonemapRenderer->Shutdown();
     }
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage() const
     {
-        return m_SkyboxRenderer->GetFramebuffer()
-             ->GetColorAttachmentImage(); // COMPOSITE_RENDERINFO(Framebuffer)->GetColorAttachmentImage();
+        return m_TonemapRenderer->GetOutputImage();
     }
 
     const glm::vec3 SceneRenderer::BuildDirectionLight( const std::vector<DirectionLight>& dirLights )

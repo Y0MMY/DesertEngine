@@ -12,6 +12,7 @@
 
 #include "Systems/Scene/Mesh/MeshRenderer.hpp"
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
+#include "Systems/Scene/PostProcessing/TonemapRenderer.hpp"
 
 namespace Desert::Core
 {
@@ -45,7 +46,6 @@ namespace Desert::Graphic
 
     private:
         void CompositeRenderPass();
-        void ToneMapRenderPass();
 
         const glm::vec3 BuildDirectionLight( const std::vector<DirectionLight>& dirLights );
 
@@ -57,7 +57,8 @@ namespace Desert::Graphic
         } m_SceneInfo;
 
     private:
-        std::unique_ptr<System::MeshRenderer>   m_MeshRenderer;
-        std::unique_ptr<System::SkyboxRenderer> m_SkyboxRenderer;
+        std::unique_ptr<System::MeshRenderer>    m_MeshRenderer;
+        std::unique_ptr<System::SkyboxRenderer>  m_SkyboxRenderer;
+        std::unique_ptr<System::TonemapRenderer> m_TonemapRenderer;
     };
 } // namespace Desert::Graphic
