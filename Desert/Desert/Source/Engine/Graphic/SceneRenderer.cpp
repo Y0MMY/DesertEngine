@@ -8,8 +8,8 @@ namespace Desert::Graphic
 {
     NO_DISCARD Common::BoolResult SceneRenderer::Init()
     {
-        const uint32_t width  = EngineContext::GetInstance().GetCurrentWindowWidth();
-        const uint32_t height = EngineContext::GetInstance().GetCurrentWindowHeight();
+        const uint32_t width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
+        const uint32_t height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
 
         m_SkyboxRenderer  = std::make_unique<System::SkyboxRenderer>();
         m_MeshRenderer    = std::make_unique<System::MeshRenderer>();
@@ -45,7 +45,7 @@ namespace Desert::Graphic
 
         m_SkyboxRenderer->EndScene();
         m_MeshRenderer->EndScene();
-        m_TonemapRenderer->Process(m_SkyboxRenderer->GetFramebuffer() );
+        m_TonemapRenderer->Process( m_SkyboxRenderer->GetFramebuffer() );
         CompositeRenderPass();
     }
 
@@ -61,8 +61,8 @@ namespace Desert::Graphic
             return;
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
-        m_SkyboxRenderer->GetFramebuffer()->Resize(width, height);
-        m_MeshRenderer->GetFramebuffer()->Resize(width, height);
+        m_SkyboxRenderer->GetFramebuffer()->Resize( width, height );
+        m_MeshRenderer->GetFramebuffer()->Resize( width, height );
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
@@ -91,10 +91,7 @@ namespace Desert::Graphic
 
     void SceneRenderer::SetEnvironment( const std::shared_ptr<MaterialSkybox>& material )
     {
-        if ( material )
-        {
-            m_SkyboxRenderer->Submit( material );
-        }
+        m_SkyboxRenderer->Submit( material );
     }
 
     const Environment& SceneRenderer::GetEnvironment()

@@ -16,12 +16,15 @@ namespace Desert::Graphic
 
         void Apply( MaterialBackend* backend ) override
         {
-            if ( m_Texture )
+            if ( m_Dirty )
             {
-                m_Uniform->SetImage2D( m_Texture );
+                if ( m_Texture )
+                {
+                    m_Uniform->SetImage2D( m_Texture );
+                }
+                backend->ApplyTexture2D( this );
+                m_Dirty = false;
             }
-
-            backend->ApplyTexture2D( this );
         }
 
         std::unique_ptr<MaterialProperty> Clone() const override
@@ -36,13 +39,13 @@ namespace Desert::Graphic
         void SetTexture( std::shared_ptr<Texture2D> texture )
         {
             m_Texture = texture->GetImage2D();
-            m_Uniform->SetImage2D( m_Texture );
+            m_Dirty = true;
         }
 
         void SetImage( std::shared_ptr<Image2D> texture )
         {
             m_Texture = texture;
-            m_Uniform->SetImage2D( m_Texture );
+            m_Dirty = true;
         }
 
         const auto& GetUniform() const

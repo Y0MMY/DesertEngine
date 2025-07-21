@@ -22,8 +22,11 @@ namespace Desert::ECS
                 const auto& skyboxes = registry.view<ECS::SkyboxComponent>();
                 for ( const auto skyboxEntity : skyboxes )
                 {
-                    const auto& skybox      = registry.get<ECS::SkyboxComponent>( skyboxEntity );
-                    auto        skyboxAsset = resourceManager->GetSkyboxCache().Get( skybox.SkyboxHandle );
+                    const auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
+                    /*if ( skybox.SkyboxHandle == m_CurrentSkyboxHandle )
+                        return;*/
+                    //m_CurrentSkyboxHandle = skybox.SkyboxHandle;
+                    auto skyboxAsset      = resourceManager->ResolveSkybox( skybox.SkyboxHandle );
 
                     if ( !skyboxAsset )
                         return;
@@ -42,5 +45,8 @@ namespace Desert::ECS
         {
             // Any cleanup logic if needed
         }
+
+    private:
+      //  Runtime::ResourceHandle m_CurrentSkyboxHandle;
     };
 } // namespace Desert::ECS

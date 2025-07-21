@@ -247,8 +247,7 @@ namespace Desert::Graphic::API::Vulkan
         for ( uint32_t i = 0; i < colorAttachmentCount; ++i )
         {
             VkClearValue clearValue{};
-            clearValue.color = {
-                 { clearColor.Color.r, clearColor.Color.g, clearColor.Color.b, 1.0 } };
+            clearValue.color = { { clearColor.Color.r, clearColor.Color.g, clearColor.Color.b, 1.0 } };
             clearValues.push_back( clearValue );
         }
         const uint32_t depthAttachmentCount = framebuffer->GetDepthAttachmentCount();
@@ -280,12 +279,14 @@ namespace Desert::Graphic::API::Vulkan
                                                      const std::shared_ptr<VulkanFramebuffer>& framebuffer,
                                                      const std::vector<VkClearValue>&          clearValues )
     {
+        const auto width  = framebuffer->GetFramebufferWidth();
+        const auto height = framebuffer->GetFramebufferHeight();
+
         VkRenderPassBeginInfo renderPassBeginInfo = {};
         renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassBeginInfo.renderPass            = framebuffer->GetVKRenderPass();
         renderPassBeginInfo.renderArea.offset     = { 0, 0 };
-        renderPassBeginInfo.renderArea.extent     = { framebuffer->GetFramebufferWidth(),
-                                                      framebuffer->GetFramebufferHeight() };
+        renderPassBeginInfo.renderArea.extent     = { width, height };
         renderPassBeginInfo.clearValueCount       = clearValues.size();
         renderPassBeginInfo.pClearValues          = clearValues.data();
         renderPassBeginInfo.framebuffer           = framebuffer->GetVKFramebuffer();
@@ -422,14 +423,14 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::SetViewportAndScissor()
     {
-        uint32_t windowWidth  = EngineContext::GetInstance().GetCurrentWindowWidth();
-        uint32_t windowHeight = EngineContext::GetInstance().GetCurrentWindowHeight();
+        uint32_t windowWidth  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
+        uint32_t windowHeight = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
 
         VkViewport viewport = {};
         viewport.x          = 0.0f;
-        viewport.y          = 0.0f;
-        viewport.width      = static_cast<float>( windowWidth );
-        viewport.height     = static_cast<float>( windowHeight );
+        viewport.y          = (float)windowHeight;
+        viewport.height     = -(float)windowHeight;
+        viewport.width      = (float)windowWidth;
         viewport.minDepth   = 0.0f;
         viewport.maxDepth   = 1.0f;
 

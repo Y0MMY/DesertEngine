@@ -1,53 +1,59 @@
 #include <Common/Core/Input.hpp>
+#include <Common/Core/CommonContext.hpp>
 
 #include <GLFW/glfw3.h>
 
 namespace Common::Input
 {
-	bool Keyboard::IsKeyPressed(KeyCode key, const void* window)
-	{
-		auto state = glfwGetKey((GLFWwindow*)window, static_cast<int32_t>(key));
+    bool Keyboard::IsKeyPressed( KeyCode key )
+    {
+        auto state = glfwGetKey( (GLFWwindow*)CommonContext::GetInstance().GetCurrentPointerToGLFWwinodw(),
+                                 static_cast<int32_t>( key ) );
 
-		return state == GLFW_PRESS || state == GLFW_REPEAT;
-	}
+        return state == GLFW_PRESS || state == GLFW_REPEAT;
+    }
 
-	bool Mouse::IsMouseButtonPressed(MouseButton button, const void* window )
-	{
-		auto state = glfwGetMouseButton((GLFWwindow*)window, static_cast<int32_t>(button));
+    Mouse::Mouse() : m_Window( CommonContext::GetInstance().GetCurrentPointerToGLFWwinodw() )
+    {
+    }
 
-		return state == GLFW_PRESS;
-	}
+    bool Mouse::IsMouseButtonPressed( MouseButton button )
+    {
+        auto state = glfwGetMouseButton( (GLFWwindow*)m_Window, static_cast<int32_t>( button ) );
 
-	float Mouse::GetMouseX(const void* window)
-	{
-		auto [x, y] = GetMousePosition(window);
-		return (float)x;
-	}
+        return state == GLFW_PRESS;
+    }
 
-	float Mouse::GetMouseY(const void* window)
-	{
-		auto [x, y] = GetMousePosition(window);
-		return (float)y;
-	}
+    float Mouse::GetMouseX()
+    {
+        auto [x, y] = GetMousePosition();
+        return (float)x;
+    }
 
-	std::pair<float, float> Mouse::GetMousePosition(const void* window)
-	{
-		double x, y;
-		glfwGetCursorPos((GLFWwindow*)window, &x, &y);
-		return { (float)x, (float)y };
-	}
+    float Mouse::GetMouseY()
+    {
+        auto [x, y] = GetMousePosition();
+        return (float)y;
+    }
 
-	Mouse& Mouse::Get()
-	{
-		static Mouse s_Instance;
-		return s_Instance;
-	}
+    std::pair<float, float> Mouse::GetMousePosition()
+    {
+        double x, y;
+        glfwGetCursorPos( (GLFWwindow*)m_Window, &x, &y );
+        return { (float)x, (float)y };
+    }
 
-	void Mouse::SetCursorMode(MouseState mode, const void* window)
-	{
-		m_MouseMode = mode;
+    Mouse& Mouse::Get()
+    {
+        static Mouse s_Instance;
+        return s_Instance;
+    }
 
-		glfwSetInputMode((GLFWwindow*)(window), GLFW_CURSOR, GLFW_CURSOR_NORMAL + (int)mode);
-	}
+    void Mouse::SetCursorMode( MouseState mode )
+    {
+        m_MouseMode = mode;
 
-}
+        glfwSetInputMode( (GLFWwindow*)( m_Window ), GLFW_CURSOR, GLFW_CURSOR_NORMAL + (int)mode );
+    }
+
+} // namespace Common::Input

@@ -16,7 +16,7 @@ namespace Desert::Graphic
     [[nodiscard]] Common::BoolResult Renderer::InitGraphicAPI()
     {
         m_RendererContext =
-             RendererContext::Create( EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw() );
+             RendererContext::Create( Common::CommonContext::GetInstance().GetCurrentPointerToGLFWwinodw() );
         switch ( RendererAPI::GetAPIType() )
         {
             case RendererAPIType::Vulkan:
@@ -80,7 +80,7 @@ namespace Desert::Graphic
         s_RendererAPI->PrepareNextFrame();
     }
 
-    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
                                          const std::shared_ptr<MaterialExecutor>& material )
     {
         s_RendererAPI->SubmitFullscreenQuad( pipeline, material );

@@ -49,10 +49,20 @@ namespace Desert::Graphic::System
 
         if ( const auto& material = m_MaterialSkybox.lock() )
         {
-            material->UpdateRenderParameters( *m_ActiveCamera );
             renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
         }
         renderer.EndRenderPass();
+    }
+
+    void SkyboxRenderer::Submit( const std::shared_ptr<MaterialSkybox>& material )
+    {
+        if ( !material )
+        {
+            return;
+        }
+
+        material->UpdateRenderParameters( *m_ActiveCamera );
+        m_MaterialSkybox = material;
     }
 
 } // namespace Desert::Graphic::System

@@ -125,7 +125,7 @@ namespace Desert::Core
             {
                 auto& transform = entity.GetComponent<ECS::TransformComponent>();
                 entitySer.Transform =
-                     internal::TransformComponentSer{ transform.Position, transform.Rotation, transform.Scale };
+                     internal::TransformComponentSer{ transform.Translation, transform.Rotation, transform.Scale };
             }
 
            /* if ( entity.HasComponent<ECS::StaticMeshComponent>() )

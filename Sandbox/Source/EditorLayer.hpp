@@ -22,6 +22,11 @@ namespace Desert
 
     private:
         bool OnWindowResize( Common::EventWindowResize& e );
+        bool OnMousePressed( Common::MouseButtonPressedEvent& e );
+
+        void HandleObjectPicking();
+
+        std::pair<float, float> GetMouseViewportSpace();
 
     private:
         const std::shared_ptr<Common::Window> m_Window;
@@ -29,7 +34,16 @@ namespace Desert
         Graphic::Environment                  m_Environment;
         Core::Camera                          m_EditorCamera;
 
-        ImVec2 m_Size;
+        struct ViewportData
+        {
+            glm::vec2 MousePosition;
+            glm::vec2 Size;
+            glm::vec2 Bounds[2];
+            bool      IsHovered = false;
+            float     DpiScale  = 1.0f;
+        };
+
+        ViewportData m_ViewportData;
 
         std::shared_ptr<Assets::AssetManager>            m_AssetManager;
         std::shared_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;

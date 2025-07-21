@@ -15,12 +15,15 @@ namespace Desert::Graphic
 
         void Apply( MaterialBackend* backend ) override
         {
-            if ( m_Texture )
+            if ( m_Dirty )
             {
-                m_Uniform->SetImageCube( m_Texture );
+                if ( m_Texture )
+                {
+                    m_Uniform->SetImageCube( m_Texture );
+                }
+                backend->ApplyTextureCube( this );
+                m_Dirty = false;
             }
-
-            backend->ApplyTexture2D( this );
         }
 
         std::unique_ptr<MaterialProperty> Clone() const override
@@ -35,7 +38,7 @@ namespace Desert::Graphic
         void SetTexture( std::shared_ptr<ImageCube> texture )
         {
             m_Texture = texture;
-            m_Uniform->SetImageCube(m_Texture);
+            m_Dirty = true;
         }
 
         const auto& GetUniform() const

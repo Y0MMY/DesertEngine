@@ -151,7 +151,7 @@ namespace Desert::Editor
                 {
                     auto&       meshComponent = selectedEntity.GetComponent<ECS::StaticMeshComponent>();
                     const auto* meshInstance =
-                         m_RuntimeResourceManager->GetMeshCache().Get( meshComponent.MeshHandle );
+                         m_RuntimeResourceManager->GetGeometryResources()->GetMeshCache().Get( meshComponent.MeshHandle );
 
                     if ( ImGui::CollapsingHeader( "Static Mesh", ImGuiTreeNodeFlags_DefaultOpen ) )
                     {
@@ -185,9 +185,12 @@ namespace Desert::Editor
                                  "(*.*)\0*.*\0" );
                             if ( !path.empty() )
                             {
-                                meshComponent.MeshHandle = m_RuntimeResourceManager->GetMeshCache().Create( path );
+                                meshComponent.MeshHandle =
+                                     m_RuntimeResourceManager->GetGeometryResources()->GetMeshCache().Create(
+                                          path );
                                 meshComponent.MaterialHandle =
-                                     m_RuntimeResourceManager->GetMaterialCache().Create( path );
+                                     m_RuntimeResourceManager->GetGeometryResources()->GetMaterialCache().Create(
+                                          path );
                             }
                         }
                     }
@@ -203,7 +206,7 @@ namespace Desert::Editor
                         ImGui::Dummy( ImVec2( 0, 4 ) );
                         auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
 
-                        Widgets::DrawVec3Control( "Position", transform.Position );
+                        Widgets::DrawVec3Control( "Position", transform.Translation );
                         ImGui::Dummy( ImVec2( 0, 6 ) );
                         Widgets::DrawVec3Control( "Rotation", transform.Rotation );
                         ImGui::Dummy( ImVec2( 0, 6 ) );
@@ -217,7 +220,7 @@ namespace Desert::Editor
                         ImGui::Dummy( ImVec2( 0, 4 ) );
                         auto& transform = selectedEntity.GetComponent<ECS::TransformComponent>();
 
-                        Widgets::DrawDirectionWidget( "Direction", transform.Position );
+                        Widgets::DrawDirectionWidget( "Direction", transform.Translation );
                     }
 
                     ImGui::Dummy( ImVec2( 0, 3 ) );

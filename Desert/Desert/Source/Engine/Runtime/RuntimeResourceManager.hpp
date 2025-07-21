@@ -12,30 +12,48 @@ namespace Desert::Runtime
     public:
         explicit RuntimeResourceManager( const std::shared_ptr<Assets::AssetManager>& assetManager )
              : m_AssetManager( assetManager ),
-               m_MaterialCache( std::make_unique<MaterialCache>( m_AssetManager ) ),
-               m_MeshCache( std::make_unique<MeshCache>( m_AssetManager ) ),
+               m_GeometryResources( std::make_unique<GeometryResources>( m_AssetManager ) ),
                m_SkyboxCache( std::make_unique<SkyboxCache>( m_AssetManager ) )
         {
         }
 
-        MaterialCache& GetMaterialCache()
+        class GeometryResources
         {
-            return *m_MaterialCache;
-        }
+        public:
+            explicit GeometryResources( const std::weak_ptr<Assets::AssetManager>& assetManager )
+                 : m_MaterialCache( std::make_unique<MaterialCache>( assetManager ) ),
+                   m_MeshCache( std::make_unique<MeshCache>( assetManager ) )
+            {
+            }
 
-        const MaterialCache& GetMaterialCache() const
-        {
-            return *m_MaterialCache;
-        }
+            MaterialCache& GetMaterialCache()
+            {
+                return *m_MaterialCache;
+            }
 
-        MeshCache& GetMeshCache()
-        {
-            return *m_MeshCache;
-        }
+            const MaterialCache& GetMaterialCache() const
+            {
+                return *m_MaterialCache;
+            }
 
-        const MeshCache& GetMeshCache() const
+            MeshCache& GetMeshCache()
+            {
+                return *m_MeshCache;
+            }
+
+            const MeshCache& GetMeshCache() const
+            {
+                return *m_MeshCache;
+            }
+
+        private:
+            const std::unique_ptr<MeshCache>     m_MeshCache;
+            const std::unique_ptr<MaterialCache> m_MaterialCache;
+        };
+
+        auto& GetGeometryResources()
         {
-            return *m_MeshCache;
+            return m_GeometryResources;
         }
 
         SkyboxCache& GetSkyboxCache()
@@ -54,8 +72,7 @@ namespace Desert::Runtime
 
     private:
         const std::weak_ptr<Assets::AssetManager> m_AssetManager;
-        const std::unique_ptr<MaterialCache>      m_MaterialCache;
-        const std::unique_ptr<MeshCache>          m_MeshCache;
+        const std::unique_ptr<GeometryResources>  m_GeometryResources;
         const std::unique_ptr<SkyboxCache>        m_SkyboxCache;
     };
 } // namespace Desert::Runtime

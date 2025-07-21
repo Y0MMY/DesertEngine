@@ -9,13 +9,17 @@ namespace Desert::Graphic
     class UniformBufferProperty : public MaterialProperty
     {
     public:
-        UniformBufferProperty( std::shared_ptr<Uniforms::UniformBuffer> buffer ) : m_Buffer( buffer )
+        UniformBufferProperty( const std::shared_ptr<Uniforms::UniformBuffer>& buffer ) : m_Buffer( buffer )
         {
         }
 
         void Apply( MaterialBackend* backend ) override
         {
-            backend->ApplyUniformBuffer( this );
+            if ( m_Dirty )
+            {
+                backend->ApplyUniformBuffer( this );
+                m_Dirty = false;
+            }
         }
 
         std::unique_ptr<MaterialProperty> Clone() const override
@@ -26,6 +30,7 @@ namespace Desert::Graphic
         void SetData( const void* data, uint32_t size )
         {
             m_Buffer->SetData( data, size );
+            m_Dirty = true;
         }
 
         const auto& GetUniform() const

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <glm/glm.hpp>
+#include <Common/Core/Math/AABB.hpp>
 
 #include <Engine/Graphic/IndexBuffer.hpp>
 #include <Engine/Graphic/VertexBuffer.hpp>
@@ -33,6 +33,10 @@ namespace Desert
         uint32_t    VertexCount;
         uint32_t    IndexOffset;
         uint32_t    IndexCount;
+
+        glm::mat4 Transform;
+
+        Common::Math::AABB BoundingBox;
     };
 
     class Mesh final

@@ -24,7 +24,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
     Common::BoolResult VulkanImGui::OnAttach()
     {
         const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        const auto  window = EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw();
+        const auto  window = Common::CommonContext::GetInstance().GetCurrentPointerToGLFWwinodw();
 
         VkDescriptorPoolSize       pool_sizes[] = { { VK_DESCRIPTOR_TYPE_SAMPLER, 100 },
                                                     { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 },
@@ -153,9 +153,9 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         VkViewport viewport = {};
         viewport.x          = 0.0f;
-        viewport.y          = (float)height;
+        viewport.y          = 0.0f;
         viewport.width      = (float)width;
-        viewport.height     = -(float)height;
+        viewport.height     = (float)height;
         viewport.minDepth   = 0.0f;
         viewport.maxDepth   = 1.0f;
         vkCmdSetViewport( drawCommandBuffer, 0, 1, &viewport );

@@ -10,7 +10,7 @@ static constexpr uint32_t kMaxPushConstantsSize = 128U;
 namespace Desert::Graphic
 {
     MaterialExecutor::MaterialExecutor( std::string&& debugName, const std::shared_ptr<Shader>& shader,
-                        std::unique_ptr<MaterialBackend>&& materialBackend )
+                                        std::unique_ptr<MaterialBackend>&& materialBackend )
          : m_DebugName( std::move( debugName ) ), m_MaterialBackend( std::move( materialBackend ) ),
            m_Shader( shader )
     {
@@ -52,14 +52,27 @@ namespace Desert::Graphic
 
     void MaterialExecutor::Apply()
     {
-        m_MaterialBackend->ApplyProperties( this );
+        const auto& backend = m_MaterialBackend.get();
+
+        for ( auto& prop : m_UniformBufferPropertiesStorage )
+            prop->Apply( backend );
+
+        for ( auto& prop : m_Texture2DPropertiesStorage )
+            prop->Apply( backend );
+
+        for ( auto& prop : m_TextureCubePropertiesStorage )
+            prop->Apply( backend );
+
+        backend->FlushUpdates();
+
         if ( m_PushConstantBuffer.Size )
         {
             // m_MaterialBackend->ApplyPushConstants( this, m_Shader-> );
         }
     }
 
-    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&& debugName, const std::shared_ptr<Shader>& shader )
+    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&&                  debugName,
+                                                                const std::shared_ptr<Shader>& shader )
     {
         switch ( RendererAPI::GetAPIType() )
         {
@@ -69,14 +82,15 @@ namespace Desert::Graphic
             {
                 return std::make_shared<MaterialExecutor>(
                      std::move( debugName ), shader,
-                     std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>() ) );
+                     std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( shader ) ) );
             }
         }
         DESERT_VERIFY( false, "Unknown RendererAPI" );
         return nullptr;
     }
 
-    std::shared_ptr<UniformBufferProperty> MaterialExecutor::GetUniformBufferProperty( const std::string& name ) const
+    std::shared_ptr<UniformBufferProperty>
+    MaterialExecutor::GetUniformBufferProperty( const std::string& name ) const
     {
         auto it = m_UniformBufferPropertiesLookup.find( name );
         if ( it != m_UniformBufferPropertiesLookup.end() )

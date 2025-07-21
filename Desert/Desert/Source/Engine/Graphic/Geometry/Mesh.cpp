@@ -8,6 +8,29 @@
 
 namespace Desert
 {
+    glm::mat4 Mat4FromAssimpMat4( const aiMatrix4x4& matrix )
+    {
+        glm::mat4 result;
+        // the a,b,c,d in assimp is the row ; the 1,2,3,4 is the column
+        result[0][0] = matrix.a1;
+        result[1][0] = matrix.a2;
+        result[2][0] = matrix.a3;
+        result[3][0] = matrix.a4;
+        result[0][1] = matrix.b1;
+        result[1][1] = matrix.b2;
+        result[2][1] = matrix.b3;
+        result[3][1] = matrix.b4;
+        result[0][2] = matrix.c1;
+        result[1][2] = matrix.c2;
+        result[2][2] = matrix.c3;
+        result[3][2] = matrix.c4;
+        result[0][3] = matrix.d1;
+        result[1][3] = matrix.d2;
+        result[2][3] = matrix.d3;
+        result[3][3] = matrix.d4;
+        return result;
+    }
+
     class LogStream : public Assimp::LogStream
     {
     public:
@@ -68,7 +91,19 @@ namespace Desert
             submesh.VertexCount  = mesh->mNumVertices;
             submesh.IndexCount   = mesh->mNumFaces * 3;
 
+            aiNode* meshNode = scene->mRootNode->FindNode( mesh->mName );
+            if ( meshNode )
+            {
+                aiMatrix4x4 transform = meshNode->mTransformation;
+                submesh.Transform     = Mat4FromAssimpMat4( transform );
+            }
+
             m_TriangleCache[meshIdx].reserve( mesh->mNumFaces );
+
+            auto& aabb = submesh.BoundingBox;
+
+            aabb.Min = { FLT_MAX, FLT_MAX, FLT_MAX };
+            aabb.Max = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
 
             for ( unsigned int vertexIdx = 0; vertexIdx < mesh->mNumVertices; vertexIdx++ )
             {
@@ -91,6 +126,12 @@ namespace Desert
                     vertex.TexCoord = { mesh->mTextureCoords[0][vertexIdx].x,
                                         mesh->mTextureCoords[0][vertexIdx].y };
                 }
+
+                glm::vec3 position = { mesh->mVertices[vertexIdx].x, mesh->mVertices[vertexIdx].y,
+                                       mesh->mVertices[vertexIdx].z };
+
+                aabb.Min = glm::min( aabb.Min, position );
+                aabb.Max = glm::max( aabb.Max, position );
 
                 vertices.push_back( vertex );
             }

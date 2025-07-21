@@ -21,7 +21,7 @@ namespace Desert::Engine
 
         m_Window = Common::Window::Create( specWindow );
         m_Window->Init();
-        EngineContext::GetInstance().m_CurrentWindow = m_Window;
+        EngineContext::GetInstance().Initialize( m_Window );
 
         m_Window->SetEventCallback( [this]( Common::Event& e ) { this->ProcessEvents( e ); } );
 

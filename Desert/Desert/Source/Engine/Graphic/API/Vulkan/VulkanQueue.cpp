@@ -74,7 +74,6 @@ namespace Desert::Graphic::API::Vulkan
 
         uint32_t newCurrentFrame                            = ( currentIndex + 1 ) % m_SwapChain->GetImageCount();
         EngineContext::GetInstance().m_CurrentFrameIndex    = newCurrentFrame;
-        EngineContext::GetInstance().m_PrevioustBufferIndex = currentIndex;
         vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
     }
 

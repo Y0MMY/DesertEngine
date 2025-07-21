@@ -14,8 +14,8 @@ namespace Desert::Core
     {
         // REGISTER_EVENT( this, OnEvent );
 
-        const auto width  = EngineContext::GetInstance().GetCurrentWindowWidth();
-        const auto height = EngineContext::GetInstance().GetCurrentWindowHeight();
+        const auto width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
+        const auto height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
 
         UpdateProjectionMatrix( width, height );
 
@@ -35,7 +35,17 @@ namespace Desert::Core
 
     Camera::Camera( const glm::mat4& projectionMatrix ) : m_ProjectionMatrix( projectionMatrix )
     {
-        // REGISTER_EVENT( this, OnEvent );
+        m_Direction  = glm::vec3( 90.0f, 0.0f, 0.0f );
+        m_FocalPoint = glm::vec3( 0.0f );
+
+        glm::vec3 position = { -5, 5, 5 };
+        m_Distance         = glm::distance( position, m_FocalPoint );
+
+        m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
+        m_Pitch = glm::pi<float>() / 4.0f;
+
+        m_Position = m_FocalPoint - GetForwardDirection() * m_Distance;
+        UpdateCameraView();
     }
 
     void Camera::OnEvent( Common::Event& e )
@@ -52,6 +62,7 @@ namespace Desert::Core
     {
         m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), static_cast<float>( width / height ),
                                                m_NearPlane, m_FarPlane );
+
     }
 
     bool Camera::OnKeyPress( Common::KeyPressedEvent& e )
@@ -68,41 +79,40 @@ namespace Desert::Core
 
     void Camera::OnUpdate( const Common::Timestep& timestep )
     {
-        auto             window = EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw();
-        const glm::vec2& MousePosition{ Common::Input::Mouse::Get().GetMouseX( window ),
-                                        Common::Input::Mouse::Get().GetMouseY( window ) };
+        const glm::vec2& MousePosition{ Common::Input::Mouse::Get().GetMouseX(),
+                                        Common::Input::Mouse::Get().GetMouseY() };
         const glm::vec2  MouseDelta = ( MousePosition - m_InitialMousePosition ) * 0.002f;
 
-        if ( Common::Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right, window ) )
+        if ( Common::Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right ) )
         {
             const float     YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
             constexpr float cameraSpeed   = 0.002f;
             constexpr float rotationSpeed = 0.133f;
 
-            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::S, window ) )
+            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::S ) )
             {
                 m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * m_Direction;
             }
-            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::W, window ) )
+            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::W ) )
             {
                 m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * m_Direction;
             }
-            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::A, window ) )
+            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::A ) )
             {
                 m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * m_RightDirection;
             }
-            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::D, window ) )
+            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::D ) )
             {
-                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds()  * m_RightDirection;
+                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * m_RightDirection;
             }
 
-            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::Q, window ) )
+            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::Q ) )
             {
-                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f } ;
+                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f };
             }
-            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::E, window ) )
+            if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::E ) )
             {
-                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f } ;
+                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f };
             }
 
             constexpr float maxRate = 0.12f;

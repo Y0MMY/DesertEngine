@@ -13,6 +13,7 @@
 
 namespace Desert::Graphic
 {
+    // TODO: should override the base class, as we may want to support not only PBR
     class MaterialPBR
     {
     public:

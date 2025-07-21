@@ -89,6 +89,29 @@ namespace Desert::Platform::Windows
                                 }
                             } );
 
+        glfwSetMouseButtonCallback( m_GLFWWindow,
+                                    []( GLFWwindow* window, int button, int action, int mods )
+                                    {
+                                        auto& data = *( (WindowData*)glfwGetWindowUserPointer( window ) );
+
+                                        switch ( action )
+                                        {
+                                            case GLFW_PRESS:
+                                            {
+                                                Common::MouseButtonPressedEvent event(
+                                                     (Common::MouseButton)button );
+                                                data.EventCallback( event );
+                                                break;
+                                            }
+                                                /* case GLFW_RELEASE:
+                                                 {
+                                                     Common::MouseButtonReleasedEvent event( button );
+                                                     data.EventCallback( event );
+                                                     break;
+                                                 }*/
+                                        }
+                                    } );
+
         return Common::MakeSuccess( true );
     }
 

@@ -9,6 +9,7 @@ namespace Desert
 {
     EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
          : Common::Layer( layerName ), m_Window( window )
+           
     {
         m_AssetManager           = std::make_shared<Assets::AssetManager>();
         m_RuntimeResourceManager = std::make_shared<Runtime::RuntimeResourceManager>( m_AssetManager );
@@ -178,13 +179,16 @@ namespace Desert
 
         ::ImGui::Begin( "Viewport", nullptr, ImGuiWindowFlags_NoScrollbar );
         {
-            ImVec2 viewportSize = ::ImGui::GetContentRegionAvail();
-            if ( m_Size.x != viewportSize.x || m_Size.y != viewportSize.y )
-            {
-                m_Size = viewportSize;
-            }
+            ImGuiWindow* window      = ::ImGui::GetCurrentWindow();
+            ImVec2       mousePos    = ::ImGui::GetMousePos();
+            ImVec2       viewportPos = ::ImGui::GetWindowPos();
 
-            m_UIHelper->Image( m_MainScene->GetFinalImage(), viewportSize );
+            m_ViewportData.MousePosition = glm::vec2( mousePos.x - viewportPos.x, mousePos.y - viewportPos.y );
+
+            m_ViewportData.Size      = { ::ImGui::GetContentRegionAvail().x, ::ImGui::GetContentRegionAvail().y };
+            m_ViewportData.IsHovered = ::ImGui::IsWindowHovered();
+
+            m_UIHelper->Image( m_MainScene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
         }
         ::ImGui::End();
         ::ImGui::PopStyleColor( 1 );
@@ -192,7 +196,7 @@ namespace Desert
 
         for ( const auto& panel : m_Panels )
         {
-            if(!panel->GetVisibility())
+            if ( !panel->GetVisibility() )
             {
                 continue;
             }
@@ -212,11 +216,46 @@ namespace Desert
         return BOOLSUCCESS;
     }
 
+    void EditorLayer::HandleObjectPicking()
+    {
+        auto [mouseX, mouseY] = GetMouseViewportSpace();
+        const auto ray        = Common::Math::Ray::FromScreenPosition(
+             { mouseX, mouseY }, m_EditorCamera.GetProjectionMatrix(), m_EditorCamera.GetViewMatrix(),
+             m_EditorCamera.GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
+             static_cast<uint32_t>( m_ViewportData.Size.y ) );
+
+        float closestT = std::numeric_limits<float>::max();
+
+        const auto& meshes = m_MainScene->GetMeshesData();
+
+        for ( const auto mesh : meshes )
+        {
+            float t = 0.0f;
+            for ( const auto& submesh : mesh.Mesh->GetSubmeshes() )
+            {
+                const auto localSpace = mesh.Transform ;
+                auto       localRay   = ray.ToLocalSpace( localSpace );
+
+                if (localRay.IntersectsAABB( submesh.BoundingBox, t ) )
+                {
+                    LOG_TRACE( "Picked object: {} distance: {}", submesh.Name, t );
+                    if ( t < closestT )
+                    {
+                        closestT = t;
+                    }
+                }
+            }
+        }
+    }
+
     void EditorLayer::OnEvent( Common::Event& e )
     {
         Common::EventManager eventManager( e );
         eventManager.Notify<Common::EventWindowResize>( [this]( Common::EventWindowResize& e )
                                                         { return OnWindowResize( e ); } );
+
+        eventManager.Notify<Common::MouseButtonPressedEvent>( [this]( Common::MouseButtonPressedEvent& e )
+                                                              { return OnMousePressed( e ); } );
     }
 
     bool EditorLayer::OnWindowResize( Common::EventWindowResize& e )
@@ -225,6 +264,21 @@ namespace Desert
         // m_ImGuiLayer->Resize( e.width, e.height );
         m_EditorCamera.UpdateProjectionMatrix( e.width, e.height );
         m_MainScene->Resize( e.width, e.height );
+        return false;
+    }
+
+    std::pair<float, float> EditorLayer::GetMouseViewportSpace()
+    {
+        return { m_ViewportData.MousePosition.x, m_ViewportData.MousePosition.y };
+    }
+
+    bool EditorLayer::OnMousePressed( Common::MouseButtonPressedEvent& e )
+    {
+        if ( e.GetMouseButton() == Common::MouseButton::Left )
+        {
+            HandleObjectPicking();
+        }
+
         return false;
     }
 

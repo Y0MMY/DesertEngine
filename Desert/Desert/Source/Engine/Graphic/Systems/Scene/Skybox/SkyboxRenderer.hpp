@@ -14,10 +14,7 @@ namespace Desert::Graphic::System
         }
 
         void BeginScene( const Core::Camera& camera );
-        void Submit( const std::shared_ptr<MaterialSkybox>& material )
-        {
-            m_MaterialSkybox = material;
-        }
+        void Submit( const std::shared_ptr<MaterialSkybox>& material );
         void EndScene();
 
         const std::optional<Environment> GetEnvironment() const

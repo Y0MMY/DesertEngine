@@ -13,8 +13,8 @@ namespace Desert::ECS
     class System
     {
     public:
-        explicit System( const std::weak_ptr<Graphic::SceneRenderer>&          sceneRenderer,
-                         const std::weak_ptr<Runtime::RuntimeResourceManager>& resourceManager )
+        explicit System( const std::weak_ptr<Graphic::SceneRenderer>&    sceneRenderer,
+                         const std::weak_ptr<Runtime::ResourceResolver>& resourceManager )
              : m_Renderer( sceneRenderer ), m_ResourceManager( resourceManager )
         {
         }
@@ -32,8 +32,8 @@ namespace Desert::ECS
         }
 
     protected:
-        const std::weak_ptr<Graphic::SceneRenderer>          m_Renderer;
-        const std::weak_ptr<Runtime::RuntimeResourceManager> m_ResourceManager;
+        const std::weak_ptr<Graphic::SceneRenderer>    m_Renderer;
+        const std::weak_ptr<Runtime::ResourceResolver> m_ResourceManager;
     };
 
 } // namespace Desert::ECS

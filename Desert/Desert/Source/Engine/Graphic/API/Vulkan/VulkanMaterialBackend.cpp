@@ -11,99 +11,94 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    void VulkanMaterialBackend::ApplyProperties( MaterialExecutor* material )
-    {
-        if ( !material )
-            return;
-
-        uint32_t    frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
-        const auto& vulkanShader = std::static_pointer_cast<VulkanShader>( material->GetShader() );
-
-        std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-
-        // Process uniform buffers
-        for ( const auto& [name, index] : material->GetUniformBufferProperties() )
-        {
-            if ( auto property = material->GetUniformBufferProperty( name ) )
-            {
-                if ( auto bufferInfo = property->GetUniform() )
-                {
-                    if ( auto vulkanBuffer = sp_cast<Uniforms::API::Vulkan::VulkanUniformBuffer>( bufferInfo ) )
-                    {
-                        auto& bufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
-                        auto  wds =
-                             DescriptorSetBuilder::GetUniformWDS( vulkanShader, frameIndex,
-                                                                  0, // set 0
-                                                                  vulkanBuffer->GetBinding(), 1U, &bufferInfo );
-                        writeDescriptorSets.push_back( wds );
-                    }
-                }
-            }
-        }
-
-        // Process 2D textures
-        for ( const auto& [name, index] : material->GetTexture2DProperties() )
-        {
-            if ( auto property = material->GetTexture2DProperty( name ) )
-            {
-                if ( auto imageUniform = property->GetUniform() )
-                {
-                    if ( auto vulkanImage = sp_cast<Uniforms::API::Vulkan::VulkanUniformImage2D>( imageUniform ) )
-                    {
-                        auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
-                        auto  wds =
-                             DescriptorSetBuilder::GetSampler2DWDS( vulkanShader, frameIndex,
-                                                                  0, // set 0
-                                                                  vulkanImage->GetBinding(), 1U, &imageInfo );
-                        writeDescriptorSets.push_back( wds );
-                    }
-                }
-            }
-        }
-
-        // Process cube textures
-        for ( const auto& [name, index] : material->GetTextureCubeProperties() )
-        {
-            if ( auto property = material->GetTextureCubeProperty( name ) )
-            {
-                if ( auto imageUniform = property->GetUniform() )
-                {
-                    if ( auto vulkanImage =
-                              sp_cast<Uniforms::API::Vulkan::VulkanUniformImageCube>( imageUniform ) )
-                    {
-                        auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
-                        auto  wds =
-                             DescriptorSetBuilder::GetSamplerCubeWDS( vulkanShader, frameIndex,
-                                                                  0, // set 0
-                                                                  vulkanImage->GetBinding(), 1U, &imageInfo );
-                        writeDescriptorSets.push_back( wds );
-                    }
-                }
-            }
-        }
-
-        if ( !writeDescriptorSets.empty() )
-        {
-            static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
-                 ->GetDescriptorManager()
-                 ->UpdateDescriptorSet( vulkanShader, frameIndex, 0, writeDescriptorSets );
-        }
-    }
-
     void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* material, Pipeline* pipeline )
     {
     }
 
     void VulkanMaterialBackend::ApplyUniformBuffer( MaterialProperty* prop )
     {
+        auto uniformProp = static_cast<UniformBufferProperty*>( prop );
+        if ( !uniformProp || !uniformProp->IsDirty() )
+            return;
+
+        const auto& frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
+        const auto& vulkanShader = std::static_pointer_cast<VulkanShader>( m_Shader );
+
+        if ( auto bufferInfo = uniformProp->GetUniform() )
+        {
+            if ( auto vulkanBuffer = sp_cast<Uniforms::API::Vulkan::VulkanUniformBuffer>( bufferInfo ) )
+            {
+                auto& bufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
+                auto  wds        = DescriptorSetBuilder::GetUniformWDS( vulkanShader, frameIndex, 0, // set 0
+                                                                        vulkanBuffer->GetBinding(), 1U, &bufferInfo );
+
+                m_PendingDescriptorWrites.push_back( wds );
+                uniformProp->MarkClean();
+            }
+        }
     }
 
     void VulkanMaterialBackend::ApplyTexture2D( MaterialProperty* prop )
     {
+        auto textureProp = static_cast<Texture2DProperty*>( prop );
+        if ( !textureProp || !textureProp->IsDirty() )
+            return;
+
+        const auto& frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
+        const auto& vulkanShader = std::static_pointer_cast<VulkanShader>( m_Shader );
+
+        if ( auto imageUniform = textureProp->GetUniform() )
+        {
+            if ( auto vulkanImage = sp_cast<Uniforms::API::Vulkan::VulkanUniformImage2D>( imageUniform ) )
+            {
+                auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
+                auto  wds       = DescriptorSetBuilder::GetSampler2DWDS( vulkanShader, frameIndex, 0, // set 0
+                                                                         vulkanImage->GetBinding(), 1U, &imageInfo );
+
+                m_PendingDescriptorWrites.push_back( wds );
+                textureProp->MarkClean();
+            }
+        }
     }
 
     void VulkanMaterialBackend::ApplyTextureCube( MaterialProperty* prop )
     {
+        auto textureProp = static_cast<TextureCubeProperty*>( prop );
+        if ( !textureProp || !textureProp->IsDirty() )
+            return;
+
+        const auto& frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
+        const auto& vulkanShader = std::static_pointer_cast<VulkanShader>( m_Shader );
+
+        if ( auto imageUniform = textureProp->GetUniform() )
+        {
+            if ( auto vulkanImage = sp_cast<Uniforms::API::Vulkan::VulkanUniformImageCube>( imageUniform ) )
+            {
+                auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
+                auto  wds       = DescriptorSetBuilder::GetSamplerCubeWDS( vulkanShader, frameIndex, 0, // set 0
+                                                                           vulkanImage->GetBinding(), 1U, &imageInfo );
+
+                m_PendingDescriptorWrites.push_back( wds );
+                textureProp->MarkClean();
+            }
+        }
+    }
+
+    void VulkanMaterialBackend::FlushUpdates()
+    {
+        if ( !m_PendingDescriptorWrites.empty() )
+        {
+            const auto& rendererAPI =
+                 static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() );
+
+            const auto& frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
+            const auto& vulkanShader = std::static_pointer_cast<VulkanShader>( m_Shader );
+
+            rendererAPI->GetDescriptorManager()->UpdateDescriptorSet( vulkanShader, frameIndex, 0, // set 0
+                                                                      m_PendingDescriptorWrites );
+        }
+
+        m_PendingDescriptorWrites.clear();
     }
 
 } // namespace Desert::Graphic::API::Vulkan

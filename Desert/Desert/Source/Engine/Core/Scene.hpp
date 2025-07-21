@@ -2,13 +2,14 @@
 
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Models/SceneRendererUpdate.hpp>
+#include <Engine/Graphic/Models/MeshRenderData.hpp>
 
 #include <Common/Core/Core.hpp>
 #include <Engine/Core/Camera.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
 
-#include <Engine/Runtime/RuntimeResourceManager.hpp>
+#include <Engine/Runtime/ResourceResolver.hpp>
 
 #include <Engine/ECS/System/System.hpp>
 
@@ -56,6 +57,8 @@ namespace Desert::Core
             return m_Entitys;
         }
 
+        std::vector<Graphic::MeshRenderData> GetMeshesData();
+
         void Resize( const uint32_t width, const uint32_t height ) const;
 
         [[nodiscard]] const Graphic::Environment& GetEnvironment() const;
@@ -77,16 +80,18 @@ namespace Desert::Core
 
     private:
         template <typename System, typename... Args>
-        void RegisterSystem( Args&&... args )
+        void RegisterSystem( const uint32_t system, Args&&... args )
         {
-            m_Systems.emplace_back( std::make_unique<System>( std::forward<Args>( args )... ) );
+            m_Systems[system] = std::make_unique<System>( std::forward<Args>( args )... );
         }
 
     private:
-        std::string                                          m_SceneName;
-        std::shared_ptr<Graphic::SceneRenderer>              m_SceneRenderer;
-        const std::weak_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;
-        std::vector<std::unique_ptr<ECS::System>>            m_Systems;
+        static constexpr uint32_t SYSTEMS_COUNT = 2U;
+
+        std::string                                             m_SceneName;
+        std::shared_ptr<Graphic::SceneRenderer>                 m_SceneRenderer;
+        const std::shared_ptr<Runtime::ResourceResolver>        m_ResourceResolver;
+        std::array<std::unique_ptr<ECS::System>, SYSTEMS_COUNT> m_Systems;
 
         entt::registry                           m_Registry;
         std::vector<ECS::Entity>                 m_Entitys;

@@ -41,7 +41,8 @@ namespace Desert::Editor
 
         // Get mesh components and validate
         auto& meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
-        auto* meshInstance  = m_ResourceManager->GetMeshCache().Get( meshComponent.MeshHandle );
+        auto* meshInstance =
+             m_ResourceManager->GetGeometryResources()->GetMeshCache().Get( meshComponent.MeshHandle );
         if ( !meshInstance || !meshInstance->IsReady() )
             return;
 
@@ -56,7 +57,7 @@ namespace Desert::Editor
             return;
 
         // Get material instance
-        auto material = m_ResourceManager->GetMaterialCache().Get( materialHandle );
+        auto material = m_ResourceManager->GetGeometryResources()->GetMaterialCache().Get( materialHandle );
         if ( !material )
             return;
 

@@ -10,8 +10,8 @@ layout(location = 4) in vec2 a_TextureCoord;
 
 layout( push_constant ) uniform constants
 {
-	mat4 project;
-	mat4 view;
+	mat4 ViewProject;
+	mat4 Transform;
 } m_PushConstants;
 
 
@@ -24,11 +24,11 @@ layout(location=0) out Vertex
 
 void main()
 {
-	outVertex.WorldPosition = a_Position;
+	outVertex.WorldPosition = vec3(m_PushConstants.Transform * vec4(a_Position, 1.0));;
 	outVertex.Texcoord = a_TextureCoord;
-	outVertex.Normal = 	 a_Normal;
+	outVertex.Normal = 	 mat3(m_PushConstants.Transform) * a_Normal;
 
-	gl_Position =  m_PushConstants.project * m_PushConstants.view * vec4(a_Position, 1.0);
+	gl_Position =  m_PushConstants.ViewProject * m_PushConstants.Transform * vec4(a_Position, 1.0);
 }
 
 #pragma stage : fragment
@@ -70,6 +70,13 @@ layout (binding = 9) uniform samplerCube u_EnvIrradianceTex;
 
 // BRDF LUT
 layout (binding = 10) uniform sampler2D u_BRDFLUTTexture;
+
+layout(binding = 11) uniform sampler2D u_AlbedoTexture;
+
+struct Params
+{
+	vec3 AlbedoColor;
+} m_Params;
 
 float ndfGGX(float cosLh, float roughness)
 {
@@ -161,16 +168,17 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 	return diffuseIBL + specularIBL;
 }
 
+
 void main() {
 
-	const vec3 albedo = pbr.Albedo;
+	m_Params.AlbedoColor = pbr.Albedo;
 	const float metalness = pbr.Metallic;
 	const float roughness  = pbr.Roughness;
 
 	const vec3 view = normalize(global.CameraPosition - inVertex.WorldPosition);
 
-	vec3 F0 = mix(Fdielectric, albedo, metalness);
-	vec3 light = Lightning(view, inVertex.Normal, F0, metalness, roughness, albedo );
-	vec3 ibl = IBL(view, inVertex.Normal, F0, metalness, roughness, albedo);
+	vec3 F0 = mix(Fdielectric, m_Params.AlbedoColor, metalness);
+	vec3 light = Lightning(view, inVertex.Normal, F0, metalness, roughness, m_Params.AlbedoColor );
+	vec3 ibl = IBL(view, inVertex.Normal, F0, metalness, roughness, m_Params.AlbedoColor);
     oColor = vec4(light + ibl, 1.0);
 }

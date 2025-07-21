@@ -10,14 +10,21 @@
 
 namespace Desert::Core
 {
+    enum SceneSystem
+    {
+        MeshRenderer   = 0,
+        SkyboxRenderer = 1,
+    };
+
     Scene::Scene( std::string&&                                           sceneName,
                   const std::shared_ptr<Runtime::RuntimeResourceManager>& resourceManager )
          : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( std::make_shared<Graphic::SceneRenderer>() ),
-           m_RuntimeResourceManager( resourceManager ), m_Systems()
+           m_ResourceResolver( std::make_shared<Runtime::ResourceResolver>( resourceManager ) ), m_Systems()
     {
 
-        RegisterSystem<ECS::MeshRenderSystem>( m_SceneRenderer, m_RuntimeResourceManager );
-        RegisterSystem<ECS::SkyboxRenderSystem>( m_SceneRenderer, m_RuntimeResourceManager );
+        RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer, m_ResourceResolver );
+        RegisterSystem<ECS::SkyboxRenderSystem>( SceneSystem::SkyboxRenderer, m_SceneRenderer,
+                                                 m_ResourceResolver );
     }
 
     NO_DISCARD Common::BoolResult Scene::BeginScene( const Core::Camera& camera )
@@ -44,7 +51,7 @@ namespace Desert::Core
                  m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
             dirLightGroup.each( [&]( const auto& light, const auto& transform )
-                                { sceneRendererInfo.DirLights.push_back( { transform.Position } ); } );
+                                { sceneRendererInfo.DirLights.push_back( { transform.Translation } ); } );
         }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
@@ -107,6 +114,25 @@ namespace Desert::Core
     {
         //   SceneSerializer serializer( this, m_AssetManager );
         // return serializer.SaveToFile();
+    }
+
+    std::vector<Graphic::MeshRenderData> Scene::GetMeshesData() 
+    {
+        std::vector<Graphic::MeshRenderData> result;
+
+        auto meshes = m_Registry.group<ECS::StaticMeshComponent>( entt::get<ECS::TransformComponent> );
+        for ( const auto entity : meshes )
+        {
+            const auto& [meshComponent, transformComponent] =
+                 meshes.template get<ECS::StaticMeshComponent, ECS::TransformComponent>( entity );
+
+            if ( auto resolvedMesh = m_ResourceResolver->ResolveMesh( meshComponent.MeshHandle ) )
+            {
+                result.push_back( { .Mesh = resolvedMesh, .Transform = transformComponent.GetTransform() } );
+            }
+        }
+
+        return result;
     }
 
 } // namespace Desert::Core
