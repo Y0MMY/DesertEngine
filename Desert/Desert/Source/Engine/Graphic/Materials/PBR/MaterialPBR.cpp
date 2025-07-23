@@ -19,7 +19,6 @@ namespace Desert::Graphic
 
         m_LightingData       = std::make_unique<Models::LightingData>( m_Material );
         m_GlobalUB           = std::make_unique<Models::GlobalData>( m_Material );
-        m_PBRUB              = std::make_unique<Models::PBR::PBRMaterial>( m_Material );
         m_PBRTextures        = std::make_unique<Models::PBR::PBRMaterialTexture>( m_Material );
         m_MaterialProperties = std::make_unique<Models::PBR::MaterialPBRProperties>( m_Material );
     }
@@ -152,7 +151,7 @@ namespace Desert::Graphic
     };
 
     void MaterialPBR::UpdateRenderParameters( const Core::Camera& camera, const glm::mat4& meshTransform,
-                                              const glm::vec3& directionLight,
+                                              const glm::vec3&                               directionLight,
                                               const std::optional<Models::PBR::PBRTextures>& pbrTextures )
     {
         const VP vp{ .ViewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(),
@@ -160,47 +159,46 @@ namespace Desert::Graphic
 
         m_LightingData->UpdateDirection( directionLight );
         m_GlobalUB->UpdateUBGlobal( Models::GlobalUB{ .CameraPosition = camera.GetPosition() } );
-        m_PBRUB->UpdatePBR( {} );
         m_PBRTextures->UpdatePBR( pbrTextures );
         m_Material->PushConstant( &vp, sizeof( vp ) );
 
         // Here we would update the actual Material object with our parameters
         // This is where we'd connect to your Material class
 
-        //{
-        //    // Update uniform buffer properties
-        //    Models::PBR::MaterialPropertiesUB props;
-        //    props.AlbedoColor      = m_AlbedoColor;
-        //    props.AlbedoBlend      = m_AlbedoBlend;
-        //    props.MetallicValue    = m_MetallicValue;
-        //    props.MetallicBlend    = m_MetallicBlend;
-        //    props.RoughnessValue   = m_RoughnessValue;
-        //    props.RoughnessBlend   = m_RoughnessBlend;
-        //    props.EmissionColor    = m_EmissionColor;
-        //    props.EmissionStrength = m_EmissionStrength;
-        //    props.AOValue          = m_AOValue;
+        {
+            // Update uniform buffer properties
+            Models::PBR::PBRMaterialPropertiesUB props;
+            props.AlbedoColor      = m_AlbedoColor;
+            props.AlbedoBlend      = m_AlbedoBlend;
+            props.MetallicValue    = m_MetallicValue;
+            props.MetallicBlend    = m_MetallicBlend;
+            props.RoughnessValue   = m_RoughnessValue;
+            props.RoughnessBlend   = m_RoughnessBlend;
+            props.EmissionColor    = m_EmissionColor;
+            props.EmissionStrength = m_EmissionStrength;
+            props.AOValue          = m_AOValue;
 
-        //    m_MaterialProperties->Update( props );
+            m_MaterialProperties->Update( props );
 
-        //    // Update textures
-        //    auto updateTexture = [&]( Assets::TextureAsset::Type type, const std::string& name )
-        //    {
-        //        if ( auto texture = GetFinalTexture( type ) )
-        //        {
-        //            if ( auto texProp = m_Material->GetTexture2DProperty( name ) )
-        //            {
-        //                texProp->SetTexture( texture );
-        //            }
-        //        }
-        //    };
+            // Update textures
+            auto updateTexture = [&]( Assets::TextureAsset::Type type, const std::string& name )
+            {
+                if ( auto texture = GetFinalTexture( type ) )
+                {
+                    if ( auto texProp = m_Material->GetTexture2DProperty( name ) )
+                    {
+                        texProp->SetTexture( texture );
+                    }
+                }
+            };
 
-        //    updateTexture( Assets::TextureAsset::Type::Albedo, "albedoMap" );
-        //    updateTexture( Assets::TextureAsset::Type::Normal, "normalMap" );
-        //    updateTexture( Assets::TextureAsset::Type::Metallic, "metallicMap" );
-        //    updateTexture( Assets::TextureAsset::Type::Roughness, "roughnessMap" );
-        //    updateTexture( Assets::TextureAsset::Type::AO, "aoMap" );
-        //    updateTexture( Assets::TextureAsset::Type::Emissive, "emissiveMap" );
-        //}
+            updateTexture( Assets::TextureAsset::Type::Albedo, "albedoMap" );
+            updateTexture( Assets::TextureAsset::Type::Normal, "normalMap" );
+            updateTexture( Assets::TextureAsset::Type::Metallic, "metallicMap" );
+            updateTexture( Assets::TextureAsset::Type::Roughness, "roughnessMap" );
+            updateTexture( Assets::TextureAsset::Type::AO, "aoMap" );
+            updateTexture( Assets::TextureAsset::Type::Emissive, "emissiveMap" );
+        }
 
         m_ParametersDirty = false;
     }

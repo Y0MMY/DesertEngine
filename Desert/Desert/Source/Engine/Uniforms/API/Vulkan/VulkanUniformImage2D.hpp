@@ -25,6 +25,11 @@ namespace Desert::Uniforms::API::Vulkan
 
         virtual void SetImage2D( const std::shared_ptr<Graphic::Image2D>& image2D ) override;
 
+        virtual const Common::UUID GetImageHash() const override
+        {
+            return m_Image2D->GetHash();
+        }
+
     private:
         void RT_Invalidate();
         void Release();

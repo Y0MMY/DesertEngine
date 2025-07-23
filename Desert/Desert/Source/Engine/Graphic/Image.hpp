@@ -5,11 +5,17 @@
 
 #include <Engine/Graphic/MipMapGenerator.hpp>
 
+#include <Common/Core/UUID.hpp>
+
 namespace Desert::Graphic
 {
     class Image
     {
     public:
+        Image() : m_Hash( Common::UUID() )
+        {
+        }
+
         virtual ~Image() = default;
 
         virtual uint32_t                      GetWidth() const               = 0;
@@ -20,12 +26,18 @@ namespace Desert::Graphic
         virtual void                          Use( uint32_t slot = 0 ) const = 0;
         virtual Core::Formats::ImagePixelData GetImagePixels() const         = 0;
 
-        virtual const std::string GetHash() const = 0;
+        virtual const Common::UUID GetHash() const final
+        {
+            return m_Hash;
+        }
 
         static uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format );
         // Calculates the byte size of an image based on dimensions and format
         static uint32_t CalculateImageSize( uint32_t width, uint32_t height,
                                             const Core::Formats::ImageFormat& format );
+
+    private:
+        const Common::UUID m_Hash;
     };
 
     class Image2D : public Image, public DynamicResources

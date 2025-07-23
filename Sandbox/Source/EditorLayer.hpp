@@ -23,10 +23,22 @@ namespace Desert
     private:
         bool OnWindowResize( Common::EventWindowResize& e );
         bool OnMousePressed( Common::MouseButtonPressedEvent& e );
+        bool OnKeyPressedEvent( Common::KeyPressedEvent& e );
 
         void HandleObjectPicking();
 
         std::pair<float, float> GetMouseViewportSpace();
+
+    private:
+        enum class GizmoType
+        {
+            None      = -1,
+            Translate = 7,   // ImGuizmo::OPERATION::TRANSLATE
+            Rotate    = 120, // ImGuizmo::OPERATION::ROTATE
+            Scale     = 896, // ImGuizmo::OPERATION::SCALE
+        };
+
+        GizmoType m_GizmoType = GizmoType::None;
 
     private:
         const std::shared_ptr<Common::Window> m_Window;

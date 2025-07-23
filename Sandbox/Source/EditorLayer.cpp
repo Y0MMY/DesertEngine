@@ -1,3 +1,5 @@
+#define IMGUI_DEFINE_MATH_OPERATORS
+
 #include "EditorLayer.hpp"
 
 #include "Editor/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
@@ -5,11 +7,16 @@
 #include "Editor/Panels/Debug/ShaderLibraryPanel.hpp"
 #include <ImGui/imgui_internal.h>
 
+#include <ImGuizmo.h>
+#include <ImGuizmo.cpp> //TODO: TEMP
+
+#include <glm/gtx/matrix_decompose.hpp>
+
 namespace Desert
 {
     EditorLayer::EditorLayer( const std::shared_ptr<Common::Window>& window, const std::string& layerName )
          : Common::Layer( layerName ), m_Window( window )
-           
+
     {
         m_AssetManager           = std::make_shared<Assets::AssetManager>();
         m_RuntimeResourceManager = std::make_shared<Runtime::RuntimeResourceManager>( m_AssetManager );
@@ -94,6 +101,7 @@ namespace Desert
 
     Common::BoolResult EditorLayer::OnImGuiRender()
     {
+        ImGuizmo::BeginFrame();
         static bool               dockspaceOpen   = true;
         static bool               opt_fullscreen  = true;
         static bool               opt_padding     = false;
@@ -190,6 +198,45 @@ namespace Desert
 
             m_UIHelper->Image( m_MainScene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
         }
+
+        // Gizmos
+        if ( m_GizmoType != GizmoType::None )
+        {
+            const auto& selected = Editor::Core::SelectionManager::GetSelected();
+            if ( selected )
+            {
+                const auto& selectedEntity = m_MainScene->FindEntityByID( *selected );
+                if ( selectedEntity )
+                {
+                    auto& transformComponent = selectedEntity->get().GetComponent<ECS::TransformComponent>();
+                    auto  transform          = transformComponent.GetTransform();
+
+                    float rw = (float)::ImGui::GetWindowWidth();
+                    float rh = (float)::ImGui::GetWindowHeight();
+                    ImGuizmo::SetOrthographic( false );
+                    ImGuizmo::SetDrawlist();
+                    ImGuizmo::SetRect( ::ImGui::GetWindowPos().x, ::ImGui::GetWindowPos().y, rw, rh );
+                    ImGuizmo::Manipulate( &m_EditorCamera.GetViewMatrix()[0][0],
+                                          &m_EditorCamera.GetProjectionMatrix()[0][0],
+                                          (ImGuizmo::OPERATION)m_GizmoType, ImGuizmo::WORLD, &transform[0][0] );
+
+                    // TODO: use math class
+                    glm::vec3 scale;
+                    glm::quat rotation;
+                    glm::vec3 translation;
+                    glm::vec3 skew;
+                    glm::vec4 perspective;
+                    glm::decompose( transform, scale, rotation, translation, skew, perspective );
+
+                    glm::vec3 euler = glm::eulerAngles( rotation ) ;
+
+                    transformComponent.Translation = translation;
+                    transformComponent.Rotation    = euler;
+                    transformComponent.Scale       = scale;
+                }
+            }
+        }
+
         ::ImGui::End();
         ::ImGui::PopStyleColor( 1 );
         ::ImGui::PopStyleVar( 3 );
@@ -226,22 +273,45 @@ namespace Desert
 
         float closestT = std::numeric_limits<float>::max();
 
-        const auto& meshes = m_MainScene->GetMeshesData();
+        const auto entities = m_MainScene->GetAllEntities();
 
-        for ( const auto mesh : meshes )
+        std::vector<std::pair<Common::UUID, std::pair<glm::mat4, std::shared_ptr<Desert::Mesh>>>> allMeshes;
+
+        for ( const auto& entity : entities )
         {
-            float t = 0.0f;
-            for ( const auto& submesh : mesh.Mesh->GetSubmeshes() )
+            if ( entity.HasComponent<ECS::StaticMeshComponent>() )
             {
-                const auto localSpace = mesh.Transform ;
-                auto       localRay   = ray.ToLocalSpace( localSpace );
+                const auto& resource = m_RuntimeResourceManager->GetGeometryResources()->GetMeshCache().Get(
+                     entity.GetComponent<ECS::StaticMeshComponent>().MeshHandle );
+                if ( !resource )
+                {
+                    continue;
+                }
 
-                if (localRay.IntersectsAABB( submesh.BoundingBox, t ) )
+                allMeshes.push_back(
+                     { entity.GetComponent<ECS::UUIDComponent>().UUID,
+                       { entity.GetComponent<ECS::TransformComponent>().GetTransform(), resource->GetMesh() } } );
+            }
+        }
+
+        for ( const auto& [uuid, meshData] : allMeshes )
+        {
+            const auto& [transform, mesh] = meshData;
+            float t                       = 0.0f;
+
+            for ( const auto& submesh : mesh->GetSubmeshes() )
+            {
+                auto localRay = ray.ToLocalSpace( transform );
+
+                if ( localRay.IntersectsAABB( submesh.BoundingBox, t ) )
                 {
                     LOG_TRACE( "Picked object: {} distance: {}", submesh.Name, t );
                     if ( t < closestT )
                     {
+                        Editor::Core::SelectionManager::SetSelected( uuid );
                         closestT = t;
+
+                        return;
                     }
                 }
             }
@@ -256,6 +326,9 @@ namespace Desert
 
         eventManager.Notify<Common::MouseButtonPressedEvent>( [this]( Common::MouseButtonPressedEvent& e )
                                                               { return OnMousePressed( e ); } );
+
+        eventManager.Notify<Common::KeyPressedEvent>( [this]( Common::KeyPressedEvent& e )
+                                                      { return OnKeyPressedEvent( e ); } );
     }
 
     bool EditorLayer::OnWindowResize( Common::EventWindowResize& e )
@@ -279,6 +352,26 @@ namespace Desert
             HandleObjectPicking();
         }
 
+        return false;
+    }
+
+    bool EditorLayer::OnKeyPressedEvent( Common::KeyPressedEvent& e )
+    {
+        switch ( e.GetKeyCode() )
+        {
+            case Common::KeyCode::N:
+                m_GizmoType = GizmoType::None;
+                break;
+            case Common::KeyCode::T:
+                m_GizmoType = GizmoType::Translate;
+                break;
+            case Common::KeyCode::R:
+                m_GizmoType = GizmoType::Rotate;
+                break;
+            case Common::KeyCode::C:
+                m_GizmoType = GizmoType::Scale;
+                break;
+        }
         return false;
     }
 

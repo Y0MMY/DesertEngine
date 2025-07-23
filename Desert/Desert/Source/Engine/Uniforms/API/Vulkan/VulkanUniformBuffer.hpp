@@ -30,6 +30,11 @@ namespace Desert::Uniforms::API::Vulkan
             return m_DescriptorInfo;
         }
 
+        virtual const void* GetData() const override
+        {
+            return m_LocalStorage.Data;
+        }
+
     private:
         void Release();
         void RT_Invalidate();
@@ -40,8 +45,8 @@ namespace Desert::Uniforms::API::Vulkan
         VkDescriptorBufferInfo m_DescriptorInfo{};
         uint32_t               m_Size    = 0;
         uint32_t               m_Binding = 0;
-        const std::string m_DebugName;
+        const std::string      m_DebugName;
 
         Common::Memory::Buffer m_LocalStorage;
     };
-} // namespace Desert::Graphic::API::Vulkan
+} // namespace Desert::Uniforms::API::Vulkan

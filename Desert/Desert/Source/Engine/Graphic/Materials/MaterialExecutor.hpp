@@ -17,7 +17,7 @@ namespace Desert::Graphic
     {
     public:
         MaterialExecutor( std::string&& debugName, const std::shared_ptr<Shader>& shader,
-                  std::unique_ptr<MaterialBackend>&& materialBackend );
+                          std::unique_ptr<MaterialBackend>&& materialBackend );
 
         virtual ~MaterialExecutor() = default;
 
@@ -55,7 +55,13 @@ namespace Desert::Graphic
             return m_Shader;
         }
 
-        static std::shared_ptr<MaterialExecutor> Create( std::string&& debugName, const std::shared_ptr<Shader>& shader );
+        const std::unique_ptr<MaterialBackend>& GetMaterialBackend() const
+        {
+            return m_MaterialBackend;
+        }
+
+        static std::shared_ptr<MaterialExecutor> Create( std::string&&                  debugName,
+                                                         const std::shared_ptr<Shader>& shader );
 
     protected:
         void InitializeProperties();

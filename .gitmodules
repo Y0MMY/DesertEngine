@@ -13,3 +13,6 @@
 [submodule "ThirdParty/ImGui"]
 	path = ThirdParty/ImGui
 	url = https://github.com/Y0MMY/imgui
+[submodule "Sandbox/ThitdParty/ImGuizmo"]
+	path = Sandbox/ThitdParty/ImGuizmo
+	url = https://github.com/CedricGuillemet/ImGuizmo

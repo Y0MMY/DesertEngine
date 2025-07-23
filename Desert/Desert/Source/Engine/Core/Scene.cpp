@@ -116,23 +116,4 @@ namespace Desert::Core
         // return serializer.SaveToFile();
     }
 
-    std::vector<Graphic::MeshRenderData> Scene::GetMeshesData() 
-    {
-        std::vector<Graphic::MeshRenderData> result;
-
-        auto meshes = m_Registry.group<ECS::StaticMeshComponent>( entt::get<ECS::TransformComponent> );
-        for ( const auto entity : meshes )
-        {
-            const auto& [meshComponent, transformComponent] =
-                 meshes.template get<ECS::StaticMeshComponent, ECS::TransformComponent>( entity );
-
-            if ( auto resolvedMesh = m_ResourceResolver->ResolveMesh( meshComponent.MeshHandle ) )
-            {
-                result.push_back( { .Mesh = resolvedMesh, .Transform = transformComponent.GetTransform() } );
-            }
-        }
-
-        return result;
-    }
-
 } // namespace Desert::Core

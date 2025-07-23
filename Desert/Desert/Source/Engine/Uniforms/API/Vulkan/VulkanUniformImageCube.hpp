@@ -23,6 +23,11 @@ namespace Desert::Uniforms::API::Vulkan
             return m_DescriptorInfo;
         }
 
+        virtual const Common::UUID GetImageHash() const override
+        {
+            return m_ImageCube->GetHash();
+        }
+
         virtual void SetImageCube( const std::shared_ptr<Graphic::ImageCube>& imageCube );
 
     private:

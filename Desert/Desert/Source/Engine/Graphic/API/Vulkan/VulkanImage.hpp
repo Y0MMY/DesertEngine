@@ -33,11 +33,6 @@ namespace Desert::Graphic::API::Vulkan
             return m_ImageSpecification.Height;
         }
 
-        virtual const std::string GetHash() const override
-        {
-            return "TODO";
-        }
-
         virtual Core::Formats::ImageFormat GetImageFormat() const override
         {
             return m_ImageSpecification.Format;
@@ -117,11 +112,6 @@ namespace Desert::Graphic::API::Vulkan
         virtual uint32_t GetMipmapLevels() const override
         {
             return m_MipLevels;
-        }
-
-        virtual const std::string GetHash() const override
-        {
-            return "TODO";
         }
 
         virtual bool IsLoaded() const override

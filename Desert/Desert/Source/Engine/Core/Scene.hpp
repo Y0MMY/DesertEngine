@@ -57,8 +57,6 @@ namespace Desert::Core
             return m_Entitys;
         }
 
-        std::vector<Graphic::MeshRenderData> GetMeshesData();
-
         void Resize( const uint32_t width, const uint32_t height ) const;
 
         [[nodiscard]] const Graphic::Environment& GetEnvironment() const;

@@ -4,7 +4,6 @@
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 #include <Engine/Graphic/Materials/Models/Global.hpp>
-#include <Engine/Graphic/Materials/Models/PBR/PBRMaterialHelper.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
 #include <Engine/Graphic/Materials/Models/PBR/MaterialPBRProperties.hpp>
 #include <Engine/Graphic/Materials/Models/Lighting.hpp>
@@ -147,7 +146,6 @@ namespace Desert::Graphic
     private:
         std::unique_ptr<Models::LightingData>               m_LightingData;
         std::unique_ptr<Models::GlobalData>                 m_GlobalUB;
-        std::unique_ptr<Models::PBR::PBRMaterial>           m_PBRUB;
         std::unique_ptr<Models::PBR::PBRMaterialTexture>    m_PBRTextures;
         std::unique_ptr<Models::PBR::MaterialPBRProperties> m_MaterialProperties;
     };

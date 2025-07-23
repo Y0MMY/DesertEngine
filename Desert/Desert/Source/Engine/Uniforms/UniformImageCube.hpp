@@ -16,6 +16,8 @@ namespace Desert::Uniforms
 
         virtual void SetImageCube( const std::shared_ptr<Graphic::ImageCube>& imageCube ) = 0;
 
+        virtual const Common::UUID GetImageHash() const = 0;
+
     private:
         static std::shared_ptr<UniformImageCube> Create( const std::string_view debugName, uint32_t binding );
 

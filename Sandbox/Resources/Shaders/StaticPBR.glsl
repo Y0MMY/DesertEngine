@@ -50,10 +50,16 @@ const vec3 Fdielectric = vec3(0.04);
 
 layout(location = 0) out vec4 oColor;
 
-layout(binding = 0) uniform PBRData {
-	vec3 		Albedo;
-	float     	Metallic;
-	float     	Roughness;
+layout(binding = 0) uniform MaterialProperties {
+	vec3	  AlbedoColor;
+    float     AlbedoBlend;
+    float     MetallicValue;
+    float     MetallicBlend;
+    float     RoughnessValue;
+    float     RoughnessBlend;
+    vec3	  EmissionColor;
+    float     EmissionStrength;
+    float     AOValue;
 } pbr;
 
 layout(binding = 1) uniform LightningUB {
@@ -171,9 +177,9 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 
 void main() {
 
-	m_Params.AlbedoColor = pbr.Albedo;
-	const float metalness = pbr.Metallic;
-	const float roughness  = pbr.Roughness;
+	m_Params.AlbedoColor = pbr.AlbedoColor * pbr.AlbedoBlend;
+	const float metalness = pbr.MetallicValue * pbr.MetallicBlend;
+	const float roughness  = pbr.RoughnessValue * pbr.RoughnessBlend;
 
 	const vec3 view = normalize(global.CameraPosition - inVertex.WorldPosition);
 
