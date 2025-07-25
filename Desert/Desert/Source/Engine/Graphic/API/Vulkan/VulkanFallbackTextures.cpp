@@ -78,12 +78,12 @@ namespace Desert::Graphic::API::Vulkan
             case Core::Formats::ImageFormat::RGBA8F:
             case Core::Formats::ImageFormat::BGRA8F:
             {
-                spec.Data = std::vector<unsigned char>( spec.Width * spec.Height * 4, 0x0 );
+                spec.Data = std::vector<unsigned char>( spec.Width * spec.Height * 4, 0xFF);
                 break;
             }
             case Core::Formats::ImageFormat::RGBA32F:
             {
-                std::vector<float> data( spec.Width * spec.Height * 4, 1.0f );
+                std::vector<float> data( spec.Width * spec.Height * 4, 1.0f);
                 spec.Data = data;
                 break;
             }

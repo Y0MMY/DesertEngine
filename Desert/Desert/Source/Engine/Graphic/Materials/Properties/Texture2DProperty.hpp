@@ -36,16 +36,17 @@ namespace Desert::Graphic
             return nullptr;
         }
 
-        void SetTexture( std::shared_ptr<Texture2D> texture )
+        void SetTexture( const std::shared_ptr<Texture2D>& texture )
         {
-            m_Texture = texture->GetImage2D();
+            if ( texture )
+                m_Texture = texture->GetImage2D();
             m_Dirty = true;
         }
 
         void SetImage( std::shared_ptr<Image2D> texture )
         {
             m_Texture = texture;
-            m_Dirty = true;
+            m_Dirty   = true;
         }
 
         const auto& GetUniform() const

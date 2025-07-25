@@ -183,7 +183,7 @@ namespace Desert::Graphic
             // Update textures
             auto updateTexture = [&]( Assets::TextureAsset::Type type, const std::string& name )
             {
-                if ( auto texture = GetFinalTexture( type ) )
+                auto texture = GetFinalTexture( type );
                 {
                     if ( auto texProp = m_Material->GetTexture2DProperty( name ) )
                     {
@@ -192,7 +192,7 @@ namespace Desert::Graphic
                 }
             };
 
-            updateTexture( Assets::TextureAsset::Type::Albedo, "albedoMap" );
+            updateTexture( Assets::TextureAsset::Type::Albedo, "u_AlbedoTexture" );
             updateTexture( Assets::TextureAsset::Type::Normal, "normalMap" );
             updateTexture( Assets::TextureAsset::Type::Metallic, "metallicMap" );
             updateTexture( Assets::TextureAsset::Type::Roughness, "roughnessMap" );

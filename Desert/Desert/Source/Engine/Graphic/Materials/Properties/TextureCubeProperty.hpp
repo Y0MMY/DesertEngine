@@ -38,7 +38,7 @@ namespace Desert::Graphic
         void SetTexture( std::shared_ptr<ImageCube> texture )
         {
             m_Texture = texture;
-            m_Dirty = true;
+            m_Dirty   = true;
         }
 
         const auto& GetUniform() const

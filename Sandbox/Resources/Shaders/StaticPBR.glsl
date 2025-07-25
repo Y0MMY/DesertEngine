@@ -20,13 +20,17 @@ layout(location=0) out Vertex
 	vec3 WorldPosition;
 	vec3 Normal;
 	vec2 Texcoord;
+	mat3 TBN;
 } outVertex;
 
 void main()
 {
 	outVertex.WorldPosition = vec3(m_PushConstants.Transform * vec4(a_Position, 1.0));;
-	outVertex.Texcoord = a_TextureCoord;
-	outVertex.Normal = 	 mat3(m_PushConstants.Transform) * a_Normal;
+	outVertex.Texcoord = vec2(a_TextureCoord.x, 1.0 - a_TextureCoord.y);
+
+	mat3 modelRotation = mat3(m_PushConstants.Transform);
+	outVertex.Normal = 	modelRotation * a_Normal;
+	outVertex.TBN = modelRotation * mat3(a_Tangent, a_Bitangent, a_Normal);
 
 	gl_Position =  m_PushConstants.ViewProject * m_PushConstants.Transform * vec4(a_Position, 1.0);
 }
@@ -40,6 +44,7 @@ layout(location=0) in Vertex
 	vec3 WorldPosition;
 	vec3 Normal;
 	vec2 Texcoord;
+	mat3 TBN;
 } inVertex;
 
 const float PI = 3.141592;
@@ -82,6 +87,7 @@ layout(binding = 11) uniform sampler2D u_AlbedoTexture;
 struct Params
 {
 	vec3 AlbedoColor;
+	vec3 Normal;
 } m_Params;
 
 float ndfGGX(float cosLh, float roughness)
@@ -178,13 +184,18 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 void main() {
 
 	m_Params.AlbedoColor = pbr.AlbedoColor * pbr.AlbedoBlend;
+	const ivec2 textureSize = textureSize(u_AlbedoTexture, 0);
+
+	m_Params.AlbedoColor *= texture(u_AlbedoTexture, inVertex.Texcoord).rgb;
+	m_Params.Normal =  normalize(inVertex.TBN * inVertex.Normal);
+
 	const float metalness = pbr.MetallicValue * pbr.MetallicBlend;
 	const float roughness  = pbr.RoughnessValue * pbr.RoughnessBlend;
 
 	const vec3 view = normalize(global.CameraPosition - inVertex.WorldPosition);
 
 	vec3 F0 = mix(Fdielectric, m_Params.AlbedoColor, metalness);
-	vec3 light = Lightning(view, inVertex.Normal, F0, metalness, roughness, m_Params.AlbedoColor );
-	vec3 ibl = IBL(view, inVertex.Normal, F0, metalness, roughness, m_Params.AlbedoColor);
+	vec3 light = Lightning(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor );
+	vec3 ibl = IBL(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor);
     oColor = vec4(light + ibl, 1.0);
 }
