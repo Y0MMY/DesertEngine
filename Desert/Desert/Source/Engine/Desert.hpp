@@ -45,4 +45,3 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/AssetPreloader.hpp>
-#include <Engine/Assets/AssetCatalog.hpp>

@@ -27,7 +27,15 @@ namespace Desert::ECS
         template <typename EntityT, typename... Args>
         decltype( auto ) AddComponent( Args&&... args ) const
         {
-            return m_Scene->GetRegistry().emplace<EntityT>( m_Handle, std::forward<Args>( args )... );
+            if constexpr ( sizeof...( Args ) == 0 )
+            {
+                return m_Scene->GetRegistry().emplace_or_replace<EntityT>( m_Handle );
+            }
+            else
+            {
+                return m_Scene->GetRegistry().emplace_or_replace<EntityT>( m_Handle,
+                                                                           std::forward<Args>( args )... );
+            }
         }
 
         template <typename EntityT>

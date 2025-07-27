@@ -15,12 +15,10 @@ namespace Desert::Runtime
         // TODO: Result<>(maybe)
 
         std::shared_ptr<Mesh>                    ResolveMesh( Assets::AssetHandle handle );
-        std::shared_ptr<Graphic::MaterialPBR>    ResolveMaterial( Assets::AssetHandle handle );
         std::shared_ptr<Graphic::MaterialSkybox> ResolveSkybox( Assets::AssetHandle handle );
 
     private:
         std::shared_ptr<Desert::Mesh>            TryGetMesh( Runtime::ResourceHandle handle ) const;
-        std::shared_ptr<Graphic::MaterialPBR>    TryGetMaterial( Runtime::ResourceHandle handle ) const;
         std::shared_ptr<Graphic::MaterialSkybox> TryGetSkybox( Runtime::ResourceHandle handle ) const;
 
     private:

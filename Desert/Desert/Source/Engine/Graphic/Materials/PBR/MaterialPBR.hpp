@@ -16,6 +16,8 @@ namespace Desert::Graphic
     class MaterialPBR
     {
     public:
+        MaterialPBR() = default;
+
         explicit MaterialPBR( const std::shared_ptr<Assets::MaterialAsset>& baseAsset );
 
         std::shared_ptr<Assets::MaterialAsset> GetBaseMaterial() const

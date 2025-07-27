@@ -57,11 +57,10 @@ namespace Desert::Assets
                 auto meshAsset     = assetManager->CreateAsset<MeshAsset>( AssetPriority::Low, filePath );
                 auto materialAsset = assetManager->CreateAsset<MaterialAsset>( AssetPriority::Low, filePath );
 
-                if ( meshAsset->GetMetadata().IsValid() && materialAsset->GetMetadata().IsValid() )
+                if ( !meshAsset->GetMetadata().IsValid() || !materialAsset->GetMetadata().IsValid() )
                 {
-                    auto& bundle            = m_MeshAssetBundle.emplace_back();
-                    bundle.MeshMetadata     = meshAsset->GetMetadata();
-                    bundle.MaterialMetadata = materialAsset->GetMetadata();
+                    LOG_ERROR( "meshAsset or materialAsset metadata is invalid" );
+                    return;
                 }
             }
         }

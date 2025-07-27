@@ -59,12 +59,10 @@ namespace Desert
         m_UIHelper->Init();
 
         m_AssetPreloader->PreloadAllAssets();
-        m_AssetCatalog = std::make_shared<Assets::AssetCatalog>();
-        m_AssetCatalog->RegisterBundles( m_AssetPreloader->GetMeshAssetBundles() );
 
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>(
-             m_MainScene, m_AssetCatalog, m_MainScene->GetResourceResolver() ) );
+             m_MainScene, m_AssetManager, m_MainScene->GetResourceResolver() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
 
 #endif // EBABLE_IMGUI

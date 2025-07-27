@@ -182,18 +182,22 @@ namespace Desert::Editor
 
                         if ( ImGui::BeginCombo( "##MeshSelector", "Select Mesh" ) )
                         {
-                            auto meshAssets = m_AssetCatalog->GetAllMeshBundles();
-                            for ( const auto& asset : meshAssets )
+                            auto meshAssets = m_AssetManager->FindAllByType<Assets::MeshAsset>();
+                            for ( const auto& [handle, asset] : meshAssets )
                             {
-                                const auto& mesh = resolver->ResolveMesh( asset.MeshMetadata.Handle );
-
-                                bool isSelected = ( asset.MeshMetadata.Handle == meshComponent.MeshHandle );
+                                bool isSelected = ( handle == meshComponent.MeshHandle );
                                 if ( ImGui::Selectable(
-                                          Common::Utils::FileSystem::GetFileName( mesh->GetFilepath() ).c_str(),
+                                          Common::Utils::FileSystem::GetFileName( asset->GetMesh()->GetFilepath() )
+                                               .c_str(),
                                           isSelected ) )
                                 {
-                                    meshComponent.MeshHandle     = asset.MeshMetadata.Handle;
-                                    meshComponent.MaterialHandle = asset.MaterialMetadata.Handle;
+                                    meshComponent.MeshHandle = handle;
+
+                                    const auto base = m_AssetManager->CreateAsset<Assets::MaterialAsset>(
+                                         Assets::AssetPriority::Low, asset->GetMesh()->GetFilepath() );
+
+                                    meshComponent.Material.reset();
+                                    meshComponent.Material = std::make_shared<Graphic::MaterialPBR>( base );
                                 }
                                 if ( isSelected )
                                 {

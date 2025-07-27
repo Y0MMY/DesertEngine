@@ -59,7 +59,6 @@ namespace Desert
 
         std::shared_ptr<Assets::AssetManager>   m_AssetManager;
         std::unique_ptr<Assets::AssetPreloader> m_AssetPreloader;
-        std::shared_ptr<Assets::AssetCatalog>   m_AssetCatalog;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;

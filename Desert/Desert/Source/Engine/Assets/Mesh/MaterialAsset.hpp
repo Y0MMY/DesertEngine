@@ -21,6 +21,8 @@ namespace Desert::Assets
 
         MaterialAsset( AssetPriority priority, const Common::Filepath& filepath );
 
+        bool CopyFrom( const MaterialAsset& source );
+
         Common::BoolResult Load() override;
         Common::BoolResult Unload() override;
 
@@ -35,14 +37,13 @@ namespace Desert::Assets
         bool AddTexture( const Common::Filepath& filepath, TextureAsset::Type type,
                          const glm::vec4& defaultColor = glm::vec4( 1.0f ) );
 
-        static AssetManager::KeyHandle GetAssetKey( const Common::Filepath& filepath );
-        static AssetTypeID             GetTypeID()
+        static AssetTypeID GetTypeID()
         {
             return AssetTypeID::Material;
         }
 
     private:
-        bool                   m_ReadyForUse = false;
+        bool m_ReadyForUse = false;
 
         std::array<std::unique_ptr<TextureSlot>, static_cast<size_t>( 6U )> m_TextureSlots;
     };

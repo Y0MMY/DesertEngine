@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Graphic/Material/MaterialCache.hpp"
 #include "Graphic/Material/SkyboxCache.hpp"
 #include "Graphic/Geometry/MeshCache.hpp"
 #include <Engine/Assets/AssetManager.hpp>
@@ -21,19 +20,8 @@ namespace Desert::Runtime
         {
         public:
             explicit GeometryResources( const std::weak_ptr<Assets::AssetManager>& assetManager )
-                 : m_MaterialCache( std::make_unique<MaterialCache>( assetManager ) ),
-                   m_MeshCache( std::make_unique<MeshCache>( assetManager ) )
+                 : m_MeshCache( std::make_unique<MeshCache>( assetManager ) )
             {
-            }
-
-            MaterialCache& GetMaterialCache()
-            {
-                return *m_MaterialCache;
-            }
-
-            const MaterialCache& GetMaterialCache() const
-            {
-                return *m_MaterialCache;
             }
 
             MeshCache& GetMeshCache()
@@ -48,7 +36,6 @@ namespace Desert::Runtime
 
         private:
             const std::unique_ptr<MeshCache>     m_MeshCache;
-            const std::unique_ptr<MaterialCache> m_MaterialCache;
         };
 
         auto& GetGeometryResources()

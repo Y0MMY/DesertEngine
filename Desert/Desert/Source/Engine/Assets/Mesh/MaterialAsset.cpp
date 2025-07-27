@@ -121,4 +121,41 @@ namespace Desert::Assets
         m_TextureSlots[static_cast<size_t>( type )] = std::move( textureSlot );
         return true;
     }
+
+    bool MaterialAsset::CopyFrom( const MaterialAsset& source )
+    {
+        if ( !source.IsReadyForUse() )
+        {
+            return false;
+        }
+
+        for ( auto& slot : m_TextureSlots )
+        {
+            slot.reset();
+        }
+
+        for ( size_t i = 0; i < source.m_TextureSlots.size(); ++i )
+        {
+            if ( source.m_TextureSlots[i] )
+            {
+                auto newSlot          = std::make_unique<TextureSlot>();
+                newSlot->DefaultColor = source.m_TextureSlots[i]->DefaultColor;
+
+                if ( source.m_TextureSlots[i]->Texture )
+                {
+                    newSlot->Texture =
+                         std::make_unique<TextureAsset>( source.m_TextureSlots[i]->Texture->GetMetadata().Priority,
+                                                         source.m_TextureSlots[i]->Texture->GetMetadata().Filepath,
+                                                         source.m_TextureSlots[i]->Texture->GetType() );
+                    newSlot->Texture->Load();
+                }
+
+                m_TextureSlots[i] = std::move( newSlot );
+            }
+        }
+
+        m_ReadyForUse = true;
+        return true;
+    }
+
 } // namespace Desert::Assets

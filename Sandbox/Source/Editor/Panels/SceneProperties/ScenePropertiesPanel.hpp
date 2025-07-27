@@ -11,9 +11,9 @@ namespace Desert::Editor
     {
     public:
         explicit ScenePropertiesPanel( const std::shared_ptr<Desert::Core::Scene>&       scene,
-                                       const std::shared_ptr<Assets::AssetCatalog>&      assetCatalog,
+                                       const std::shared_ptr<Assets::AssetManager>&      assetManager,
                                        const std::shared_ptr<Runtime::ResourceResolver>& resolver )
-             : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetCatalog( assetCatalog ),
+             : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetManager( assetManager ),
                m_RuntimeResourceResolver( resolver ),
                m_MaterialsPanel( std::make_shared<MaterialsPanel>( resolver ) )
         {
@@ -25,7 +25,7 @@ namespace Desert::Editor
 
     private:
         std::shared_ptr<Desert::Core::Scene>           m_Scene;
-        const std::shared_ptr<Assets::AssetCatalog>    m_AssetCatalog;
+        const std::shared_ptr<Assets::AssetManager>    m_AssetManager;
         const std::weak_ptr<Runtime::ResourceResolver> m_RuntimeResourceResolver;
         const std::shared_ptr<MaterialsPanel>          m_MaterialsPanel;
     };

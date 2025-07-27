@@ -11,6 +11,7 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
+#include <Engine/Graphic/Materials/PBR/MaterialPBR.hpp>
 
 namespace Desert::ECS
 {
@@ -26,8 +27,13 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Assets::AssetHandle MeshHandle;
-        Assets::AssetHandle MaterialHandle;
+        Assets::AssetHandle                   MeshHandle;
+        std::shared_ptr<Graphic::MaterialPBR> Material;
+
+        StaticMeshComponent( ) 
+        {
+            Material = std::make_shared<Graphic::MaterialPBR>(nullptr);
+        }
     };
 
     struct TransformComponent

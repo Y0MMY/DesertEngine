@@ -42,14 +42,13 @@ namespace Desert::Editor
                 return;
 
             // Get mesh components and validate
-            auto&       meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
-            const auto& material      = resolver->ResolveMaterial( meshComponent.MaterialHandle );
+            auto& meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
 
             // Draw collapsible material panel
             if ( ImGui::CollapsingHeader( "Material", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
                 ImGui::Dummy( ImVec2( 0, 4 ) );
-                DrawMaterialEditor( material );
+                DrawMaterialEditor( meshComponent.Material );
             }
         }
     }

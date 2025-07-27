@@ -13,8 +13,12 @@ namespace Desert::Runtime
         }
 
         const auto runtimeHandle = cacheGetter().Create( handle );
-        cache.emplace( handle, runtimeHandle );
+        if ( !runtimeHandle.IsValid() )
+        {
+            return nullptr;
+        }
 
+        cache.emplace( handle, runtimeHandle );
         return resourceGetter( runtimeHandle );
     }
 
@@ -24,14 +28,6 @@ namespace Desert::Runtime
              handle, m_HandleCache,
              [this]() -> auto& { return m_ResourceManager->GetGeometryResources()->GetMeshCache(); },
              [this]( Runtime::ResourceHandle h ) { return TryGetMesh( h ); } );
-    }
-
-    std::shared_ptr<Desert::Graphic::MaterialPBR> ResourceResolver::ResolveMaterial( Assets::AssetHandle handle )
-    {
-        return ResolveResource<Desert::Graphic::MaterialPBR>(
-             handle, m_HandleCache,
-             [this]() -> auto& { return m_ResourceManager->GetGeometryResources()->GetMaterialCache(); },
-             [this]( Runtime::ResourceHandle h ) { return TryGetMaterial( h ); } );
     }
 
     std::shared_ptr<Desert::Graphic::MaterialSkybox> ResourceResolver::ResolveSkybox( Assets::AssetHandle handle )
@@ -46,16 +42,6 @@ namespace Desert::Runtime
         if ( const auto& mesh = m_ResourceManager->GetGeometryResources()->GetMeshCache().Get( handle ) )
         {
             return mesh->GetMesh();
-        }
-        return nullptr;
-    }
-
-    std::shared_ptr<Desert::Graphic::MaterialPBR>
-    ResourceResolver::TryGetMaterial( Runtime::ResourceHandle handle ) const
-    {
-        if ( const auto& material = m_ResourceManager->GetGeometryResources()->GetMaterialCache().Get( handle ) )
-        {
-            return material;
         }
         return nullptr;
     }
