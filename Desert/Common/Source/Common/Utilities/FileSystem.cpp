@@ -37,7 +37,7 @@ namespace Common::Utils
 
         if ( file.is_open() )
         {
-            LOG_INFO ("Created File {}", path.string());
+            LOG_INFO( "Created File {}", path.string() );
             file.close();
         }
 
@@ -158,7 +158,13 @@ namespace Common::Utils
 
     const std::string FileSystem::GetFileNameWithoutExtension( const std::filesystem::path& filepath )
     {
-        return filepath.stem().string();
+        return GetFileNameWithoutExtension_PATH( filepath ).string();
+    }
+
+    const std::filesystem::path
+    FileSystem::GetFileNameWithoutExtension_PATH( const std::filesystem::path& filepath )
+    {
+        return filepath.stem();
     }
 
     const std::string FileSystem::GetFileExtension( const std::filesystem::path& filepath )

@@ -61,6 +61,11 @@ namespace Desert
             return m_IndexBuffer;
         }
 
+        [[nodiscard]] const auto& GetFilepath() const
+        {
+            return m_Filename;
+        }
+
     private:
         std::shared_ptr<Graphic::VertexBuffer> m_VertexBuffer;
         std::shared_ptr<Graphic::IndexBuffer>  m_IndexBuffer;

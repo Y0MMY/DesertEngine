@@ -12,66 +12,38 @@ namespace Desert::Assets
         struct TextureSlot
         {
             std::unique_ptr<TextureAsset> Texture;
-            glm::vec4                     DefaultColor;
+            glm::vec4                     DefaultColor = glm::vec4( 1.0f );
+            bool                          IsValid() const
+            {
+                return Texture != nullptr;
+            }
         };
-        MaterialAsset( const AssetPriority priority, const Common::Filepath& filepath );
 
-        virtual Common::BoolResult Load() override;
-        virtual Common::BoolResult Unload() override;
+        MaterialAsset( AssetPriority priority, const Common::Filepath& filepath );
 
-        virtual bool IsReadyForUse() const
+        Common::BoolResult Load() override;
+        Common::BoolResult Unload() override;
+
+        bool IsReadyForUse() const
         {
             return m_ReadyForUse;
         }
 
-        bool HasTexture( TextureAsset::Type type ) const
-        {
-            return m_TextureLookup.find( type ) != m_TextureLookup.end();
-        }
+        std::optional<std::reference_wrapper<const TextureSlot>> GetTextureSlot( TextureAsset::Type type ) const;
+        std::shared_ptr<Graphic::Texture2D>                      GetTexture( TextureAsset::Type type ) const;
 
-        static AssetTypeID GetTypeID()
+        bool AddTexture( const Common::Filepath& filepath, TextureAsset::Type type,
+                         const glm::vec4& defaultColor = glm::vec4( 1.0f ) );
+
+        static AssetManager::KeyHandle GetAssetKey( const Common::Filepath& filepath );
+        static AssetTypeID             GetTypeID()
         {
             return AssetTypeID::Material;
         }
 
-        const TextureSlot* GetTextureSlot( TextureAsset::Type type ) const
-        {
-            auto it = m_TextureLookup.find( type );
-            if ( it != m_TextureLookup.end() )
-                return it->second->get();
-            return nullptr;
-        }
-
-        const std::shared_ptr<Graphic::Texture2D>& GetTexture( TextureAsset::Type type ) const
-        {
-            auto it = m_TextureLookup.find( type );
-            if ( it != m_TextureLookup.end() && ( *it->second )->Texture &&
-                 ( *it->second )->Texture->IsReadyForUse() )
-            {
-                return ( *it->second )->Texture->GetTexture();
-            }
-            return nullptr;
-        }
-
-        const auto& GetTextureLookup() const
-        {
-            return m_TextureLookup;
-        }
-
-        static AssetManager::KeyHandle GetAssetKey( const Common::Filepath& filepath );
-
-        const auto& GetMaterialAssetPath() const
-        {
-            return m_MaterialAssetPath;
-        }
-
     private:
-        const Common::Filepath m_MaterialAssetPath;
+        bool                   m_ReadyForUse = false;
 
-        bool                                      m_ReadyForUse = false;
-        std::vector<std::unique_ptr<TextureSlot>> m_TextureSlots;
-        std::unordered_map<TextureAsset::Type, typename std::vector<std::unique_ptr<TextureSlot>>::iterator>
-             m_TextureLookup;
+        std::array<std::unique_ptr<TextureSlot>, static_cast<size_t>( 6U )> m_TextureSlots;
     };
-
 } // namespace Desert::Assets

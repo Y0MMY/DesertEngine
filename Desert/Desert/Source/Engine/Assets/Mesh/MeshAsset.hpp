@@ -11,7 +11,7 @@ namespace Desert::Assets
     class MeshAsset final : public AssetBase, public AssetsEventSystem
     {
     public:
-        using AssetBase::AssetBase;
+        explicit MeshAsset( const AssetPriority priority, const Common::Filepath& filepath );
 
         virtual Common::BoolResult Load() override;
         virtual Common::BoolResult Unload() override;

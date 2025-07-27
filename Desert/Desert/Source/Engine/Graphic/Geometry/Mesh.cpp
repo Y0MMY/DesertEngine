@@ -62,7 +62,7 @@ namespace Desert
 
     Common::BoolResult Mesh::Invalidate()
     {
-        const Common::Filepath path = Common::Constants::Path::MESH_PATH / m_Filename;
+        const Common::Filepath path = m_Filename;
 
         std::unique_ptr<Assimp::Importer> importer = std::make_unique<Assimp::Importer>();
 
@@ -72,6 +72,7 @@ namespace Desert
                                                              aiProcess_ValidateDataStructure );
         if ( scene == nullptr )
         {
+            LOG_ERROR( "An error occurred during mesh extraction: {}", std::string( importer->GetErrorString() ) );
             return Common::MakeError( std::string( importer->GetErrorString() ) );
         }
 

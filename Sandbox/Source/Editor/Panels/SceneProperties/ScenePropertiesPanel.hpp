@@ -10,11 +10,12 @@ namespace Desert::Editor
     class ScenePropertiesPanel final : public IPanel
     {
     public:
-        explicit ScenePropertiesPanel(
-             const std::shared_ptr<Desert::Core::Scene>&             scene,
-             const std::shared_ptr<Runtime::RuntimeResourceManager>& runtimeResourceManager )
-             : IPanel( "Scene Properties" ), m_Scene( scene ), m_RuntimeResourceManager( runtimeResourceManager ),
-               m_MaterialsPanel( std::make_shared<MaterialsPanel>( m_RuntimeResourceManager ) )
+        explicit ScenePropertiesPanel( const std::shared_ptr<Desert::Core::Scene>&       scene,
+                                       const std::shared_ptr<Assets::AssetCatalog>&      assetCatalog,
+                                       const std::shared_ptr<Runtime::ResourceResolver>& resolver )
+             : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetCatalog( assetCatalog ),
+               m_RuntimeResourceResolver( resolver ),
+               m_MaterialsPanel( std::make_shared<MaterialsPanel>( resolver ) )
         {
         }
         void OnUIRender() override;
@@ -23,8 +24,9 @@ namespace Desert::Editor
         void DrawMaterialEntity( const ECS::Entity& entity );
 
     private:
-        std::shared_ptr<Desert::Core::Scene>                   m_Scene;
-        const std::shared_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;
-        const std::shared_ptr<MaterialsPanel>                  m_MaterialsPanel;
+        std::shared_ptr<Desert::Core::Scene>           m_Scene;
+        const std::shared_ptr<Assets::AssetCatalog>    m_AssetCatalog;
+        const std::weak_ptr<Runtime::ResourceResolver> m_RuntimeResourceResolver;
+        const std::shared_ptr<MaterialsPanel>          m_MaterialsPanel;
     };
 } // namespace Desert::Editor

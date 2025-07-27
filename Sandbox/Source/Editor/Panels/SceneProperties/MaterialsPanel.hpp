@@ -11,8 +11,8 @@ namespace Desert::Editor
     class MaterialsPanel
     {
     public:
-        MaterialsPanel( const std::shared_ptr<Runtime::RuntimeResourceManager>& resourceManager )
-             : m_ResourceManager( resourceManager ), m_UIHelper( std::make_unique<Editor::UI::UIHelper>() )
+        MaterialsPanel( const std::weak_ptr<Runtime::ResourceResolver>& resourceResolver )
+             : m_ResourceResolver( resourceResolver ), m_UIHelper( std::make_unique<Editor::UI::UIHelper>() )
         {
             m_UIHelper->Init();
         }
@@ -27,8 +27,8 @@ namespace Desert::Editor
         void DrawMaterialProperties( const std::shared_ptr<Graphic::MaterialPBR>& material );
 
     private:
-        const std::shared_ptr<Runtime::RuntimeResourceManager> m_ResourceManager;
-        std::unique_ptr<Editor::UI::UIHelper>                  m_UIHelper;
+        const std::weak_ptr<Runtime::ResourceResolver> m_ResourceResolver;
+        std::unique_ptr<Editor::UI::UIHelper>          m_UIHelper;
     };
 
 } // namespace Desert::Editor

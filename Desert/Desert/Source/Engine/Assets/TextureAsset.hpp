@@ -10,6 +10,7 @@ namespace Desert::Assets
     class TextureAsset : public AssetBase
     {
     public:
+        // TODO: Move TextureAsset::Type to models
         enum class Type
         {
             Albedo,

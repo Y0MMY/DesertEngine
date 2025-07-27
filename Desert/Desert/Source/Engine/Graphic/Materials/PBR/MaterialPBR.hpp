@@ -88,14 +88,10 @@ namespace Desert::Graphic
         }
 
         // Texture operations
-        void SetTexture( Assets::TextureAsset::Type type, std::shared_ptr<Assets::TextureAsset> texture );
+        void SetNewTexture( Assets::TextureAsset::Type type, const Common::Filepath& path );
         void RemoveTexture( Assets::TextureAsset::Type type );
         bool HasTexture( Assets::TextureAsset::Type type ) const;
         std::shared_ptr<Assets::TextureAsset> GetTexture( Assets::TextureAsset::Type type ) const;
-        bool                                  HasAnyTexture() const
-        {
-            return !m_Textures.empty();
-        }
 
         // Combined texture access (checks both instance and base material)
         std::shared_ptr<Graphic::Texture2D> GetFinalTexture( Assets::TextureAsset::Type type ) const;
@@ -114,8 +110,6 @@ namespace Desert::Graphic
         // weak_ptr because AssetManager owns MaterialAsset
         // MaterialPBR only observes the base material
         std::weak_ptr<Assets::MaterialAsset> m_BaseMaterial;
-        std::unordered_map<Assets::TextureAsset::Type, std::shared_ptr<Assets::TextureAsset>>
-             m_Textures; // TODO: Move TextureAsset::Type to models
 
         std::shared_ptr<MaterialExecutor> m_Material;
 

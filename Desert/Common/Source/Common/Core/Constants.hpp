@@ -22,6 +22,7 @@ namespace Common::Constants // TODO: should be merge from config
         const std::string SPIRV_BINARY_EXTENSION_FRAG = ".spvbin_frag";
         const std::string SPIRV_BINARY_EXTENSION_COMP = ".spvbin_comp";
         const std::string SCENE_EXTENSION             = ".desce";
+        const std::string MESH_SERIALIZBLE_EXTENSION  = ".demesh";
         const std::string MATERIAL_EXTENSION          = ".demat";
     } // namespace Extensions
 } // namespace Common::Constants

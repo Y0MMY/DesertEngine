@@ -34,7 +34,7 @@ namespace Desert::Graphic
         {
             if ( auto albedoSlot = baseMaterial->GetTextureSlot( Assets::TextureAsset::Type::Albedo ) )
             {
-                m_AlbedoColor = albedoSlot->DefaultColor;
+                m_AlbedoColor = albedoSlot->get().DefaultColor;
             }
         }
 
@@ -96,39 +96,44 @@ namespace Desert::Graphic
     }
 
     // Texture operations
-    void MaterialPBR::SetTexture( Assets::TextureAsset::Type type, std::shared_ptr<Assets::TextureAsset> texture )
+    void MaterialPBR::SetNewTexture( Assets::TextureAsset::Type type, const Common::Filepath& path )
     {
-        m_Textures[type] = std::move( texture );
+        const auto& baseMaterial = m_BaseMaterial.lock();
+        if ( !baseMaterial )
+            return;
+
+        const bool resultNewTexture = baseMaterial->AddTexture( path, type );
+        if ( !resultNewTexture )
+        {
+            return;
+        }
+
         MarkDirty();
     }
 
     void MaterialPBR::RemoveTexture( Assets::TextureAsset::Type type )
     {
-        if ( m_Textures.erase( type ) > 0 )
-        {
-            MarkDirty();
-        }
+        /* if ( m_Textures.erase( type ) > 0 )
+         {
+             MarkDirty();
+         }*/
     }
 
     bool MaterialPBR::HasTexture( Assets::TextureAsset::Type type ) const
     {
-        return m_Textures.find( type ) != m_Textures.end();
+        return false; // m_Textures.find(type) != m_Textures.end();
     }
 
     std::shared_ptr<Assets::TextureAsset> MaterialPBR::GetTexture( Assets::TextureAsset::Type type ) const
     {
-        auto it = m_Textures.find( type );
-        return it != m_Textures.end() ? it->second : nullptr;
+        /* auto it = m_Textures.find( type );
+         return it != m_Textures.end() ? it->second : nullptr;*/
+
+        return nullptr;
     }
 
     std::shared_ptr<Graphic::Texture2D> MaterialPBR::GetFinalTexture( Assets::TextureAsset::Type type ) const
     {
-        // First check instance textures
-        if ( auto it = m_Textures.find( type ); it != m_Textures.end() && it->second->IsReadyForUse() )
-        {
-            return it->second->GetTexture();
-        }
-
         const auto& baseMaterial = m_BaseMaterial.lock();
         // Then check base material
         if ( baseMaterial )
@@ -193,7 +198,7 @@ namespace Desert::Graphic
             };
 
             updateTexture( Assets::TextureAsset::Type::Albedo, "u_AlbedoTexture" );
-            updateTexture( Assets::TextureAsset::Type::Normal, "normalMap" );
+            updateTexture( Assets::TextureAsset::Type::Normal, "u_NormalTexture" );
             updateTexture( Assets::TextureAsset::Type::Metallic, "metallicMap" );
             updateTexture( Assets::TextureAsset::Type::Roughness, "roughnessMap" );
             updateTexture( Assets::TextureAsset::Type::AO, "aoMap" );

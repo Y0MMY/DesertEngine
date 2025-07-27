@@ -10,72 +10,66 @@
 
 namespace Desert::Assets
 {
-
-    static Common::Filepath GetMaterialFilename( const Common::Filepath& filepath )
+    namespace
     {
-        const auto materialPath = Common::Constants::Path::MATERIAL_PATH.string() +
-                                  Common::Utils::FileSystem::GetFileNameWithoutExtension( filepath );
+        constexpr std::array<aiTextureType, static_cast<size_t>( 6U )> kTextureTypeMapping = {
+             aiTextureType_DIFFUSE,           // Albedo
+             aiTextureType_NORMALS,           // Normal
+             aiTextureType_METALNESS,         // Metallic
+             aiTextureType_DIFFUSE_ROUGHNESS, // Roughness
+             aiTextureType_AMBIENT_OCCLUSION, // AO
+             aiTextureType_EMISSIVE           // Emissive
+        };
 
-        return materialPath + Common::Constants::Extensions::MATERIAL_EXTENSION;
-    }
+        constexpr std::array<glm::vec4, static_cast<size_t>( 6U )> kDefaultColors = {
+             glm::vec4( 1.0f ),                   // Albedo (white)
+             glm::vec4( 0.5f, 0.5f, 1.0f, 1.0f ), // Normal (blue)
+             glm::vec4( 0.0f ),                   // Metallic (black)
+             glm::vec4( 1.0f ),                   // Roughness (white)
+             glm::vec4( 1.0f ),                   // AO (white)
+             glm::vec4( 0.0f )                    // Emissive (black)
+        };
+    } // namespace
 
-    MaterialAsset::MaterialAsset( const AssetPriority priority, const Common::Filepath& filepath )
-         : AssetBase( priority, filepath ), m_MaterialAssetPath( GetMaterialFilename( filepath ) )
+    MaterialAsset::MaterialAsset( AssetPriority priority, const Common::Filepath& filepath )
+         : AssetBase( priority, filepath, AssetTypeID::Material )
     {
     }
 
     Common::BoolResult MaterialAsset::Load()
     {
-        const std::string modelPath = m_Filepath.string();
-        const std::string directory = Common::Utils::FileSystem::GetFileDirectoryString( m_Filepath );
+        static constexpr uint32_t s_MeshImportFlags =
+             aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_SortByPType | aiProcess_GenNormals |
+             aiProcess_GenUVCoords | aiProcess_OptimizeMeshes | aiProcess_ValidateDataStructure;
 
         Assimp::Importer importer;
-        const aiScene*   scene = importer.ReadFile( modelPath, 0 );
+        const aiScene*   scene = importer.ReadFile( m_Metadata.Filepath.string(), s_MeshImportFlags );
 
         if ( !scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode ||
              scene->mNumMaterials == 0 )
         {
-            LOG_ERROR( "Failed to load model: {}", std::string( importer.GetErrorString() ) );
             return Common::MakeError( "Failed to load model: " + std::string( importer.GetErrorString() ) );
         }
 
         aiMaterial* material = scene->mMaterials[0];
 
-        auto loadTexture = [&]( aiTextureType type, TextureAsset::Type textureType,
-                                const glm::vec4& defaultColor ) -> bool
+        for ( size_t i = 0; i < kTextureTypeMapping.size(); ++i )
         {
-            if ( material->GetTextureCount( type ) > 0 )
+            const auto type = static_cast<TextureAsset::Type>( i );
+            if ( material->GetTextureCount( kTextureTypeMapping[i] ) > 0 )
             {
                 aiString texturePath;
-                if ( material->GetTexture( type, 0, &texturePath ) == AI_SUCCESS )
+                if ( material->GetTexture( kTextureTypeMapping[i], 0, &texturePath ) == AI_SUCCESS )
                 {
-                    const Common::Filepath fullPath = directory + texturePath.C_Str();
-
-                    auto textureSlot = std::make_unique<TextureSlot>();
-                    textureSlot->Texture =
-                         std::make_unique<TextureAsset>( AssetPriority::Low, fullPath, textureType );
-                    textureSlot->DefaultColor = defaultColor;
-
-                    if ( textureSlot->Texture->Load() )
-                    {
-                        m_TextureSlots.push_back( std::move( textureSlot ) );
-                        m_TextureLookup[textureType] = std::prev( m_TextureSlots.end() );
-                        return true;
-                    }
+                    Common::Filepath fullPath =
+                         Common::Utils::FileSystem::GetFileNameWithoutExtension_PATH( m_Metadata.Filepath ) /
+                         texturePath.C_Str();
+                    AddTexture( fullPath, type, kDefaultColors[i] );
                 }
             }
-            return false;
-        };
-
-        loadTexture( aiTextureType_DIFFUSE, TextureAsset::Type::Albedo, glm::vec4( 1.0f ) );
-        loadTexture( aiTextureType_NORMALS, TextureAsset::Type::Normal, glm::vec4( 0.5f, 0.5f, 1.0f, 1.0f ) );
-        loadTexture( aiTextureType_METALNESS, TextureAsset::Type::Metallic, glm::vec4( 0.0f ) );
-        loadTexture( aiTextureType_DIFFUSE_ROUGHNESS, TextureAsset::Type::Roughness, glm::vec4( 1.0f ) );
-        loadTexture( aiTextureType_AMBIENT_OCCLUSION, TextureAsset::Type::AO, glm::vec4( 1.0f ) );
-        loadTexture( aiTextureType_EMISSIVE, TextureAsset::Type::Emissive, glm::vec4( 0.0f ) );
+        }
 
         m_ReadyForUse = true;
-
         return BOOLSUCCESS;
     }
 
@@ -84,9 +78,47 @@ namespace Desert::Assets
         return BOOLSUCCESS;
     }
 
-    AssetManager::KeyHandle MaterialAsset::GetAssetKey( const Common::Filepath& filepath )
+    std::optional<std::reference_wrapper<const MaterialAsset::TextureSlot>>
+    MaterialAsset::GetTextureSlot( TextureAsset::Type type ) const
     {
-        return GetMaterialFilename( filepath );
+        const auto& slot = m_TextureSlots[static_cast<size_t>( type )];
+        if ( slot )
+            return std::cref( *slot );
+        return std::nullopt;
     }
 
+    std::shared_ptr<Graphic::Texture2D> MaterialAsset::GetTexture( TextureAsset::Type type ) const
+    {
+        if ( auto slot = GetTextureSlot( type ) )
+        {
+            if ( slot->get().Texture && slot->get().Texture->IsReadyForUse() )
+            {
+                return slot->get().Texture->GetTexture();
+            }
+        }
+        return nullptr;
+    }
+
+    bool MaterialAsset::AddTexture( const Common::Filepath& filepath, TextureAsset::Type type,
+                                    const glm::vec4& defaultColor )
+    {
+        if ( m_TextureSlots[static_cast<size_t>( type )] )
+        {
+            LOG_WARN( "Texture slot for type {} is already occupied", static_cast<int>( type ) );
+            return false;
+        }
+
+        auto textureSlot          = std::make_unique<TextureSlot>();
+        textureSlot->Texture      = std::make_unique<TextureAsset>( AssetPriority::Low, filepath, type );
+        textureSlot->DefaultColor = defaultColor;
+
+        if ( !textureSlot->Texture->Load() )
+        {
+            LOG_WARN( "Failed to load texture: {}", filepath.string() );
+            return false;
+        }
+
+        m_TextureSlots[static_cast<size_t>( type )] = std::move( textureSlot );
+        return true;
+    }
 } // namespace Desert::Assets

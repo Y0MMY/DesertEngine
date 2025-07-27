@@ -35,37 +35,22 @@ namespace Desert::Editor
     // =========================================================================
     void MaterialsPanel::DrawMaterialEntity( const ECS::Entity& entity )
     {
-        // Only proceed if entity has a mesh component
-        if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
-            return;
-
-        // Get mesh components and validate
-        auto& meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
-        auto* meshInstance =
-             m_ResourceManager->GetGeometryResources()->GetMeshCache().Get( meshComponent.MeshHandle );
-        if ( !meshInstance || !meshInstance->IsReady() )
-            return;
-
-        // Get mesh asset
-        auto meshAsset = meshInstance->GetMeshAsset();
-        if ( !meshAsset )
-            return;
-
-        // Validate material handle
-        auto materialHandle = meshComponent.MaterialHandle;
-        if ( !materialHandle.IsValid() )
-            return;
-
-        // Get material instance
-        auto material = m_ResourceManager->GetGeometryResources()->GetMaterialCache().Get( materialHandle );
-        if ( !material )
-            return;
-
-        // Draw collapsible material panel
-        if ( ImGui::CollapsingHeader( "Material", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( const auto& resolver = m_ResourceResolver.lock() )
         {
-            ImGui::Dummy( ImVec2( 0, 4 ) );
-            DrawMaterialEditor( material );
+            // Only proceed if entity has a mesh component
+            if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+                return;
+
+            // Get mesh components and validate
+            auto&       meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
+            const auto& material      = resolver->ResolveMaterial( meshComponent.MaterialHandle );
+
+            // Draw collapsible material panel
+            if ( ImGui::CollapsingHeader( "Material", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                ImGui::Dummy( ImVec2( 0, 4 ) );
+                DrawMaterialEditor( material );
+            }
         }
     }
 
@@ -163,7 +148,7 @@ namespace Desert::Editor
                      "(*.*)\0*.*\0" );
                 if ( !path.empty() )
                 {
-                    // TODO: Load and assign texture
+                    material->SetNewTexture( type, path );
                 }
             }
 

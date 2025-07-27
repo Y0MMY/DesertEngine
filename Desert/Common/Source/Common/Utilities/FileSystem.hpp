@@ -27,6 +27,8 @@ namespace Common::Utils
         [[nodiscard]] static const std::string GetFileName( const std::string& filepath );
         [[nodiscard]] static const std::string
         GetFileNameWithoutExtension( const std::filesystem::path& filepath );
+        [[nodiscard]] static const std::filesystem::path
+        GetFileNameWithoutExtension_PATH( const std::filesystem::path& filepath );
 
     public:
         [[nodiscard]] static const std::string ReadFileContent( const std::filesystem::path& filepath );

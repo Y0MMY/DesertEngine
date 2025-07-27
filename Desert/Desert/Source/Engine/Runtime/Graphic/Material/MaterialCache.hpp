@@ -14,7 +14,6 @@ namespace Desert::Runtime
         explicit MaterialCache( const std::weak_ptr<Assets::AssetManager>& assetManager );
 
         ResourceHandle Create( Assets::AssetHandle materialHandle );
-        ResourceHandle Create( const Common::Filepath& path );
         void           Destroy( ResourceHandle handle );
 
         std::shared_ptr<Graphic::MaterialPBR>       Get( ResourceHandle handle );

@@ -10,7 +10,7 @@
 #include <Engine/Graphic/Geometry/Mesh.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
-#include <Engine/Runtime/Handle.hpp>
+#include <Engine/Assets/Common.hpp>
 
 namespace Desert::ECS
 {
@@ -26,8 +26,8 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Runtime::ResourceHandle MeshHandle;
-        Runtime::ResourceHandle MaterialHandle;
+        Assets::AssetHandle MeshHandle;
+        Assets::AssetHandle MaterialHandle;
     };
 
     struct TransformComponent
@@ -49,6 +49,6 @@ namespace Desert::ECS
 
     struct SkyboxComponent
     {
-        Runtime::ResourceHandle SkyboxHandle;
+        Assets::AssetHandle SkyboxHandle;
     };
 } // namespace Desert::ECS

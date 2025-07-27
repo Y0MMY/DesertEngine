@@ -36,10 +36,6 @@
 #include <Engine/Graphic/Geometry/Mesh.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
 
-// =================== Runtime =================== //
-
-#include <Engine/Runtime/RuntimeResourceManager.hpp>
-
 // =================== ECS =================== //
 
 #include <Engine/ECS/Entity.hpp>
@@ -48,3 +44,5 @@
 // =================== Assets =================== //
 
 #include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/AssetPreloader.hpp>
+#include <Engine/Assets/AssetCatalog.hpp>

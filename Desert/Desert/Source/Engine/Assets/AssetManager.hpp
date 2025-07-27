@@ -9,20 +9,26 @@ namespace Desert::Assets
     {
     public:
         using KeyHandle      = Common::Filepath;
-        using AssetContainer = std::vector<std::pair<KeyHandle, Asset<AssetBase>>>;
-        using AssetIterator  = uint32_t;
+        using AssetContainer = std::vector<std::pair<AssetMetadata, Asset<AssetBase>>>;
+        using AssetIndex     = uint32_t;
 
         template <typename AssetType, typename... Args>
         Asset<AssetType> CreateAsset( const AssetPriority priority, const Common::Filepath& filepath,
-                                      bool loadAfterCreate = true, Args&&... args)
+                                      bool loadAfterCreate = true, Args&&... args )
         {
             static_assert( std::is_base_of_v<AssetBase, AssetType>, "AssetType must inherit from AssetBase" );
 
-            const auto& key = AssetType::GetAssetKey( filepath );
+            AssetMetadata lookUpMetadata;
+            lookUpMetadata.Filepath  = filepath;
+            lookUpMetadata.AssetType = AssetType::GetTypeID();
 
-            if ( auto it = m_AssetLookup.find( key ); it != m_AssetLookup.end() )
+            auto it = std::find_if( m_AssetsCache.begin(), m_AssetsCache.end(),
+                                    [&lookUpMetadata]( const auto& assetCache )
+                                    { return assetCache.first.IsEquivalent( lookUpMetadata ); } );
+
+            if ( it != m_AssetsCache.end() )
             {
-                return sp_cast<AssetType>( m_AssetsCache[it->second].second );
+                return sp_cast<AssetType>( it->second );
             }
 
             // NOTE:Perhaps the creation of an asset via the Create() method should be defined for each type
@@ -33,16 +39,10 @@ namespace Desert::Assets
                 asset->Load();
             }
 
-            m_AssetsCache.push_back( { key, asset } );
-            m_AssetLookup[key]                 = m_AssetsCache.size() - 1;
-            m_HandleLookup[asset->GetHandle()] = asset;
+            const auto& metadata = asset->GetMetadata();
+            m_AssetsCache.push_back( { metadata, asset } );
+            m_HandleLookup[metadata.Handle] = m_AssetsCache.size() - 1;
             return asset;
-        }
-
-        Asset<AssetBase> FindByFilepath( const KeyHandle& handle, AssetTypeID typeID )
-        {
-            auto it = m_AssetLookup.find( handle );
-            return ( it != m_AssetLookup.end() ) ? m_AssetsCache[it->second].second : nullptr;
         }
 
         template <typename TypeAsset>
@@ -50,14 +50,33 @@ namespace Desert::Assets
         {
             if ( auto it = m_HandleLookup.find( handle ); it != m_HandleLookup.end() )
             {
-                return sp_cast<TypeAsset>( it->second );
+                return sp_cast<TypeAsset>( m_AssetsCache[it->second].second );
             }
             return nullptr;
         }
 
+        template <typename TypeAsset>
+        std::vector<std::pair<AssetHandle, Asset<TypeAsset>>> FindAllByType() const
+        {
+            std::vector<std::pair<AssetHandle, Asset<TypeAsset>>> result;
+            const auto                                            typeId = TypeAsset::GetTypeID();
+
+            for ( const auto& [metadata, asset] : m_AssetsCache )
+            {
+                if ( metadata.AssetType == typeId )
+                {
+                    if ( auto casted = sp_cast<TypeAsset>( asset ) )
+                    {
+                        result.emplace_back( metadata.Handle, casted );
+                    }
+                }
+            }
+
+            return result;
+        }
+
     private:
-        AssetContainer                                    m_AssetsCache;
-        std::unordered_map<KeyHandle, AssetIterator>      m_AssetLookup;
-        std::unordered_map<AssetHandle, Asset<AssetBase>> m_HandleLookup;
+        AssetContainer                              m_AssetsCache;
+        std::unordered_map<AssetHandle, AssetIndex> m_HandleLookup;
     };
 } // namespace Desert::Assets

@@ -57,8 +57,9 @@ namespace Desert
 
         ViewportData m_ViewportData;
 
-        std::shared_ptr<Assets::AssetManager>            m_AssetManager;
-        std::shared_ptr<Runtime::RuntimeResourceManager> m_RuntimeResourceManager;
+        std::shared_ptr<Assets::AssetManager>   m_AssetManager;
+        std::unique_ptr<Assets::AssetPreloader> m_AssetPreloader;
+        std::shared_ptr<Assets::AssetCatalog>   m_AssetCatalog;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;

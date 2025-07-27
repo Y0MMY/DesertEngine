@@ -21,10 +21,10 @@ namespace Desert::ImGui
 
             const auto vulkanImageInfo =
                  sp_cast<Graphic::API::Vulkan::VulkanImage2D>( image )->GetVulkanImageInfo();
-            if ( !vulkanImageInfo.ImageInfo.imageView)
+            if ( !vulkanImageInfo.ImageInfo.imageView )
                 return nullptr;
 
-            auto it = g_TextureCache.find( vulkanImageInfo.ImageInfo.imageView);
+            auto it = g_TextureCache.find( vulkanImageInfo.ImageInfo.imageView );
             if ( it != g_TextureCache.end() )
             {
                 return it->second;

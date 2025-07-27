@@ -2,9 +2,14 @@
 
 namespace Desert::Assets
 {
+    MeshAsset::MeshAsset( const AssetPriority priority, const Common::Filepath& filepath )
+         : AssetBase( priority, filepath, AssetTypeID::Mesh )
+    {
+    }
+
     Common::BoolResult MeshAsset::Load()
     {
-        m_Mesh = std::make_shared<Mesh>( m_Filepath.string() );
+        m_Mesh = std::make_shared<Mesh>( m_Metadata.Filepath.string() );
         m_Mesh->Invalidate();
 
         m_ReadyForUse = true;
@@ -18,5 +23,4 @@ namespace Desert::Assets
 
         return BOOLSUCCESS;
     }
-
 } // namespace Desert::Assets

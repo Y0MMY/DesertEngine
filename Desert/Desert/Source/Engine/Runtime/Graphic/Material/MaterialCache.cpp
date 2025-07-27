@@ -39,41 +39,6 @@ namespace Desert::Runtime
         return { ResourceHandle::InvalidIndex };
     }
 
-    ResourceHandle MaterialCache::Create( const Common::Filepath& path )
-    {
-        uint32_t index;
-
-        if ( !m_FreeList.empty() )
-        {
-            index = m_FreeList.front();
-            m_FreeList.pop();
-        }
-        else
-        {
-            index = static_cast<uint32_t>( m_Entries.size() );
-            m_Entries.push_back( {} );
-        }
-
-        if ( const auto& assetManager = m_AssetManager.lock() )
-        {
-            auto materialAsset =
-                 assetManager->CreateAsset<Assets::MaterialAsset>( Assets::AssetPriority::Low, path );
-            if ( !materialAsset )
-            {
-                return { ResourceHandle::InvalidIndex };
-            }
-
-            m_Entries[index].Instance = Graphic::MaterialFactory::CreatePBR( materialAsset );
-            m_Entries[index].IsAlive  = true;
-
-            ResourceHandle handle{ index };
-            m_DirtyMaterials.push_back( handle );
-
-            return handle;
-        }
-        return { ResourceHandle::InvalidIndex };
-    }
-
     void MaterialCache::Destroy( ResourceHandle handle )
     {
     }

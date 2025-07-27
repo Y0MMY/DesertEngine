@@ -4,30 +4,11 @@
 #include <Common/Core/Core.hpp>
 #include <Common/Core/UUID.hpp>
 
+#include "Common.hpp"
+#include "AssetMetadata.hpp"
+
 namespace Desert::Assets
 {
-    using AssetHandle = Common::UUID;
-
-    template <typename T>
-    using Asset = std::shared_ptr<T>;
-
-    using NullAsset = nullptr_t;
-
-    enum class AssetPriority
-    {
-        Low    = 0,
-        Medium = 1,
-        High   = 2,
-    };
-
-    enum class AssetTypeID
-    {
-        Unknown = 0,
-        Mesh,
-        Material,
-        Texture2D,
-    };
-
     class MeshAsset;
 
     class AssetBase
@@ -35,19 +16,9 @@ namespace Desert::Assets
     public:
         virtual ~AssetBase() = default;
 
-        virtual const AssetPriority GetPriority() const final
+        virtual const AssetMetadata& GetMetadata() const final
         {
-            return m_Priority;
-        }
-
-        virtual const AssetHandle GetHandle() const final
-        {
-            return m_Handle;
-        }
-
-        virtual const Common::Filepath& GetBaseFilepath() const final
-        {
-            return m_Filepath;
+            return m_Metadata;
         }
 
         virtual Common::BoolResult Load()   = 0;
@@ -55,25 +26,12 @@ namespace Desert::Assets
 
         virtual bool IsReadyForUse() const = 0;
 
-        explicit AssetBase( const AssetPriority priority, const Common::Filepath& filepath )
-             : m_Handle( Common::UUID() ), m_Priority( priority ), m_Filepath( filepath )
+        explicit AssetBase( const AssetPriority priority, const Common::Filepath& filepath, AssetTypeID assetType )
+             : m_Metadata{ Common::UUID(), filepath, priority, assetType }
         {
         }
-
-        inline static Common::Filepath GetAssetKey( const Common::Filepath& filepath )
-        {
-            return filepath;
-        }
-
-       /* static Asset<AssetBase> Create( const AssetPriority priority, const Common::Filepath& filepath )
-        {
-            return std::make_shared<AssetBase>( priority, filepath );
-        }*/
-
     protected:
-        AssetHandle      m_Handle;
-        AssetPriority    m_Priority;
-        Common::Filepath m_Filepath;
+        AssetMetadata m_Metadata;
     };
 
 } // namespace Desert::Assets

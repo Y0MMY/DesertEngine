@@ -36,7 +36,7 @@ namespace Desert::Core
     {
     public:
         Scene() = default;
-        Scene( std::string&& sceneName, const std::shared_ptr<Runtime::RuntimeResourceManager>& resourceManager );
+        Scene( std::string&& sceneName, const std::shared_ptr<Assets::AssetManager>& assetManager );
 
         [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
         void                             OnUpdate( const Common::Timestep& ts );
@@ -73,6 +73,11 @@ namespace Desert::Core
 
         [[nodiscard]] std::optional<std::reference_wrapper<const ECS::Entity>>
         FindEntityByID( const Common::UUID& uuid ) const;
+
+        const auto& GetResourceResolver() const
+        {
+            return m_ResourceResolver;
+        }
 
         void Serialize() const;
 

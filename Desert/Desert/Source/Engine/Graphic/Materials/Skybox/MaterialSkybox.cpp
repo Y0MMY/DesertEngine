@@ -13,7 +13,7 @@ namespace Desert::Graphic
         m_CameraModel = std::make_unique<Models::CameraData>( m_Material );
         m_SkyboxModel = std::make_unique<Models::SkyboxData>( m_Material );
 
-        m_Environment = Graphic::EnvironmentManager::Create( baseAsset->GetBaseFilepath() );
+        m_Environment = Graphic::EnvironmentManager::Create( baseAsset->GetMetadata().Filepath );
     }
 
     void MaterialSkybox::UpdateRenderParameters( const Core::Camera& camera )

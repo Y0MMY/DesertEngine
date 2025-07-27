@@ -18,14 +18,13 @@ namespace Desert
          : Common::Layer( layerName ), m_Window( window )
 
     {
-        m_AssetManager           = std::make_shared<Assets::AssetManager>();
-        m_RuntimeResourceManager = std::make_shared<Runtime::RuntimeResourceManager>( m_AssetManager );
-        m_MainScene              = std::make_shared<Core::Scene>( "New Scene", m_RuntimeResourceManager );
+        m_AssetManager   = std::make_shared<Assets::AssetManager>();
+        m_AssetPreloader = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
+        m_MainScene      = std::make_shared<Core::Scene>( "New Scene", m_AssetManager );
     }
 
     EditorLayer::~EditorLayer()
     {
-        m_RuntimeResourceManager->Shutdown();
         m_MainScene->Shutdown();
     }
 
@@ -59,9 +58,13 @@ namespace Desert
         m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
         m_UIHelper->Init();
 
+        m_AssetPreloader->PreloadAllAssets();
+        m_AssetCatalog = std::make_shared<Assets::AssetCatalog>();
+        m_AssetCatalog->RegisterBundles( m_AssetPreloader->GetMeshAssetBundles() );
+
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
-        m_Panels.emplace_back(
-             std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_RuntimeResourceManager ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>(
+             m_MainScene, m_AssetCatalog, m_MainScene->GetResourceResolver() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
 
 #endif // EBABLE_IMGUI
@@ -228,7 +231,7 @@ namespace Desert
                     glm::vec4 perspective;
                     glm::decompose( transform, scale, rotation, translation, skew, perspective );
 
-                    glm::vec3 euler = glm::eulerAngles( rotation ) ;
+                    glm::vec3 euler = glm::eulerAngles( rotation );
 
                     transformComponent.Translation = translation;
                     transformComponent.Rotation    = euler;
@@ -265,6 +268,11 @@ namespace Desert
 
     void EditorLayer::HandleObjectPicking()
     {
+        // not over viewport
+        if ( !m_ViewportData.IsHovered )
+        {
+            return;
+        }
         auto [mouseX, mouseY] = GetMouseViewportSpace();
         const auto ray        = Common::Math::Ray::FromScreenPosition(
              { mouseX, mouseY }, m_EditorCamera.GetProjectionMatrix(), m_EditorCamera.GetViewMatrix(),
@@ -277,20 +285,21 @@ namespace Desert
 
         std::vector<std::pair<Common::UUID, std::pair<glm::mat4, std::shared_ptr<Desert::Mesh>>>> allMeshes;
 
+        const auto& resolver = m_MainScene->GetResourceResolver();
+
         for ( const auto& entity : entities )
         {
             if ( entity.HasComponent<ECS::StaticMeshComponent>() )
             {
-                const auto& resource = m_RuntimeResourceManager->GetGeometryResources()->GetMeshCache().Get(
-                     entity.GetComponent<ECS::StaticMeshComponent>().MeshHandle );
-                if ( !resource )
+                const auto& mesh =
+                     resolver->ResolveMesh( entity.GetComponent<ECS::StaticMeshComponent>().MeshHandle );
+                if ( !mesh )
                 {
                     continue;
                 }
 
-                allMeshes.push_back(
-                     { entity.GetComponent<ECS::UUIDComponent>().UUID,
-                       { entity.GetComponent<ECS::TransformComponent>().GetTransform(), resource->GetMesh() } } );
+                allMeshes.push_back( { entity.GetComponent<ECS::UUIDComponent>().UUID,
+                                       { entity.GetComponent<ECS::TransformComponent>().GetTransform(), mesh } } );
             }
         }
 
