@@ -17,14 +17,14 @@ namespace Desert::ECS
         {
             // Process static meshes
             const auto& renderer        = m_Renderer.lock();
-            const auto& resourceManager = m_ResourceManager.lock();
+            const auto& resourceManager = m_ResourceRegistry.lock();
             if ( renderer && resourceManager )
             {
                 auto meshView = registry.view<StaticMeshComponent, TransformComponent>();
                 meshView.each(
                      [&]( auto entity, const auto& mesh, const auto& transform )
                      {
-                         auto resolvedMesh = resourceManager->ResolveMesh( mesh.MeshHandle );
+                         auto resolvedMesh = resourceManager->GetMesh( mesh.MeshHandle );
                          if ( !resolvedMesh || !mesh.Material )
                          {
                              return;

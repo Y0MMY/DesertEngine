@@ -33,8 +33,8 @@ namespace Common::Utils
     public:
         [[nodiscard]] static const std::string ReadFileContent( const std::filesystem::path& filepath );
         static const void WriteContentToFile( const std::filesystem::path& filepath, const std::string& content );
-        [[nodiscard]] static const std::vector<uint32_t>
-        ReadByteFileContent( const std::filesystem::path& filepath );
+
+        [[nodiscard]] static std::vector<uint8_t> ReadByteFileContent( const std::filesystem::path& filepath );
 
     public:
         [[nodiscard]] static const std::filesystem::path GetParentPath( const std::filesystem::path& filepath );

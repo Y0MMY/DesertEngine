@@ -35,7 +35,7 @@ namespace Desert::Editor
     // =========================================================================
     void MaterialsPanel::DrawMaterialEntity( const ECS::Entity& entity )
     {
-        if ( const auto& resolver = m_ResourceResolver.lock() )
+        if ( const auto& resolver = m_ResourceRegistry.lock() )
         {
             // Only proceed if entity has a mesh component
             if ( !entity.HasComponent<ECS::StaticMeshComponent>() )

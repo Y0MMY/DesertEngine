@@ -15,7 +15,7 @@ namespace Desert::Editor
 
     void ScenePropertiesPanel::OnUIRender()
     {
-        if ( const auto& resolver = m_RuntimeResourceResolver.lock() )
+        if ( const auto& resolver = m_ResourceRegistry.lock() )
         {
             ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 10, 8 ) );
             ImGui::PushStyleVar( ImGuiStyleVar_WindowRounding, 4.0f );
@@ -78,8 +78,8 @@ namespace Desert::Editor
                     {
 
                         auto& skyboxComponent = selectedEntity.GetComponent<ECS::SkyboxComponent>();
-                        const std::shared_ptr<Graphic::MaterialSkybox> skyboxInstance =
-                             resolver->ResolveSkybox( skyboxComponent.SkyboxHandle );
+                        /* const std::shared_ptr<Graphic::MaterialSkybox> skyboxInstance =
+                              resolver->GetMesh( skyboxComponent.SkyboxHandle );*/
 
                         if ( ImGui::CollapsingHeader( "Skybox", ImGuiTreeNodeFlags_DefaultOpen ) )
                         {
@@ -113,16 +113,26 @@ namespace Desert::Editor
 
                                 ImGui::Dummy( ImVec2( 0, 6 ) );
 
-                                if ( ImGui::Button( "Load Cubemap",
-                                                    ImVec2( ImGui::GetContentRegionAvail().x, 24 ) ) )
+                                if ( ImGui::BeginCombo( "##SkyboxSelector", "Select Skybox" ) )
                                 {
-                                    auto path = Common::Utils::FileSystem::OpenFileDialog(
-                                         "Cubemap Files (*.hdr;*.exr)\0*.hdr;*.exr\0All Files (*.*)\0*.*\0" );
-                                    if ( !path.empty() )
+                                    auto skyboxAssets = m_AssetManager->FindAllByType<Assets::SkyboxAsset>();
+                                    for ( const auto& [handle, asset] : skyboxAssets )
                                     {
-
-                                        // TODO:
+                                        bool isSelected = ( handle == skyboxComponent.SkyboxHandle );
+                                        if ( ImGui::Selectable( Common::Utils::FileSystem::GetFileName(
+                                                                     asset->GetMetadata().Filepath )
+                                                                     .c_str(),
+                                                                isSelected ) )
+                                        {
+                                            skyboxComponent.SkyboxHandle = handle;
+                                            // Update skybox instance if needed
+                                        }
+                                        if ( isSelected )
+                                        {
+                                            ImGui::SetItemDefaultFocus();
+                                        }
                                     }
+                                    ImGui::EndCombo();
                                 }
                             }
                             else if ( currentType == 1 ) // Procedural
@@ -156,7 +166,7 @@ namespace Desert::Editor
                     if ( selectedEntity.HasComponent<ECS::StaticMeshComponent>() )
                     {
                         auto&      meshComponent = selectedEntity.GetComponent<ECS::StaticMeshComponent>();
-                        const auto mesh          = resolver->ResolveMesh( meshComponent.MeshHandle );
+                        const auto mesh          = resolver->GetMesh( meshComponent.MeshHandle );
 
                         if ( ImGui::CollapsingHeader( "Static Mesh", ImGuiTreeNodeFlags_DefaultOpen ) )
                         {
@@ -171,7 +181,7 @@ namespace Desert::Editor
                             std::string currentMesh = "None";
                             if ( mesh )
                             {
-                                currentMesh = mesh->GetFilepath();
+                                currentMesh = mesh->GetFilepath().string();
                             }
 
                             ImGui::TextWrapped( "%s", currentMesh.c_str() );
@@ -187,14 +197,14 @@ namespace Desert::Editor
                             {
                                 bool isSelected = ( handle == meshComponent.MeshHandle );
                                 if ( ImGui::Selectable(
-                                          Common::Utils::FileSystem::GetFileName( asset->GetMesh()->GetFilepath() )
+                                          Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath )
                                                .c_str(),
                                           isSelected ) )
                                 {
                                     meshComponent.MeshHandle = handle;
 
                                     const auto base = m_AssetManager->CreateAsset<Assets::MaterialAsset>(
-                                         Assets::AssetPriority::Low, asset->GetMesh()->GetFilepath() );
+                                         Assets::AssetPriority::Low, asset->GetMetadata().Filepath );
 
                                     meshComponent.Material.reset();
                                     meshComponent.Material = std::make_shared<Graphic::MaterialPBR>( base );

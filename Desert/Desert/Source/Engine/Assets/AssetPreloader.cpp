@@ -2,67 +2,88 @@
 
 namespace Desert::Assets
 {
-    constexpr std::array<std::string_view, 1> SUPPORTED_MESH_EXTENSIONS = { ".fbx" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_MESH_EXTENSIONS   = { ".fbx" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS = { ".hdr" };
 
-    AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
-         : m_AssetManager( assetManager )
+    AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>&              assetManager,
+                                    const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
+         : m_AssetManager( assetManager ), m_ResourceRegistry( resourceRegistry )
     {
     }
 
     void AssetPreloader::PreloadAllAssets()
     {
         PreloadMeshes();
-        // Add other asset types here as needed
+        PreloadSkyboxes();
     }
 
-    void AssetPreloader::PreloadMeshes()
+    namespace
     {
-        namespace fs = std::filesystem;
-
-        // Recursively scan MESH_PATH for supported files
-        for ( const auto& entry : fs::recursive_directory_iterator( Common::Constants::Path::MESH_PATH ) )
+        template <typename AssetType, typename... Args>
+        void ProcessAssetFiles( const std::filesystem::path& rootPath, bool useRootpath,
+                                const std::array<std::string_view, 1>& supportedExtensions,
+                                const std::weak_ptr<AssetManager>& assetManager, AssetPriority priority,
+                                Args&&... args )
         {
-            if ( entry.is_regular_file() )
+            namespace fs = std::filesystem;
+
+            for ( const auto& entry : fs::recursive_directory_iterator( rootPath ) )
             {
-                ProcessMeshFile( entry.path() );
-            }
-        }
-    }
+                if ( !entry.is_regular_file() )
+                    continue;
 
-    void AssetPreloader::ProcessMeshFile( const std::filesystem::path& filePath )
-    {
-        namespace fs = std::filesystem;
+                std::string ext = entry.path().extension().string();
+                std::transform( ext.begin(), ext.end(), ext.begin(), ::tolower );
 
-        std::string ext = filePath.extension().string();
-        std::transform( ext.begin(), ext.end(), ext.begin(), ::tolower );
+                if ( std::find( supportedExtensions.begin(), supportedExtensions.end(), ext ) ==
+                     supportedExtensions.end() )
+                    continue;
 
-        if ( std::find( SUPPORTED_MESH_EXTENSIONS.begin(), SUPPORTED_MESH_EXTENSIONS.end(), ext ) !=
-             SUPPORTED_MESH_EXTENSIONS.end() )
-        {
-            // Check for serialized version first
-            std::filesystem::path serializedPath = filePath;
-            serializedPath.replace_extension( Common::Constants::Extensions::MESH_SERIALIZBLE_EXTENSION );
-
-            if ( fs::exists( serializedPath ) )
-            {
-                // TODO: Handle serialized mesh loading
-                // For now, we'll just load the original file
-
-                return;
-            }
-
-            // Load the mesh
-            if ( auto assetManager = m_AssetManager.lock() )
-            {
-                auto meshAsset     = assetManager->CreateAsset<MeshAsset>( AssetPriority::Low, filePath );
-                auto materialAsset = assetManager->CreateAsset<MaterialAsset>( AssetPriority::Low, filePath );
-
-                if ( !meshAsset->GetMetadata().IsValid() || !materialAsset->GetMetadata().IsValid() )
+                if ( auto manager = assetManager.lock() )
                 {
-                    LOG_ERROR( "meshAsset or materialAsset metadata is invalid" );
-                    return;
+                    Common::Filepath path;
+                    if ( useRootpath )
+                    {
+                        path = rootPath / entry.path();
+                    }
+                    else
+                    {
+                        path = entry.path();
+                    }
+                    auto asset = manager->CreateAsset<AssetType>( priority, path, std::forward<Args>( args )... );
+
+                    if ( !asset->GetMetadata().IsValid() )
+                    {
+                        LOG_ERROR( "Asset metadata is invalid for: {}", path.string() );
+                    }
                 }
             }
         }
+    } // namespace
+
+    void AssetPreloader::PreloadMeshes()
+    {
+        ProcessAssetFiles<MeshAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
+                                      m_AssetManager, AssetPriority::Low );
+
+        ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
+                                          m_AssetManager, AssetPriority::Low );
+
+        if ( auto registry = m_ResourceRegistry.lock() )
+        {
+            if ( auto manager = m_AssetManager.lock() )
+            {
+                for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
+                {
+                    registry->RegisterMesh( meshAsset );
+                }
+            }
+        }
+    }
+
+    void AssetPreloader::PreloadSkyboxes()
+    {
+        /*  ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, false,
+           SUPPORTED_SKYBOX_EXTENSIONS, m_AssetManager, AssetPriority::Medium );*/
     }
 } // namespace Desert::Assets

@@ -18,9 +18,10 @@ namespace Desert
          : Common::Layer( layerName ), m_Window( window )
 
     {
-        m_AssetManager   = std::make_shared<Assets::AssetManager>();
-        m_AssetPreloader = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
-        m_MainScene      = std::make_shared<Core::Scene>( "New Scene", m_AssetManager );
+        m_AssetManager     = std::make_shared<Assets::AssetManager>();
+        m_ResourceRegistry = std::make_shared<Runtime::ResourceRegistry>();
+        m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager, m_ResourceRegistry );
+        m_MainScene        = std::make_shared<Core::Scene>( "New Scene", m_ResourceRegistry );
     }
 
     EditorLayer::~EditorLayer()
@@ -61,8 +62,8 @@ namespace Desert
         m_AssetPreloader->PreloadAllAssets();
 
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
-        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>(
-             m_MainScene, m_AssetManager, m_MainScene->GetResourceResolver() ) );
+        m_Panels.emplace_back(
+             std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager, m_ResourceRegistry ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
 
 #endif // EBABLE_IMGUI
@@ -200,6 +201,8 @@ namespace Desert
             m_UIHelper->Image( m_MainScene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
         }
 
+        m_GizmoHovered = false;
+
         // Gizmos
         if ( m_GizmoType != GizmoType::None )
         {
@@ -220,6 +223,11 @@ namespace Desert
                     ImGuizmo::Manipulate( &m_EditorCamera.GetViewMatrix()[0][0],
                                           &m_EditorCamera.GetProjectionMatrix()[0][0],
                                           (ImGuizmo::OPERATION)m_GizmoType, ImGuizmo::WORLD, &transform[0][0] );
+
+                    if ( ImGuizmo::IsOver() )
+                    {
+                        m_GizmoHovered = true;
+                    }
 
                     // TODO: use math class
                     glm::vec3 scale;
@@ -266,6 +274,12 @@ namespace Desert
 
     void EditorLayer::HandleObjectPicking()
     {
+
+        if ( m_GizmoHovered )
+        {
+            return;
+        }
+
         // not over viewport
         if ( !m_ViewportData.IsHovered )
         {
@@ -283,14 +297,12 @@ namespace Desert
 
         std::vector<std::pair<Common::UUID, std::pair<glm::mat4, std::shared_ptr<Desert::Mesh>>>> allMeshes;
 
-        const auto& resolver = m_MainScene->GetResourceResolver();
-
         for ( const auto& entity : entities )
         {
             if ( entity.HasComponent<ECS::StaticMeshComponent>() )
             {
                 const auto& mesh =
-                     resolver->ResolveMesh( entity.GetComponent<ECS::StaticMeshComponent>().MeshHandle );
+                     m_ResourceRegistry->GetMesh( entity.GetComponent<ECS::StaticMeshComponent>().MeshHandle );
                 if ( !mesh )
                 {
                     continue;
@@ -366,7 +378,7 @@ namespace Desert
     {
         switch ( e.GetKeyCode() )
         {
-            case Common::KeyCode::N:
+            case Common::KeyCode::Escape:
                 m_GizmoType = GizmoType::None;
                 break;
             case Common::KeyCode::T:

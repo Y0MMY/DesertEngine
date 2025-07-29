@@ -36,7 +36,12 @@ namespace Desert::Assets
             auto asset = std::make_shared<AssetType>( priority, filepath, std::forward<Args>( args )... );
             if ( loadAfterCreate )
             {
-                asset->Load();
+                const auto& loadResult = asset->Load();
+                if ( !loadResult )
+                {
+                    LOG_ERROR( "Error while loading {}. Error: {}", filepath.string(), loadResult.GetError() );
+                    return nullptr;
+                }
             }
 
             const auto& metadata = asset->GetMetadata();

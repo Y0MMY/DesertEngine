@@ -39,6 +39,7 @@ namespace Desert
         };
 
         GizmoType m_GizmoType = GizmoType::None;
+        bool m_GizmoHovered = false;
 
     private:
         const std::shared_ptr<Common::Window> m_Window;
@@ -57,8 +58,9 @@ namespace Desert
 
         ViewportData m_ViewportData;
 
-        std::shared_ptr<Assets::AssetManager>   m_AssetManager;
-        std::unique_ptr<Assets::AssetPreloader> m_AssetPreloader;
+        std::shared_ptr<Assets::AssetManager>      m_AssetManager;
+        std::unique_ptr<Assets::AssetPreloader>    m_AssetPreloader;
+        std::shared_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;

@@ -133,7 +133,7 @@ namespace Common::Utils
         return result;
     }
 
-    const std::vector<uint32_t> FileSystem::ReadByteFileContent( const std::filesystem::path& filepath )
+    std::vector<uint8_t> FileSystem::ReadByteFileContent( const std::filesystem::path& filepath )
     {
         std::ifstream file( filepath, std::ios::in | std::ios::binary );
         DESERT_VERIFY( file, "Could not open file! {}", filepath.string().c_str() );
@@ -142,13 +142,13 @@ namespace Common::Utils
         std::streamsize fileSize = file.tellg();
         file.seekg( 0, std::ios::beg );
 
-        std::vector<uint32_t> binaryData( fileSize / sizeof( uint32_t ) );
+        std::vector<uint8_t> binaryData( fileSize / sizeof( uint8_t ) );
         if ( !file.read( reinterpret_cast<char*>( binaryData.data() ), fileSize ) )
         {
             DESERT_VERIFY( file, "Could not read file! {}", filepath.string().c_str() );
             return {};
         }
-        return binaryData;
+        return std::move( binaryData );
     }
 
     const std::filesystem::path FileSystem::GetParentPath( const std::filesystem::path& filepath )

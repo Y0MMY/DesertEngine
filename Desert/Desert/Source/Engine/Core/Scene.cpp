@@ -16,14 +16,14 @@ namespace Desert::Core
         SkyboxRenderer = 1,
     };
 
-    Scene::Scene( std::string&& sceneName, const std::shared_ptr<Assets::AssetManager>& assetManager )
+    Scene::Scene( std::string&& sceneName, const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
          : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( std::make_shared<Graphic::SceneRenderer>() ),
-           m_ResourceResolver( std::make_shared<Runtime::ResourceResolver>( assetManager ) ), m_Systems()
+           m_ResourceRegistry( resourceRegistry ), m_Systems()
     {
 
-        RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer, m_ResourceResolver );
+        RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer, m_ResourceRegistry );
         RegisterSystem<ECS::SkyboxRenderSystem>( SceneSystem::SkyboxRenderer, m_SceneRenderer,
-                                                 m_ResourceResolver );
+                                                 m_ResourceRegistry );
     }
 
     NO_DISCARD Common::BoolResult Scene::BeginScene( const Core::Camera& camera )

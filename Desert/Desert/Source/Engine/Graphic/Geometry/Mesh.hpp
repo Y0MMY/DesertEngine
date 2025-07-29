@@ -5,6 +5,8 @@
 #include <Engine/Graphic/IndexBuffer.hpp>
 #include <Engine/Graphic/VertexBuffer.hpp>
 
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+
 namespace Desert
 {
     struct Vertex
@@ -42,7 +44,7 @@ namespace Desert
     class Mesh final
     {
     public:
-        explicit Mesh( const std::string& filename );
+        explicit Mesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
 
         Common::BoolResult Invalidate();
 
@@ -61,9 +63,14 @@ namespace Desert
             return m_IndexBuffer;
         }
 
+        [[nodiscard]] const auto& GetAsset() const
+        {
+            return m_MeshAsset;
+        }
+
         [[nodiscard]] const auto& GetFilepath() const
         {
-            return m_Filename;
+            return m_Filepath;
         }
 
     private:
@@ -73,6 +80,7 @@ namespace Desert
         std::vector<std::vector<TriangleCache>> m_TriangleCache; // [SubmeshIndex][TriangleIndex]
         std::vector<Submesh>                    m_Submeshes;
 
-        const std::string m_Filename;
+        const std::weak_ptr<Assets::MeshAsset> m_MeshAsset;
+        const Common::Filepath                 m_Filepath;
     };
 } // namespace Desert

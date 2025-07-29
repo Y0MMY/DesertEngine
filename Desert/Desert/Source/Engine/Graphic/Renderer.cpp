@@ -43,7 +43,7 @@ namespace Desert::Graphic
 
         Graphic::TextureSpecification spec;
         spec.GenerateMips = false;
-        m_BRDFTexture     = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" );
+        m_BRDFTexture = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" );
         m_BRDFTexture->Invalidate();
 
         return Common::MakeSuccess( true );

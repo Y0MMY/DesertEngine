@@ -9,7 +9,7 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 
-#include <Engine/Runtime/ResourceResolver.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Engine/ECS/System/System.hpp>
 
@@ -36,7 +36,7 @@ namespace Desert::Core
     {
     public:
         Scene() = default;
-        Scene( std::string&& sceneName, const std::shared_ptr<Assets::AssetManager>& assetManager );
+        Scene( std::string&& sceneName, const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry );
 
         [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
         void                             OnUpdate( const Common::Timestep& ts );
@@ -74,11 +74,6 @@ namespace Desert::Core
         [[nodiscard]] std::optional<std::reference_wrapper<const ECS::Entity>>
         FindEntityByID( const Common::UUID& uuid ) const;
 
-        const auto& GetResourceResolver() const
-        {
-            return m_ResourceResolver;
-        }
-
         void Serialize() const;
 
     private:
@@ -93,7 +88,7 @@ namespace Desert::Core
 
         std::string                                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer>                 m_SceneRenderer;
-        const std::shared_ptr<Runtime::ResourceResolver>        m_ResourceResolver;
+        const std::weak_ptr<Runtime::ResourceRegistry>          m_ResourceRegistry;
         std::array<std::unique_ptr<ECS::System>, SYSTEMS_COUNT> m_Systems;
 
         entt::registry                           m_Registry;

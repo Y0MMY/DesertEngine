@@ -1,5 +1,7 @@
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 
+#include <Common/Utilities/FileSystem.hpp>
+
 namespace Desert::Assets
 {
     MeshAsset::MeshAsset( const AssetPriority priority, const Common::Filepath& filepath )
@@ -9,9 +11,7 @@ namespace Desert::Assets
 
     Common::BoolResult MeshAsset::Load()
     {
-        m_Mesh = std::make_shared<Mesh>( m_Metadata.Filepath.string() );
-        m_Mesh->Invalidate();
-
+        m_RawData = Common::Utils::FileSystem::ReadByteFileContent( m_Metadata.Filepath );
         m_ReadyForUse = true;
         Notify( EventType::OnReady );
         return BOOLSUCCESS;
@@ -19,8 +19,6 @@ namespace Desert::Assets
 
     Common::BoolResult MeshAsset::Unload()
     {
-        m_Mesh.reset();
-
         return BOOLSUCCESS;
     }
 } // namespace Desert::Assets

@@ -28,7 +28,7 @@ namespace Desert::ECS
     struct StaticMeshComponent
     {
         Assets::AssetHandle                   MeshHandle;
-        std::shared_ptr<Graphic::MaterialPBR> Material;
+        std::shared_ptr<Graphic::MaterialPBR> Material; //TODO: std::optional
 
         StaticMeshComponent( ) 
         {

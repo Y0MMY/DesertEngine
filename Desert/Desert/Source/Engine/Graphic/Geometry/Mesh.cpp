@@ -31,45 +31,93 @@ namespace Desert
         return result;
     }
 
-    class LogStream : public Assimp::LogStream
+    class ErrorLogStream : public Assimp::LogStream
+    {
+    public:
+        void write( const char* message ) override
+        {
+            LOG_ERROR( "Assimp: {}", message );
+        }
+    };
+
+    class WarnLogStream : public Assimp::LogStream
+    {
+    public:
+        void write( const char* message ) override
+        {
+            LOG_WARN( "Assimp: {}", message );
+        }
+    };
+
+    class InfoLogStream : public Assimp::LogStream
+    {
+    public:
+        void write( const char* message ) override
+        {
+            LOG_INFO( "Assimp: {}", message );
+        }
+    };
+
+    class DebugLogStream : public Assimp::LogStream
+    {
+    public:
+        void write( const char* message ) override
+        {
+            LOG_DEBUG( "Assimp: {}", message );
+        }
+    };
+
+    class AssimpLogger
     {
     public:
         static void Init()
         {
             using namespace Assimp;
-            const unsigned int severity = Logger::Debugging | Logger::Info | Logger::Err | Logger::Warn;
 
+            // Create logger with verbose output
             DefaultLogger::create( "", Logger::VERBOSE );
-            Assimp::DefaultLogger::get()->attachStream( new LogStream, severity );
+            auto* logger = DefaultLogger::get();
+
+            // Attach separate streams for each severity
+            logger->attachStream( new ErrorLogStream, Logger::Err );
+            logger->attachStream( new WarnLogStream, Logger::Warn );
+            logger->attachStream( new InfoLogStream, Logger::Info );
+            logger->attachStream( new DebugLogStream, Logger::Debugging );
         }
 
-        // Write something using your own functionality
-        void write( const char* message ) override
+        static void Shutdown()
         {
-            LOG_ERROR( "Assimp error: {}", message );
+            Assimp::DefaultLogger::kill();
         }
     };
 
-    static std::unique_ptr<LogStream> s_LogStream = nullptr;
+    static std::unique_ptr<AssimpLogger> s_LogStream = nullptr;
 
-    Mesh::Mesh( const std::string& filename ) : m_Filename( filename )
+    Mesh::Mesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+         : m_MeshAsset( meshAsset ), m_Filepath( meshAsset->GetMetadata().Filepath )
     {
         if ( !s_LogStream )
         {
-            ( s_LogStream = std::make_unique<LogStream>() )->Init();
+            ( s_LogStream = std::make_unique<AssimpLogger>() )->Init();
         }
     }
 
     Common::BoolResult Mesh::Invalidate()
     {
-        const Common::Filepath path = m_Filename;
-
         std::unique_ptr<Assimp::Importer> importer = std::make_unique<Assimp::Importer>();
 
-        auto scene = importer->ReadFile( path.string(), aiProcess_CalcTangentSpace | aiProcess_Triangulate |
-                                                             aiProcess_SortByPType | aiProcess_GenNormals |
-                                                             aiProcess_GenUVCoords | aiProcess_OptimizeMeshes |
-                                                             aiProcess_ValidateDataStructure );
+        const auto& meshAsset = m_MeshAsset.lock();
+        if ( !meshAsset )
+        {
+            return Common::MakeError( "Mesh assset was destroyed!" );
+        }
+
+        const auto& rawData = meshAsset->GetRawData();
+
+        auto scene = importer->ReadFileFromMemory(
+             rawData.data(), rawData.size(),
+             aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_SortByPType | aiProcess_GenNormals |
+                  aiProcess_GenUVCoords | aiProcess_OptimizeMeshes | aiProcess_ValidateDataStructure );
         if ( scene == nullptr )
         {
             LOG_ERROR( "An error occurred during mesh extraction: {}", std::string( importer->GetErrorString() ) );

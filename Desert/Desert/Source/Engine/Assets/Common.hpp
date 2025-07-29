@@ -22,5 +22,6 @@ namespace Desert::Assets
         Mesh,
         Material,
         Texture2D,
+        Skybox
     };
 } // namespace Desert::Assets

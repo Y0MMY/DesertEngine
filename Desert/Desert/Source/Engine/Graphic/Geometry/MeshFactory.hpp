@@ -1,15 +1,18 @@
 #pragma once
 
-#include "MeshInstance.hpp"
+#include "Mesh.hpp"
 
 namespace Desert::Graphic
 {
     class MeshFactory
     {
     public:
-        static std::unique_ptr<MeshInstance> Create( const std::shared_ptr<Assets::MeshAsset>& baseAsset )
+        static std::shared_ptr<Mesh> Create( const std::shared_ptr<Assets::MeshAsset>& baseAsset )
         {
-            return std::make_unique<MeshInstance>( baseAsset );
+            const auto& mesh = std::make_shared<Mesh>( baseAsset );
+            mesh->Invalidate();
+
+            return mesh;
         }
     };
 } // namespace Desert::Graphic

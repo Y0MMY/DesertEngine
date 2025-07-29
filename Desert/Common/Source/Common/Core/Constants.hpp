@@ -14,6 +14,7 @@ namespace Common::Constants // TODO: should be merge from config
         const std::filesystem::path SCENE_PATH            = "Resources/Assets/Scene/";
         const std::filesystem::path MATERIAL_PATH         = "Resources/Assets/Material/";
         const std::filesystem::path MESH_PATH             = "Resources/Mesh/";
+        const std::filesystem::path SKYBOX_PATH           = "Resources/Textures/HDR/";
     } // namespace Path
 
     namespace Extensions

@@ -4,8 +4,6 @@
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/AssetEvents.hpp>
 
-#include <Engine/Graphic/Geometry/Mesh.hpp>
-
 namespace Desert::Assets
 {
     class MeshAsset final : public AssetBase, public AssetsEventSystem
@@ -16,9 +14,9 @@ namespace Desert::Assets
         virtual Common::BoolResult Load() override;
         virtual Common::BoolResult Unload() override;
 
-        const auto GetMesh() const
+        const auto& GetRawData() const
         {
-            return m_Mesh;
+            return m_RawData;
         }
 
         virtual bool IsReadyForUse() const
@@ -32,8 +30,8 @@ namespace Desert::Assets
         }
 
     private:
-        std::shared_ptr<Mesh> m_Mesh;
-        bool                  m_ReadyForUse = false;
+        bool                 m_ReadyForUse = false;
+        std::vector<uint8_t> m_RawData;
     };
 
 } // namespace Desert::Assets

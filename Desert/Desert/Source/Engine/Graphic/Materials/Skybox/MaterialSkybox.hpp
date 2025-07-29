@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 #include <Engine/Graphic/Materials/Models/Skybox/Camera.hpp>
@@ -24,7 +24,7 @@ namespace Desert::Graphic
             return nullptr;
         }
 
-        const Environment& GetEnvironment( )
+        const Environment& GetEnvironment()
         {
             return m_Environment;
         }
@@ -55,7 +55,7 @@ namespace Desert::Graphic
         // weak_ptr because AssetManager owns MaterialAsset
         // MaterialPBR only observes the base material
         std::weak_ptr<Assets::TextureAsset> m_BaseMaterial;
-        std::shared_ptr<MaterialExecutor>           m_Material;
+        std::shared_ptr<MaterialExecutor>   m_Material;
 
         Environment m_Environment;
 

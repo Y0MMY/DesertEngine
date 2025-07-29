@@ -12,10 +12,10 @@ namespace Desert::Editor
     public:
         explicit ScenePropertiesPanel( const std::shared_ptr<Desert::Core::Scene>&       scene,
                                        const std::shared_ptr<Assets::AssetManager>&      assetManager,
-                                       const std::shared_ptr<Runtime::ResourceResolver>& resolver )
+                                       const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
              : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetManager( assetManager ),
-               m_RuntimeResourceResolver( resolver ),
-               m_MaterialsPanel( std::make_shared<MaterialsPanel>( resolver ) )
+               m_ResourceRegistry( resourceRegistry ),
+               m_MaterialsPanel( std::make_shared<MaterialsPanel>( resourceRegistry ) )
         {
         }
         void OnUIRender() override;
@@ -26,7 +26,7 @@ namespace Desert::Editor
     private:
         std::shared_ptr<Desert::Core::Scene>           m_Scene;
         const std::shared_ptr<Assets::AssetManager>    m_AssetManager;
-        const std::weak_ptr<Runtime::ResourceResolver> m_RuntimeResourceResolver;
+        const std::weak_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
         const std::shared_ptr<MaterialsPanel>          m_MaterialsPanel;
     };
 } // namespace Desert::Editor
