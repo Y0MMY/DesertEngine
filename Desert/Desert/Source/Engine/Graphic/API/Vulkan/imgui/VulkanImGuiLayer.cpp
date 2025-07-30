@@ -66,17 +66,6 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         ImGui_ImplVulkan_Init( &init_info, swapchain->GetRenderPass() );
 
         {
-            ImGuiIO& io = ::ImGui::GetIO();
-
-            ImFont* mainFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Black.ttf", 16.0f, nullptr,
-                                                             io.Fonts->GetGlyphRangesCyrillic() );
-
-            if ( !mainFont )
-            {
-                mainFont = io.Fonts->AddFontDefault();
-            }
-            io.FontDefault = mainFont;
-
             const auto commandBuffer =
                  CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
             ImGui_ImplVulkan_CreateFontsTexture( commandBuffer.GetValue() );

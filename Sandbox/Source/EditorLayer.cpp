@@ -5,6 +5,8 @@
 #include "Editor/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
 #include "Editor/Panels/SceneProperties/ScenePropertiesPanel.hpp"
 #include "Editor/Panels/Debug/ShaderLibraryPanel.hpp"
+#include "Editor/Panels/FileExplorer/FileExplorerPanel.hpp"
+#include "Editor/Core/EditorResources.hpp"
 #include <ImGui/imgui_internal.h>
 
 #include <ImGuizmo.h>
@@ -33,6 +35,9 @@ namespace Desert
     {
         // Setup ImGui docking
         ::ImGui::CreateContext();
+
+        Editor::EditorResources::Initialize( "Resources/Fonts/fontawesome-webfont.ttf" );
+
         ImGuiIO& io = ::ImGui::GetIO();
         (void)io;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
@@ -61,10 +66,11 @@ namespace Desert
 
         m_AssetPreloader->PreloadAllAssets();
 
-        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
+        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager, m_ResourceRegistry ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
+        m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>("Resources/"));
 
 #endif // EBABLE_IMGUI
 

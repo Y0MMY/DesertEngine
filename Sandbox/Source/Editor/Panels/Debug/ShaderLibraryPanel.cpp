@@ -1,5 +1,7 @@
 ﻿#include "ShaderLibraryPanel.hpp"
 
+#include "../../Core/FontAwesomeDefinitions.hpp"
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
@@ -21,7 +23,7 @@ namespace Desert::Editor
         ImGui::BeginChild( "SearchBar", ImVec2( 0, 50 ), true );
         {
             ImGui::SetCursorPosY( ImGui::GetCursorPosY() + 5 );
-            ImGui::Text( "🔍" );
+            ImGui::Text( ICON_FA_SEARCH );
             ImGui::SameLine();
 
             ImGui::PushItemWidth( -1 );
@@ -96,7 +98,6 @@ namespace Desert::Editor
         }
     }
 
-
     void ShaderLibraryPanel::RenderShaderCodeWindow()
     {
         ImGui::SetNextWindowSize( ImVec2( 800, 600 ), ImGuiCond_FirstUseEver );
@@ -120,7 +121,7 @@ namespace Desert::Editor
 
             ImGui::BeginChild( "CodeView", ImVec2( 0, 0 ), true, ImGuiWindowFlags_HorizontalScrollbar );
             {
-              //  ImGui::PushFont( GetMonoFont() );
+                //  ImGui::PushFont( GetMonoFont() );
                 ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.9f, 0.9f, 0.9f, 1.0f ) );
 
                 std::istringstream iss( m_ShaderSource );
@@ -135,7 +136,7 @@ namespace Desert::Editor
                 }
 
                 ImGui::PopStyleColor();
-               // ImGui::PopFont();
+                // ImGui::PopFont();
             }
             ImGui::EndChild();
         }
