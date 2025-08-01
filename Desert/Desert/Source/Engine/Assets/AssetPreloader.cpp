@@ -44,7 +44,14 @@ namespace Desert::Assets
                     Common::Filepath path;
                     if ( useRootpath )
                     {
-                        path = rootPath / entry.path();
+                        std::string       originalPath   = entry.path().string();
+                        const std::string prefixToRemove = "Resources/Textures/";
+                        size_t            pos            = originalPath.find( prefixToRemove );
+                        if ( pos != std::string::npos )
+                        {
+                            originalPath.erase( pos, prefixToRemove.length() );
+                        }
+                        path = originalPath;
                     }
                     else
                     {
@@ -83,7 +90,20 @@ namespace Desert::Assets
 
     void AssetPreloader::PreloadSkyboxes()
     {
-        /*  ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, false,
-           SUPPORTED_SKYBOX_EXTENSIONS, m_AssetManager, AssetPriority::Medium );*/
+        ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, true, SUPPORTED_SKYBOX_EXTENSIONS,
+                                        m_AssetManager, AssetPriority::Medium );
+
+
+
+        if ( auto registry = m_ResourceRegistry.lock() )
+        {
+            if ( auto manager = m_AssetManager.lock() )
+            {
+                for ( const auto& [handle, skyboxAsset] : manager->FindAllByType<Assets::SkyboxAsset>() )
+                {
+                    registry->RegisterSkybox(skyboxAsset);
+                }
+            }
+        }
     }
 } // namespace Desert::Assets

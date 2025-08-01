@@ -8,9 +8,14 @@ namespace Desert::Graphic::System
     Common::BoolResult MeshRenderer::Init( const uint32_t width, const uint32_t height,
                                            const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal )
     {
+        m_RenderGraph = std::make_unique<RenderGraph>();
+
         // Setup geometry pass
         if ( !SetupGeometryPass( width, height, skyboxFramebufferExternal ) )
             return Common::MakeError( "Failed to setup geometry pass" );
+
+        if ( !SetupOutlinePass( width, height, skyboxFramebufferExternal ) )
+            return Common::MakeError( "Failed to setup outline pass" );
 
         return BOOLSUCCESS;
     }
@@ -25,6 +30,89 @@ namespace Desert::Graphic::System
 
         m_RenderQueue.clear();
         m_ActiveCamera = nullptr;
+    }
+
+    bool MeshRenderer::SetupOutlinePass( const uint32_t width, const uint32_t height,
+                                         const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal )
+    {
+        FramebufferSpecification fbSpec;
+        fbSpec.DebugName               = "OutlineBuffer";
+        fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
+
+        fbSpec.ExternalAttachments.ColorAttachments.push_back( { .SourceFramebuffer = skyboxFramebufferExternal,
+                                                                 .AttachmentIndex   = 0,
+                                                                 .Load              = AttachmentLoad::Load } );
+
+        fbSpec.ExternalAttachments.DepthAttachment = { .SourceFramebuffer = m_Framebuffer,
+                                                       .Load              = AttachmentLoad::Load };
+
+        m_OutlineFramebuffer = Graphic::Framebuffer::Create( fbSpec );
+        m_OutlineFramebuffer->Resize( width, height );
+
+        // RenderPass
+        RenderPassSpecification rpSpec;
+        rpSpec.DebugName         = "OutlinePass";
+        rpSpec.TargetFramebuffer = m_OutlineFramebuffer;
+
+        m_RenderGraph->AddPass(
+             "OutlinePass",
+             [&]()
+             {
+                 if ( !m_OutlineDraw )
+                 {
+                     return;
+                 }
+
+                 auto& renderer = Renderer::GetInstance();
+                 for ( const auto& renderData : m_RenderQueue )
+                 {
+
+                     m_OutlineMaterial->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform,
+                                                                m_OutlineWidth, m_OutlineColor );
+
+                     renderer.RenderMesh( m_OutlinePipeline, renderData.Mesh,
+                                          m_OutlineMaterial->GetMaterialExecutor() );
+                 }
+             },
+             RenderPass::Create( rpSpec ) );
+
+        // Shader
+        m_OutlineShader = Graphic::Shader::Create( "Outline.glsl" );
+
+        PipelineSpecification outlinePipeSpec;
+        outlinePipeSpec.DebugName = "OutlinePipeline";
+        outlinePipeSpec.Layout    = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                      { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                      { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                      { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                      { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+
+        outlinePipeSpec.DepthWriteEnabled = true;
+        outlinePipeSpec.DepthTestEnabled = false;
+        outlinePipeSpec.StencilTestEnabled = true;
+        outlinePipeSpec.StencilFront       = { .FailOp      = StencilOp::Keep,
+                                               .PassOp      = StencilOp::Replace,
+                                               .DepthFailOp = StencilOp::Keep,
+                                               .CompareOp   = CompareOp::NotEqual,
+                                               .CompareMask = 0xFF,
+                                               .WriteMask   = 0xFF, 
+                                               .Reference   = 1 };
+        outlinePipeSpec.StencilBack        = outlinePipeSpec.StencilFront;
+        outlinePipeSpec.DepthTestEnabled   = false;
+
+        outlinePipeSpec.StencilBack = outlinePipeSpec.StencilFront;
+
+        outlinePipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
+        outlinePipeSpec.CullMode       = CullMode::None; 
+        outlinePipeSpec.Shader      = m_OutlineShader;
+        outlinePipeSpec.Framebuffer = m_OutlineFramebuffer;
+
+        m_OutlinePipeline = Pipeline::Create( outlinePipeSpec );
+        m_OutlinePipeline->Invalidate();
+
+        m_OutlineMaterial = std::make_unique<MaterialOutline>();
+
+        return true;
     }
 
     void MeshRenderer::BeginScene( const Core::Camera& camera, const std::optional<Environment>& environment )
@@ -55,20 +143,9 @@ namespace Desert::Graphic::System
 
     void MeshRenderer::EndScene()
     {
-        auto& renderer = Renderer::GetInstance();
-        renderer.BeginRenderPass( m_RenderPass );
+        auto&      renderer = Renderer::GetInstance();
 
-        const auto textures = PreparePBRTextures();
-
-        // Render all meshes in queue
-        for ( const auto& renderData : m_RenderQueue )
-        {
-            renderData.Material->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform, m_DirectionLight,
-                                                         textures );
-            renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
-        }
-
-        renderer.EndRenderPass();
+        m_RenderGraph->Execute();
     }
 
     bool MeshRenderer::SetupGeometryPass( const uint32_t width, const uint32_t height,
@@ -78,10 +155,12 @@ namespace Desert::Graphic::System
 
         // Framebuffer
         FramebufferSpecification fbSpec;
-        fbSpec.DebugName                = debugName;
-        fbSpec.Attachments.Attachments  = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
-        fbSpec.ExternalAttachments.Load = AttachmentLoad::Load;
-        fbSpec.ExternalAttachments.ExternalAttachments.push_back( skyboxFramebufferExternal );
+        fbSpec.DebugName               = debugName;
+        fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
+
+        fbSpec.ExternalAttachments.ColorAttachments.push_back( { .SourceFramebuffer = skyboxFramebufferExternal,
+                                                                 .AttachmentIndex   = 0,
+                                                                 .Load              = AttachmentLoad::Load } );
 
         m_Framebuffer = Graphic::Framebuffer::Create( fbSpec );
         m_Framebuffer->Resize( width, height );
@@ -90,7 +169,21 @@ namespace Desert::Graphic::System
         RenderPassSpecification rpSpec;
         rpSpec.DebugName         = debugName;
         rpSpec.TargetFramebuffer = m_Framebuffer;
-        m_RenderPass             = RenderPass::Create( rpSpec );
+        m_RenderGraph->AddPass(
+             "SceneGeometry",
+             [&]()
+             {
+                 auto& renderer = Renderer::GetInstance();
+                 const auto textures = PreparePBRTextures();
+
+                 for ( const auto& renderData : m_RenderQueue )
+                 {
+                     renderData.Material->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform,
+                                                                  m_DirectionLight, textures );
+                     renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
+                 }
+             },
+             RenderPass::Create( rpSpec ) );
 
         // Pipeline
         PipelineSpecification pipeSpec;
@@ -101,10 +194,20 @@ namespace Desert::Graphic::System
                                { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                                { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
 
-        m_Shader             = Graphic::Shader::Create( "StaticPBR.glsl" );
-        pipeSpec.Shader      = m_Shader;
-        pipeSpec.Framebuffer = m_Framebuffer;
-        pipeSpec.Renderpass  = m_RenderPass;
+        pipeSpec.StencilTestEnabled = true;
+        pipeSpec.StencilFront       = { .FailOp      = StencilOp::Replace,
+                                        .PassOp      = StencilOp::Replace,
+                                        .DepthFailOp = StencilOp::Replace,
+                                        .CompareOp   = CompareOp::Always,
+                                        .CompareMask = 0xFF,
+                                        .WriteMask   = 0xFF,
+                                        .Reference   = 1 };
+        pipeSpec.StencilBack        = pipeSpec.StencilFront;
+
+        pipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
+        pipeSpec.CullMode       = CullMode::Back; 
+        pipeSpec.Shader         = Graphic::Shader::Create( "StaticPBR.glsl" );
+        pipeSpec.Framebuffer    = m_Framebuffer;
 
         m_Pipeline = Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();

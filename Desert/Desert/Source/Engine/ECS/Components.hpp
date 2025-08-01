@@ -11,7 +11,7 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
-#include <Engine/Graphic/Materials/PBR/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 
 namespace Desert::ECS
 {

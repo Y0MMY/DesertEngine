@@ -180,5 +180,57 @@ namespace Desert::Editor
         ImGui::PopID();
     }
 
-   
+    void Widgets::DrawColorControl( const std::string& label, glm::vec3& color )
+    {
+        ImGui::PushID( label.c_str() );
+
+        ImGui::Columns( 2 );
+        ImGui::SetColumnWidth( 0, 100.0f );
+        ImGui::Text( "%s", label.c_str() );
+        ImGui::NextColumn();
+
+        ImGui::ColorEdit3( "##Color", &color.x, ImGuiColorEditFlags_NoInputs );
+
+        ImGui::Columns( 1 );
+        ImGui::PopID();
+    }
+
+    void Widgets::DrawFloatControl( const std::string& label, float& value, float step, float min, float max,
+                                    const char* format )
+    {
+        ImGui::PushID( label.c_str() );
+
+        ImGui::Columns( 2 );
+        ImGui::SetColumnWidth( 0, 100.0f );
+        ImGui::Text( "%s", label.c_str() );
+        ImGui::NextColumn();
+
+        if ( max > min )
+        {
+            ImGui::SliderFloat( "##Slider", &value, min, max, format );
+        }
+        else
+        {
+            ImGui::DragFloat( "##Drag", &value, step, min, max, format );
+        }
+
+        ImGui::Columns( 1 );
+        ImGui::PopID();
+    }
+
+    void Widgets::DrawToggleControl( const std::string& label, bool& value )
+    {
+        ImGui::PushID( label.c_str() );
+
+        ImGui::Columns( 2 );
+        ImGui::SetColumnWidth( 0, 100.0f );
+        ImGui::Text( "%s", label.c_str() );
+        ImGui::NextColumn();
+
+        ImGui::Checkbox( "##Toggle", &value );
+
+        ImGui::Columns( 1 );
+        ImGui::PopID();
+    }
+
 } // namespace Desert::Editor

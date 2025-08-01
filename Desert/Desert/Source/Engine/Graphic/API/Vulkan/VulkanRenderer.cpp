@@ -145,14 +145,6 @@ namespace Desert::Graphic::API::Vulkan
 
     } // namespace Utils
 
-    struct VulkanRendererData
-    {
-        std::shared_ptr<VulkanVertexBuffer> QuadVertexBuffer;
-        std::shared_ptr<VulkanIndexBuffer>  QuadIndexBuffer;
-    };
-
-    static VulkanRendererData* s_Data = nullptr;
-
     Common::BoolResult VulkanRendererAPI::BeginFrame()
     {
         if ( m_CurrentCommandBuffer != nullptr )
@@ -204,36 +196,8 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::Init()
     {
-        s_Data = new VulkanRendererData;
-
-        struct QuadVertex
-        {
-            glm::vec3 Position;
-        };
-
-        std::array<QuadVertex, 4> data;
-        data[0].Position = { -1, 1, 0 };
-
-        data[1].Position = { -1, -1, 0 };
-
-        data[2].Position = { 1, 1, 0 };
-
-        data[3].Position = { 1, -1, 0 };
-
-        s_Data->QuadVertexBuffer = std::make_shared<VulkanVertexBuffer>( data.data(), 4 * sizeof( QuadVertex ) );
-        s_Data->QuadVertexBuffer->Invalidate();
-
-        uint32_t* indices = new uint32_t[6]{
-             0, 1, 2, 1, 2, 3,
-        };
-
-        s_Data->QuadIndexBuffer = std::make_shared<VulkanIndexBuffer>( indices, 6 * sizeof( unsigned int ) );
-        s_Data->QuadIndexBuffer->Invalidate();
-
         m_DescriptorManager = std::make_unique<VulkanDescriptorManager>();
         m_DescriptorManager->Initialize( EngineContext::GetInstance().GetFramesInFlight() );
-
-        // delete[] indices;
     }
 
     std::vector<VkClearValue> CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
@@ -369,16 +333,7 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                            vulkanLayout->GetVkPipeline() );
 
-        VkDeviceSize offsets[] = { 0 };
-        const auto   vbuffer   = s_Data->QuadVertexBuffer->GetVulkanBuffer();
-        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &vbuffer, offsets );
-
-        const auto ibuffer = s_Data->QuadIndexBuffer->GetVulkanBuffer();
-        vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
-
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-
-        vkCmdDrawIndexed( m_CurrentCommandBuffer, s_Data->QuadIndexBuffer->GetCount(), 1, 0, 0, 0 );
+        vkCmdDraw(m_CurrentCommandBuffer, 6, 1, 0, 0);
     }
 
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
@@ -630,11 +585,6 @@ namespace Desert::Graphic::API::Vulkan
         vkDeviceWaitIdle( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice() );
 
         m_DescriptorManager.reset();
-        s_Data->QuadVertexBuffer->Release();
-        s_Data->QuadIndexBuffer->Release();
-
-        delete s_Data;
-        s_Data = nullptr;
     }
 
     VkCommandBuffer VulkanRendererAPI::GetCurrentCmdBuffer() const

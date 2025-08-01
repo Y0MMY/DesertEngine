@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Graphic/Materials/PBR/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 
 namespace Desert::Graphic
 {

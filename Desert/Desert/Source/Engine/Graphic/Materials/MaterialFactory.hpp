@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Graphic/Materials/PBR/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 

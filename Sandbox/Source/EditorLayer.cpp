@@ -70,7 +70,7 @@ namespace Desert
         m_Panels.emplace_back(
              std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager, m_ResourceRegistry ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
-        m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>("Resources/"));
+        m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>( "Resources/" ) );
 
 #endif // EBABLE_IMGUI
 
@@ -201,7 +201,13 @@ namespace Desert
 
             m_ViewportData.MousePosition = glm::vec2( mousePos.x - viewportPos.x, mousePos.y - viewportPos.y );
 
-            m_ViewportData.Size      = { ::ImGui::GetContentRegionAvail().x, ::ImGui::GetContentRegionAvail().y };
+            const glm::vec2 size = { ::ImGui::GetContentRegionAvail().x, ::ImGui::GetContentRegionAvail().y };
+            if ( m_ViewportData.Size != size )
+            {
+                m_ViewportData.Size = size;
+               // m_MainScene->Resize( size.x, size.y );
+                m_EditorCamera.UpdateProjectionMatrix( size.x, size.y );
+            }
             m_ViewportData.IsHovered = ::ImGui::IsWindowHovered();
 
             m_UIHelper->Image( m_MainScene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );

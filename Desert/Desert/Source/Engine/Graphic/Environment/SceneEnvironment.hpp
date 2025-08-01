@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Texture.hpp>
+#include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 
 namespace Desert::Graphic
 {
@@ -20,6 +21,6 @@ namespace Desert::Graphic
     class EnvironmentManager
     {
     public:
-        static Environment Create( const Common::Filepath& filepath );
+        static Environment Create( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset );
     };
 } // namespace Desert::Graphic

@@ -12,6 +12,73 @@ namespace Desert::Graphic::API::Vulkan
 
     namespace
     {
+        static VkStencilOp ConvertStencilOp( StencilOp op )
+        {
+            switch ( op )
+            {
+                case StencilOp::Keep:
+                    return VK_STENCIL_OP_KEEP;
+                case StencilOp::Zero:
+                    return VK_STENCIL_OP_ZERO;
+                case StencilOp::Replace:
+                    return VK_STENCIL_OP_REPLACE;
+                case StencilOp::IncrementAndClamp:
+                    return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+                case StencilOp::DecrementAndClamp:
+                    return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+                case StencilOp::Invert:
+                    return VK_STENCIL_OP_INVERT;
+                case StencilOp::IncrementAndWrap:
+                    return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+                case StencilOp::DecrementAndWrap:
+                    return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+                default:
+                    return VK_STENCIL_OP_KEEP;
+            }
+        }
+
+        static VkCompareOp ConvertCompareOp( CompareOp op )
+        {
+            switch ( op )
+            {
+                case CompareOp::Never:
+                    return VK_COMPARE_OP_NEVER;
+                case CompareOp::Less:
+                    return VK_COMPARE_OP_LESS;
+                case CompareOp::Equal:
+                    return VK_COMPARE_OP_EQUAL;
+                case CompareOp::LessOrEqual:
+                    return VK_COMPARE_OP_LESS_OR_EQUAL;
+                case CompareOp::Greater:
+                    return VK_COMPARE_OP_GREATER;
+                case CompareOp::NotEqual:
+                    return VK_COMPARE_OP_NOT_EQUAL;
+                case CompareOp::GreaterOrEqual:
+                    return VK_COMPARE_OP_GREATER_OR_EQUAL;
+                case CompareOp::Always:
+                    return VK_COMPARE_OP_ALWAYS;
+                default:
+                    return VK_COMPARE_OP_ALWAYS;
+            }
+        }
+
+        static VkCullModeFlags ConvertCullMode( CullMode mode )
+        {
+            switch ( mode )
+            {
+                case CullMode::None:
+                    return VK_CULL_MODE_NONE;
+                case CullMode::Front:
+                    return VK_CULL_MODE_FRONT_BIT;
+                case CullMode::Back:
+                    return VK_CULL_MODE_BACK_BIT;
+                case CullMode::FrontAndBack:
+                    return VK_CULL_MODE_FRONT_AND_BACK;
+                default:
+                    return VK_CULL_MODE_BACK_BIT;
+            }
+        }
+
         static VkFormat ShaderDataTypeToVulkanFormat( ShaderDataType type )
         {
             switch ( type )
@@ -44,6 +111,8 @@ namespace Desert::Graphic::API::Vulkan
         vertexInputBinding.stride    = vertexLayout.GetStride();
         vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
+        const auto vertexInputSize = vertexInputBinding.stride > 0 ? 1U : 0U;
+
         std::vector<VkVertexInputAttributeDescription> vertexInputAttributes( vertexLayout.GetElementCount() );
 
         uint32_t location = 0;
@@ -60,7 +129,7 @@ namespace Desert::Graphic::API::Vulkan
         VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
              .sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
              .pNext                           = nullptr,
-             .vertexBindingDescriptionCount   = 1,
+             .vertexBindingDescriptionCount   = vertexInputSize,
              .pVertexBindingDescriptions      = &vertexInputBinding,
              .vertexAttributeDescriptionCount = (uint32_t)vertexInputAttributes.size(),
              .pVertexAttributeDescriptions    = vertexInputAttributes.data() };
@@ -89,11 +158,10 @@ namespace Desert::Graphic::API::Vulkan
              .depthClampEnable        = VK_FALSE,
              .rasterizerDiscardEnable = VK_FALSE,
              .polygonMode             = VK_POLYGON_MODE_FILL,
-             .cullMode                = VK_CULL_MODE_NONE, // VK_CULL_MODE_BACK_BIT
+             .cullMode                = ConvertCullMode( m_Specification.CullMode ),
              .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
              .depthBiasEnable         = VK_FALSE,
-             .lineWidth               = 1.0f,
-        };
+             .lineWidth               = 1.0f };
 
         VkPipelineMultisampleStateCreateInfo multisampling = {
              .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -105,19 +173,25 @@ namespace Desert::Graphic::API::Vulkan
 
         VkPipelineDepthStencilStateCreateInfo depthStencil = {
              .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-             .depthTestEnable       = hasDepth ? VK_TRUE : VK_FALSE,
-             .depthWriteEnable      = hasDepth ? VK_TRUE : VK_FALSE,
-             .depthCompareOp        = VK_COMPARE_OP_LESS,
+             .depthTestEnable       = m_Specification.DepthTestEnabled ? VK_TRUE : VK_FALSE,
+             .depthWriteEnable      = m_Specification.DepthWriteEnabled ? VK_TRUE : VK_FALSE,
+             .depthCompareOp        = ConvertCompareOp(m_Specification.DepthCompareOp),
              .depthBoundsTestEnable = VK_FALSE,
-             .stencilTestEnable     = hasDepth ? VK_TRUE : VK_FALSE,
-             .front                 = { .failOp      = VK_STENCIL_OP_KEEP,
-                                        .passOp      = VK_STENCIL_OP_KEEP,
-                                        .depthFailOp = VK_STENCIL_OP_KEEP,
-                                        .compareOp   = VK_COMPARE_OP_ALWAYS },
-             .back                  = { .failOp      = VK_STENCIL_OP_KEEP,
-                                        .passOp      = VK_STENCIL_OP_KEEP,
-                                        .depthFailOp = VK_STENCIL_OP_KEEP,
-                                        .compareOp   = VK_COMPARE_OP_ALWAYS },
+             .stencilTestEnable     = m_Specification.StencilTestEnabled ? VK_TRUE : VK_FALSE,
+             .front                 = { .failOp      = ConvertStencilOp( m_Specification.StencilFront.FailOp ),
+                                        .passOp      = ConvertStencilOp( m_Specification.StencilFront.PassOp ),
+                                        .depthFailOp = ConvertStencilOp( m_Specification.StencilFront.DepthFailOp ),
+                                        .compareOp   = ConvertCompareOp( m_Specification.StencilFront.CompareOp ),
+                                        .compareMask = m_Specification.StencilFront.CompareMask,
+                                        .writeMask   = m_Specification.StencilFront.WriteMask,
+                                        .reference   = m_Specification.StencilFront.Reference },
+             .back                  = { .failOp      = ConvertStencilOp( m_Specification.StencilBack.FailOp ),
+                                        .passOp      = ConvertStencilOp( m_Specification.StencilBack.PassOp ),
+                                        .depthFailOp = ConvertStencilOp( m_Specification.StencilBack.DepthFailOp ),
+                                        .compareOp   = ConvertCompareOp( m_Specification.StencilBack.CompareOp ),
+                                        .compareMask = m_Specification.StencilBack.CompareMask,
+                                        .writeMask   = m_Specification.StencilBack.WriteMask,
+                                        .reference   = m_Specification.StencilBack.Reference },
              .minDepthBounds        = 0.0f,
              .maxDepthBounds        = 1.0f };
 

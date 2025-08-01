@@ -25,7 +25,6 @@ namespace Desert::Graphic::System
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;
-        pipeSpec.Layout      = { { Graphic::ShaderDataType::Float3, "a_Position" } };
         pipeSpec.Framebuffer = m_Framebuffer;
         pipeSpec.Shader      = m_Shader;
 

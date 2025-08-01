@@ -1,5 +1,5 @@
-#include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
-#include <Engine/Graphic/Materials/Models/PBR/PBRConstants.hpp>
+#include <Engine/Graphic/Materials/Models/Mesh/PBR/PBRTextures.hpp>
+#include <Engine/Graphic/Materials/Models/Mesh/PBR/PBRConstants.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
 

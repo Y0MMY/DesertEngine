@@ -2,23 +2,32 @@
 
 #version 450 
 
-layout(location = 0) in vec3 a_Position;  
 layout(location = 0) out vec2 v_TexCoord; 
 
-vec2 textureCoords[4] = 
-{
-#ifdef VULKAN
-    {0, 0},  
-    {0, 1},  
-    {1, 0},  
-    {1, 1}   
-#endif
+vec2 positions[6] = {
+    {-1.0, -1.0}, 
+    { 1.0, -1.0}, 
+    {-1.0,  1.0}, 
+    
+    { 1.0, -1.0}, 
+    { 1.0,  1.0}, 
+    {-1.0,  1.0}  
+};
+
+vec2 texCoords[6] = {
+    {0.0, 1.0},  // Раньше было 0.0, 0.0
+    {1.0, 1.0},  // Раньше было 1.0, 0.0
+    {0.0, 0.0},  // Раньше было 0.0, 1.0
+    
+    {1.0, 1.0},  // Второй треугольник
+    {1.0, 0.0},  
+    {0.0, 0.0}   
 };
 
 void main()
 {
-    v_TexCoord = textureCoords[gl_VertexIndex];
-    gl_Position = vec4(a_Position, 1.0);
+    v_TexCoord = texCoords[gl_VertexIndex];
+    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
 }
 
 #pragma stage : fragment

@@ -2,8 +2,6 @@
 
 #version 450 
 
-layout(location = 0) in vec3 aPosition;
-
 layout(binding = 0) uniform camera {
     mat4 projection;
     mat4 view;
@@ -12,16 +10,24 @@ layout(binding = 0) uniform camera {
 layout(location =3) out vec3 outUVW ;
 layout(location =4) out vec3   v_Position ;
 
+vec2 positions[6] = {
+    {-1.0, -1.0}, 
+    { 1.0, -1.0}, 
+    {-1.0,  1.0}, 
+    
+    { 1.0, -1.0}, 
+    { 1.0,  1.0}, 
+    {-1.0,  1.0}  
+};
+
 void main()
 {
-    vec4 position = vec4(aPosition.xy, 1.0, 1.0);
+    vec4 position = vec4(positions[gl_VertexIndex], 1.0, 1.0);
 	gl_Position = position;
 
     mat4 inverseVP = inverse(ubo.projection * ubo.view);
 
 	v_Position = ((inverseVP * position).xyz);
-    v_Position.xy *= -1.0;
-
 }
 
 #pragma stage : fragment

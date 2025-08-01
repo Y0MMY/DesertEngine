@@ -14,7 +14,7 @@ namespace Desert::Graphic
     std::shared_ptr<Desert::Graphic::MaterialSkybox>
     MaterialFactory::CreateSkybox( const std::shared_ptr<Assets::TextureAsset>& baseAsset )
     {
-        return std::make_shared<MaterialSkybox>( baseAsset );
+        return {};//std::make_shared<MaterialSkybox>(baseAsset);
     }
 
 } // namespace Desert::Graphic

@@ -43,7 +43,10 @@ namespace Desert::Graphic::API::Vulkan
 
         uint32_t GetDepthAttachmentCount() const override
         {
-            return ( m_DepthAttachment || m_ExternalDepthAttachment.lock() ) ? 1U : 0U;
+            return ( m_DepthAttachment ||
+                     ( m_ExternalDepthAttachment && m_ExternalDepthAttachment->Image.lock() ) )
+                        ? 1U
+                        : 0U;
         }
 
         Common::BoolResult Invalidate() override
@@ -75,8 +78,14 @@ namespace Desert::Graphic::API::Vulkan
         std::shared_ptr<Image2D>              m_DepthAttachment;
         std::vector<std::shared_ptr<Image2D>> m_ColorAttachments;
 
-        std::weak_ptr<Image2D>              m_ExternalDepthAttachment;
-        std::vector<std::weak_ptr<Image2D>> m_ExternalColorAttachments;
+        struct ExternalAttachmentInfo
+        {
+            std::weak_ptr<Image2D> Image;
+            AttachmentLoad         LoadOp;
+        };
+
+        std::optional<ExternalAttachmentInfo> m_ExternalDepthAttachment;
+        std::vector<ExternalAttachmentInfo>   m_ExternalColorAttachments;
 
         FramebufferSpecification m_FramebufferSpecification;
 

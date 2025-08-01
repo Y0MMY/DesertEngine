@@ -27,11 +27,17 @@ namespace Desert::Graphic
 
     class Framebuffer;
 
+    struct ExternalAttachment
+    {
+        std::shared_ptr<Framebuffer> SourceFramebuffer;
+        uint32_t                     AttachmentIndex = 0;
+        AttachmentLoad               Load            = AttachmentLoad::Clear;
+    };
+
     struct ExternalFramebuffer
     {
-        //  external attachments (e.g. Skybox texture)
-        std::vector<std::shared_ptr<Framebuffer>> ExternalAttachments;
-        AttachmentLoad                            Load = AttachmentLoad::Clear;
+        std::vector<ExternalAttachment> ColorAttachments;
+        std::optional<ExternalAttachment> DepthAttachment;
     };
 
     struct FramebufferSpecification

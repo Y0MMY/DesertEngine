@@ -10,9 +10,18 @@ namespace Desert::Runtime
         m_Textures[handle] = std::move( texture );
     }
 
-    void ResourceRegistry::RegisterSkybox( const Assets::AssetHandle& handle, const Graphic::Environment& skybox )
+    Common::BoolResult
+    ResourceRegistry::RegisterSkybox( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAssetAsset )
     {
-        m_Skyboxes[handle] = skybox;
+        if ( !skyboxAssetAsset->GetMetadata().IsValid() )
+        {
+            return Common::MakeError( "Skybox asset is invalid" );
+        }
+
+        m_Skyboxes[skyboxAssetAsset->GetMetadata().Handle] =
+             std::make_shared<Graphic::MaterialSkybox>( skyboxAssetAsset );
+
+        return BOOLSUCCESS;
     }
 
     std::shared_ptr<Desert::Graphic::Texture2D>
@@ -22,7 +31,7 @@ namespace Desert::Runtime
         return ( it != m_Textures.end() ) ? it->second : nullptr;
     }
 
-    std::optional<Graphic::Environment> ResourceRegistry::GetSkybox( const Assets::AssetHandle& handle ) const
+    std::optional<std::shared_ptr<Graphic::MaterialSkybox>> ResourceRegistry::GetSkybox( const Assets::AssetHandle& handle ) const
     {
         auto it = m_Skyboxes.find( handle );
         return ( it != m_Skyboxes.end() ) ? std::make_optional( it->second ) : std::nullopt;

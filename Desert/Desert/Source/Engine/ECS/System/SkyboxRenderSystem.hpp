@@ -30,7 +30,7 @@ namespace Desert::ECS
 
                     if ( !skyboxAsset )
                         return;
-                    //renderer->SetEnvironment( skyboxAsset );
+                    renderer->SetEnvironment( skyboxAsset.value() );
                     break;
                 }
             }

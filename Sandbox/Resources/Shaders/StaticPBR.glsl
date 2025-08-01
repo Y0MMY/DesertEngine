@@ -25,11 +25,11 @@ layout(location=0) out Vertex
 
 void main()
 {
-	outVertex.WorldPosition = vec3(m_PushConstants.Transform * vec4(a_Position, 1.0));;
+	outVertex.WorldPosition = vec3(m_PushConstants.Transform * vec4(a_Position, 1.0));
 	outVertex.Texcoord = vec2(a_TextureCoord.x, 1.0 - a_TextureCoord.y);
 
-	mat3 modelRotation = mat3(m_PushConstants.Transform);
-	outVertex.Normal = 	modelRotation * a_Normal;
+	mat3 modelRotation =  transpose(inverse(mat3(m_PushConstants.Transform)));
+	outVertex.Normal = 	mat3(m_PushConstants.Transform) * a_Normal;
 	outVertex.TBN = modelRotation * mat3(a_Tangent, a_Bitangent, a_Normal);
 
 	gl_Position =  m_PushConstants.ViewProject * m_PushConstants.Transform * vec4(a_Position, 1.0);
@@ -83,6 +83,7 @@ layout (binding = 9) uniform samplerCube u_EnvIrradianceTex;
 layout (binding = 10) uniform sampler2D u_BRDFLUTTexture;
 
 layout(binding = 11) uniform sampler2D u_AlbedoTexture;
+layout(binding = 12) uniform sampler2D u_NormalTexture;
 
 struct Params
 {
@@ -184,10 +185,15 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 void main() {
 
 	m_Params.AlbedoColor = pbr.AlbedoColor * pbr.AlbedoBlend;
-	const ivec2 textureSize = textureSize(u_AlbedoTexture, 0);
-
 	m_Params.AlbedoColor *= texture(u_AlbedoTexture, inVertex.Texcoord).rgb;
-	m_Params.Normal =  normalize(inVertex.TBN * inVertex.Normal);
+	m_Params.Normal =  normalize(inVertex.Normal);
+
+	const ivec2 textureSize = textureSize(u_NormalTexture, 0);
+	if(textureSize.x > 1 && textureSize.y > 1) // not fallback
+	{
+		m_Params.Normal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
+		m_Params.Normal = normalize(inVertex.TBN * m_Params.Normal);
+	}
 
 	const float metalness = pbr.MetallicValue * pbr.MetallicBlend;
 	const float roughness  = pbr.RoughnessValue * pbr.RoughnessBlend;

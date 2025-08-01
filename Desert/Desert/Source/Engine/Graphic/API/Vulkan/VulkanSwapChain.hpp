@@ -79,7 +79,7 @@ namespace Desert::Graphic::API::Vulkan
         Common::Result<VkResult> AcquireNextImage( VkSemaphore presentCompleteSemaphore, uint32_t* imageIndex );
         Common::Result<VkResult> CreateSwapChainRenderPass();
         Common::Result<VkResult> CreateSwapChainFramebuffers();
-        Common::Result<VkResult> CreateColorAndDepthImages();
+        Common::Result<VkResult> CreateColorAndDepthImages(); //TODO: remove depth
 
     private:
         VkSampleCountFlagBits m_MSAASamples = VK_SAMPLE_COUNT_1_BIT;

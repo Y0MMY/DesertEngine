@@ -65,6 +65,17 @@ namespace Desert::Graphic
                 return true;
             return false;
         }
+
+        bool HasStencilComponent( Core::Formats::ImageFormat format )
+        {
+            switch ( format )
+            {
+                case Core::Formats::ImageFormat::DEPTH24STENCIL8:
+                    return true;
+                default:
+                    return false;
+            }
+        }
     } // namespace Utils
 
     uint32_t Image::GetBytesPerPixel( const Core::Formats::ImageFormat& format )

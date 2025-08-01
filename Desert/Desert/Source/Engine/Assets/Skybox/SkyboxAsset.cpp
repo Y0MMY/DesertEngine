@@ -11,17 +11,12 @@ namespace Desert::Assets
 
     Common::BoolResult SkyboxAsset::Load()
     {
-        m_TextureAsset =
-             std::make_unique<TextureAsset>( AssetPriority::Low, m_Metadata.Filepath, TextureAsset::Type::Skybox );
-
-        if ( !m_TextureAsset->Load() )
+        /*if ( !m_TextureAsset->Load() )
         {
             LOG_WARN( "Failed to load texture: {}", m_Metadata.Filepath.string() );
             return Common::MakeFormattedError( "Failed to load texture: {}", m_Metadata.Filepath.string() );
-        }
+        }*/
 
-        m_Environment = Graphic::EnvironmentManager::Create( m_Metadata.Filepath.string() ); // TODO: param:
-                                                                                             // texture
         m_ReadyForUse = true;
         return BOOLSUCCESS;
     }

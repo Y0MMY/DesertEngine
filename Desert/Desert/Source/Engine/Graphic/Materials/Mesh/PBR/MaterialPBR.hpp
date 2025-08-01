@@ -4,8 +4,8 @@
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 #include <Engine/Graphic/Materials/Models/Global.hpp>
-#include <Engine/Graphic/Materials/Models/PBR/PBRTextures.hpp>
-#include <Engine/Graphic/Materials/Models/PBR/MaterialPBRProperties.hpp>
+#include <Engine/Graphic/Materials/Models/Mesh/PBR/PBRTextures.hpp>
+#include <Engine/Graphic/Materials/Models/Mesh/PBR/MaterialPBRProperties.hpp>
 #include <Engine/Graphic/Materials/Models/Lighting.hpp>
 
 #include <Engine/Core/Camera.hpp>

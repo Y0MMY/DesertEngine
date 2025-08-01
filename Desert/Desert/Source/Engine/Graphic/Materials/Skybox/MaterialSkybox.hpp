@@ -13,9 +13,9 @@ namespace Desert::Graphic
     class MaterialSkybox
     {
     public:
-        explicit MaterialSkybox( const std::shared_ptr<Assets::TextureAsset>& baseAsset );
+        explicit MaterialSkybox( const std::shared_ptr<Assets::SkyboxAsset>& baseAsset );
 
-        std::shared_ptr<Assets::TextureAsset> GetBaseMaterial() const
+        std::shared_ptr<Assets::SkyboxAsset> GetBaseMaterial() const
         {
             if ( auto material = m_BaseMaterial.lock() )
             {
@@ -54,8 +54,8 @@ namespace Desert::Graphic
     private:
         // weak_ptr because AssetManager owns MaterialAsset
         // MaterialPBR only observes the base material
-        std::weak_ptr<Assets::TextureAsset> m_BaseMaterial;
-        std::shared_ptr<MaterialExecutor>   m_Material;
+        std::weak_ptr<Assets::SkyboxAsset> m_BaseMaterial;
+        std::shared_ptr<MaterialExecutor>  m_Material;
 
         Environment m_Environment;
 

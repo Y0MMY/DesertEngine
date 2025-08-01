@@ -2,7 +2,7 @@
 
 namespace Desert::Graphic
 {
-    MaterialSkybox::MaterialSkybox( const std::shared_ptr<Assets::TextureAsset>& baseAsset )
+    MaterialSkybox::MaterialSkybox( const std::shared_ptr<Assets::SkyboxAsset>& baseAsset )
          : m_BaseMaterial( baseAsset )
     {
 
@@ -13,7 +13,7 @@ namespace Desert::Graphic
         m_CameraModel = std::make_unique<Models::CameraData>( m_Material );
         m_SkyboxModel = std::make_unique<Models::SkyboxData>( m_Material );
 
-        m_Environment = Graphic::EnvironmentManager::Create( baseAsset->GetMetadata().Filepath );
+        m_Environment = Graphic::EnvironmentManager::Create( baseAsset );
     }
 
     void MaterialSkybox::UpdateRenderParameters( const Core::Camera& camera )

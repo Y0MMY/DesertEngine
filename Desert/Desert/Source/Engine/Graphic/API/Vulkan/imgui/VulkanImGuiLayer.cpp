@@ -142,9 +142,9 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         VkViewport viewport = {};
         viewport.x          = 0.0f;
-        viewport.y          = 0.0f;
+        viewport.y          = (float)height;
+        viewport.height     = -(float)height;
         viewport.width      = (float)width;
-        viewport.height     = (float)height;
         viewport.minDepth   = 0.0f;
         viewport.maxDepth   = 1.0f;
         vkCmdSetViewport( drawCommandBuffer, 0, 1, &viewport );

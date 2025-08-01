@@ -7,6 +7,8 @@
 #include <Common/Core/Core.hpp>
 #include <Engine/Core/Camera.hpp>
 
+#include "SceneSettings.hpp"
+
 #include <Engine/Assets/AssetManager.hpp>
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -74,6 +76,16 @@ namespace Desert::Core
         [[nodiscard]] std::optional<std::reference_wrapper<const ECS::Entity>>
         FindEntityByID( const Common::UUID& uuid ) const;
 
+        [[nodiscard]] SceneSettings& GetSettings()
+        {
+            return m_Settings;
+        }
+
+        [[nodiscard]] const SceneSettings& GetSettings() const
+        {
+            return m_Settings;
+        }
+
         void Serialize() const;
 
     private:
@@ -94,5 +106,7 @@ namespace Desert::Core
         entt::registry                           m_Registry;
         std::vector<ECS::Entity>                 m_Entitys;
         std::unordered_map<Common::UUID, size_t> m_EntitysMap;
+
+        SceneSettings m_Settings;
     };
 } // namespace Desert::Core

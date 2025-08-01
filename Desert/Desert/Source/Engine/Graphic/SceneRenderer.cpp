@@ -34,6 +34,10 @@ namespace Desert::Graphic
         m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
         m_SkyboxRenderer->BeginScene( camera );
         m_MeshRenderer->BeginScene( camera, m_SkyboxRenderer->GetEnvironment() );
+        const auto& sceneSettings = scene->GetSettings();
+        m_MeshRenderer->SetOutlineColor( sceneSettings.OutlineColor );
+        m_MeshRenderer->ToggleOutline( sceneSettings.EnableOutline );
+        m_MeshRenderer->SetOutlineWidth( sceneSettings.OutlineWidth );
         auto& renderer = Renderer::GetInstance();
         return renderer.BeginFrame();
     }
@@ -86,7 +90,7 @@ namespace Desert::Graphic
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
     {
-        return EnvironmentManager::Create( filepath );
+        return {}; // EnvironmentManager::Create( filepath );
     }
 
     void SceneRenderer::SetEnvironment( const std::shared_ptr<MaterialSkybox>& material )
