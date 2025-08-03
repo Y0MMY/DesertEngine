@@ -23,9 +23,15 @@ namespace Desert::Graphic
         const VP vp{ .ViewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(),
                      .Transform      = transform };
 
+        const glm::vec3 worldPosition  = transform[3];
+        const auto&     cameraPosition = camera.GetPosition();
+
+        float       distance     = glm::distance( worldPosition, cameraPosition );
+        const float dynamicWidth = width / ( 1.0f + distance );
+
         m_Material->PushConstant( &vp, sizeof( vp ) );
 
-        m_OutlineData->UpdateOutlineUB( { width, color } );
+        m_OutlineData->UpdateOutlineUB( { 1.0f + dynamicWidth, color } );
     }
 
 } // namespace Desert::Graphic

@@ -21,12 +21,7 @@ layout(std140, binding = 0) uniform OutlineUBVertex
 
 void main()
 {
-    vec4 clipPosition = m_PushConstants.ViewProject * m_PushConstants.Transform * vec4(a_Position, 1.0);
-    vec3 clipNormal = normalize(mat3(m_PushConstants.ViewProject) * mat3(m_PushConstants.Transform) * a_Normal);
-    float outlineWidth = u_OutlineWidth * 0.005; 
-    clipPosition.xyz += clipNormal * outlineWidth * clipPosition.w;
-    
-    gl_Position = clipPosition;
+	gl_Position = m_PushConstants.ViewProject * m_PushConstants.Transform * vec4(a_Position * u_OutlineWidth, 1.0) ;
 }
 
 #pragma stage : fragment

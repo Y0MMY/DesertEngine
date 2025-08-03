@@ -69,7 +69,7 @@ namespace Desert::Core
 
         float m_Distance  = 0.0f;
         float m_FOV       = 45.0f;
-        float m_NearPlane = 0.1f;
+        float m_NearPlane = 0.001f;
         float m_FarPlane  = 1000.0f;
 
         float m_Pitch = 0.0f, m_PitchDelta = 0.0f;

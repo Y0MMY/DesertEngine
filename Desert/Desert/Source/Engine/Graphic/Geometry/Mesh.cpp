@@ -114,10 +114,21 @@ namespace Desert
 
         const auto& rawData = meshAsset->GetRawData();
 
-        auto scene = importer->ReadFileFromMemory(
-             rawData.data(), rawData.size(),
-             aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_SortByPType | aiProcess_GenNormals |
-                  aiProcess_GenUVCoords | aiProcess_OptimizeMeshes | aiProcess_ValidateDataStructure );
+        static const uint32_t s_MeshImportFlags =
+             aiProcess_CalcTangentSpace | // Create binormals/tangents just in case
+             aiProcess_Triangulate |      // Make sure we're triangles
+             aiProcess_SortByPType |      // Split meshes by primitive type
+             aiProcess_GenNormals |       // Make sure we have legit normals
+             aiProcess_GenUVCoords |      // Convert UVs if required
+             //		aiProcess_OptimizeGraph |
+             aiProcess_OptimizeMeshes | // Batch draws where possible
+             aiProcess_JoinIdenticalVertices |
+             aiProcess_LimitBoneWeights | // If more than N (=4) bone weights, discard least influencing bones and
+                                          // renormalise sum to 1
+             aiProcess_ValidateDataStructure | // Validation
+             aiProcess_GlobalScale; // e.g. convert cm to m for fbx import (and other formats where cm is native)
+
+        auto scene = importer->ReadFileFromMemory( rawData.data(), rawData.size(), s_MeshImportFlags );
         if ( scene == nullptr )
         {
             LOG_ERROR( "An error occurred during mesh extraction: {}", std::string( importer->GetErrorString() ) );

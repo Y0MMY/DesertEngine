@@ -8,7 +8,6 @@ namespace Desert::Graphic::System
     Common::BoolResult MeshRenderer::Init( const uint32_t width, const uint32_t height,
                                            const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal )
     {
-        m_RenderGraph = std::make_unique<RenderGraph>();
 
         // Setup geometry pass
         if ( !SetupGeometryPass( width, height, skyboxFramebufferExternal ) )
@@ -35,46 +34,6 @@ namespace Desert::Graphic::System
     bool MeshRenderer::SetupOutlinePass( const uint32_t width, const uint32_t height,
                                          const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal )
     {
-        FramebufferSpecification fbSpec;
-        fbSpec.DebugName               = "OutlineBuffer";
-        fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
-
-        fbSpec.ExternalAttachments.ColorAttachments.push_back( { .SourceFramebuffer = skyboxFramebufferExternal,
-                                                                 .AttachmentIndex   = 0,
-                                                                 .Load              = AttachmentLoad::Load } );
-
-        fbSpec.ExternalAttachments.DepthAttachment = { .SourceFramebuffer = m_Framebuffer,
-                                                       .Load              = AttachmentLoad::Load };
-
-        m_OutlineFramebuffer = Graphic::Framebuffer::Create( fbSpec );
-        m_OutlineFramebuffer->Resize( width, height );
-
-        // RenderPass
-        RenderPassSpecification rpSpec;
-        rpSpec.DebugName         = "OutlinePass";
-        rpSpec.TargetFramebuffer = m_OutlineFramebuffer;
-
-        m_RenderGraph->AddPass(
-             "OutlinePass",
-             [&]()
-             {
-                 if ( !m_OutlineDraw )
-                 {
-                     return;
-                 }
-
-                 auto& renderer = Renderer::GetInstance();
-                 for ( const auto& renderData : m_RenderQueue )
-                 {
-
-                     m_OutlineMaterial->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform,
-                                                                m_OutlineWidth, m_OutlineColor );
-
-                     renderer.RenderMesh( m_OutlinePipeline, renderData.Mesh,
-                                          m_OutlineMaterial->GetMaterialExecutor() );
-                 }
-             },
-             RenderPass::Create( rpSpec ) );
 
         // Shader
         m_OutlineShader = Graphic::Shader::Create( "Outline.glsl" );
@@ -87,15 +46,15 @@ namespace Desert::Graphic::System
                                       { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                                       { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
 
-        outlinePipeSpec.DepthWriteEnabled = true;
-        outlinePipeSpec.DepthTestEnabled = false;
+        outlinePipeSpec.DepthWriteEnabled  = true;
+        outlinePipeSpec.DepthTestEnabled   = false;
         outlinePipeSpec.StencilTestEnabled = true;
         outlinePipeSpec.StencilFront       = { .FailOp      = StencilOp::Keep,
                                                .PassOp      = StencilOp::Replace,
                                                .DepthFailOp = StencilOp::Keep,
                                                .CompareOp   = CompareOp::NotEqual,
                                                .CompareMask = 0xFF,
-                                               .WriteMask   = 0xFF, 
+                                               .WriteMask   = 0xFF,
                                                .Reference   = 1 };
         outlinePipeSpec.StencilBack        = outlinePipeSpec.StencilFront;
         outlinePipeSpec.DepthTestEnabled   = false;
@@ -103,9 +62,12 @@ namespace Desert::Graphic::System
         outlinePipeSpec.StencilBack = outlinePipeSpec.StencilFront;
 
         outlinePipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
-        outlinePipeSpec.CullMode       = CullMode::None; 
-        outlinePipeSpec.Shader      = m_OutlineShader;
-        outlinePipeSpec.Framebuffer = m_OutlineFramebuffer;
+        outlinePipeSpec.CullMode       = CullMode::None;
+        outlinePipeSpec.Shader         = m_OutlineShader;
+        outlinePipeSpec.Framebuffer    = m_Framebuffer;
+        outlinePipeSpec.PolygonMode    = PrimitivePolygonMode::Wireframe;
+        outlinePipeSpec.Topology       = PrimitiveTopology::LineStrip;
+        outlinePipeSpec.LineWidth       = 5.0f;
 
         m_OutlinePipeline = Pipeline::Create( outlinePipeSpec );
         m_OutlinePipeline->Invalidate();
@@ -144,8 +106,32 @@ namespace Desert::Graphic::System
     void MeshRenderer::EndScene()
     {
         auto&      renderer = Renderer::GetInstance();
+        const auto textures = PreparePBRTextures();
+        renderer.BeginRenderPass( m_RenderPass );
 
-        m_RenderGraph->Execute();
+        for ( const auto& renderData : m_RenderQueue )
+        {
+            renderData.Material->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform, m_DirectionLight,
+                                                         textures );
+            renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
+        }
+
+        if ( !m_OutlineDraw )
+        {
+            return;
+        }
+
+        for ( const auto& renderData : m_RenderQueue )
+        {
+
+            m_OutlineMaterial->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform, m_OutlineWidth,
+                                                       m_OutlineColor );
+
+            renderer.RenderMesh( m_OutlinePipeline, m_RenderQueue[0].Mesh,
+                                 m_OutlineMaterial->GetMaterialExecutor() );
+        }
+
+        renderer.EndRenderPass();
     }
 
     bool MeshRenderer::SetupGeometryPass( const uint32_t width, const uint32_t height,
@@ -169,21 +155,6 @@ namespace Desert::Graphic::System
         RenderPassSpecification rpSpec;
         rpSpec.DebugName         = debugName;
         rpSpec.TargetFramebuffer = m_Framebuffer;
-        m_RenderGraph->AddPass(
-             "SceneGeometry",
-             [&]()
-             {
-                 auto& renderer = Renderer::GetInstance();
-                 const auto textures = PreparePBRTextures();
-
-                 for ( const auto& renderData : m_RenderQueue )
-                 {
-                     renderData.Material->UpdateRenderParameters( *m_ActiveCamera, renderData.Transform,
-                                                                  m_DirectionLight, textures );
-                     renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
-                 }
-             },
-             RenderPass::Create( rpSpec ) );
 
         // Pipeline
         PipelineSpecification pipeSpec;
@@ -205,11 +176,12 @@ namespace Desert::Graphic::System
         pipeSpec.StencilBack        = pipeSpec.StencilFront;
 
         pipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
-        pipeSpec.CullMode       = CullMode::Back; 
+        pipeSpec.CullMode       = CullMode::None;
         pipeSpec.Shader         = Graphic::Shader::Create( "StaticPBR.glsl" );
         pipeSpec.Framebuffer    = m_Framebuffer;
 
-        m_Pipeline = Pipeline::Create( pipeSpec );
+        m_RenderPass = RenderPass::Create( rpSpec );
+        m_Pipeline   = Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 
         return true;

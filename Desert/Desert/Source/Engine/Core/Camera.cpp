@@ -62,7 +62,6 @@ namespace Desert::Core
     {
         m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), static_cast<float>( width / height ),
                                                m_NearPlane, m_FarPlane );
-
     }
 
     bool Camera::OnKeyPress( Common::KeyPressedEvent& e )
@@ -86,33 +85,33 @@ namespace Desert::Core
         if ( Common::Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right ) )
         {
             const float     YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
-            constexpr float cameraSpeed   = 0.002f;
-            constexpr float rotationSpeed = 0.133f;
+            const float cameraSpeed   = 0.0002f * timestep.GetMilliseconds();
+            const float rotationSpeed = 0.133f * timestep.GetMilliseconds();
 
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::S ) )
             {
-                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * m_Direction;
+                m_LocationDelta -= cameraSpeed * m_Direction;
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::W ) )
             {
-                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * m_Direction;
+                m_LocationDelta += cameraSpeed * m_Direction;
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::A ) )
             {
-                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * m_RightDirection;
+                m_LocationDelta -= cameraSpeed * m_RightDirection;
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::D ) )
             {
-                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * m_RightDirection;
+                m_LocationDelta += cameraSpeed * m_RightDirection;
             }
 
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::Q ) )
             {
-                m_LocationDelta -= cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f };
+                m_LocationDelta -= cameraSpeed * glm::vec3{ 0.f, YAWSign, 0.f };
             }
             if ( Common::Input::Keyboard::IsKeyPressed( Common::KeyCode::E ) )
             {
-                m_LocationDelta += cameraSpeed * timestep.GetMilliseconds() * glm::vec3{ 0.f, YAWSign, 0.f };
+                m_LocationDelta += cameraSpeed * glm::vec3{ 0.f, YAWSign, 0.f };
             }
 
             constexpr float maxRate = 0.12f;

@@ -50,6 +50,32 @@ namespace Desert::Graphic
         uint32_t  Reference;
     };
 
+    enum class PrimitiveTopology
+    {
+        Points = 0,
+        Lines,
+        Triangles,
+        LineStrip,
+        TriangleStrip,
+        TriangleFan
+    };
+
+    inline bool PrimitiveIsLine( PrimitiveTopology topology )
+    {
+        if ( topology == PrimitiveTopology::Lines || topology == PrimitiveTopology::LineStrip )
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    enum class PrimitivePolygonMode
+    {
+        Solid = 0,
+        Wireframe,
+    };
+
     struct PipelineSpecification
     {
         std::shared_ptr<Shader>      Shader;
@@ -58,12 +84,16 @@ namespace Desert::Graphic
         VertexBufferLayout           Layout;
 
         bool           DepthTestEnabled   = true;
-        CompareOp      DepthCompareOp = CompareOp::Less;
+        CompareOp      DepthCompareOp     = CompareOp::Less;
         bool           StencilTestEnabled = false;
         StencilOpState StencilFront;
         StencilOpState StencilBack;
         CullMode       CullMode          = CullMode::None;
         bool           DepthWriteEnabled = true;
+
+        float                LineWidth   = 1.0F; // Also affects the PrimitivePolygonMode::Wireframe
+        PrimitiveTopology    Topology    = PrimitiveTopology::Triangles;
+        PrimitivePolygonMode PolygonMode = PrimitivePolygonMode::Solid;
 
         std::string DebugName;
     };

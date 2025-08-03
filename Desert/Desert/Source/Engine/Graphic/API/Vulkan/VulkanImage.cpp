@@ -272,13 +272,13 @@ namespace Desert::Graphic::API::Vulkan
         // Creates an image view for accessing the image
         inline Common::Result<VkImageView> CreateImageView( VkDevice device, VkFormat format, VkImage image,
                                                             uint32_t mipLevels, bool isCubemap = false,
-                                                            bool isDepth = false )
+                                                            bool isDepth = false, bool hasStencil = false )
         {
             VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
             if ( isDepth )
             {
-                if ( format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT )
+                if ( hasStencil )
                 {
                     aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
                 }
@@ -436,17 +436,18 @@ namespace Desert::Graphic::API::Vulkan
             return result;
         }
 
-        const bool isDepth = Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format );
+        const bool isDepth    = Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format );
+        const bool hasStencil = Graphic::Utils::HasStencilComponent( m_ImageSpecification.Format );
 
         // Create image view
-        auto viewResult =
-             Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, false, isDepth );
+        auto viewResult = Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, false,
+                                                  isDepth, hasStencil );
         if ( !viewResult.IsSuccess() )
         {
             return Common::MakeError<bool>( viewResult.GetError() );
         }
         m_VulkanImageInfo.ImageInfo.imageView = viewResult.GetValue();
-        m_VulkanImageInfo.ImageInfo.imageLayout=
+        m_VulkanImageInfo.ImageInfo.imageLayout =
              Utils::GetVkImageLayout( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage );
 
         // Create sampler (only for non-storage images)
@@ -746,7 +747,7 @@ namespace Desert::Graphic::API::Vulkan
             return result;
 
         auto viewResult =
-             Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, true, false );
+             Utils::CreateImageView( device, format, m_VulkanImageInfo.Image, m_MipLevels, true, false, false );
         if ( !viewResult.IsSuccess() )
         {
             Release();

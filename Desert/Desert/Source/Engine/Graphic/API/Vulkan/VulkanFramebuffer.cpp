@@ -30,7 +30,8 @@ namespace Desert::Graphic::API::Vulkan
         CreateRenderPass( VkDevice device, const std::vector<Core::Formats::ImageFormat>& colorAttachments,
                           const std::optional<Core::Formats::ImageFormat>& depthAttachment,
                           const std::vector<ExternalAttachment>&           externalColorAttachments,
-                          const std::optional<ExternalAttachment>&         externalDepthAttachment )
+                          const std::optional<ExternalAttachment>&         externalDepthAttachment,
+                          std::vector<VkClearValue>&                       clearValues )
         {
             std::vector<VkAttachmentDescription> attachmentDescriptions;
             std::vector<VkAttachmentReference>   colorAttachmentRefs;
@@ -44,7 +45,7 @@ namespace Desert::Graphic::API::Vulkan
                 desc.samples        = VK_SAMPLE_COUNT_1_BIT;
                 desc.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR; // Always clear for internal
                 desc.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-                desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_CLEAR;
                 desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                 desc.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
                 desc.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -55,6 +56,9 @@ namespace Desert::Graphic::API::Vulkan
 
                 attachmentDescriptions.push_back( desc );
                 colorAttachmentRefs.push_back( ref );
+
+                clearValues.emplace_back();
+                clearValues.back().color = { 0.0, 0.0, 0.0, 1.0 };
             }
 
             // Process external color attachments
@@ -79,6 +83,9 @@ namespace Desert::Graphic::API::Vulkan
 
                     attachmentDescriptions.push_back( desc );
                     colorAttachmentRefs.push_back( ref );
+
+                    clearValues.emplace_back();
+                    clearValues.back().color = { 0.0, 0.0, 0.0, 1.0 };
                 }
             }
 
@@ -103,6 +110,10 @@ namespace Desert::Graphic::API::Vulkan
 
                 attachmentDescriptions.push_back( desc );
                 depthAttachmentRef = ref;
+
+                clearValues.emplace_back();
+                clearValues.back().depthStencil.depth   = 1.0f;
+                clearValues.back().depthStencil.stencil = 0;
             }
 
             // Process external depth attachment
@@ -121,9 +132,8 @@ namespace Desert::Graphic::API::Vulkan
                                                     : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
                     desc.stencilStoreOp =
                          hasStencil ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                    desc.initialLayout =
-                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL; // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                    desc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+                    desc.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                    desc.finalLayout   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
                     VkAttachmentReference ref{};
                     ref.attachment = static_cast<uint32_t>( attachmentDescriptions.size() );
@@ -131,6 +141,10 @@ namespace Desert::Graphic::API::Vulkan
 
                     attachmentDescriptions.push_back( desc );
                     depthAttachmentRef = ref;
+
+                    clearValues.emplace_back();
+                    clearValues.back().depthStencil.depth   = 1.0f;
+                    clearValues.back().depthStencil.stencil = 0;
                 }
             }
 
@@ -274,7 +288,7 @@ namespace Desert::Graphic::API::Vulkan
             const auto renderPassResult =
                  CreateRenderPass( device, colorFormats, depthFormat,
                                    m_FramebufferSpecification.ExternalAttachments.ColorAttachments,
-                                   m_FramebufferSpecification.ExternalAttachments.DepthAttachment );
+                                   m_FramebufferSpecification.ExternalAttachments.DepthAttachment, m_ClearValues );
 
             if ( !renderPassResult.IsSuccess() )
             {

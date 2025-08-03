@@ -71,6 +71,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_DepthAttachment;
         }
 
+        const auto& GetClearValues() const
+        {
+            return m_ClearValues;
+        }
+
     private:
         Common::Result<VkFramebuffer> CreateFramebuffer( VkDevice device, uint32_t width, uint32_t height );
 
@@ -94,5 +99,7 @@ namespace Desert::Graphic::API::Vulkan
 
         uint32_t m_Width  = 0;
         uint32_t m_Height = 0;
+
+        std::vector<VkClearValue> m_ClearValues;
     };
 } // namespace Desert::Graphic::API::Vulkan

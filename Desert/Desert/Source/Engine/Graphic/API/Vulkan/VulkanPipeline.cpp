@@ -12,6 +12,19 @@ namespace Desert::Graphic::API::Vulkan
 
     namespace
     {
+        static VkPolygonMode ConvertVkPolygonMode( PrimitivePolygonMode mode )
+        {
+            switch ( mode )
+            {
+                case PrimitivePolygonMode::Solid:
+                    return VK_POLYGON_MODE_FILL;
+                case PrimitivePolygonMode::Wireframe:
+                    return VK_POLYGON_MODE_LINE;
+            }
+
+            return VK_POLYGON_MODE_FILL;
+        }
+
         static VkStencilOp ConvertStencilOp( StencilOp op )
         {
             switch ( op )
@@ -139,7 +152,8 @@ namespace Desert::Graphic::API::Vulkan
              .topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
              .primitiveRestartEnable = VK_FALSE };
 
-        std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
+                                                      VK_DYNAMIC_STATE_LINE_WIDTH };
 
         VkPipelineDynamicStateCreateInfo dynamicStateInfo = {};
         dynamicStateInfo.sType                            = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -157,11 +171,12 @@ namespace Desert::Graphic::API::Vulkan
              .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
              .depthClampEnable        = VK_FALSE,
              .rasterizerDiscardEnable = VK_FALSE,
-             .polygonMode             = VK_POLYGON_MODE_FILL,
+             .polygonMode             = ConvertVkPolygonMode(m_Specification.PolygonMode),
+
              .cullMode                = ConvertCullMode( m_Specification.CullMode ),
-             .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+             .frontFace               = VK_FRONT_FACE_CLOCKWISE,
              .depthBiasEnable         = VK_FALSE,
-             .lineWidth               = 1.0f };
+             .lineWidth               = 1.0F };
 
         VkPipelineMultisampleStateCreateInfo multisampling = {
              .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -175,7 +190,7 @@ namespace Desert::Graphic::API::Vulkan
              .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
              .depthTestEnable       = m_Specification.DepthTestEnabled ? VK_TRUE : VK_FALSE,
              .depthWriteEnable      = m_Specification.DepthWriteEnabled ? VK_TRUE : VK_FALSE,
-             .depthCompareOp        = ConvertCompareOp(m_Specification.DepthCompareOp),
+             .depthCompareOp        = ConvertCompareOp( m_Specification.DepthCompareOp ),
              .depthBoundsTestEnable = VK_FALSE,
              .stencilTestEnable     = m_Specification.StencilTestEnabled ? VK_TRUE : VK_FALSE,
              .front                 = { .failOp      = ConvertStencilOp( m_Specification.StencilFront.FailOp ),
@@ -193,7 +208,7 @@ namespace Desert::Graphic::API::Vulkan
                                         .writeMask   = m_Specification.StencilBack.WriteMask,
                                         .reference   = m_Specification.StencilBack.Reference },
              .minDepthBounds        = 0.0f,
-             .maxDepthBounds        = 1.0f };
+             .maxDepthBounds        = 0.0f };
 
         std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments;
         colorBlendAttachments.resize( m_Specification.Framebuffer->GetColorAttachmentCount() );
@@ -207,7 +222,7 @@ namespace Desert::Graphic::API::Vulkan
         VkPipelineColorBlendStateCreateInfo colorBlending = {
              .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
              .logicOpEnable   = VK_FALSE,
-             .logicOp         = VK_LOGIC_OP_COPY,
+             .logicOp         = VK_LOGIC_OP_CLEAR,
              .attachmentCount = static_cast<uint32_t>( colorBlendAttachments.size() ),
              .pAttachments    = colorBlendAttachments.data(),
              .blendConstants  = { 0.0f, 0.0f, 0.0f, 0.0f },

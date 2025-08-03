@@ -40,6 +40,15 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
+        if ( deviceFeatures.wideLines )
+        {
+            m_SupportWideLines = true;
+        }
+        else
+        {
+            LOG_WARN( "Device doesn't support wide lines, line width will be clamped to 1.0" );
+        }
+
         if ( !selectedPhysicalDevice )
         {
             DESERT_VERIFY( "Could not find discrete GPU." );
@@ -130,6 +139,11 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkDeviceCreateInfo       createInfo{};
         VkPhysicalDeviceFeatures deviceFeatures{};
+        if (m_PhysicalDevice->m_SupportWideLines)
+        {
+            deviceFeatures.wideLines = VK_TRUE;
+            deviceFeatures.fillModeNonSolid = VK_TRUE;
+        }
         createInfo.sType                 = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         createInfo.pQueueCreateInfos     = m_PhysicalDevice->m_QueueCreateInfos.data();
         createInfo.queueCreateInfoCount  = m_PhysicalDevice->m_QueueCreateInfos.size();

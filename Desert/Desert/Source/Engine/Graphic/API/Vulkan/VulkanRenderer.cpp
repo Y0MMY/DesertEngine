@@ -23,6 +23,20 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
+    namespace
+    {
+        bool ShouldUseDynamicLineWidth( const std::shared_ptr<Pipeline>& pipeline )
+        {
+            const auto& spec = pipeline->GetSpecification();
+            if ( spec.PolygonMode == PrimitivePolygonMode::Wireframe || Graphic::PrimitiveIsLine( spec.Topology ) )
+            {
+                return true;
+            }
+
+            return false;
+        }
+    } // namespace
+
     static constexpr uint32_t kEnvFaceMapSize    = 1024;
     static constexpr uint32_t kIrradianceMapSize = 32;
     static constexpr uint32_t kBRDF_LUT_Size     = 256;
@@ -200,33 +214,6 @@ namespace Desert::Graphic::API::Vulkan
         m_DescriptorManager->Initialize( EngineContext::GetInstance().GetFramesInFlight() );
     }
 
-    std::vector<VkClearValue> CreateClearValues( const std::shared_ptr<RenderPass>& renderPass )
-    {
-        const auto&               clearColor = renderPass->GetSpecification().ClearColor;
-        std::vector<VkClearValue> clearValues;
-
-        const auto& framebuffer = renderPass->GetSpecification().TargetFramebuffer;
-
-        const uint32_t colorAttachmentCount = framebuffer->GetColorAttachmentCount();
-        for ( uint32_t i = 0; i < colorAttachmentCount; ++i )
-        {
-            VkClearValue clearValue{};
-            clearValue.color = { { clearColor.Color.r, clearColor.Color.g, clearColor.Color.b, 1.0 } };
-            clearValues.push_back( clearValue );
-        }
-        const uint32_t depthAttachmentCount = framebuffer->GetDepthAttachmentCount();
-
-        if ( depthAttachmentCount > 0 )
-        {
-            VkClearValue depthClearValue{};
-            depthClearValue.depthStencil = { clearColor.DepthStencil.x,
-                                             static_cast<uint32_t>( clearColor.DepthStencil.y ) };
-            clearValues.push_back( depthClearValue );
-        }
-
-        return clearValues;
-    }
-
     std::shared_ptr<VulkanFramebuffer> GetFramebuffer( const std::shared_ptr<RenderPass>& renderPass )
     {
         return sp_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
@@ -274,18 +261,19 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
     {
-        auto        clearValues = CreateClearValues( renderPass );
+        auto clearValues =
+             std::static_pointer_cast<VulkanFramebuffer>( renderPass->GetSpecification().TargetFramebuffer )
+                  ->GetClearValues();
         auto        framebuffer = GetFramebuffer( renderPass );
         const auto& swapChain   = GetSwapChain();
 
         m_CompositeFramebuffer = framebuffer;
 
-        SetViewportAndScissor();
-
         VkRenderPassBeginInfo renderPassBeginInfo =
              CreateRenderPassBeginInfo( swapChain, framebuffer, clearValues );
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
 
+        SetViewportAndScissor();
         return Common::MakeSuccess( true );
     }
 
@@ -296,12 +284,11 @@ namespace Desert::Graphic::API::Vulkan
         const auto&                 swapChain   = GetSwapChain();
         const auto                  framebuffer = swapChain->GetVKFramebuffers();
 
-        SetViewportAndScissor();
-
         VkRenderPassBeginInfo renderPassBeginInfo =
              CreateRenderPassBeginInfo( swapChain, framebuffer[frameIndex], clearValues );
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
 
+        SetViewportAndScissor();
         return Common::MakeSuccess( true );
     }
 
@@ -333,7 +320,7 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                            vulkanLayout->GetVkPipeline() );
 
-        vkCmdDraw(m_CurrentCommandBuffer, 6, 1, 0, 0);
+        vkCmdDraw( m_CurrentCommandBuffer, 6, 1, 0, 0 );
     }
 
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
@@ -437,6 +424,11 @@ namespace Desert::Graphic::API::Vulkan
 
         const auto ibuffer = sp_cast<API::Vulkan::VulkanIndexBuffer>( mesh->GetIndexBuffer() )->GetVulkanBuffer();
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
+
+        if ( ShouldUseDynamicLineWidth( pipeline ) )
+        {
+            vkCmdSetLineWidth( m_CurrentCommandBuffer, pipeline->GetSpecification().LineWidth );
+        }
 
         const auto& pcBuffer = material->GetPushConstantBuffer();
         if ( pcBuffer.Size )
