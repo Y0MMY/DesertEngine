@@ -1,5 +1,70 @@
 local baseDir = "%{wks.location}/ThirdParty"
 
+local function findVulkanSDK()
+    print("[Vulkan] Searching for Vulkan SDK...")
+    
+    local vulkan_sdk = os.getenv("VULKAN_SDK")
+    
+    if vulkan_sdk and vulkan_sdk ~= "" then
+        print("[Vulkan] Found via VULKAN_SDK environment variable: " .. vulkan_sdk)
+    else
+        print("[Vulkan] VULKAN_SDK environment variable not set or empty")
+        
+        if os.host() == "windows" then
+            print("[Vulkan] Trying to find VulkanSDK in Program Files...")
+            local program_files = os.getenv("PROGRAMFILES")
+            vulkan_sdk = program_files .. "/VulkanSDK"
+            
+            -- Latest version
+            local versions = os.matchdirs(vulkan_sdk .. "/*")
+            table.sort(versions, function(a, b) return a > b end)
+            if #versions > 0 then
+                vulkan_sdk = versions[1]
+                print("[Vulkan] Found in Program Files: " .. vulkan_sdk)
+            else
+                print("[Vulkan] No VulkanSDK versions found in " .. vulkan_sdk)
+            end
+        else
+            -- Linux/macOS
+            vulkan_sdk = "/usr/local/vulkan"
+            print("[Vulkan] Trying default path for Linux/macOS: " .. vulkan_sdk)
+        end
+    end
+    
+    if not vulkan_sdk or vulkan_sdk == "" then
+        print("[Vulkan] Warning: Vulkan SDK not found!")
+        return nil
+    end
+    
+    print("[Vulkan] Using Vulkan SDK at: " .. vulkan_sdk)
+    return vulkan_sdk
+end
+
+local vulkan_sdk = findVulkanSDK()
+
+local function getVulkanLibs(config)
+    local libs = {}
+    
+    if vulkan_sdk then
+        print(string.format("[Vulkan] Getting libraries for config: %s", config))
+        local suffix = config:find("Debug") and "d" or ""
+        
+        table.insert(libs, vulkan_sdk .. "/Lib/vulkan-1.lib")
+        
+        table.insert(libs, vulkan_sdk .. "/Lib/shaderc" .. suffix .. ".lib")
+        table.insert(libs, vulkan_sdk .. "/Lib/shaderc_shared" .. suffix .. ".lib")
+        table.insert(libs, vulkan_sdk .. "/Lib/shaderc_combined" .. suffix .. ".lib")
+        table.insert(libs, vulkan_sdk .. "/Lib/shaderc_util" .. suffix .. ".lib")
+        
+        table.insert(libs, vulkan_sdk .. "/Lib/spirv-cross-core" .. suffix .. ".lib")
+        table.insert(libs, vulkan_sdk .. "/Lib/spirv-cross-glsl" .. suffix .. ".lib")
+        
+        table.insert(libs, vulkan_sdk .. "/Lib/OGLCompiler" .. suffix .. ".lib")
+    end
+    
+    return libs
+end
+
 Dependencies = {
     Common = {
         IncludeDir = {
@@ -29,37 +94,25 @@ Dependencies = {
         IncludeDir = {
             base = baseDir,
             stb = baseDir .. "/stb/include",
+            vkallocator = baseDir .. "/VulkanAllocator",
+            imgui = baseDir .. "/stb/ImGui",
             assimp = baseDir .. "/assimp/include",
             entt = baseDir .. "/entt/include",
-            Vulkan = baseDir .. "/VulkanSDK/",
-            VulkanInc = baseDir .. "/VulkanSDK/include/",
-            shaderc = baseDir .. "/VulkanSDK/shaderc/Include",
-            spirv_cross = baseDir .. "/VulkanSDK/spirv_cross/Include",
             reflect_cpp = baseDir .. "/reflect-cpp/include",
+            Vulkan = vulkan_sdk and (vulkan_sdk .. "/Include") or nil,
+            shaderc = vulkan_sdk and (vulkan_sdk .. "/Include/shaderc") or nil,
+            spirv_cross = vulkan_sdk and (vulkan_sdk .. "/Include/spirv_cross") or nil,
         },
         Libraries = {
             Debug = {
                 assimp = baseDir .. "/assimp/bin/Debug/assimp-vc142-mtd.lib",
-                shaderc = baseDir .. "/VulkanSDK/shaderc/Lib/shadercd.lib",
-                shaderc_shared = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_sharedd.lib",
-                spirv_cross_core = baseDir .. "/VulkanSDK/spirv_cross/Lib/spirv-cross-cored.lib",
-                spirv_cross_glsl = baseDir .. "/VulkanSDK/spirv_cross/Lib/spirv-cross-glsld.lib",
-                vulkan = baseDir .. "/VulkanSDK/Lib/vulkan-1.lib",
-                OGLCompiler = baseDir .. "/VulkanSDK/Lib/OGLCompilerd.lib",
-                shaderc_combined = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_combinedd.lib",
-                shaderc_util = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_utild.lib",
                 reflect_cpp = baseDir .. "/reflect-cpp/bin/Debug/reflectcpp.lib",
+                getVulkanLibs("Debug")
             },
             Release = {
                 assimp = baseDir .. "/assimp/bin/Release/assimp-vc142-mt.lib",
-                shaderc = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc.lib",
-                shaderc_shared = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_shared.lib",
-                spirv_cross_core = baseDir .. "/VulkanSDK/spirv_cross/Lib/spirv-cross-core.lib",
-                spirv_cross_glsl = baseDir .. "/VulkanSDK/spirv_cross/Lib/spirv-cross-glsl.lib",
-                vulkan = baseDir .. "/VulkanSDK/Lib/vulkan-1.lib",
-                OGLCompiler = baseDir .. "/VulkanSDK/Lib/OGLCompiler.lib",
-                shaderc_combined = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_combined.lib",
-                shaderc_util = baseDir .. "/VulkanSDK/shaderc/Lib/shaderc_util.lib",
+                reflect_cpp = baseDir .. "/reflect-cpp/bin/Release/reflectcpp.lib",
+                getVulkanLibs("Release")
             }
         },
         Defines = {

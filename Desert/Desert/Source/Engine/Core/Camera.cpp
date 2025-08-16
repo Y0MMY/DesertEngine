@@ -60,7 +60,7 @@ namespace Desert::Core
 
     void Camera::UpdateProjectionMatrix( const uint32_t width, const uint32_t height )
     {
-        m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), static_cast<float>( width / height ),
+        m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), static_cast<float>( width / (height == 0 ? 1 : height)),
                                                m_NearPlane, m_FarPlane );
     }
 

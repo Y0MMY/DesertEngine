@@ -37,8 +37,23 @@ namespace Desert::Platform::Windows
         if ( Graphic::RendererAPI::GetAPIType() == Graphic::RendererAPIType::Vulkan )
             glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
 
-        m_GLFWWindow = glfwCreateWindow( (int)m_Data.Specification.Width, (int)m_Data.Specification.Height,
-                                         m_Data.Specification.Title.c_str(), nullptr, nullptr );
+        auto width  = m_Data.Specification.Width;
+        auto height = m_Data.Specification.Height;
+
+        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode    = glfwGetVideoMode( monitor );
+        if ( m_Data.Specification.Fullscreen )
+        {
+
+            width  = mode->width;
+            height = mode->height;
+
+            m_Data.Specification.Width  = width;
+            m_Data.Specification.Height = height;
+        }
+
+        m_GLFWWindow =
+             glfwCreateWindow( (int)width, (int)height, m_Data.Specification.Title.c_str(), nullptr, nullptr );
 
         // EngineContext::GetInstance().m_CurrentWindow = m_GLFWWindow;
 
@@ -143,8 +158,7 @@ namespace Desert::Platform::Windows
 
     bool WindowsWindow::IsWindowMaximized() const
     {
-
-        return false;
+        return glfwGetWindowMonitor( m_GLFWWindow ) != nullptr;
     }
 
     bool WindowsWindow::IsWindowMinimized() const
@@ -152,8 +166,15 @@ namespace Desert::Platform::Windows
         return false;
     }
 
-    void WindowsWindow::Maximize() const
+    void WindowsWindow::Maximize()
     {
+        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode    = glfwGetVideoMode( monitor );
+
+        m_Data.Specification.Width  = mode->width;
+        m_Data.Specification.Height = mode->height;
+
+        glfwSetWindowMonitor( m_GLFWWindow, monitor, 0, 0, mode->width, mode->height, mode->refreshRate );
     }
 
     void WindowsWindow::ProcessEvents()

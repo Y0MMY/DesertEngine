@@ -10,7 +10,7 @@ project "Desert"
         "Source/pch.hpp",
         "Source/Engine/**.cpp", 
         "Source/Engine/**.hpp",
-        "%{wks.location}/ThirdParty/VulkanSDK/VulkanAllocator/vk_mem_alloc.cpp",
+        "%{wks.location}/ThirdParty/VulkanAllocator/vk_mem_alloc.cpp",
         "%{wks.location}/ThirdParty/stb/stb_image.cpp",
     }
 

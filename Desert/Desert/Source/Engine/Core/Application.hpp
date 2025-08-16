@@ -6,6 +6,7 @@
 #include <Common/Core/LayerStack.hpp>
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/Window.hpp>
+#include "EngineStats.hpp"
 
 #include <Common/Core/Core.hpp>
 
@@ -20,6 +21,7 @@ namespace Desert::Engine
         std::string Title;
         uint32_t    Width;
         uint32_t    Height;
+        bool Fullscreen = true;
     };
 
     class Application
@@ -27,6 +29,11 @@ namespace Desert::Engine
     public:
         Application( const ApplicationInfo& appInfo );
         ~Application() = default;
+
+        const auto& GetEngineStats() const
+        {
+            return m_EngineStats;
+        }
 
         virtual void OnCreate()  = 0;
         virtual void OnDestroy() = 0;
@@ -61,16 +68,9 @@ namespace Desert::Engine
         std::shared_ptr<Common::Window> m_Window; // TODO: unique ptr
     private:
         Common::LayerStack m_LayerStack;
+        EngineStats        m_EngineStats;
 
-        Common::Timestep m_TimeStep;
-        Common::Timestep m_Frametime;
-        float m_LastFrameTime = 0.0f;
-        bool             m_IsRunningApplication = true;
-
-        float    m_FPS        = 0.0f;
-        float    m_FPSTimer   = 0.0f;
-        uint32_t m_FPSCounter = 0;
-
+        bool m_IsRunningApplication = true;
         bool m_Minimized = false;
 
     public:

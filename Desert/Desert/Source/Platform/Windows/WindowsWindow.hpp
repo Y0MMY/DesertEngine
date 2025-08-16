@@ -35,7 +35,7 @@ namespace Desert::Platform::Windows
 
         virtual bool IsWindowMaximized() const override;
         virtual bool IsWindowMinimized() const override;
-        virtual void Maximize() const override;
+        virtual void Maximize() override;
 
         virtual void PrepareNextFrame() const override;
         virtual void PresentFinalImage() const override;

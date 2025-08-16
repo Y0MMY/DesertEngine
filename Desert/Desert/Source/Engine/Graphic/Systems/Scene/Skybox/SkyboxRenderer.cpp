@@ -4,22 +4,15 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult SkyboxRenderer::Init( const uint32_t width, const uint32_t height )
+    Common::BoolResult SkyboxRenderer::Init( const uint32_t width, const uint32_t height,
+                                             const std::shared_ptr<Framebuffer>& compositeFramebuffer )
     {
         constexpr std::string_view debugName = "Skybox";
-
-        // Framebuffer
-        FramebufferSpecification fbSpec;
-        fbSpec.DebugName = debugName;
-        fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
-
-        m_Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-        m_Framebuffer->Resize( width, height );
 
         // RenderPass
         RenderPassSpecification rpSpec;
         rpSpec.DebugName         = debugName;
-        rpSpec.TargetFramebuffer = m_Framebuffer;
+        rpSpec.TargetFramebuffer = compositeFramebuffer;
         m_RenderPass             = Graphic::RenderPass::Create( rpSpec );
 
         // Pipeline
@@ -27,9 +20,9 @@ namespace Desert::Graphic::System
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;
-        pipeSpec.Framebuffer = m_Framebuffer;
+        pipeSpec.Framebuffer = compositeFramebuffer;
         pipeSpec.Shader      = m_Shader;
-        
+
         m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 

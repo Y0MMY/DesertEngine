@@ -14,7 +14,7 @@ namespace Common
 
         const std::string ToString() const
         {
-            return std::to_string( m_UUID );
+            return std::to_string( m_UUID ); //TODO: Cache
         }
 
         operator uint64_t()

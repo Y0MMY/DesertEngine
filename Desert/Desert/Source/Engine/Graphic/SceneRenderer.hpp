@@ -57,6 +57,8 @@ namespace Desert::Graphic
         } m_SceneInfo;
 
     private:
+        std::shared_ptr<Framebuffer> m_CompositeFramebuffer;
+
         std::unique_ptr<System::MeshRenderer>    m_MeshRenderer;
         std::unique_ptr<System::SkyboxRenderer>  m_SkyboxRenderer;
         std::unique_ptr<System::TonemapRenderer> m_TonemapRenderer;

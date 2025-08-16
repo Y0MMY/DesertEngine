@@ -8,6 +8,10 @@
 
 #include <vulkan/vulkan.h>
 
+#ifndef VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+    #define VK_KHR_WIN32_SURFACE_EXTENSION_NAME "VK_KHR_win32_surface"
+#endif
+
 namespace Desert::Graphic::API::Vulkan
 {
     static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugReportCallback( VkDebugReportFlagsEXT      flags,

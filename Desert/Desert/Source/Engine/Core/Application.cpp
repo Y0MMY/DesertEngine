@@ -15,9 +15,10 @@ namespace Desert::Engine
         EngineContext::CreateInstance();
 
         Common::WindowSpecification specWindow;
-        specWindow.Title  = appInfo.Title;
-        specWindow.Width  = appInfo.Width;
-        specWindow.Height = appInfo.Height;
+        specWindow.Title      = appInfo.Title;
+        specWindow.Width      = appInfo.Width;
+        specWindow.Height     = appInfo.Height;
+        specWindow.Fullscreen = appInfo.Fullscreen;
 
         m_Window = Common::Window::Create( specWindow );
         m_Window->Init();
@@ -33,10 +34,6 @@ namespace Desert::Engine
         OnCreate();
         Init();
 
-        static float FpsUpdateInterval    = 1.0f;
-        static float FpsUpdateAccumulator = 0.0f;
-        static float FPS                  = 0.0f;
-
         while ( m_IsRunningApplication )
         {
             m_Window->ProcessEvents();
@@ -44,7 +41,7 @@ namespace Desert::Engine
             {
                 for ( const auto& layer : m_LayerStack )
                 {
-                    const auto& result = layer->OnUpdate( m_TimeStep );
+                    const auto& result = layer->OnUpdate( m_EngineStats.GetDeltaTime() );
                     if ( !result )
                     {
                         throw std::logic_error( result.GetError() );
@@ -52,22 +49,8 @@ namespace Desert::Engine
                 }
             }
 
-            float currentTime = glfwGetTime();
-            m_Frametime       = Common::Timestep( currentTime - m_LastFrameTime );
-            m_TimeStep        = Common::Timestep( glm::min<float>( m_Frametime.GetSeconds(), 0.0333f ) );
-            m_LastFrameTime   = currentTime;
-
-            m_FPSCounter++;
-            FpsUpdateAccumulator += m_Frametime.GetSeconds();
-
-            if ( FpsUpdateAccumulator >= FpsUpdateInterval )
-            {
-                FPS                  = static_cast<float>( m_FPSCounter ) / FpsUpdateAccumulator;
-                m_FPSCounter         = 0;
-                FpsUpdateAccumulator = 0.0f;
-
-                m_Window->SetTitle( "FPS: " + std::to_string( (uint32_t)FPS ) );
-            }
+            m_EngineStats.Update();
+            m_Window->SetTitle( m_EngineStats.GetFormattedStats() );
         }
         Destroy();
     }

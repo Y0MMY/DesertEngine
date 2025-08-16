@@ -17,6 +17,7 @@ namespace Desert::Graphic
         std::shared_ptr<Framebuffer> TargetFramebuffer;
         std::string                  DebugName;
     };
+
     class RenderPass final
     {
     public:

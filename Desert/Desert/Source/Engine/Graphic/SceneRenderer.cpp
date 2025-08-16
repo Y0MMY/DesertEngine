@@ -11,14 +11,22 @@ namespace Desert::Graphic
         const uint32_t width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
         const uint32_t height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
 
+        // Framebuffer
+        FramebufferSpecification fbSpec;
+        fbSpec.DebugName = "Composite framebuffer";
+        fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+
+        m_CompositeFramebuffer = Graphic::Framebuffer::Create( fbSpec );
+        m_CompositeFramebuffer->Resize( width, height );
+
         m_SkyboxRenderer  = std::make_unique<System::SkyboxRenderer>();
         m_MeshRenderer    = std::make_unique<System::MeshRenderer>();
         m_TonemapRenderer = std::make_unique<System::TonemapRenderer>();
 
-        if ( !m_SkyboxRenderer->Init( width, height ) )
+        if ( !m_SkyboxRenderer->Init( width, height, m_CompositeFramebuffer ) )
             return Common::MakeError( "Failed to initialize SkyboxRenderer system" );
 
-        if ( !m_MeshRenderer->Init( width, height, m_SkyboxRenderer->GetFramebuffer() ) )
+        if ( !m_MeshRenderer->Init( width, height, m_CompositeFramebuffer ) )
             return Common::MakeError( "Failed to initialize MeshRenderer system" );
 
         if ( !m_TonemapRenderer->Init( width, height ) )
@@ -49,7 +57,8 @@ namespace Desert::Graphic
 
         m_SkyboxRenderer->EndScene();
         m_MeshRenderer->EndScene();
-        m_TonemapRenderer->Process( m_SkyboxRenderer->GetFramebuffer() );
+        m_TonemapRenderer->Process(
+             m_CompositeFramebuffer ); // NOTE: m_CompositeFramebuffer stores all scene image data (skybox, mesh, etc)
         CompositeRenderPass();
     }
 
@@ -65,7 +74,7 @@ namespace Desert::Graphic
             return;
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
-        m_SkyboxRenderer->GetFramebuffer()->Resize( width, height );
+        m_CompositeFramebuffer->Resize( width, height );
         m_MeshRenderer->GetFramebuffer()->Resize( width, height );
     }
 
@@ -77,8 +86,8 @@ namespace Desert::Graphic
 
         auto& renderer = Renderer::GetInstance();
 
-        renderer.BeginSwapChainRenderPass();
-        renderer.EndRenderPass();
+        // renderer.BeginSwapChainRenderPass();
+        // renderer.EndRenderPass();
     }
 
     void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>&        mesh,

@@ -45,7 +45,7 @@ namespace Desert::Graphic::System
 
         void SetOutlineWidth( const float width )
         {
-            //m_OutlineWidth = width;
+            // m_OutlineWidth = width;
         }
 
     private:
@@ -70,8 +70,8 @@ namespace Desert::Graphic::System
         std::shared_ptr<Shader>      m_Shader;
 
         // Outline
-        std::shared_ptr<Shader>      m_OutlineShader;
-        std::shared_ptr<Pipeline>    m_OutlinePipeline;
+        std::shared_ptr<Shader>   m_OutlineShader;
+        std::shared_ptr<Pipeline> m_OutlinePipeline;
 
         std::unique_ptr<MaterialOutline> m_OutlineMaterial;
 

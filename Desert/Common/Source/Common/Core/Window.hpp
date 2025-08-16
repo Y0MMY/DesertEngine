@@ -38,7 +38,7 @@ namespace Common
 
         virtual bool IsWindowMaximized() const = 0;
         virtual bool IsWindowMinimized() const = 0;
-        virtual void Maximize() const          = 0;
+        virtual void Maximize()                = 0;
 
         virtual void PrepareNextFrame() const  = 0;
         virtual void PresentFinalImage() const = 0;
