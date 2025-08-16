@@ -3,7 +3,7 @@
 workspace "Desert"
     configurations { "Debug", "Release" }
     architecture "x64"
-    startproject "Sandbox"
+    startproject "Editor"
 
     language "C++"
 	cppdialect "C++20"
@@ -29,5 +29,5 @@ include "ThirdParty/"
 group ""
 
 include "Desert/"
-include "Sandbox/"
+include "Editor/"
 
