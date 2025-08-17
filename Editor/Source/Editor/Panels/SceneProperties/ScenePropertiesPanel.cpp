@@ -23,8 +23,6 @@ namespace Desert::Editor
             return;
         }
 
-        Utils::ImGuiUtilities::PushID();
-
         const auto& selectedEntityOpt = m_Scene->FindEntityByID( selectedOpt.value() );
         if ( !selectedEntityOpt )
         {
@@ -135,8 +133,6 @@ namespace Desert::Editor
         static ComponentEditor componentEditor( m_AssetManager );
         componentEditor.Render( const_cast<ECS::Entity&>( selectedEntity ) );
         ImGui::EndChild();
-
-        Utils::ImGuiUtilities::PopID();
     }
 
 } // namespace Desert::Editor

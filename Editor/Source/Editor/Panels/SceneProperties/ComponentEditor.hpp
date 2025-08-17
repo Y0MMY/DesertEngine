@@ -3,21 +3,29 @@
 #include <Engine/Desert.hpp>
 #include <ImGui/imgui_internal.h>
 
+#include "ComponentWidgets/IComponentWidget.hpp"
+
 namespace Desert::Editor
 {
-    class ComponentEditor final
+    class ComponentEditor
     {
     public:
-        explicit ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager );
+        using ComponentFactory = std::function<std::unique_ptr<IComponentWidget>()>;
+
+        ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager );
+        void RegisterDefaultComponents();
+        void RegisterComponent( const std::string& name, ComponentFactory factory );
         void Render( ECS::Entity& entity );
 
     private:
-        void RenderTransformComponent( ECS::Entity& entity );
-        void RenderStaticMeshComponent( ECS::Entity& entity );
+        void RenderAddComponentPopup( ECS::Entity& entity );
+        void RenderComponentHeader( IComponentWidget& widget, ECS::Entity& entity );
 
     private:
-        ImGuiTextFilter m_ComponentFilter;
+        std::weak_ptr<Assets::AssetManager> m_AssetManager;
 
-        const std::weak_ptr<Assets::AssetManager> m_AssetManager;
+        std::vector<std::pair<std::string, ComponentFactory>> m_AvailableComponents;
+        ImGuiTextFilter                                       m_ComponentFilter;
     };
+
 } // namespace Desert::Editor
