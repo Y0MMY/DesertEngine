@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Engine/Graphic/Systems/RenderSystem.hpp>
+
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
 
@@ -11,22 +13,19 @@
 
 namespace Desert::Graphic::System
 {
-    class MeshRenderer
+    class MeshRenderer final : public RenderSystem
     {
     public:
-        Common::BoolResult Init( const uint32_t width, const uint32_t height,
-                                 const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal );
-        void               Shutdown();
+        using RenderSystem::RenderSystem;
 
-        void BeginScene( const Core::Camera& camera, const std::optional<Environment>& environment );
-        void Submit( const MeshRenderData& renderData );
-        void SubmitLight( const glm::vec3& directionLight );
-        void EndScene();
+        virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
+        virtual void               Shutdown() override;
 
-        std::shared_ptr<Framebuffer> GetFramebuffer() const
-        {
-            return m_Framebuffer;
-        }
+        void PrepareFrame( const Core::Camera& camera, const std::optional<Environment>& environment );
+        void AddMesh( const MeshRenderData& renderData );
+        void AddLight( const glm::vec3& directionLight );
+
+        virtual void ProcessSystem() override;
 
         void ToggleOutline( const bool value )
         {
@@ -65,7 +64,6 @@ namespace Desert::Graphic::System
 
         std::shared_ptr<RenderPass> m_RenderPass;
 
-        std::shared_ptr<Framebuffer> m_Framebuffer;
         std::shared_ptr<Pipeline>    m_Pipeline;
         std::shared_ptr<Shader>      m_Shader;
 

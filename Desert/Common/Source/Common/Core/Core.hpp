@@ -79,3 +79,6 @@ constexpr std::shared_ptr<T> sp_cast( const std::shared_ptr<U>& ptr )
 {
     return std::static_pointer_cast<T>( ptr );
 }
+
+#define SP_CAST(T, ptr) sp_cast<T>(ptr)
+#define UNIQUE_GET_AS(T, ptr) static_cast<T*>((ptr).get())

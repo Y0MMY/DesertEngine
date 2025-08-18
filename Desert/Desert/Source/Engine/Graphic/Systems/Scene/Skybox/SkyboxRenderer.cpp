@@ -4,9 +4,14 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult SkyboxRenderer::Init( const uint32_t width, const uint32_t height,
-                                             const std::shared_ptr<Framebuffer>& compositeFramebuffer )
+    Common::BoolResult SkyboxRenderer::Initialize( const uint32_t width, const uint32_t height )
     {
+        const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
+        if ( !compositeFramebuffer )
+        {
+            DESERT_VERIFY( false );
+        }
+
         constexpr std::string_view debugName = "Skybox";
 
         // RenderPass
@@ -29,12 +34,12 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void SkyboxRenderer::BeginScene( const Core::Camera& camera )
+    void SkyboxRenderer::PrepareCamera( const Core::Camera& camera )
     {
         m_ActiveCamera = const_cast<Core::Camera*>( &camera );
     }
 
-    void SkyboxRenderer::EndScene()
+    void SkyboxRenderer::ProcessSystem()
     {
         auto& renderer = Renderer::GetInstance();
         renderer.BeginRenderPass( m_RenderPass );
@@ -46,7 +51,7 @@ namespace Desert::Graphic::System
         renderer.EndRenderPass();
     }
 
-    void SkyboxRenderer::Submit( const std::shared_ptr<MaterialSkybox>& material )
+    void SkyboxRenderer::PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material )
     {
         if ( !material )
         {

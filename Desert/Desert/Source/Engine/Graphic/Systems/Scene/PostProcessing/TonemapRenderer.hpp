@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Engine/Graphic/Systems/RenderSystem.hpp>
+
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
 
@@ -7,21 +9,17 @@
 
 namespace Desert::Graphic::System
 {
-    class TonemapRenderer
+    class TonemapRenderer final : public RenderSystem
     {
     public:
-        Common::BoolResult Init( const uint32_t width, const uint32_t height );
-        void               Shutdown() {}
+        using RenderSystem::RenderSystem;
 
-        void Process( const std::shared_ptr<Framebuffer>& inputFramebuffer );
+        virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
+        virtual void               Shutdown() override {};
 
-        std::shared_ptr<Image2D> GetOutputImage() const
-        {
-            return m_Framebuffer->GetColorAttachmentImage();
-        }
+        virtual void ProcessSystem() override;
 
     private:
-        std::shared_ptr<Framebuffer> m_Framebuffer;
         std::shared_ptr<RenderPass>  m_RenderPass;
         std::shared_ptr<Pipeline>    m_Pipeline;
         std::shared_ptr<Shader>      m_Shader;

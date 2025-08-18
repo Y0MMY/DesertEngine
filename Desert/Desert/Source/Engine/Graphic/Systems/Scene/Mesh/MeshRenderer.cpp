@@ -5,15 +5,19 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult MeshRenderer::Init( const uint32_t width, const uint32_t height,
-                                           const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal )
+    Common::BoolResult MeshRenderer::Initialize( const uint32_t width, const uint32_t height )
     {
+        const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
+        if ( !compositeFramebuffer )
+        {
+            DESERT_VERIFY( false );
+        }
 
         // Setup geometry pass
-        if ( !SetupGeometryPass( width, height, skyboxFramebufferExternal ) )
+        if ( !SetupGeometryPass( width, height, compositeFramebuffer) )
             return Common::MakeError( "Failed to setup geometry pass" );
 
-        if ( !SetupOutlinePass( width, height, skyboxFramebufferExternal ) )
+        if ( !SetupOutlinePass( width, height, compositeFramebuffer) )
             return Common::MakeError( "Failed to setup outline pass" );
 
         return BOOLSUCCESS;
@@ -67,7 +71,7 @@ namespace Desert::Graphic::System
         outlinePipeSpec.Framebuffer    = m_Framebuffer;
         outlinePipeSpec.PolygonMode    = PrimitivePolygonMode::Wireframe;
         outlinePipeSpec.Topology       = PrimitiveTopology::LineStrip;
-        outlinePipeSpec.LineWidth       = 5.0f;
+        outlinePipeSpec.LineWidth      = 5.0f;
 
         m_OutlinePipeline = Pipeline::Create( outlinePipeSpec );
         m_OutlinePipeline->Invalidate();
@@ -77,19 +81,19 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    void MeshRenderer::BeginScene( const Core::Camera& camera, const std::optional<Environment>& environment )
+    void MeshRenderer::PrepareFrame( const Core::Camera& camera, const std::optional<Environment>& environment )
     {
         m_ActiveCamera = const_cast<Core::Camera*>( &camera );
         m_RenderQueue.clear();
         m_Environment = environment;
     }
 
-    void MeshRenderer::Submit( const MeshRenderData& renderData )
+    void MeshRenderer::AddMesh( const MeshRenderData& renderData )
     {
         m_RenderQueue.push_back( renderData );
     }
 
-    void MeshRenderer::SubmitLight( const glm::vec3& directionLight )
+    void MeshRenderer::AddLight( const glm::vec3& directionLight )
     {
         m_DirectionLight = directionLight;
     }
@@ -103,7 +107,7 @@ namespace Desert::Graphic::System
                                          .PreFilteredMap = m_Environment->PreFilteredMap };
     }
 
-    void MeshRenderer::EndScene()
+    void MeshRenderer::ProcessSystem()
     {
         auto&      renderer = Renderer::GetInstance();
         const auto textures = PreparePBRTextures();

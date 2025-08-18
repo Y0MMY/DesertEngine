@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Engine/Graphic/Systems/RenderSystem.hpp>
+
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
@@ -44,6 +46,9 @@ namespace Desert::Graphic
 
         const std::shared_ptr<Image2D> GetFinalImage() const;
 
+        void RegisterExternalPass( std::string&& name, std::function<void()> execute,
+                                   std::shared_ptr<RenderPass>&& renderPass );
+
     private:
         void CompositeRenderPass();
 
@@ -57,10 +62,20 @@ namespace Desert::Graphic
         } m_SceneInfo;
 
     private:
+        // RenderGraph m_RenderGraph;
+        // RenderGraph m_ExternalRenderGraph;
+
+    private:
         std::shared_ptr<Framebuffer> m_CompositeFramebuffer;
 
-        std::unique_ptr<System::MeshRenderer>    m_MeshRenderer;
-        std::unique_ptr<System::SkyboxRenderer>  m_SkyboxRenderer;
-        std::unique_ptr<System::TonemapRenderer> m_TonemapRenderer;
+    private:
+        static constexpr size_t                                                 s_RenderSystemsCount = 3U;
+        std::array<std::unique_ptr<System::RenderSystem>, s_RenderSystemsCount> m_FixedRenderSystems;
+
+        template <typename System, typename... Args>
+        void RegisterSystem( const uint32_t system, Args&&... args )
+        {
+            m_FixedRenderSystems[system] = std::make_unique<System>( std::forward<Args>( args )... );
+        }
     };
 } // namespace Desert::Graphic

@@ -2,8 +2,14 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult TonemapRenderer::Init( const uint32_t width, const uint32_t height )
+    Common::BoolResult TonemapRenderer::Initialize( const uint32_t width, const uint32_t height )
     {
+        const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
+        if ( !compositeFramebuffer )
+        {
+            DESERT_VERIFY( false );
+        }
+
         constexpr std::string_view debugName = "SceneToneMap";
 
         // Framebuffer
@@ -36,12 +42,19 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void TonemapRenderer::Process( const std::shared_ptr<Framebuffer>& inputFramebuffer )
+    void TonemapRenderer::ProcessSystem()
     {
+        const auto& framebuffer = m_CompositeFramebuffer.lock();
+        if ( !framebuffer )
+        {
+            LOG_ERROR( "The framebuffer for `TonemapRenderer::ProcessSystem` was destroyed or wasn't set up" );
+            return;
+        }
+
         auto& renderer = Renderer::GetInstance();
         renderer.BeginRenderPass( m_RenderPass );
 
-        m_MaterialTonemap->UpdateRenderParameters( inputFramebuffer->GetColorAttachmentImage() );
+        m_MaterialTonemap->UpdateRenderParameters( framebuffer->GetColorAttachmentImage() );
 
         renderer.SubmitFullscreenQuad( m_Pipeline, m_MaterialTonemap->GetMaterialExecutor() );
         renderer.EndRenderPass();

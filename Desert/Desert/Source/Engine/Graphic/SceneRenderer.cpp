@@ -6,6 +6,13 @@
 
 namespace Desert::Graphic
 {
+    enum FixedRenderSystems 
+    {
+        SkyboxSystem  = 0,
+        MeshSystem    = 1,
+        TonemapSystem = 2
+    };
+
     NO_DISCARD Common::BoolResult SceneRenderer::Init()
     {
         const uint32_t width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
@@ -19,17 +26,17 @@ namespace Desert::Graphic
         m_CompositeFramebuffer = Graphic::Framebuffer::Create( fbSpec );
         m_CompositeFramebuffer->Resize( width, height );
 
-        m_SkyboxRenderer  = std::make_unique<System::SkyboxRenderer>();
-        m_MeshRenderer    = std::make_unique<System::MeshRenderer>();
-        m_TonemapRenderer = std::make_unique<System::TonemapRenderer>();
+        RegisterSystem<System::SkyboxRenderer>( FixedRenderSystems::SkyboxSystem, m_CompositeFramebuffer );
+        RegisterSystem<System::MeshRenderer>( FixedRenderSystems::MeshSystem, m_CompositeFramebuffer );
+        RegisterSystem<System::TonemapRenderer>( FixedRenderSystems::TonemapSystem, m_CompositeFramebuffer );
 
-        if ( !m_SkyboxRenderer->Init( width, height, m_CompositeFramebuffer ) )
+        if ( !m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem]->Initialize( width, height ) )
             return Common::MakeError( "Failed to initialize SkyboxRenderer system" );
 
-        if ( !m_MeshRenderer->Init( width, height, m_CompositeFramebuffer ) )
+        if ( !m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->Initialize( width, height ) )
             return Common::MakeError( "Failed to initialize MeshRenderer system" );
 
-        if ( !m_TonemapRenderer->Init( width, height ) )
+        if ( !m_FixedRenderSystems[FixedRenderSystems::TonemapSystem]->Initialize( width, height ) )
             return Common::MakeError( "Failed to initialize TonemapRenderer system" );
 
         return BOOLSUCCESS;
@@ -39,26 +46,42 @@ namespace Desert::Graphic
                                                              const Core::Camera&                 camera )
     {
         m_SceneInfo.ActiveScene  = scene;
-        m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera );
-        m_SkyboxRenderer->BeginScene( camera );
-        m_MeshRenderer->BeginScene( camera, m_SkyboxRenderer->GetEnvironment() );
+        m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera ); // TODO: shared ptr
+
+        const auto& skyboxSystem =
+             UNIQUE_GET_AS( System::SkyboxRenderer, m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem] );
+        const auto& meshSystem =
+             UNIQUE_GET_AS( System::MeshRenderer, m_FixedRenderSystems[FixedRenderSystems::MeshSystem] );
+
+        skyboxSystem->PrepareCamera( camera );
+
+        meshSystem->PrepareFrame( camera, skyboxSystem->GetEnvironment() );
         const auto& sceneSettings = scene->GetSettings();
-        m_MeshRenderer->SetOutlineColor( sceneSettings.OutlineColor );
-        m_MeshRenderer->ToggleOutline( sceneSettings.EnableOutline );
-        m_MeshRenderer->SetOutlineWidth( sceneSettings.OutlineWidth );
+        meshSystem->SetOutlineColor( sceneSettings.OutlineColor );
+        meshSystem->ToggleOutline( sceneSettings.EnableOutline );
+        meshSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
         auto& renderer = Renderer::GetInstance();
+
         return renderer.BeginFrame();
     }
 
     void SceneRenderer::OnUpdate( const SceneRendererUpdate& sceneRenderInfo )
     {
-        m_MeshRenderer->SubmitLight( BuildDirectionLight(
+        const auto& skyboxSystem =
+             UNIQUE_GET_AS( System::SkyboxRenderer, m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem] );
+        const auto& meshSystem =
+             UNIQUE_GET_AS( System::MeshRenderer, m_FixedRenderSystems[FixedRenderSystems::MeshSystem] );
+
+        meshSystem->AddLight( BuildDirectionLight(
              sceneRenderInfo.DirLights ) /*{ sceneRenderInfo.DirLights[0].Direction, {}, 0.0 } */ );
 
-        m_SkyboxRenderer->EndScene();
-        m_MeshRenderer->EndScene();
-        m_TonemapRenderer->Process(
-             m_CompositeFramebuffer ); // NOTE: m_CompositeFramebuffer stores all scene image data (skybox, mesh, etc)
+        // TODO: Move to RenderGraph
+        for ( const auto& system : m_FixedRenderSystems )
+        {
+            system->ProcessSystem();
+        }
+
+        // m_RenderGraph.Execute();
         CompositeRenderPass();
     }
 
@@ -75,7 +98,9 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
         m_CompositeFramebuffer->Resize( width, height );
-        m_MeshRenderer->GetFramebuffer()->Resize( width, height );
+        m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->GetSystemFramebuffer()->Resize(
+             width,
+             height ); // TODO: event
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
@@ -94,7 +119,8 @@ namespace Desert::Graphic
                                              const std::shared_ptr<MaterialPBR>& material,
                                              const glm::mat4&                    transform )
     {
-        m_MeshRenderer->Submit( { mesh, transform, material } );
+        UNIQUE_GET_AS( System::MeshRenderer, m_FixedRenderSystems[FixedRenderSystems::MeshSystem] )
+             ->AddMesh( { mesh, transform, material } );
     }
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
@@ -104,7 +130,8 @@ namespace Desert::Graphic
 
     void SceneRenderer::SetEnvironment( const std::shared_ptr<MaterialSkybox>& material )
     {
-        m_SkyboxRenderer->Submit( material );
+        UNIQUE_GET_AS( System::SkyboxRenderer, m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem] )
+             ->PrepareMaterial( material );
     }
 
     const Environment& SceneRenderer::GetEnvironment()
@@ -114,14 +141,17 @@ namespace Desert::Graphic
 
     void SceneRenderer::Shutdown()
     {
-        m_SkyboxRenderer->Shutdown();
-        m_MeshRenderer->Shutdown();
-        m_TonemapRenderer->Shutdown();
+        for ( const auto& system : m_FixedRenderSystems )
+        {
+            system->Shutdown();
+        }
     }
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage() const
     {
-        return m_TonemapRenderer->GetOutputImage();
+        return m_FixedRenderSystems[FixedRenderSystems::TonemapSystem]
+             ->GetSystemFramebuffer()
+             ->GetColorAttachmentImage();
     }
 
     const glm::vec3 SceneRenderer::BuildDirectionLight( const std::vector<DirectionLight>& dirLights )
@@ -132,6 +162,12 @@ namespace Desert::Graphic
         }
 
         return glm::vec3( 0.0f );
+    }
+
+    void SceneRenderer::RegisterExternalPass( std::string&& name, std::function<void()> execute,
+                                              std::shared_ptr<RenderPass>&& renderPass )
+    {
+        //  m_RenderGraph.AddPass( std::move( name ), std::move( execute ), std::move( renderPass ) );
     }
 
 } // namespace Desert::Graphic

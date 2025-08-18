@@ -1,22 +1,25 @@
 #pragma once
 
+#include <Engine/Graphic/Systems/RenderSystem.hpp>
+
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 
 namespace Desert::Graphic::System
 {
-    class SkyboxRenderer
+    class SkyboxRenderer final : public RenderSystem
     {
     public:
-        [[nodiscard]] Common::BoolResult Init( const uint32_t width, const uint32_t height,
-                                               const std::shared_ptr<Framebuffer>& compositeFramebuffer );
-        void                             Shutdown()
+        using RenderSystem::RenderSystem;
+
+        virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
+        void                       Shutdown()
         {
         }
 
-        void BeginScene( const Core::Camera& camera );
-        void Submit( const std::shared_ptr<MaterialSkybox>& material );
-        void EndScene();
+        void         PrepareCamera( const Core::Camera& camera );
+        void         PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material );
+        virtual void ProcessSystem() override;
 
         const std::optional<Environment> GetEnvironment() const
         {
