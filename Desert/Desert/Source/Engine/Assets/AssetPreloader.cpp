@@ -2,7 +2,7 @@
 
 namespace Desert::Assets
 {
-    constexpr std::array<std::string_view, 1> SUPPORTED_MESH_EXTENSIONS   = { ".fbx" };
+    constexpr std::array<std::string_view, 2> SUPPORTED_MESH_EXTENSIONS   = { ".fbx", ".blend" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS = { ".hdr" };
 
     AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>&              assetManager,
@@ -19,9 +19,9 @@ namespace Desert::Assets
 
     namespace
     {
-        template <typename AssetType, typename... Args>
+        template <typename AssetType, typename Extensions, typename... Args>
         void ProcessAssetFiles( const std::filesystem::path& rootPath, bool useRootpath,
-                                const std::array<std::string_view, 1>& supportedExtensions,
+                                const Extensions& supportedExtensions,
                                 const std::weak_ptr<AssetManager>& assetManager, AssetPriority priority,
                                 Args&&... args )
         {
@@ -93,17 +93,15 @@ namespace Desert::Assets
         ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, true, SUPPORTED_SKYBOX_EXTENSIONS,
                                         m_AssetManager, AssetPriority::Medium );
 
-
-
-        if ( auto registry = m_ResourceRegistry.lock() )
+         /*if ( auto registry = m_ResourceRegistry.lock() )
         {
-            if ( auto manager = m_AssetManager.lock() )
-            {
-                for ( const auto& [handle, skyboxAsset] : manager->FindAllByType<Assets::SkyboxAsset>() )
-                {
-                    registry->RegisterSkybox(skyboxAsset);
-                }
-            }
-        }
+             if ( auto manager = m_AssetManager.lock() )
+             {
+                 for ( const auto& [handle, skyboxAsset] : manager->FindAllByType<Assets::SkyboxAsset>() )
+                 {
+                     registry->RegisterSkybox(skyboxAsset);
+                 }
+             }
+         }*/
     }
 } // namespace Desert::Assets
