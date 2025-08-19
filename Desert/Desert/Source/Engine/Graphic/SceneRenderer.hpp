@@ -30,7 +30,7 @@ namespace Desert::Graphic
         void                             Shutdown();
 
         [[nodiscard]] Common::BoolResult BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene,
-                                                     const Core::Camera&                         camera );
+                                                     const std::shared_ptr<Core::Camera>&        camera );
 
         void OnUpdate( const SceneRendererUpdate& sceneRenderInfo );
 
@@ -57,12 +57,12 @@ namespace Desert::Graphic
     private:
         struct
         {
-            std::shared_ptr<Core::Scene> ActiveScene;
-            Core::Camera*                ActiveCamera;
+            std::weak_ptr<Core::Scene>  ActiveScene;
+            std::weak_ptr<Core::Camera> ActiveCamera;
         } m_SceneInfo;
 
     private:
-        // RenderGraph m_RenderGraph;
+        std::shared_ptr<RenderGraph> m_RenderGraph;
         // RenderGraph m_ExternalRenderGraph;
 
     private:

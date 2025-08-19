@@ -17,10 +17,7 @@ namespace Desert::Graphic::System
         virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
         virtual void               Shutdown() override {};
 
-        virtual void ProcessSystem() override;
-
     private:
-        std::shared_ptr<RenderPass>  m_RenderPass;
         std::shared_ptr<Pipeline>    m_Pipeline;
         std::shared_ptr<Shader>      m_Shader;
 

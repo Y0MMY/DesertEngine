@@ -6,7 +6,7 @@
 
 namespace Desert::Graphic
 {
-    enum FixedRenderSystems 
+    enum FixedRenderSystems
     {
         SkyboxSystem  = 0,
         MeshSystem    = 1,
@@ -18,6 +18,8 @@ namespace Desert::Graphic
         const uint32_t width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
         const uint32_t height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
 
+        m_RenderGraph = std::make_shared<RenderGraph>();
+
         // Framebuffer
         FramebufferSpecification fbSpec;
         fbSpec.DebugName = "Composite framebuffer";
@@ -26,9 +28,12 @@ namespace Desert::Graphic
         m_CompositeFramebuffer = Graphic::Framebuffer::Create( fbSpec );
         m_CompositeFramebuffer->Resize( width, height );
 
-        RegisterSystem<System::SkyboxRenderer>( FixedRenderSystems::SkyboxSystem, m_CompositeFramebuffer );
-        RegisterSystem<System::MeshRenderer>( FixedRenderSystems::MeshSystem, m_CompositeFramebuffer );
-        RegisterSystem<System::TonemapRenderer>( FixedRenderSystems::TonemapSystem, m_CompositeFramebuffer );
+        RegisterSystem<System::SkyboxRenderer>( FixedRenderSystems::SkyboxSystem, m_CompositeFramebuffer,
+                                                m_RenderGraph );
+        RegisterSystem<System::MeshRenderer>( FixedRenderSystems::MeshSystem, m_CompositeFramebuffer,
+                                              m_RenderGraph );
+        RegisterSystem<System::TonemapRenderer>( FixedRenderSystems::TonemapSystem, m_CompositeFramebuffer,
+                                                 m_RenderGraph );
 
         if ( !m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem]->Initialize( width, height ) )
             return Common::MakeError( "Failed to initialize SkyboxRenderer system" );
@@ -42,11 +47,11 @@ namespace Desert::Graphic
         return BOOLSUCCESS;
     }
 
-    NO_DISCARD Common::BoolResult SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>& scene,
-                                                             const Core::Camera&                 camera )
+    NO_DISCARD Common::BoolResult SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>&  scene,
+                                                             const std::shared_ptr<Core::Camera>& camera )
     {
         m_SceneInfo.ActiveScene  = scene;
-        m_SceneInfo.ActiveCamera = const_cast<Core::Camera*>( &camera ); // TODO: shared ptr
+        m_SceneInfo.ActiveCamera = camera;
 
         const auto& skyboxSystem =
              UNIQUE_GET_AS( System::SkyboxRenderer, m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem] );
@@ -75,11 +80,7 @@ namespace Desert::Graphic
         meshSystem->AddLight( BuildDirectionLight(
              sceneRenderInfo.DirLights ) /*{ sceneRenderInfo.DirLights[0].Direction, {}, 0.0 } */ );
 
-        // TODO: Move to RenderGraph
-        for ( const auto& system : m_FixedRenderSystems )
-        {
-            system->ProcessSystem();
-        }
+        m_RenderGraph->Execute();
 
         // m_RenderGraph.Execute();
         CompositeRenderPass();

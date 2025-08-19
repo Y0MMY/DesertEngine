@@ -216,7 +216,7 @@ namespace Desert::Editor
 
                 if ( ImGui::Selectable( "Camera" ) )
                 {
-                    scene->CreateNewEntity( "Directional Light" ).AddComponent<ECS::CameraComponent>();
+                    scene->CreateNewEntity( "Camera" ).AddComponent<ECS::CameraComponent>();
                 }
 
                 if ( ImGui::Selectable( "Sprite" ) )
@@ -292,11 +292,14 @@ namespace Desert::Editor
         m_HierarchyFilter.Draw( "##HierarchyFilter",
                                 ImGui::GetContentRegionAvail().x - ImGui::GetStyle().IndentSpacing );
         Utils::ImGuiUtilities::DrawItemActivityOutline( 2.0f, false, ImColor( 80, 80, 80 ) );
+
+        bool isFilterFocused = ImGui::IsItemActive();
+
         ImGui::PopFont();
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
 
-        if ( !m_HierarchyFilter.IsActive() )
+        if ( !m_HierarchyFilter.IsActive() && !isFilterFocused)
         {
             ImGui::SameLine();
             ImGui::PushFont( EditorResources::GetBoldFont() );

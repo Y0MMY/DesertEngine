@@ -81,8 +81,7 @@ namespace Desert::Editor
 
     [[nodiscard]] Common::BoolResult EditorLayer::OnUpdate( const Common::Timestep& ts )
     {
-        const auto& camera      = static_cast<ViewportPanel*>( m_Panels[3].get() )->GetCamera();
-        const auto& beginResult = m_MainScene->BeginScene( camera );
+        const auto& beginResult = m_MainScene->BeginScene();
         if ( !beginResult )
         {
             return Common::MakeError( beginResult.GetError() );

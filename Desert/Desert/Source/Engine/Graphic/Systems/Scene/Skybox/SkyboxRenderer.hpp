@@ -17,9 +17,8 @@ namespace Desert::Graphic::System
         {
         }
 
-        void         PrepareCamera( const Core::Camera& camera );
-        void         PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material );
-        virtual void ProcessSystem() override;
+        void PrepareCamera( const std::shared_ptr<Core::Camera>& camera );
+        void PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material );
 
         const std::optional<Environment> GetEnvironment() const
         {
@@ -33,9 +32,7 @@ namespace Desert::Graphic::System
     private:
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
 
-        Core::Camera* m_ActiveCamera = nullptr;
-
-        std::shared_ptr<RenderPass> m_RenderPass;
+        std::weak_ptr<Core::Camera> m_ActiveCamera;
         std::shared_ptr<Pipeline>   m_Pipeline;
         std::shared_ptr<Shader>     m_Shader;
     };

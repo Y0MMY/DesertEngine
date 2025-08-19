@@ -17,13 +17,6 @@ namespace Desert::Editor
 
         void OnEvent( Common::Event& e ) override;
 
-        void UpdateCamera( const Common::Timestep& timestep );
-
-        const auto& GetCamera() const
-        {
-            return m_EditorCamera;
-        }
-
     private:
         bool OnWindowResize( Common::EventWindowResize& e );
         bool OnMousePressed( Common::MouseButtonPressedEvent& e );
@@ -70,7 +63,6 @@ namespace Desert::Editor
         bool         m_GizmoHovered = false;
 
         std::shared_ptr<Desert::Core::Scene>       m_Scene;
-        Desert::Core::Camera                       m_EditorCamera;
         std::shared_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
         std::unique_ptr<Editor::UI::UIHelper>      m_UIHelper;
     };

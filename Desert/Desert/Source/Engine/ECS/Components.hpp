@@ -25,14 +25,25 @@ namespace Desert::ECS
         Common::UUID UUID;
     };
 
+    struct CameraComponent
+    {
+        std::shared_ptr<Core::Camera> Camera;
+        bool                          IsMainCamera = true;
+    };
+
+    struct VisibilityComponent
+    {
+        bool Visible;
+    };
+
     struct StaticMeshComponent
     {
         Assets::AssetHandle                   MeshHandle;
-        std::shared_ptr<Graphic::MaterialPBR> Material; //TODO: std::optional
+        std::shared_ptr<Graphic::MaterialPBR> Material; // TODO: std::optional
 
-        StaticMeshComponent( ) 
+        StaticMeshComponent()
         {
-            Material = std::make_shared<Graphic::MaterialPBR>(nullptr);
+            Material = std::make_shared<Graphic::MaterialPBR>( nullptr );
         }
     };
 
@@ -51,10 +62,13 @@ namespace Desert::ECS
 
     struct DirectionLightComponent
     {
+        float Intensity;
     };
 
     struct SkyboxComponent
     {
         Assets::AssetHandle SkyboxHandle;
+
+        float Intensity;
     };
 } // namespace Desert::ECS

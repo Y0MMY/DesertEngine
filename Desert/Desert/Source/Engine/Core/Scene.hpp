@@ -33,14 +33,13 @@ namespace Desert
 
 namespace Desert::Core
 {
-
     class Scene final : public std::enable_shared_from_this<Scene>
     {
     public:
         Scene() = default;
         Scene( std::string&& sceneName, const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry );
 
-        [[nodiscard]] Common::BoolResult BeginScene( const Core::Camera& camera );
+        [[nodiscard]] Common::BoolResult BeginScene();
         void                             OnUpdate( const Common::Timestep& ts );
         [[nodiscard]] Common::BoolResult EndScene();
 
@@ -88,6 +87,14 @@ namespace Desert::Core
 
         void Serialize() const;
 
+        void RegisterExternalPass( std::string&& name, std::function<void()> execute,
+                                   std::shared_ptr<Graphic::RenderPass>&& renderPass );
+
+        std::optional<std::shared_ptr<Core::Camera>> GetMainCamera() const
+        {
+            return m_MainCamera ? std::make_optional( m_MainCamera ) : std::nullopt;
+        }
+
     private:
         template <typename System, typename... Args>
         void RegisterSystem( const uint32_t system, Args&&... args )
@@ -96,7 +103,11 @@ namespace Desert::Core
         }
 
     private:
-        static constexpr uint32_t SYSTEMS_COUNT = 2U;
+        void FindMainCamera();
+        void OnEntityCreated_Camera();
+
+    private:
+        static constexpr uint32_t SYSTEMS_COUNT = 2U; // TODO: uint8_t
 
         std::string                                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer>                 m_SceneRenderer;
@@ -108,5 +119,7 @@ namespace Desert::Core
         std::unordered_map<Common::UUID, size_t> m_EntitysMap;
 
         SceneSettings m_Settings;
+
+        std::shared_ptr<Core::Camera> m_MainCamera = nullptr;
     };
 } // namespace Desert::Core

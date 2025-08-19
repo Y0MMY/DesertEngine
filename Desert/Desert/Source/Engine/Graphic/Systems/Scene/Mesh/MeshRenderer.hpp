@@ -21,11 +21,10 @@ namespace Desert::Graphic::System
         virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
         virtual void               Shutdown() override;
 
-        void PrepareFrame( const Core::Camera& camera, const std::optional<Environment>& environment );
+        void PrepareFrame( const std::shared_ptr<Core::Camera>& camera,
+                           const std::optional<Environment>&    environment );
         void AddMesh( const MeshRenderData& renderData );
         void AddLight( const glm::vec3& directionLight );
-
-        virtual void ProcessSystem() override;
 
         void ToggleOutline( const bool value )
         {
@@ -49,9 +48,11 @@ namespace Desert::Graphic::System
 
     private:
         bool                                    SetupGeometryPass( const uint32_t width, const uint32_t height,
-                                                                   const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal );
+                                                                   const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
+                                                                   const std::shared_ptr<RenderGraph>& renderGraph );
         bool                                    SetupOutlinePass( const uint32_t width, const uint32_t height,
-                                                                  const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal );
+                                                                  const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
+                                                                  const std::shared_ptr<RenderGraph>& renderGraph );
         std::optional<Models::PBR::PBRTextures> PreparePBRTextures() const;
 
     private:
@@ -60,12 +61,10 @@ namespace Desert::Graphic::System
     private:
         std::vector<MeshRenderData> m_RenderQueue;
         glm::vec3                   m_DirectionLight;
-        Core::Camera*               m_ActiveCamera = nullptr;
+        std::weak_ptr<Core::Camera> m_ActiveCamera;
 
-        std::shared_ptr<RenderPass> m_RenderPass;
-
-        std::shared_ptr<Pipeline>    m_Pipeline;
-        std::shared_ptr<Shader>      m_Shader;
+        std::shared_ptr<Pipeline> m_Pipeline;
+        std::shared_ptr<Shader>   m_Shader;
 
         // Outline
         std::shared_ptr<Shader>   m_OutlineShader;

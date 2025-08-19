@@ -18,6 +18,14 @@ namespace Desert::Editor
 
     void ViewportPanel::OnUIRender()
     {
+        const auto& mainCamera = m_Scene->GetMainCamera();
+        if ( !mainCamera )
+        {
+            ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "Camera was not found" );
+            ImGui::TextWrapped( "Please add a camera to the scene to display the view." );
+            return;
+        }
+
         ImVec2 mousePos    = ImGui::GetMousePos();
         ImVec2 viewportPos = ImGui::GetWindowPos();
 
@@ -27,7 +35,7 @@ namespace Desert::Editor
         if ( m_ViewportData.Size != size )
         {
             m_ViewportData.Size = size;
-            m_EditorCamera.UpdateProjectionMatrix( size.x, size.y );
+            mainCamera.value()->UpdateProjectionMatrix( size.x, size.y ); // TODO: Move to scene
         }
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
 
@@ -45,6 +53,12 @@ namespace Desert::Editor
     void ViewportPanel::RenderGizmo()
     {
         ImGuizmo::BeginFrame();
+
+        const auto& mainCamera = m_Scene->GetMainCamera();
+        if ( !mainCamera )
+        {
+            return;
+        }
 
         const auto& selected = Core::SelectionManager::GetSelected();
         if ( !selected )
@@ -64,7 +78,8 @@ namespace Desert::Editor
         ImGuizmo::SetDrawlist();
         ImGuizmo::SetRect( ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, rw, rh );
 
-        ImGuizmo::Manipulate( &m_EditorCamera.GetViewMatrix()[0][0], &m_EditorCamera.GetProjectionMatrix()[0][0],
+        ImGuizmo::Manipulate( &mainCamera.value()->GetViewMatrix()[0][0],
+                              &mainCamera.value()->GetProjectionMatrix()[0][0],
                               static_cast<ImGuizmo::OPERATION>( m_GizmoType ), ImGuizmo::WORLD, &transform[0][0] );
 
         if ( ImGuizmo::IsOver() )
@@ -90,6 +105,12 @@ namespace Desert::Editor
 
     void ViewportPanel::HandleObjectPicking()
     {
+        const auto& mainCamera = m_Scene->GetMainCamera();
+        if ( !mainCamera )
+        {
+            return;
+        }
+
         if ( m_GizmoHovered )
         {
             return;
@@ -102,8 +123,8 @@ namespace Desert::Editor
         }
         auto [mouseX, mouseY] = GetMouseViewportSpace();
         const auto ray        = Common::Math::Ray::FromScreenPosition(
-             { mouseX, mouseY }, m_EditorCamera.GetProjectionMatrix(), m_EditorCamera.GetViewMatrix(),
-             m_EditorCamera.GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
+             { mouseX, mouseY }, mainCamera.value()->GetProjectionMatrix(), mainCamera.value()->GetViewMatrix(),
+             mainCamera.value()->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
              static_cast<uint32_t>( m_ViewportData.Size.y ) );
 
         float closestT = std::numeric_limits<float>::max();
@@ -135,7 +156,7 @@ namespace Desert::Editor
 
             for ( const auto& submesh : mesh->GetSubmeshes() )
             {
-                auto localRay = ray.ToLocalSpace( transform );
+                auto localRay = ray.ToLocalSpace( transform * submesh.Transform );
 
                 if ( localRay.IntersectsAABB( submesh.BoundingBox, t ) )
                 {
@@ -150,11 +171,6 @@ namespace Desert::Editor
                 }
             }
         }
-    }
-
-    void ViewportPanel::UpdateCamera( const Common::Timestep& timestep )
-    {
-        m_EditorCamera.OnUpdate( timestep );
     }
 
     void ViewportPanel::OnEvent( Common::Event& e )
@@ -174,7 +190,7 @@ namespace Desert::Editor
 
     {
         // m_ImGuiLayer->Resize( e.width, e.height );
-        m_EditorCamera.UpdateProjectionMatrix( e.width, e.height );
+        // m_EditorCamera.UpdateProjectionMatrix( e.width, e.height );
         m_Scene->Resize( e.width, e.height );
         return false;
     }

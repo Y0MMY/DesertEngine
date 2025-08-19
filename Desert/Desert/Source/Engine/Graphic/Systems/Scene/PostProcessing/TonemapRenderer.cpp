@@ -5,7 +5,8 @@ namespace Desert::Graphic::System
     Common::BoolResult TonemapRenderer::Initialize( const uint32_t width, const uint32_t height )
     {
         const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
-        if ( !compositeFramebuffer )
+        const auto& renderGraph          = m_RenderGraph.lock();
+        if ( !compositeFramebuffer || !renderGraph )
         {
             DESERT_VERIFY( false );
         }
@@ -24,7 +25,6 @@ namespace Desert::Graphic::System
         RenderPassSpecification rpSpec;
         rpSpec.DebugName         = debugName;
         rpSpec.TargetFramebuffer = m_Framebuffer;
-        m_RenderPass             = Graphic::RenderPass::Create( rpSpec );
 
         // Pipeline
         m_Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
@@ -39,25 +39,24 @@ namespace Desert::Graphic::System
 
         m_MaterialTonemap = std::make_unique<MaterialTonemap>();
 
+        renderGraph->AddPass(
+             "TonemapPass",
+             [this]()
+             {
+                 const auto& framebuffer =
+                      m_CompositeFramebuffer.lock(); // We call lock internally to avoid cyclic dependencies.
+                 if ( !framebuffer )
+                 {
+                     LOG_ERROR(
+                          "The framebuffer for `TonemapRenderer::ProcessSystem` was destroyed or wasn't set up" );
+                     return;
+                 }
+
+                 auto& renderer = Renderer::GetInstance();
+                 m_MaterialTonemap->UpdateRenderParameters( framebuffer->GetColorAttachmentImage() );
+                 renderer.SubmitFullscreenQuad( m_Pipeline, m_MaterialTonemap->GetMaterialExecutor() );
+             },
+             RenderPass::Create( rpSpec ) );
         return BOOLSUCCESS;
     }
-
-    void TonemapRenderer::ProcessSystem()
-    {
-        const auto& framebuffer = m_CompositeFramebuffer.lock();
-        if ( !framebuffer )
-        {
-            LOG_ERROR( "The framebuffer for `TonemapRenderer::ProcessSystem` was destroyed or wasn't set up" );
-            return;
-        }
-
-        auto& renderer = Renderer::GetInstance();
-        renderer.BeginRenderPass( m_RenderPass );
-
-        m_MaterialTonemap->UpdateRenderParameters( framebuffer->GetColorAttachmentImage() );
-
-        renderer.SubmitFullscreenQuad( m_Pipeline, m_MaterialTonemap->GetMaterialExecutor() );
-        renderer.EndRenderPass();
-    }
-
 } // namespace Desert::Graphic::System

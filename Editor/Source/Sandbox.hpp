@@ -23,6 +23,7 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
     appInfo.Title  = "Desert Engine";
     appInfo.Width  = 1920;
     appInfo.Height = 780;
+    appInfo.Fullscreen = false;
 
     return &Common::Singleton<Desert::Sandbox>::CreateInstance( appInfo );
 }

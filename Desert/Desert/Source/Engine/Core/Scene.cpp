@@ -24,11 +24,13 @@ namespace Desert::Core
         RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer, m_ResourceRegistry );
         RegisterSystem<ECS::SkyboxRenderSystem>( SceneSystem::SkyboxRenderer, m_SceneRenderer,
                                                  m_ResourceRegistry );
+
+        m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }
 
-    NO_DISCARD Common::BoolResult Scene::BeginScene( const Core::Camera& camera )
+    NO_DISCARD Common::BoolResult Scene::BeginScene()
     {
-        return m_SceneRenderer->BeginScene( shared_from_this(), camera );
+        return m_SceneRenderer->BeginScene( shared_from_this(), m_MainCamera );
     }
 
     NO_DISCARD Common::BoolResult Scene::Init()
@@ -51,6 +53,13 @@ namespace Desert::Core
 
             dirLightGroup.each( [&]( const auto& light, const auto& transform )
                                 { sceneRendererInfo.DirLights.push_back( { transform.Translation } ); } );
+        }
+
+
+        //TODO: system
+        if (m_MainCamera)
+        {
+            m_MainCamera->OnUpdate(ts);
         }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
@@ -113,6 +122,49 @@ namespace Desert::Core
     {
         //   SceneSerializer serializer( this, m_AssetManager );
         // return serializer.SaveToFile();
+    }
+
+    void Scene::RegisterExternalPass( std::string&& name, std::function<void()> execute,
+                                      std::shared_ptr<Graphic::RenderPass>&& renderPass )
+    {
+        m_SceneRenderer->RegisterExternalPass( std::move( name ), execute, std::move( renderPass ) );
+    }
+
+    void Scene::OnEntityCreated_Camera()
+    {
+        FindMainCamera();
+    }
+
+    void Scene::FindMainCamera()
+    {
+        m_MainCamera.reset();
+
+        auto cameraView = m_Registry.view<ECS::CameraComponent>();
+
+        for ( auto entity : cameraView )
+        {
+            auto& cameraComponent = cameraView.get<ECS::CameraComponent>( entity );
+
+            if ( cameraComponent.IsMainCamera )
+            {
+                // TODO: Get from scene config
+                const glm::mat4 projection =
+                     glm::perspectiveFov( glm::radians( 45.0f ), 1280.0f, 720.0f, 0.1f, 1000.0f );
+                cameraComponent.Camera = std::make_shared<Core::Camera>( projection );
+                m_MainCamera           = cameraComponent.Camera;
+
+                break;
+            }
+        }
+
+        if ( !m_MainCamera && !cameraView.empty() )
+        {
+            auto  entity          = *cameraView.begin();
+            auto& cameraComponent = cameraView.get<ECS::CameraComponent>( entity );
+            m_MainCamera          = cameraComponent.Camera;
+
+            cameraComponent.IsMainCamera = true;
+        }
     }
 
 } // namespace Desert::Core
