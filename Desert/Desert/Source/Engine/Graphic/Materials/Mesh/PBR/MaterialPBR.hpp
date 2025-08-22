@@ -1,7 +1,8 @@
 #pragma once
 
+#include <Engine/Graphic/Materials/Material.hpp>
+
 #include <Engine/Assets/Mesh/MaterialAsset.hpp>
-#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 #include <Engine/Graphic/Materials/Models/Global.hpp>
 #include <Engine/Graphic/Materials/Models/Mesh/PBR/PBRTextures.hpp>
@@ -13,7 +14,7 @@
 namespace Desert::Graphic
 {
     // TODO: should override the base class, as we may want to support not only PBR
-    class MaterialPBR
+    class MaterialPBR final : public Material
     {
     public:
         MaterialPBR() = default;
@@ -28,14 +29,10 @@ namespace Desert::Graphic
             }
             return nullptr;
         }
+
         bool IsUsingBaseMaterial() const
         {
             return m_BaseMaterial.lock() != nullptr;
-        }
-
-        const auto& GetMaterial() const
-        {
-            return m_Material;
         }
 
         // Albedo properties
@@ -112,9 +109,6 @@ namespace Desert::Graphic
         // weak_ptr because AssetManager owns MaterialAsset
         // MaterialPBR only observes the base material
         std::weak_ptr<Assets::MaterialAsset> m_BaseMaterial;
-
-        std::shared_ptr<MaterialExecutor> m_Material;
-
         // Material properties
         glm::vec3 m_AlbedoColor = glm::vec3( 0.8f );
         float     m_AlbedoBlend = 1.0f;

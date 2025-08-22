@@ -5,7 +5,7 @@
 namespace Desert::Graphic
 {
     MaterialPBR::MaterialPBR( const std::shared_ptr<Assets::MaterialAsset>& baseAsset )
-         : m_BaseMaterial( baseAsset )
+         : Material( "MaterialPBR", "StaticPBR.glsl" ), m_BaseMaterial( baseAsset )
     {
         // Create a new material instance based on the base asset
         if ( const auto& baseMaterial = m_BaseMaterial.lock(); baseMaterial )
@@ -13,14 +13,10 @@ namespace Desert::Graphic
             InheritBaseMaterialProperties();
         }
 
-        const auto& shader = Graphic::ShaderLibrary::Get( "StaticPBR.glsl", {} );
-
-        m_Material = Graphic::MaterialExecutor::Create( "MaterialPBR", shader.GetValue() );
-
-        m_LightingData       = std::make_unique<Models::LightingData>( m_Material );
-        m_GlobalUB           = std::make_unique<Models::GlobalData>( m_Material );
-        m_PBRTextures        = std::make_unique<Models::PBR::PBRMaterialTexture>( m_Material );
-        m_MaterialProperties = std::make_unique<Models::PBR::MaterialPBRProperties>( m_Material );
+        m_LightingData       = std::make_unique<Models::LightingData>( m_MaterialExecutor );
+        m_GlobalUB           = std::make_unique<Models::GlobalData>( m_MaterialExecutor );
+        m_PBRTextures        = std::make_unique<Models::PBR::PBRMaterialTexture>( m_MaterialExecutor );
+        m_MaterialProperties = std::make_unique<Models::PBR::MaterialPBRProperties>( m_MaterialExecutor );
     }
 
     void MaterialPBR::InheritBaseMaterialProperties()
@@ -165,7 +161,7 @@ namespace Desert::Graphic
         m_LightingData->UpdateDirection( directionLight );
         m_GlobalUB->UpdateUBGlobal( Models::GlobalUB{ .CameraPosition = camera.GetPosition() } );
         m_PBRTextures->UpdatePBR( pbrTextures );
-        m_Material->PushConstant( &vp, sizeof( vp ) );
+        m_MaterialExecutor->PushConstant( &vp, sizeof( vp ) );
 
         // Here we would update the actual Material object with our parameters
         // This is where we'd connect to your Material class
@@ -190,7 +186,7 @@ namespace Desert::Graphic
             {
                 auto texture = GetFinalTexture( type );
                 {
-                    if ( auto texProp = m_Material->GetTexture2DProperty( name ) )
+                    if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( name ) )
                     {
                         texProp->SetTexture( texture );
                     }
