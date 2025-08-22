@@ -58,6 +58,13 @@ namespace Desert::Graphic::API::Vulkan
         }
         const auto& GetDescriptorSetLayout( uint32_t set ) const
         {
+            static VkDescriptorSetLayout nullLayout = VK_NULL_HANDLE;
+
+            if ( set >= m_DescriptorSetLayouts.size() )
+            {
+                return nullLayout;
+            }
+
             return m_DescriptorSetLayouts[set];
         }
 

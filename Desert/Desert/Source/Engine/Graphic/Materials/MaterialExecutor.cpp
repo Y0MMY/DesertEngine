@@ -71,9 +71,17 @@ namespace Desert::Graphic
         }
     }
 
-    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&&                  debugName,
-                                                                const std::shared_ptr<Shader>& shader )
+    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&& debugName, std::string&& shaderName )
     {
+        const auto& shaderLibrary = Graphic::ShaderLibrary::Get( shaderName, {} );
+        if ( !shaderLibrary )
+        {
+            LOG_ERROR( "Could not find the shader" );
+            DESERT_VERIFY( false )
+        }
+
+        const auto& shader = shaderLibrary.GetValue();
+
         switch ( RendererAPI::GetAPIType() )
         {
             case RendererAPIType::None:

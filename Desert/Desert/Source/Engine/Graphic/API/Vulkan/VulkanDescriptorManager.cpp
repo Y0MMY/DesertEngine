@@ -44,6 +44,10 @@ namespace Desert::Graphic::API::Vulkan
         auto& frame = m_Frames[frameIndex];
 
         VkDescriptorSetLayout layout = shader->GetDescriptorSetLayout( setIndex );
+        if ( layout == VK_NULL_HANDLE )
+        {
+            return Common::MakeSuccess( DescriptorSetInfo{ VK_NULL_HANDLE, VK_NULL_HANDLE } );
+        }
 
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;

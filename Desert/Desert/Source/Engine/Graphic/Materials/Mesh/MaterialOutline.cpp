@@ -2,13 +2,9 @@
 
 namespace Desert::Graphic
 {
-    MaterialOutline::MaterialOutline()
+    MaterialOutline::MaterialOutline() : Material( "MaterialOutline", "Outline.glsl" )
     {
-        const auto& shader = Graphic::ShaderLibrary::Get( "Outline.glsl", {} );
-
-        m_Material = Graphic::MaterialExecutor::Create( "MaterialOutline", shader.GetValue() );
-
-        m_OutlineData = std::make_unique<Models::OutlineData>( m_Material );
+        m_OutlineData = std::make_unique<Models::OutlineData>( m_MaterialExecutor );
     }
 
     static struct VP
@@ -29,7 +25,7 @@ namespace Desert::Graphic
         float       distance     = glm::distance( worldPosition, cameraPosition );
         const float dynamicWidth = width / ( 1.0f + distance );
 
-        m_Material->PushConstant( &vp, sizeof( vp ) );
+        m_MaterialExecutor->PushConstant( &vp, sizeof( vp ) );
 
         m_OutlineData->UpdateOutlineUB( { 1.0f + dynamicWidth, color } );
     }

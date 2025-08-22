@@ -60,8 +60,7 @@ namespace Desert::Graphic
             return m_MaterialBackend;
         }
 
-        static std::shared_ptr<MaterialExecutor> Create( std::string&&                  debugName,
-                                                         const std::shared_ptr<Shader>& shader );
+        static std::shared_ptr<MaterialExecutor> Create( std::string&& debugName, std::string&& shaderName );
 
     protected:
         void InitializeProperties();

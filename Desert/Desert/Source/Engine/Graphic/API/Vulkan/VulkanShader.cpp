@@ -157,11 +157,12 @@ namespace Desert::Graphic::API::Vulkan
 
             if ( module.GetCompilationStatus() != shaderc_compilation_status_success )
             {
-                LOG_ERROR( "{}While compiling shader file: {} \nAt stage: {}", module.GetErrorMessage(),
-                           shaderPath, "TODO" );
-                return Common::MakeFormattedError<std::vector<uint32_t>>(
-                     "{}While compiling shader file: {} \nAt stage: {}", module.GetErrorMessage(), shaderPath,
-                     "TODO" );
+                const auto errorMsg =
+                     std::format( "{}While compiling shader file: {} \nAt stage: {}", module.GetErrorMessage(),
+                                  shaderPath, Shader::GetStringShaderStage( stage ) );
+
+                LOG_ERROR( errorMsg );
+                return Common::MakeError<std::vector<uint32_t>>( errorMsg );
             }
 
             return Common::MakeSuccess( std::vector<uint32_t>( module.begin(), module.end() ) );
@@ -449,6 +450,11 @@ namespace Desert::Graphic::API::Vulkan
     Common::BoolResult VulkanShader::CreateDescriptorsLayout()
     {
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        if ( m_ReflectionData.ShaderDescriptorSets.empty() )
+        {
+            return Common::MakeSuccess( true );
+        }
 
         std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
 

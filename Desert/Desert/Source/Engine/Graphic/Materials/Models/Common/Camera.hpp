@@ -12,21 +12,23 @@ namespace Desert::Graphic::Models
     class CameraData final : public MaterialHelper::MaterialWrapper
     {
     public:
-        explicit CameraData( const std::shared_ptr<MaterialExecutor>& material )
-             : MaterialHelper::MaterialWrapper( material, "camera")
+        struct CameraDataUB
+        {
+            glm::mat4 Projection;
+            glm::mat4 View;
+        };
+
+        explicit CameraData( const std::shared_ptr<MaterialExecutor>& material, std::string&& ubName )
+             : MaterialHelper::MaterialWrapper( material, std::move( ubName ) )
         {
         }
 
         void UpdateCameraUB( const Core::Camera& camera )
         {
-            struct
-            {
-                glm::mat4 m1;
-                glm::mat4 m2;
-            } cameraObj;
+            CameraDataUB cameraObj;
 
-            cameraObj.m1 = camera.GetProjectionMatrix();
-            cameraObj.m2 = camera.GetViewMatrix();
+            cameraObj.Projection = camera.GetProjectionMatrix();
+            cameraObj.View       = camera.GetViewMatrix();
 
             m_UniformProperty->SetData( &cameraObj, 128 );
         }

@@ -21,6 +21,7 @@ namespace Desert::Graphic
         virtual const std::vector<Core::Models::ImageCubeSampler> GetUniformImageCubeModels() const            = 0;
         virtual const std::vector<Core::Models::Image2DSampler>   GetUniformImage2DModels() const              = 0;
         virtual const ShaderDefines&                              GetDefines() const                           = 0;
+        static std::string GetStringShaderStage( const Core::Formats::ShaderStage stage );
 
         static std::shared_ptr<Shader> Create( const std::string& filename, const ShaderDefines& defines = {} );
     };

@@ -45,6 +45,8 @@ namespace Desert
     {
     public:
         explicit Mesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
+        Mesh( const std::vector<Vertex>& vertices, const std::vector<Index>& indices,
+              const std::string& name = "CustomMesh" );
 
         Common::BoolResult Invalidate();
 
@@ -82,5 +84,7 @@ namespace Desert
 
         const std::weak_ptr<Assets::MeshAsset> m_MeshAsset;
         const Common::Filepath                 m_Filepath;
+
+        const bool m_Custom = false;
     };
 } // namespace Desert

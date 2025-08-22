@@ -7,7 +7,6 @@
 
 namespace Desert::Graphic::Models
 {
-
     class SkyboxData final : public MaterialHelper::MaterialWrapperTextureCube
     {
     public:

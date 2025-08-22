@@ -40,6 +40,21 @@ namespace Desert::Graphic
         return shader;
     }
 
+    std::string Shader::GetStringShaderStage( const Core::Formats::ShaderStage stage )
+    {
+        switch ( stage )
+        {
+            case Core::Formats::ShaderStage::Fragment:
+                return "Fragment";
+            case Core::Formats::ShaderStage::Vertex:
+                return "Vertex";
+            case Core::Formats::ShaderStage::Compute:
+                return "Compute";
+        }
+
+        return "Unknown";
+    }
+
     void ShaderLibrary::LoadShader( const std::shared_ptr<Shader>& shader, const ShaderDefines& defines )
     {
         const std::string shaderName = shader->GetName();

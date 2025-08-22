@@ -2,11 +2,9 @@
 
 namespace Desert::Graphic
 {
-    MaterialTonemap::MaterialTonemap()
+    MaterialTonemap::MaterialTonemap() : Material( "MaterialTonemap", "SceneComposite.glsl" )
     {
-        const auto& shader = Graphic::ShaderLibrary::Get( "SceneComposite.glsl", {} );
-        m_Material         = Graphic::MaterialExecutor::Create( "MaterialTonemap", shader.GetValue() );
-        m_ToneMapModel     = std::make_unique<Models::ToneMap>( m_Material );
+        m_ToneMapModel = std::make_unique<Models::ToneMap>( m_MaterialExecutor );
     }
 
     void MaterialTonemap::UpdateRenderParameters( const std::shared_ptr<Image2D>& targetImage )

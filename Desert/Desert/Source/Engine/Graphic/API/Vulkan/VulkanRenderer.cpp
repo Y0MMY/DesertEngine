@@ -314,9 +314,12 @@ namespace Desert::Graphic::API::Vulkan
 
         const auto& vulkanLayout  = std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline );
         const auto& descriptorSet = descriptorSetResult.GetValue();
-        m_DescriptorManager->BindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                                 vulkanLayout->GetVkPipelineLayout(), vulkanShader, frameIndex );
-
+        if ( descriptorSet.Set != VK_NULL_HANDLE )
+        {
+            m_DescriptorManager->BindDescriptorSets( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                     vulkanLayout->GetVkPipelineLayout(), vulkanShader,
+                                                     frameIndex );
+        }
         vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                            vulkanLayout->GetVkPipeline() );
 

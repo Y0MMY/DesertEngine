@@ -16,3 +16,6 @@
 [submodule "Editor/ThirdParty/ImGuizmo"]
 	path = Editor/ThirdParty/ImGuizmo
 	url = https://github.com/CedricGuillemet/ImGuizmo
+[submodule "ThirdParty/NVRHI"]
+	path = ThirdParty/NVRHI
+	url = https://github.com/Y0MMY/NVRHI

@@ -102,8 +102,51 @@ namespace Desert
         }
     }
 
+    Mesh::Mesh( const std::vector<Vertex>& vertices, const std::vector<Index>& indices, const std::string& name )
+         : m_Filepath( "" ), m_Custom( true )
+    {
+        Submesh submesh;
+        submesh.Name         = name;
+        submesh.VertexOffset = 0;
+        submesh.VertexCount  = static_cast<uint32_t>( vertices.size() );
+        submesh.IndexOffset  = 0;
+        submesh.IndexCount   = static_cast<uint32_t>( indices.size() ) * 3;
+        submesh.Transform    = glm::mat4( 1.0f );
+
+        submesh.BoundingBox.Min = { FLT_MAX, FLT_MAX, FLT_MAX };
+        submesh.BoundingBox.Max = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
+        for ( const auto& vertex : vertices )
+        {
+            submesh.BoundingBox.Min = glm::min( submesh.BoundingBox.Min, vertex.Position );
+            submesh.BoundingBox.Max = glm::max( submesh.BoundingBox.Max, vertex.Position );
+        }
+
+        m_Submeshes.push_back( submesh );
+
+        m_TriangleCache.resize( 1 );
+        m_TriangleCache[0].reserve( indices.size() );
+
+        for ( const auto& index : indices )
+        {
+            m_TriangleCache[0].emplace_back( vertices[index.V1], vertices[index.V2], vertices[index.V3] );
+        }
+
+        m_VertexBuffer =
+             Graphic::VertexBuffer::Create( (void*)vertices.data(), vertices.size() * sizeof( Vertex ) );
+        m_VertexBuffer->RT_Invalidate();
+
+        m_IndexBuffer = Graphic::IndexBuffer::Create( indices.data(), indices.size() * sizeof( Index ) );
+        m_IndexBuffer->RT_Invalidate();
+    }
+
     Common::BoolResult Mesh::Invalidate()
     {
+        if ( m_Custom )
+        {
+            return BOOLSUCCESS;
+        }
+
         std::unique_ptr<Assimp::Importer> importer = std::make_unique<Assimp::Importer>();
 
         const auto& meshAsset = m_MeshAsset.lock();

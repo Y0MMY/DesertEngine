@@ -1,16 +1,18 @@
 #pragma once
 
+#include <Engine/Graphic/Materials/Material.hpp>
+
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
-#include <Engine/Graphic/Materials/Models/Skybox/Camera.hpp>
+#include <Engine/Graphic/Materials/Models/Common/Camera.hpp>
 #include <Engine/Graphic/Materials/Models/Skybox/Skybox.hpp>
 
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 namespace Desert::Graphic
 {
-    class MaterialSkybox
+    class MaterialSkybox final : public Material
     {
     public:
         explicit MaterialSkybox( const std::shared_ptr<Assets::SkyboxAsset>& baseAsset );
@@ -45,11 +47,6 @@ namespace Desert::Graphic
 
         // Parameter updates
         void UpdateRenderParameters( const Core::Camera& camera );
-
-        const auto& GetMaterialExecutor() const
-        {
-            return m_Material;
-        }
 
     private:
         // weak_ptr because AssetManager owns MaterialAsset
