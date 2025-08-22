@@ -55,11 +55,10 @@ namespace Desert::Core
                                 { sceneRendererInfo.DirLights.push_back( { transform.Translation } ); } );
         }
 
-
-        //TODO: system
-        if (m_MainCamera)
+        // TODO: system
+        if ( m_MainCamera )
         {
-            m_MainCamera->OnUpdate(ts);
+            m_MainCamera->OnUpdate( ts );
         }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
@@ -165,6 +164,11 @@ namespace Desert::Core
 
             cameraComponent.IsMainCamera = true;
         }
+    }
+
+    const std::shared_ptr<Desert::Graphic::Framebuffer> Scene::GetCompositeFramebuffer() const
+    {
+        return m_SceneRenderer->GetCompositeFramebuffer();
     }
 
 } // namespace Desert::Core

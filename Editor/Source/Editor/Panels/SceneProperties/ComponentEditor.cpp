@@ -5,6 +5,7 @@
 
 #include "ComponentWidgets/TransformComponentWidget.hpp"
 #include "ComponentWidgets/StaticMeshComponent.hpp"
+#include "ComponentWidgets/SkyboxComponent.hpp"
 
 namespace Desert::Editor
 {
@@ -27,6 +28,7 @@ namespace Desert::Editor
         RegisterComponent( "Transform", []() { return std::make_unique<TransformComponentWidget>(); } );
         RegisterComponent( "3D Model",
                            [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager ); } );
+        RegisterComponent( "..", [this]() { return std::make_unique<SkyboxComponentWidget>( m_AssetManager ); } );
     }
 
     void ComponentEditor::Render( ECS::Entity& entity )

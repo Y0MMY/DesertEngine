@@ -26,17 +26,23 @@ namespace Desert::Editor
             return;
         }
 
-        ImVec2 mousePos    = ImGui::GetMousePos();
-        ImVec2 viewportPos = ImGui::GetWindowPos();
+        ImVec2 mousePos    = ::ImGui::GetMousePos();
+        ImVec2 viewportPos = ::ImGui::GetWindowPos();
 
-        m_ViewportData.MousePosition = glm::vec2( mousePos.x - viewportPos.x, mousePos.y - viewportPos.y );
+        ImVec2 contentMin = ::ImGui::GetWindowContentRegionMin();
+        ImVec2 contentMax = ::ImGui::GetWindowContentRegionMax();
 
-        const glm::vec2 size = { ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y };
-        if ( m_ViewportData.Size != size )
-        {
-            m_ViewportData.Size = size;
-            mainCamera.value()->UpdateProjectionMatrix( size.x, size.y ); // TODO: Move to scene
-        }
+        m_ViewportData.WindowPos  = { viewportPos.x, viewportPos.y };
+        m_ViewportData.ContentMin = { contentMin.x, contentMin.y };
+        m_ViewportData.ContentMax = { contentMax.x, contentMax.y };
+
+        m_ViewportData.MousePosition = glm::vec2( mousePos.x - ( viewportPos.x + contentMin.x ),
+                                                  mousePos.y - ( viewportPos.y + contentMin.y ) );
+
+        m_ViewportData.Size      = { contentMax.x - contentMin.x, contentMax.y - contentMin.y };
+        m_ViewportData.IsHovered = ::ImGui::IsWindowHovered();
+
+        mainCamera.value()->UpdateProjectionMatrix(m_ViewportData.Size.x, m_ViewportData.Size.y ); // TODO: Move to scene
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
 
         // Render scene
@@ -156,7 +162,7 @@ namespace Desert::Editor
 
             for ( const auto& submesh : mesh->GetSubmeshes() )
             {
-                auto localRay = ray.ToLocalSpace( transform * submesh.Transform );
+                auto localRay = ray.ToLocalSpace( transform  );
 
                 if ( localRay.IntersectsAABB( submesh.BoundingBox, t ) )
                 {

@@ -4,6 +4,7 @@
 #include <imgui/imgui.h>
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include "Editor/Panels/IPanel.hpp"
+#include "Editor/RenderSystems/RenderRigistry.hpp"
 
 namespace Desert::Editor
 {
@@ -37,6 +38,7 @@ namespace Desert::Editor
         std::shared_ptr<Assets::AssetManager>      m_AssetManager;
         std::unique_ptr<Assets::AssetPreloader>    m_AssetPreloader;
         std::shared_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
+        std::unique_ptr<Render::RenderRegistry>    m_RenderRegistry;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;

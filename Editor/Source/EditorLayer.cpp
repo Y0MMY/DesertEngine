@@ -76,6 +76,7 @@ namespace Desert::Editor
 
 #endif // EBABLE_IMGUI
 
+        m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
         return BOOLSUCCESS;
     }
 
@@ -86,6 +87,7 @@ namespace Desert::Editor
         {
             return Common::MakeError( beginResult.GetError() );
         }
+        m_RenderRegistry->Render();
 
         m_MainScene->OnUpdate( ts );
 
@@ -104,6 +106,7 @@ namespace Desert::Editor
 
             m_ImGuiLayer->End();
         }
+
         m_Application->GetWindow()->PresentFinalImage();
         return BOOLSUCCESS;
     }

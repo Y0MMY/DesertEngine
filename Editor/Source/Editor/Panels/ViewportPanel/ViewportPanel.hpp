@@ -53,9 +53,13 @@ namespace Desert::Editor
 
         struct ViewportData
         {
-            glm::vec2 Size          = { 0.0f, 0.0f };
-            glm::vec2 MousePosition = { 0.0f, 0.0f };
-            bool      IsHovered     = false;
+            glm::vec2 MousePosition;
+            glm::vec2 Size;
+            glm::vec2 ContentMin;
+            glm::vec2 ContentMax;
+            glm::vec2 WindowPos;  
+            bool      IsHovered = false;
+            float     DpiScale  = 1.0f;
         };
 
         ViewportData m_ViewportData;

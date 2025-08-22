@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Models/SceneRendererUpdate.hpp>
 #include <Engine/Graphic/Models/MeshRenderData.hpp>
+#include <Engine/Graphic/RenderPass.hpp>
 
 #include <Common/Core/Core.hpp>
 #include <Engine/Core/Camera.hpp>
@@ -49,7 +50,8 @@ namespace Desert::Core
 
         [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
 
-        const std::shared_ptr<Graphic::Image2D> GetFinalImage() const;
+        const std::shared_ptr<Graphic::Image2D>     GetFinalImage() const;
+        const std::shared_ptr<Graphic::Framebuffer> GetCompositeFramebuffer() const;
 
         ECS::Entity& CreateNewEntity( std::string&& entityName );
 

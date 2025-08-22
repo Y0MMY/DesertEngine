@@ -74,6 +74,11 @@ namespace Desert::Editor
                 icon = (char*)ICON_MDI_LIGHTBULB;
             }
 
+            else if ( entity.HasComponent<ECS::SkyboxComponent>() )
+            {
+                icon = (char*)ICON_MDI_EARTH;
+            }
+
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetIconColor() );
 
             bool nodeOpen = ImGui::TreeNodeEx( name.c_str(), nodeFlags, "%s", icon );
@@ -203,6 +208,11 @@ namespace Desert::Editor
                 if ( ImGui::Selectable( "Light" ) )
                 {
                     scene->CreateNewEntity( "Directional Light" ).AddComponent<ECS::DirectionLightComponent>();
+                }
+
+                if ( ImGui::Selectable( "Skybox" ) )
+                {
+                    scene->CreateNewEntity( "Skybox" ).AddComponent<ECS::SkyboxComponent>();
                 }
 
                 if ( ImGui::Selectable( "3D Model" ) )
