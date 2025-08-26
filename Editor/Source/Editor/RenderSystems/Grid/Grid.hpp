@@ -26,7 +26,6 @@ namespace Desert::Editor::Render
 
         std::shared_ptr<Graphic::Pipeline>    m_Pipeline;
         std::shared_ptr<Graphic::Shader>      m_Shader;
-        std::shared_ptr<Graphic::Framebuffer> m_Framebuffer;
         std::shared_ptr<MaterialGrid>         m_Material;
     };
 

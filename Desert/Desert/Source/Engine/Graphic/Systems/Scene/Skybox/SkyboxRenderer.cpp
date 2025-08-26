@@ -4,7 +4,7 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult SkyboxRenderer::Initialize( const uint32_t width, const uint32_t height )
+    Common::BoolResult SkyboxRenderer::Initialize()
     {
         const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
         const auto& renderGraph          = m_RenderGraph.lock();
@@ -27,6 +27,10 @@ namespace Desert::Graphic::System
         pipeSpec.DebugName   = debugName;
         pipeSpec.Framebuffer = compositeFramebuffer;
         pipeSpec.Shader      = m_Shader;
+
+        pipeSpec.CullMode = CullMode::None;
+        pipeSpec.DepthTestEnabled = false;
+        pipeSpec.DepthWriteEnabled = false; 
 
         m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();

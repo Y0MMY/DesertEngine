@@ -14,13 +14,6 @@ namespace Desert::Graphic
         Vulkan = 1,
     };
 
-    struct PBRTextures
-    {
-        std::shared_ptr<ImageCube> EnvironmentMap;
-        std::shared_ptr<ImageCube> IrradianceMap;
-        std::shared_ptr<ImageCube> PrefilteredMap;
-    };
-
     class RendererAPI
     {
     public:
@@ -43,14 +36,6 @@ namespace Desert::Graphic
                                            const std::shared_ptr<MaterialExecutor>& material )              = 0;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) = 0;
-#ifdef DESERT_CONFIG_DEBUG
-
-        virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath,
-                                                                         bool calculateMips )                  = 0;
-        virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath )         = 0;
-        virtual Common::BoolResult         CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) = 0;
-        virtual PBRTextures                CreateEnvironmentMap( const Common::Filepath& filepath )            = 0;
-#endif
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const = 0;
 
     public:

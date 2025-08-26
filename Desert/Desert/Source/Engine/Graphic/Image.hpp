@@ -24,7 +24,7 @@ namespace Desert::Graphic
         virtual uint32_t                      GetMipmapLevels() const        = 0;
         virtual bool                          IsLoaded() const               = 0;
         virtual void                          Use( uint32_t slot = 0 ) const = 0;
-        virtual Core::Formats::ImagePixelData GetImagePixels() const         = 0;
+        virtual Core::Formats::ImagePixelData GetImagePixels()               = 0;
 
         virtual const Common::UUID GetHash() const final
         {
@@ -60,6 +60,7 @@ namespace Desert::Graphic
 
         static std::shared_ptr<ImageCube> Create( const Core::Formats::ImageCubeSpecification& spec,
                                                   const std::unique_ptr<MipMapCubeGenerator>&  mipGenerator );
+        static std::shared_ptr<ImageCube> Copy( const std::shared_ptr<ImageCube>& targetImageCube );
     };
 
     namespace Utils

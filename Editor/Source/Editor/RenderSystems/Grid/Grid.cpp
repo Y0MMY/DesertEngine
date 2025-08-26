@@ -11,48 +11,48 @@ namespace Desert::Editor::Render
         }
 
         // Create grid mesh
-        /*if ( !CreateGridGeometry() )
-            return Common::MakeError( "Failed to create grid geometry" );*/
+        if ( !CreateGridGeometry() )
+            return Common::MakeError( "Failed to create grid geometry" );
 
         // Setup pipeline
-        /*if ( !SetupPipeline() )
-            return Common::MakeError( "Failed to setup grid pipeline" );*/
+        if ( !SetupPipeline() )
+            return Common::MakeError( "Failed to setup grid pipeline" );
 
         // Create grid material
-       // m_Material = std::make_shared<MaterialGrid>();
+        m_Material = std::make_shared<MaterialGrid>();
 
-        //m_Material->SetGridProperties( 1.0f, 20, glm::vec4( 0.5f, 0.5f, 0.5f, 0.3f ) );
+        m_Material->SetGridProperties( 1.0f, 20, glm::vec4( 0.5f, 0.5f, 0.5f, 0.3f ) );
 
         // Add to render graph
         constexpr std::string_view debugName = "EditorGrid";
 
-        //scene->RegisterExternalPass(
-        //     "EditorGridPass",
-        //     [this]()
-        //     {
-        //         const auto& camera = m_DstScene.lock()->GetMainCamera();
-        //         if ( camera )
-        //         {
-        //             // TODO: move to bind-class
-        //             SetGridProperties( 16.025f, 0.025f, glm::vec4( 0.5f, 0.5f, 0.5f, 0.3f ) );
-        //             UpdateCamera( camera.value() );
+        scene->RegisterExternalPass(
+             "EditorGridPass",
+             [this]()
+             {
+                 const auto& camera = m_DstScene.lock()->GetMainCamera();
+                 if ( camera )
+                 {
+                     // TODO: move to bind-class
+                     SetGridProperties( 16.025f, 0.025f, glm::vec4( 0.5f, 0.5f, 0.5f, 0.3f ) );
+                     UpdateCamera( camera.value() );
 
-        //             auto& renderer = Graphic::Renderer::GetInstance();
-        //             if ( const auto& material = m_Material )
-        //             {
-        //                 renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
-        //             }
-        //         }
-        //     },
-        //     Graphic::RenderPass::Create(
-        //          { .TargetFramebuffer = m_Framebuffer, .DebugName = "EditorGridPass" } ) );
+                     auto& renderer = Graphic::Renderer::GetInstance();
+                     if ( const auto& material = m_Material )
+                     {
+                         renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
+                     }
+                 }
+             },
+             Graphic::RenderPass::Create(
+                  { .TargetFramebuffer = scene->GetCompositeFramebuffer(), .DebugName = "EditorGridPass" } ) );
 
         return BOOLSUCCESS;
     }
 
     bool Grid::CreateGridGeometry()
     {
-        // m_MeshGrid = std::make_shared<Desert::Mesh>();
+        //m_MeshGrid = std::make_shared<Desert::Mesh>();
         return true;
     }
 
@@ -70,32 +70,26 @@ namespace Desert::Editor::Render
 
         m_Shader = Graphic::Shader::Create( "Grid.glsl" );
 
-        // Framebuffer
-        FramebufferSpecification fbSpec;
-        fbSpec.DebugName               = debugName;
-
-        fbSpec.ExternalAttachments.ColorAttachments.push_back(
-             { .SourceFramebuffer = scene->GetCompositeFramebuffer(),
-               .AttachmentIndex   = 0,
-               .Load              = AttachmentLoad::Load } );
-
-        fbSpec.ExternalAttachments.DepthAttachment = 
-             { .SourceFramebuffer = scene->GetCompositeFramebuffer(),
-               .AttachmentIndex   = 0,
-               .Load              = AttachmentLoad::Load };
-
-        m_Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-
-        m_Framebuffer->Resize( 1920, 780 );
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName         = debugName;
-        pipeSpec.Framebuffer       = m_Framebuffer;
+        pipeSpec.Framebuffer       = scene->GetCompositeFramebuffer();
         pipeSpec.Shader            = m_Shader;
         pipeSpec.DepthTestEnabled  = true;
-        pipeSpec.DepthWriteEnabled = true;
-        pipeSpec.DepthCompareOp    = CompareOp::LessOrEqual;
+        pipeSpec.DepthWriteEnabled = false;
+        pipeSpec.DepthCompareOp    = CompareOp::Less;
         pipeSpec.CullMode          = CullMode::None;
+        pipeSpec.StencilTestEnabled = false;
 
+        pipeSpec.StencilTestEnabled = true;
+        pipeSpec.StencilFront       = { .FailOp      = StencilOp::Keep,
+                                        .PassOp      = StencilOp::Keep, // Не записывать в трафарет
+                                        .DepthFailOp = StencilOp::Keep,
+                                        .CompareOp   = CompareOp::Always, // Всегда проходить тест
+                                        .CompareMask = 0xFF,
+                                        .WriteMask   = 0x00, // Не записывать в трафарет
+                                        .Reference   = 0 };
+
+        pipeSpec.StencilBack        = pipeSpec.StencilFront;
         m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 

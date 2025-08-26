@@ -1,13 +1,13 @@
 #pragma once
 
-#include <cstdint>   
-#include <variant>   
-#include <optional>  
-#include <vector>    
-#include <string>    
-#include <algorithm> 
-#include <cmath>     
-#include <memory>     
+#include <cstdint>
+#include <variant>
+#include <optional>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cmath>
+#include <memory>
 
 // =================== Common =================== //
 
@@ -35,6 +35,7 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/Geometry/Mesh.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
+#include <Engine/Graphic/Systems/RenderSystem.hpp>
 
 // =================== ECS =================== //
 

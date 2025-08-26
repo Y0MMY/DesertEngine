@@ -3,7 +3,10 @@
 #include <Engine/Graphic/Shader.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
+#include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Vertexbuffer.hpp>
+
+#include <Common/Core/Memory/Buffer.hpp>
 
 namespace Desert::Graphic
 {
@@ -115,15 +118,23 @@ namespace Desert::Graphic
     public:
         virtual ~PipelineCompute() = default;
 
-        virtual void Begin()                                                                      = 0;
-        virtual void Execute( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )  = 0;
-        virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) = 0;
-        virtual void End()                                                                        = 0;
+        virtual void Begin()                                                                             = 0;
+        virtual void Execute( const std::shared_ptr<Image>& imageForProccess, std::shared_ptr<Image>& outputImage,
+                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )         = 0;
+        virtual void ExecuteMipLevel( const std::shared_ptr<Image>& imageForProccess, uint32_t mipLevel,
+                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) = 0;
+        virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )        = 0;
+        virtual void End()                                                                               = 0;
+
+        virtual void UpdateStorageBuffer( void* data, std::size_t size ) final;
 
         virtual void Invalidate() = 0;
         virtual void Release()    = 0;
 
         static std::shared_ptr<PipelineCompute> Create( const std::shared_ptr<Shader>& shader );
+
+    protected:
+        Common::Memory::Buffer m_StorageBuffer; // 128 bytes
     };
 
 } // namespace Desert::Graphic

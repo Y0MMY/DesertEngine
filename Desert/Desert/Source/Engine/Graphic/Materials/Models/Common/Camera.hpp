@@ -16,6 +16,7 @@ namespace Desert::Graphic::Models
         {
             glm::mat4 Projection;
             glm::mat4 View;
+            glm::vec3 CameraPos;
         };
 
         explicit CameraData( const std::shared_ptr<MaterialExecutor>& material, std::string&& ubName )
@@ -29,6 +30,7 @@ namespace Desert::Graphic::Models
 
             cameraObj.Projection = camera.GetProjectionMatrix();
             cameraObj.View       = camera.GetViewMatrix();
+            cameraObj.CameraPos  = camera.GetPosition();
 
             m_UniformProperty->SetData( &cameraObj, 128 );
         }

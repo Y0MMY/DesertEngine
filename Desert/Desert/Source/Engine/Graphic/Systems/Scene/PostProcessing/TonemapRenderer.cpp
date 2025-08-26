@@ -2,7 +2,7 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult TonemapRenderer::Initialize( const uint32_t width, const uint32_t height )
+    Common::BoolResult TonemapRenderer::Initialize()
     {
         const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
         const auto& renderGraph          = m_RenderGraph.lock();
@@ -19,7 +19,7 @@ namespace Desert::Graphic::System
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
 
         m_Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-        m_Framebuffer->Resize( width, height );
+        m_Framebuffer->Resize( m_Width, m_Height);
 
         // RenderPass
         RenderPassSpecification rpSpec;

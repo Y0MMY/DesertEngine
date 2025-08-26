@@ -35,4 +35,11 @@ namespace Desert::Graphic
         return nullptr;
     }
 
+    void PipelineCompute::UpdateStorageBuffer( void* data, std::size_t size )
+    {
+        DESERT_VERIFY( size <= 128 );
+
+        m_StorageBuffer = Common::Memory::Buffer::Copy( data, size );
+    }
+
 } // namespace Desert::Graphic

@@ -55,6 +55,16 @@ namespace Desert::Graphic
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
     }
 
+    std::shared_ptr<Desert::Graphic::ImageCube>
+    ImageCube::Copy( const std::shared_ptr<ImageCube>& targetImageCube )
+    {
+        // TODO!
+        const auto& image = std::make_shared<API::Vulkan::VulkanImageCube>(
+             *SP_CAST( API::Vulkan::VulkanImageCube, targetImageCube ) );
+
+        return image;
+    }
+
     namespace Utils
     {
         bool IsDepthFormat( Core::Formats::ImageFormat format )

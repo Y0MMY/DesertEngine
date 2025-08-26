@@ -18,30 +18,32 @@ namespace Desert::Graphic
         const uint32_t width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
         const uint32_t height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
 
-        m_RenderGraph = std::make_shared<RenderGraph>();
+        m_RenderGraphRenderSystems = std::make_shared<RenderGraph>();
+        m_RenderGraphPPSystems     = std::make_shared<RenderGraph>();
 
         // Framebuffer
         FramebufferSpecification fbSpec;
         fbSpec.DebugName = "Composite framebuffer";
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+        fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
 
         m_CompositeFramebuffer = Graphic::Framebuffer::Create( fbSpec );
         m_CompositeFramebuffer->Resize( width, height );
 
         RegisterSystem<System::SkyboxRenderer>( FixedRenderSystems::SkyboxSystem, m_CompositeFramebuffer,
-                                                m_RenderGraph );
+                                                m_RenderGraphRenderSystems );
         RegisterSystem<System::MeshRenderer>( FixedRenderSystems::MeshSystem, m_CompositeFramebuffer,
-                                              m_RenderGraph );
+                                              m_RenderGraphRenderSystems );
         RegisterSystem<System::TonemapRenderer>( FixedRenderSystems::TonemapSystem, m_CompositeFramebuffer,
-                                                 m_RenderGraph );
+                                                 m_RenderGraphPPSystems );
 
-        if ( !m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem]->Initialize( width, height ) )
+        if ( !m_FixedRenderSystems[FixedRenderSystems::SkyboxSystem]->Initialize() )
             return Common::MakeError( "Failed to initialize SkyboxRenderer system" );
 
-        if ( !m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->Initialize( width, height ) )
+        if ( !m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->Initialize() )
             return Common::MakeError( "Failed to initialize MeshRenderer system" );
 
-        if ( !m_FixedRenderSystems[FixedRenderSystems::TonemapSystem]->Initialize( width, height ) )
+        if ( !m_FixedRenderSystems[FixedRenderSystems::TonemapSystem]->Initialize() )
             return Common::MakeError( "Failed to initialize TonemapRenderer system" );
 
         return BOOLSUCCESS;
@@ -80,7 +82,8 @@ namespace Desert::Graphic
         meshSystem->AddLight( BuildDirectionLight(
              sceneRenderInfo.DirLights ) /*{ sceneRenderInfo.DirLights[0].Direction, {}, 0.0 } */ );
 
-        m_RenderGraph->Execute();
+        m_RenderGraphRenderSystems->Execute();
+        m_RenderGraphPPSystems->Execute();
 
         // m_RenderGraph.Execute();
         CompositeRenderPass();
@@ -168,7 +171,7 @@ namespace Desert::Graphic
     void SceneRenderer::RegisterExternalPass( std::string&& name, std::function<void()> execute,
                                               std::shared_ptr<RenderPass>&& renderPass )
     {
-        //  m_RenderGraph.AddPass( std::move( name ), std::move( execute ), std::move( renderPass ) );
+        m_RenderGraphRenderSystems->AddPass( std::move( name ), std::move( execute ), std::move( renderPass ) );
     }
 
 } // namespace Desert::Graphic

@@ -16,10 +16,9 @@ namespace Desert::Graphic
             {
                 if ( strategy == MipGenStrategy::ComputeShader )
                 {
-                    return std::make_unique<API::Vulkan::VulkanMipMap2DGeneratorCS>();
+                    DESERT_VERIFY( false, "ComputeShader was not impl" );
                 }
-
-                DESERT_VERIFY( false, "TransferOps was not impl" );
+                return std::make_unique<API::Vulkan::VulkanMipMap2DGeneratorTO>();
             }
         }
         DESERT_VERIFY( false, "Unknown RendererAPI" );
@@ -36,10 +35,9 @@ namespace Desert::Graphic
             {
                 if ( strategy == MipGenStrategy::ComputeShader )
                 {
-                    return std::make_unique<API::Vulkan::VulkanMipMapCubeGeneratorCS>();
+                    DESERT_VERIFY( false, "ComputeShader was not impl" );
                 }
-
-                DESERT_VERIFY( false, "TransferOps was not impl" );
+                return std::make_unique<API::Vulkan::VulkanMipMapCubeGeneratorTO>();
             }
         }
         DESERT_VERIFY( false, "Unknown RendererAPI" );

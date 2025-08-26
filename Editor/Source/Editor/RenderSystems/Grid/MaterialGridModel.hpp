@@ -22,8 +22,8 @@ namespace Desert::Editor::Render::Model
 
         void Update( const GridMaterialPropertiesUB& props )
         {
-            m_Data = props;
-            m_UniformProperty->SetData( &m_Data, sizeof( GridMaterialPropertiesUB ) );
+            // m_Data = props;
+            // m_UniformProperty->SetData( &m_Data, sizeof( GridMaterialPropertiesUB ) );
         }
 
     private:

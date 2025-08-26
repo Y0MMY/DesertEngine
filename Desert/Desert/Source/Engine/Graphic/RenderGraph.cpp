@@ -9,19 +9,20 @@ namespace Desert::Graphic
                                std::shared_ptr<RenderPass>&& renderPass )
     {
 
-        m_Passes.push_back( { std::move( name ), std::move( execute ), std::move( renderPass ) } );
+        m_Renderpass = std::move( renderPass );
+        m_Passes.push_back( { std::move( name ), std::move( execute ) } );
     }
 
     void RenderGraph::Execute()
     {
         auto& renderer = Renderer::GetInstance();
 
+        renderer.BeginRenderPass( m_Renderpass );
         for ( auto& pass : m_Passes )
         {
-            renderer.BeginRenderPass( pass.Renderpass );
             pass.Execute();
-            renderer.EndRenderPass();
         }
+        renderer.EndRenderPass();
     }
 
 } // namespace Desert::Graphic

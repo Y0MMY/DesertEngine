@@ -18,7 +18,7 @@ namespace Desert::Graphic::System
     public:
         using RenderSystem::RenderSystem;
 
-        virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
+        virtual Common::BoolResult Initialize() override;
         virtual void               Shutdown() override;
 
         void PrepareFrame( const std::shared_ptr<Core::Camera>& camera,
@@ -47,12 +47,10 @@ namespace Desert::Graphic::System
         }
 
     private:
-        bool                                    SetupGeometryPass( const uint32_t width, const uint32_t height,
-                                                                   const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
-                                                                   const std::shared_ptr<RenderGraph>& renderGraph );
-        bool                                    SetupOutlinePass( const uint32_t width, const uint32_t height,
-                                                                  const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
-                                                                  const std::shared_ptr<RenderGraph>& renderGraph );
+        bool SetupGeometryPass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
+                                const std::shared_ptr<RenderGraph>& renderGraph );
+        bool SetupOutlinePass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
+                               const std::shared_ptr<RenderGraph>& renderGraph );
         std::optional<Models::PBR::PBRTextures> PreparePBRTextures() const;
 
     private:

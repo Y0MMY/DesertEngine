@@ -12,7 +12,7 @@ namespace Desert::Graphic::System
     public:
         using RenderSystem::RenderSystem;
 
-        virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
+        virtual Common::BoolResult Initialize() override;
         void                       Shutdown()
         {
         }

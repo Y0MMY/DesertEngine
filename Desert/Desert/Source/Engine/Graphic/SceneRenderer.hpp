@@ -44,7 +44,11 @@ namespace Desert::Graphic
         void               SetEnvironment( const std::shared_ptr<MaterialSkybox>& material );
         const Environment& GetEnvironment();
 
-        const std::shared_ptr<Image2D> GetFinalImage() const;
+        const std::shared_ptr<Image2D>     GetFinalImage() const;
+        const std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const
+        {
+            return m_CompositeFramebuffer;
+        }
 
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
                                    std::shared_ptr<RenderPass>&& renderPass );
@@ -62,8 +66,8 @@ namespace Desert::Graphic
         } m_SceneInfo;
 
     private:
-        std::shared_ptr<RenderGraph> m_RenderGraph;
-        // RenderGraph m_ExternalRenderGraph;
+        std::shared_ptr<RenderGraph> m_RenderGraphRenderSystems;
+        std::shared_ptr<RenderGraph> m_RenderGraphPPSystems; // Post-Proccessing
 
     private:
         std::shared_ptr<Framebuffer> m_CompositeFramebuffer;

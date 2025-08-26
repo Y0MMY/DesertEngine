@@ -5,7 +5,7 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult MeshRenderer::Initialize( const uint32_t width, const uint32_t height )
+    Common::BoolResult MeshRenderer::Initialize()
     {
         const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
         const auto& renderGraph          = m_RenderGraph.lock();
@@ -15,16 +15,16 @@ namespace Desert::Graphic::System
         }
 
         // Setup geometry pass
-        if ( !SetupGeometryPass( width, height, compositeFramebuffer, renderGraph ) )
+        if ( !SetupGeometryPass( compositeFramebuffer, renderGraph ) )
             return Common::MakeError( "Failed to setup geometry pass" );
 
-        if ( !SetupOutlinePass( width, height, compositeFramebuffer, renderGraph ) )
+        if ( !SetupOutlinePass( compositeFramebuffer, renderGraph ) )
             return Common::MakeError( "Failed to setup outline pass" );
 
         // RenderPass
         RenderPassSpecification rpSpec;
         rpSpec.DebugName         = "SceneGeometry";
-        rpSpec.TargetFramebuffer = m_Framebuffer;
+        rpSpec.TargetFramebuffer = compositeFramebuffer;
 
         renderGraph->AddPass(
              "SceneGeometry",
@@ -40,7 +40,8 @@ namespace Desert::Graphic::System
                      {
                          renderData.Material->UpdateRenderParameters( *camera, renderData.Transform,
                                                                       m_DirectionLight, textures );
-                         renderer.RenderMesh( m_Pipeline, renderData.Mesh, renderData.Material->GetMaterial() );
+                         renderer.RenderMesh( m_Pipeline, renderData.Mesh,
+                                              renderData.Material->GetMaterialExecutor() );
                      }
 
                      if ( m_OutlineDraw )
@@ -74,23 +75,10 @@ namespace Desert::Graphic::System
         m_RenderQueue.clear();
     }
 
-    bool MeshRenderer::SetupGeometryPass( const uint32_t width, const uint32_t height,
-                                          const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
+    bool MeshRenderer::SetupGeometryPass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
                                           const std::shared_ptr<RenderGraph>& renderGraph )
     {
         constexpr std::string_view debugName = "SceneGeometry";
-
-        // Framebuffer
-        FramebufferSpecification fbSpec;
-        fbSpec.DebugName               = debugName;
-        fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::DEPTH24STENCIL8 };
-
-        fbSpec.ExternalAttachments.ColorAttachments.push_back( { .SourceFramebuffer = skyboxFramebufferExternal,
-                                                                 .AttachmentIndex   = 0,
-                                                                 .Load              = AttachmentLoad::Load } );
-
-        m_Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-        m_Framebuffer->Resize( width, height );
 
         // Pipeline
         PipelineSpecification pipeSpec;
@@ -114,7 +102,7 @@ namespace Desert::Graphic::System
         pipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
         pipeSpec.CullMode       = CullMode::None;
         pipeSpec.Shader         = Graphic::Shader::Create( "StaticPBR.glsl" );
-        pipeSpec.Framebuffer    = m_Framebuffer;
+        pipeSpec.Framebuffer    = skyboxFramebufferExternal;
 
         m_Pipeline = Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
@@ -122,8 +110,7 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    bool MeshRenderer::SetupOutlinePass( const uint32_t width, const uint32_t height,
-                                         const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
+    bool MeshRenderer::SetupOutlinePass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
                                          const std::shared_ptr<RenderGraph>& renderGraph )
     {
 
@@ -156,7 +143,7 @@ namespace Desert::Graphic::System
         outlinePipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
         outlinePipeSpec.CullMode       = CullMode::None;
         outlinePipeSpec.Shader         = m_OutlineShader;
-        outlinePipeSpec.Framebuffer    = m_Framebuffer;
+        outlinePipeSpec.Framebuffer    = skyboxFramebufferExternal;
         outlinePipeSpec.PolygonMode    = PrimitivePolygonMode::Wireframe;
         outlinePipeSpec.Topology       = PrimitiveTopology::LineStrip;
         outlinePipeSpec.LineWidth      = 5.0f;

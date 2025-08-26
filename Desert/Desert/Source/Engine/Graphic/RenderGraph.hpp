@@ -11,7 +11,6 @@ namespace Desert::Graphic
         {
             std::string                 Name;
             std::function<void()>       Execute;
-            std::shared_ptr<RenderPass> Renderpass;
         };
 
         void AddPass( std::string&& name, std::function<void()>&& execute,
@@ -19,6 +18,7 @@ namespace Desert::Graphic
         void Execute();
 
     private:
+        std::shared_ptr<RenderPass> m_Renderpass;
         std::vector<Pass> m_Passes;
     };
 } // namespace Desert::Graphic

@@ -117,11 +117,6 @@ namespace Desert::Graphic
         s_RendererAPI->RenderMesh( pipeline, mesh, material );
     }
 
-    PBRTextures Renderer::CreateEnvironmentMap( const Common::Filepath& filepath )
-    {
-        return s_RendererAPI->CreateEnvironmentMap( filepath );
-    }
-
     const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const
     {
         return m_BRDFTexture;

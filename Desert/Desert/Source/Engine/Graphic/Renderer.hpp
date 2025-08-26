@@ -48,8 +48,6 @@ namespace Desert::Graphic
         const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
-        PBRTextures                  CreateEnvironmentMap( const Common::Filepath& filepath );
-
         uint32_t GetCurrentFrameIndex();
 
         template <typename FuncT>

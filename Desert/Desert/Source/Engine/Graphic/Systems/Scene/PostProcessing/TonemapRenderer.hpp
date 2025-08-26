@@ -14,12 +14,12 @@ namespace Desert::Graphic::System
     public:
         using RenderSystem::RenderSystem;
 
-        virtual Common::BoolResult Initialize( const uint32_t width, const uint32_t height ) override;
+        virtual Common::BoolResult Initialize() override;
         virtual void               Shutdown() override {};
 
     private:
-        std::shared_ptr<Pipeline>    m_Pipeline;
-        std::shared_ptr<Shader>      m_Shader;
+        std::shared_ptr<Pipeline> m_Pipeline;
+        std::shared_ptr<Shader>   m_Shader;
 
         std::unique_ptr<MaterialTonemap> m_MaterialTonemap;
     };
