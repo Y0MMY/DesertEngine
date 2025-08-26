@@ -10,13 +10,26 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkImage               Image = nullptr;
         VkDescriptorImageInfo ImageInfo{};
-
-        VmaAllocation MemoryAlloc = nullptr;
+        VkFormat              Format;
+        VmaAllocation         MemoryAlloc = nullptr;
     };
 
     VkFormat GetImageVulkanFormat( const Core::Formats::ImageFormat& imageFormat );
 
-    class VulkanImage2D final : public Image2D
+    class VulkanImageBase
+    {
+    public:
+        virtual ~VulkanImageBase() = default;
+
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const                  = 0;
+        virtual void              TransitionImageLayout( VkCommandBuffer cmdBuffer, VkImageLayout newImageLayout,
+                                                         const uint32_t mip = 1U ) = 0;
+        virtual const VkImageView GetMipImageView( uint32_t level ) const          = 0;
+
+        virtual uint32_t GetLayerCount() const = 0;
+    };
+
+    class VulkanImage2D final : public Image2D, public VulkanImageBase
     {
     public:
         VulkanImage2D( const Core::Formats::Image2DSpecification& specification );
@@ -55,10 +68,10 @@ namespace Desert::Graphic::API::Vulkan
             return m_ImageSpecification;
         }
 
-        virtual Core::Formats::ImagePixelData GetImagePixels() const override;
+        virtual Core::Formats::ImagePixelData GetImagePixels() override;
 
         // VulkanImageBase interface
-        virtual const VulkanImageInfo& GetVulkanImageInfo() const
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const override
         {
             return m_VulkanImageInfo;
         }
@@ -67,14 +80,22 @@ namespace Desert::Graphic::API::Vulkan
         Common::BoolResult Invalidate() override;
         Common::BoolResult Release() override;
 
-        const auto GetMipImageView( uint32_t level ) const
+        void TransitionImageLayout( VkCommandBuffer cmdBuffer, VkImageLayout newImageLayout,
+                                    const uint32_t mip = 1U ) override;
+
+        const VkImageView GetMipImageView( uint32_t level ) const override
         {
             return m_MipImageViews[level];
         }
 
+        virtual uint32_t GetLayerCount() const
+        {
+            return 1U;
+        }
+
     private:
-        Common::BoolResult CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo,
-                                               VkFormat format );
+        void               CopyBufferToImage2D( VkCommandBuffer commandBuffer, VkBuffer sourceBuffer );
+        Common::BoolResult CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo );
         Common::BoolResult CreateAttachmentImage( VkDevice device, VkImageCreateInfo& imageInfo, VkFormat format );
 
         VkImageCreateInfo CreateImageInfo( VkFormat format );
@@ -87,11 +108,12 @@ namespace Desert::Graphic::API::Vulkan
         VulkanImageInfo                     m_VulkanImageInfo;
     };
 
-    class VulkanImageCube final : public ImageCube
+    class VulkanImageCube final : public ImageCube, public VulkanImageBase
     {
     public:
         VulkanImageCube( const Core::Formats::ImageCubeSpecification& specification );
         ~VulkanImageCube() override;
+        explicit VulkanImageCube( const VulkanImageCube& other );
 
         // ImageCube interface
         virtual uint32_t GetWidth() const override
@@ -126,10 +148,10 @@ namespace Desert::Graphic::API::Vulkan
             return m_ImageSpecification;
         }
 
-        virtual Core::Formats::ImagePixelData GetImagePixels() const override;
+        virtual Core::Formats::ImagePixelData GetImagePixels() override;
 
         // VulkanImageBase interface
-        virtual const VulkanImageInfo& GetVulkanImageInfo() const
+        virtual const VulkanImageInfo& GetVulkanImageInfo() const override
         {
             return m_VulkanImageInfo;
         }
@@ -138,9 +160,17 @@ namespace Desert::Graphic::API::Vulkan
         Common::BoolResult Invalidate() override;
         Common::BoolResult Release() override;
 
-        const auto GetMipImageView( uint32_t level ) const
+        void TransitionImageLayout( VkCommandBuffer cmdBuffer, VkImageLayout newImageLayout,
+                                    const uint32_t mip = 1U ) override;
+
+        const VkImageView GetMipImageView( uint32_t level ) const override
         {
             return m_MipImageViews[level];
+        }
+
+        virtual uint32_t GetLayerCount() const
+        {
+            return 6U;
         }
 
     private:

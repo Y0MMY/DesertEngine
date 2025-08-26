@@ -236,39 +236,6 @@ namespace Desert::Graphic::API::Vulkan
             return CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
         }
 
-        // Transitions image layout and copies data from buffer to image
-        void CopyBufferToImage2D( VkCommandBuffer commandBuffer, VkBuffer sourceBuffer, VkFormat imageFormat,
-                                  VkImage destinationImage, uint32_t width, uint32_t height, uint32_t mipLevels )
-        {
-            // Transition image to transfer destination layout
-            Utils::InsertImageMemoryBarrier( commandBuffer, destinationImage, imageFormat,
-                                             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                             1, // Array layers
-                                             mipLevels );
-
-            VkBufferImageCopy copyRegion = { .bufferOffset      = 0,
-                                             .bufferRowLength   = 0,
-                                             .bufferImageHeight = 0,
-                                             .imageSubresource  = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-                                                                    .mipLevel       = 0,
-                                                                    .baseArrayLayer = 0,
-                                                                    .layerCount     = 1 },
-                                             .imageOffset       = { 0, 0, 0 },
-                                             .imageExtent       = { width, height, 1 } };
-
-            vkCmdCopyBufferToImage( commandBuffer, sourceBuffer, destinationImage,
-                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion );
-
-            // Transition to shader-read layout
-            Utils::InsertImageMemoryBarrier( commandBuffer, destinationImage, imageFormat,
-                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                             1, // Array layers
-                                             mipLevels );
-
-            CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
-        }
-
         // Creates an image view for accessing the image
         inline Common::Result<VkImageView> CreateImageView( VkDevice device, VkFormat format, VkImage image,
                                                             uint32_t mipLevels, bool isCubemap = false,
@@ -354,6 +321,7 @@ namespace Desert::Graphic::API::Vulkan
                                              VK_IMAGE_LAYOUT_GENERAL,   // Storage-compatible layout
                                              layerCount,                // array layers
                                              imageInfo.mipLevels );
+            imageInfoVulkan.ImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
             CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmdBuffer.GetValue() );
 
@@ -406,7 +374,8 @@ namespace Desert::Graphic::API::Vulkan
 
         VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
 
-        VkFormat          format    = GetImageVulkanFormat( m_ImageSpecification.Format );
+        VkFormat format             = GetImageVulkanFormat( m_ImageSpecification.Format );
+        m_VulkanImageInfo.Format    = format;
         VkImageCreateInfo imageInfo = CreateImageInfo( format );
 
         Common::BoolResult result;
@@ -426,7 +395,7 @@ namespace Desert::Graphic::API::Vulkan
 
             default: // Regular 2D texture
             {
-                result = CreateTextureImage( device, imageInfo, format );
+                result = CreateTextureImage( device, imageInfo );
                 break;
             }
         }
@@ -467,6 +436,32 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
+    // Transitions image layout and copies data from buffer to image
+    void VulkanImage2D::CopyBufferToImage2D( VkCommandBuffer commandBuffer, VkBuffer sourceBuffer )
+    {
+        const auto width  = m_ImageSpecification.Width;
+        const auto height = m_ImageSpecification.Height;
+        // Transition image to transfer destination layout
+        TransitionImageLayout( commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_MipLevels );
+
+        VkBufferImageCopy copyRegion = { .bufferOffset      = 0,
+                                         .bufferRowLength   = 0,
+                                         .bufferImageHeight = 0,
+                                         .imageSubresource  = { .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                                .mipLevel       = 0,
+                                                                .baseArrayLayer = 0,
+                                                                .layerCount     = 1 },
+                                         .imageOffset       = { 0, 0, 0 },
+                                         .imageExtent       = { width, height, 1 } };
+
+        vkCmdCopyBufferToImage( commandBuffer, sourceBuffer, m_VulkanImageInfo.Image,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion );
+
+        TransitionImageLayout( commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_MipLevels );
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
+    }
+
     // Helper methods for different image types
     Common::BoolResult VulkanImage2D::CreateAttachmentImage( VkDevice device, VkImageCreateInfo& imageInfo,
                                                              VkFormat format )
@@ -482,8 +477,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanImage2D::CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo,
-                                                          VkFormat format )
+    Common::BoolResult VulkanImage2D::CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo )
     {
         if ( m_ImageSpecification.Properties & Core::Formats::ImageProperties::Storage ) [[likely]]
         {
@@ -523,8 +517,7 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError<bool>( cmdBuffer.GetError() );
         }
 
-        Utils::CopyBufferToImage2D( cmdBuffer.GetValue(), stagingBuffer, format, m_VulkanImageInfo.Image,
-                                    m_ImageSpecification.Width, m_ImageSpecification.Height, m_MipLevels );
+        CopyBufferToImage2D( cmdBuffer.GetValue(), stagingBuffer );
 
         VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_IMAGE, m_ImageSpecification.Tag + " - Texture2D",
                                           m_VulkanImageInfo.Image );
@@ -593,85 +586,10 @@ namespace Desert::Graphic::API::Vulkan
         return createInfo;
     }
 
-    Core::Formats::ImagePixelData VulkanImage2D::GetImagePixels() const
+    Core::Formats::ImagePixelData VulkanImage2D::GetImagePixels()
     {
-        const uint32_t width         = m_ImageSpecification.Width;
-        const uint32_t height        = m_ImageSpecification.Height;
-        const VkFormat format        = GetImageVulkanFormat( m_ImageSpecification.Format );
-        const uint32_t bytesPerPixel = Image::GetBytesPerPixel( m_ImageSpecification.Format );
-
-        // Create staging buffer
-        VkBuffer      stagingBuffer;
-        VmaAllocation stagingAllocation;
-
-        const uint32_t     bufferSize = width * height * bytesPerPixel;
-        VkBufferCreateInfo bufferInfo = { .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                                          .size        = bufferSize,
-                                          .usage       = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                          .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
-
-        auto allocationResult = VulkanAllocator::GetInstance().RT_AllocateBuffer(
-             "ImageReadbackStaging", bufferInfo, VMA_MEMORY_USAGE_CPU_ONLY, stagingBuffer ); // TODO: naming
-
-        if ( !allocationResult.IsSuccess() )
-        {
-            LOG_ERROR( "Failed to allocate staging buffer" );
-            return Core::Formats::EmptyPixelData{};
-        }
-        stagingAllocation = allocationResult.GetValue();
-
-        auto cmdBufferResult = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
-        if ( !cmdBufferResult.IsSuccess() )
-        {
-            LOG_ERROR( "Failed to allocate command buffer" );
-            return Core::Formats::EmptyPixelData{};
-        }
-
-        VkCommandBuffer commandBuffer = cmdBufferResult.GetValue();
-
-        // Determine expected state
-        const auto [currentLayout, sourceStage] = Utils::DetermineImageState( m_ImageSpecification );
-
-        // Transition to transfer source
-        Utils::InsertImageMemoryBarrier( commandBuffer, m_VulkanImageInfo.Image, format, currentLayout,
-                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                         1, // array layers
-                                         m_MipLevels );
-
-        VkBufferImageCopy region = {
-             .bufferOffset      = 0,
-             .bufferRowLength   = 0,
-             .bufferImageHeight = 0,
-             .imageSubresource  = { .aspectMask /*= Graphic::Utils::IsDepthFormat( m_ImageSpecification.Format )
-                                                       ? VK_IMAGE_ASPECT_DEPTH_BIT*/
-                                    = VK_IMAGE_ASPECT_COLOR_BIT,
-                                    .mipLevel       = 0,
-                                    .baseArrayLayer = 0,
-                                    .layerCount     = 1 },
-             .imageOffset       = { 0, 0, 0 },
-             .imageExtent       = { width, height, 1 } };
-
-        vkCmdCopyImageToBuffer( commandBuffer, m_VulkanImageInfo.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                stagingBuffer, 1, &region );
-
-        // Transition back to original layout
-        Utils::InsertImageMemoryBarrier( commandBuffer, m_VulkanImageInfo.Image, format,
-                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, currentLayout,
-                                         1, // array layers
-                                         m_MipLevels );
-
-        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
-
-        void* mappedData;
-        vmaMapMemory( VulkanAllocator::GetVMAAllocator(), stagingAllocation, &mappedData );
-
-        Core::Formats::ImagePixelData result =
-             Utils::ProcessImageData( mappedData, m_ImageSpecification.Format, bufferSize );
-
-        vmaUnmapMemory( VulkanAllocator::GetVMAAllocator(), stagingAllocation );
-        vmaDestroyBuffer( VulkanAllocator::GetVMAAllocator(), stagingBuffer, stagingAllocation );
-
-        return result;
+        DESERT_VERIFY( false );
+        return Core::Formats::EmptyPixelData{};
     }
 
     Common::BoolResult VulkanImage2D::Invalidate()
@@ -705,12 +623,38 @@ namespace Desert::Graphic::API::Vulkan
         Release();
     }
 
+    void VulkanImage2D::TransitionImageLayout( VkCommandBuffer cmdBuffer, VkImageLayout newImageLayout,
+                                               const uint32_t mip )
+    {
+        Utils::InsertImageMemoryBarrier( cmdBuffer, m_VulkanImageInfo.Image, m_VulkanImageInfo.Format,
+                                         m_VulkanImageInfo.ImageInfo.imageLayout, newImageLayout, 1U, mip );
+
+        m_VulkanImageInfo.ImageInfo.imageLayout = newImageLayout;
+    }
+
     //***************************************************************************************************//
 
     VulkanImageCube::VulkanImageCube( const Core::Formats::ImageCubeSpecification& spec )
          : m_ImageSpecification( spec )
     {
         m_MipLevels = m_ImageSpecification.Mips;
+    }
+
+    VulkanImageCube::VulkanImageCube( const VulkanImageCube& other )
+         : ImageCube( other ), VulkanImageBase( other ), m_FaceSize( other.m_FaceSize ),
+           m_MipLevels( other.m_MipLevels ), m_ImageSpecification( other.m_ImageSpecification ), m_Loaded( false )
+    {
+        m_VulkanImageInfo = VulkanImageInfo{};
+        m_MipImageViews.clear();
+
+        if ( other.m_Loaded )
+        {
+            auto result = Invalidate();
+            if ( !result.IsSuccess() )
+            {
+                LOG_ERROR( "Failed to copy VulkanImageCube: " + result.GetError() );
+            }
+        }
     }
 
     Common::BoolResult VulkanImageCube::RT_Invalidate()
@@ -730,10 +674,9 @@ namespace Desert::Graphic::API::Vulkan
 
         m_FaceSize = faceWidth;
 
-        VkDevice         device    = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        VulkanAllocator& allocator = VulkanAllocator::GetInstance();
-
-        VkFormat          format    = GetImageVulkanFormat( m_ImageSpecification.Format );
+        VkDevice device             = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkFormat format             = GetImageVulkanFormat( m_ImageSpecification.Format );
+        m_VulkanImageInfo.Format    = format;
         VkImageCreateInfo imageInfo = CreateImageInfo( format );
 
         Common::BoolResult result;
@@ -768,6 +711,7 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeError( "TODO" );
         }
 
+        m_Loaded = true;
         return Common::MakeSuccess( true );
     }
 
@@ -892,16 +836,13 @@ namespace Desert::Graphic::API::Vulkan
                                      .imageExtent       = { m_FaceSize, m_FaceSize, 1 } } );
         }
 
-        Utils::InsertImageMemoryBarrier( commandBuffer, m_VulkanImageInfo.Image, format, VK_IMAGE_LAYOUT_UNDEFINED,
-                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, CUBEMAP_FACE_COUNT, 1 );
+        TransitionImageLayout( commandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
 
         vkCmdCopyBufferToImage( commandBuffer, stagingBuffer, m_VulkanImageInfo.Image,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>( copyRegions.size() ),
                                 copyRegions.data() );
 
-        Utils::InsertImageMemoryBarrier( commandBuffer, m_VulkanImageInfo.Image, format,
-                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, CUBEMAP_FACE_COUNT, 1 );
+        TransitionImageLayout( commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
     }
 
     void VulkanImageCube::Use( uint32_t slot /*= 0 */ ) const
@@ -909,7 +850,7 @@ namespace Desert::Graphic::API::Vulkan
         // Implementation would bind the image to a descriptor set
     }
 
-    Desert::Core::Formats::ImagePixelData VulkanImageCube::GetImagePixels() const
+    Desert::Core::Formats::ImagePixelData VulkanImageCube::GetImagePixels()
     {
         return Core::Formats::EmptyPixelData{};
     }
@@ -972,6 +913,16 @@ namespace Desert::Graphic::API::Vulkan
     VulkanImageCube::~VulkanImageCube()
     {
         Release();
+    }
+
+    void VulkanImageCube::TransitionImageLayout( VkCommandBuffer cmdBuffer, VkImageLayout newImageLayout,
+                                                 const uint32_t mip )
+    {
+        Utils::InsertImageMemoryBarrier( cmdBuffer, m_VulkanImageInfo.Image, m_VulkanImageInfo.Format,
+                                         m_VulkanImageInfo.ImageInfo.imageLayout, newImageLayout,
+                                         CUBEMAP_FACE_COUNT, mip );
+
+        m_VulkanImageInfo.ImageInfo.imageLayout = newImageLayout;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

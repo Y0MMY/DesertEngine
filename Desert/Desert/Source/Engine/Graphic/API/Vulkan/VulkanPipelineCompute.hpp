@@ -13,7 +13,10 @@ namespace Desert::Graphic::API::Vulkan
         VulkanPipelineCompute( const std::shared_ptr<Shader>& shader );
 
         virtual void Begin() override;
-        virtual void Execute( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
+        virtual void Execute( const std::shared_ptr<Image>& imageForProccess, std::shared_ptr<Image>& outputImage,
+                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
+        virtual void ExecuteMipLevel( const std::shared_ptr<Image>& imageForProccess, uint32_t mipLevel,
+                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
         virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
         virtual void End() override;
 
@@ -26,8 +29,6 @@ namespace Desert::Graphic::API::Vulkan
         void UpdateDescriptorSet( uint32_t frameIndex, const std::vector<VkWriteDescriptorSet>& writes,
                                   VkDescriptorSet descriptorSet, uint32_t setIndex = 0 );
         void BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex );
-
-        void PushConstant( uint32_t size, void* data );
 
         void ReadBuffer( uint32_t bufferSize ); // TEMP
 

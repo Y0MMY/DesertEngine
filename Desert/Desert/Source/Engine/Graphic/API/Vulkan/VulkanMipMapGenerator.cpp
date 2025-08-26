@@ -1,108 +1,179 @@
 #include <Engine/Graphic/API/Vulkan/VulkanMipMapGenerator.hpp>
 
-#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanPipelineCompute.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
-#include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
+
+#include <vulkan/vulkan.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
-    static constexpr uint32_t kWorkGroups = 32;
-
-    namespace Utils
+    static void GenerateMipmapsTO( VkCommandBuffer commandBuffer, VkImage image, VkFormat imageFormat,
+                                   uint32_t width, uint32_t height, uint32_t mipLevels,
+                                   uint32_t baseArrayLayer = 0, uint32_t layerCount = 1 )
     {
-        template <typename VulkanImageType>
-        Common::BoolResult GenerateMipmaps( const VulkanImageType& vulkanImage, uint32_t width, uint32_t height,
-                                            uint32_t mipLevels, uint32_t layers, const std::string& shaderName )
+        // Check if image format supports linear blitting
+        // VkFormatProperties formatProperties;
+        // vkGetPhysicalDeviceFormatProperties(VKDevice::Get().GetGPU(), imageFormat, &formatProperties);
+        // if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT))
+        // {
+        //     LERROR("Texture image format does not support linear blitting!");
+        //     return;
+        // }
+
+        // Generate mipmaps for each layer
+        for ( uint32_t layer = baseArrayLayer; layer < baseArrayLayer + layerCount; layer++ )
         {
-            static auto shader     = Shader::Create( shaderName );
-            uint32_t    frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+            // Уровень 0 уже должен быть в VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+            // (это делается в вызывающей функции)
 
-            auto pipelineCompute = PipelineCompute::Create( shader );
-            pipelineCompute->Invalidate();
-            auto vulkanPipeline = sp_cast<VulkanPipelineCompute>( pipelineCompute );
-
-            auto descriptorSetResult = vulkanPipeline->GetDescriptorSet( frameIndex, 0 );
-            if ( !descriptorSetResult.IsSuccess() )
+            // Generate each mip level
+            for ( uint32_t i = 1; i < mipLevels; i++ )
             {
-                return Common::MakeError( "Failed to allocate descriptor set" );
-            }
+                VkImageBlit imageBlit{};
 
-            for ( uint32_t mip = 1; mip < mipLevels; ++mip )
-            {
-                std::array<VkDescriptorImageInfo, 2> imageInfo = {};
+                // Source - previous mip level
+                imageBlit.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                imageBlit.srcSubresource.baseArrayLayer = layer;
+                imageBlit.srcSubresource.layerCount     = 1;
+                imageBlit.srcSubresource.mipLevel       = i - 1;
+                imageBlit.srcOffsets[0]                 = { 0, 0, 0 };
+                imageBlit.srcOffsets[1].x               = int32_t( std::max( width >> ( i - 1 ), 1u ) );
+                imageBlit.srcOffsets[1].y               = int32_t( std::max( height >> ( i - 1 ), 1u ) );
+                imageBlit.srcOffsets[1].z               = 1;
 
-                // Input image (previous mip)
-                imageInfo[0].imageView   = ( mip == 1 ) ? vulkanImage.GetVulkanImageInfo().ImageInfo.imageView
-                                                        : vulkanImage.GetMipImageView( mip - 1 );
-                imageInfo[0].sampler     = vulkanImage.GetVulkanImageInfo().ImageInfo.sampler;
-                imageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                // Destination - current mip level
+                imageBlit.dstSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                imageBlit.dstSubresource.baseArrayLayer = layer;
+                imageBlit.dstSubresource.layerCount     = 1;
+                imageBlit.dstSubresource.mipLevel       = i;
+                imageBlit.dstOffsets[0]                 = { 0, 0, 0 };
+                imageBlit.dstOffsets[1].x               = int32_t( std::max( width >> i, 1u ) );
+                imageBlit.dstOffsets[1].y               = int32_t( std::max( height >> i, 1u ) );
+                imageBlit.dstOffsets[1].z               = 1;
 
-                // Output image (current mip)
-                imageInfo[1].imageView   = vulkanImage.GetMipImageView( mip );
-                imageInfo[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkImageSubresourceRange mipSubRange = {};
+                mipSubRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
+                mipSubRange.baseArrayLayer          = layer;
+                mipSubRange.layerCount              = 1;
+                mipSubRange.baseMipLevel            = i;
+                mipSubRange.levelCount              = 1;
 
-                std::vector<VkWriteDescriptorSet> descriptorWrites;
+                // Prepare current mip level as image blit destination
+                // Уровни 1+ всегда UNDEFINED (они новые)
+                Utils::InsertImageMemoryBarrier( commandBuffer, image, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                                 mipSubRange );
 
-                descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
-                     sp_cast<VulkanShader>( shader ), frameIndex, 0, 0, 1, &imageInfo[0] ) );
+                // Blit from previous level
+                vkCmdBlitImage( commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageBlit, VK_FILTER_LINEAR );
 
-                descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS(
-                     sp_cast<VulkanShader>( shader ), frameIndex, 0, 1, 1, &imageInfo[1] ) );
-
-                vulkanPipeline->UpdateDescriptorSet( frameIndex, descriptorWrites,
-                                                     descriptorSetResult.GetValue() );
-
-                pipelineCompute->Begin();
-
-                VkCommandBuffer cmd = vulkanPipeline->GetCommandBuffer();
-
-                // Transition current mip to GENERAL
+                // Prepare current mip level as image blit source for next level
                 Utils::InsertImageMemoryBarrier(
-                     cmd, vulkanImage.GetVulkanImageInfo().Image, 0, VK_ACCESS_SHADER_WRITE_BIT,
-                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                     VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, layers } );
-
-                vulkanPipeline->BindDescriptorSets( descriptorSetResult.GetValue(), frameIndex );
-
-                // Dispatch compute
-                const uint32_t workGroupsX = std::max( 1u, ( width >> mip ) / kWorkGroups );
-                const uint32_t workGroupsY = std::max( 1u, ( height >> mip ) / kWorkGroups );
-                pipelineCompute->Dispatch( workGroupsX, workGroupsY, layers );
-
-                // Transition current mip to SHADER_READ_ONLY_OPTIMAL
-                Utils::InsertImageMemoryBarrier(
-                     cmd, vulkanImage.GetVulkanImageInfo().Image, VK_ACCESS_SHADER_WRITE_BIT,
-                     VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                     VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, layers } );
-
-                pipelineCompute->End();
+                     commandBuffer, image, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                     VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, mipSubRange );
             }
-
-            return Common::MakeSuccess( true );
         }
-    } // namespace Utils
+
+        // Transition all mip levels to SHADER_READ layout
+        VkImageSubresourceRange finalRange = {};
+        finalRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
+        finalRange.baseArrayLayer          = baseArrayLayer;
+        finalRange.layerCount              = layerCount;
+        finalRange.baseMipLevel            = 0;
+        finalRange.levelCount              = mipLevels;
+
+        Utils::InsertImageMemoryBarrier( commandBuffer, image, VK_ACCESS_TRANSFER_READ_BIT,
+                                         VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, finalRange );
+    }
 
     Common::BoolResult VulkanMipMap2DGeneratorCS::GenerateMips( const std::shared_ptr<Image2D>& image ) const
     {
-        auto& vulkanImage = static_cast<const VulkanImage2D&>( *image );
-
-        return Utils::GenerateMipmaps<VulkanImage2D>( vulkanImage, image->GetWidth(), image->GetHeight(),
-                                                      image->GetMipmapLevels(), 1, "GenerateMipMap_2D.glsl" );
+        return Common::MakeError( "Not impl" );
     }
 
     Common::BoolResult
     VulkanMipMapCubeGeneratorCS::GenerateMips( const std::shared_ptr<ImageCube>& imageCube ) const
     {
+        return Common::MakeError( "Not impl" );
+    }
 
-        return Utils::GenerateMipmaps<VulkanImageCube>(
-             static_cast<const VulkanImageCube&>( *imageCube ), imageCube->GetWidth(), imageCube->GetHeight(),
-             imageCube->GetMipmapLevels(), 6, std::string( "GenerateMipMap_Cube.glsl" ) );
+    // Transfer ops
+
+    Common::BoolResult VulkanMipMap2DGeneratorTO::GenerateMips( const std::shared_ptr<Image2D>& image ) const
+    {
+        const auto& vulkanImage    = SP_CAST( VulkanImage2D, image );
+        const auto  originalLayout = vulkanImage->GetVulkanImageInfo().ImageInfo.imageLayout;
+        const auto& spec           = vulkanImage->GetVulkanImageInfo();
+
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc )
+        {
+            return Common::MakeError( cmdAlloc.GetError() );
+        }
+
+        VkCommandBuffer commandBuffer = cmdAlloc.GetValue();
+
+        // Переводим уровень 0 в TRANSFER_SRC_OPTIMAL до вызова GenerateMipmapsTO
+        VkImageSubresourceRange baseMipRange = {};
+        baseMipRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
+        baseMipRange.baseMipLevel            = 0;
+        baseMipRange.levelCount              = 1;
+        baseMipRange.baseArrayLayer          = 0;
+        baseMipRange.layerCount              = 1;
+
+        Utils::InsertImageMemoryBarrier( commandBuffer, spec.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, originalLayout,
+                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                         VK_PIPELINE_STAGE_TRANSFER_BIT, baseMipRange );
+
+        // Теперь вызываем GenerateMipmapsTO - уровень 0 уже в правильном layout'е
+        GenerateMipmapsTO( commandBuffer, spec.Image, spec.Format, image->GetWidth(), image->GetHeight(),
+                           image->GetMipmapLevels() );
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
+
+        return Common::MakeSuccess( true );
+    }
+
+    Common::BoolResult
+    VulkanMipMapCubeGeneratorTO::GenerateMips( const std::shared_ptr<ImageCube>& imageCube ) const
+    {
+        const auto& vulkanImage    = SP_CAST( VulkanImageCube, imageCube );
+        const auto  originalLayout = vulkanImage->GetVulkanImageInfo().ImageInfo.imageLayout;
+        const auto& spec           = vulkanImage->GetVulkanImageInfo();
+
+        const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+        if ( !cmdAlloc )
+        {
+            return Common::MakeError( cmdAlloc.GetError() );
+        }
+
+        VkCommandBuffer commandBuffer = cmdAlloc.GetValue();
+
+        // Переводим уровень 0 для всех 6 слоев в TRANSFER_SRC_OPTIMAL
+        VkImageSubresourceRange baseMipRange = {};
+        baseMipRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
+        baseMipRange.baseMipLevel            = 0;
+        baseMipRange.levelCount              = 1;
+        baseMipRange.baseArrayLayer          = 0;
+        baseMipRange.layerCount              = 6; // Все 6 граней куба
+
+        Utils::InsertImageMemoryBarrier( commandBuffer, spec.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, originalLayout,
+                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_PIPELINE_STAGE_TRANSFER_BIT, baseMipRange );
+
+        // Теперь вызываем GenerateMipmapsTO - уровень 0 уже в правильном layout'е
+        GenerateMipmapsTO( commandBuffer, spec.Image, spec.Format, imageCube->GetWidth(), imageCube->GetHeight(),
+                           imageCube->GetMipmapLevels(), 0, 6 ); // 6 faces for cubemap
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
+
+        return Common::MakeSuccess( true );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

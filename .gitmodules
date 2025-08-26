@@ -19,3 +19,6 @@
 [submodule "ThirdParty/NVRHI"]
 	path = ThirdParty/NVRHI
 	url = https://github.com/Y0MMY/NVRHI
+[submodule "ThirdParty/lightweightvk"]
+	path = ThirdParty/lightweightvk
+	url = https://github.com/Y0MMY/lightweightvk

@@ -32,13 +32,6 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 
-#ifdef DESERT_CONFIG_DEBUG
-        virtual std::shared_ptr<ImageCube> ConvertPanoramaToCubeMap_4x3( const Common::Filepath& filepath,
-                                                                         bool calculateMips ) override;
-        virtual std::shared_ptr<ImageCube> CreateDiffuseIrradiance( const Common::Filepath& filepath ) override;
-        virtual Common::BoolResult CreatePrefilteredMap( const std::shared_ptr<ImageCube>& imageCube ) override;
-        virtual PBRTextures        CreateEnvironmentMap( const Common::Filepath& filepath ) override;
-#endif
         VkCommandBuffer GetCurrentCmdBuffer() const;
 
         const auto& GetDescriptorManager() const

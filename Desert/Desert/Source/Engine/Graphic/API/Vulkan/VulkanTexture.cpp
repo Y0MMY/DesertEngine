@@ -70,7 +70,7 @@ namespace Desert::Graphic::API::Vulkan
                                                                 .Usage      = Core::Formats::Image2DUsage::Image2D,
                                                                 .Properties = imageBaseSpec.Properties };
         const auto                                mipGenerator =
-             m_Specification.GenerateMips ? MipMap2DGenerator::Create( MipGenStrategy::ComputeShader ) : nullptr;
+             m_Specification.GenerateMips ? MipMap2DGenerator::Create( MipGenStrategy::TransferOps) : nullptr;
         m_Image2D = Image2D::Create( imageSpec, mipGenerator );
 
         return Common::MakeSuccess( true ); // TODO
@@ -106,7 +106,7 @@ namespace Desert::Graphic::API::Vulkan
                                                                   .Properties = imageBaseSpec.Properties };
 
         const auto mipGenerator =
-             m_Specification.GenerateMips ? MipMapCubeGenerator::Create( MipGenStrategy::ComputeShader ) : nullptr;
+             m_Specification.GenerateMips ? MipMapCubeGenerator::Create( MipGenStrategy::TransferOps) : nullptr;
         m_ImageCube = ImageCube::Create( imageSpec, mipGenerator );
         return Common::MakeSuccess( true ); // TODO
         // return std::static_pointer_cast<Graphic::API::Vulkan::VulkanImage2D>( m_Image2D )->RT_Invalidate();
