@@ -7,6 +7,8 @@
 #include <Engine/Uniforms/API/Vulkan/VulkanUniformImage2D.hpp>
 #include <Engine/Uniforms/API/Vulkan/VulkanUniformImageCube.hpp>
 
+#include <Engine/Core/EngineContext.hpp>
+
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -29,20 +31,69 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanMaterialBackend::CreateDescriptorPool()
     {
-        const uint32_t framesInFlight = 3u; // EngineContext::Get()->GetFramesInFlight();
+        const uint32_t framesInFlight = EngineContext::GetInstance().GetFramesInFlight();
         const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
 
-        std::vector<VkDescriptorPoolSize> poolSizes = {
-             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100 * framesInFlight * setCount },
-             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 * framesInFlight * setCount },
-             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 10 * framesInFlight * setCount },
-             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 * framesInFlight * setCount } };
+        auto& descriptorSets = m_VulkanShader->GetShaderDescriptorSets();
+
+        uint32_t uniformBufferCount        = 0;
+        uint32_t combinedImageSamplerCount = 0;
+        uint32_t storageImageCount         = 0;
+        uint32_t storageBufferCount        = 0;
+
+        for ( const auto& [setIndex, descriptorSet] : descriptorSets )
+        {
+            // Uniform buffers
+            uniformBufferCount += descriptorSet.UniformBuffers.size();
+
+            // Combined image samplers (2D + Cube)
+            combinedImageSamplerCount += descriptorSet.Image2DSamplers.size();
+            combinedImageSamplerCount += descriptorSet.ImageCubeSamplers.size();
+
+            // Storage images
+            storageImageCount += descriptorSet.StorageImage2DSamplers.size();
+
+            // Storage buffers
+            storageBufferCount += descriptorSet.StorageBuffers.size();
+        }
+
+        uniformBufferCount *= framesInFlight;
+        combinedImageSamplerCount *= framesInFlight;
+        storageImageCount *= framesInFlight;
+        storageBufferCount *= framesInFlight;
+
+        std::vector<VkDescriptorPoolSize> poolSizes;
+
+        if ( uniformBufferCount > 0 )
+        {
+            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBufferCount } );
+        }
+
+        if ( combinedImageSamplerCount > 0 )
+        {
+            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, combinedImageSamplerCount } );
+        }
+
+        if ( storageImageCount > 0 )
+        {
+            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, storageImageCount } );
+        }
+
+        if ( storageBufferCount > 0 )
+        {
+            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storageBufferCount } );
+        }
+
+        if ( poolSizes.empty() )
+        {
+            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 } );
+        }
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.poolSizeCount = static_cast<uint32_t>( poolSizes.size() );
         poolInfo.pPoolSizes    = poolSizes.data();
-        poolInfo.maxSets       = framesInFlight * setCount * 2; // Немного запаса
+        poolInfo.maxSets       = framesInFlight * setCount;
         poolInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
         VK_CHECK_RESULT( vkCreateDescriptorPool( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
@@ -51,7 +102,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanMaterialBackend::AllocateDescriptorSets()
     {
-        const uint32_t framesInFlight = 3u; // EngineContext::Get()->GetFramesInFlight();
+        const uint32_t framesInFlight = EngineContext::GetInstance().GetFramesInFlight();
         const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
 
         m_DescriptorSets.resize( framesInFlight );
