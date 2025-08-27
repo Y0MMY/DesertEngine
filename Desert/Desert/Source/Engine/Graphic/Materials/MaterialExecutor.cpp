@@ -97,6 +97,24 @@ namespace Desert::Graphic
         return nullptr;
     }
 
+    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&&                  debugName,
+                                                                const std::shared_ptr<Shader>& shader )
+    {
+        switch ( RendererAPI::GetAPIType() )
+        {
+            case RendererAPIType::None:
+                return nullptr;
+            case RendererAPIType::Vulkan:
+            {
+                return std::make_shared<MaterialExecutor>(
+                     std::move( debugName ), shader,
+                     std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( shader ) ) );
+            }
+        }
+        DESERT_VERIFY( false, "Unknown RendererAPI" );
+        return nullptr;
+    }
+
     std::shared_ptr<UniformBufferProperty>
     MaterialExecutor::GetUniformBufferProperty( const std::string& name ) const
     {

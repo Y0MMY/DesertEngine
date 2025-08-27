@@ -49,6 +49,10 @@ namespace Desert::Graphic::System
 
                          for ( const auto& renderData : m_RenderQueue )
                          {
+                             if ( !renderData.Outlined )
+                             {
+                                 continue;
+                             }
 
                              m_OutlineMaterial->UpdateRenderParameters( *camera, renderData.Transform,
                                                                         m_OutlineWidth, m_OutlineColor );

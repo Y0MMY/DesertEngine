@@ -79,12 +79,28 @@ namespace Desert::Graphic
         Wireframe,
     };
 
+    struct VertexPullingAttribute
+    {
+        ShaderDataType Type;
+        std::string    Name;
+        uint32_t       Offset;
+        uint32_t       BindingPoint;
+    };
+
+    struct VertexPullingConfig
+    {
+        uint32_t                            VertexStride = 0;
+        std::vector<VertexPullingAttribute> Attributes;
+        BufferUsage                         Usage = BufferUsage::Dynamic;
+    };
+
     struct PipelineSpecification
     {
-        std::shared_ptr<Shader>      Shader;
-        std::shared_ptr<Framebuffer> Framebuffer;
-        std::shared_ptr<RenderPass>  Renderpass;
-        VertexBufferLayout           Layout;
+        std::shared_ptr<Shader>            Shader;
+        std::shared_ptr<Framebuffer>       Framebuffer;
+        std::shared_ptr<RenderPass>        Renderpass;
+        std::optional<VertexBufferLayout>  Layout;
+        std::optional<VertexPullingConfig> PullingConfig;
 
         bool           DepthTestEnabled   = true;
         CompareOp      DepthCompareOp     = CompareOp::Less;

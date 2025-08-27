@@ -66,7 +66,7 @@ namespace Desert::Graphic::API::Vulkan
         vkGetPhysicalDeviceQueueFamilyProperties( m_PhysicalDevice, &queueFamilyCount,
                                                   m_QueueFamilyProperties.data() );
 
-        int requestedQueueTypes = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+        int requestedQueueTypes = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
         m_QueueFamilyIndices    = GetQueueFamilyIndices( requestedQueueTypes );
 
         static constexpr float queuePriority = 1.0f;
@@ -94,6 +94,26 @@ namespace Desert::Graphic::API::Vulkan
                 queueCreateInfo.pQueuePriorities = &queuePriority;
                 m_QueueCreateInfos.push_back( queueCreateInfo );
             }
+        }
+
+        if ( requestedQueueTypes & VK_QUEUE_TRANSFER_BIT )
+        {
+            if ( m_QueueFamilyIndices.TransferFamily != m_QueueFamilyIndices.GraphicsFamily &&
+                 m_QueueFamilyIndices.TransferFamily != m_QueueFamilyIndices.ComputeFamily )
+            {
+                // Transfer queue
+                VkDeviceQueueCreateInfo queueCreateInfo{};
+                queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+                queueCreateInfo.queueFamilyIndex = m_QueueFamilyIndices.TransferFamily.value_or( -1 );
+                queueCreateInfo.queueCount       = 1;
+                queueCreateInfo.pQueuePriorities = &queuePriority;
+                m_QueueCreateInfos.push_back( queueCreateInfo );
+            }
+        }
+        else
+        {
+            // Else we use the same queue
+            //  queueFamilyIndices.transfer = queueFamilyIndices.graphics;
         }
 
         // Check for ext.
@@ -139,9 +159,9 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkDeviceCreateInfo       createInfo{};
         VkPhysicalDeviceFeatures deviceFeatures{};
-        if (m_PhysicalDevice->m_SupportWideLines)
+        if ( m_PhysicalDevice->m_SupportWideLines )
         {
-            deviceFeatures.wideLines = VK_TRUE;
+            deviceFeatures.wideLines        = VK_TRUE;
             deviceFeatures.fillModeNonSolid = VK_TRUE;
         }
         createInfo.sType                 = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -167,6 +187,8 @@ namespace Desert::Graphic::API::Vulkan
                           &m_GraphicsQueue );
         vkGetDeviceQueue( m_LogicalDevice, *m_PhysicalDevice->m_QueueFamilyIndices.ComputeFamily, 0,
                           &m_ComputeQueue );
+        vkGetDeviceQueue( m_LogicalDevice, *m_PhysicalDevice->m_QueueFamilyIndices.TransferFamily, 0,
+                          &m_TransferQueue );
 
         return Common::MakeSuccess( true );
     }
@@ -186,6 +208,21 @@ namespace Desert::Graphic::API::Vulkan
                      ( ( queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT ) == 0 ) )
                 {
                     indices.ComputeFamily = i;
+                    break;
+                }
+            }
+        }
+
+        if ( ( flags & VK_QUEUE_TRANSFER_BIT ) )
+        {
+            for ( uint32_t i = 0; i < ( m_QueueFamilyProperties.size() ); i++ )
+            {
+                auto& queueFamilyProperties = m_QueueFamilyProperties[i];
+                if ( ( queueFamilyProperties.queueFlags & VK_QUEUE_TRANSFER_BIT ) &&
+                     ( ( queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT ) == 0 ) &&
+                     ( ( queueFamilyProperties.queueFlags & VK_QUEUE_COMPUTE_BIT ) == 0 ) )
+                {
+                    indices.TransferFamily = i;
                     break;
                 }
             }

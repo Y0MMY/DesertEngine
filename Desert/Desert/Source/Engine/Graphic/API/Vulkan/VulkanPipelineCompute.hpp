@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
 
 #include <vulkan/vulkan.hpp>
 
@@ -25,21 +26,21 @@ namespace Desert::Graphic::API::Vulkan
             return m_ActiveComputeCommandBuffer;
         }
 
-        Common::Result<VkDescriptorSet> GetDescriptorSet( uint32_t frameIndex, uint32_t setIndex = 0 );
-        void UpdateDescriptorSet( uint32_t frameIndex, const std::vector<VkWriteDescriptorSet>& writes,
-                                  VkDescriptorSet descriptorSet, uint32_t setIndex = 0 );
-        void BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex );
-
-        void ReadBuffer( uint32_t bufferSize ); // TEMP
-
         virtual void Invalidate() override;
         virtual void Release() override;
 
+        void BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex );
+        void UpdateDescriptorSet( uint32_t frameIndex, const std::vector<VkWriteDescriptorSet>& writes,
+                                  VkDescriptorSet descriptorSet, uint32_t setIndex = 0 );
+
+    private:
     private:
         std::weak_ptr<Shader> m_Shader;
         VkPipeline            m_ComputePipeline;
         VkPipelineLayout      m_ComputePipelineLayout;
         VkPipelineCache       m_PipelineCache;
+
+        std::unique_ptr<VulkanMaterialBackend> m_VulkanMaterialBackend;
 
         VkCommandBuffer m_ActiveComputeCommandBuffer = nullptr;
     };

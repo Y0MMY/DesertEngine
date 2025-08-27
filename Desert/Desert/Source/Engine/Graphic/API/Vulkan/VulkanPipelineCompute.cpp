@@ -16,6 +16,7 @@ namespace Desert::Graphic::API::Vulkan
 {
     VulkanPipelineCompute::VulkanPipelineCompute( const std::shared_ptr<Shader>& shader ) : m_Shader( shader )
     {
+        m_VulkanMaterialBackend = std::make_unique<VulkanMaterialBackend>( shader );
     }
 
     void VulkanPipelineCompute::Begin()
@@ -55,10 +56,6 @@ namespace Desert::Graphic::API::Vulkan
         vkDestroyFence( device, fence, nullptr );
 
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
-
-        static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
-             ->GetDescriptorManager()
-             ->CleanupFrame( EngineContext::GetInstance().GetFramesInFlight() );
     }
 
     void VulkanPipelineCompute::ExecuteMipLevel( const std::shared_ptr<Image>& imageForProccess, uint32_t mipLevel,
@@ -78,13 +75,7 @@ namespace Desert::Graphic::API::Vulkan
             return;
         }
 
-        uint32_t frameIndex          = Renderer::GetInstance().GetCurrentFrameIndex();
-        auto     descriptorSetResult = GetDescriptorSet( frameIndex, 0 );
-        if ( !descriptorSetResult.IsSuccess() )
-        {
-            return;
-        }
-
+        uint32_t    frameIndex     = Renderer::GetInstance().GetCurrentFrameIndex();
         const auto& inputImageInfo = vulkanInputImage->GetVulkanImageInfo();
 
         // Prepare descriptor image info
@@ -102,9 +93,9 @@ namespace Desert::Graphic::API::Vulkan
 
         std::vector<VkWriteDescriptorSet> descriptorWrites;
         descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
-             SP_CAST( VulkanShader, shader ), frameIndex, 0, 0, 1, &imageInfo[0] ) );
-        descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS( sp_cast<VulkanShader>( shader ),
-                                                                         frameIndex, 0, 1, 1, &imageInfo[1] ) );
+             m_VulkanMaterialBackend.get(), frameIndex, 0, 0, 1, &imageInfo[0] ) );
+        descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS( m_VulkanMaterialBackend.get(), frameIndex,
+                                                                         0, 1, 1, &imageInfo[1] ) );
 
         // First command buffer: transition input image to SHADER_READ_ONLY_OPTIMAL
         // and output image to GENERAL
@@ -149,9 +140,11 @@ namespace Desert::Graphic::API::Vulkan
             CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmdBuffer.GetValue() );
         }
 
-        UpdateDescriptorSet( frameIndex, descriptorWrites, descriptorSetResult.GetValue() );
+        const auto& dSet = m_VulkanMaterialBackend->GetDescriptorSet( frameIndex );
+
+        UpdateDescriptorSet( frameIndex, descriptorWrites, dSet );
         Begin();
-        BindDescriptorSets( descriptorSetResult.GetValue(), frameIndex );
+        BindDescriptorSets( dSet, frameIndex );
         Dispatch( groupCountX, groupCountY, groupCountZ );
         End();
 
@@ -203,12 +196,7 @@ namespace Desert::Graphic::API::Vulkan
         const auto& inputImageInfo  = vulkanInputImage->GetVulkanImageInfo();
         const auto& outputImageInfo = vulkanOutputImage->GetVulkanImageInfo();
 
-        uint32_t frameIndex          = Renderer::GetInstance().GetCurrentFrameIndex();
-        auto     descriptorSetResult = GetDescriptorSet( frameIndex, 0 );
-        if ( !descriptorSetResult.IsSuccess() )
-        {
-            // return Common::MakeError( "Failed to allocate descriptor set" );
-        }
+        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
 
         std::array<VkDescriptorImageInfo, 2> imageInfo = {};
 
@@ -224,15 +212,16 @@ namespace Desert::Graphic::API::Vulkan
         std::vector<VkWriteDescriptorSet> descriptorWrites;
 
         descriptorWrites.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
-             SP_CAST( VulkanShader, shader ), frameIndex, 0, 0, 1, &imageInfo[0] ) );
+             m_VulkanMaterialBackend.get(), frameIndex, 0, 0, 1, &imageInfo[0] ) );
 
-        descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS( sp_cast<VulkanShader>( shader ),
-                                                                         frameIndex, 0, 1, 1, &imageInfo[1] ) );
+        descriptorWrites.push_back( DescriptorSetBuilder::GetStorageWDS( m_VulkanMaterialBackend.get(), frameIndex,
+                                                                         0, 1, 1, &imageInfo[1] ) );
+        const auto& dSet = m_VulkanMaterialBackend->GetDescriptorSet( frameIndex );
 
-        UpdateDescriptorSet( frameIndex, descriptorWrites, descriptorSetResult.GetValue() );
+        UpdateDescriptorSet( frameIndex, descriptorWrites, dSet );
 
         Begin();
-        BindDescriptorSets( descriptorSetResult.GetValue(), frameIndex );
+        BindDescriptorSets( dSet, frameIndex );
         Dispatch( groupCountX, groupCountY, groupCountZ );
 
         End();
@@ -303,54 +292,10 @@ namespace Desert::Graphic::API::Vulkan
         VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_PIPELINE, shader->GetName(), m_ComputePipeline );
     }
 
-    void VulkanPipelineCompute::ReadBuffer( uint32_t bufferSize )
-    {
-    }
-
-    Common::Result<VkDescriptorSet> VulkanPipelineCompute::GetDescriptorSet( uint32_t frameIndex,
-                                                                             uint32_t setIndex )
-    {
-        const auto& shader = m_Shader.lock();
-        if ( !shader )
-        {
-            return Common::MakeError<VkDescriptorSet>( "Shader for some reasone was destoyed!" );
-        }
-        auto rendererAPI = static_cast<VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() );
-        auto result      = rendererAPI->GetDescriptorManager()->GetDescriptorSet( sp_cast<VulkanShader>( shader ),
-                                                                                  frameIndex, setIndex );
-
-        if ( result.IsSuccess() )
-        {
-            return Common::MakeSuccess( result.GetValue().Set );
-        }
-        return Common::MakeError<VkDescriptorSet>( "Failed to get descriptor set" );
-    }
-
-    void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t                                 frameIndex,
-                                                     const std::vector<VkWriteDescriptorSet>& writes,
-                                                     VkDescriptorSet descriptorSet, uint32_t setIndex )
-    {
-        std::vector<VkWriteDescriptorSet> modifiedWrites = writes;
-        for ( auto& write : modifiedWrites )
-        {
-            write.dstSet = descriptorSet;
-        }
-
-        vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
-                                static_cast<uint32_t>( modifiedWrites.size() ), modifiedWrites.data(), 0,
-                                nullptr );
-    }
-
     void VulkanPipelineCompute::BindDescriptorSets( VkDescriptorSet descriptorSet, uint32_t frameIndex )
     {
-        const auto& shader = m_Shader.lock();
-        if ( !shader )
-        {
-            return;
-        }
-        auto vulkanShader = sp_cast<VulkanShader>( shader );
-        vkCmdBindDescriptorSets( m_ActiveComputeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                 m_ComputePipelineLayout, 0, 1, &descriptorSet, 0, nullptr );
+        m_VulkanMaterialBackend->BindDescriptorSets( m_ActiveComputeCommandBuffer, m_ComputePipelineLayout,
+                                                     VK_PIPELINE_BIND_POINT_COMPUTE, frameIndex );
     }
 
     void VulkanPipelineCompute::Release()
@@ -376,6 +321,21 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
+    }
+
+    void VulkanPipelineCompute::UpdateDescriptorSet( uint32_t                                 frameIndex,
+                                                     const std::vector<VkWriteDescriptorSet>& writes,
+                                                     VkDescriptorSet descriptorSet, uint32_t setIndex /*= 0 */ )
+    {
+        std::vector<VkWriteDescriptorSet> modifiedWrites = writes;
+        for ( auto& write : modifiedWrites )
+        {
+            write.dstSet = descriptorSet;
+        }
+
+        vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
+                                static_cast<uint32_t>( modifiedWrites.size() ), modifiedWrites.data(), 0,
+                                nullptr );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

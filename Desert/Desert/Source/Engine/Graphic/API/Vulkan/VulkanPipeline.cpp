@@ -114,168 +114,260 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    void VulkanPipeline::Invalidate()
+    void VulkanPipeline::CreatePipelineLayout()
     {
-        // Vertex input state used for pipeline creation
-        VkVertexInputBindingDescription vertexInputBinding = {};
-        VertexBufferLayout&             vertexLayout       = m_Specification.Layout;
+        VulkanShader* vulkanShader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
 
-        vertexInputBinding.binding   = 0;
-        vertexInputBinding.stride    = vertexLayout.GetStride();
-        vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        const auto  descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
+        const auto& pushConstant         = SetUpPushConstantRange();
 
-        const auto vertexInputSize = vertexInputBinding.stride > 0 ? 1U : 0U;
+        VkPipelineLayoutCreateInfo layoutInfo = {
+             .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+             .setLayoutCount         = static_cast<uint32_t>( descriptorSetLayouts.size() ),
+             .pSetLayouts            = descriptorSetLayouts.data(),
+             .pushConstantRangeCount = pushConstant.first,
+             .pPushConstantRanges    = pushConstant.first > 0 ? &pushConstant.second : nullptr };
 
-        std::vector<VkVertexInputAttributeDescription> vertexInputAttributes( vertexLayout.GetElementCount() );
+        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkResult result = vkCreatePipelineLayout( device, &layoutInfo, nullptr, &m_PipelineLayout );
 
-        uint32_t location = 0;
-        for ( auto element : vertexLayout )
+        if ( result != VK_SUCCESS )
         {
-            vertexInputAttributes[location].binding  = 0;
-            vertexInputAttributes[location].location = location;
-            vertexInputAttributes[location].format   = ShaderDataTypeToVulkanFormat( element.Type );
-            vertexInputAttributes[location].offset   = element.Offset;
+            throw std::runtime_error( "Failed to create pipeline layout" );
+        }
+    }
 
+    void VulkanPipeline::CreateVertexInputState()
+    {
+        if ( m_Specification.PullingConfig )
+        {
+            m_VertexInputInfo = VkPipelineVertexInputStateCreateInfo{
+                 .sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+                 .vertexBindingDescriptionCount   = 0,
+                 .pVertexBindingDescriptions      = nullptr,
+                 .vertexAttributeDescriptionCount = 0,
+                 .pVertexAttributeDescriptions    = nullptr };
+            return;
+        }
+
+        if ( !m_Specification.Layout || m_Specification.Layout->GetElementCount() == 0 )
+        {
+            m_VertexInputInfo = VkPipelineVertexInputStateCreateInfo{
+                 .sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+                 .vertexBindingDescriptionCount   = 0,
+                 .pVertexBindingDescriptions      = nullptr,
+                 .vertexAttributeDescriptionCount = 0,
+                 .pVertexAttributeDescriptions    = nullptr };
+            return;
+        }
+
+        m_VertexInputBinding = VkVertexInputBindingDescription{ .binding   = 0,
+                                                                .stride    = m_Specification.Layout->GetStride(),
+                                                                .inputRate = VK_VERTEX_INPUT_RATE_VERTEX };
+
+        m_VertexAttributes.clear();
+        const auto& layout = m_Specification.Layout.value();
+        for ( uint32_t location = 0; const auto& element : layout )
+        {
+            m_VertexAttributes.push_back(
+                 VkVertexInputAttributeDescription{ .location = location,
+                                                    .binding  = 0,
+                                                    .format   = ShaderDataTypeToVulkanFormat( element.Type ),
+                                                    .offset   = element.Offset } );
             location++;
         }
 
-        VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
+        m_VertexInputInfo = VkPipelineVertexInputStateCreateInfo{
              .sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-             .pNext                           = nullptr,
-             .vertexBindingDescriptionCount   = vertexInputSize,
-             .pVertexBindingDescriptions      = &vertexInputBinding,
-             .vertexAttributeDescriptionCount = (uint32_t)vertexInputAttributes.size(),
-             .pVertexAttributeDescriptions    = vertexInputAttributes.data() };
+             .vertexBindingDescriptionCount   = 1,
+             .pVertexBindingDescriptions      = &m_VertexInputBinding,
+             .vertexAttributeDescriptionCount = static_cast<uint32_t>( m_VertexAttributes.size() ),
+             .pVertexAttributeDescriptions    = m_VertexAttributes.data() };
+    }
 
-        VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
+    void VulkanPipeline::CreateInputAssemblyState()
+    {
+        VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        switch ( m_Specification.Topology )
+        {
+            case PrimitiveTopology::Points:
+                topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+                break;
+            case PrimitiveTopology::Lines:
+                topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+                break;
+            case PrimitiveTopology::LineStrip:
+                topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+                break;
+            case PrimitiveTopology::Triangles:
+                topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+                break;
+            case PrimitiveTopology::TriangleStrip:
+                topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+                break;
+        }
+
+        m_InputAssembly = VkPipelineInputAssemblyStateCreateInfo{
              .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-             .topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+             .topology               = topology,
              .primitiveRestartEnable = VK_FALSE };
+    }
 
-        std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
-                                                      VK_DYNAMIC_STATE_LINE_WIDTH };
+    void VulkanPipeline::CreateDynamicState()
+    {
+        m_DynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH };
 
-        VkPipelineDynamicStateCreateInfo dynamicStateInfo = {};
-        dynamicStateInfo.sType                            = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-        dynamicStateInfo.dynamicStateCount                = static_cast<uint32_t>( dynamicStates.size() );
-        dynamicStateInfo.pDynamicStates                   = dynamicStates.data();
+        m_DynamicStateInfo = VkPipelineDynamicStateCreateInfo{
+             .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+             .dynamicStateCount = static_cast<uint32_t>( m_DynamicStates.size() ),
+             .pDynamicStates    = m_DynamicStates.data() };
+    }
 
-        VkPipelineViewportStateCreateInfo viewportState = {
-             .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-             .viewportCount = 1,
-             .pViewports    = nullptr,
-             .scissorCount  = 1,
-        };
+    void VulkanPipeline::CreateViewportState()
+    {
+        m_ViewportState =
+             VkPipelineViewportStateCreateInfo{ .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+                                                .viewportCount = 1,
+                                                .pViewports    = nullptr,
+                                                .scissorCount  = 1,
+                                                .pScissors     = nullptr };
+    }
 
-        VkPipelineRasterizationStateCreateInfo rasterizer = {
+    void VulkanPipeline::CreateRasterizationState()
+    {
+        m_Rasterizer = VkPipelineRasterizationStateCreateInfo{
              .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
              .depthClampEnable        = VK_FALSE,
              .rasterizerDiscardEnable = VK_FALSE,
-             .polygonMode             = ConvertVkPolygonMode(m_Specification.PolygonMode),
-
+             .polygonMode             = ConvertVkPolygonMode( m_Specification.PolygonMode ),
              .cullMode                = ConvertCullMode( m_Specification.CullMode ),
              .frontFace               = VK_FRONT_FACE_CLOCKWISE,
              .depthBiasEnable         = VK_FALSE,
-             .lineWidth               = 1.0F };
+             .lineWidth               = m_Specification.LineWidth };
+    }
 
-        VkPipelineMultisampleStateCreateInfo multisampling = {
+    void VulkanPipeline::CreateMultisampleState()
+    {
+        m_Multisampling = VkPipelineMultisampleStateCreateInfo{
              .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
              .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-             .sampleShadingEnable  = VK_FALSE,
-        };
+             .sampleShadingEnable  = VK_FALSE };
+    }
 
-        const auto hasDepth = HasDepth();
+    void VulkanPipeline::CreateDepthStencilState()
+    {
+        VkStencilOpState frontStencil = ConvertStencilOpState( m_Specification.StencilFront );
+        VkStencilOpState backStencil  = ConvertStencilOpState( m_Specification.StencilBack );
 
-        VkPipelineDepthStencilStateCreateInfo depthStencil = {
+        m_DepthStencil = VkPipelineDepthStencilStateCreateInfo{
              .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
              .depthTestEnable       = m_Specification.DepthTestEnabled ? VK_TRUE : VK_FALSE,
              .depthWriteEnable      = m_Specification.DepthWriteEnabled ? VK_TRUE : VK_FALSE,
              .depthCompareOp        = ConvertCompareOp( m_Specification.DepthCompareOp ),
              .depthBoundsTestEnable = VK_FALSE,
              .stencilTestEnable     = m_Specification.StencilTestEnabled ? VK_TRUE : VK_FALSE,
-             .front                 = { .failOp      = ConvertStencilOp( m_Specification.StencilFront.FailOp ),
-                                        .passOp      = ConvertStencilOp( m_Specification.StencilFront.PassOp ),
-                                        .depthFailOp = ConvertStencilOp( m_Specification.StencilFront.DepthFailOp ),
-                                        .compareOp   = ConvertCompareOp( m_Specification.StencilFront.CompareOp ),
-                                        .compareMask = m_Specification.StencilFront.CompareMask,
-                                        .writeMask   = m_Specification.StencilFront.WriteMask,
-                                        .reference   = m_Specification.StencilFront.Reference },
-             .back                  = { .failOp      = ConvertStencilOp( m_Specification.StencilBack.FailOp ),
-                                        .passOp      = ConvertStencilOp( m_Specification.StencilBack.PassOp ),
-                                        .depthFailOp = ConvertStencilOp( m_Specification.StencilBack.DepthFailOp ),
-                                        .compareOp   = ConvertCompareOp( m_Specification.StencilBack.CompareOp ),
-                                        .compareMask = m_Specification.StencilBack.CompareMask,
-                                        .writeMask   = m_Specification.StencilBack.WriteMask,
-                                        .reference   = m_Specification.StencilBack.Reference },
+             .front                 = frontStencil,
+             .back                  = backStencil,
              .minDepthBounds        = 0.0f,
-             .maxDepthBounds        = 0.0f };
+             .maxDepthBounds        = 1.0f };
+    }
 
-        std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments;
-        colorBlendAttachments.resize( m_Specification.Framebuffer->GetColorAttachmentCount() );
-        for ( auto& attachment : colorBlendAttachments )
+    void VulkanPipeline::CreateColorBlendState()
+    {
+        m_ColorBlendAttachments.clear();
+        uint32_t colorAttachmentCount =
+             m_Specification.Framebuffer ? m_Specification.Framebuffer->GetColorAttachmentCount() : 1;
+
+        m_ColorBlendAttachments.resize( colorAttachmentCount );
+        for ( auto& attachment : m_ColorBlendAttachments )
         {
-            attachment.blendEnable    = VK_FALSE;
-            attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+            attachment = { .blendEnable    = VK_FALSE,
+                           .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT };
         }
 
-        VkPipelineColorBlendStateCreateInfo colorBlending = {
+        m_ColorBlending = VkPipelineColorBlendStateCreateInfo{
              .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
              .logicOpEnable   = VK_FALSE,
-             .logicOp         = VK_LOGIC_OP_CLEAR,
-             .attachmentCount = static_cast<uint32_t>( colorBlendAttachments.size() ),
-             .pAttachments    = colorBlendAttachments.data(),
-             .blendConstants  = { 0.0f, 0.0f, 0.0f, 0.0f },
-        };
+             .logicOp         = VK_LOGIC_OP_COPY,
+             .attachmentCount = static_cast<uint32_t>( m_ColorBlendAttachments.size() ),
+             .pAttachments    = m_ColorBlendAttachments.data(),
+             .blendConstants  = { 0.0f, 0.0f, 0.0f, 0.0f } };
+    }
 
-        VulkanShader* vulkanShader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
-
-        const auto descriptorSets       = vulkanShader->GetShaderDescriptorSets();
-        const auto descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
-
-        const auto& pushConstant = SetUpPushConstantRange();
-
-        VkPipelineLayoutCreateInfo lyoutInfo = { .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                                 .setLayoutCount = (uint32_t)descriptorSetLayouts.size(),
-                                                 .pSetLayouts    = descriptorSetLayouts.data(),
-                                                 .pushConstantRangeCount = pushConstant.first,
-                                                 .pPushConstantRanges    = &pushConstant.second };
-
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-
-        VkResult res = vkCreatePipelineLayout( device, &lyoutInfo, VK_NULL_HANDLE, &m_PipelineLayout );
-
+    void VulkanPipeline::CreateGraphicsPipeline( VkDevice device, VulkanShader* vulkanShader )
+    {
         if ( !m_Specification.Framebuffer )
         {
-            // return TODO: assert
+            throw std::runtime_error( "Framebuffer is required for pipeline creation" );
         }
 
-        const auto& renderPass =
-             sp_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer )->GetVKRenderPass();
+        VkRenderPass renderPass =
+             std::static_pointer_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer )
+                  ->GetVKRenderPass();
 
         VkGraphicsPipelineCreateInfo pipelineInfo = {
-             .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-             .stageCount          = (uint32_t)vulkanShader->GetPipelineShaderStageCreateInfos().size(),
-             .pStages             = vulkanShader->GetPipelineShaderStageCreateInfos().data(),
-             .pVertexInputState   = &vertexInputInfo,
-             .pInputAssemblyState = &inputAssembly,
-             .pViewportState      = &viewportState,
-             .pRasterizationState = &rasterizer,
-             .pMultisampleState   = &multisampling,
-             .pDepthStencilState  = &depthStencil,
-             .pColorBlendState    = &colorBlending,
-             .pDynamicState       = &dynamicStateInfo,
+             .sType      = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+             .stageCount = static_cast<uint32_t>( vulkanShader->GetPipelineShaderStageCreateInfos().size() ),
+             .pStages    = vulkanShader->GetPipelineShaderStageCreateInfos().data(),
+             .pVertexInputState   = &m_VertexInputInfo,
+             .pInputAssemblyState = &m_InputAssembly,
+             .pViewportState      = &m_ViewportState,
+             .pRasterizationState = &m_Rasterizer,
+             .pMultisampleState   = &m_Multisampling,
+             .pDepthStencilState  = &m_DepthStencil,
+             .pColorBlendState    = &m_ColorBlending,
+             .pDynamicState       = &m_DynamicStateInfo,
              .layout              = m_PipelineLayout,
              .renderPass          = renderPass,
              .subpass             = 0,
              .basePipelineHandle  = VK_NULL_HANDLE,
              .basePipelineIndex   = -1 };
 
-        res = vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &m_Pipeline );
+        VkResult result =
+             vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline );
+
+        if ( result != VK_SUCCESS )
+        {
+            throw std::runtime_error( "Failed to create graphics pipeline" );
+        }
+    }
+
+    void VulkanPipeline::Invalidate()
+    {
+        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+
+        if ( m_Pipeline != VK_NULL_HANDLE )
+        {
+            vkDestroyPipeline( device, m_Pipeline, nullptr );
+            m_Pipeline = VK_NULL_HANDLE;
+        }
+        if ( m_PipelineLayout != VK_NULL_HANDLE )
+        {
+            vkDestroyPipelineLayout( device, m_PipelineLayout, nullptr );
+            m_PipelineLayout = VK_NULL_HANDLE;
+        }
+
+        CreatePipelineLayout();
+
+        CreateVertexInputState();
+        CreateInputAssemblyState();
+        CreateDynamicState();
+        CreateViewportState();
+        CreateRasterizationState();
+        CreateMultisampleState();
+        CreateDepthStencilState();
+        CreateColorBlendState();
+
+        VulkanShader* vulkanShader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
+
+        CreateGraphicsPipeline( device, vulkanShader );
 
         LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
-    } // namespace Desert::Graphic::API::Vulkan
+    }
 
     std::pair<uint32_t, VkPushConstantRange> VulkanPipeline::SetUpPushConstantRange() const
     {
@@ -323,6 +415,21 @@ namespace Desert::Graphic::API::Vulkan
         const auto& attachments = m_Specification.Framebuffer->GetSpecification().Attachments.Attachments;
         return std::any_of( attachments.begin(), attachments.end(),
                             []( const auto& attachment ) { return Utils::IsDepthFormat( attachment ); } );
+    }
+
+    VkStencilOpState VulkanPipeline::ConvertStencilOpState( const StencilOpState& state )
+    {
+        return VkStencilOpState{ .failOp      = ConvertStencilOp( state.FailOp ),
+                                 .passOp      = ConvertStencilOp( state.PassOp ),
+                                 .depthFailOp = ConvertStencilOp( state.DepthFailOp ),
+                                 .compareOp   = ConvertCompareOp( state.CompareOp ),
+                                 .compareMask = state.CompareMask,
+                                 .writeMask   = state.WriteMask,
+                                 .reference   = state.Reference };
+    }
+
+    VulkanPipeline::~VulkanPipeline()
+    {
     }
 
 } // namespace Desert::Graphic::API::Vulkan

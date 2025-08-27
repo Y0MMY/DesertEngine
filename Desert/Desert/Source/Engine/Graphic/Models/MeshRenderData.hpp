@@ -9,5 +9,7 @@ namespace Desert::Graphic
         std::shared_ptr<Mesh>        Mesh;
         glm::mat4                    Transform;
         std::shared_ptr<MaterialPBR> Material;
+
+        bool Outlined = false;
     };
 } // namespace Desert::Graphic

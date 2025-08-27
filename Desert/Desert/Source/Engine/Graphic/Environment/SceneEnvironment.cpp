@@ -15,11 +15,11 @@ namespace Desert::Graphic
                  Texture2D::Create( { true }, skyboxAsset->GetMetadata().Filepath );
             imagePanorama->Invalidate();
 
-          //  const auto crossCubemap = ConvertPanoramaToCubemapCross( imagePanorama );
-            // const auto diffuseIrradiance = CreateDiffuseIrradiance( imagePanorama );
-           const auto prefiltered = CreatePrefilteredMap( imagePanorama );
+            const auto crossCubemap      = ConvertPanoramaToCubemapCross( imagePanorama );
+            const auto diffuseIrradiance = CreateDiffuseIrradiance( imagePanorama );
+            const auto prefiltered       = CreatePrefilteredMap( imagePanorama );
 
-            return { skyboxAsset->GetMetadata().Filepath, prefiltered, prefiltered, prefiltered };
+            return { skyboxAsset->GetMetadata().Filepath, crossCubemap, diffuseIrradiance, prefiltered };
         }
 
         return {};
@@ -65,10 +65,10 @@ namespace Desert::Graphic
         ComputeImagesSpecification processingInfo;
         processingInfo.InputImage = texturePanorama->GetImage2D();
         processingInfo.ShaderName = "PanoramaToCubemap.glsl";
-        processingInfo.Tag        = texturePanorama->GetImage2D()->GetImageSpecification().Tag + "_" + "Prefiltered";
-        processingInfo.Width      = kEnvFaceMapSize * 4;
-        processingInfo.Height     = kEnvFaceMapSize * 3;
-        processingInfo.MipLevels  = kMipsCount;
+        processingInfo.Tag    = texturePanorama->GetImage2D()->GetImageSpecification().Tag + "_" + "Prefiltered";
+        processingInfo.Width  = kEnvFaceMapSize * 4;
+        processingInfo.Height = kEnvFaceMapSize * 3;
+        processingInfo.MipLevels = kMipsCount;
 
         const auto cubeCross     = ComputeImages::ProccessForImageCube( processingInfo );
         const auto generatorMips = MipMapCubeGenerator::Create( MipGenStrategy::TransferOps );

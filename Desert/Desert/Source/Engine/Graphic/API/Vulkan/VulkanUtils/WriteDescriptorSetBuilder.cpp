@@ -1,22 +1,19 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
 
-    VkWriteDescriptorSet DescriptorSetBuilder::GetUniformWDS( const std::shared_ptr<VulkanShader>& vulkanShader,
+    VkWriteDescriptorSet DescriptorSetBuilder::GetUniformWDS( VulkanMaterialBackend* materialBackend,
                                                               const uint32_t frame, const uint32_t set,
                                                               const uint32_t                dstBinding,
                                                               const uint32_t                descriptorCount,
                                                               const VkDescriptorBufferInfo* pBufferInfo )
     {
-        const auto& descriptorSetResult =
-             static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
-                  ->GetDescriptorManager()
-                  ->GetLast( vulkanShader, frame, set );
-        if ( !descriptorSetResult.IsSuccess() )
+        VkDescriptorSet descriptorSet = materialBackend->GetDescriptorSet( frame, set );
+        if ( descriptorSet == VK_NULL_HANDLE )
         {
             VkWriteDescriptorSet writeDescriptor = {};
             writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -27,7 +24,7 @@ namespace Desert::Graphic::API::Vulkan
         VkWriteDescriptorSet writeDescriptor = {};
         writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writeDescriptor.dstSet               = descriptorSetResult.GetValue().Set;
+        writeDescriptor.dstSet               = descriptorSet;
         writeDescriptor.dstBinding           = dstBinding;
         writeDescriptor.descriptorCount      = descriptorCount;
         writeDescriptor.pBufferInfo          = pBufferInfo;
@@ -38,18 +35,14 @@ namespace Desert::Graphic::API::Vulkan
     namespace Detail
     {
         template <typename TextureType, typename GetFallbackFunc>
-        VkWriteDescriptorSet GetSamplerWDSImpl( const std::shared_ptr<VulkanShader>& vulkanShader,
-                                                const uint32_t frame, const uint32_t set,
-                                                const uint32_t dstBinding, const uint32_t descriptorCount,
+        VkWriteDescriptorSet GetSamplerWDSImpl( VulkanMaterialBackend* materialBackend, const uint32_t frame,
+                                                const uint32_t set, const uint32_t dstBinding,
+                                                const uint32_t               descriptorCount,
                                                 const VkDescriptorImageInfo* pImageInfo,
                                                 VkDescriptorType descriptorType, GetFallbackFunc getFallback )
         {
-            const auto& descriptorSetResult =
-                 static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
-                      ->GetDescriptorManager()
-                      ->GetLast( vulkanShader, frame, set );
-
-            if ( !descriptorSetResult.IsSuccess() )
+            VkDescriptorSet descriptorSet = materialBackend->GetDescriptorSet( frame, set );
+            if ( descriptorSet == VK_NULL_HANDLE )
             {
                 VkWriteDescriptorSet writeDescriptor = {};
                 writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -67,7 +60,7 @@ namespace Desert::Graphic::API::Vulkan
             VkWriteDescriptorSet writeDescriptor = {};
             writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writeDescriptor.descriptorType       = descriptorType;
-            writeDescriptor.dstSet               = descriptorSetResult.GetValue().Set;
+            writeDescriptor.dstSet               = descriptorSet;
             writeDescriptor.dstBinding           = dstBinding;
             writeDescriptor.descriptorCount      = descriptorCount;
             writeDescriptor.pImageInfo           = outputImageInfo;
@@ -75,7 +68,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     } // namespace Detail
 
-    VkWriteDescriptorSet DescriptorSetBuilder::GetSampler2DWDS( const std::shared_ptr<VulkanShader>& vulkanShader,
+    VkWriteDescriptorSet DescriptorSetBuilder::GetSampler2DWDS( VulkanMaterialBackend* materialBackend,
                                                                 const uint32_t frame, const uint32_t set,
                                                                 const uint32_t               dstBinding,
                                                                 const uint32_t               descriptorCount,
@@ -85,34 +78,32 @@ namespace Desert::Graphic::API::Vulkan
         { return FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA8F ); };
 
         return Detail::GetSamplerWDSImpl<API::Vulkan::VulkanImage2D>(
-             vulkanShader, frame, set, dstBinding, descriptorCount, pImageInfo,
+             materialBackend, frame, set, dstBinding, descriptorCount, pImageInfo,
              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, getFallback );
     }
 
-    VkWriteDescriptorSet DescriptorSetBuilder::GetSamplerCubeWDS(
-         const std::shared_ptr<VulkanShader>& vulkanShader, const uint32_t frame, const uint32_t set,
-         const uint32_t dstBinding, const uint32_t descriptorCount, const VkDescriptorImageInfo* pImageInfo )
+    VkWriteDescriptorSet DescriptorSetBuilder::GetSamplerCubeWDS( VulkanMaterialBackend* materialBackend,
+                                                                  const uint32_t frame, const uint32_t set,
+                                                                  const uint32_t               dstBinding,
+                                                                  const uint32_t               descriptorCount,
+                                                                  const VkDescriptorImageInfo* pImageInfo )
     {
         auto getFallback = []()
         { return FallbackTextures::Get().GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F ); };
 
         return Detail::GetSamplerWDSImpl<API::Vulkan::VulkanImageCube>(
-             vulkanShader, frame, set, dstBinding, descriptorCount, pImageInfo,
+             materialBackend, frame, set, dstBinding, descriptorCount, pImageInfo,
              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, getFallback );
     }
 
-    VkWriteDescriptorSet DescriptorSetBuilder::GetStorageWDS( const std::shared_ptr<VulkanShader>& vulkanShader,
+    VkWriteDescriptorSet DescriptorSetBuilder::GetStorageWDS( VulkanMaterialBackend* materialBackend,
                                                               const uint32_t frame, const uint32_t set,
                                                               const uint32_t               dstBinding,
                                                               const uint32_t               descriptorCount,
                                                               const VkDescriptorImageInfo* pImageInfo )
     {
-        const auto& descriptorSetResult =
-             static_cast<API::Vulkan::VulkanRendererAPI*>( Renderer::GetInstance().GetRendererAPI() )
-                  ->GetDescriptorManager()
-                  ->GetLast( vulkanShader, frame, set );
-
-        if ( !descriptorSetResult.IsSuccess() )
+        VkDescriptorSet descriptorSet = materialBackend->GetDescriptorSet( frame, set );
+        if ( descriptorSet == VK_NULL_HANDLE )
         {
             VkWriteDescriptorSet writeDescriptor = {};
             writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -123,7 +114,7 @@ namespace Desert::Graphic::API::Vulkan
         VkWriteDescriptorSet writeDescriptor = {};
         writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writeDescriptor.dstSet               = descriptorSetResult.GetValue().Set;
+        writeDescriptor.dstSet               = descriptorSet;
         writeDescriptor.dstBinding           = dstBinding;
         writeDescriptor.descriptorCount      = descriptorCount;
         writeDescriptor.pImageInfo           = pImageInfo;

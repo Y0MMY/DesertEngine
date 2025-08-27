@@ -41,6 +41,8 @@ namespace Desert::ECS
         Assets::AssetHandle                   MeshHandle;
         std::shared_ptr<Graphic::MaterialPBR> Material; // TODO: std::optional
 
+        bool OutlineDraw = false;
+
         StaticMeshComponent()
         {
             Material = std::make_shared<Graphic::MaterialPBR>( nullptr );

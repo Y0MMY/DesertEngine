@@ -34,17 +34,10 @@ namespace Desert::Graphic::API::Vulkan
 
         VkCommandBuffer GetCurrentCmdBuffer() const;
 
-        const auto& GetDescriptorManager() const
-        {
-            return m_DescriptorManager;
-        }
-
     private:
         void SetViewportAndScissor();
 
     private:
-        std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
-
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;
 
         std::weak_ptr<Framebuffer> m_CompositeFramebuffer;

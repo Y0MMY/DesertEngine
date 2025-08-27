@@ -61,6 +61,10 @@ namespace Desert::Editor
             ImGui::EndPopup();
         }
 
+        if ( ImGui::Checkbox( "Mesh Outline", &staticMesh.OutlineDraw) )
+        {
+        }
+
         // if ( staticMesh.Mesh )
         {
             /*ImGui::Dummy( ImVec2( 0, 10 ) );

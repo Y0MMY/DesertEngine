@@ -42,6 +42,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         const uint32_t frames = 3U; // TODO
 
+        // Graphic
         {
             m_CommandGraphicPool.resize( frames );
 
@@ -56,6 +57,7 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
+        // Compute
         {
             m_ComputeCommandPool.resize( frames );
 
@@ -70,8 +72,24 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        m_GraphicsQueue = device.m_GraphicsQueue;
-        m_ComputeQueue  = device.m_ComputeQueue;
+        // Transfer Ops
+        {
+            m_TransferOpsCommandPool.resize( frames );
+
+            VkCommandPoolCreateInfo cmdPoolInfo = {};
+            cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            cmdPoolInfo.queueFamilyIndex        = device.GetPhysicalDevice()->GetTransferFamily().value();
+            cmdPoolInfo.flags                   = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            for ( auto& cmdPool : m_TransferOpsCommandPool )
+            {
+                VK_CHECK_RESULT(
+                     vkCreateCommandPool( device.GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
+            }
+        }
+
+        m_GraphicsQueue    = device.m_GraphicsQueue;
+        m_ComputeQueue     = device.m_ComputeQueue;
+        m_TransferOpsQueue = device.m_TransferQueue;
 
         m_LogicalDevice = device.m_LogicalDevice;
     }
@@ -157,6 +175,42 @@ namespace Desert::Graphic::API::Vulkan
                                         vkAllocateCommandBuffers( m_LogicalDevice, &allocateInfo, &cmdBuffer ) );
 
         return Common::MakeSuccess( cmdBuffer );
+    }
+
+    Common::Result<VkCommandBuffer>
+    CommandBufferAllocator::RT_AllocateCommandBufferTransferOps( bool begin /*= false */ )
+    {
+        const auto frame = EngineContext::GetInstance().GetCurrentFrameIndex();
+
+        VkCommandBufferAllocateInfo allocateInfo;
+        allocateInfo.pNext              = VK_NULL_HANDLE;
+        allocateInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocateInfo.commandBufferCount = 1;
+        allocateInfo.commandPool        = m_TransferOpsCommandPool[frame];
+
+        VkCommandBuffer cmdBuffer;
+        VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
+                                        vkAllocateCommandBuffers( m_LogicalDevice, &allocateInfo, &cmdBuffer ) );
+
+        if ( begin )
+        {
+            VkCommandBufferBeginInfo cmdBufferBeginInfo{};
+            cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            VK_RETURN_RESULT_IF_FALSE_TYPE( VkCommandBuffer,
+                                            vkBeginCommandBuffer( cmdBuffer, &cmdBufferBeginInfo ) );
+        }
+
+        return Common::MakeSuccess( cmdBuffer );
+    }
+
+    Common::Result<VkResult>
+    CommandBufferAllocator::RT_FlushCommandBufferTransferOps( VkCommandBuffer commandBuffer )
+    {
+        const auto frame = EngineContext::GetInstance().GetCurrentFrameIndex();
+
+        return FlushCommandBuffer( m_LogicalDevice, m_TransferOpsCommandPool[frame], commandBuffer,
+                                   m_TransferOpsQueue );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

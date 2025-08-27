@@ -16,6 +16,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             std::optional<int32_t> GraphicsFamily;
             std::optional<int32_t> ComputeFamily;
+            std::optional<int32_t> TransferFamily;
             std::optional<int32_t> PresentFamily;
         };
 
@@ -36,6 +37,11 @@ namespace Desert::Graphic::API::Vulkan
         std::optional<int32_t> GetComputeFamily() const
         {
             return m_QueueFamilyIndices.ComputeFamily;
+        }
+
+        std::optional<int32_t> GetTransferFamily() const
+        {
+            return m_QueueFamilyIndices.TransferFamily;
         }
 
         Common::Result<bool> CreateDevice();
@@ -101,6 +107,7 @@ namespace Desert::Graphic::API::Vulkan
 
         VkQueue m_GraphicsQueue;
         VkQueue m_ComputeQueue;
+        VkQueue m_TransferQueue;
 
         friend class CommandBufferAllocator;
     };
