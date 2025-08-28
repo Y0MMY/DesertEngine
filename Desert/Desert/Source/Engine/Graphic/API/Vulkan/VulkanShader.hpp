@@ -49,6 +49,8 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual const std::vector<Core::Models::UniformBuffer>
         GetUniformBufferModels() const override; // don't use it often! TODO: cache
+        virtual const std::vector<Core::Models::StorageBuffer>
+        GetStorageBufferModels() const override; // don't use it often! TODO: cache
         virtual const std::vector<Core::Models::ImageCubeSampler> GetUniformImageCubeModels() const override;
         virtual const std::vector<Core::Models::Image2DSampler>   GetUniformImage2DModels() const override;
 

@@ -1,8 +1,9 @@
 ﻿// https://github.com/PacktPublishing/3D-Graphics-Rendering-Cookbook/blob/35bb8b717d6fb52ced60509be1bd4b99ad6d9a01/data/shaders/chapter05/GL01_grid.frag
 
 #pragma stage : vertex
-
 #version 450
+
+#include "Common/CameraUB.glslh"
 
 layout (location=0) out vec2 uv;
 layout (location=1) out vec2 out_camPos;
@@ -18,27 +19,21 @@ const int indices[6] = int[6](
 	0, 1, 2, 2, 3, 0
 );
 
-layout(binding = 0) uniform Camera {
-    mat4 projection;
-    mat4 view;
-	vec3 CameraPos;
-};
-
 const float gridYOffset = -1.5;
 
 void main()
 {
 	float gridSize = 100.0;
 
-	mat4 MVP = projection * view;
+	mat4 MVP = cameraUB.Projection * cameraUB.View;
 
 	int idx = indices[gl_VertexIndex];
 	vec3 position = pos[idx] * gridSize;
 	
-	position.x += CameraPos.x;
-	position.z += CameraPos.z;
+	position.x += cameraUB.CameraPos.x;
+	position.z += cameraUB.CameraPos.z;
 
-	out_camPos = CameraPos.xz;
+	out_camPos = cameraUB.CameraPos.xz;
 
 	position.y += gridYOffset;
 

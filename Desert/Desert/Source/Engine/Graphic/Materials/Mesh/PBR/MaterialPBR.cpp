@@ -13,10 +13,10 @@ namespace Desert::Graphic
             InheritBaseMaterialProperties();
         }
 
-        m_LightingData       = std::make_unique<Models::LightingData>( m_MaterialExecutor );
+        m_LightingData       = std::make_unique<Models::Light::DirectionLightUB>( m_MaterialExecutor );
         m_GlobalUB           = std::make_unique<Models::GlobalData>( m_MaterialExecutor );
         m_PBRTextures        = std::make_unique<Models::PBR::PBRMaterialTexture>( m_MaterialExecutor );
-        m_MaterialProperties = std::make_unique<Models::PBR::MaterialPBRProperties>( m_MaterialExecutor );
+        m_MaterialProperties = std::make_unique<Models::PBR::MaterialPBRUB>( m_MaterialExecutor );
     }
 
     void MaterialPBR::InheritBaseMaterialProperties()
@@ -151,16 +151,14 @@ namespace Desert::Graphic
         glm::mat4 Transform;
     };
 
-    void MaterialPBR::UpdateRenderParameters( const Core::Camera& camera, const glm::mat4& meshTransform,
-                                              const glm::vec3&                               directionLight,
-                                              const std::optional<Models::PBR::PBRTextures>& pbrTextures )
+    void MaterialPBR::Bind(const UpdateMaterialPBRInfo& data)
     {
-        const VP vp{ .ViewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(),
-                     .Transform      = meshTransform };
+        const VP vp{ .ViewProjection = data.Camera->GetProjectionMatrix() * data.Camera->GetViewMatrix(),
+                     .Transform      = data.MeshTransform };
 
-        m_LightingData->UpdateDirection( directionLight );
-        m_GlobalUB->UpdateUBGlobal( Models::GlobalUB{ .CameraPosition = camera.GetPosition() } );
-        m_PBRTextures->UpdatePBR( pbrTextures );
+        m_LightingData->Update(data.DirectionLight );
+        m_GlobalUB->Update( Models::GlobalUB{ .CameraPosition = data.Camera->GetPosition() } );
+        m_PBRTextures->UpdatePBR(data.PbrTextures );
         m_MaterialExecutor->PushConstant( &vp, sizeof( vp ) );
 
         // Here we would update the actual Material object with our parameters

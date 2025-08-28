@@ -7,7 +7,7 @@ namespace Desert::Graphic
         m_ToneMapModel = std::make_unique<Models::ToneMap>( m_MaterialExecutor );
     }
 
-    void MaterialTonemap::UpdateRenderParameters( const std::shared_ptr<Image2D>& targetImage )
+    void MaterialTonemap::Bind( const std::shared_ptr<Image2D>& targetImage )
     {
         m_ToneMapModel->UpdateToneMap( targetImage );
     }

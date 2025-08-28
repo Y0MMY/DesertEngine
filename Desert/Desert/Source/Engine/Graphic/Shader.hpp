@@ -18,6 +18,7 @@ namespace Desert::Graphic
         virtual Common::BoolResult                             Reload()                                        = 0;
         virtual const std::string                              GetName() const                                 = 0;
         virtual const std::vector<Core::Models::UniformBuffer> GetUniformBufferModels() const                  = 0;
+        virtual const std::vector<Core::Models::StorageBuffer> GetStorageBufferModels() const                  = 0;
         virtual const std::vector<Core::Models::ImageCubeSampler> GetUniformImageCubeModels() const            = 0;
         virtual const std::vector<Core::Models::Image2DSampler>   GetUniformImage2DModels() const              = 0;
         virtual const ShaderDefines&                              GetDefines() const                           = 0;

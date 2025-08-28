@@ -20,6 +20,7 @@
 
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/Scene.hpp>
+#include <Engine/Core/Camera.hpp>
 
 // =================== Graphic =================== //
 
@@ -36,6 +37,7 @@
 #include <Engine/Graphic/Geometry/Mesh.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
+#include <Engine/Graphic/Materials/Material.hpp>
 
 // =================== ECS =================== //
 

@@ -78,14 +78,21 @@ namespace Desert::Uniforms
 
         // Buffers
         {
-            const auto& models = shader->GetUniformBufferModels();
-            m_BufferData.Data.reserve( models.size() );
-            m_BufferData.Names.reserve( models.size() );
+            const auto& models        = shader->GetUniformBufferModels();
+            const auto& storageModels = shader->GetStorageBufferModels();
+            m_BufferData.Data.reserve( models.size() + storageModels.size() );
+            m_BufferData.Names.reserve( models.size() + storageModels.size() );
 
             for ( const auto& model : models )
             {
                 AddBuffer( UniformBuffer::Create( debugName, model.Size, model.BindingPoint ), model.Name );
             }
+
+            for ( const auto& model : storageModels )
+            {
+                AddBuffer( UniformBuffer::Create( debugName, model.Size, model.BindingPoint ), model.Name );
+            }
+            // Maybe it should be separated?
         }
 
         // ImageCube

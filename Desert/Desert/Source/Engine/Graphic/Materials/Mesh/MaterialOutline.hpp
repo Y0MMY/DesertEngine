@@ -6,13 +6,20 @@
 
 namespace Desert::Graphic
 {
-    class MaterialOutline final : public Material
+    struct UpdateMaterialOutlineInfo
+    {
+        std::shared_ptr<Core::Camera> Camera;
+        glm::mat4                     Transform;
+        float                         Width;
+        glm::vec3                     Color;
+    };
+
+    class MaterialOutline final : public Material<UpdateMaterialOutlineInfo>
     {
     public:
         MaterialOutline();
 
-        void UpdateRenderParameters( const Core::Camera& camera, const glm::mat4& transform, const float width,
-                                     const glm::vec3& color );
+        void Bind( const UpdateMaterialOutlineInfo& data ) override;
 
     private:
         std::unique_ptr<Models::OutlineData> m_OutlineData;

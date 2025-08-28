@@ -1,33 +1,15 @@
 #pragma stage : vertex
-
 #version 450 
+
+#include "Common/QuadPositions.glslh"
+#include "Common/QuadTextureCoords.glslh"
 
 layout(location = 0) out vec2 v_TexCoord; 
 
-vec2 positions[6] = {
-    {-1.0, -1.0}, 
-    { 1.0, -1.0}, 
-    {-1.0,  1.0}, 
-    
-    { 1.0, -1.0}, 
-    { 1.0,  1.0}, 
-    {-1.0,  1.0}  
-};
-
-vec2 texCoords[6] = {
-    {0.0, 1.0},
-    {1.0, 1.0},
-    {0.0, 0.0},
-    
-    {1.0, 1.0},
-    {1.0, 0.0},  
-    {0.0, 0.0}   
-};
-
 void main()
 {
-    v_TexCoord = texCoords[gl_VertexIndex];
-    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+    v_TexCoord = QUAD_TEXTURE_COORDINATES[gl_VertexIndex];
+    gl_Position = vec4(QUAD_POSITIONS[gl_VertexIndex], 0.0, 1.0);
 }
 
 #pragma stage : fragment

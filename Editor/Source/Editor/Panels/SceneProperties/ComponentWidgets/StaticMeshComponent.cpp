@@ -1,6 +1,7 @@
 #include "StaticMeshComponent.hpp"
-
 #include <ImGui/imgui.h>
+
+#include <Editor/Core/ImGuiUtilities.hpp>
 
 namespace Desert::Editor
 {
@@ -18,17 +19,24 @@ namespace Desert::Editor
 
         auto&       staticMesh          = entity.GetComponent<ECS::StaticMeshComponent>();
         const auto& currentSelectedMesh = assetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
+
         std::string currentMeshName =
              currentSelectedMesh
                   ? Common::Utils::FileSystem::GetFileName( currentSelectedMesh->GetMetadata().Filepath )
                   : "None";
 
-        if ( ImGui::Button( currentMeshName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
-        {
-            ImGui::OpenPopup( "mesh_selector" );
-        }
+        Utils::ImGuiUtilities::PushID();
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
-        if ( ImGui::BeginPopup( "mesh_selector" ) )
+        // Mesh selection section
+        ImGui::Columns( 2 );
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Mesh" );
+        ImGui::NextColumn();
+        ImGui::PushItemWidth( -1 );
+
+        if ( ImGui::BeginCombo( "##MeshSelector", currentMeshName.c_str(), 0 ) )
         {
             static ImGuiTextFilter meshFilter;
             meshFilter.Draw( "##Search", 200 );
@@ -38,6 +46,7 @@ namespace Desert::Editor
             {
                 const std::string& meshName =
                      Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
+
                 if ( meshFilter.PassFilter( meshName.c_str() ) )
                 {
                     bool isSelected = ( staticMesh.MeshHandle == handle );
@@ -58,20 +67,38 @@ namespace Desert::Editor
                 ImGui::TextDisabled( "No mesh assets available" );
             }
 
-            ImGui::EndPopup();
+            ImGui::EndCombo();
         }
 
-        if ( ImGui::Checkbox( "Mesh Outline", &staticMesh.OutlineDraw) )
+        ImGui::PopItemWidth();
+        ImGui::NextColumn();
+        ImGui::Columns( 1 ); // Важно: сбросить колонки
+        ImGui::Separator();
+        ImGui::PopStyleVar();
+
+        // Show mesh info if mesh is loaded
+        if ( currentSelectedMesh )
         {
+            // Убедитесь, что мы не в режиме колонок перед отрисовкой деталей
+            ImGui::Columns( 1 ); // Дополнительный сброс для уверенности
+
+            if ( ImGui::TreeNodeEx( "Mesh Details", ImGuiTreeNodeFlags_Framed ) )
+            {
+                ImGui::Columns( 2 );
+
+                // File path
+                ImGui::TextUnformatted( "File Path" );
+                ImGui::NextColumn();
+                ImGui::TextUnformatted( "currentSelectedMesh->GetMetadata().Filepath.c_str() ");
+                Utils::ImGuiUtilities::Tooltip( "currentSelectedMesh->GetMetadata().Filepath.c_str() ");
+                ImGui::NextColumn();
+
+                ImGui::Columns( 1 );
+                ImGui::TreePop();
+            }
         }
 
-        // if ( staticMesh.Mesh )
-        {
-            /*ImGui::Dummy( ImVec2( 0, 10 ) );
-            ImGui::Text( "Mesh Info:" );
-            ImGui::Text( "Vertices: %zu", staticMesh.Mesh->GetVertexCount() );
-            ImGui::Text( "Triangles: %zu", staticMesh.Mesh->GetTriangleCount() );*/
-        }
+        Utils::ImGuiUtilities::PopID();
     }
 
 } // namespace Desert::Editor

@@ -7,13 +7,14 @@
 
 namespace Desert::Editor::Render
 {
-    class MaterialGrid : public Graphic::Material
+
+    class MaterialGrid : public Graphic::Material<std::shared_ptr<Desert::Core::Camera>>
     {
     public:
         MaterialGrid();
         ~MaterialGrid() = default;
 
-        void UpdateRenderParameters( const Core::Camera& camera );
+        void Bind( const std::shared_ptr<Desert::Core::Camera>& camera ) override;
         void SetGridProperties( float cellSize, float cellCount, const glm::vec4& color );
 
     private:

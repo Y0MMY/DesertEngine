@@ -51,7 +51,7 @@ namespace Desert::Core
         [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
 
         const std::shared_ptr<Graphic::Image2D>     GetFinalImage() const;
-        const std::shared_ptr<Graphic::Framebuffer> GetCompositeFramebuffer() const;
+        const std::shared_ptr<Graphic::Framebuffer> GetTargetFramebuffer() const;
 
         ECS::Entity& CreateNewEntity( std::string&& entityName );
 
@@ -62,7 +62,7 @@ namespace Desert::Core
 
         void Resize( const uint32_t width, const uint32_t height ) const;
 
-        [[nodiscard]] const Graphic::Environment& GetEnvironment() const;
+        [[nodiscard]] const std::optional<Graphic::Environment>& GetEnvironment() const;
 
         [[nodiscard]] auto& GetRegistry()
         {

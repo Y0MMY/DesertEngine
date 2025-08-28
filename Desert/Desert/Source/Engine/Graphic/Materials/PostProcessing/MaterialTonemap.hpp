@@ -6,13 +6,13 @@
 
 namespace Desert::Graphic
 {
-    class MaterialTonemap final : public Material
+    class MaterialTonemap final : public Material<std::shared_ptr<Image2D>>
     {
     public:
         explicit MaterialTonemap();
 
         // Parameter updates
-        void UpdateRenderParameters( const std::shared_ptr<Image2D>& targetImage );
+        void Bind( const std::shared_ptr<Image2D>& targetImage );
 
     private:
         std::unique_ptr<Models::ToneMap> m_ToneMapModel;

@@ -1,6 +1,7 @@
 #include "MeshRenderer.hpp"
 
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/Materials/Models/ToneMap.hpp>
 
 namespace Desert::Graphic::System
@@ -30,16 +31,19 @@ namespace Desert::Graphic::System
              "SceneGeometry",
              [this]()
              {
-                 const auto& camera = m_ActiveCamera.lock();
+                 const auto& camera = m_SceneRenderer->GetMainCamera().lock();
                  if ( camera )
                  {
                      auto&      renderer = Renderer::GetInstance();
                      const auto textures = PreparePBRTextures();
 
-                     for ( const auto& renderData : m_RenderQueue )
+                     const auto& renderQueue = m_SceneRenderer->GetMeshRenderList();
+
+                     for ( const auto& renderData : renderQueue )
                      {
-                         renderData.Material->UpdateRenderParameters( *camera, renderData.Transform,
-                                                                      m_DirectionLight, textures );
+                         renderData.Material->Bind( { camera, renderData.Transform,
+                                                      BuildDirectionLight( m_SceneRenderer->GetDirectionLights() ),
+                                                      textures } );
                          renderer.RenderMesh( m_Pipeline, renderData.Mesh,
                                               renderData.Material->GetMaterialExecutor() );
                      }
@@ -47,15 +51,15 @@ namespace Desert::Graphic::System
                      if ( m_OutlineDraw )
                      {
 
-                         for ( const auto& renderData : m_RenderQueue )
+                         for ( const auto& renderData : renderQueue )
                          {
                              if ( !renderData.Outlined )
                              {
                                  continue;
                              }
 
-                             m_OutlineMaterial->UpdateRenderParameters( *camera, renderData.Transform,
-                                                                        m_OutlineWidth, m_OutlineColor );
+                             m_OutlineMaterial->Bind(
+                                  { camera, renderData.Transform, m_OutlineWidth, m_OutlineColor } );
 
                              renderer.RenderMesh( m_OutlinePipeline, renderData.Mesh,
                                                   m_OutlineMaterial->GetMaterialExecutor() );
@@ -75,8 +79,16 @@ namespace Desert::Graphic::System
             m_Framebuffer->Release();
             m_Framebuffer.reset();
         }
+    }
 
-        m_RenderQueue.clear();
+    const glm::vec3 MeshRenderer::BuildDirectionLight( const std::vector<DirectionLight>& dirLights )
+    {
+        if ( !dirLights.empty() )
+        {
+            return dirLights[0].Direction;
+        }
+
+        return glm::vec3( 0.0f );
     }
 
     bool MeshRenderer::SetupGeometryPass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
@@ -160,31 +172,15 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    void MeshRenderer::PrepareFrame( const std::shared_ptr<Core::Camera>& camera,
-                                     const std::optional<Environment>&    environment )
-    {
-        m_ActiveCamera = camera;
-        m_RenderQueue.clear();
-        m_Environment = environment;
-    }
-
-    void MeshRenderer::AddMesh( const MeshRenderData& renderData )
-    {
-        m_RenderQueue.push_back( renderData );
-    }
-
-    void MeshRenderer::AddLight( const glm::vec3& directionLight )
-    {
-        m_DirectionLight = directionLight;
-    }
-
     std::optional<Models::PBR::PBRTextures> MeshRenderer::PreparePBRTextures() const
     {
-        if ( !m_Environment || !m_Environment->IrradianceMap || !m_Environment->PreFilteredMap )
+        const auto& environment = m_SceneRenderer->GetEnvironment();
+
+        if ( !environment || !environment->IrradianceMap || !environment->PreFilteredMap )
             return std::nullopt;
 
-        return Models::PBR::PBRTextures{ .IrradianceMap  = m_Environment->IrradianceMap,
-                                         .PreFilteredMap = m_Environment->PreFilteredMap };
+        return Models::PBR::PBRTextures{ .IrradianceMap  = environment->IrradianceMap,
+                                         .PreFilteredMap = environment->PreFilteredMap };
     }
 
 } // namespace Desert::Graphic::System

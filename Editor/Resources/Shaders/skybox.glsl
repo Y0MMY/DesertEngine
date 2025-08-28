@@ -1,32 +1,18 @@
 #pragma stage : vertex
-
 #version 450 
 
-layout(binding = 0) uniform camera {
-    mat4 projection;
-    mat4 view;
-    vec3 CameraPos;
-} ubo;
+#include "Common/QuadPositions.glslh"
+#include "Common/CameraUB.glslh"
 
 layout(location =3) out vec3 outUVW ;
 layout(location =4) out vec3   v_Position ;
 
-vec2 positions[6] = {
-    {-1.0, -1.0}, 
-    { 1.0, -1.0}, 
-    {-1.0,  1.0}, 
-    
-    { 1.0, -1.0}, 
-    { 1.0,  1.0}, 
-    {-1.0,  1.0}  
-};
-
 void main()
 {
-    vec4 position = vec4(positions[gl_VertexIndex], 1.0, 1.0);
+    vec4 position = vec4(QUAD_POSITIONS[gl_VertexIndex], 1.0, 1.0);
 	gl_Position = position;
 
-    mat4 inverseVP = inverse(ubo.projection * ubo.view);
+    mat4 inverseVP = inverse(cameraUB.Projection * cameraUB.View);
 
 	v_Position = ((inverseVP * position).xyz);
 }

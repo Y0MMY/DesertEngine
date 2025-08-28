@@ -13,21 +13,20 @@ namespace Desert::Graphic
         glm::mat4 Transform;
     };
 
-    void MaterialOutline::UpdateRenderParameters( const Core::Camera& camera, const glm::mat4& transform,
-                                                  const float width, const glm::vec3& color )
+    void MaterialOutline::Bind( const UpdateMaterialOutlineInfo& data )
     {
-        const VP vp{ .ViewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(),
-                     .Transform      = transform };
+        const VP vp{ .ViewProjection = data.Camera->GetProjectionMatrix() * data.Camera->GetViewMatrix(),
+                     .Transform      = data.Transform };
 
-        const glm::vec3 worldPosition  = transform[3];
-        const auto&     cameraPosition = camera.GetPosition();
+        const glm::vec3 worldPosition  = data.Transform[3];
+        const auto&     cameraPosition = data.Camera->GetPosition();
 
         float       distance     = glm::distance( worldPosition, cameraPosition );
-        const float dynamicWidth = width / ( 1.0f + distance );
+        const float dynamicWidth = data.Width / ( 1.0f + distance );
 
         m_MaterialExecutor->PushConstant( &vp, sizeof( vp ) );
 
-        m_OutlineData->UpdateOutlineUB( { 1.0f + dynamicWidth, color } );
+        m_OutlineData->UpdateOutlineUB( { 1.0f + dynamicWidth, data.Color } );
     }
 
 } // namespace Desert::Graphic

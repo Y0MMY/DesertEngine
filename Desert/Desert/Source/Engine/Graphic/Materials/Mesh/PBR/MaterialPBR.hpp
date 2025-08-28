@@ -6,15 +6,24 @@
 
 #include <Engine/Graphic/Materials/Models/Global.hpp>
 #include <Engine/Graphic/Materials/Models/Mesh/PBR/PBRTextures.hpp>
-#include <Engine/Graphic/Materials/Models/Mesh/PBR/MaterialPBRProperties.hpp>
-#include <Engine/Graphic/Materials/Models/Lighting.hpp>
+#include <Engine/Graphic/Materials/Models/Mesh/PBR/MaterialPBRUB.hpp>
+#include <Engine/Graphic/Materials/Models/Light/DirectionLight.hpp>
+#include <Engine/Graphic/Materials/Models/Light/PointLight.hpp>
 
 #include <Engine/Core/Camera.hpp>
 
 namespace Desert::Graphic
 {
+    struct UpdateMaterialPBRInfo
+    {
+        std::shared_ptr<Core::Camera>           Camera;
+        glm::mat4                               MeshTransform;
+        glm::vec3                               DirectionLight;
+        std::optional<Models::PBR::PBRTextures> PbrTextures;
+    };
+
     // TODO: should override the base class, as we may want to support not only PBR
-    class MaterialPBR final : public Material
+    class MaterialPBR final : public Material<UpdateMaterialPBRInfo>
     {
     public:
         MaterialPBR() = default;
@@ -97,9 +106,7 @@ namespace Desert::Graphic
         bool                                HasFinalTexture( Assets::TextureAsset::Type type ) const;
 
         // Parameter updates
-        void UpdateRenderParameters( const Core::Camera& camera, const glm::mat4& meshTransform,
-                                     const glm::vec3&                               directionLight,
-                                     const std::optional<Models::PBR::PBRTextures>& pbrTextures );
+        void Bind( const UpdateMaterialPBRInfo& data ) override;
         bool IsDirty() const
         {
             return m_ParametersDirty;
@@ -134,9 +141,10 @@ namespace Desert::Graphic
         }
 
     private:
-        std::unique_ptr<Models::LightingData>               m_LightingData;
-        std::unique_ptr<Models::GlobalData>                 m_GlobalUB;
-        std::unique_ptr<Models::PBR::PBRMaterialTexture>    m_PBRTextures;
-        std::unique_ptr<Models::PBR::MaterialPBRProperties> m_MaterialProperties;
+        std::unique_ptr<Models::Light::PointLightUB>     m_PointLightUB;
+        std::unique_ptr<Models::Light::DirectionLightUB> m_LightingData;
+        std::unique_ptr<Models::GlobalData>              m_GlobalUB;
+        std::unique_ptr<Models::PBR::PBRMaterialTexture> m_PBRTextures;
+        std::unique_ptr<Models::PBR::MaterialPBRUB>      m_MaterialProperties;
     };
 } // namespace Desert::Graphic

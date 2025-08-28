@@ -10,7 +10,7 @@ namespace Desert::Graphic
     {
         struct
         {
-            glm::vec4 Color        = { 0.0f, 0.0f, 0.0f, 1.0f }; 
+            glm::vec4 Color        = { 0.1000000015, 0.1000000015, 0.1000000015, 1.00 };
             glm::vec2 DepthStencil = { 1.0f, 0 }; // X = Depth, Y = Stencil
         } ClearColor;
 

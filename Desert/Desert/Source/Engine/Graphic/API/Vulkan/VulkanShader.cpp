@@ -5,6 +5,7 @@
 #include <Engine/Core/Models/Shader.hpp>
 
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
+#include <Engine/Core/ShaderCompiler/Includer/ShaderIncluder.hpp>
 
 #include <shaderc/shaderc.hpp>
 #include <spirv_cross/spirv_glsl.hpp>
@@ -147,6 +148,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             static shaderc::Compiler compiler;
             shaderc::CompileOptions  shaderCOptions;
+            shaderCOptions.SetIncluder( std::make_unique<Core::ShaderIncluder>( shaderPath ) );
 
             shaderCOptions.SetTargetEnvironment( shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1 );
             shaderCOptions.SetWarningsAsErrors();
@@ -507,6 +509,17 @@ namespace Desert::Graphic::API::Vulkan
                 layout.descriptorCount    = 1;
             }
 
+            // Storage buffers
+            for ( const auto& [binding, storageBuffer] : shaderDescriptorSet.StorageBuffers )
+            {
+                auto& layout              = layoutBindings.emplace_back();
+                layout.binding            = binding;
+                layout.descriptorType     = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                layout.stageFlags         = Utils::ShaderStageToVkShader( storageBuffer.ShaderStage );
+                layout.pImmutableSamplers = nullptr;
+                layout.descriptorCount    = 1;
+            }
+
             VkDescriptorSetLayoutCreateInfo layoutInfo = {};
             layoutInfo.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
             layoutInfo.bindingCount                    = (uint32_t)layoutBindings.size();
@@ -563,6 +576,21 @@ namespace Desert::Graphic::API::Vulkan
         else [[likely]]
         {
             const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).Image2DSamplers;
+            auto        res =
+                 uniformInfo | std::views::values | std::views::transform( []( const auto& p ) { return p; } );
+            return { res.begin(), res.end() };
+        }
+    }
+
+    const std::vector<Core::Models::StorageBuffer> VulkanShader::GetStorageBufferModels() const
+    {
+        if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
+        {
+            return {};
+        }
+        else [[likely]]
+        {
+            const auto& uniformInfo = m_ReflectionData.ShaderDescriptorSets.at( 0 ).StorageBuffers;
             auto        res =
                  uniformInfo | std::views::values | std::views::transform( []( const auto& p ) { return p; } );
             return { res.begin(), res.end() };

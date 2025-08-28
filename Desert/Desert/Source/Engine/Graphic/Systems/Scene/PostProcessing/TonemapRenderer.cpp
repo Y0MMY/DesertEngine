@@ -53,7 +53,7 @@ namespace Desert::Graphic::System
                  }
 
                  auto& renderer = Renderer::GetInstance();
-                 m_MaterialTonemap->UpdateRenderParameters( framebuffer->GetColorAttachmentImage() );
+                 m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage() );
                  renderer.SubmitFullscreenQuad( m_Pipeline, m_MaterialTonemap->GetMaterialExecutor() );
              },
              RenderPass::Create( rpSpec ) );

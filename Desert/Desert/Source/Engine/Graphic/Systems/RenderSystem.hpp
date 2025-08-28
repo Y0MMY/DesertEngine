@@ -5,14 +5,21 @@
 
 #include <Common/Core/CommonContext.hpp>
 
+namespace Desert::Graphic
+{
+    class SceneRenderer;
+}
+
 namespace Desert::Graphic::System
 {
     class RenderSystem
     {
     public:
-        explicit RenderSystem( const std::shared_ptr<Framebuffer>& compositeFramebuffer,
+        explicit RenderSystem( SceneRenderer*                      sceneRenderer,
+                               const std::shared_ptr<Framebuffer>& compositeFramebuffer,
                                const std::shared_ptr<RenderGraph>& renderGraph )
-             : m_CompositeFramebuffer( compositeFramebuffer ), m_RenderGraph( renderGraph )
+             : m_SceneRenderer( sceneRenderer ), m_CompositeFramebuffer( compositeFramebuffer ),
+               m_RenderGraph( renderGraph )
         {
             m_Width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
             m_Height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
@@ -32,6 +39,7 @@ namespace Desert::Graphic::System
         uint32_t m_Height;
 
     protected:
+        SceneRenderer*             m_SceneRenderer;
         std::weak_ptr<Framebuffer> m_CompositeFramebuffer;
         std::weak_ptr<RenderGraph> m_RenderGraph;
 

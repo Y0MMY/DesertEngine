@@ -58,7 +58,7 @@ namespace Desert::Graphic::API::Vulkan
                 colorAttachmentRefs.push_back( ref );
 
                 clearValues.emplace_back();
-                clearValues.back().color = { 0.0, 0.0, 0.0, 1.0 };
+                clearValues.back().color = { 0.1000000015, 0.1000000015, 0.1000000015, 1.00 };
             }
 
             // Process external color attachments
@@ -85,7 +85,7 @@ namespace Desert::Graphic::API::Vulkan
                     colorAttachmentRefs.push_back( ref );
 
                     clearValues.emplace_back();
-                    clearValues.back().color = { 0.0, 0.0, 0.0, 1.0 };
+                    clearValues.back().color = { 0.1000000015, 0.1000000015, 0.1000000015, 1.00 };
                 }
             }
 

@@ -40,14 +40,29 @@ namespace Desert::Graphic
 
         void AddToRenderMeshList( const std::shared_ptr<Mesh>& mesh, const std::shared_ptr<MaterialPBR>& material,
                                   const glm::mat4& transform );
-        const Environment  CreateEnvironment( const Common::Filepath& filepath );
-        void               SetEnvironment( const std::shared_ptr<MaterialSkybox>& material );
-        const Environment& GetEnvironment();
+        const Environment                 CreateEnvironment( const Common::Filepath& filepath );
+        void                              SetEnvironment( const std::shared_ptr<MaterialSkybox>& material );
+        const std::optional<Environment>& GetEnvironment();
+
+        const auto& GetMainCamera() const
+        {
+            return m_SceneInfo.ActiveCamera;
+        }
+
+        const auto& GetMeshRenderList() const
+        {
+            return m_MeshRenderData;
+        }
+
+        const auto& GetDirectionLights() const
+        {
+            return m_DirectionLights;
+        }
 
         const std::shared_ptr<Image2D>     GetFinalImage() const;
-        const std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const
+        const std::shared_ptr<Framebuffer> GetTargetFramebuffer() const
         {
-            return m_CompositeFramebuffer;
+            return m_TargetFramebuffer;
         }
 
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
@@ -55,9 +70,6 @@ namespace Desert::Graphic
 
     private:
         void CompositeRenderPass();
-
-        const glm::vec3 BuildDirectionLight( const std::vector<DirectionLight>& dirLights );
-
     private:
         struct
         {
@@ -65,12 +77,15 @@ namespace Desert::Graphic
             std::weak_ptr<Core::Camera> ActiveCamera;
         } m_SceneInfo;
 
+        std::vector<DirectionLight> m_DirectionLights;
+        std::vector<MeshRenderData> m_MeshRenderData;
+
     private:
         std::shared_ptr<RenderGraph> m_RenderGraphRenderSystems;
         std::shared_ptr<RenderGraph> m_RenderGraphPPSystems; // Post-Proccessing
 
     private:
-        std::shared_ptr<Framebuffer> m_CompositeFramebuffer;
+        std::shared_ptr<Framebuffer> m_TargetFramebuffer;
 
     private:
         static constexpr size_t                                                 s_RenderSystemsCount = 3U;

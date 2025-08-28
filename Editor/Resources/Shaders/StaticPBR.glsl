@@ -69,11 +69,24 @@ layout(binding = 0) uniform MaterialProperties {
 
 layout(binding = 1) uniform LightningUB {
 	vec3 		Direction;
-} lights;
+} directionLights;
 
 layout(binding = 2) uniform GlobalUB {
 	vec3 CameraPosition;
 } global;
+
+// struct PointLight {
+//     vec3 color;
+//     vec3 position;
+//     float intensity;
+//     float radius;
+// };
+
+// layout(std430, binding = 3) buffer PointLights
+// {
+//     int numLights;
+//     PointLight lights[]; 
+// };
 
 // Environment maps
 layout (binding = 8) uniform samplerCube u_EnvSpecularTex;
@@ -123,7 +136,7 @@ vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec
 
 	for(uint i = 0; i < 1; i++)
 	{
-		vec3 Li = -lights.Direction;
+		vec3 Li = -directionLights.Direction;
 		vec3 Lradiance = vec3(1.0, 1.0, 1.0);
 		vec3 Lh = normalize(Li + view);
 
@@ -203,5 +216,8 @@ void main() {
 	vec3 F0 = mix(Fdielectric, m_Params.AlbedoColor, metalness);
 	vec3 light = Lightning(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor );
 	vec3 ibl = IBL(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor);
-    oColor = vec4(light + ibl, 1.0);
+
+	vec3 pointLight = 1.0;//lights[0].color;
+
+    oColor = vec4(light + ibl + pointLight, 1.0);
 }

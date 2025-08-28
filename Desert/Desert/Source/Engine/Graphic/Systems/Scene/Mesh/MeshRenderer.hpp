@@ -8,6 +8,7 @@
 #include <Engine/Graphic/Models/MeshRenderData.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialOutline.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
+#include <Engine/Graphic/Models/DirectionLight.hpp>
 
 #include <Engine/Graphic/RenderGraph.hpp>
 
@@ -20,11 +21,6 @@ namespace Desert::Graphic::System
 
         virtual Common::BoolResult Initialize() override;
         virtual void               Shutdown() override;
-
-        void PrepareFrame( const std::shared_ptr<Core::Camera>& camera,
-                           const std::optional<Environment>&    environment );
-        void AddMesh( const MeshRenderData& renderData );
-        void AddLight( const glm::vec3& directionLight );
 
         void ToggleOutline( const bool value )
         {
@@ -54,13 +50,9 @@ namespace Desert::Graphic::System
         std::optional<Models::PBR::PBRTextures> PreparePBRTextures() const;
 
     private:
-        std::optional<Environment> m_Environment;
+        const glm::vec3 BuildDirectionLight( const std::vector<DirectionLight>& dirLights );
 
     private:
-        std::vector<MeshRenderData> m_RenderQueue;
-        glm::vec3                   m_DirectionLight;
-        std::weak_ptr<Core::Camera> m_ActiveCamera;
-
         std::shared_ptr<Pipeline> m_Pipeline;
         std::shared_ptr<Shader>   m_Shader;
 

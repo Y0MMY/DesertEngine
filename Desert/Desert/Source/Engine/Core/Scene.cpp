@@ -74,7 +74,7 @@ namespace Desert::Core
         return m_SceneRenderer->CreateEnvironment( filepath );
     }
 
-    const Desert::Graphic::Environment& Scene::GetEnvironment() const
+    const std::optional<Graphic::Environment>& Scene::GetEnvironment() const
     {
         return m_SceneRenderer->GetEnvironment();
     }
@@ -166,9 +166,9 @@ namespace Desert::Core
         }
     }
 
-    const std::shared_ptr<Desert::Graphic::Framebuffer> Scene::GetCompositeFramebuffer() const
+    const std::shared_ptr<Desert::Graphic::Framebuffer> Scene::GetTargetFramebuffer() const
     {
-        return m_SceneRenderer->GetCompositeFramebuffer();
+        return m_SceneRenderer->GetTargetFramebuffer();
     }
 
 } // namespace Desert::Core

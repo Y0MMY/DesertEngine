@@ -45,7 +45,7 @@ namespace Desert::Editor::Render
                  }
              },
              Graphic::RenderPass::Create(
-                  { .TargetFramebuffer = scene->GetCompositeFramebuffer(), .DebugName = "EditorGridPass" } ) );
+                  { .TargetFramebuffer = scene->GetTargetFramebuffer(), .DebugName = "EditorGridPass" } ) );
 
         return BOOLSUCCESS;
     }
@@ -72,24 +72,13 @@ namespace Desert::Editor::Render
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName         = debugName;
-        pipeSpec.Framebuffer       = scene->GetCompositeFramebuffer();
+        pipeSpec.Framebuffer       = scene->GetTargetFramebuffer();
         pipeSpec.Shader            = m_Shader;
         pipeSpec.DepthTestEnabled  = true;
         pipeSpec.DepthWriteEnabled = false;
         pipeSpec.DepthCompareOp    = CompareOp::Less;
         pipeSpec.CullMode          = CullMode::None;
-        pipeSpec.StencilTestEnabled = false;
 
-        pipeSpec.StencilTestEnabled = true;
-        pipeSpec.StencilFront       = { .FailOp      = StencilOp::Keep,
-                                        .PassOp      = StencilOp::Keep, // Не записывать в трафарет
-                                        .DepthFailOp = StencilOp::Keep,
-                                        .CompareOp   = CompareOp::Always, // Всегда проходить тест
-                                        .CompareMask = 0xFF,
-                                        .WriteMask   = 0x00, // Не записывать в трафарет
-                                        .Reference   = 0 };
-
-        pipeSpec.StencilBack        = pipeSpec.StencilFront;
         m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 
@@ -108,7 +97,7 @@ namespace Desert::Editor::Render
     {
         if ( m_Material )
         {
-            m_Material->UpdateRenderParameters( *camera );
+            m_Material->Bind( camera );
         }
     }
 

@@ -12,21 +12,12 @@ namespace Desert::Graphic::Models
         glm::vec3 CameraPosition;
     };
 
-    class GlobalData final : public MaterialHelper::MaterialWrapper
+    class GlobalData final : public MaterialHelper::MaterialWrapper<GlobalUB>
     {
     public:
         explicit GlobalData( const std::shared_ptr<MaterialExecutor>& material )
-             : MaterialHelper::MaterialWrapper( material, "GlobalUB" ), m_GlobalUB( {} )
+             : MaterialWrapper( material, "GlobalUB" )
         {
         }
-
-        void UpdateUBGlobal( const GlobalUB& ubGlobal )
-        {
-            m_GlobalUB = ubGlobal;
-            m_UniformProperty->SetData( &m_GlobalUB, sizeof( GlobalUB ) );
-        }
-
-    private:
-        GlobalUB m_GlobalUB;
     };
 } // namespace Desert::Graphic::Models

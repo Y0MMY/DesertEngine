@@ -1,8 +1,7 @@
 #pragma once
-#pragma once
 
 #include <Engine/Graphic/RendererAPI.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanDescriptorManager.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
 #include <vulkan/vulkan.hpp>
 
@@ -25,7 +24,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                  const std::shared_ptr<MaterialExecutor>& material ) override;
 
-        virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+        virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
                                            const std::shared_ptr<MaterialExecutor>& material ) override;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;

@@ -28,9 +28,9 @@ namespace Desert::Graphic::System
         pipeSpec.Framebuffer = compositeFramebuffer;
         pipeSpec.Shader      = m_Shader;
 
-        pipeSpec.CullMode = CullMode::None;
-        pipeSpec.DepthTestEnabled = false;
-        pipeSpec.DepthWriteEnabled = false; 
+        pipeSpec.CullMode          = CullMode::None;
+        pipeSpec.DepthTestEnabled  = false;
+        pipeSpec.DepthWriteEnabled = false;
 
         m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
@@ -68,7 +68,7 @@ namespace Desert::Graphic::System
             return;
         }
 
-        material->UpdateRenderParameters( *camera );
+        material->Bind( { camera } );
         m_MaterialSkybox = material;
     }
 
