@@ -1,7 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
-#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperUniform.hpp>
 
 namespace Desert::Graphic::Models::PBR
 {
@@ -18,6 +18,6 @@ namespace Desert::Graphic::Models::PBR
         float     AOValue;
     };
 
-    DEFINE_MATERIAL_WRAPPER( MaterialPBRUB, PBRMaterialPropertiesUB, "MaterialProperties" )
+    DEFINE_MATERIAL_WRAPPER_UNIFORM( MaterialPBRUB, PBRMaterialPropertiesUB, "MaterialProperties" )
 
 } // namespace Desert::Graphic::Models::PBR

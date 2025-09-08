@@ -6,6 +6,7 @@
 #include <Engine/Uniforms/API/Vulkan/VulkanUniformBuffer.hpp>
 #include <Engine/Uniforms/API/Vulkan/VulkanUniformImage2D.hpp>
 #include <Engine/Uniforms/API/Vulkan/VulkanUniformImageCube.hpp>
+#include <Engine/Uniforms/API/Vulkan/VulkanStorageBuffer.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
 
@@ -163,6 +164,28 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
+    void VulkanMaterialBackend::ApplyStorageBuffer( MaterialProperty* prop )
+    {
+        auto storageProp = static_cast<StorageBufferProperty*>( prop );
+        if ( !storageProp || !storageProp->IsDirty() )
+            return;
+
+        const auto& frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+
+        if ( auto bufferInfo = storageProp->GetStorageBuffer() )
+        {
+            if ( auto vulkanBuffer = sp_cast<Uniforms::API::Vulkan::VulkanStorageBuffer>( bufferInfo ) )
+            {
+                auto& bufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
+                auto  wds        = DescriptorSetBuilder::GetStorageWDS( this, frameIndex, 0, // set 0
+                                                                        vulkanBuffer->GetBinding(), 1U, &bufferInfo );
+
+                m_PendingDescriptorWrites.push_back( wds );
+                storageProp->MarkClean();
+            }
+        }
+    }
+
     void VulkanMaterialBackend::ApplyTexture2D( MaterialProperty* prop )
     {
         auto textureProp = static_cast<Texture2DProperty*>( prop );
@@ -254,5 +277,4 @@ namespace Desert::Graphic::API::Vulkan
 
         m_PendingDescriptorWrites.clear();
     }
-
 } // namespace Desert::Graphic::API::Vulkan

@@ -50,7 +50,6 @@ namespace Desert::Graphic::System
         std::optional<Models::PBR::PBRTextures> PreparePBRTextures() const;
 
     private:
-        const glm::vec3 BuildDirectionLight( const std::vector<DirectionLight>& dirLights );
 
     private:
         std::shared_ptr<Pipeline> m_Pipeline;

@@ -5,6 +5,8 @@
 #include <Common/Core/Events/MouseEvents.hpp>
 #include <Engine/Core/Application.hpp>
 
+#include "Frustum.hpp"
+
 #include <Common/Core/EventRegistry.hpp>
 
 #include <glm/glm.hpp>
@@ -41,6 +43,8 @@ namespace Desert::Core
             return m_Position;
         }
 
+        const Frustum& GetFrustum();
+
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
@@ -74,5 +78,8 @@ namespace Desert::Core
 
         float m_Pitch = 0.0f, m_PitchDelta = 0.0f;
         float m_Yaw = 0.0f, m_YawDelta = 0.0f;
+
+    private:
+        Frustum m_Frustum;
     };
 } // namespace Desert::Core

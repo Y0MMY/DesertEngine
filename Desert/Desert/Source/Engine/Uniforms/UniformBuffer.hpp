@@ -3,21 +3,14 @@
 #include <Common/Core/Result.hpp>
 
 #include <Engine/Graphic/Shader.hpp>
+#include "BaseBuffer.hpp"
 
 namespace Desert::Uniforms
 {
-    class UniformBuffer
+    class UniformBuffer : public BaseBuffer
     {
     public:
         virtual ~UniformBuffer() = default;
-
-        virtual void SetData( const void* data, uint32_t size, uint32_t offset = 0 )    = 0;
-        virtual void RT_SetData( const void* data, uint32_t size, uint32_t offset = 0 ) = 0;
-
-        virtual const uint32_t GetBinding() const = 0;
-        virtual const uint32_t GetSize() const    = 0;
-
-        virtual const void* GetData() const = 0;
 
     private:
         static std::shared_ptr<UniformBuffer> Create( const std::string_view debugName, uint32_t size,
@@ -25,4 +18,5 @@ namespace Desert::Uniforms
 
         friend class UniformManager;
     };
+
 } // namespace Desert::Uniforms

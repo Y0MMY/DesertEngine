@@ -14,7 +14,7 @@ namespace Desert::Editor
 
         ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager );
         void RegisterDefaultComponents();
-        void RegisterComponent( const std::string& name, ComponentFactory factory );
+        void RegisterComponent( ComponentFactory factory );
         void Render( ECS::Entity& entity );
 
     private:
@@ -24,8 +24,8 @@ namespace Desert::Editor
     private:
         std::weak_ptr<Assets::AssetManager> m_AssetManager;
 
-        std::vector<std::pair<std::string, ComponentFactory>> m_AvailableComponents;
-        ImGuiTextFilter                                       m_ComponentFilter;
+        std::vector<ComponentFactory> m_AvailableComponents;
+        ImGuiTextFilter               m_ComponentFilter;
     };
 
 } // namespace Desert::Editor

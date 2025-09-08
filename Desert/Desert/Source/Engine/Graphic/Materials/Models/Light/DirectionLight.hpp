@@ -1,10 +1,10 @@
 #pragma once
 
-#include <glm/glm.hpp>
-#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
+#include <Engine/Graphic/Models/DirectionLight.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperUniform.hpp>
 
 namespace Desert::Graphic::Models::Light
 {
-    DEFINE_MATERIAL_WRAPPER( DirectionLightUB, glm::vec3, "LightningUB" );
+    DEFINE_MATERIAL_WRAPPER_UNIFORM( DirectionLightUB, std::vector<DirectionLight>, "LightningUB" );
 
 } // namespace Desert::Graphic::Models::Light

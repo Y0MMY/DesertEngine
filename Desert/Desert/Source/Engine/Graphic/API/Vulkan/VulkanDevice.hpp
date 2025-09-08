@@ -66,6 +66,7 @@ namespace Desert::Graphic::API::Vulkan
         VkFormat m_DepthFormat = VK_FORMAT_UNDEFINED;
 
         bool m_SupportWideLines = false;
+        VkDeviceSize m_UniformBufferOffsetAlignment;
 
         std::unordered_set<std::string> m_SupportedExtensions;
 

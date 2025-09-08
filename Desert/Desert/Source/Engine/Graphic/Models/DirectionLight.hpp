@@ -1,8 +1,5 @@
 #pragma once
 
-#include <Common/Core/Timestep.hpp>
-#include <Engine/ECS/Components.hpp>
-
 #include <glm/glm.hpp>
 
 namespace Desert::Graphic

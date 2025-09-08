@@ -36,7 +36,12 @@ namespace Desert::Editor
         ImGui::NextColumn();
         ImGui::PushItemWidth( -1 );
 
-        if ( ImGui::BeginCombo( "##MeshSelector", currentMeshName.c_str(), 0 ) )
+        if ( ImGui::Button( currentMeshName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+        {
+            ImGui::OpenPopup( "mesh_selector" );
+        }
+
+        if ( ImGui::BeginPopup( "mesh_selector" ) )
         {
             static ImGuiTextFilter meshFilter;
             meshFilter.Draw( "##Search", 200 );
@@ -67,20 +72,19 @@ namespace Desert::Editor
                 ImGui::TextDisabled( "No mesh assets available" );
             }
 
-            ImGui::EndCombo();
+            ImGui::EndPopup();
         }
 
         ImGui::PopItemWidth();
         ImGui::NextColumn();
-        ImGui::Columns( 1 ); // Важно: сбросить колонки
+        ImGui::Columns( 1 );
         ImGui::Separator();
         ImGui::PopStyleVar();
 
         // Show mesh info if mesh is loaded
         if ( currentSelectedMesh )
         {
-            // Убедитесь, что мы не в режиме колонок перед отрисовкой деталей
-            ImGui::Columns( 1 ); // Дополнительный сброс для уверенности
+            ImGui::Columns( 1 );
 
             if ( ImGui::TreeNodeEx( "Mesh Details", ImGuiTreeNodeFlags_Framed ) )
             {
@@ -89,8 +93,8 @@ namespace Desert::Editor
                 // File path
                 ImGui::TextUnformatted( "File Path" );
                 ImGui::NextColumn();
-                ImGui::TextUnformatted( "currentSelectedMesh->GetMetadata().Filepath.c_str() ");
-                Utils::ImGuiUtilities::Tooltip( "currentSelectedMesh->GetMetadata().Filepath.c_str() ");
+                ImGui::TextUnformatted( "currentSelectedMesh->GetMetadata().Filepath.c_str() " );
+                Utils::ImGuiUtilities::Tooltip( "currentSelectedMesh->GetMetadata().Filepath.c_str() " );
                 ImGui::NextColumn();
 
                 ImGui::Columns( 1 );

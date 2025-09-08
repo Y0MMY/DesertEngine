@@ -31,6 +31,15 @@ namespace Desert::Graphic
             m_UniformBufferPropertiesLookup[name] = m_UniformBufferPropertiesStorage.size() - 1;
         }
 
+        for ( auto [name, index] : uniformManager->GetStorageBufferTotal().Names )
+        {
+            LOG_INFO( "Found {} as storage buffer", name );
+            auto prop =
+                 std::make_shared<StorageBufferProperty>( uniformManager->GetStorageBuffer( name ).GetValue() );
+            m_StorageBufferPropertiesStorage.push_back( prop );
+            m_StorageBufferPropertiesLookup[name] = m_StorageBufferPropertiesStorage.size() - 1;
+        }
+
         for ( auto [name, index] : uniformManager->GetUniformImageCubeTotal().Names )
         {
             LOG_INFO( "Found {} as image cube", name );
@@ -61,6 +70,9 @@ namespace Desert::Graphic
             prop->Apply( backend );
 
         for ( auto& prop : m_TextureCubePropertiesStorage )
+            prop->Apply( backend );
+
+        for ( auto& prop : m_StorageBufferPropertiesStorage )
             prop->Apply( backend );
 
         backend->FlushUpdates();
@@ -126,6 +138,17 @@ namespace Desert::Graphic
         return nullptr;
     }
 
+    std::shared_ptr<Desert::Graphic::StorageBufferProperty>
+    MaterialExecutor::GetStorageBufferProperty( const std::string& name ) const
+    {
+        auto it = m_StorageBufferPropertiesLookup.find( name );
+        if ( it != m_StorageBufferPropertiesLookup.end() )
+        {
+            return m_StorageBufferPropertiesStorage[it->second];
+        }
+        return nullptr;
+    }
+
     std::shared_ptr<Texture2DProperty> MaterialExecutor::GetTexture2DProperty( const std::string& name ) const
     {
         auto it = m_Texture2DPropertiesLookup.find( name );
@@ -145,5 +168,4 @@ namespace Desert::Graphic
         }
         return nullptr;
     }
-
 } // namespace Desert::Graphic

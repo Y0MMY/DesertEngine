@@ -6,6 +6,7 @@
 #include <Common/Core/Memory/Buffer.hpp>
 
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/TextureCubeProperty.hpp>
 
@@ -46,6 +47,7 @@ namespace Desert::Graphic
         }
 
         std::shared_ptr<UniformBufferProperty> GetUniformBufferProperty( const std::string& name ) const;
+        std::shared_ptr<StorageBufferProperty> GetStorageBufferProperty( const std::string& name ) const;
         std::shared_ptr<Texture2DProperty>     GetTexture2DProperty( const std::string& name ) const;
         std::shared_ptr<TextureCubeProperty>   GetTextureCubeProperty( const std::string& name ) const;
 
@@ -83,11 +85,13 @@ namespace Desert::Graphic
 
         // Compact storage
         PropertyStorage<UniformBufferProperty> m_UniformBufferPropertiesStorage;
+        PropertyStorage<StorageBufferProperty> m_StorageBufferPropertiesStorage;
         PropertyStorage<Texture2DProperty>     m_Texture2DPropertiesStorage;
         PropertyStorage<TextureCubeProperty>   m_TextureCubePropertiesStorage;
 
         // Fast lookup
         PropertyLookup<UniformBufferProperty> m_UniformBufferPropertiesLookup;
+        PropertyLookup<StorageBufferProperty> m_StorageBufferPropertiesLookup;
         PropertyLookup<Texture2DProperty>     m_Texture2DPropertiesLookup;
         PropertyLookup<TextureCubeProperty>   m_TextureCubePropertiesLookup;
     };

@@ -6,7 +6,7 @@
 
 namespace Desert::Graphic
 {
-    class MaterialTonemap final : public Material<std::shared_ptr<Image2D>>
+    class MaterialTonemap final : public Material
     {
     public:
         explicit MaterialTonemap();

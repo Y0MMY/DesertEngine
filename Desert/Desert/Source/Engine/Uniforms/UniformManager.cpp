@@ -2,11 +2,18 @@
 
 namespace Desert::Uniforms
 {
-    void UniformManager::AddBuffer( std::shared_ptr<UniformBuffer>&& buffer, const std::string& name )
+    void UniformManager::AddUniformBuffer( std::shared_ptr<UniformBuffer>&& buffer, const std::string& name )
     {
-        const auto index = m_BufferData.Data.size();
-        m_BufferData.Data.push_back( std::move( buffer ) );
-        m_BufferData.Names[name] = index;
+        const auto index = m_UniformBuffersData.Data.size();
+        m_UniformBuffersData.Data.push_back( std::move( buffer ) );
+        m_UniformBuffersData.Names[name] = index;
+    }
+
+    void UniformManager::AddStorageBuffer( std::shared_ptr<StorageBuffer>&& buffer, const std::string& name )
+    {
+        const auto index = m_SrorageBuffersData.Data.size();
+        m_SrorageBuffersData.Data.push_back( std::move( buffer ) );
+        m_SrorageBuffersData.Names[name] = index;
     }
 
     void UniformManager::AddImageCube( std::shared_ptr<UniformImageCube>&& buffer, const std::string& name )
@@ -26,15 +33,27 @@ namespace Desert::Uniforms
     Common::Result<std::shared_ptr<UniformBuffer>>
     UniformManager::GetUniformBuffer( const std::string& name ) const
     {
-        auto it = m_BufferData.Names.find( name );
-        if ( it == m_BufferData.Names.end() )
+        auto it = m_UniformBuffersData.Names.find( name );
+        if ( it == m_UniformBuffersData.Names.end() )
         {
-
             return Common::MakeFormattedError<std::shared_ptr<UniformBuffer>>(
                  "Uniform '{}' not found in material", name );
         }
 
-        return Common::MakeSuccess( m_BufferData.Data[it->second] );
+        return Common::MakeSuccess( m_UniformBuffersData.Data[it->second] );
+    }
+
+    Common::Result<std::shared_ptr<Desert::Uniforms::StorageBuffer>>
+    UniformManager::GetStorageBuffer( const std::string& name ) const
+    {
+        auto it = m_SrorageBuffersData.Names.find( name );
+        if ( it == m_SrorageBuffersData.Names.end() )
+        {
+            return Common::MakeFormattedError<std::shared_ptr<StorageBuffer>>(
+                 "Storage buffer '{}' not found in material", name );
+        }
+
+        return Common::MakeSuccess( m_SrorageBuffersData.Data[it->second] );
     }
 
     Common::Result<std::shared_ptr<UniformImageCube>>
@@ -80,19 +99,21 @@ namespace Desert::Uniforms
         {
             const auto& models        = shader->GetUniformBufferModels();
             const auto& storageModels = shader->GetStorageBufferModels();
-            m_BufferData.Data.reserve( models.size() + storageModels.size() );
-            m_BufferData.Names.reserve( models.size() + storageModels.size() );
+            m_UniformBuffersData.Data.reserve( models.size() + storageModels.size() );
+            m_SrorageBuffersData.Names.reserve( models.size() + storageModels.size() );
 
             for ( const auto& model : models )
             {
-                AddBuffer( UniformBuffer::Create( debugName, model.Size, model.BindingPoint ), model.Name );
+                AddUniformBuffer( UniformBuffer::Create( model.Name, model.Size, model.BindingPoint ),
+                                  model.Name );
             }
 
+            // Maybe it should be separated?
             for ( const auto& model : storageModels )
             {
-                AddBuffer( UniformBuffer::Create( debugName, model.Size, model.BindingPoint ), model.Name );
+                AddStorageBuffer( StorageBuffer::Create( model.Name, 36, model.BindingPoint ),
+                                  model.Name );
             }
-            // Maybe it should be separated?
         }
 
         // ImageCube
@@ -103,7 +124,7 @@ namespace Desert::Uniforms
 
             for ( const auto& model : models )
             {
-                AddImageCube( UniformImageCube::Create( debugName, model.BindingPoint ), model.Name );
+                AddImageCube( UniformImageCube::Create( model.Name, model.BindingPoint ), model.Name );
             }
         }
 
@@ -115,7 +136,7 @@ namespace Desert::Uniforms
 
             for ( const auto& model : models )
             {
-                AddImage2D( UniformImage2D::Create( debugName, model.BindingPoint ), model.Name );
+                AddImage2D( UniformImage2D::Create( model.Name, model.BindingPoint ), model.Name );
             }
         }
     }

@@ -17,7 +17,7 @@ namespace Desert::Graphic
         std::shared_ptr<Core::Camera> Camera;
     };
 
-    class MaterialSkybox final : public Material<UpdateMaterialSkyboxInfo>
+    class MaterialSkybox final : public Material
     {
     public:
         explicit MaterialSkybox( const std::shared_ptr<Assets::SkyboxAsset>& baseAsset );
@@ -51,7 +51,7 @@ namespace Desert::Graphic
         }
 
         // Parameter updates
-        void Bind( const UpdateMaterialSkyboxInfo& data ) override;
+        void Bind( const UpdateMaterialSkyboxInfo& data ) ;
 
     private:
         // weak_ptr because AssetManager owns MaterialAsset

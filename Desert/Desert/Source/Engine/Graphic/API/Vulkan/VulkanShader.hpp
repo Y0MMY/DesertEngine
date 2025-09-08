@@ -54,6 +54,11 @@ namespace Desert::Graphic::API::Vulkan
         virtual const std::vector<Core::Models::ImageCubeSampler> GetUniformImageCubeModels() const override;
         virtual const std::vector<Core::Models::Image2DSampler>   GetUniformImage2DModels() const override;
 
+        virtual const Common::Filepath& GetFilepath() const override
+        {
+            return m_ShaderPath;
+        }
+
         const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
         {
             return m_PipelineShaderStageCreateInfos;

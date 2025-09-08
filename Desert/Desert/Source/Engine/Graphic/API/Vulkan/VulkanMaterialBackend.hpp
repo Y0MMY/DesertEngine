@@ -14,6 +14,7 @@ namespace Desert::Graphic::API::Vulkan
         ~VulkanMaterialBackend();
 
         virtual void ApplyUniformBuffer( MaterialProperty* prop ) override;
+        virtual void ApplyStorageBuffer( MaterialProperty* prop ) override;
         virtual void ApplyTexture2D( MaterialProperty* prop ) override;
         virtual void ApplyTextureCube( MaterialProperty* prop ) override;
 

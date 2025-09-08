@@ -1,0 +1,62 @@
+#ifndef POINTLIGHT_GLSLH
+#define POINTLIGHT_GLSLH
+
+#include "PBRFunctions.glslh"
+
+#define MAX_POINT_LIGHT 4
+
+struct PointLight {
+    vec3 color;
+    float intensity;
+    vec3 position;
+    float radius;
+};
+
+layout(std140, binding = 3) uniform PointLights
+{
+    PointLight lights[MAX_POINT_LIGHT];    
+} pointLights;
+
+vec3 CalculatePointLight(PointLight light, vec3 worldPosition, vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albedo)
+{
+    vec3 L = light.position - worldPosition;
+    float distance = length(L);
+    
+    // Нормализуем направление к свету
+    L = normalize(L);
+    
+    // Вектор отражения и половинный вектор
+    vec3 H = normalize(view + L);
+    
+    // Косинусы углов
+    float cosLi = max(dot(N, L), 0.0);
+    float cosLh = max(dot(N, H), 0.0);
+    float cosLo = max(dot(N, view), 0.0);
+    
+    if (cosLi <= 0.0) {
+        return vec3(0.0);
+    }
+    
+    // Вычисляем затухание
+    float attenuation = CalculateAttenuation(distance, light.radius);
+    vec3 radiance = light.color * light.intensity * attenuation;
+    
+    // Вычисляем компоненты BRDF
+    float D = DistributionGGX(cosLh, roughness);
+    float G = GeometrySchlickGGX(cosLi, cosLo, roughness);
+    vec3 F = fresnelSchlick(F0, max(dot(H, view), 0.0));
+    
+    // Вычисляем specular BRDF
+    vec3 specular = (D * G * F) / (4.0 * cosLo * cosLi + 0.0001);
+    
+    // Вычисляем diffuse BRDF (для диэлектриков)
+    vec3 kd = (1.0 - F) * (1.0 - metalness);
+    vec3 diffuse = kd * albedo / PI;
+    
+    // Комбинируем результаты
+    vec3 Lo = (diffuse + specular) * radiance * cosLi;
+    
+    return Lo;
+}
+
+#endif // POINTLIGHT_GLSLH

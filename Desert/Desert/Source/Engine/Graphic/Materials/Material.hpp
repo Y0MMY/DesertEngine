@@ -4,7 +4,6 @@
 
 namespace Desert::Graphic
 {
-    template <typename MaterialOverrideT>
     class Material
     {
     public:
@@ -36,16 +35,14 @@ namespace Desert::Graphic
             m_ParametersDirty = false;
         }
 
-        const auto& GetStorageData() const
+     /*   const auto& GetStorageData() const
         {
             return m_TMaterialOverrideData;
-        }
+        }*/
 
-        virtual void Bind( const MaterialOverrideT& materialInput ) = 0;
 
     protected:
         std::shared_ptr<MaterialExecutor> m_MaterialExecutor;
         bool                              m_ParametersDirty = false;
-        MaterialOverrideT                 m_TMaterialOverrideData;
     };
 } // namespace Desert::Graphic

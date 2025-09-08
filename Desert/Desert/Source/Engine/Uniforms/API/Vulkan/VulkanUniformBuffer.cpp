@@ -3,8 +3,8 @@
 namespace Desert::Uniforms::API::Vulkan
 {
 
-    VulkanUniformBuffer::VulkanUniformBuffer( const std::string_view debugName, uint32_t size, uint32_t binding )
-         : m_Size( size ), m_Binding( binding ), m_DebugName( debugName )
+    VulkanUniformBuffer::VulkanUniformBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding )
+         : m_Size( size ), m_Binding( binding ), m_BufferName( bufferName )
     {
         RT_Invalidate();
     }
@@ -41,7 +41,7 @@ namespace Desert::Uniforms::API::Vulkan
         bufferInfo.size               = m_Size;
 
         const auto allocatedBuffer = Graphic::API::Vulkan::VulkanAllocator::GetInstance().RT_AllocateBuffer(
-             "UniformBuffer", bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffer );
+             std::format( "{}-UniformBuffer", m_BufferName ), bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffer );
 
         if ( !allocatedBuffer.IsSuccess() )
         {

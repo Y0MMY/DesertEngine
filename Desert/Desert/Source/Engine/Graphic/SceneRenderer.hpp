@@ -68,8 +68,16 @@ namespace Desert::Graphic
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
                                    std::shared_ptr<RenderPass>&& renderPass );
 
+        void AddPointLight( PointLight&& pointLight );
+
+        const auto& GetPointLights() const
+        {
+            return m_PointLight;
+        }
+
     private:
         void CompositeRenderPass();
+
     private:
         struct
         {
@@ -78,6 +86,7 @@ namespace Desert::Graphic
         } m_SceneInfo;
 
         std::vector<DirectionLight> m_DirectionLights;
+        std::vector<PointLight>     m_PointLight;
         std::vector<MeshRenderData> m_MeshRenderData;
 
     private:

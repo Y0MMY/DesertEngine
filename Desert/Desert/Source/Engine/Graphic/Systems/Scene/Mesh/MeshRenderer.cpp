@@ -39,11 +39,13 @@ namespace Desert::Graphic::System
 
                      const auto& renderQueue = m_SceneRenderer->GetMeshRenderList();
 
+                     const auto& pointLights = m_SceneRenderer->GetPointLights();
+
                      for ( const auto& renderData : renderQueue )
                      {
                          renderData.Material->Bind( { camera, renderData.Transform,
-                                                      BuildDirectionLight( m_SceneRenderer->GetDirectionLights() ),
-                                                      textures } );
+                                                      m_SceneRenderer->GetDirectionLights(), textures,
+                                                      pointLights } );
                          renderer.RenderMesh( m_Pipeline, renderData.Mesh,
                                               renderData.Material->GetMaterialExecutor() );
                      }
@@ -79,16 +81,6 @@ namespace Desert::Graphic::System
             m_Framebuffer->Release();
             m_Framebuffer.reset();
         }
-    }
-
-    const glm::vec3 MeshRenderer::BuildDirectionLight( const std::vector<DirectionLight>& dirLights )
-    {
-        if ( !dirLights.empty() )
-        {
-            return dirLights[0].Direction;
-        }
-
-        return glm::vec3( 0.0f );
     }
 
     bool MeshRenderer::SetupGeometryPass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,

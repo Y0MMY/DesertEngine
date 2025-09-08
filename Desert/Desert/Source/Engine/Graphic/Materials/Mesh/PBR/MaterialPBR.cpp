@@ -4,6 +4,8 @@
 
 namespace Desert::Graphic
 {
+#define MAKE_RESOURCE( type, var ) var = std::make_unique<type>( m_MaterialExecutor )
+
     MaterialPBR::MaterialPBR( const std::shared_ptr<Assets::MaterialAsset>& baseAsset )
          : Material( "MaterialPBR", "StaticPBR.glsl" ), m_BaseMaterial( baseAsset )
     {
@@ -12,11 +14,12 @@ namespace Desert::Graphic
         {
             InheritBaseMaterialProperties();
         }
-
-        m_LightingData       = std::make_unique<Models::Light::DirectionLightUB>( m_MaterialExecutor );
-        m_GlobalUB           = std::make_unique<Models::GlobalData>( m_MaterialExecutor );
-        m_PBRTextures        = std::make_unique<Models::PBR::PBRMaterialTexture>( m_MaterialExecutor );
-        m_MaterialProperties = std::make_unique<Models::PBR::MaterialPBRUB>( m_MaterialExecutor );
+        MAKE_RESOURCE( Models::Light::DirectionLightUB, m_DirectionLightUB );
+        MAKE_RESOURCE( Models::Light::PointLightUB, m_PointLightUB );
+        MAKE_RESOURCE( Models::Light::LightsMetadataUB, m_LightsMetadataUB);
+        MAKE_RESOURCE( Models::GlobalData, m_GlobalUB );
+        MAKE_RESOURCE( Models::PBR::PBRMaterialTexture, m_PBRTextures );
+        MAKE_RESOURCE( Models::PBR::MaterialPBRUB, m_MaterialProperties );
     }
 
     void MaterialPBR::InheritBaseMaterialProperties()
@@ -151,15 +154,19 @@ namespace Desert::Graphic
         glm::mat4 Transform;
     };
 
-    void MaterialPBR::Bind(const UpdateMaterialPBRInfo& data)
+    void MaterialPBR::Bind( const UpdateMaterialPBRInfo& data )
     {
         const VP vp{ .ViewProjection = data.Camera->GetProjectionMatrix() * data.Camera->GetViewMatrix(),
                      .Transform      = data.MeshTransform };
 
-        m_LightingData->Update(data.DirectionLight );
         m_GlobalUB->Update( Models::GlobalUB{ .CameraPosition = data.Camera->GetPosition() } );
-        m_PBRTextures->UpdatePBR(data.PbrTextures );
+        m_PBRTextures->UpdatePBR( data.PbrTextures );
         m_MaterialExecutor->PushConstant( &vp, sizeof( vp ) );
+
+        UpdatePointLight( data.PointLights );
+        UpdateDirectionLight( data.DirectionLights );
+
+        UpdateLightsMetadata( data.PointLights, data.DirectionLights );
 
         // Here we would update the actual Material object with our parameters
         // This is where we'd connect to your Material class
@@ -200,6 +207,23 @@ namespace Desert::Graphic
         }
 
         m_ParametersDirty = false;
+    }
+
+    void MaterialPBR::UpdatePointLight( const std::vector<PointLight>& pointLights )
+    {
+        m_PointLightUB->Update( pointLights );
+    }
+
+    void MaterialPBR::UpdateDirectionLight( const std::vector<DirectionLight>& directionLights )
+    {
+        m_DirectionLightUB->Update( directionLights );
+    }
+
+    void MaterialPBR::UpdateLightsMetadata( const std::vector<PointLight>&     pointLights,
+                                            const std::vector<DirectionLight>& directionLights )
+    {
+        m_LightsMetadataUB->Update( { .DirectionLightCount = static_cast<uint32_t>( directionLights.size() ),
+                                      .PointLightCount     = static_cast<uint32_t>( pointLights.size() ) } );
     }
 
 } // namespace Desert::Graphic

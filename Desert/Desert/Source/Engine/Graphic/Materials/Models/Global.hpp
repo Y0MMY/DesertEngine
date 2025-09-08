@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
-#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperUniform.hpp>
 
 namespace Desert::Graphic::Models
 {
@@ -12,11 +12,11 @@ namespace Desert::Graphic::Models
         glm::vec3 CameraPosition;
     };
 
-    class GlobalData final : public MaterialHelper::MaterialWrapper<GlobalUB>
+    class GlobalData final : public MaterialHelper::MaterialWrapperUniform<GlobalUB>
     {
     public:
         explicit GlobalData( const std::shared_ptr<MaterialExecutor>& material )
-             : MaterialWrapper( material, "GlobalUB" )
+             : MaterialWrapperUniform( material, "GlobalUB" )
         {
         }
     };

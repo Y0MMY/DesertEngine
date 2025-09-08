@@ -5,6 +5,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/System/MeshRenderSystem.hpp>
 #include <Engine/ECS/System/SkyboxRenderSystem.hpp>
+#include <Engine/ECS/System/PointLightSystem.hpp>
 
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
@@ -14,6 +15,7 @@ namespace Desert::Core
     {
         MeshRenderer   = 0,
         SkyboxRenderer = 1,
+        PointLight     = 2, //TODO: add direction light
     };
 
     Scene::Scene( std::string&& sceneName, const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
@@ -24,6 +26,8 @@ namespace Desert::Core
         RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer, m_ResourceRegistry );
         RegisterSystem<ECS::SkyboxRenderSystem>( SceneSystem::SkyboxRenderer, m_SceneRenderer,
                                                  m_ResourceRegistry );
+        RegisterSystem<ECS::PointLightRenderSystem>( SceneSystem::PointLight, m_SceneRenderer,
+                                                     m_ResourceRegistry );
 
         m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }

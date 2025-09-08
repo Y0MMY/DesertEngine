@@ -36,6 +36,9 @@ namespace Desert::Graphic::API::Vulkan
             if ( isDeviceSuitable( device ) )
             {
                 selectedPhysicalDevice = device;
+
+                m_UniformBufferOffsetAlignment = deviceProperties.limits.minUniformBufferOffsetAlignment;
+
                 break;
             }
         }

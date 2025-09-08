@@ -1,5 +1,4 @@
 ﻿#pragma stage : vertex
-
 #version 450 
 
 layout(location = 0) in vec3 a_Position;
@@ -36,8 +35,10 @@ void main()
 }
 
 #pragma stage : fragment
-
 #version 450 core
+
+#include "Mesh/PointLight.glslh"
+#include "Mesh/LightsMetadata.glslh"
 
 layout(location=0) in Vertex
 {
@@ -47,7 +48,6 @@ layout(location=0) in Vertex
 	mat3 TBN;
 } inVertex;
 
-const float PI = 3.141592;
 const float Epsilon = 0.00001;
 
 const vec3 Fdielectric = vec3(0.04);
@@ -75,19 +75,6 @@ layout(binding = 2) uniform GlobalUB {
 	vec3 CameraPosition;
 } global;
 
-// struct PointLight {
-//     vec3 color;
-//     vec3 position;
-//     float intensity;
-//     float radius;
-// };
-
-// layout(std430, binding = 3) buffer PointLights
-// {
-//     int numLights;
-//     PointLight lights[]; 
-// };
-
 // Environment maps
 layout (binding = 8) uniform samplerCube u_EnvSpecularTex;
 layout (binding = 9) uniform samplerCube u_EnvIrradianceTex;
@@ -104,37 +91,11 @@ struct Params
 	vec3 Normal;
 } m_Params;
 
-float ndfGGX(float cosLh, float roughness)
-{
-	float alpha   = roughness * roughness;
-	float alphaSq = alpha * alpha;
-
-	float denom = (cosLh * cosLh) * (alphaSq - 1.0) + 1.0;
-	return alphaSq / (PI * denom * denom);
-}
-
-float gaSchlickG1(float cosTheta, float k)
-{
-	return cosTheta / (cosTheta * (1.0 - k) + k);
-}
-
-float gaSchlickGGX(float cosLi, float cosLo, float roughness)
-{
-	float r = roughness + 1.0;
-	float k = (r * r) / 8.0; // Epic suggests using this roughness remapping for analytic lights.
-	return gaSchlickG1(cosLi, k) * gaSchlickG1(cosLo, k);
-}
-
-vec3 fresnelSchlick(vec3 F0, float cosTheta)
-{
-	return F0 + (vec3(1.0) - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
 vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albedo)
 {
 	vec3 color = vec3(0);
 
-	for(uint i = 0; i < 1; i++)
+	for(uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
 	{
 		vec3 Li = -directionLights.Direction;
 		vec3 Lradiance = vec3(1.0, 1.0, 1.0);
@@ -146,9 +107,9 @@ vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec
 
 		vec3 F  = fresnelSchlick(F0, max(0.0, dot(Lh, view)));
 		// Calculate normal distribution for specular BRDF.
-		float D = ndfGGX(cosLh, roughness);
+		float D = DistributionGGX(cosLh, roughness);
 		// Calculate geometric attenuation for specular BRDF.
-		float G = gaSchlickGGX(cosLi, cosLo, roughness);
+		float G = GeometrySchlickGGX(cosLi, cosLo, roughness);
 
 		vec3 kd = (1.0 - F) * (1.0 - metalness);
 		vec3 diffuseBRDF = kd * albedo;
@@ -202,7 +163,7 @@ void main() {
 	m_Params.Normal =  normalize(inVertex.Normal);
 
 	const ivec2 textureSize = textureSize(u_NormalTexture, 0);
-	if(textureSize.x > 1 && textureSize.y > 1) // not fallback
+	if(textureSize.x > 1 && textureSize.y > 1) // not fallback (TODO. bad way)
 	{
 		m_Params.Normal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
 		m_Params.Normal = normalize(inVertex.TBN * m_Params.Normal);
@@ -217,7 +178,15 @@ void main() {
 	vec3 light = Lightning(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor );
 	vec3 ibl = IBL(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor);
 
-	vec3 pointLight = 1.0;//lights[0].color;
+	vec3 pointLight = vec3(0.0);
+
+	for(uint i = 0; i < lightsMetadata.PointLightCount; i++)
+	{
+		PointLight light = pointLights.lights[i];
+        pointLight += CalculatePointLight(light, inVertex.WorldPosition, view, 
+                                        m_Params.Normal, F0, metalness, 
+                                        roughness, m_Params.AlbedoColor);
+	}
 
     oColor = vec4(light + ibl + pointLight, 1.0);
 }

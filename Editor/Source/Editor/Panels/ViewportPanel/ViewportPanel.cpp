@@ -14,6 +14,8 @@ namespace Desert::Editor
     {
         m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
         m_UIHelper->Init();
+
+        m_LightGizmoRenderer = std::make_unique<LightGizmoRenderer>( scene );
     }
 
     void ViewportPanel::OnUIRender()
@@ -29,20 +31,25 @@ namespace Desert::Editor
         ImVec2 mousePos    = ::ImGui::GetMousePos();
         ImVec2 viewportPos = ::ImGui::GetWindowPos();
 
-        ImVec2 contentMin = ::ImGui::GetWindowContentRegionMin();
-        ImVec2 contentMax = ::ImGui::GetWindowContentRegionMax();
+        ImVec2 viewportMin = ImGui::GetWindowPos();
+        viewportMin.x += ImGui::GetWindowContentRegionMin().x;
+        viewportMin.y += ImGui::GetWindowContentRegionMin().y;
 
-        m_ViewportData.WindowPos  = { viewportPos.x, viewportPos.y };
-        m_ViewportData.ContentMin = { contentMin.x, contentMin.y };
-        m_ViewportData.ContentMax = { contentMax.x, contentMax.y };
+        ImVec2 viewportMax = ImGui::GetWindowPos();
+        viewportMax.x += ImGui::GetWindowContentRegionMax().x;
+        viewportMax.y += ImGui::GetWindowContentRegionMax().y;
 
-        m_ViewportData.MousePosition = glm::vec2( mousePos.x - ( viewportPos.x + contentMin.x ),
-                                                  mousePos.y - ( viewportPos.y + contentMin.y ) );
+        m_ViewportData.ViewportPos = { ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x,
+                                       ImGui::GetWindowPos().y + ImGui::GetWindowContentRegionMin().y };
 
-        m_ViewportData.Size      = { contentMax.x - contentMin.x, contentMax.y - contentMin.y };
+        m_ViewportData.MousePosition = glm::vec2( mousePos.x - ( viewportPos.x + viewportMin.x ),
+                                                  mousePos.y - ( viewportPos.y + viewportMin.y ) );
+
+        m_ViewportData.Size      = { viewportMax.x - viewportMin.x, viewportMax.y - viewportMin.y };
         m_ViewportData.IsHovered = ::ImGui::IsWindowHovered();
 
-        mainCamera.value()->UpdateProjectionMatrix(m_ViewportData.Size.x, m_ViewportData.Size.y ); // TODO: Move to scene
+        mainCamera.value()->UpdateProjectionMatrix( m_ViewportData.Size.x,
+                                                    m_ViewportData.Size.y ); // TODO: Move to scene
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
 
         // Render scene
@@ -54,6 +61,8 @@ namespace Desert::Editor
         {
             RenderGizmo();
         }
+
+        m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y, m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y );
     }
 
     void ViewportPanel::RenderGizmo()
@@ -162,7 +171,7 @@ namespace Desert::Editor
 
             for ( const auto& submesh : mesh->GetSubmeshes() )
             {
-                auto localRay = ray.ToLocalSpace( transform  );
+                auto localRay = ray.ToLocalSpace( transform );
 
                 if ( localRay.IntersectsAABB( submesh.BoundingBox, t ) )
                 {

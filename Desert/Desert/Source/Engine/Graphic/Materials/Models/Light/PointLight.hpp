@@ -1,25 +1,10 @@
 #pragma once
 
 #include <glm/glm.hpp>
-#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperUniform.hpp>
+#include <Engine/Graphic/Models/PointLight.hpp>
 
 namespace Desert::Graphic::Models::Light
 {
-    struct PointLightMaterialUB
-    {
-        glm::vec3 Color;
-        glm::vec3 Position;
-        float     Intensity;
-        float     Radius;
-    };
-
-    class PointLightUB final : public MaterialHelper::MaterialWrapper<PointLightMaterialUB>
-    {
-    public:
-        explicit PointLightUB( const std::shared_ptr<MaterialExecutor>& material )
-             : MaterialWrapper( material, "PointLights" )
-        {
-        }
-    };
-    ;
+    DEFINE_MATERIAL_WRAPPER_UNIFORM( PointLightUB, std::vector<PointLight>, "PointLights" );
 } // namespace Desert::Graphic::Models::Light

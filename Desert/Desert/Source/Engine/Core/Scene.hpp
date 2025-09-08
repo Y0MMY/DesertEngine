@@ -109,7 +109,7 @@ namespace Desert::Core
         void OnEntityCreated_Camera();
 
     private:
-        static constexpr uint32_t SYSTEMS_COUNT = 2U; // TODO: uint8_t
+        static constexpr uint32_t SYSTEMS_COUNT = 3U; // TODO: uint8_t
 
         std::string                                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer>                 m_SceneRenderer;

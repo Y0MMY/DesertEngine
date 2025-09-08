@@ -90,6 +90,7 @@ namespace Desert::Graphic
     NO_DISCARD Common::BoolResult SceneRenderer::EndScene()
     {
         m_MeshRenderData.clear();
+        m_PointLight.clear();
 
         auto& renderer = Renderer::GetInstance();
         return renderer.EndFrame();
@@ -102,9 +103,9 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
         m_TargetFramebuffer->Resize( width, height );
-        m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->GetSystemFramebuffer()->Resize(
+       /* m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->GetSystemFramebuffer()->Resize(
              width,
-             height ); // TODO: event
+             height );*/ // TODO: event
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
@@ -162,6 +163,11 @@ namespace Desert::Graphic
                                               std::shared_ptr<RenderPass>&& renderPass )
     {
         m_RenderGraphRenderSystems->AddPass( std::move( name ), std::move( execute ), std::move( renderPass ) );
+    }
+
+    void SceneRenderer::AddPointLight( PointLight&& pointLight )
+    {
+        m_PointLight.push_back( std::move( pointLight ) );
     }
 
 } // namespace Desert::Graphic

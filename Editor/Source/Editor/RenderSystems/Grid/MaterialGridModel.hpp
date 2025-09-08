@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperUniform.hpp>
 
 namespace Desert::Editor::Render::Model
 {
@@ -11,6 +11,6 @@ namespace Desert::Editor::Render::Model
         float CellSize;
         float CellScale;
     };
-    DEFINE_MATERIAL_WRAPPER(MaterialGridProperties, GridMaterialPropertiesUB, "GridUniforms")
+    DEFINE_MATERIAL_WRAPPER_UNIFORM(MaterialGridProperties, GridMaterialPropertiesUB, "GridUniforms")
 
 } // namespace Desert::Editor::Render::Model

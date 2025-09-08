@@ -153,6 +153,8 @@ namespace Desert::Graphic::API::Vulkan
             shaderCOptions.SetTargetEnvironment( shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1 );
             shaderCOptions.SetWarningsAsErrors();
 
+            shaderCOptions.SetGenerateDebugInfo();
+
             // Compile shader
             const shaderc::SpvCompilationResult module = compiler.CompileGlslToSpv(
                  shaderSource, ShaderStageToShaderC( stage ), shaderPath.c_str(), shaderCOptions );
@@ -368,6 +370,8 @@ namespace Desert::Graphic::API::Vulkan
             const auto& name          = resource.name;
             uint32_t    binding       = compiler.get_decoration( resource.id, spv::DecorationBinding );
             uint32_t    descriptorSet = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+            auto&       bufferType    = compiler.get_type( resource.base_type_id );
+            uint32_t    size          = (uint32_t)compiler.get_declared_struct_size( bufferType );
 
             auto& storageBuffers = m_ReflectionData.ShaderDescriptorSets[descriptorSet].StorageBuffers;
 
@@ -376,6 +380,7 @@ namespace Desert::Graphic::API::Vulkan
                 Core::Models::StorageBuffer storageBuffer;
                 storageBuffer.BindingPoint = binding;
                 storageBuffer.Name         = name;
+                storageBuffer.Size         = size;
                 storageBuffer.ShaderStage = Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
 
                 storageBuffers.insert( { binding, storageBuffer } );

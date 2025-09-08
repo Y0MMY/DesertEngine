@@ -17,6 +17,8 @@
 
 namespace Desert::Editor
 {
+    static constexpr uint32_t s_ShaderLibraryPanelIndex = 2;
+
     EditorLayer::EditorLayer( const Engine::Application* application, const std::string& layerName )
          : Common::Layer( layerName ), m_Application( application )
 

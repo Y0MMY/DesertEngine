@@ -14,12 +14,12 @@ namespace Desert::Graphic
         glm::vec3                     Color;
     };
 
-    class MaterialOutline final : public Material<UpdateMaterialOutlineInfo>
+    class MaterialOutline final : public Material
     {
     public:
         MaterialOutline();
 
-        void Bind( const UpdateMaterialOutlineInfo& data ) override;
+        void Bind( const UpdateMaterialOutlineInfo& data ) ;
 
     private:
         std::unique_ptr<Models::OutlineData> m_OutlineData;

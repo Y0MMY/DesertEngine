@@ -60,8 +60,9 @@ namespace Desert::Core
 
     void Camera::UpdateProjectionMatrix( const uint32_t width, const uint32_t height )
     {
-        m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), static_cast<float>( width / (height == 0 ? 1 : height)),
-                                               m_NearPlane, m_FarPlane );
+        m_ProjectionMatrix =
+             glm::perspective( glm::radians( m_FOV ), static_cast<float>( width / ( height == 0 ? 1 : height ) ),
+                               m_NearPlane, m_FarPlane );
     }
 
     bool Camera::OnKeyPress( Common::KeyPressedEvent& e )
@@ -84,7 +85,7 @@ namespace Desert::Core
 
         if ( Common::Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right ) )
         {
-            const float     YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
+            const float YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
             const float cameraSpeed   = 0.0002f * timestep.GetMilliseconds();
             const float rotationSpeed = 0.133f * timestep.GetMilliseconds();
 
@@ -167,6 +168,13 @@ namespace Desert::Core
         m_YawDelta *= 0.6f;
         m_PitchDelta *= 0.6f;
         m_LocationDelta *= 0.8f;
+    }
+
+    const Frustum& Camera::GetFrustum()
+    {
+        m_Frustum.Rebuild( m_ProjectionMatrix, m_ViewMatrix );
+
+        return m_Frustum;
     }
 
 } // namespace Desert::Core

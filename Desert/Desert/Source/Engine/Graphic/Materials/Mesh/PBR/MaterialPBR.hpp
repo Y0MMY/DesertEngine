@@ -9,6 +9,9 @@
 #include <Engine/Graphic/Materials/Models/Mesh/PBR/MaterialPBRUB.hpp>
 #include <Engine/Graphic/Materials/Models/Light/DirectionLight.hpp>
 #include <Engine/Graphic/Materials/Models/Light/PointLight.hpp>
+#include <Engine/Graphic/Materials/Models/Light/LightMetaData.hpp>
+
+#include <Engine/Graphic/Models/PointLight.hpp>
 
 #include <Engine/Core/Camera.hpp>
 
@@ -18,12 +21,13 @@ namespace Desert::Graphic
     {
         std::shared_ptr<Core::Camera>           Camera;
         glm::mat4                               MeshTransform;
-        glm::vec3                               DirectionLight;
+        std::vector<DirectionLight>             DirectionLights;
         std::optional<Models::PBR::PBRTextures> PbrTextures;
+        std::vector<PointLight>                 PointLights;
     };
 
     // TODO: should override the base class, as we may want to support not only PBR
-    class MaterialPBR final : public Material<UpdateMaterialPBRInfo>
+    class MaterialPBR final : public Material
     {
     public:
         MaterialPBR() = default;
@@ -106,7 +110,7 @@ namespace Desert::Graphic
         bool                                HasFinalTexture( Assets::TextureAsset::Type type ) const;
 
         // Parameter updates
-        void Bind( const UpdateMaterialPBRInfo& data ) override;
+        void Bind( const UpdateMaterialPBRInfo& data );
         bool IsDirty() const
         {
             return m_ParametersDirty;
@@ -141,8 +145,15 @@ namespace Desert::Graphic
         }
 
     private:
+        void UpdatePointLight( const std::vector<PointLight>& pointLights );
+        void UpdateDirectionLight( const std::vector<DirectionLight>& directionLights );
+        void UpdateLightsMetadata( const std::vector<PointLight>&     pointLights,
+                                   const std::vector<DirectionLight>& directionLights );
+
+    private:
         std::unique_ptr<Models::Light::PointLightUB>     m_PointLightUB;
-        std::unique_ptr<Models::Light::DirectionLightUB> m_LightingData;
+        std::unique_ptr<Models::Light::DirectionLightUB> m_DirectionLightUB;
+        std::unique_ptr<Models::Light::LightsMetadataUB> m_LightsMetadataUB;
         std::unique_ptr<Models::GlobalData>              m_GlobalUB;
         std::unique_ptr<Models::PBR::PBRMaterialTexture> m_PBRTextures;
         std::unique_ptr<Models::PBR::MaterialPBRUB>      m_MaterialProperties;

@@ -1,0 +1,11 @@
+#ifndef LIGHTSMETADATA_GLSLH
+#define LIGHTSMETADATA_GLSLH
+
+layout(std140, binding = 4) uniform LightsMetadata
+{
+    uint DirectionLightCount;
+    uint PointLightCount;
+} lightsMetadata;
+
+#endif // LIGHTSMETADATA_GLSLH
+

@@ -74,6 +74,11 @@ namespace Desert::Editor
                 icon = (char*)ICON_MDI_LIGHTBULB;
             }
 
+            else if ( entity.HasComponent<ECS::PointLightComponent>() )
+            {
+                icon = (char*)ICON_MDI_LIGHTBULB;
+            }
+
             else if ( entity.HasComponent<ECS::SkyboxComponent>() )
             {
                 icon = (char*)ICON_MDI_EARTH;
@@ -205,9 +210,27 @@ namespace Desert::Editor
                     scene->CreateNewEntity( "Empty Entity" );
                 }
 
-                if ( ImGui::Selectable( "Light" ) )
+                if ( ImGui::BeginMenu( "Light" ) )
                 {
-                    scene->CreateNewEntity( "Directional Light" ).AddComponent<ECS::DirectionLightComponent>();
+                    if ( ImGui::Selectable( "Directional Light" ) )
+                    {
+                        auto entity = scene->CreateNewEntity( "Directional Light" );
+                        entity.AddComponent<ECS::DirectionLightComponent>();
+                    }
+
+                    if ( ImGui::Selectable( "Point Light" ) )
+                    {
+                        auto entity = scene->CreateNewEntity( "Point Light" );
+                        entity.AddComponent<ECS::PointLightComponent>();
+                    }
+
+                    if ( ImGui::Selectable( "Spot Light" ) )
+                    {
+                        auto entity = scene->CreateNewEntity( "Spot Light" );
+                        //   entity.AddComponent<ECS::SpotLightComponent>();
+                    }
+
+                    ImGui::EndMenu();
                 }
 
                 if ( ImGui::Selectable( "Skybox" ) )
@@ -309,7 +332,7 @@ namespace Desert::Editor
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
 
-        if ( !m_HierarchyFilter.IsActive() && !isFilterFocused)
+        if ( !m_HierarchyFilter.IsActive() && !isFilterFocused )
         {
             ImGui::SameLine();
             ImGui::PushFont( EditorResources::GetBoldFont() );

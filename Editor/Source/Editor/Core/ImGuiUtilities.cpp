@@ -2,6 +2,7 @@
 
 #include <ImGui/imgui.h>
 #include <ImGui/imgui_internal.h>
+#include <format>
 
 namespace Desert::Editor::Utils
 {
@@ -115,6 +116,78 @@ namespace Desert::Editor::Utils
             {
                 updated = true;
             }
+        }
+        ImGui::PopItemWidth();
+        ImGui::NextColumn();
+
+        return updated;
+    }
+
+    bool ImGuiUtilities::Property( const char* name, float& value, float min /*= -1.0f*/, float max /*= 1.0f*/,
+                                   float delta /*= 1.0f*/, PropertyFlag flags /*= PropertyFlag::None */ )
+    {
+        bool updated = false;
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted( name );
+        ImGui::NextColumn();
+        ImGui::PushItemWidth( -1 );
+
+        if ( (int)flags & (int)PropertyFlag::ReadOnly )
+        {
+            ImGui::Text( "%.2f", value );
+        }
+        else if ( (int)flags & (int)PropertyFlag::DragValue )
+        {
+            if ( ImGui::DragFloat( std::format( "##{}", name ).c_str(), &value, delta, min, max ) )
+                updated = true;
+        }
+        else if ( (int)flags & (int)PropertyFlag::SliderValue )
+        {
+            if ( ImGui::SliderFloat( std::format( "##{}", name ).c_str(), &value, min, max ) )
+                updated = true;
+        }
+        else
+        {
+            if ( ImGui::InputFloat( std::format( "##{}", name ).c_str(), &value, delta ) )
+                updated = true;
+        }
+        ImGui::PopItemWidth();
+        ImGui::NextColumn();
+
+        return updated;
+    }
+
+    bool ImGuiUtilities::Property( const char* name, glm::vec3& value, bool exposeW, PropertyFlag flags )
+    {
+        return Property( name, value, -1.0f, 1.0f, exposeW, flags );
+    }
+
+    bool ImGuiUtilities::Property( const char* name, glm::vec3& value, float min, float max,
+                                   bool exposeW /*= false*/, PropertyFlag flags )
+    {
+        bool updated = false;
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted( name );
+        ImGui::NextColumn();
+        ImGui::PushItemWidth( -1 );
+        if ( (int)flags & (int)PropertyFlag::ReadOnly )
+        {
+            ImGui::Text( "%.2f , %.2f, %.2f", value.x, value.y, value.z );
+        }
+        else
+        {
+
+            // std::string id = "##" + name;
+            if ( (int)flags & (int)PropertyFlag::ColorProperty )
+            {
+                if ( ImGui::ColorEdit4( std::format( "##{}", name ).c_str(), &value.x ) )
+                    updated = true;
+            }
+            else if ( ( exposeW ? ImGui::DragFloat4( std::format( "##{}", name ).c_str(), &value.x )
+                                : ImGui::DragFloat4( std::format( "##{}", name ).c_str(), &value.x ) ) )
+                updated = true;
         }
         ImGui::PopItemWidth();
         ImGui::NextColumn();

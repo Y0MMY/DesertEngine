@@ -6,6 +6,7 @@
 #include "ComponentWidgets/TransformComponentWidget.hpp"
 #include "ComponentWidgets/StaticMeshComponent.hpp"
 #include "ComponentWidgets/SkyboxComponent.hpp"
+#include "ComponentWidgets/PointLightComponent.hpp"
 
 namespace Desert::Editor
 {
@@ -17,25 +18,24 @@ namespace Desert::Editor
         RegisterDefaultComponents();
     }
 
-    void ComponentEditor::RegisterComponent( const std::string&                                 name,
-                                             std::function<std::unique_ptr<IComponentWidget>()> factory )
+    void ComponentEditor::RegisterComponent( std::function<std::unique_ptr<IComponentWidget>()> factory )
     {
-        m_AvailableComponents.emplace_back( name, factory );
+        m_AvailableComponents.emplace_back( factory );
     }
 
     void ComponentEditor::RegisterDefaultComponents()
     {
-        RegisterComponent( "Transform", []() { return std::make_unique<TransformComponentWidget>(); } );
-        RegisterComponent( "3D Model",
-                           [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager ); } );
-        RegisterComponent( "..", [this]() { return std::make_unique<SkyboxComponentWidget>( m_AssetManager ); } );
+        RegisterComponent( []() { return std::make_unique<TransformComponentWidget>(); } );
+        RegisterComponent( [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager ); } );
+        RegisterComponent( [this]() { return std::make_unique<SkyboxComponentWidget>( m_AssetManager ); } );
+        RegisterComponent( [this]() { return std::make_unique<PointLightComponentWidget>(); } );
     }
 
     void ComponentEditor::Render( ECS::Entity& entity )
     {
         std::vector<std::unique_ptr<IComponentWidget>> activeWidgets;
 
-        for ( const auto& [name, factory] : m_AvailableComponents )
+        for ( const auto& factory : m_AvailableComponents )
         {
             auto widget = factory();
             if ( widget->EntityHasComponent( entity ) )
@@ -72,14 +72,14 @@ namespace Desert::Editor
             filterSize       = filterSize < 200 ? 200 : filterSize;
             m_ComponentFilter.Draw( "##ComponentFilter", filterSize );
 
-            for ( const auto& [name, factory] : m_AvailableComponents )
+            for ( const auto& factory : m_AvailableComponents )
             {
-                if ( m_ComponentFilter.PassFilter( name.c_str() ) )
-                {
-                    auto testWidget = factory();
-                    bool alreadyHas = testWidget->EntityHasComponent( entity );
+                auto testWidget = factory();
+                bool alreadyHas = testWidget->EntityHasComponent( entity );
 
-                    if ( !alreadyHas && ImGui::Selectable( name.c_str() ) )
+                if ( !alreadyHas && ImGui::Selectable( testWidget->GetName().c_str() ) )
+                {
+                    if ( m_ComponentFilter.PassFilter( testWidget->GetName().c_str() ) )
                     {
                         auto widget = factory();
                         widget->AddComponentToEntity( entity );

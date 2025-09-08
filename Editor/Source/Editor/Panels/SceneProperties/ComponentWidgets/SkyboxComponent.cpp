@@ -14,7 +14,7 @@ namespace Desert::Editor
     void SkyboxComponentWidget::Render( ECS::Entity& entity )
     {
         const auto assetManager = m_AssetManager.lock();
-        auto       meshAssets   = assetManager->FindAllByType<Assets::SkyboxAsset>();
+        auto       skyboxAssets = assetManager->FindAllByType<Assets::SkyboxAsset>();
 
         auto&       skybox                = entity.GetComponent<ECS::SkyboxComponent>();
         const auto& currentSelectedSkybox = assetManager->FindByHandle<Assets::SkyboxAsset>( skybox.SkyboxHandle );
@@ -30,18 +30,18 @@ namespace Desert::Editor
 
         if ( ImGui::BeginPopup( "skybox_selector" ) )
         {
-            static ImGuiTextFilter meshFilter;
-            meshFilter.Draw( "##Search", 200 );
+            static ImGuiTextFilter skyboxFilter;
+            skyboxFilter.Draw( "##Search", 200 );
             ImGui::Separator();
 
-            for ( const auto& [handle, meshAsset] : meshAssets )
+            for ( const auto& [handle, meshAsset] : skyboxAssets )
             {
-                const std::string& meshName =
+                const std::string& skyboxName =
                      Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
-                if ( meshFilter.PassFilter( meshName.c_str() ) )
+                if ( skyboxFilter.PassFilter( skyboxName.c_str() ) )
                 {
                     bool isSelected = ( skybox.SkyboxHandle == handle );
-                    if ( ImGui::Selectable( meshName.c_str(), isSelected ) )
+                    if ( ImGui::Selectable( skyboxName.c_str(), isSelected ) )
                     {
                         skybox.SkyboxHandle = handle;
                     }
@@ -53,7 +53,7 @@ namespace Desert::Editor
                 }
             }
 
-            if ( meshAssets.empty() )
+            if ( skyboxAssets.empty() )
             {
                 ImGui::TextDisabled( "No skybox assets available" );
             }

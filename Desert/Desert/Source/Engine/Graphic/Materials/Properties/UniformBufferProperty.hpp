@@ -15,10 +15,10 @@ namespace Desert::Graphic
 
         void Apply( MaterialBackend* backend ) override
         {
-            if ( m_Dirty )
+            if ( true || m_Dirty )
             {
                 backend->ApplyUniformBuffer( this );
-                m_Dirty = false;
+                m_Dirty = true;
             }
         }
 

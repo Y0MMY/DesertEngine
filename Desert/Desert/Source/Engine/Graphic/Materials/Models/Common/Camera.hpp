@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
-#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapper.hpp>
+#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperUniform.hpp>
 
 #include <Engine/Core/Camera.hpp>
 
@@ -16,11 +16,11 @@ namespace Desert::Graphic::Models
         glm::vec3 CameraPos;
     };
 
-    class CameraData final : public MaterialHelper::MaterialWrapper<CameraDataUB>
+    class CameraData final : public MaterialHelper::MaterialWrapperUniform<CameraDataUB>
     {
     public:
         explicit CameraData( const std::shared_ptr<MaterialExecutor>& material, std::string&& ubName )
-             : MaterialWrapper( material, std::move( ubName ) )
+             : MaterialWrapperUniform( material, std::move( ubName ) )
         {
         }
 

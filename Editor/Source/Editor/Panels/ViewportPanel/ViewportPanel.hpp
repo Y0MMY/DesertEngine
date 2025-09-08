@@ -6,6 +6,8 @@
 
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 
+#include "LightGizmoRenderer.hpp"
+
 namespace Desert::Editor
 {
     class ViewportPanel : public IPanel, public Common::EventHandler
@@ -55,9 +57,7 @@ namespace Desert::Editor
         {
             glm::vec2 MousePosition;
             glm::vec2 Size;
-            glm::vec2 ContentMin;
-            glm::vec2 ContentMax;
-            glm::vec2 WindowPos;  
+            glm::vec2 ViewportPos;
             bool      IsHovered = false;
             float     DpiScale  = 1.0f;
         };
@@ -69,5 +69,6 @@ namespace Desert::Editor
         std::shared_ptr<Desert::Core::Scene>       m_Scene;
         std::shared_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
         std::unique_ptr<Editor::UI::UIHelper>      m_UIHelper;
+        std::unique_ptr<LightGizmoRenderer>        m_LightGizmoRenderer;
     };
 } // namespace Desert::Editor
