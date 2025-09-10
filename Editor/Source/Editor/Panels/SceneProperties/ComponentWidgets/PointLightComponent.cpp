@@ -24,6 +24,7 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::Property( "Colour", pointLight.Color, true,
                                          Utils::ImGuiUtilities::PropertyFlag::ColorProperty );
         Utils::ImGuiUtilities::Property( "Intensity", pointLight.Intensity, 0.0f, 4.0f );
+        Utils::ImGuiUtilities::Property( "Show radius", pointLight.ShowRadius );
 
         ImGui::Columns( 1 );
         ImGui::Separator();

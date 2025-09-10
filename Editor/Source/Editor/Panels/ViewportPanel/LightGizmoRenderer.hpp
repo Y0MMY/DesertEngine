@@ -16,9 +16,13 @@ namespace Desert::Editor
     private:
         void RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,
                                 float xpos, float ypos );
-        void RenderSelectedLightGizmo( const std::shared_ptr<Desert::Core::Camera>& camera,
-                                       const glm::vec3& position, float radius, float width, float height,
-                                       ImDrawList* drawList );
+        void DrawAxisAlignedCircle( ImDrawList* drawList, const glm::vec3& center, float radius, int segments,
+                                    const glm::vec3& axis1, const glm::vec3& axis2, const glm::mat4& mvp,
+                                    float width, float height, float xpos, float ypos, ImU32 color );
+
+        void DrawLightRadiusSphere( const std::shared_ptr<Desert::Core::Camera>& camera, const glm::vec3& worldPos,
+                                    float radius, float width, float height, float windowX, float windowY,
+                                    float iconCenterX, float iconCenterY );
 
     private:
         std::shared_ptr<Desert::Core::Scene> m_Scene;

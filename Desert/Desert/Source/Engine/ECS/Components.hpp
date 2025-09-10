@@ -8,6 +8,7 @@
 #include <glm/gtx/quaternion.hpp>
 
 #include <Engine/Graphic/Geometry/Mesh.hpp>
+#include <Engine/Graphic/Geometry/PrimitiveType.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
@@ -38,14 +39,30 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Assets::AssetHandle                   MeshHandle;
-        std::shared_ptr<Graphic::MaterialPBR> Material; // TODO: std::optional
+        enum class Type : uint8_t
+        {
+            None,
+            Asset,
+            Primitive
+        };
+        std::optional<Assets::AssetHandle> MeshHandle     = std::nullopt;
+        std::optional<PrimitiveType>       PrimitiveShape = std::nullopt;
 
-        bool OutlineDraw = false;
+        std::shared_ptr<Graphic::MaterialPBR> Material;
+        bool                                  OutlineDraw = false;
 
         StaticMeshComponent()
         {
             Material = std::make_shared<Graphic::MaterialPBR>( nullptr );
+        }
+
+        Type GetMeshType() const
+        {
+            if ( MeshHandle.has_value() )
+                return Type::Asset;
+            if ( PrimitiveShape.has_value() )
+                return Type::Primitive;
+            return Type::None;
         }
     };
 
@@ -65,6 +82,16 @@ namespace Desert::ECS
     struct DirectionLightComponent
     {
         float Intensity;
+    };
+
+    struct PointLightComponent
+    {
+        glm::vec3 Color;
+        glm::vec3 Position;
+        float     Intensity;
+        float     Radius;
+
+        bool ShowRadius;
     };
 
     struct SkyboxComponent

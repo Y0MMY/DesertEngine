@@ -62,7 +62,8 @@ namespace Desert::Editor
             RenderGizmo();
         }
 
-        m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y, m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y );
+        m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y, m_ViewportData.ViewportPos.x,
+                                      m_ViewportData.ViewportPos.y );
     }
 
     void ViewportPanel::RenderGizmo()
@@ -152,8 +153,7 @@ namespace Desert::Editor
         {
             if ( entity.HasComponent<ECS::StaticMeshComponent>() )
             {
-                const auto& mesh =
-                     m_ResourceRegistry->GetMesh( entity.GetComponent<ECS::StaticMeshComponent>().MeshHandle );
+                const auto mesh = GetMeshComponent( entity.GetComponent<ECS::StaticMeshComponent>() );
                 if ( !mesh )
                 {
                     continue;
@@ -238,6 +238,16 @@ namespace Desert::Editor
                 break;
         }
         return false;
+    }
+
+    std::shared_ptr<Desert::Mesh> ViewportPanel::GetMeshComponent( const ECS::StaticMeshComponent& component )
+    {
+        if ( component.GetMeshType() == ECS::StaticMeshComponent::Type::Asset )
+        {
+            return m_ResourceRegistry->GetMesh( *component.MeshHandle );
+        }
+
+        return PrimitiveMeshFactory::GetPrimitive( *component.PrimitiveShape );
     }
 
 } // namespace Desert::Editor

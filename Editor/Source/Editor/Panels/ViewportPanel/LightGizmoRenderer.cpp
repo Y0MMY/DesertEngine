@@ -19,13 +19,14 @@ namespace Desert::Editor
             return;
 
         RenderPointLights( camera.value(), width, height, xpos, ypos );
-        // RenderDirectionalLights( camera.value(), viewportStart, viewportSize );
     }
 
     void LightGizmoRenderer::RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
                                                 float height, float xpos, float ypos )
     {
         auto entities = m_Scene->GetAllEntities();
+
+        ImVec2 windowPos = ImGui::GetWindowPos();
 
         for ( auto entity : entities )
         {
@@ -42,38 +43,99 @@ namespace Desert::Editor
 
             if ( !frustum.IsInside( transform.Translation ) )
             {
-                return;
+                continue;
             }
 
             const auto mvp = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 
             glm::vec2 screenPos =
                  Common::Math::SpaceTransformer::WorldToScreenSpace( transform.Translation, mvp, width, height );
+
+            float absoluteX = windowPos.x + screenPos.x;
+            float absoluteY = windowPos.y + screenPos.y;
+
             const char* icon     = ICON_MDI_LIGHTBULB;
             ImVec2      iconSize = ImGui::CalcTextSize( icon );
 
-            ImGui::SetCursorPos( ImVec2( screenPos.x - iconSize.x * 0.5f, screenPos.y - iconSize.y * 0.5f ) );
+            ImDrawList* drawList   = ImGui::GetWindowDrawList();
+            ImVec4      lightColor = ImVec4( 1.0f, 1.0f, 1.0f, 1.0f );
 
-            ImVec4 lightColor = ImVec4( 1.0f, 1.0f, 1.0f, 1.0f );
-            ImGui::PushStyleColor( ImGuiCol_Text, lightColor );
-            ImGui::TextUnformatted( icon );
-            ImGui::PopStyleColor();
+            drawList->AddText( ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
+                               ImColor( lightColor ), icon );
 
-            if ( ImGui::IsItemHovered() )
+            if ( light.ShowRadius )
             {
-                Utils::ImGuiUtilities::Tooltip(
-                     std::format( "Point Light\nIntensity: {}\nRadius: {}\nPosition: ({}, {}, {})", light.Intensity, light.Radius,  transform.Translation.x, transform.Translation.y,
-                             transform.Translation.z).c_str() );
-
-                ImGui::BeginTooltip();
-                ImGui::Text( "Point Light" );
-                ImGui::Text( "Intensity: %.1f", light.Intensity );
-                ImGui::Text( "Radius: %.1f", light.Radius );
-                ImGui::Separator();
-                ImGui::Text( "Position: (%.1f, %.1f, %.1f)", transform.Translation.x, transform.Translation.y,
-                             transform.Translation.z );
-                ImGui::EndTooltip();
+                DrawLightRadiusSphere( camera, transform.Translation, light.Radius, width, height, windowPos.x,
+                                       windowPos.y, absoluteX, absoluteY );
             }
+            ImVec2 mousePos = ImGui::GetMousePos();
+            if ( mousePos.x >= absoluteX - iconSize.x * 0.5f && mousePos.x <= absoluteX + iconSize.x * 0.5f &&
+                 mousePos.y >= absoluteY - iconSize.y * 0.5f && mousePos.y <= absoluteY + iconSize.y * 0.5f )
+            {
+                ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
+                Utils::ImGuiUtilities::Tooltip(
+                     std::format( "Point Light\nIntensity: {}\nRadius: {}\nPosition: ({}, {}, {})",
+                                  light.Intensity, light.Radius, transform.Translation.x, transform.Translation.y,
+                                  transform.Translation.z )
+                          .c_str() );
+                ImGui::PopStyleColor();
+            }
+        }
+    }
+
+    void LightGizmoRenderer::DrawLightRadiusSphere( const std::shared_ptr<Desert::Core::Camera>& camera,
+                                                    const glm::vec3& worldPos, float radius, float width,
+                                                    float height, float windowX, float windowY, float iconCenterX,
+                                                    float iconCenterY )
+    {
+        ImDrawList* drawList         = ImGui::GetWindowDrawList();
+        const auto  viewMatrix       = camera->GetViewMatrix();
+        const auto  projectionMatrix = camera->GetProjectionMatrix();
+        const auto  mvp              = projectionMatrix * viewMatrix;
+
+        const int segments = 64;
+
+        ImU32 colorWhite = ImColor( 1.0f, 1.0f, 1.0f, 1.0f );
+
+        DrawAxisAlignedCircle( drawList, worldPos, radius, segments, glm::vec3( 1.0f, 0.0f, 0.0f ),
+                               glm::vec3( 0.0f, 0.0f, 1.0f ), mvp, width, height, windowX, windowY, colorWhite );
+
+        DrawAxisAlignedCircle( drawList, worldPos, radius, segments, glm::vec3( 1.0f, 0.0f, 0.0f ),
+                               glm::vec3( 0.0f, 1.0f, 0.0f ), mvp, width, height, windowX, windowY, colorWhite );
+
+        DrawAxisAlignedCircle( drawList, worldPos, radius, segments, glm::vec3( 0.0f, 1.0f, 0.0f ),
+                               glm::vec3( 0.0f, 0.0f, 1.0f ), mvp, width, height, windowX, windowY, colorWhite );
+    }
+
+    void LightGizmoRenderer::DrawAxisAlignedCircle( ImDrawList* drawList, const glm::vec3& center, float radius,
+                                                    int segments, const glm::vec3& axis1, const glm::vec3& axis2,
+                                                    const glm::mat4& mvp, float width, float height, float windowX,
+                                                    float windowY, ImU32 color )
+    {
+        std::vector<ImVec2> screenPoints;
+
+        for ( int i = 0; i <= segments; ++i )
+        {
+            float     angle = 2.0f * glm::pi<float>() * i / segments;
+            glm::vec3 point = center + radius * ( cos( angle ) * axis1 + sin( angle ) * axis2 );
+
+            glm::vec2 screenPoint =
+                 Common::Math::SpaceTransformer::WorldToScreenSpace( point, mvp, width, height );
+
+            float absoluteX = windowX + screenPoint.x;
+            float absoluteY = windowY + screenPoint.y;
+
+            screenPoints.push_back( ImVec2( absoluteX, absoluteY ) );
+        }
+
+        for ( size_t i = 1; i < screenPoints.size(); ++i )
+        {
+            drawList->AddLine( screenPoints[i - 1], screenPoints[i], color, 0.1f );
+        }
+
+        if ( screenPoints.size() > 1 )
+        {
+            drawList->AddLine( screenPoints.back(), screenPoints.front(), color, 0.1f );
         }
     }
 

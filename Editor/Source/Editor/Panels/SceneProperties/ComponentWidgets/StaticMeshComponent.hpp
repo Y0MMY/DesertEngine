@@ -17,6 +17,10 @@ namespace Desert::Editor
         void Render( ECS::Entity& entity ) override;
 
     private:
+        void RenderPrimitiveSection( ECS::StaticMeshComponent& staticMesh );
+        void RenderAssetSection( ECS::StaticMeshComponent& staticMesh );
+
+    private:
         const std::weak_ptr<Assets::AssetManager> m_AssetManager;
     };
 } // namespace Desert::Editor

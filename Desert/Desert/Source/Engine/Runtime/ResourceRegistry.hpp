@@ -18,10 +18,10 @@ namespace Desert::Runtime
 
         [[nodiscard]] Common::BoolResult RegisterMesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
 
-        std::shared_ptr<Graphic::Texture2D> GetTexture( const Assets::AssetHandle& handle ) const;
-        std::optional<std::shared_ptr<Graphic::MaterialSkybox>>
-                              GetSkybox( const Assets::AssetHandle& handle ) const;
-        std::shared_ptr<Mesh> GetMesh( const Assets::AssetHandle& handle ) const;
+        [[nodiscard]] std::shared_ptr<Graphic::Texture2D> GetTexture( const Assets::AssetHandle& handle ) const;
+        [[nodiscard]] std::optional<std::shared_ptr<Graphic::MaterialSkybox>>
+                                            GetSkybox( const Assets::AssetHandle& handle ) const;
+        [[nodiscard]] std::shared_ptr<Mesh> GetMesh( const Assets::AssetHandle& handle ) const;
 
         void Clear();
 

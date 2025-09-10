@@ -3,8 +3,7 @@
 #include "System.hpp"
 
 #include <Engine/ECS/Components.hpp>
-#include <Engine/Graphic/SceneRenderer.hpp>
-#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Graphic/Geometry/PrimitiveMeshFactory.hpp>
 
 namespace Desert::ECS
 {
@@ -22,16 +21,29 @@ namespace Desert::ECS
             {
                 auto meshView = registry.view<StaticMeshComponent, TransformComponent>();
                 meshView.each(
-                     [&]( auto entity, const auto& mesh, const auto& transform )
+                     [&]( auto entity, const StaticMeshComponent& mesh, const TransformComponent& transform )
                      {
-                         auto resolvedMesh = resourceManager->GetMesh( mesh.MeshHandle );
-                         if ( !resolvedMesh || !mesh.Material )
+                         std::shared_ptr<Desert::Mesh> targetMesh = nullptr;
+                         const auto                    meshType   = mesh.GetMeshType();
+                         if ( meshType != StaticMeshComponent::Type::None )
                          {
-                             return;
-                         }
+                             if ( meshType == StaticMeshComponent::Type::Primitive )
+                             {
+                                 targetMesh = PrimitiveMeshFactory::GetPrimitive( *mesh.PrimitiveShape );
+                             }
+                             else
+                             {
+                                 auto resolvedMesh = resourceManager->GetMesh( *mesh.MeshHandle );
+                                 if ( !resolvedMesh || !mesh.Material )
+                                 {
+                                     return;
+                                 }
+                                 targetMesh = resolvedMesh;
+                             }
 
-                         // Add to render list
-                         renderer->AddToRenderMeshList( resolvedMesh, mesh.Material, transform.GetTransform() );
+                             // Add to render list
+                             renderer->AddToRenderMeshList( targetMesh, mesh.Material, transform.GetTransform() );
+                         }
                      } );
             }
         }

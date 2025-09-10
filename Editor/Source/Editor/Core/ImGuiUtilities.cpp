@@ -96,6 +96,32 @@ namespace Desert::Editor::Utils
         ImGui::PopStyleVar();
     }
 
+    bool ImGuiUtilities::Property( const char* name, bool& value, PropertyFlag flags )
+    {
+        bool updated = false;
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted( name );
+        ImGui::NextColumn();
+        ImGui::PushItemWidth( -1 );
+
+        if ( (int)flags & (int)PropertyFlag::ReadOnly )
+        {
+            ImGui::TextUnformatted( value ? "True" : "False" );
+        }
+        else
+        {
+            std::string id = "##" + std::string( name );
+            if ( ImGui::Checkbox( id.c_str(), &value ) )
+                updated = true;
+        }
+
+        ImGui::PopItemWidth();
+        ImGui::NextColumn();
+
+        return updated;
+    }
+
     bool ImGuiUtilities::Property( const char* name, std::string& value, PropertyFlag flags )
     {
         bool updated = false;

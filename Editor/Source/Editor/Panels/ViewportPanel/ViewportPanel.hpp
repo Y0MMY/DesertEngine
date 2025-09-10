@@ -49,6 +49,9 @@ namespace Desert::Editor
         }
 
     private:
+        std::shared_ptr<Mesh> GetMeshComponent( const ECS::StaticMeshComponent& component );
+
+    private:
         void                    HandleObjectPicking();
         std::pair<float, float> GetMouseViewportSpace() const;
         void                    RenderGizmo();

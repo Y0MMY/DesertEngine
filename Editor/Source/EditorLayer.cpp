@@ -27,10 +27,13 @@ namespace Desert::Editor
         m_ResourceRegistry = std::make_shared<Runtime::ResourceRegistry>();
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager, m_ResourceRegistry );
         m_MainScene        = std::make_shared<Desert::Core::Scene>( "New Scene", m_ResourceRegistry );
+
+        PrimitiveMeshFactory::Initialize();
     }
 
     EditorLayer::~EditorLayer()
     {
+        PrimitiveMeshFactory::Shutdown();
         m_MainScene->Shutdown();
     }
 

@@ -32,6 +32,7 @@ namespace Desert::Editor::Utils
                               float delta = 1.0f, PropertyFlag flags = PropertyFlag::None );
         static bool Property( const char* name, glm::vec3& value, float min = -1.0f, float max = 1.0f,
                               bool exposeW = false, PropertyFlag flags = PropertyFlag::None );
+        static bool Property( const char* name, bool& value, PropertyFlag flags = PropertyFlag::None );
 
         static bool Property( const char* name, glm::vec3& value, bool exposeW, PropertyFlag flags );
 

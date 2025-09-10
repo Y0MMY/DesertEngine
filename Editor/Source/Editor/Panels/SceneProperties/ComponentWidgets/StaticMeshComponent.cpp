@@ -1,7 +1,7 @@
 #include "StaticMeshComponent.hpp"
 #include <ImGui/imgui.h>
-
 #include <Editor/Core/ImGuiUtilities.hpp>
+#include <Engine/Graphic/Geometry/Mesh.hpp>
 
 namespace Desert::Editor
 {
@@ -14,24 +14,54 @@ namespace Desert::Editor
 
     void StaticMeshComponentWidget::Render( ECS::Entity& entity )
     {
-        const auto assetManager = m_AssetManager.lock();
-        auto       meshAssets   = assetManager->FindAllByType<Assets::MeshAsset>();
+        auto& staticMesh = entity.GetComponent<ECS::StaticMeshComponent>();
 
-        auto&       staticMesh          = entity.GetComponent<ECS::StaticMeshComponent>();
-        const auto& currentSelectedMesh = assetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
+        Utils::ImGuiUtilities::PushID();
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
+
+        // Render appropriate section based on type
+        switch ( staticMesh.GetMeshType() )
+        {
+            case ECS::StaticMeshComponent::Type::Asset:
+                RenderAssetSection( staticMesh );
+                break;
+
+            case ECS::StaticMeshComponent::Type::Primitive:
+                RenderPrimitiveSection( staticMesh );
+                break;
+
+            case ECS::StaticMeshComponent::Type::None:
+            default:
+                ImGui::TextDisabled( "No mesh selected" );
+                break;
+        }
+
+        ImGui::PopStyleVar();
+        Utils::ImGuiUtilities::PopID();
+    }
+
+    void StaticMeshComponentWidget::RenderAssetSection( ECS::StaticMeshComponent& staticMesh )
+    {
+        const auto assetManager = m_AssetManager.lock();
+        if ( !assetManager )
+            return;
+
+        auto meshAssets = assetManager->FindAllByType<Assets::MeshAsset>();
+
+        const auto& currentSelectedMesh =
+             staticMesh.MeshHandle.has_value()
+                  ? assetManager->FindByHandle<Assets::MeshAsset>( *staticMesh.MeshHandle )
+                  : nullptr;
 
         std::string currentMeshName =
              currentSelectedMesh
                   ? Common::Utils::FileSystem::GetFileName( currentSelectedMesh->GetMetadata().Filepath )
                   : "None";
 
-        Utils::ImGuiUtilities::PushID();
-        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
-
-        // Mesh selection section
         ImGui::Columns( 2 );
         ImGui::Separator();
 
+        // Mesh selection section
         ImGui::TextUnformatted( "Mesh" );
         ImGui::NextColumn();
         ImGui::PushItemWidth( -1 );
@@ -54,7 +84,8 @@ namespace Desert::Editor
 
                 if ( meshFilter.PassFilter( meshName.c_str() ) )
                 {
-                    bool isSelected = ( staticMesh.MeshHandle == handle );
+                    bool isSelected =
+                         ( staticMesh.MeshHandle.has_value() && ( *staticMesh.MeshHandle ) == handle );
                     if ( ImGui::Selectable( meshName.c_str(), isSelected ) )
                     {
                         staticMesh.MeshHandle = handle;
@@ -79,13 +110,10 @@ namespace Desert::Editor
         ImGui::NextColumn();
         ImGui::Columns( 1 );
         ImGui::Separator();
-        ImGui::PopStyleVar();
 
         // Show mesh info if mesh is loaded
         if ( currentSelectedMesh )
         {
-            ImGui::Columns( 1 );
-
             if ( ImGui::TreeNodeEx( "Mesh Details", ImGuiTreeNodeFlags_Framed ) )
             {
                 ImGui::Columns( 2 );
@@ -93,16 +121,54 @@ namespace Desert::Editor
                 // File path
                 ImGui::TextUnformatted( "File Path" );
                 ImGui::NextColumn();
-                ImGui::TextUnformatted( "currentSelectedMesh->GetMetadata().Filepath.c_str() " );
-                Utils::ImGuiUtilities::Tooltip( "currentSelectedMesh->GetMetadata().Filepath.c_str() " );
+                ImGui::TextUnformatted( "%s", currentSelectedMesh->GetMetadata().Filepath.string().c_str() );
+                Utils::ImGuiUtilities::Tooltip( currentSelectedMesh->GetMetadata().Filepath.string().c_str() );
                 ImGui::NextColumn();
 
                 ImGui::Columns( 1 );
                 ImGui::TreePop();
             }
         }
+    }
 
-        Utils::ImGuiUtilities::PopID();
+    void StaticMeshComponentWidget::RenderPrimitiveSection( ECS::StaticMeshComponent& staticMesh )
+    {
+        if ( !staticMesh.PrimitiveShape.has_value() )
+        {
+            return;
+        }
+
+        ImGui::Columns( 2 );
+        ImGui::Separator();
+
+        // Primitive selection section
+        ImGui::TextUnformatted( "Primitive" );
+        ImGui::NextColumn();
+        ImGui::PushItemWidth( -1 );
+
+        // Get current primitive name
+        std::string currentPrimitiveName = PrimitiveMeshFactory::GetPrimitiveName( *staticMesh.PrimitiveShape );
+
+        ImGui::TextUnformatted( currentPrimitiveName.c_str() );
+
+        ImGui::PopItemWidth();
+        ImGui::NextColumn();
+        ImGui::Columns( 1 );
+        ImGui::Separator();
+
+        // Show primitive info
+        if ( ImGui::TreeNodeEx( "Primitive Details", ImGuiTreeNodeFlags_Framed ) )
+        {
+            ImGui::Columns( 2 );
+
+            ImGui::TextUnformatted( "Type" );
+            ImGui::NextColumn();
+            ImGui::TextUnformatted( currentPrimitiveName.c_str() );
+            ImGui::NextColumn();
+
+            ImGui::Columns( 1 );
+            ImGui::TreePop();
+        }
     }
 
 } // namespace Desert::Editor
