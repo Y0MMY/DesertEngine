@@ -32,6 +32,32 @@ namespace Desert::Graphic::API::Vulkan
         return writeDescriptor;
     }
 
+    VkWriteDescriptorSet DescriptorSetBuilder::GetStorageWDS( VulkanMaterialBackend* materialBackend,
+                                                              const uint32_t frame, const uint32_t set,
+                                                              const uint32_t                dstBinding,
+                                                              const uint32_t                descriptorCount,
+                                                              const VkDescriptorBufferInfo* pBufferInfo )
+    {
+        VkDescriptorSet descriptorSet = materialBackend->GetDescriptorSet( frame, set );
+        if ( descriptorSet == VK_NULL_HANDLE )
+        {
+            VkWriteDescriptorSet writeDescriptor = {};
+            writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            return writeDescriptor;
+        }
+
+        VkWriteDescriptorSet writeDescriptor = {};
+        writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writeDescriptor.dstSet               = descriptorSet;
+        writeDescriptor.dstBinding           = dstBinding;
+        writeDescriptor.descriptorCount      = descriptorCount;
+        writeDescriptor.pBufferInfo          = pBufferInfo;
+
+        return writeDescriptor;
+    }
+
     namespace Detail
     {
         template <typename TextureType, typename GetFallbackFunc>

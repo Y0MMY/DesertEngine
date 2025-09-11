@@ -46,14 +46,16 @@ namespace Desert::Graphic::API::Vulkan
         VkFenceCreateInfo fenceCreateInfo = {};
         fenceCreateInfo.sType             = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceCreateInfo.flags             = 0;
-        const auto& device                = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        vkCreateFence( device, &fenceCreateInfo, nullptr, &fence );
-        VkQueue computeQueue = VulkanLogicalDevice::GetInstance().GetComputeQueue();
+        const auto& device        = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() );
+        VkDevice    deviceLogical = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                                      ->GetVulkanLogicalDevice();
+        vkCreateFence( deviceLogical, &fenceCreateInfo, nullptr, &fence );
+        VkQueue computeQueue = device->GetComputeQueue();
         vkQueueSubmit( computeQueue, 1, &submitInfo, fence );
 
         // Wait for the fence to signal that command buffer has finished executing
-        VK_CHECK_RESULT( vkWaitForFences( device, 1, &fence, VK_TRUE, UINT64_MAX ) );
-        vkDestroyFence( device, fence, nullptr );
+        VK_CHECK_RESULT( vkWaitForFences( deviceLogical, 1, &fence, VK_TRUE, UINT64_MAX ) );
+        vkDestroyFence( deviceLogical, fence, nullptr );
 
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
     }
@@ -249,7 +251,8 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipelineCompute::Invalidate()
     {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         const auto& shader = m_Shader.lock();
         if ( !shader )
@@ -300,7 +303,8 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipelineCompute::Release()
     {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         if ( m_ComputePipeline != VK_NULL_HANDLE )
         {
@@ -332,9 +336,9 @@ namespace Desert::Graphic::API::Vulkan
         {
             write.dstSet = descriptorSet;
         }
-
-        vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
-                                static_cast<uint32_t>( modifiedWrites.size() ), modifiedWrites.data(), 0,
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
+        vkUpdateDescriptorSets( device, static_cast<uint32_t>( modifiedWrites.size() ), modifiedWrites.data(), 0,
                                 nullptr );
     }
 

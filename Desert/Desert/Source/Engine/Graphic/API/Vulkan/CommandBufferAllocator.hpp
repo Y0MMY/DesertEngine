@@ -7,7 +7,7 @@ namespace Desert::Graphic::API::Vulkan
     class CommandBufferAllocator : public Common::Singleton<CommandBufferAllocator>
     {
     public:
-        CommandBufferAllocator( const VulkanLogicalDevice& device );
+        CommandBufferAllocator( const std::shared_ptr<VulkanLogicalDevice>& device );
 
         Common::Result<VkCommandBuffer> RT_GetCommandBufferCompute( bool begin = false );
         Common::Result<VkCommandBuffer> RT_AllocateCommandBufferGraphic( bool begin = false );

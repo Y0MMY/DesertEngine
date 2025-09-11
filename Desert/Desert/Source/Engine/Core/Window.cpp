@@ -1,9 +1,9 @@
-#include <Common/Core/Window.hpp>
+#include "Window.hpp"
 #if defined( DESERT_PLATFORM_WINDOWS )
 #include <Platform/Windows/WindowsWindow.hpp>
 #endif
 
-namespace Common
+namespace Desert
 {
     std::shared_ptr<Window> Window::Create( const WindowSpecification& specification )
     {

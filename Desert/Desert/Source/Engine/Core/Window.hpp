@@ -1,11 +1,19 @@
 #pragma once
 
-#include <Common/Core/Events/Event.hpp>
-#include <Common/Core/Result.hpp>
-
 #include <string>
 
-namespace Common
+#include <Common/Core/Events/Event.hpp>
+#include <Common/Core/Result.hpp>
+#include <Common/Core/EventRegistry.hpp>
+
+#include <Engine/Graphic/SwapChain.hpp>
+
+namespace Desert::Graphic
+{
+    class SwapChain;
+}
+
+namespace Desert
 {
     struct WindowSpecification
     {
@@ -17,7 +25,7 @@ namespace Common
         bool        VSync      = true;
     };
 
-    class Window // NOTE: should be Singleton?
+    class Window : public Common::EventHandler
     {
     public:
         virtual ~Window()                   = default;
@@ -43,8 +51,13 @@ namespace Common
         virtual void PrepareNextFrame() const  = 0;
         virtual void PresentFinalImage() const = 0;
 
+        virtual std::shared_ptr<Graphic::SwapChain> GetWindowSwapChain() = 0;
+
         virtual void SetEventCallback( const EventCallbackFn& e ) = 0;
+
+        virtual Common::Result<bool>
+        SetupSwapChain( ) = 0;
 
         static std::shared_ptr<Window> Create( const WindowSpecification& specification );
     };
-} // namespace Common
+} // namespace Desert

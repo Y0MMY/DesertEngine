@@ -25,8 +25,10 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( m_DescriptorPool != VK_NULL_HANDLE )
         {
-            vkDestroyDescriptorPool( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(), m_DescriptorPool,
-                                     nullptr );
+
+            vkDestroyDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                                          ->GetVulkanLogicalDevice(),
+                                     m_DescriptorPool, nullptr );
         }
     }
 
@@ -97,8 +99,10 @@ namespace Desert::Graphic::API::Vulkan
         poolInfo.maxSets       = framesInFlight * setCount;
         poolInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
-        VK_CHECK_RESULT( vkCreateDescriptorPool( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
-                                                 &poolInfo, nullptr, &m_DescriptorPool ) );
+        VK_CHECK_RESULT(
+             vkCreateDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                                          ->GetVulkanLogicalDevice(),
+                                     &poolInfo, nullptr, &m_DescriptorPool ) );
     }
 
     void VulkanMaterialBackend::AllocateDescriptorSets()
@@ -124,8 +128,10 @@ namespace Desert::Graphic::API::Vulkan
             allocInfo.descriptorSetCount = setCount;
             allocInfo.pSetLayouts        = layouts.data();
 
-            VK_CHECK_RESULT( vkAllocateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
-                                                       &allocInfo, m_DescriptorSets[frame].data() ) );
+            VK_CHECK_RESULT( vkAllocateDescriptorSets(
+                 SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                      ->GetVulkanLogicalDevice(),
+                 &allocInfo, m_DescriptorSets[frame].data() ) );
         }
     }
 
@@ -269,7 +275,8 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( !m_PendingDescriptorWrites.empty() )
         {
-            vkUpdateDescriptorSets( VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice(),
+            vkUpdateDescriptorSets( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                                         ->GetVulkanLogicalDevice(),
                                     static_cast<uint32_t>( m_PendingDescriptorWrites.size() ),
                                     m_PendingDescriptorWrites.data(), 0, nullptr );
             m_PendingDescriptorWrites.clear();

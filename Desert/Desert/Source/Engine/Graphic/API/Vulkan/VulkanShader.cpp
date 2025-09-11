@@ -3,6 +3,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
 #include <Engine/Core/Models/Shader.hpp>
+#include <Engine/Core/EngineContext.hpp>
 
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
 #include <Engine/Core/ShaderCompiler/Includer/ShaderIncluder.hpp>
@@ -177,7 +178,8 @@ namespace Desert::Graphic::API::Vulkan
                                                const std::filesystem::path&                  filepath,
                                                std::vector<VkPipelineShaderStageCreateInfo>& writeCreateInfo )
         {
-            VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+            VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                                   ->GetVulkanLogicalDevice();
 
             std::string              moduleName;
             VkShaderModuleCreateInfo moduleCreateInfo{};
@@ -456,7 +458,8 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanShader::CreateDescriptorsLayout()
     {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         if ( m_ReflectionData.ShaderDescriptorSets.empty() )
         {

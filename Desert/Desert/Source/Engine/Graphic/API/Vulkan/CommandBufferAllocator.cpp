@@ -38,7 +38,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     } // namespace
 
-    CommandBufferAllocator::CommandBufferAllocator( const VulkanLogicalDevice& device )
+    CommandBufferAllocator::CommandBufferAllocator( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
         const uint32_t frames = 3U; // TODO
 
@@ -48,12 +48,12 @@ namespace Desert::Graphic::API::Vulkan
 
             VkCommandPoolCreateInfo cmdPoolInfo = {};
             cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            cmdPoolInfo.queueFamilyIndex        = device.GetPhysicalDevice()->GetGraphicsFamily().value();
+            cmdPoolInfo.queueFamilyIndex        = device->GetPhysicalDevice()->GetGraphicsFamily().value();
             cmdPoolInfo.flags                   = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             for ( auto& cmdPool : m_CommandGraphicPool )
             {
                 VK_CHECK_RESULT(
-                     vkCreateCommandPool( device.GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
+                     vkCreateCommandPool( device->GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
             }
         }
 
@@ -63,12 +63,12 @@ namespace Desert::Graphic::API::Vulkan
 
             VkCommandPoolCreateInfo cmdPoolInfo = {};
             cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            cmdPoolInfo.queueFamilyIndex        = device.GetPhysicalDevice()->GetComputeFamily().value();
+            cmdPoolInfo.queueFamilyIndex        = device->GetPhysicalDevice()->GetComputeFamily().value();
             cmdPoolInfo.flags                   = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             for ( auto& cmdPool : m_ComputeCommandPool )
             {
                 VK_CHECK_RESULT(
-                     vkCreateCommandPool( device.GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
+                     vkCreateCommandPool( device->GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
             }
         }
 
@@ -78,20 +78,20 @@ namespace Desert::Graphic::API::Vulkan
 
             VkCommandPoolCreateInfo cmdPoolInfo = {};
             cmdPoolInfo.sType                   = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            cmdPoolInfo.queueFamilyIndex        = device.GetPhysicalDevice()->GetTransferFamily().value();
+            cmdPoolInfo.queueFamilyIndex        = device->GetPhysicalDevice()->GetTransferFamily().value();
             cmdPoolInfo.flags                   = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             for ( auto& cmdPool : m_TransferOpsCommandPool )
             {
                 VK_CHECK_RESULT(
-                     vkCreateCommandPool( device.GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
+                     vkCreateCommandPool( device->GetVulkanLogicalDevice(), &cmdPoolInfo, nullptr, &cmdPool ) );
             }
         }
 
-        m_GraphicsQueue    = device.m_GraphicsQueue;
-        m_ComputeQueue     = device.m_ComputeQueue;
-        m_TransferOpsQueue = device.m_TransferQueue;
+        m_GraphicsQueue    = device->m_GraphicsQueue;
+        m_ComputeQueue     = device->m_ComputeQueue;
+        m_TransferOpsQueue = device->m_TransferQueue;
 
-        m_LogicalDevice = device.m_LogicalDevice;
+        m_LogicalDevice = device->m_LogicalDevice;
     }
 
     Common::Result<VkCommandBuffer> CommandBufferAllocator::RT_GetCommandBufferCompute( bool begin /*= false */ )

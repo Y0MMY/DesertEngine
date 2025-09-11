@@ -15,13 +15,13 @@
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Math/Ray.hpp>
 #include <Common/Core/Math/SpaceTransformer.hpp>
-#include <Common/Core/Input.hpp>
 
 // =================== Engine =================== //
 
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/Camera.hpp>
+#include <Engine/Core/Input.hpp>
 
 // =================== Graphic =================== //
 

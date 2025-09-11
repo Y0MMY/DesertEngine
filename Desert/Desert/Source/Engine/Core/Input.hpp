@@ -2,10 +2,10 @@
 
 #include <utility>
 
-#include "KeyCodes.hpp"
-#include "MouseButton.hpp"
+#include <Common/Core/KeyCodes.hpp>
+#include <Common/Core/MouseButton.hpp>
 
-namespace Common::Input
+namespace Desert::Input
 {
     enum class MouseState
     {
@@ -21,7 +21,7 @@ namespace Common::Input
 
         static Mouse& Get();
 
-        bool                    IsMouseButtonPressed( MouseButton button );
+        bool                    IsMouseButtonPressed( Common::MouseButton button );
         float                   GetMouseX();
         float                   GetMouseY();
         std::pair<float, float> GetMousePosition();
@@ -41,6 +41,6 @@ namespace Common::Input
     class Keyboard
     {
     public:
-        static bool IsKeyPressed( KeyCode keycode );
+        static bool IsKeyPressed( Common::KeyCode keycode );
     };
-} // namespace Common::Input
+} // namespace Desert::Input

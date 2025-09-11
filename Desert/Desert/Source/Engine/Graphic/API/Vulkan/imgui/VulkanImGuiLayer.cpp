@@ -8,6 +8,7 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/RendererAPI.hpp>
@@ -23,8 +24,9 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 {
     Common::BoolResult VulkanImGui::OnAttach()
     {
-        const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-        const auto  window = Common::CommonContext::GetInstance().GetCurrentPointerToGLFWwinodw();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
+        const auto window = EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw();
 
         VkDescriptorPoolSize       pool_sizes[] = { { VK_DESCRIPTOR_TYPE_SAMPLER, 100 },
                                                     { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 },
@@ -45,17 +47,20 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         pool_info.pPoolSizes                    = pool_sizes;
         VK_CHECK_RESULT( vkCreateDescriptorPool( device, &pool_info, nullptr, &m_ImguiPool ) );
 
-        const auto& context   = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() );
-        const auto& swapchain = context->GetVulkanSwapChain();
+        const auto& context = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() );
+        const auto& swapchain =
+             SP_CAST( VulkanSwapChain, EngineContext::GetInstance().GetCurrentWindow()->GetWindowSwapChain() );
 
         // Setup Platform/Renderer bindings
         ImGui_ImplGlfw_InitForVulkan( window, true );
         ImGui_ImplVulkan_InitInfo init_info = {};
         init_info.Instance                  = context->GetVulkanInstance();
-        init_info.PhysicalDevice =
-             VulkanLogicalDevice::GetInstance().GetPhysicalDevice()->GetVulkanPhysicalDevice();
-        init_info.Device         = device;
-        init_info.Queue          = VulkanLogicalDevice::GetInstance().GetGraphicsQueue();
+        init_info.PhysicalDevice = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                                        ->GetPhysicalDevice()
+                                        ->GetVulkanPhysicalDevice();
+        init_info.Device = device;
+        init_info.Queue =
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )->GetGraphicsQueue();
         init_info.PipelineCache  = nullptr;
         init_info.DescriptorPool = m_ImguiPool;
         init_info.Allocator      = nullptr;
@@ -80,12 +85,13 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
     Common::BoolResult VulkanImGui::OnDetach()
     {
-        const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        const auto& device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                                  ->GetVulkanLogicalDevice();
         vkDeviceWaitIdle( device );
 
-        ImGui_ImplVulkan_Shutdown(); // Уничтожаем Vulkan-бэкенд
-        ImGui_ImplGlfw_Shutdown();   // Уничтожаем GLFW-бэкенд
-        ::ImGui::DestroyContext();   // Уничтожаем контекст ImGui
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ::ImGui::DestroyContext();
 
         if ( m_ImguiPool != VK_NULL_HANDLE )
         {
@@ -114,8 +120,9 @@ namespace Desert::Graphic::API::Vulkan::ImGui
     {
         ::ImGui::Render();
 
-        const auto& context   = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() );
-        const auto& swapChain = context->GetVulkanSwapChain();
+        const auto& context = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() );
+        const auto& swapChain =
+             SP_CAST( VulkanSwapChain, EngineContext::GetInstance().GetCurrentWindow()->GetWindowSwapChain() );
 
         VkClearValue clearValues[2];
         clearValues[0].color        = { { 1.0f, 0.0f, 0.0f, 1.0f } };
@@ -142,9 +149,9 @@ namespace Desert::Graphic::API::Vulkan::ImGui
 
         VkViewport viewport = {};
         viewport.x          = 0.0f;
-        viewport.y          = (float)height;
-        viewport.height     = -(float)height;
+        viewport.y          = 0.0f; 
         viewport.width      = (float)width;
+        viewport.height     = (float)height; 
         viewport.minDepth   = 0.0f;
         viewport.maxDepth   = 1.0f;
         vkCmdSetViewport( drawCommandBuffer, 0, 1, &viewport );

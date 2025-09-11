@@ -44,12 +44,18 @@ namespace Desert::Editor
 
         m_ViewportData.MousePosition = glm::vec2( mousePos.x - ( viewportPos.x + viewportMin.x ),
                                                   mousePos.y - ( viewportPos.y + viewportMin.y ) );
+        const auto oldSize           = m_ViewportData.Size;
 
         m_ViewportData.Size      = { viewportMax.x - viewportMin.x, viewportMax.y - viewportMin.y };
         m_ViewportData.IsHovered = ::ImGui::IsWindowHovered();
 
-        mainCamera.value()->UpdateProjectionMatrix( m_ViewportData.Size.x,
-                                                    m_ViewportData.Size.y ); // TODO: Move to scene
+        if ( oldSize != m_ViewportData.Size )
+        {
+            m_Scene->Resize( m_ViewportData.Size.x, m_ViewportData.Size.y );
+            mainCamera.value()->UpdateProjectionMatrix( m_ViewportData.Size.x,
+                                                        m_ViewportData.Size.y ); // TODO: Move to scene
+        }
+       
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
 
         // Render scene
@@ -206,7 +212,7 @@ namespace Desert::Editor
     {
         // m_ImGuiLayer->Resize( e.width, e.height );
         // m_EditorCamera.UpdateProjectionMatrix( e.width, e.height );
-        m_Scene->Resize( e.width, e.height );
+
         return false;
     }
 

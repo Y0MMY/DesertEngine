@@ -4,12 +4,13 @@
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
 #include <vulkan/vulkan.h>
 
 #ifndef VK_KHR_WIN32_SURFACE_EXTENSION_NAME
-    #define VK_KHR_WIN32_SURFACE_EXTENSION_NAME "VK_KHR_win32_surface"
+#define VK_KHR_WIN32_SURFACE_EXTENSION_NAME "VK_KHR_win32_surface"
 #endif
 
 namespace Desert::Graphic::API::Vulkan
@@ -36,8 +37,9 @@ namespace Desert::Graphic::API::Vulkan
     static bool s_DebugValidation = false;
 #endif
 
-    VulkanContext::VulkanContext( GLFWwindow* window ) : m_GLFWwindow( window )
+    VulkanContext::VulkanContext( const std::shared_ptr<Window>& window ) : m_Window( window )
     {
+        CreateVKInstance();
     }
 
     Common::Result<VkResult> VulkanContext::CreateVKInstance()
@@ -119,25 +121,6 @@ namespace Desert::Graphic::API::Vulkan
             VK_CHECK_RESULT( vkCreateDebugReportCallbackEXT( s_VulkanInstance, &debug_report_ci, nullptr,
                                                              &m_DebugReportCallback ) );
         }
-        const auto& pDevice = Graphic::API::Vulkan::VulkanPhysicalDevice::Create();
-        pDevice->CreateDevice();
-        auto& lDevice = Common::Singleton<VulkanLogicalDevice>::CreateInstance( pDevice );
-        lDevice.CreateDevice();
-
-        VulkanAllocator::CreateInstance().Init( lDevice, s_VulkanInstance );
-        CommandBufferAllocator::CreateInstance( lDevice );
-
-        m_SwapChain = std::make_unique<VulkanSwapChain>();
-        m_SwapChain->Init( m_GLFWwindow, s_VulkanInstance, lDevice );
-
-        uint32_t width, height;
-        m_SwapChain->Create( &width, &height );
-
-        m_VulkanQueue = std::make_unique<VulkanQueue>( m_SwapChain.get() ); // TODO: make shared ptr
-        m_VulkanQueue->Init();
-
-        VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );
-        VulkanLoadDebugUtilsExtensions( s_VulkanInstance );
         return Common::MakeSuccess( VK_SUCCESS );
     }
 
@@ -153,8 +136,27 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanContext::Shutdown()
     {
-        m_SwapChain->Release();
         VulkanAllocator::GetInstance().Shutdown();
+    }
+
+    void VulkanContext::Init()
+    {
+        const auto logicalDeivce = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() );
+
+        VulkanAllocator::CreateInstance().Init( logicalDeivce, s_VulkanInstance );
+        CommandBufferAllocator::CreateInstance( logicalDeivce );
+
+        const auto window = m_Window.lock();
+        if ( !window )
+        {
+            DESERT_VERIFY( false );
+        }
+        m_VulkanQueue = std::make_unique<VulkanQueue>(
+             SP_CAST( VulkanSwapChain, EngineContext::GetInstance().GetCurrentWindow()->GetWindowSwapChain() ) );
+        m_VulkanQueue->Init();
+
+        VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );
+        VulkanLoadDebugUtilsExtensions( s_VulkanInstance );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -65,11 +65,11 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( allocation );
     }
 
-    void VulkanAllocator::Init( const VulkanLogicalDevice& device, VkInstance instance )
+    void VulkanAllocator::Init( const std::shared_ptr<VulkanLogicalDevice>& device, VkInstance instance )
     {
         VmaAllocatorCreateInfo allocatorInfo = {};
-        allocatorInfo.device                 = device.GetVulkanLogicalDevice();
-        allocatorInfo.physicalDevice         = device.GetPhysicalDevice()->GetVulkanPhysicalDevice();
+        allocatorInfo.device                 = device->GetVulkanLogicalDevice();
+        allocatorInfo.physicalDevice         = device->GetPhysicalDevice()->GetVulkanPhysicalDevice();
         allocatorInfo.vulkanApiVersion       = VK_API_VERSION_1_2;
         allocatorInfo.instance               = instance;
 

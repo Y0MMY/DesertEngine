@@ -1,23 +1,23 @@
-#include <Common/Core/Input.hpp>
-#include <Common/Core/CommonContext.hpp>
+#include <Engine/Core/Input.hpp>
+#include <Engine/Core/EngineContext.hpp>
 
 #include <GLFW/glfw3.h>
 
-namespace Common::Input
+namespace Desert::Input
 {
-    bool Keyboard::IsKeyPressed( KeyCode key )
+    bool Keyboard::IsKeyPressed( Common::KeyCode key )
     {
-        auto state = glfwGetKey( (GLFWwindow*)CommonContext::GetInstance().GetCurrentPointerToGLFWwinodw(),
+        auto state = glfwGetKey( (GLFWwindow*)EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw(),
                                  static_cast<int32_t>( key ) );
 
         return state == GLFW_PRESS || state == GLFW_REPEAT;
     }
 
-    Mouse::Mouse() : m_Window( CommonContext::GetInstance().GetCurrentPointerToGLFWwinodw() )
+    Mouse::Mouse() : m_Window( EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw() )
     {
     }
 
-    bool Mouse::IsMouseButtonPressed( MouseButton button )
+    bool Mouse::IsMouseButtonPressed( Common::MouseButton button )
     {
         auto state = glfwGetMouseButton( (GLFWwindow*)m_Window, static_cast<int32_t>( button ) );
 
@@ -56,4 +56,4 @@ namespace Common::Input
         glfwSetInputMode( (GLFWwindow*)( m_Window ), GLFW_CURSOR, GLFW_CURSOR_NORMAL + (int)mode );
     }
 
-} // namespace Common::Input
+} // namespace Desert::Input

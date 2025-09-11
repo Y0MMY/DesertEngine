@@ -9,31 +9,36 @@ namespace Desert::Graphic::API::Vulkan
 {
     static VmaAllocation s_VmaAllocation = nullptr;
 
-    void VulkanSwapChain::Init( GLFWwindow* window, const VkInstance instance, VulkanLogicalDevice& device )
+    void VulkanSwapChain::Init( const VkInstance instance, const std::shared_ptr<Engine::Device>& device )
     {
-        m_VulkanInstance = instance;
-        m_LogicalDevice  = &device;
+        const auto vkLogicalDevice = SP_CAST( VulkanLogicalDevice, device );
+        m_LogicalDevice            = std::weak_ptr<VulkanLogicalDevice>( vkLogicalDevice );
 
-        InitSurface( window );
-        GetImageFormatAndColorSpace();
+        InitSurface( const_cast<GLFWwindow*>( m_Window ), instance );
+        GetImageFormatAndColorSpace( vkLogicalDevice );
 
         CreateSwapChainRenderPass();
     }
 
-    void VulkanSwapChain::InitSurface( GLFWwindow* window )
+    void VulkanSwapChain::InitSurface( GLFWwindow* window, const VkInstance instance )
     {
-        glfwCreateWindowSurface( m_VulkanInstance, window, nullptr, &m_Surface );
+        glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
     }
 
-    Common::Result<VkResult> VulkanSwapChain::Create( uint32_t* width, uint32_t* height )
+    Common::Result<bool> VulkanSwapChain::CreateSwapChain( const std::shared_ptr<Engine::Device>& device,
+                                                           uint32_t* width, uint32_t* height )
     {
-        auto oldSwapchain = m_SwapChain;
+        const VkInstance instance =
+             SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanInstance();
+        Init( instance, device );
+        auto       oldSwapchain    = m_SwapChain;
+        const auto vkLogicalDevice = SP_CAST( VulkanLogicalDevice, device );
 
-        const auto& pDevice = m_LogicalDevice->GetPhysicalDevice()->GetVulkanPhysicalDevice();
-        const auto& lDevice = m_LogicalDevice->GetVulkanLogicalDevice();
+        const auto& pDevice = vkLogicalDevice->GetPhysicalDevice()->GetVulkanPhysicalDevice();
+        const auto& lDevice = vkLogicalDevice->GetVulkanLogicalDevice();
         // Get physical device surface properties and formats
         VkSurfaceCapabilitiesKHR surfCaps;
-        VK_RETURN_RESULT_IF_FALSE( vkGetPhysicalDeviceSurfaceCapabilitiesKHR( pDevice, m_Surface, &surfCaps ) );
+        VK_CHECK_RESULT( vkGetPhysicalDeviceSurfaceCapabilitiesKHR( pDevice, m_Surface, &surfCaps ) );
 
         uint32_t numberOfSwapChainImages =
              std::clamp( surfCaps.minImageCount + 1, surfCaps.minImageCount, surfCaps.maxImageCount );
@@ -92,8 +97,8 @@ namespace Desert::Graphic::API::Vulkan
         swapChainCreateInfo.compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         swapChainCreateInfo.oldSwapchain          = oldSwapchain;
 
-        VK_RETURN_RESULT_IF_FALSE( vkCreateSwapchainKHR( m_LogicalDevice->GetVulkanLogicalDevice(),
-                                                         &swapChainCreateInfo, nullptr, &m_SwapChain ) );
+        VK_CHECK_RESULT( vkCreateSwapchainKHR( vkLogicalDevice->GetVulkanLogicalDevice(), &swapChainCreateInfo,
+                                               nullptr, &m_SwapChain ) );
 
         // If an existing swap chain is re-created, destroy the old swap chain
         // This also cleans up all the presentable images
@@ -109,37 +114,39 @@ namespace Desert::Graphic::API::Vulkan
         LOG_TRACE( "Swap chain created" );
 
         uint32_t swapChainImages = 0u;
-        VK_RETURN_RESULT_IF_FALSE( vkGetSwapchainImagesKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
-                                                            &swapChainImages, VK_NULL_HANDLE ) );
+        VK_CHECK_RESULT( vkGetSwapchainImagesKHR( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
+                                                  &swapChainImages, VK_NULL_HANDLE ) );
         m_SwapChainImages.Images.resize( swapChainImages );
         m_SwapChainImages.ImagesView.resize( swapChainImages );
 
         EngineContext::GetInstance().m_FramesInFlight = m_SwapChainImages.ImagesView.size();
-        VK_RETURN_RESULT_IF_FALSE( vkGetSwapchainImagesKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
-                                                            &swapChainImages, m_SwapChainImages.Images.data() ) );
+        VK_CHECK_RESULT( vkGetSwapchainImagesKHR( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
+                                                  &swapChainImages, m_SwapChainImages.Images.data() ) );
 
         for ( uint32_t i = 0; i < swapChainImages; i++ )
         {
             const auto& createdImageView =
-                 Utils::CreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChainImages.Images[i],
+                 Utils::CreateImageView( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChainImages.Images[i],
                                          m_ColorFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
             if ( !createdImageView.IsSuccess() )
             {
-                return Common::MakeError<VkResult>( createdImageView.GetError() );
+                return Common::MakeError<bool>( createdImageView.GetError() );
             }
 
             m_SwapChainImages.ImagesView[i] = createdImageView.GetValue();
         }
 
-        CreateColorAndDepthImages();
+        CreateColorAndDepthImages( SP_CAST( VulkanLogicalDevice, device ) );
         CreateSwapChainFramebuffers();
 
-        return Common::MakeSuccess( VK_SUCCESS );
+        return Common::MakeSuccess( true );
     }
 
-    Common::Result<bool> VulkanSwapChain::GetImageFormatAndColorSpace()
+    Common::Result<bool>
+    VulkanSwapChain::GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
-        VkPhysicalDevice physicalDevice = m_LogicalDevice->GetPhysicalDevice()->GetVulkanPhysicalDevice();
+
+        VkPhysicalDevice physicalDevice = device->GetPhysicalDevice()->GetVulkanPhysicalDevice();
 
         uint32_t formatCount;
         vkGetPhysicalDeviceSurfaceFormatsKHR( physicalDevice, m_Surface, &formatCount, nullptr );
@@ -190,20 +197,37 @@ namespace Desert::Graphic::API::Vulkan
     Common::Result<VkResult> VulkanSwapChain::AcquireNextImage( VkSemaphore presentCompleteSemaphore,
                                                                 uint32_t*   imageIndex )
     {
-        VK_RETURN_RESULT( vkAcquireNextImageKHR( m_LogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
+        const auto vkLogicalDevice = m_LogicalDevice.lock();
+        if ( !vkLogicalDevice )
+        {
+            DESERT_VERIFY( false );
+        }
+
+        VK_RETURN_RESULT( vkAcquireNextImageKHR( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
                                                  UINT64_MAX, presentCompleteSemaphore, VK_NULL_HANDLE,
                                                  imageIndex ) );
     }
 
     void VulkanSwapChain::OnResize( uint32_t width, uint32_t height )
     {
+        const auto device = m_LogicalDevice.lock();
+        if ( !device )
+        {
+            DESERT_VERIFY( false );
+        }
         Release();
-        Create( &width, &height );
+        CreateSwapChain( device, &width, &height );
     }
 
     void VulkanSwapChain::Release()
     {
-        const auto& device = m_LogicalDevice->GetVulkanLogicalDevice();
+        const auto vkLogicalDevice = m_LogicalDevice.lock();
+        if ( !vkLogicalDevice )
+        {
+            DESERT_VERIFY( false );
+        }
+
+        const auto& device = vkLogicalDevice->GetVulkanLogicalDevice();
         if ( m_SwapChain != VK_NULL_HANDLE )
         {
             for ( uint32_t i = 0; i < m_SwapChainImages.ImagesView.size(); i++ )
@@ -226,11 +250,17 @@ namespace Desert::Graphic::API::Vulkan
         VulkanAllocator::GetInstance().RT_DestroyImage( m_DepthStencilImages.Image,
                                                         (VmaAllocation)m_VmaAllocation[1] ); // depth stancil
         m_VmaAllocation[0] = m_VmaAllocation[1] = nullptr;
-        m_SwapChain = VK_NULL_HANDLE;
+        m_SwapChain                             = VK_NULL_HANDLE;
     }
 
     Common::Result<VkResult> VulkanSwapChain::CreateSwapChainFramebuffers()
     {
+        const auto vkLogicalDevice = m_LogicalDevice.lock();
+        if ( !vkLogicalDevice )
+        {
+            DESERT_VERIFY( false );
+        }
+
         m_SwapChainFramebuffers.resize( m_SwapChainImages.ImagesView.size() );
         for ( uint32_t i = 0; i < m_SwapChainFramebuffers.size(); i++ )
         {
@@ -245,7 +275,7 @@ namespace Desert::Graphic::API::Vulkan
             fbCreateInfo.height                  = m_Height;
             fbCreateInfo.layers                  = 1;
 
-            const auto& device = m_LogicalDevice->GetVulkanLogicalDevice();
+            const auto& device = vkLogicalDevice->GetVulkanLogicalDevice();
             auto        res    = vkCreateFramebuffer( device, &fbCreateInfo, NULL, &m_SwapChainFramebuffers[i] );
 
             if ( res != VK_SUCCESS )
@@ -258,7 +288,13 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::Result<VkResult> VulkanSwapChain::CreateSwapChainRenderPass()
     {
-        VkFormat depthFormat = m_LogicalDevice->GetPhysicalDevice()->GetDepthFormat();
+        const auto vkLogicalDevice = m_LogicalDevice.lock();
+        if ( !vkLogicalDevice )
+        {
+            DESERT_VERIFY( false );
+        }
+
+        VkFormat depthFormat = vkLogicalDevice->GetPhysicalDevice()->GetDepthFormat();
 
         // Render Pass
         std::array<VkAttachmentDescription, 1> attachments = {};
@@ -303,11 +339,12 @@ namespace Desert::Graphic::API::Vulkan
         renderPassInfo.dependencyCount        = 1;
         renderPassInfo.pDependencies          = &dependency;
 
-        VK_RETURN_RESULT( vkCreateRenderPass( m_LogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo, nullptr,
+        VK_RETURN_RESULT( vkCreateRenderPass( vkLogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo, nullptr,
                                               &m_VkRenderPass ) );
     }
 
-    Common::Result<VkResult> VulkanSwapChain::CreateColorAndDepthImages()
+    Common::Result<VkResult>
+    VulkanSwapChain::CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
         // Color image
         {
@@ -346,13 +383,13 @@ namespace Desert::Graphic::API::Vulkan
             imageViewCI.subresourceRange.layerCount     = 1;
             imageViewCI.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
 
-            VK_CHECK_RESULT( vkCreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
+            VK_CHECK_RESULT( vkCreateImageView( device->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
                                                 &m_ColorImages.ImageView ) );
         }
 
         // Depth image
         {
-            VkFormat depthFormat = m_LogicalDevice->GetPhysicalDevice()->GetDepthFormat();
+            VkFormat depthFormat = device->GetPhysicalDevice()->GetDepthFormat();
 
             VkImageCreateInfo imageInfo{};
             imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -390,7 +427,7 @@ namespace Desert::Graphic::API::Vulkan
             imageViewCI.subresourceRange.layerCount     = 1;
             imageViewCI.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT;
 
-            VK_CHECK_RESULT( vkCreateImageView( m_LogicalDevice->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
+            VK_CHECK_RESULT( vkCreateImageView( device->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
                                                 &m_DepthStencilImages.ImageView ) );
         }
 
@@ -399,7 +436,11 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanSwapChain::~VulkanSwapChain()
     {
-        //Release();
+        // Release();
+    }
+
+    VulkanSwapChain::VulkanSwapChain( const GLFWwindow* window ) : SwapChain( window )
+    {
     }
 
 } // namespace Desert::Graphic::API::Vulkan

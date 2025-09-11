@@ -5,10 +5,13 @@
 #include <Common/Core/Singleton.hpp>
 #include <Common/Core/LayerStack.hpp>
 #include <Common/Core/Events/WindowEvents.hpp>
-#include <Common/Core/Window.hpp>
-#include "EngineStats.hpp"
-
 #include <Common/Core/Core.hpp>
+
+#include "EngineStats.hpp"
+#include <Engine/Core/Window.hpp>
+#include <Engine/Core/Device.hpp>
+
+#include <Engine/Graphic/RendererContext.hpp>
 
 #ifdef EBABLE_IMGUI
 #include <Engine/imgui/ImGuiLayer.hpp>
@@ -21,7 +24,7 @@ namespace Desert::Engine
         std::string Title;
         uint32_t    Width;
         uint32_t    Height;
-        bool Fullscreen = true;
+        bool        Fullscreen = true;
     };
 
     class Application
@@ -65,13 +68,17 @@ namespace Desert::Engine
         ApplicationInfo m_ApplicationInfo;
 
     protected:
-        std::shared_ptr<Common::Window> m_Window; // TODO: unique ptr
+        std::shared_ptr<Window> m_Window;
+
     private:
         Common::LayerStack m_LayerStack;
         EngineStats        m_EngineStats;
 
         bool m_IsRunningApplication = true;
-        bool m_Minimized = false;
+        bool m_Minimized            = false;
+
+        std::shared_ptr<Device>                   m_Device;
+        std::shared_ptr<Graphic::RendererContext> m_RendererContext;
 
     public:
     };

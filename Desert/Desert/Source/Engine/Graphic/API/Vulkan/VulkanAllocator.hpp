@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
                                                          VmaMemoryUsage usage, VkBuffer& outBuffer );
 
         void RT_DestroyBuffer( VkBuffer buffer, VmaAllocation allocation );
-        void RT_DestroyImage(VkImage image, VmaAllocation allocation);
+        void RT_DestroyImage( VkImage image, VmaAllocation allocation );
 
         uint8_t* MapMemory( VmaAllocation allocation )
         {
@@ -44,7 +44,7 @@ namespace Desert::Graphic::API::Vulkan
 
         void UnmapMemory( VmaAllocation allocation );
 
-        void Init( const VulkanLogicalDevice& device, VkInstance instance );
+        void Init( const std::shared_ptr<VulkanLogicalDevice>& device, VkInstance instance );
 
         void Shutdown();
 

@@ -10,6 +10,9 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanRendererAPI : public RendererAPI
     {
     public:
+        explicit VulkanRendererAPI( const std::shared_ptr<Window>& window ) : RendererAPI( window )
+        {
+        }
         virtual void Init() override;
         virtual void Shutdown() override;
 
@@ -34,7 +37,7 @@ namespace Desert::Graphic::API::Vulkan
         VkCommandBuffer GetCurrentCmdBuffer() const;
 
     private:
-        void SetViewportAndScissor();
+        void SetViewportAndScissor( const uint32_t wdith, const uint32_t height );
 
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;

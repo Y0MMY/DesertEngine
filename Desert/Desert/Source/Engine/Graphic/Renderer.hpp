@@ -22,11 +22,6 @@ namespace Desert::Graphic
         Common::BoolResult Init();
         void               Shutdown();
 
-        const auto& GetRendererContext() const
-        {
-            return m_RendererContext;
-        }
-
         [[nodiscard]] Common::BoolResult BeginFrame();
         [[nodiscard]] Common::BoolResult EndFrame();
         void                             BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
@@ -64,6 +59,5 @@ namespace Desert::Graphic
 
     private:
         std::shared_ptr<Texture2D>              m_BRDFTexture;
-        std::unique_ptr<RendererContext>        m_RendererContext;
     };
 } // namespace Desert::Graphic

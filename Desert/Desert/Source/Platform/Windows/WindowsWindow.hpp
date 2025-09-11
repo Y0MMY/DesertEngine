@@ -1,15 +1,17 @@
 #pragma once
 
-#include <Common/Core/Window.hpp>
-
 #include <GLFW/glfw3.h>
+
+#include <Engine/Core/Window.hpp>
+
+#include <Common/Core/Events/WindowEvents.hpp>
 
 namespace Desert::Platform::Windows
 {
-    class WindowsWindow : public Common::Window
+    class WindowsWindow : public Desert::Window
     {
     public:
-        WindowsWindow( const Common::WindowSpecification& specification );
+        WindowsWindow( const WindowSpecification& specification );
         virtual ~WindowsWindow() = default;
 
         using EventCallbackFn = std::function<void( Common::Event& )>;
@@ -40,18 +42,31 @@ namespace Desert::Platform::Windows
         virtual void PrepareNextFrame() const override;
         virtual void PresentFinalImage() const override;
 
+        virtual void OnEvent( Common::Event& e ) override;
+
+        virtual std::shared_ptr<Graphic::SwapChain> GetWindowSwapChain() override
+        {
+            return m_SwapChain;
+        }
+
         virtual void SetEventCallback( const EventCallbackFn& e ) override
         {
             m_Data.EventCallback = e;
         }
 
+        virtual Common::Result<bool> SetupSwapChain() override;
+
+    private:
+        bool OnEventWindowResize( Common::EventWindowResize& e );
+
     private:
         struct WindowData
         {
-            Common::WindowSpecification Specification;
-            EventCallbackFn             EventCallback;
+            WindowSpecification Specification;
+            EventCallbackFn     EventCallback;
         } m_Data;
 
-        GLFWwindow* m_GLFWWindow;
+        GLFWwindow*                         m_GLFWWindow;
+        std::shared_ptr<Graphic::SwapChain> m_SwapChain;
     };
 } // namespace Desert::Platform::Windows

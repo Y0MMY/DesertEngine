@@ -3,7 +3,6 @@
 #include <vulkan/vulkan.h>
 
 #include <Engine/Graphic/RendererContext.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanQueue.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -12,8 +11,10 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanContext final : public RendererContext
     {
     public:
-        VulkanContext( GLFWwindow* window );
+        VulkanContext( const std::shared_ptr<Window>& window );
         virtual ~VulkanContext() = default;
+
+        virtual void Init() override;
 
         virtual void BeginFrame() const override;
         virtual void EndFrame() const override;
@@ -28,11 +29,6 @@ namespace Desert::Graphic::API::Vulkan
             return s_VulkanInstance;
         }
 
-        [[nodiscard]] const auto& GetVulkanSwapChain() const
-        {
-            return m_SwapChain;
-        }
-
         [[nodiscard]] const auto& GetVulkanQueue() const
         {
             return m_VulkanQueue;
@@ -43,10 +39,9 @@ namespace Desert::Graphic::API::Vulkan
     private:
         inline static VkInstance s_VulkanInstance;
         VkDebugReportCallbackEXT m_DebugReportCallback = VK_NULL_HANDLE;
-        GLFWwindow*              m_GLFWwindow;
+        std::weak_ptr<Window>    m_Window;
 
-        std::unique_ptr<VulkanSwapChain> m_SwapChain;
-        std::unique_ptr<VulkanQueue>     m_VulkanQueue;
+        std::unique_ptr<VulkanQueue> m_VulkanQueue;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -1,6 +1,4 @@
 #include <Engine/Core/Application.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
-
 #include <Engine/Core/EngineContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
@@ -14,18 +12,21 @@ namespace Desert::Engine
     {
         EngineContext::CreateInstance();
 
-        Common::WindowSpecification specWindow;
+        WindowSpecification specWindow;
         specWindow.Title      = appInfo.Title;
         specWindow.Width      = appInfo.Width;
         specWindow.Height     = appInfo.Height;
         specWindow.Fullscreen = appInfo.Fullscreen;
 
-        m_Window = Common::Window::Create( specWindow );
+        m_Window = Window::Create( specWindow );
         m_Window->Init();
-        EngineContext::GetInstance().Initialize( m_Window );
+        m_RendererContext = Graphic::RendererContext::Create( m_Window );
+        m_Device          = Device::Create();
+        EngineContext::GetInstance().Initialize( m_Window, m_Device, m_RendererContext );
+        m_Window->SetupSwapChain();
+        m_RendererContext->Init();
 
         m_Window->SetEventCallback( [this]( Common::Event& e ) { this->ProcessEvents( e ); } );
-
         Graphic::Renderer::CreateInstance().Init();
     }
 

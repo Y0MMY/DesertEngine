@@ -6,21 +6,24 @@
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanQueue.hpp>
 
+#include <Engine/Graphic/SwapChain.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
-    class VulkanSwapChain // maybe should be Singleton?
+    class VulkanSwapChain final : public SwapChain
     {
     public:
-        VulkanSwapChain() = default;
-        ~VulkanSwapChain() ;
+        VulkanSwapChain( const GLFWwindow* window );
+        ~VulkanSwapChain();
 
-        void Init( GLFWwindow* window, const VkInstance instance, VulkanLogicalDevice& device );
+        void Init( const VkInstance instance, const std::shared_ptr<Engine::Device>& device );
 
-        Common::Result<VkResult> Create( uint32_t* width, uint32_t* height );
+        Common::Result<bool> CreateSwapChain( const std::shared_ptr<Engine::Device>& device, uint32_t* width,
+                                              uint32_t* height ) override;
 
-        Common::Result<bool> GetImageFormatAndColorSpace();
+        Common::Result<bool> GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device );
 
-        uint32_t GetImageCount() const
+        uint32_t GetBackBufferCount() const override
         {
             return m_SwapChainImages.Images.size();
         }
@@ -40,8 +43,14 @@ namespace Desert::Graphic::API::Vulkan
             return m_ColorFormat;
         }
 
-        const uint32_t GetWidth() const { return m_Width; }
-        const uint32_t GetHeight() const { return m_Height; }
+        uint32_t GetWidth() const override
+        {
+            return m_Width;
+        }
+        uint32_t GetHeight() const override
+        {
+            return m_Height;
+        }
 
         VkColorSpaceKHR GetColorSpace() const
         {
@@ -73,18 +82,18 @@ namespace Desert::Graphic::API::Vulkan
         void Release();
 
     private:
-        void InitSurface( GLFWwindow* window );
+        void InitSurface( GLFWwindow* window, const VkInstance instance );
 
     private:
         Common::Result<VkResult> AcquireNextImage( VkSemaphore presentCompleteSemaphore, uint32_t* imageIndex );
         Common::Result<VkResult> CreateSwapChainRenderPass();
         Common::Result<VkResult> CreateSwapChainFramebuffers();
-        Common::Result<VkResult> CreateColorAndDepthImages(); //TODO: remove depth
+        Common::Result<VkResult>
+        CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device ); // TODO: remove depth
 
     private:
-        VkSampleCountFlagBits m_MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-        VulkanLogicalDevice*  m_LogicalDevice;
-        VkInstance            m_VulkanInstance;
+        VkSampleCountFlagBits              m_MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        std::weak_ptr<VulkanLogicalDevice> m_LogicalDevice;
 
         VkSwapchainKHR m_SwapChain = VK_NULL_HANDLE;
         VkSurfaceKHR   m_Surface   = VK_NULL_HANDLE;

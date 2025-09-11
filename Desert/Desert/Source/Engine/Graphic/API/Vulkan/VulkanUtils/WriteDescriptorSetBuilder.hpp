@@ -13,6 +13,11 @@ namespace Desert::Graphic::API::Vulkan
                                                    const uint32_t                descriptorCount,
                                                    const VkDescriptorBufferInfo* pBufferInfo );
 
+        static VkWriteDescriptorSet GetStorageWDS( VulkanMaterialBackend* materialBackend, const uint32_t frame,
+                                                   const uint32_t set, const uint32_t dstBinding,
+                                                   const uint32_t                descriptorCount,
+                                                   const VkDescriptorBufferInfo* pBufferInfo );
+
         static VkWriteDescriptorSet GetSampler2DWDS( VulkanMaterialBackend* materialBackend, const uint32_t frame,
                                                      const uint32_t set, const uint32_t dstBinding,
                                                      const uint32_t               descriptorCount,

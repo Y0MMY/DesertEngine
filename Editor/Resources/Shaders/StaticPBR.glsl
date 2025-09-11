@@ -188,5 +188,5 @@ void main() {
                                         roughness, m_Params.AlbedoColor);
 	}
 
-    oColor = vec4(light + ibl + pointLight, 1.0);
+    oColor = vec4( pointLight, 1.0);
 }

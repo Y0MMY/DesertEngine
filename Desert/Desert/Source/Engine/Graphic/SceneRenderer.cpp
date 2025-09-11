@@ -15,8 +15,8 @@ namespace Desert::Graphic
 
     NO_DISCARD Common::BoolResult SceneRenderer::Init()
     {
-        const uint32_t width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
-        const uint32_t height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
+        const uint32_t width  = EngineContext::GetInstance().GetCurrentWindow()->GetWidth();
+        const uint32_t height = EngineContext::GetInstance().GetCurrentWindow()->GetHeight();
 
         m_RenderGraphRenderSystems = std::make_shared<RenderGraph>();
         m_RenderGraphPPSystems     = std::make_shared<RenderGraph>();
@@ -103,9 +103,9 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
         m_TargetFramebuffer->Resize( width, height );
-       /* m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->GetSystemFramebuffer()->Resize(
-             width,
-             height );*/ // TODO: event
+        /* m_FixedRenderSystems[FixedRenderSystems::MeshSystem]->GetSystemFramebuffer()->Resize(
+              width,
+              height );*/ // TODO: event
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting

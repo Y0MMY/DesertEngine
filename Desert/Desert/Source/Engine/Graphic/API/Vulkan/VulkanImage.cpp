@@ -2,6 +2,8 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
+#include <Engine/Core/EngineContext.hpp>
+
 #include <Common/Utilities/String.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -348,7 +350,9 @@ namespace Desert::Graphic::API::Vulkan
             case Core::Formats::ImageFormat::DEPTH32F:
                 return VK_FORMAT_D32_SFLOAT;
             case Core::Formats::ImageFormat::DEPTH24STENCIL8:
-                return VulkanLogicalDevice::GetInstance().GetPhysicalDevice()->GetDepthFormat();
+                return SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                     ->GetPhysicalDevice()
+                     ->GetDepthFormat();
             default:
                 return VK_FORMAT_UNDEFINED;
         }
@@ -372,7 +376,8 @@ namespace Desert::Graphic::API::Vulkan
             Release();
         }
 
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         VkFormat format             = GetImageVulkanFormat( m_ImageSpecification.Format );
         m_VulkanImageInfo.Format    = format;
@@ -599,7 +604,8 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanImage2D::Release()
     {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         for ( uint32_t i = 0; i < m_MipImageViews.size(); ++i )
         {
@@ -674,7 +680,8 @@ namespace Desert::Graphic::API::Vulkan
 
         m_FaceSize = faceWidth;
 
-        VkDevice device             = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
         VkFormat format             = GetImageVulkanFormat( m_ImageSpecification.Format );
         m_VulkanImageInfo.Format    = format;
         VkImageCreateInfo imageInfo = CreateImageInfo( format );
@@ -888,7 +895,8 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanImageCube::Release()
     {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         // Destroy all mip image views
         for ( auto& view : m_MipImageViews )

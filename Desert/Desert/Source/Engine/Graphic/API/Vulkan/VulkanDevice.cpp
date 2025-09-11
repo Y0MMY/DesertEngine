@@ -4,12 +4,19 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
+#include <Engine/Core/EngineContext.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
+    VulkanPhysicalDevice::VulkanPhysicalDevice()
+    {
+        CreateDevice();
+    }
+
     Common::Result<bool> VulkanPhysicalDevice::CreateDevice()
     {
-        auto& instance = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
-                              ->GetVulkanInstance();
+        auto& instance =
+             SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanInstance();
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices( instance, &deviceCount, nullptr );
         DESERT_VERIFY( deviceCount, "Failed to find GPUs with Vulkan support!" );
@@ -147,9 +154,10 @@ namespace Desert::Graphic::API::Vulkan
         return std::make_shared<Desert::Graphic::API::Vulkan::VulkanPhysicalDevice>();
     }
 
-    VulkanLogicalDevice::VulkanLogicalDevice( const std::shared_ptr<VulkanPhysicalDevice>& physicalDevice )
-         : m_PhysicalDevice( physicalDevice )
+    VulkanLogicalDevice::VulkanLogicalDevice()
     {
+        m_PhysicalDevice = std::make_shared<VulkanPhysicalDevice>();
+        CreateDevice();
     }
 
     void VulkanLogicalDevice::Destroy()
@@ -269,4 +277,6 @@ namespace Desert::Graphic::API::Vulkan
         }
         return VK_FORMAT_UNDEFINED;
     }
+
+
 } // namespace Desert::Graphic::API::Vulkan

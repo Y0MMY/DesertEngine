@@ -129,7 +129,8 @@ namespace Desert::Graphic::API::Vulkan
              .pushConstantRangeCount = pushConstant.first,
              .pPushConstantRanges    = pushConstant.first > 0 ? &pushConstant.second : nullptr };
 
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
         VkResult result = vkCreatePipelineLayout( device, &layoutInfo, nullptr, &m_PipelineLayout );
 
         if ( result != VK_SUCCESS )
@@ -337,7 +338,8 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipeline::Invalidate()
     {
-        VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         if ( m_Pipeline != VK_NULL_HANDLE )
         {

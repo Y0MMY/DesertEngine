@@ -9,7 +9,7 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanQueue final
     {
     public:
-        VulkanQueue( VulkanSwapChain* swapChain );
+        VulkanQueue( const std::shared_ptr<VulkanSwapChain>& swapChain );
 
         void                     PrepareFrame();
         void                     Present();
@@ -32,7 +32,7 @@ namespace Desert::Graphic::API::Vulkan
     private:
         uint32_t m_ImageIndex = ~0;
 
-        VulkanSwapChain* m_SwapChain;
+        std::weak_ptr<VulkanSwapChain> m_SwapChain;
 
         struct
         {

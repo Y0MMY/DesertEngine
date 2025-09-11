@@ -3,7 +3,7 @@
 #include <Engine/Graphic/Framebuffer.hpp>
 #include <Engine/Graphic/RenderGraph.hpp>
 
-#include <Common/Core/CommonContext.hpp>
+#include <Engine/Core/EngineContext.hpp>
 
 namespace Desert::Graphic
 {
@@ -15,14 +15,11 @@ namespace Desert::Graphic::System
     class RenderSystem
     {
     public:
-        explicit RenderSystem( SceneRenderer*                      sceneRenderer,
-                               const std::shared_ptr<Framebuffer>& compositeFramebuffer,
+        explicit RenderSystem( SceneRenderer* sceneRenderer, const std::shared_ptr<Framebuffer>& targetFramebuffer,
                                const std::shared_ptr<RenderGraph>& renderGraph )
-             : m_SceneRenderer( sceneRenderer ), m_CompositeFramebuffer( compositeFramebuffer ),
+             : m_SceneRenderer( sceneRenderer ), m_TargetFramebuffer( targetFramebuffer ),
                m_RenderGraph( renderGraph )
         {
-            m_Width  = Common::CommonContext::GetInstance().GetCurrentWindowWidth();
-            m_Height = Common::CommonContext::GetInstance().GetCurrentWindowHeight();
         }
         virtual ~RenderSystem() = default;
 
@@ -35,12 +32,8 @@ namespace Desert::Graphic::System
         }
 
     protected:
-        uint32_t m_Width;
-        uint32_t m_Height;
-
-    protected:
         SceneRenderer*             m_SceneRenderer;
-        std::weak_ptr<Framebuffer> m_CompositeFramebuffer;
+        std::weak_ptr<Framebuffer> m_TargetFramebuffer;
         std::weak_ptr<RenderGraph> m_RenderGraph;
 
         std::shared_ptr<Framebuffer> m_Framebuffer;

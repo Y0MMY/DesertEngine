@@ -6,7 +6,7 @@ namespace Desert::Graphic::System
 {
     Common::BoolResult SkyboxRenderer::Initialize()
     {
-        const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
+        const auto& compositeFramebuffer = m_TargetFramebuffer.lock();
         const auto& renderGraph          = m_RenderGraph.lock();
         if ( !compositeFramebuffer || !renderGraph )
         {

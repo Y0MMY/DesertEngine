@@ -2,6 +2,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 
+#include <Engine/Core/EngineContext.hpp>
+
 namespace Desert::Graphic::API::Vulkan
 {
     namespace
@@ -51,7 +53,8 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanIndexBuffer::RT_Invalidate()
     {
-        const VkDevice device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         auto& allocator = VulkanAllocator::GetInstance();
 

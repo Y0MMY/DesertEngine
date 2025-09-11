@@ -156,7 +156,7 @@ namespace Desert::Graphic::API::Vulkan
 
             std::vector<VkSubpassDependency> dependencies;
 
-            if (colorAttachments.size() )
+            if ( colorAttachments.size() )
             {
                 {
                     VkSubpassDependency& depedency = dependencies.emplace_back();
@@ -288,8 +288,9 @@ namespace Desert::Graphic::API::Vulkan
             sp_cast<VulkanImage2D>( m_DepthAttachment )->RT_Invalidate();
         }
 
-        const auto& device = Common::Singleton<VulkanLogicalDevice>::GetInstance().GetVulkanLogicalDevice();
-        const auto  result = CreateFramebuffer( device, width, height );
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
+        const auto result = CreateFramebuffer( device, width, height );
         if ( !result.IsSuccess() )
         {
             return Common::MakeError( result.GetError() );
@@ -387,8 +388,9 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanFramebuffer::Release()
     {
-        const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
+        vkDeviceWaitIdle( device );
         // Release color attachments
         for ( auto& colorAttachment : m_ColorAttachments )
         {
@@ -408,7 +410,8 @@ namespace Desert::Graphic::API::Vulkan
     {
         Release();
 
-        const auto& device = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                               ->GetVulkanLogicalDevice();
 
         m_ColorAttachments.clear();
 

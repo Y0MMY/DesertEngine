@@ -127,10 +127,12 @@ namespace Desert::Platform::Windows
                                         }
                                     } );
 
+        m_SwapChain = Graphic::SwapChain::Create( m_GLFWWindow );
+
         return Common::MakeSuccess( true );
     }
 
-    WindowsWindow::WindowsWindow( const Common::WindowSpecification& specification )
+    WindowsWindow::WindowsWindow( const WindowSpecification& specification )
     {
         m_Data.Specification = specification;
     }
@@ -184,18 +186,38 @@ namespace Desert::Platform::Windows
 
     void WindowsWindow::PresentFinalImage() const
     {
-        Graphic::Renderer::GetInstance().GetRendererContext()->EndFrame();
+        EngineContext::GetInstance().GetRendererContext()->EndFrame();
     }
 
     void WindowsWindow::PrepareNextFrame() const
     {
-        Graphic::Renderer::GetInstance().GetRendererContext()->BeginFrame();
+        EngineContext::GetInstance().GetRendererContext()->BeginFrame();
     }
 
     void WindowsWindow::SetTitle( const std::string& title )
     {
         m_Data.Specification.Title = title;
         glfwSetWindowTitle( m_GLFWWindow, title.c_str() );
+    }
+
+    void WindowsWindow::OnEvent( Common::Event& e )
+    {
+        Common::EventManager eventManager( e );
+        eventManager.Notify<Common::EventWindowResize>( [this]( Common::EventWindowResize& e )
+                                                        { return this->OnEventWindowResize( e ); } );
+    }
+
+    bool WindowsWindow::OnEventWindowResize( Common::EventWindowResize& e )
+    {
+        m_SwapChain->OnResize( e.width, e.height );
+
+        return false;
+    }
+
+    Common::Result<bool> WindowsWindow::SetupSwapChain()
+    {
+        const auto device = EngineContext::GetInstance().GetMainDevice();
+        return m_SwapChain->CreateSwapChain( device, &m_Data.Specification.Width, &m_Data.Specification.Height );
     }
 
 } // namespace Desert::Platform::Windows

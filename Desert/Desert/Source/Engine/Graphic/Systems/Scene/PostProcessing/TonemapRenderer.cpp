@@ -4,9 +4,9 @@ namespace Desert::Graphic::System
 {
     Common::BoolResult TonemapRenderer::Initialize()
     {
-        const auto& compositeFramebuffer = m_CompositeFramebuffer.lock();
-        const auto& renderGraph          = m_RenderGraph.lock();
-        if ( !compositeFramebuffer || !renderGraph )
+        const auto& targetFramebuffer = m_TargetFramebuffer.lock();
+        const auto& renderGraph       = m_RenderGraph.lock();
+        if ( !targetFramebuffer || !renderGraph )
         {
             DESERT_VERIFY( false );
         }
@@ -19,7 +19,8 @@ namespace Desert::Graphic::System
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
 
         m_Framebuffer = Graphic::Framebuffer::Create( fbSpec );
-        m_Framebuffer->Resize( m_Width, m_Height);
+        m_Framebuffer->Resize( targetFramebuffer->GetFramebufferWidth(),
+                               targetFramebuffer->GetFramebufferHeight() );
 
         // RenderPass
         RenderPassSpecification rpSpec;
@@ -44,7 +45,7 @@ namespace Desert::Graphic::System
              [this]()
              {
                  const auto& framebuffer =
-                      m_CompositeFramebuffer.lock(); // We call lock internally to avoid cyclic dependencies.
+                      m_TargetFramebuffer.lock(); // We call lock internally to avoid cyclic dependencies.
                  if ( !framebuffer )
                  {
                      LOG_ERROR(

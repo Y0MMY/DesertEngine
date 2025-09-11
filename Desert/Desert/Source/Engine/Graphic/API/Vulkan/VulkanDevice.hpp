@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Common/Core/Singleton.hpp>
+#include <Engine/Core/Device.hpp>
 
 #include <vulkan/vulkan.h>
 
@@ -9,7 +9,7 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanPhysicalDevice final
     {
     public:
-        VulkanPhysicalDevice()  = default;
+        VulkanPhysicalDevice();
         ~VulkanPhysicalDevice() = default;
 
         struct QueueFamilyIndices
@@ -65,7 +65,7 @@ namespace Desert::Graphic::API::Vulkan
 
         VkFormat m_DepthFormat = VK_FORMAT_UNDEFINED;
 
-        bool m_SupportWideLines = false;
+        bool         m_SupportWideLines = false;
         VkDeviceSize m_UniformBufferOffsetAlignment;
 
         std::unordered_set<std::string> m_SupportedExtensions;
@@ -74,10 +74,10 @@ namespace Desert::Graphic::API::Vulkan
         friend class VulkanLogicalDevice;
     };
 
-    class VulkanLogicalDevice : public Common::Singleton<VulkanLogicalDevice>
+    class VulkanLogicalDevice : public Engine::Device
     {
     public:
-        VulkanLogicalDevice( const std::shared_ptr<VulkanPhysicalDevice>& physicalDevice );
+        VulkanLogicalDevice();
         ~VulkanLogicalDevice() = default;
 
         const auto& GetPhysicalDevice() const

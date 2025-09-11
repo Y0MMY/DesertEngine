@@ -15,7 +15,7 @@ namespace Desert::Core
     {
         MeshRenderer   = 0,
         SkyboxRenderer = 1,
-        PointLight     = 2, //TODO: add direction light
+        PointLight     = 2, // TODO: add direction light
     };
 
     Scene::Scene( std::string&& sceneName, const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
@@ -106,6 +106,11 @@ namespace Desert::Core
     void Scene::Resize( const uint32_t width, const uint32_t height ) const
     {
         m_SceneRenderer->Resize( width, height );
+
+        if ( m_MainCamera )
+        {
+            m_MainCamera->UpdateProjectionMatrix( width, height ); // TODO: Move to scene
+        }
     }
 
     std::optional<std::reference_wrapper<const Desert::ECS::Entity>>
