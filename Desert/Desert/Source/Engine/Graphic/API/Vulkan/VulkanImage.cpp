@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
@@ -170,14 +171,17 @@ namespace Desert::Graphic::API::Vulkan
                                               .usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
 
-            return VulkanAllocator::GetInstance().RT_AllocateBuffer( "ImageStagingBuffer", bufferInfo,
-                                                                     VMA_MEMORY_USAGE_CPU_TO_GPU, outBuffer );
+            return SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                 ->GetVulkanAllocator()
+                 ->RT_AllocateBuffer( "ImageStagingBuffer", bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, outBuffer );
         }
 
         void ReleaseStagingBuffer( VkBuffer inBuffer, const VmaAllocation& allocation )
         {
 
-            return VulkanAllocator::GetInstance().RT_DestroyBuffer( inBuffer, allocation );
+            return SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                 ->GetVulkanAllocator()
+                 ->RT_DestroyBuffer( inBuffer, allocation );
         }
 
         // Copies image data to a staging buffer
@@ -188,7 +192,9 @@ namespace Desert::Graphic::API::Vulkan
             if ( !Core::Formats::HasData( imageData ) )
                 return;
 
-            void* mappedData = VulkanAllocator::GetInstance().MapMemory( stagingAllocation );
+            void* mappedData = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                                    ->GetVulkanAllocator()
+                                    ->MapMemory( stagingAllocation );
 
             switch ( format )
             {
@@ -216,20 +222,25 @@ namespace Desert::Graphic::API::Vulkan
                     break;
             }
 
-            VulkanAllocator::GetInstance().UnmapMemory( stagingAllocation );
+            SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                 ->GetVulkanAllocator()
+                 ->UnmapMemory( stagingAllocation );
         }
 
         // Creates a Vulkan image with specified parameters
         inline Common::Result<VmaAllocation> CreateImage( const VkImageCreateInfo& imageInfo, VkImage& outImage,
                                                           const std::string& tag )
         {
-            return VulkanAllocator::GetInstance().RT_AllocateImage( tag + " - VulkanImage", imageInfo,
-                                                                    VMA_MEMORY_USAGE_GPU_ONLY, outImage );
+            return SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                 ->GetVulkanAllocator()
+                 ->RT_AllocateImage( tag + " - VulkanImage", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, outImage );
         }
 
         inline void ReleaseImage( VkImage inImage, const VmaAllocation& allocation )
         {
-            return VulkanAllocator::GetInstance().RT_DestroyImage( inImage, allocation );
+            return SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                 ->GetVulkanAllocator()
+                 ->RT_DestroyImage( inImage, allocation );
         }
 
         // Prepares a command buffer for image operations
@@ -604,6 +615,11 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanImage2D::Release()
     {
+        if ( !m_VulkanImageInfo.Image )
+        {
+            return BOOLSUCCESS;
+        }
+
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();
 
@@ -739,7 +755,9 @@ namespace Desert::Graphic::API::Vulkan
             {
                 if ( buffer )
                 {
-                    VulkanAllocator::GetInstance().RT_DestroyBuffer( buffer, allocation );
+                    SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                         ->GetVulkanAllocator()
+                         ->RT_DestroyBuffer( buffer, allocation );
                 }
             }
         } stagingBuffer;
@@ -766,10 +784,14 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             uint8_t* dstData =
-                 static_cast<uint8_t*>( VulkanAllocator::GetInstance().MapMemory( stagingBuffer.allocation ) );
+                 static_cast<uint8_t*>( SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                                             ->GetVulkanAllocator()
+                                             ->MapMemory( stagingBuffer.allocation ) );
             CopyImageDataToCubemapFaces( srcDataResult.GetValue(), dstData,
                                          m_ImageSpecification.Width * bytesPerPixel, faceSize, bytesPerPixel );
-            VulkanAllocator::GetInstance().UnmapMemory( stagingBuffer.allocation );
+            SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                 ->GetVulkanAllocator()
+                 ->UnmapMemory( stagingBuffer.allocation );
         }
 
         auto imageAlloc =

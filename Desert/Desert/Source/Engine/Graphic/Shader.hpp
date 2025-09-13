@@ -4,6 +4,8 @@
 #include <Engine/Core/Formats/Shader.hpp>
 #include <Engine/Core/Models/Shader.hpp>
 
+#include <Engine/Assets/Shader/ShaderAsset.hpp>
+
 namespace Desert::Graphic
 {
     using ShaderDefines = std::vector<std::pair<std::string, std::string>>;
@@ -25,24 +27,8 @@ namespace Desert::Graphic
         virtual const Common::Filepath&                           GetFilepath() const                          = 0;
 
         static std::string             GetStringShaderStage( const Core::Formats::ShaderStage stage );
-        static std::shared_ptr<Shader> Create( const std::string& filename, const ShaderDefines& defines = {} );
+        static std::shared_ptr<Shader> Create( const Assets::Asset<Assets::ShaderAsset>& asset,
+                                               const ShaderDefines&                      defines = {} );
     };
 
-    class ShaderLibrary final
-    {
-    public:
-        ShaderLibrary() = default;
-
-        static void LoadShader( const std::shared_ptr<Shader>& shader, const ShaderDefines& defines );
-        static Common::Result<std::shared_ptr<Shader>> Get( const std::string&   shaderName,
-                                                            const ShaderDefines& defines );
-        static inline bool                             IsShaderInLibrary( const std::string& shaderName );
-        static auto&                                   GetAll()
-        {
-            return s_AllShaders;
-        }
-
-    private:
-        static inline std::unordered_map<std::string, std::shared_ptr<Shader>> s_AllShaders;
-    };
 } // namespace Desert::Graphic

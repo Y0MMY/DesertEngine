@@ -23,17 +23,16 @@ namespace Desert::Editor
          : Common::Layer( layerName ), m_Application( application )
 
     {
-        m_AssetManager     = std::make_shared<Assets::AssetManager>();
-        m_ResourceRegistry = std::make_shared<Runtime::ResourceRegistry>();
-        m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager, m_ResourceRegistry );
-        m_MainScene        = std::make_shared<Desert::Core::Scene>( "New Scene", m_ResourceRegistry );
+        m_AssetManager   = std::make_shared<Assets::AssetManager>();
+        m_AssetPreloader = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
+        m_MainScene      = std::make_shared<Desert::Core::Scene>( "New Scene" );
 
-        PrimitiveMeshFactory::Initialize();
+        // PrimitiveMeshFactory::Initialize();
     }
 
     EditorLayer::~EditorLayer()
     {
-        PrimitiveMeshFactory::Shutdown();
+        // PrimitiveMeshFactory::Shutdown();
         m_MainScene->Shutdown();
     }
 
@@ -65,18 +64,18 @@ namespace Desert::Editor
 
         Editor::ThemeManager::SetDarkTheme();
 
+        m_AssetPreloader->PreloadAllAssets();
         m_MainScene->Init();
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
         m_ImGuiLayer->OnAttach();
 
-        m_AssetPreloader->PreloadAllAssets();
 
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene ) );
         m_Panels.emplace_back(
-             std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager, m_ResourceRegistry ) );
+             std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
-        m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene, m_ResourceRegistry ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>( "Resources/" ) );
 
 #endif // EBABLE_IMGUI

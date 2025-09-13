@@ -41,6 +41,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( s_VmaAllocator == nullptr )
         {
+            DESERT_VERIFY( false );
             return Common::MakeError<VmaAllocation>(
                  "VmaAllocator is nullptr. You must call `VulkanAllocator::Init` first. " );
         }
@@ -173,4 +174,9 @@ namespace Desert::Graphic::API::Vulkan
     {
         CHECK_RESOURCE_LEAKS();
     }
+
+    VulkanAllocator::~VulkanAllocator()
+    {
+    }
+
 } // namespace Desert::Graphic::API::Vulkan

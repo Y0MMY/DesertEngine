@@ -18,16 +18,14 @@ namespace Desert::Core
         PointLight     = 2, // TODO: add direction light
     };
 
-    Scene::Scene( std::string&& sceneName, const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
+    Scene::Scene( std::string&& sceneName )
          : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( std::make_shared<Graphic::SceneRenderer>() ),
-           m_ResourceRegistry( resourceRegistry ), m_Systems()
+           m_Systems()
     {
 
-        RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer, m_ResourceRegistry );
-        RegisterSystem<ECS::SkyboxRenderSystem>( SceneSystem::SkyboxRenderer, m_SceneRenderer,
-                                                 m_ResourceRegistry );
-        RegisterSystem<ECS::PointLightRenderSystem>( SceneSystem::PointLight, m_SceneRenderer,
-                                                     m_ResourceRegistry );
+        RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer );
+        RegisterSystem<ECS::SkyboxRenderSystem>( SceneSystem::SkyboxRenderer, m_SceneRenderer );
+        RegisterSystem<ECS::PointLightRenderSystem>( SceneSystem::PointLight, m_SceneRenderer );
 
         m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }

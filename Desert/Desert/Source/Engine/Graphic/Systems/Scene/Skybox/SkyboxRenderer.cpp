@@ -2,6 +2,8 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
 namespace Desert::Graphic::System
 {
     Common::BoolResult SkyboxRenderer::Initialize()
@@ -21,7 +23,7 @@ namespace Desert::Graphic::System
         rpSpec.TargetFramebuffer = compositeFramebuffer;
 
         // Pipeline
-        m_Shader = Graphic::Shader::Create( "skybox.glsl" );
+        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "skybox.glsl" );
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;

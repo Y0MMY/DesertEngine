@@ -220,4 +220,8 @@ namespace Desert::Platform::Windows
         return m_SwapChain->CreateSwapChain( device, &m_Data.Specification.Width, &m_Data.Specification.Height );
     }
 
+    WindowsWindow::~WindowsWindow()
+    {
+    }
+
 } // namespace Desert::Platform::Windows

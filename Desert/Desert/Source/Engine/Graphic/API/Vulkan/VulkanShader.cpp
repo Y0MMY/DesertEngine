@@ -205,8 +205,9 @@ namespace Desert::Graphic::API::Vulkan
 
     } // namespace Utils
 
-    VulkanShader::VulkanShader( const std::filesystem::path& path, const ShaderDefines& defines )
-         : m_ShaderPath( path ), m_ShaderName( path.filename().string() )
+    VulkanShader::VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines )
+         : m_ShaderAsset( asset ), m_ShaderPath( asset->GetMetadata().Filepath ),
+           m_ShaderName( m_ShaderPath.filename().string() )
     {
         Utils::CreateDirectoriesIfNoExists(); // TODO: move to a better location (init project)
 
@@ -215,9 +216,14 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResult VulkanShader::Reload() // also load
     {
+        const auto asset = m_ShaderAsset.lock();
+        if ( !asset )
+        {
+            DESERT_VERIFY( false );
+        }
         m_PipelineShaderStageCreateInfos.clear();
 
-        const auto shaderContent    = Common::Utils::FileSystem::ReadFileContent( m_ShaderPath );
+        const auto shaderContent    = asset->GetShaderContent();
         const auto shadersWithStage = Core::Preprocess::Shader::PreProcess( shaderContent );
 
         m_ReflectionData.ShaderDescriptorSets.clear();

@@ -16,8 +16,7 @@ namespace Desert::ECS
         void Update( entt::registry& registry, const Common::Timestep& ts ) override
         {
             const auto& renderer        = m_Renderer.lock();
-            const auto& resourceManager = m_ResourceRegistry.lock();
-            if ( renderer && resourceManager )
+            if ( renderer )
             {
                 const auto& skyboxes = registry.view<ECS::SkyboxComponent>();
                 for ( const auto skyboxEntity : skyboxes )
@@ -26,11 +25,11 @@ namespace Desert::ECS
                     /*if ( skybox.SkyboxHandle == m_CurrentSkyboxHandle )
                         return;*/
                     // m_CurrentSkyboxHandle = skybox.SkyboxHandle;
-                    auto skyboxAsset = resourceManager->GetSkybox( skybox.SkyboxHandle );
+                    auto skyboxAsset = Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle );
 
                     if ( !skyboxAsset )
                         return;
-                    renderer->SetEnvironment( skyboxAsset.value() );
+                    renderer->SetEnvironment( skyboxAsset );
                     break;
                 }
             }

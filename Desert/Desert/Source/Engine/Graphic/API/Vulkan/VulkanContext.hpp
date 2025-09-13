@@ -3,11 +3,11 @@
 #include <vulkan/vulkan.h>
 
 #include <Engine/Graphic/RendererContext.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanQueue.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
-
+    class VulkanAllocator;
     class VulkanContext final : public RendererContext
     {
     public:
@@ -29,19 +29,18 @@ namespace Desert::Graphic::API::Vulkan
             return s_VulkanInstance;
         }
 
-        [[nodiscard]] const auto& GetVulkanQueue() const
-        {
-            return m_VulkanQueue;
-        }
-
         [[nodiscard]] Common::Result<VkResult> CreateVKInstance();
 
-    private:
-        inline static VkInstance s_VulkanInstance;
-        VkDebugReportCallbackEXT m_DebugReportCallback = VK_NULL_HANDLE;
-        std::weak_ptr<Window>    m_Window;
+        const auto& GetVulkanAllocator() const
+        {
+            return m_VulkanAllocator;
+        }
 
-        std::unique_ptr<VulkanQueue> m_VulkanQueue;
+    private:
+        inline static VkInstance         s_VulkanInstance;
+        VkDebugReportCallbackEXT         m_DebugReportCallback = VK_NULL_HANDLE;
+        std::weak_ptr<Window>            m_Window;
+        std::unique_ptr<VulkanAllocator> m_VulkanAllocator;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

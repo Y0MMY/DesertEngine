@@ -13,16 +13,10 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t    Size;
     };
 
-#ifdef DESERT_CONFIG_DEBUG
-#define CHECK_RESOURCE_LEAKS_ALLOCATOR() VulkanAllocator::GetInstance().CheckResourceLeaks();
-#else
-#define CHECK_RESOURCE_LEAKS_ALLOCATOR()
-#endif
-
-    class VulkanAllocator : public Common::Singleton<VulkanAllocator>
+    class VulkanAllocator
     {
     public:
-        ~VulkanAllocator() = default;
+        ~VulkanAllocator();
 
         Common::Result<VmaAllocation> RT_AllocateImage( const std::string&       tag,
                                                         const VkImageCreateInfo& imageCreateInfo,

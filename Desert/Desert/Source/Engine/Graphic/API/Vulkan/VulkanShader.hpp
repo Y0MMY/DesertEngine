@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
         };
 
     public:
-        VulkanShader( const std::filesystem::path& path, const ShaderDefines& defines );
+        VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines );
 
         virtual void Use( BindUsage use = BindUsage::Bind ) const override
         {
@@ -108,6 +108,9 @@ namespace Desert::Graphic::API::Vulkan
     private:
         void               Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
         Common::BoolResult CreateDescriptorsLayout();
+
+    private:
+        const std::weak_ptr<Assets::ShaderAsset> m_ShaderAsset;
 
     private:
         std::vector<VkPipelineShaderStageCreateInfo> m_PipelineShaderStageCreateInfos;

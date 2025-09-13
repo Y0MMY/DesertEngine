@@ -8,9 +8,8 @@
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
-    ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>&       scene,
-                                  const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
-         : IPanel( "Scene###scene" ), m_Scene( scene ), m_ResourceRegistry( resourceRegistry )
+    ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>&       scene)
+         : IPanel( "Scene###scene" ), m_Scene( scene )
     {
         m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
         m_UIHelper->Init();
@@ -55,7 +54,7 @@ namespace Desert::Editor
             mainCamera.value()->UpdateProjectionMatrix( m_ViewportData.Size.x,
                                                         m_ViewportData.Size.y ); // TODO: Move to scene
         }
-       
+
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
 
         // Render scene
@@ -250,7 +249,7 @@ namespace Desert::Editor
     {
         if ( component.GetMeshType() == ECS::StaticMeshComponent::Type::Asset )
         {
-            return m_ResourceRegistry->GetMesh( *component.MeshHandle );
+            return Runtime::ResourceRegistry::GetMeshService()->Get( *component.MeshHandle );
         }
 
         return PrimitiveMeshFactory::GetPrimitive( *component.PrimitiveShape );

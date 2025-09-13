@@ -12,7 +12,7 @@ namespace Desert::Platform::Windows
     {
     public:
         WindowsWindow( const WindowSpecification& specification );
-        virtual ~WindowsWindow() = default;
+        virtual ~WindowsWindow();
 
         using EventCallbackFn = std::function<void( Common::Event& )>;
 

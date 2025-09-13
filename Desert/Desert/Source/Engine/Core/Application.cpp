@@ -23,8 +23,8 @@ namespace Desert::Engine
         m_RendererContext = Graphic::RendererContext::Create( m_Window );
         m_Device          = Device::Create();
         EngineContext::GetInstance().Initialize( m_Window, m_Device, m_RendererContext );
-        m_Window->SetupSwapChain();
         m_RendererContext->Init();
+        m_Window->SetupSwapChain();
 
         m_Window->SetEventCallback( [this]( Common::Event& e ) { this->ProcessEvents( e ); } );
         Graphic::Renderer::CreateInstance().Init();
@@ -110,7 +110,9 @@ namespace Desert::Engine
             delete layer;
         }
 
+        m_Window.reset();
         Graphic::Renderer::GetInstance().Shutdown();
+    //    m_RendererContext->Shutdown();
     }
 
     void Application::ProcessImGui()

@@ -2,6 +2,7 @@
 #include <Engine/Graphic/RendererAPI.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Engine/Uniforms/UniformManager.hpp>
 
@@ -85,14 +86,12 @@ namespace Desert::Graphic
 
     std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&& debugName, std::string&& shaderName )
     {
-        const auto& shaderLibrary = Graphic::ShaderLibrary::Get( shaderName, {} );
-        if ( !shaderLibrary )
+        const auto& resolvedShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( shaderName );
+        if ( !resolvedShader )
         {
             LOG_ERROR( "Could not find the shader" );
             DESERT_VERIFY( false )
         }
-
-        const auto& shader = shaderLibrary.GetValue();
 
         switch ( RendererAPI::GetAPIType() )
         {
@@ -101,8 +100,8 @@ namespace Desert::Graphic
             case RendererAPIType::Vulkan:
             {
                 return std::make_shared<MaterialExecutor>(
-                     std::move( debugName ), shader,
-                     std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( shader ) ) );
+                     std::move( debugName ), resolvedShader,
+                     std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( resolvedShader ) ) );
             }
         }
         DESERT_VERIFY( false, "Unknown RendererAPI" );

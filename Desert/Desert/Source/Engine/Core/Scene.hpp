@@ -38,7 +38,7 @@ namespace Desert::Core
     {
     public:
         Scene() = default;
-        Scene( std::string&& sceneName, const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry );
+        Scene( std::string&& sceneName );
 
         [[nodiscard]] Common::BoolResult BeginScene();
         void                             OnUpdate( const Common::Timestep& ts );
@@ -113,7 +113,6 @@ namespace Desert::Core
 
         std::string                                             m_SceneName;
         std::shared_ptr<Graphic::SceneRenderer>                 m_SceneRenderer;
-        const std::weak_ptr<Runtime::ResourceRegistry>          m_ResourceRegistry;
         std::array<std::unique_ptr<ECS::System>, SYSTEMS_COUNT> m_Systems;
 
         entt::registry                           m_Registry;

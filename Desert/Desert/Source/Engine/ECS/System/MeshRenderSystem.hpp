@@ -15,9 +15,8 @@ namespace Desert::ECS
         void Update( entt::registry& registry, const Common::Timestep& ts ) override
         {
             // Process static meshes
-            const auto& renderer        = m_Renderer.lock();
-            const auto& resourceManager = m_ResourceRegistry.lock();
-            if ( renderer && resourceManager )
+            const auto& renderer = m_Renderer.lock();
+            if ( renderer )
             {
                 auto meshView = registry.view<StaticMeshComponent, TransformComponent>();
                 meshView.each(
@@ -33,7 +32,8 @@ namespace Desert::ECS
                              }
                              else
                              {
-                                 auto resolvedMesh = resourceManager->GetMesh( *mesh.MeshHandle );
+                                 auto resolvedMesh =
+                                      Runtime::ResourceRegistry::GetMeshService()->Get(*mesh.MeshHandle);
                                  if ( !resolvedMesh || !mesh.Material )
                                  {
                                      return;

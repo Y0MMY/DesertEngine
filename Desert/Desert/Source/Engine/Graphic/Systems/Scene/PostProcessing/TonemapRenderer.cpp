@@ -1,5 +1,7 @@
 #include "TonemapRenderer.hpp"
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
 namespace Desert::Graphic::System
 {
     Common::BoolResult TonemapRenderer::Initialize()
@@ -28,7 +30,7 @@ namespace Desert::Graphic::System
         rpSpec.TargetFramebuffer = m_Framebuffer;
 
         // Pipeline
-        m_Shader = Graphic::Shader::Create( "SceneComposite.glsl" );
+        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName("SceneComposite.glsl" );
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;

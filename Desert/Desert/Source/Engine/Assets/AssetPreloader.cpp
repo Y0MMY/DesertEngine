@@ -2,18 +2,19 @@
 
 namespace Desert::Assets
 {
-    constexpr std::array<std::string_view, 2> SUPPORTED_MESH_EXTENSIONS   = { ".fbx", ".blend" };
-    constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS = { ".hdr" };
+    constexpr std::array<std::string_view, 2> SUPPORTED_MESH_EXTENSIONS    = { ".fbx", ".blend" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS  = { ".hdr" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS = { ".glsl" };
 
-    AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>&              assetManager,
-                                    const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry )
-         : m_AssetManager( assetManager ), m_ResourceRegistry( resourceRegistry )
+    AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
+         : m_AssetManager( assetManager )
     {
     }
 
     void AssetPreloader::PreloadAllAssets()
     {
         PreloadMeshes();
+        PreloadShaders();
         PreloadSkyboxes();
     }
 
@@ -21,7 +22,7 @@ namespace Desert::Assets
     {
         template <typename AssetType, typename Extensions, typename... Args>
         void ProcessAssetFiles( const std::filesystem::path& rootPath, bool useRootpath,
-                                const Extensions& supportedExtensions,
+                                const Extensions&                  supportedExtensions,
                                 const std::weak_ptr<AssetManager>& assetManager, AssetPriority priority,
                                 Args&&... args )
         {
@@ -76,14 +77,11 @@ namespace Desert::Assets
         ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
                                           m_AssetManager, AssetPriority::Low );
 
-        if ( auto registry = m_ResourceRegistry.lock() )
+        if ( auto manager = m_AssetManager.lock() )
         {
-            if ( auto manager = m_AssetManager.lock() )
+            for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
             {
-                for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
-                {
-                    registry->RegisterMesh( meshAsset );
-                }
+                Runtime::ResourceRegistry::GetMeshService()->Register( meshAsset );
             }
         }
     }
@@ -93,15 +91,28 @@ namespace Desert::Assets
         ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, true, SUPPORTED_SKYBOX_EXTENSIONS,
                                         m_AssetManager, AssetPriority::Medium );
 
-         /*if ( auto registry = m_ResourceRegistry.lock() )
+        if ( auto manager = m_AssetManager.lock() )
         {
-             if ( auto manager = m_AssetManager.lock() )
-             {
-                 for ( const auto& [handle, skyboxAsset] : manager->FindAllByType<Assets::SkyboxAsset>() )
-                 {
-                     registry->RegisterSkybox(skyboxAsset);
-                 }
-             }
-         }*/
+            for ( const auto& [handle, skyboxAsset] : manager->FindAllByType<Assets::SkyboxAsset>() )
+            {
+                Runtime::ResourceRegistry::GetSkyboxService()->Register( skyboxAsset );
+                return;
+            }
+        }
     }
+
+    void AssetPreloader::PreloadShaders()
+    {
+        ProcessAssetFiles<ShaderAsset>( Common::Constants::Path::SHADERDIR_PATH, true,
+                                        SUPPORTED_SHADERS_EXTENSIONS, m_AssetManager, AssetPriority::Medium );
+
+        if ( auto manager = m_AssetManager.lock() )
+        {
+            for ( const auto& [handle, shaderAsset] : manager->FindAllByType<Assets::ShaderAsset>() )
+            {
+                Runtime::ResourceRegistry::GetShaderService()->Register( shaderAsset );
+            }
+        }
+    }
+
 } // namespace Desert::Assets

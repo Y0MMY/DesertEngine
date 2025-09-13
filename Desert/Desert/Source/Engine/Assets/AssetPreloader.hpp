@@ -11,17 +11,16 @@ namespace Desert::Assets
     class AssetPreloader
     {
     public:
-        explicit AssetPreloader( const std::shared_ptr<AssetManager>&              assetManager,
-                                 const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry );
+        explicit AssetPreloader( const std::shared_ptr<AssetManager>& assetManager );
 
         void PreloadAllAssets();
 
     private:
         void PreloadMeshes();
         void PreloadSkyboxes();
+        void PreloadShaders();
 
     private:
-        std::weak_ptr<AssetManager>              m_AssetManager;
-        std::weak_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
+        std::weak_ptr<AssetManager> m_AssetManager;
     };
 } // namespace Desert::Assets

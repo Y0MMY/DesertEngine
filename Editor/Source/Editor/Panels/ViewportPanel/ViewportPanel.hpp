@@ -13,8 +13,7 @@ namespace Desert::Editor
     class ViewportPanel : public IPanel, public Common::EventHandler
     {
     public:
-        explicit ViewportPanel( const std::shared_ptr<Desert::Core::Scene>&       scene,
-                                const std::shared_ptr<Runtime::ResourceRegistry>& resourceRegistry );
+        explicit ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene );
         void OnUIRender() override;
 
         void OnEvent( Common::Event& e ) override;
@@ -69,9 +68,8 @@ namespace Desert::Editor
         GizmoType    m_GizmoType    = GizmoType::None;
         bool         m_GizmoHovered = false;
 
-        std::shared_ptr<Desert::Core::Scene>       m_Scene;
-        std::shared_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
-        std::unique_ptr<Editor::UI::UIHelper>      m_UIHelper;
-        std::unique_ptr<LightGizmoRenderer>        m_LightGizmoRenderer;
+        std::shared_ptr<Desert::Core::Scene>  m_Scene;
+        std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
+        std::unique_ptr<LightGizmoRenderer>   m_LightGizmoRenderer;
     };
 } // namespace Desert::Editor

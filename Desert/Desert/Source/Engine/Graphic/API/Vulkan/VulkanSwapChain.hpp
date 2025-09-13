@@ -77,6 +77,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_SwapChainFramebuffers;
         }
 
+        const auto& GetVulkanQueue() const
+        {
+            return m_VulkanQueue;
+        }
+
         void OnResize( uint32_t width, uint32_t height );
 
         void Release();
@@ -92,6 +97,7 @@ namespace Desert::Graphic::API::Vulkan
         CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device ); // TODO: remove depth
 
     private:
+        std::unique_ptr<VulkanQueue>       m_VulkanQueue;
         VkSampleCountFlagBits              m_MSAASamples = VK_SAMPLE_COUNT_1_BIT;
         std::weak_ptr<VulkanLogicalDevice> m_LogicalDevice;
 

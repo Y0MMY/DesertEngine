@@ -1,6 +1,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
+#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/Framebuffer.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
@@ -11,6 +12,13 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanSwapChain::Init( const VkInstance instance, const std::shared_ptr<Engine::Device>& device )
     {
+        static bool hasInit = false;
+        if ( hasInit )
+        {
+            return;
+        }
+        hasInit = true;
+
         const auto vkLogicalDevice = SP_CAST( VulkanLogicalDevice, device );
         m_LogicalDevice            = std::weak_ptr<VulkanLogicalDevice>( vkLogicalDevice );
 
@@ -138,7 +146,11 @@ namespace Desert::Graphic::API::Vulkan
 
         CreateColorAndDepthImages( SP_CAST( VulkanLogicalDevice, device ) );
         CreateSwapChainFramebuffers();
-
+        if ( !m_VulkanQueue )
+        {
+            m_VulkanQueue = std::make_unique<VulkanQueue>( this );
+            m_VulkanQueue->Init();
+        }
         return Common::MakeSuccess( true );
     }
 
@@ -217,6 +229,28 @@ namespace Desert::Graphic::API::Vulkan
         }
         Release();
         CreateSwapChain( device, &width, &height );
+
+        auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
+
+        for ( auto& image : GetSwapChainVKImage() )
+        {
+            VkImageMemoryBarrier barrier{};
+            barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout                   = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image                       = image;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.layerCount = 1;
+
+            vkCmdPipelineBarrier( commandBuffer.GetValue(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                                  &barrier );
+        }
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer.GetValue() );
     }
 
     void VulkanSwapChain::Release()
@@ -228,6 +262,8 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         const auto& device = vkLogicalDevice->GetVulkanLogicalDevice();
+        vkDeviceWaitIdle( device );
+
         if ( m_SwapChain != VK_NULL_HANDLE )
         {
             for ( uint32_t i = 0; i < m_SwapChainImages.ImagesView.size(); i++ )
@@ -245,10 +281,14 @@ namespace Desert::Graphic::API::Vulkan
             vkDestroyFramebuffer( device, framebuffer, VK_NULL_HANDLE );
         }
 
-        VulkanAllocator::GetInstance().RT_DestroyImage( m_ColorImages.Image,
-                                                        (VmaAllocation)m_VmaAllocation[0] ); // color
-        VulkanAllocator::GetInstance().RT_DestroyImage( m_DepthStencilImages.Image,
-                                                        (VmaAllocation)m_VmaAllocation[1] ); // depth stancil
+        SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+             ->GetVulkanAllocator()
+             ->RT_DestroyImage( m_ColorImages.Image,
+                                (VmaAllocation)m_VmaAllocation[0] ); // color
+        SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+             ->GetVulkanAllocator()
+             ->RT_DestroyImage( m_DepthStencilImages.Image,
+                                (VmaAllocation)m_VmaAllocation[1] ); // depth stancil
         m_VmaAllocation[0] = m_VmaAllocation[1] = nullptr;
         m_SwapChain                             = VK_NULL_HANDLE;
     }
@@ -363,8 +403,10 @@ namespace Desert::Graphic::API::Vulkan
             imageInfo.samples     = m_MSAASamples;
             imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-            const auto& resultAlloc = VulkanAllocator::GetInstance().RT_AllocateImage(
-                 "Swapchain image color", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, m_ColorImages.Image );
+            const auto& resultAlloc = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                                           ->GetVulkanAllocator()
+                                           ->RT_AllocateImage( "Swapchain image color", imageInfo,
+                                                               VMA_MEMORY_USAGE_GPU_ONLY, m_ColorImages.Image );
             if ( !resultAlloc.IsSuccess() )
             {
                 return Common::MakeError<VkResult>( resultAlloc.GetError() );
@@ -406,8 +448,11 @@ namespace Desert::Graphic::API::Vulkan
             imageInfo.samples       = m_MSAASamples;
             imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
 
-            const auto& resultAlloc = VulkanAllocator::GetInstance().RT_AllocateImage(
-                 "Swapchain image depth", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY, m_DepthStencilImages.Image );
+            const auto& resultAlloc =
+                 SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                      ->GetVulkanAllocator()
+                      ->RT_AllocateImage( "Swapchain image depth", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
+                                          m_DepthStencilImages.Image );
 
             if ( !resultAlloc.IsSuccess() )
             {
@@ -436,7 +481,7 @@ namespace Desert::Graphic::API::Vulkan
 
     VulkanSwapChain::~VulkanSwapChain()
     {
-        // Release();
+        Release();
     }
 
     VulkanSwapChain::VulkanSwapChain( const GLFWwindow* window ) : SwapChain( window )

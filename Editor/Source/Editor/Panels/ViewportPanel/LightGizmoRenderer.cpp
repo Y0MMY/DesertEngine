@@ -39,13 +39,6 @@ namespace Desert::Editor
             auto& transform = entity.GetComponent<ECS::TransformComponent>();
             auto& uuid      = entity.GetComponent<ECS::UUIDComponent>().UUID;
 
-            const auto frustum = camera->GetFrustum();
-
-            if ( !frustum.IsInside( transform.Translation ) )
-            {
-                continue;
-            }
-
             const auto mvp = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 
             glm::vec2 screenPos =
@@ -73,12 +66,13 @@ namespace Desert::Editor
                  mousePos.y >= absoluteY - iconSize.y * 0.5f && mousePos.y <= absoluteY + iconSize.y * 0.5f )
             {
                 ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
+                ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
                 Utils::ImGuiUtilities::Tooltip(
                      std::format( "Point Light\nIntensity: {}\nRadius: {}\nPosition: ({}, {}, {})",
                                   light.Intensity, light.Radius, transform.Translation.x, transform.Translation.y,
                                   transform.Translation.z )
                           .c_str() );
-                ImGui::PopStyleColor();
+                ImGui::PopStyleColor( 2 );
             }
         }
     }

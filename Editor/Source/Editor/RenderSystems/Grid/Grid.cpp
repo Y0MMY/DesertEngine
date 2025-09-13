@@ -68,7 +68,7 @@ namespace Desert::Editor::Render
 
         constexpr std::string_view debugName = "EditorGrid";
 
-        m_Shader = Graphic::Shader::Create( "Grid.glsl" );
+       // m_Shader = Graphic::Shader::Create( "Grid.glsl" );
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName         = debugName;

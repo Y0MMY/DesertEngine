@@ -2,6 +2,8 @@
 #include "Shader.hpp"
 #include "Pipeline.hpp"
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
 namespace Desert::Graphic
 {
     static constexpr uint32_t kEnvFaceMapSize    = 1024;
@@ -21,7 +23,7 @@ namespace Desert::Graphic
         auto& shader = shaderCache[spec.ShaderName];
         if ( !shader )
         {
-            shader = Shader::Create( spec.ShaderName );
+            shader = Runtime::ResourceRegistry::GetShaderService()->GetByName(spec.ShaderName);
         }
 
         Core::Formats::ImageCubeSpecification outputImageInfo = {
@@ -54,9 +56,9 @@ namespace Desert::Graphic
         static std::unordered_map<std::string, std::shared_ptr<Shader>> shaderCache;
 
         auto& shader = shaderCache[spec.ShaderName];
-        if ( !shader )
+        if ( !shader )        
         {
-            shader = Shader::Create( spec.ShaderName );
+            shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( spec.ShaderName );
         }
 
         const auto& computePipeline = PipelineCompute::Create( shader );

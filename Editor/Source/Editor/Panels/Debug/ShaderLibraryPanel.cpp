@@ -57,7 +57,7 @@ namespace Desert::Editor
         ImGui::Unindent();
 
         // Shaders list
-        {
+        /*{
             ImGui::Indent();
 
             const auto& allShaders = Graphic::ShaderLibrary::GetAll();
@@ -72,7 +72,7 @@ namespace Desert::Editor
             }
 
             ImGui::Unindent();
-        }
+        }*/
 
         if ( m_ShowShaderCode && m_SelectedShader )
         {

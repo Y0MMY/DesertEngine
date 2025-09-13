@@ -93,6 +93,14 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::Init()
     {
+        const auto window = m_Window.lock();
+        if ( !window )
+        {
+            DESERT_VERIFY( false );
+        }
+
+        VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init(
+             SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->GetVulkanQueue().get() );
     }
 
     std::shared_ptr<VulkanFramebuffer> GetFramebuffer( const std::shared_ptr<RenderPass>& renderPass )

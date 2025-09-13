@@ -4,6 +4,8 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/Materials/Models/ToneMap.hpp>
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
 namespace Desert::Graphic::System
 {
     Common::BoolResult MeshRenderer::Initialize()
@@ -109,7 +111,7 @@ namespace Desert::Graphic::System
 
         pipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
         pipeSpec.CullMode       = CullMode::None;
-        pipeSpec.Shader         = Graphic::Shader::Create( "StaticPBR.glsl" );
+        pipeSpec.Shader         = Runtime::ResourceRegistry::GetShaderService()->GetByName( "StaticPBR.glsl" );
         pipeSpec.Framebuffer    = skyboxFramebufferExternal;
 
         m_Pipeline = Pipeline::Create( pipeSpec );
@@ -123,7 +125,7 @@ namespace Desert::Graphic::System
     {
 
         // Shader
-        m_OutlineShader = Graphic::Shader::Create( "Outline.glsl" );
+        m_OutlineShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Outline.glsl" );
 
         PipelineSpecification outlinePipeSpec;
         outlinePipeSpec.DebugName = "OutlinePipeline";

@@ -37,7 +37,6 @@ namespace Desert::Editor
 
         std::shared_ptr<Assets::AssetManager>      m_AssetManager;
         std::unique_ptr<Assets::AssetPreloader>    m_AssetPreloader;
-        std::shared_ptr<Runtime::ResourceRegistry> m_ResourceRegistry;
         std::unique_ptr<Render::RenderRegistry>    m_RenderRegistry;
 
 #ifdef EBABLE_IMGUI

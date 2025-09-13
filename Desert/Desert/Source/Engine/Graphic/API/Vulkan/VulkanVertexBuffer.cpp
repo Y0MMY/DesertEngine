@@ -44,15 +44,17 @@ namespace Desert::Graphic::API::Vulkan
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();
 
-        auto& allocator = VulkanAllocator::GetInstance();
+        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                              ->GetVulkanAllocator()
+                              .get();
 
         if ( m_StorageBuffer.Data == nullptr ) [[unlikely]]
         {
             auto vertexBufferCreateInfo =
                  CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE );
             m_MemoryAllocation = allocator
-                                      .RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
-                                                          VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer )
+                                      ->RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
+                                                           VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer )
                                       .GetValue();
         }
 
@@ -63,7 +65,7 @@ namespace Desert::Graphic::API::Vulkan
                  CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_SHARING_MODE_EXCLUSIVE );
 
             VkBuffer stagingBuffer;
-            auto     stagingBufferAllocation = allocator.RT_AllocateBuffer(
+            auto     stagingBufferAllocation = allocator->RT_AllocateBuffer(
                  "VertexBuffer_staging", stagingBufferCreateInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, stagingBuffer );
 
             if ( !stagingBufferAllocation.IsSuccess() )
@@ -75,16 +77,16 @@ namespace Desert::Graphic::API::Vulkan
 
             // copy data to staging buffer
 
-            auto destData = allocator.MapMemory( stagingBufferAllocationVAL );
+            auto destData = allocator->MapMemory( stagingBufferAllocationVAL );
             memcpy( destData, m_StorageBuffer.Data, m_StorageBuffer.Size );
-            allocator.UnmapMemory( stagingBufferAllocationVAL );
+            allocator->UnmapMemory( stagingBufferAllocationVAL );
 
             auto vertexBufferCreateInfo = CreateVertexBufferInfo(
                  m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                  VK_SHARING_MODE_EXCLUSIVE );
 
-            const auto buffer = allocator.RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
-                                                             VMA_MEMORY_USAGE_GPU_ONLY, m_VulkanBuffer );
+            const auto buffer = allocator->RT_AllocateBuffer( "VertexBuffer", vertexBufferCreateInfo,
+                                                              VMA_MEMORY_USAGE_GPU_ONLY, m_VulkanBuffer );
             if ( !buffer.IsSuccess() )
             {
                 return Common::MakeError<bool>( buffer.GetError() );
@@ -106,7 +108,7 @@ namespace Desert::Graphic::API::Vulkan
 
             CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( copyCmdVal );
 
-            allocator.RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL );
+            allocator->RT_DestroyBuffer( stagingBuffer, stagingBufferAllocationVAL );
         }
         return Common::MakeSuccess( true );
     }
@@ -128,7 +130,9 @@ namespace Desert::Graphic::API::Vulkan
     {
         m_StorageBuffer.Release();
 
-        VulkanAllocator::GetInstance().RT_DestroyBuffer( m_VulkanBuffer, m_MemoryAllocation );
+        SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+             ->GetVulkanAllocator()
+             ->RT_DestroyBuffer( m_VulkanBuffer, m_MemoryAllocation );
         m_VulkanBuffer     = nullptr;
         m_MemoryAllocation = nullptr;
         return BOOLSUCCESS;

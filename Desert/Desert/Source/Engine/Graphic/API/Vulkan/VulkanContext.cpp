@@ -121,29 +121,46 @@ namespace Desert::Graphic::API::Vulkan
             VK_CHECK_RESULT( vkCreateDebugReportCallbackEXT( s_VulkanInstance, &debug_report_ci, nullptr,
                                                              &m_DebugReportCallback ) );
         }
+        VulkanLoadDebugUtilsExtensions( s_VulkanInstance );
         return Common::MakeSuccess( VK_SUCCESS );
     }
 
     void VulkanContext::BeginFrame() const
     {
-        m_VulkanQueue->PrepareFrame();
+        const auto window = m_Window.lock();
+        if ( !window )
+        {
+            DESERT_VERIFY( false );
+        }
+
+        const auto& vulkanQueue = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->GetVulkanQueue();
+        vulkanQueue->PrepareFrame();
     }
 
     void VulkanContext::EndFrame() const
     {
-        m_VulkanQueue->Present();
+        const auto window = m_Window.lock();
+        if ( !window )
+        {
+            DESERT_VERIFY( false );
+        }
+
+        const auto& vulkanQueue = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->GetVulkanQueue();
+        vulkanQueue->Present();
     }
 
     void VulkanContext::Shutdown()
     {
-        VulkanAllocator::GetInstance().Shutdown();
+        m_VulkanAllocator->Shutdown();
     }
 
     void VulkanContext::Init()
     {
         const auto logicalDeivce = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() );
 
-        VulkanAllocator::CreateInstance().Init( logicalDeivce, s_VulkanInstance );
+        m_VulkanAllocator = std::make_unique<VulkanAllocator>();
+        m_VulkanAllocator->Init( logicalDeivce, s_VulkanInstance );
+
         CommandBufferAllocator::CreateInstance( logicalDeivce );
 
         const auto window = m_Window.lock();
@@ -151,12 +168,6 @@ namespace Desert::Graphic::API::Vulkan
         {
             DESERT_VERIFY( false );
         }
-        m_VulkanQueue = std::make_unique<VulkanQueue>(
-             SP_CAST( VulkanSwapChain, EngineContext::GetInstance().GetCurrentWindow()->GetWindowSwapChain() ) );
-        m_VulkanQueue->Init();
-
-        VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init( m_VulkanQueue.get() );
-        VulkanLoadDebugUtilsExtensions( s_VulkanInstance );
     }
 
 } // namespace Desert::Graphic::API::Vulkan
