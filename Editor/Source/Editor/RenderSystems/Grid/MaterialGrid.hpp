@@ -18,7 +18,6 @@ namespace Desert::Editor::Render
         void SetGridProperties( float cellSize, float cellCount, const glm::vec4& color );
 
     private:
-        std::unique_ptr<Model::MaterialGridProperties> m_GridModel;
         std::unique_ptr<Graphic::Models::CameraData>   m_CameraModel;
     };
 } // namespace Desert::Editor::Render

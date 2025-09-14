@@ -24,13 +24,13 @@ namespace Desert::Graphic
 
         [[nodiscard]] Common::BoolResult BeginFrame();
         [[nodiscard]] Common::BoolResult EndFrame();
-        void                             BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass );
-        void                             BeginSwapChainRenderPass();
-        void                             EndRenderPass();
+        void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame = false );
+        void BeginSwapChainRenderPass();
+        void EndRenderPass();
         void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                          const std::shared_ptr<MaterialExecutor>& material );
 
-        void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+        void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
                                    const std::shared_ptr<MaterialExecutor>& material );
 
         void PrepareNextFrame();
@@ -43,7 +43,7 @@ namespace Desert::Graphic
         const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
-        uint32_t GetCurrentFrameIndex();
+        uint32_t                     GetCurrentFrameIndex();
 
         template <typename FuncT>
         static void SubmitCommand( FuncT&& func )
@@ -58,6 +58,6 @@ namespace Desert::Graphic
         static Common::Memory::CommandBuffer& GetRenderCommandQueue();
 
     private:
-        std::shared_ptr<Texture2D>              m_BRDFTexture;
+        std::shared_ptr<Texture2D> m_BRDFTexture;
     };
 } // namespace Desert::Graphic

@@ -17,6 +17,10 @@ namespace Desert::Graphic::System
         virtual Common::BoolResult Initialize() override;
         virtual void               Shutdown() override {};
 
+        void RegisterPasses( RenderGraphBuilder& builder ) override;
+
+    private:
+        void Render();
     private:
         std::shared_ptr<Pipeline> m_Pipeline;
         std::shared_ptr<Shader>   m_Shader;

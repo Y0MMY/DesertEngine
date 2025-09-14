@@ -7,8 +7,7 @@ namespace Desert::Graphic::System
     Common::BoolResult TonemapRenderer::Initialize()
     {
         const auto& targetFramebuffer = m_TargetFramebuffer.lock();
-        const auto& renderGraph       = m_RenderGraph.lock();
-        if ( !targetFramebuffer || !renderGraph )
+        if ( !targetFramebuffer )
         {
             DESERT_VERIFY( false );
         }
@@ -30,7 +29,7 @@ namespace Desert::Graphic::System
         rpSpec.TargetFramebuffer = m_Framebuffer;
 
         // Pipeline
-        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName("SceneComposite.glsl" );
+        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "SceneComposite.glsl" );
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;
@@ -42,24 +41,28 @@ namespace Desert::Graphic::System
 
         m_MaterialTonemap = std::make_unique<MaterialTonemap>();
 
-        renderGraph->AddPass(
-             "TonemapPass",
-             [this]()
-             {
-                 const auto& framebuffer =
-                      m_TargetFramebuffer.lock(); // We call lock internally to avoid cyclic dependencies.
-                 if ( !framebuffer )
-                 {
-                     LOG_ERROR(
-                          "The framebuffer for `TonemapRenderer::ProcessSystem` was destroyed or wasn't set up" );
-                     return;
-                 }
-
-                 auto& renderer = Renderer::GetInstance();
-                 m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage() );
-                 renderer.SubmitFullscreenQuad( m_Pipeline, m_MaterialTonemap->GetMaterialExecutor() );
-             },
-             RenderPass::Create( rpSpec ) );
         return BOOLSUCCESS;
+    }
+
+    void TonemapRenderer::RegisterPasses( RenderGraphBuilder& builder )
+    {
+        builder.AddPass( "TonemapPass", RenderPhase::PostProcess, [this]() { Render(); },
+                         m_Pipeline ? m_Pipeline->GetSpecification() : PipelineSpecification{}, m_Framebuffer,
+                         { RenderPassDependency( RenderPhase::Debug ) } );
+    }
+
+    void TonemapRenderer::Render()
+    {
+        const auto& framebuffer =
+             m_TargetFramebuffer.lock(); // We call lock internally to avoid cyclic dependencies.
+        if ( !framebuffer )
+        {
+            LOG_ERROR( "The framebuffer for `TonemapRenderer::ProcessSystem` was destroyed or wasn't set up" );
+            return;
+        }
+
+        auto& renderer = Renderer::GetInstance();
+        m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage() );
+        renderer.SubmitFullscreenQuad( m_Pipeline, m_MaterialTonemap->GetMaterialExecutor() );
     }
 } // namespace Desert::Graphic::System

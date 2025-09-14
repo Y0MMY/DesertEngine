@@ -1,16 +1,13 @@
 #pragma once
 
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
-
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
-
 #include <Engine/Graphic/Models/MeshRenderData.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialOutline.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Models/DirectionLight.hpp>
-
-#include <Engine/Graphic/RenderGraph.hpp>
+#include <Engine/Graphic/RenderGraphBuilder.hpp>
 
 namespace Desert::Graphic::System
 {
@@ -21,48 +18,42 @@ namespace Desert::Graphic::System
 
         virtual Common::BoolResult Initialize() override;
         virtual void               Shutdown() override;
+        virtual void               RegisterPasses( RenderGraphBuilder& builder ) override;
 
-        void ToggleOutline( const bool value )
+        void ToggleOutline( bool value )
         {
             m_OutlineDraw = value;
         }
-
         void DisableOutline()
         {
             m_OutlineDraw = false;
         }
-
         void SetOutlineColor( const glm::vec3& color )
         {
             m_OutlineColor = color;
         }
-
-        void SetOutlineWidth( const float width )
+        void SetOutlineWidth( float width )
         {
-            // m_OutlineWidth = width;
+            m_OutlineWidth = width;
         }
 
     private:
-        bool SetupGeometryPass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
-                                const std::shared_ptr<RenderGraph>& renderGraph );
-        bool SetupOutlinePass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
-                               const std::shared_ptr<RenderGraph>& renderGraph );
+        bool                                    SetupGeometryPass();
+        bool                                    SetupOutlinePass();
         std::optional<Models::PBR::PBRTextures> PreparePBRTextures() const;
 
     private:
-
-    private:
-        std::shared_ptr<Pipeline> m_Pipeline;
-        std::shared_ptr<Shader>   m_Shader;
+        std::shared_ptr<Pipeline> m_GeometryPipeline;
+        std::shared_ptr<Shader>   m_GeometryShader;
 
         // Outline
-        std::shared_ptr<Shader>   m_OutlineShader;
-        std::shared_ptr<Pipeline> m_OutlinePipeline;
-
+        std::shared_ptr<Pipeline>        m_OutlinePipeline;
+        std::shared_ptr<Shader>          m_OutlineShader;
         std::unique_ptr<MaterialOutline> m_OutlineMaterial;
 
-        bool      m_OutlineDraw = true;
-        glm::vec3 m_OutlineColor;
-        float     m_OutlineWidth = 0.005;
+        bool      m_OutlineDraw  = true;
+        glm::vec3 m_OutlineColor = glm::vec3( 1.0f, 0.5f, 0.0f );
+        float     m_OutlineWidth = 0.005f;
+
     };
 } // namespace Desert::Graphic::System

@@ -20,9 +20,9 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] virtual Common::BoolResult EndFrame() override;
         [[nodiscard]] virtual Common::BoolResult PrepareNextFrame() override;
         [[nodiscard]] virtual Common::BoolResult PresentFinalImage() override;
-        [[nodiscard]] virtual Common::BoolResult
-                                   BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass ) override;
-        virtual Common::BoolResult BeginSwapChainRenderPass() override;
+        [[nodiscard]] virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
+                                                                  bool clearFrame ) override;
+        virtual Common::BoolResult               BeginSwapChainRenderPass() override;
         [[nodiscard]] virtual Common::BoolResult EndRenderPass() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                  const std::shared_ptr<MaterialExecutor>& material ) override;
@@ -38,6 +38,8 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         void SetViewportAndScissor( const uint32_t wdith, const uint32_t height );
+        void ClearAttachments( const std::vector<VkClearValue>&    clearValues,
+                               const std::shared_ptr<Framebuffer>& framebuffer );
 
     private:
         VkCommandBuffer m_CurrentCommandBuffer = nullptr;

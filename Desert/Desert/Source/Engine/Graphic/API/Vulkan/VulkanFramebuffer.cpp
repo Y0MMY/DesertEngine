@@ -43,11 +43,11 @@ namespace Desert::Graphic::API::Vulkan
                 VkAttachmentDescription desc{};
                 desc.format         = GetImageVulkanFormat( format );
                 desc.samples        = VK_SAMPLE_COUNT_1_BIT;
-                desc.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR; // Always clear for internal
+                desc.loadOp         = VK_ATTACHMENT_LOAD_OP_LOAD; // Always clear for internal
                 desc.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
                 desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_CLEAR;
                 desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                desc.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                desc.initialLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 desc.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
                 VkAttachmentReference ref{};
@@ -288,6 +288,8 @@ namespace Desert::Graphic::API::Vulkan
             sp_cast<VulkanImage2D>( m_DepthAttachment )->RT_Invalidate();
         }
 
+        TransitionImagesToInitialLayouts();
+
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();
         const auto result = CreateFramebuffer( device, width, height );
@@ -431,4 +433,65 @@ namespace Desert::Graphic::API::Vulkan
             m_RenderPass = VK_NULL_HANDLE;
         }
     }
+
+    void VulkanFramebuffer::TransitionImagesToInitialLayouts()
+    {
+        auto commandBuffer =
+             CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+
+        for ( auto& colorAttachment : m_ColorAttachments )
+        {
+            auto    vulkanImage = sp_cast<VulkanImage2D>( colorAttachment );
+            VkImage image       = vulkanImage->GetVulkanImageInfo().Image;
+
+            VkImageMemoryBarrier barrier{};
+            barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout                       = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image                           = image;
+            barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.baseMipLevel   = 0;
+            barrier.subresourceRange.levelCount     = 1;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.layerCount     = 1;
+            barrier.srcAccessMask                   = 0;
+            barrier.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+
+            vkCmdPipelineBarrier( commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier );
+        }
+
+        if ( m_DepthAttachment )
+        {
+            auto    vulkanImage = sp_cast<VulkanImage2D>( m_DepthAttachment );
+            VkImage image       = vulkanImage->GetVulkanImageInfo().Image;
+
+            VkImageMemoryBarrier barrier{};
+            barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout                   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image                       = image;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            if ( Graphic::Utils::HasStencilComponent( m_DepthAttachment->GetImageSpecification().Format ) )
+            {
+                barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+            }
+            barrier.subresourceRange.baseMipLevel   = 0;
+            barrier.subresourceRange.levelCount     = 1;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.layerCount     = 1;
+            barrier.srcAccessMask                   = 0;
+            barrier.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+
+            vkCmdPipelineBarrier( commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier );
+        }
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
+    }
+
 } // namespace Desert::Graphic::API::Vulkan

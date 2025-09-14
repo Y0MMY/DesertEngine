@@ -16,6 +16,8 @@
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
 #include "Systems/Scene/PostProcessing/TonemapRenderer.hpp"
 
+#include <Engine/Graphic/IRenderSystem.hpp>
+
 namespace Desert::Core
 {
     class Scene;
@@ -59,14 +61,27 @@ namespace Desert::Graphic
             return m_DirectionLights;
         }
 
-        const std::shared_ptr<Image2D>     GetFinalImage() const;
+        const std::shared_ptr<Image2D>     GetFinalImage();
         const std::shared_ptr<Framebuffer> GetTargetFramebuffer() const
         {
             return m_TargetFramebuffer;
         }
 
+        void RegisterRenderPass( RenderPhase phase, const std::string& name, std::function<void()> executeFunc,
+                                 const PipelineSpecification& pipeSpec = {} );
+
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
-                                   std::shared_ptr<RenderPass>&& renderPass );
+                                   std::shared_ptr<RenderPass>&& renderPass )
+        {
+        }
+
+        std::shared_ptr<Framebuffer> GetFramebufferForPhase( RenderPhase phase );
+        std::shared_ptr<Texture>     GetTexture( const std::string& name );
+
+        void RegisterRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system );
+        void UnregisterRenderSystem( const std::string& name );
+
+        void RebuildRenderGraph();
 
         void AddPointLight( PointLight&& pointLight );
 
@@ -76,7 +91,9 @@ namespace Desert::Graphic
         }
 
     private:
+        void ClearMainFramebuffer();
         void CompositeRenderPass();
+        void ExecuteRenderGraph();
 
     private:
         struct
@@ -90,20 +107,15 @@ namespace Desert::Graphic
         std::vector<MeshRenderData> m_MeshRenderData;
 
     private:
-        std::shared_ptr<RenderGraph> m_RenderGraphRenderSystems;
-        std::shared_ptr<RenderGraph> m_RenderGraphPPSystems; // Post-Proccessing
+        std::shared_ptr<Framebuffer>                                    m_TargetFramebuffer;
+        RenderGraphBuilder                                              m_RenderGraphBuilder;
+        std::unordered_map<std::string, std::shared_ptr<IRenderSystem>> m_RenderSystems;
 
     private:
-        std::shared_ptr<Framebuffer> m_TargetFramebuffer;
-
-    private:
-        static constexpr size_t                                                 s_RenderSystemsCount = 3U;
-        std::array<std::unique_ptr<System::RenderSystem>, s_RenderSystemsCount> m_FixedRenderSystems;
-
         template <typename System, typename... Args>
-        void RegisterSystem( const uint32_t system, Args&&... args )
+        void RegisterSystem( const std::string& system, Args&&... args )
         {
-            m_FixedRenderSystems[system] = std::make_unique<System>( std::forward<Args>( args )... );
+            m_RenderSystems[system] = std::make_unique<System>( std::forward<Args>( args )... );
         }
     };
 } // namespace Desert::Graphic

@@ -146,7 +146,8 @@ namespace Desert::Graphic::API::Vulkan
         return renderPassBeginInfo;
     }
 
-    Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
+    Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
+                                                           bool                               clearFrame )
     {
         const auto window = m_Window.lock();
         if ( !window )
@@ -166,6 +167,10 @@ namespace Desert::Graphic::API::Vulkan
              CreateRenderPassBeginInfo( swapChain, framebuffer, clearValues );
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
 
+        if ( clearFrame )
+        {
+            ClearAttachments( clearValues, framebuffer );
+        }
         SetViewportAndScissor( framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() );
         return Common::MakeSuccess( true );
     }
@@ -334,4 +339,43 @@ namespace Desert::Graphic::API::Vulkan
     {
         return m_CurrentCommandBuffer;
     }
+
+    void VulkanRendererAPI::ClearAttachments( const std::vector<VkClearValue>&    clearValues,
+                                              const std::shared_ptr<Framebuffer>& framebuffer )
+    {
+        const uint32_t colorAttachmentCount = (uint32_t)framebuffer->GetColorAttachmentCount();
+        const uint32_t totalAttachmentCount =
+             colorAttachmentCount + ( ( framebuffer->GetDepthAttachmentCount() != 0 ) ? 1 : 0 );
+        DESERT_VERIFY( clearValues.size() == totalAttachmentCount );
+
+        std::vector<VkClearAttachment> attachments( totalAttachmentCount );
+        std::vector<VkClearRect>       clearRects( totalAttachmentCount );
+        for ( uint32_t i = 0; i < colorAttachmentCount; i++ )
+        {
+            attachments[i].aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
+            attachments[i].colorAttachment = i;
+            attachments[i].clearValue      = clearValues[i];
+
+            clearRects[i].rect.offset    = { (int32_t)0, (int32_t)0 };
+            clearRects[i].rect.extent    = { framebuffer->GetFramebufferWidth(),
+                                             framebuffer->GetFramebufferHeight() };
+            clearRects[i].baseArrayLayer = 0;
+            clearRects[i].layerCount     = 1;
+        }
+
+        if ( framebuffer->GetDepthAttachmentCount() != 0 )
+        {
+            attachments[colorAttachmentCount].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            attachments[colorAttachmentCount].clearValue = clearValues[colorAttachmentCount];
+            clearRects[colorAttachmentCount].rect.offset = { (int32_t)0, (int32_t)0 };
+            clearRects[colorAttachmentCount].rect.extent = { framebuffer->GetFramebufferWidth(),
+                                                             framebuffer->GetFramebufferHeight() };
+            clearRects[colorAttachmentCount].baseArrayLayer = 0;
+            clearRects[colorAttachmentCount].layerCount     = 1;
+        }
+
+        vkCmdClearAttachments( m_CurrentCommandBuffer, totalAttachmentCount, attachments.data(),
+                               totalAttachmentCount, clearRects.data() );
+    }
+
 } // namespace Desert::Graphic::API::Vulkan

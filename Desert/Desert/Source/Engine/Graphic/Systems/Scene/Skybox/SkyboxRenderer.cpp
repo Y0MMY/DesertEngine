@@ -9,8 +9,7 @@ namespace Desert::Graphic::System
     Common::BoolResult SkyboxRenderer::Initialize()
     {
         const auto& compositeFramebuffer = m_TargetFramebuffer.lock();
-        const auto& renderGraph          = m_RenderGraph.lock();
-        if ( !compositeFramebuffer || !renderGraph )
+        if ( !compositeFramebuffer )
         {
             DESERT_VERIFY( false );
         }
@@ -37,18 +36,6 @@ namespace Desert::Graphic::System
         m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 
-        renderGraph->AddPass(
-             "SkyboxPass",
-             [this]()
-             {
-                 auto& renderer = Renderer::GetInstance();
-                 if ( const auto& material = m_MaterialSkybox.lock() )
-                 {
-                     renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
-                 }
-             },
-             RenderPass::Create( rpSpec ) );
-
         return BOOLSUCCESS;
     }
 
@@ -72,6 +59,26 @@ namespace Desert::Graphic::System
 
         material->Bind( { camera } );
         m_MaterialSkybox = material;
+    }
+
+    void SkyboxRenderer::RegisterPasses( RenderGraphBuilder& builder )
+    {
+        auto targetFb = m_TargetFramebuffer.lock();
+        if ( !targetFb )
+            return;
+
+        builder.AddPass( "SkyboxPass", RenderPhase::Sky, [this]() { Render(); },
+                         m_Pipeline ? m_Pipeline->GetSpecification() : PipelineSpecification{}, targetFb,
+                         { RenderPassDependency( RenderPhase::Geometry ) } );
+    }
+
+    void SkyboxRenderer::Render()
+    {
+        auto& renderer = Renderer::GetInstance();
+        if ( const auto& material = m_MaterialSkybox.lock() )
+        {
+            renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
+        }
     }
 
 } // namespace Desert::Graphic::System

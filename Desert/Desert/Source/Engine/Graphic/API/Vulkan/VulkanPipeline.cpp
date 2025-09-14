@@ -200,7 +200,7 @@ namespace Desert::Graphic::API::Vulkan
                 topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
                 break;
             case PrimitiveTopology::LineStrip:
-                topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+                topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
                 break;
             case PrimitiveTopology::Triangles:
                 topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;

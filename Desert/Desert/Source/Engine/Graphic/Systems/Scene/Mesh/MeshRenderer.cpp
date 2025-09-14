@@ -1,9 +1,6 @@
 #include "MeshRenderer.hpp"
-
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
-#include <Engine/Graphic/Materials/Models/ToneMap.hpp>
-
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Graphic::System
@@ -11,86 +8,107 @@ namespace Desert::Graphic::System
     Common::BoolResult MeshRenderer::Initialize()
     {
         const auto& compositeFramebuffer = m_TargetFramebuffer.lock();
-        const auto& renderGraph          = m_RenderGraph.lock();
-        if ( !compositeFramebuffer || !renderGraph )
+        if ( !compositeFramebuffer )
         {
-            DESERT_VERIFY( false );
+            return Common::MakeError( "Target framebuffer is not available" );
         }
 
         // Setup geometry pass
-        if ( !SetupGeometryPass( compositeFramebuffer, renderGraph ) )
+        if ( !SetupGeometryPass() )
             return Common::MakeError( "Failed to setup geometry pass" );
 
-        if ( !SetupOutlinePass( compositeFramebuffer, renderGraph ) )
+        // Setup outline pass
+        if ( !SetupOutlinePass() )
             return Common::MakeError( "Failed to setup outline pass" );
-
-        // RenderPass
-        RenderPassSpecification rpSpec;
-        rpSpec.DebugName         = "SceneGeometry";
-        rpSpec.TargetFramebuffer = compositeFramebuffer;
-
-        renderGraph->AddPass(
-             "SceneGeometry",
-             [this]()
-             {
-                 const auto& camera = m_SceneRenderer->GetMainCamera().lock();
-                 if ( camera )
-                 {
-                     auto&      renderer = Renderer::GetInstance();
-                     const auto textures = PreparePBRTextures();
-
-                     const auto& renderQueue = m_SceneRenderer->GetMeshRenderList();
-
-                     const auto& pointLights = m_SceneRenderer->GetPointLights();
-
-                     for ( const auto& renderData : renderQueue )
-                     {
-                         renderData.Material->Bind( { camera, renderData.Transform,
-                                                      m_SceneRenderer->GetDirectionLights(), textures,
-                                                      pointLights } );
-                         renderer.RenderMesh( m_Pipeline, renderData.Mesh,
-                                              renderData.Material->GetMaterialExecutor() );
-                     }
-
-                     if ( m_OutlineDraw )
-                     {
-
-                         for ( const auto& renderData : renderQueue )
-                         {
-                             if ( !renderData.Outlined )
-                             {
-                                 continue;
-                             }
-
-                             m_OutlineMaterial->Bind(
-                                  { camera, renderData.Transform, m_OutlineWidth, m_OutlineColor } );
-
-                             renderer.RenderMesh( m_OutlinePipeline, renderData.Mesh,
-                                                  m_OutlineMaterial->GetMaterialExecutor() );
-                         }
-                     }
-                 }
-             },
-             RenderPass::Create( rpSpec ) );
 
         return BOOLSUCCESS;
     }
 
     void MeshRenderer::Shutdown()
     {
-        if ( m_Framebuffer )
-        {
-            m_Framebuffer->Release();
-            m_Framebuffer.reset();
-        }
+        m_GeometryPipeline.reset();
+        m_OutlinePipeline.reset();
+        m_OutlineMaterial.reset();
     }
 
-    bool MeshRenderer::SetupGeometryPass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
-                                          const std::shared_ptr<RenderGraph>& renderGraph )
+    void MeshRenderer::RegisterPasses( RenderGraphBuilder& builder )
     {
-        constexpr std::string_view debugName = "SceneGeometry";
+        auto targetFb = m_TargetFramebuffer.lock();
+        if ( !targetFb )
+            return;
 
-        // Pipeline
+        // Geometry pass
+        builder.AddPass( "MeshGeometryPass", RenderPhase::Geometry,
+                         [this]()
+                         {
+                             const auto camera      = m_SceneRenderer->GetMainCamera().lock();
+                             if ( !camera  )
+                                 return;
+
+
+                             auto&      renderer    = Renderer::GetInstance();
+                             const auto  textures    = PreparePBRTextures();
+                             const auto& renderQueue = m_SceneRenderer->GetMeshRenderList();
+                             const auto& pointLights = m_SceneRenderer->GetPointLights();
+
+                             for ( const auto& renderData : renderQueue )
+                             {
+                                 renderData.Material->Bind( { camera, renderData.Transform,
+                                                              m_SceneRenderer->GetDirectionLights(), textures,
+                                                              pointLights } );
+                                 renderer.RenderMesh(m_GeometryPipeline, renderData.Mesh,
+                                                      renderData.Material->GetMaterialExecutor() );
+                             }
+                         },
+                         m_GeometryPipeline->GetSpecification(), targetFb,
+                         { RenderPassDependency( RenderPhase::DepthPrePass ) } );
+
+        //// Outline pass (optional)
+        //if ( m_OutlineDraw )
+        //{
+        //    builder.AddPass( "MeshOutlinePass", RenderPhase::Outline,
+        //                     [this]()
+        //                     {
+        //                         auto&      renderer = Renderer::GetInstance();
+        //                         const auto camera   = m_ActiveCamera.lock();
+
+        //                         if ( !camera )
+        //                             return;
+
+        //                         const auto& renderQueue = m_SceneRenderer->GetMeshRenderList();
+
+        //                         for ( const auto& renderData : renderQueue )
+        //                         {
+        //                             if ( !renderData.Outlined )
+        //                                 continue;
+
+        //                             m_OutlineMaterial->Bind(
+        //                                  { camera, renderData.Transform, m_OutlineWidth, m_OutlineColor } );
+
+        //                             renderer.RenderMesh( m_OutlinePipeline, renderData.Mesh,
+        //                                                  m_OutlineMaterial->GetMaterialExecutor() );
+        //                         }
+        //                     },
+        //                     m_OutlinePipeline->GetSpecification(), targetFb,
+        //                     { RenderPassDependency( RenderPhase::Geometry ) } );
+        //}
+    }
+
+    bool MeshRenderer::SetupGeometryPass()
+    {
+        constexpr std::string_view debugName = "MeshGeometry";
+
+        m_GeometryShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "StaticPBR.glsl" );
+        if ( !m_GeometryShader )
+        {
+            LOG_ERROR( "Failed to load geometry shader" );
+            return false;
+        }
+
+        const auto& targetFb = m_TargetFramebuffer.lock();
+        if ( !targetFb )
+            return false;
+
         PipelineSpecification pipeSpec;
         pipeSpec.DebugName = debugName;
         pipeSpec.Layout    = { { Graphic::ShaderDataType::Float3, "a_Position" },
@@ -110,22 +128,28 @@ namespace Desert::Graphic::System
         pipeSpec.StencilBack        = pipeSpec.StencilFront;
 
         pipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
-        pipeSpec.CullMode       = CullMode::None;
-        pipeSpec.Shader         = Runtime::ResourceRegistry::GetShaderService()->GetByName( "StaticPBR.glsl" );
-        pipeSpec.Framebuffer    = skyboxFramebufferExternal;
+        pipeSpec.CullMode       = CullMode::Back;
+        pipeSpec.Shader         = m_GeometryShader;
+        pipeSpec.Framebuffer    = targetFb;
 
-        m_Pipeline = Pipeline::Create( pipeSpec );
-        m_Pipeline->Invalidate();
+        m_GeometryPipeline = Pipeline::Create( pipeSpec );
+        m_GeometryPipeline->Invalidate();
 
         return true;
     }
 
-    bool MeshRenderer::SetupOutlinePass( const std::shared_ptr<Framebuffer>& skyboxFramebufferExternal,
-                                         const std::shared_ptr<RenderGraph>& renderGraph )
+    bool MeshRenderer::SetupOutlinePass()
     {
-
-        // Shader
         m_OutlineShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Outline.glsl" );
+        if ( !m_OutlineShader )
+        {
+            LOG_ERROR( "Failed to load outline shader" );
+            return false;
+        }
+
+        const auto& targetFb = m_TargetFramebuffer.lock();
+        if ( !targetFb )
+            return false;
 
         PipelineSpecification outlinePipeSpec;
         outlinePipeSpec.DebugName = "OutlinePipeline";
@@ -135,7 +159,7 @@ namespace Desert::Graphic::System
                                       { Graphic::ShaderDataType::Float3, "a_Bitangent" },
                                       { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
 
-        outlinePipeSpec.DepthWriteEnabled  = true;
+        outlinePipeSpec.DepthWriteEnabled  = false;
         outlinePipeSpec.DepthTestEnabled   = false;
         outlinePipeSpec.StencilTestEnabled = true;
         outlinePipeSpec.StencilFront       = { .FailOp      = StencilOp::Keep,
@@ -146,17 +170,11 @@ namespace Desert::Graphic::System
                                                .WriteMask   = 0xFF,
                                                .Reference   = 1 };
         outlinePipeSpec.StencilBack        = outlinePipeSpec.StencilFront;
-        outlinePipeSpec.DepthTestEnabled   = false;
-
-        outlinePipeSpec.StencilBack = outlinePipeSpec.StencilFront;
-
-        outlinePipeSpec.DepthCompareOp = CompareOp::LessOrEqual;
-        outlinePipeSpec.CullMode       = CullMode::None;
-        outlinePipeSpec.Shader         = m_OutlineShader;
-        outlinePipeSpec.Framebuffer    = skyboxFramebufferExternal;
-        outlinePipeSpec.PolygonMode    = PrimitivePolygonMode::Wireframe;
-        outlinePipeSpec.Topology       = PrimitiveTopology::LineStrip;
-        outlinePipeSpec.LineWidth      = 5.0f;
+        outlinePipeSpec.CullMode           = CullMode::None;
+        outlinePipeSpec.Shader             = m_OutlineShader;
+        outlinePipeSpec.Framebuffer        = targetFb;
+        outlinePipeSpec.PolygonMode        = PrimitivePolygonMode::Wireframe;
+        outlinePipeSpec.LineWidth          = 5.0F; 
 
         m_OutlinePipeline = Pipeline::Create( outlinePipeSpec );
         m_OutlinePipeline->Invalidate();
@@ -169,12 +187,10 @@ namespace Desert::Graphic::System
     std::optional<Models::PBR::PBRTextures> MeshRenderer::PreparePBRTextures() const
     {
         const auto& environment = m_SceneRenderer->GetEnvironment();
-
         if ( !environment || !environment->IrradianceMap || !environment->PreFilteredMap )
             return std::nullopt;
 
         return Models::PBR::PBRTextures{ .IrradianceMap  = environment->IrradianceMap,
                                          .PreFilteredMap = environment->PreFilteredMap };
     }
-
 } // namespace Desert::Graphic::System

@@ -81,9 +81,9 @@ namespace Desert::Graphic
         s_RendererAPI->SubmitFullscreenQuad( pipeline, material );
     }
 
-    void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass )
+    void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame)
     {
-        s_RendererAPI->BeginRenderPass( renderPass );
+        s_RendererAPI->BeginRenderPass( renderPass, clearFrame);
     }
 
     void Renderer::BeginSwapChainRenderPass()

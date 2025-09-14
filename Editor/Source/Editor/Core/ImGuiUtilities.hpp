@@ -36,6 +36,8 @@ namespace Desert::Editor::Utils
 
         static bool Property( const char* name, glm::vec3& value, bool exposeW, PropertyFlag flags );
 
+        static bool Property( const char* name, uint32_t& value, PropertyFlag flags = PropertyFlag::None );
+
         static void DrawBorder( ImVec2 rectMin, ImVec2 rectMax, const ImVec4& borderColour, float thickness = 1.0f,
                                 float offsetX = 0.0f, float offsetY = 0.0f );
         static void DrawBorder( ImRect rect, float thickness = 1.0f, float rounding = 0.0f, float offsetX = 0.0f,

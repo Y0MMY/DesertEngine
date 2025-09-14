@@ -29,6 +29,10 @@ namespace Desert::Graphic::System
             return std::nullopt;
         }
 
+        void RegisterPasses( RenderGraphBuilder& builder ) override;
+
+    private:
+        void Render();
     private:
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
 

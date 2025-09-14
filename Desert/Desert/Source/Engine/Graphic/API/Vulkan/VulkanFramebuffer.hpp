@@ -80,6 +80,9 @@ namespace Desert::Graphic::API::Vulkan
         Common::Result<VkFramebuffer> CreateFramebuffer( VkDevice device, uint32_t width, uint32_t height );
 
     private:
+        void TransitionImagesToInitialLayouts();
+
+    private:
         std::shared_ptr<Image2D>              m_DepthAttachment;
         std::vector<std::shared_ptr<Image2D>> m_ColorAttachments;
 
