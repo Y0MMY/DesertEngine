@@ -22,3 +22,6 @@
 [submodule "ThirdParty/lightweightvk"]
 	path = ThirdParty/lightweightvk
 	url = https://github.com/Y0MMY/lightweightvk
+[submodule "Editor/ThirdParty/ImGuiColorTextEdit"]
+	path = Editor/ThirdParty/ImGuiColorTextEdit
+	url = https://github.com/BalazsJako/ImGuiColorTextEdit
