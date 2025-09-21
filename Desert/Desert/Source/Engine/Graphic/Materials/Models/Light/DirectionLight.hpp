@@ -5,6 +5,11 @@
 
 namespace Desert::Graphic::Models::Light
 {
-    DEFINE_MATERIAL_WRAPPER_UNIFORM( DirectionLightUB, std::vector<DirectionLight>, "LightningUB" );
+    // clang-format off
+    RFL_UB_TYPE( DirectionLightPropertiesUB, 
+        FIELD( DirectionLights, std::vector<DirectionLight> ) )
+    // clang-format on
+
+    DEFINE_MATERIAL_WRAPPER_UNIFORM( DirectionLightUB, DirectionLightPropertiesUB, "LightningUB" );
 
 } // namespace Desert::Graphic::Models::Light

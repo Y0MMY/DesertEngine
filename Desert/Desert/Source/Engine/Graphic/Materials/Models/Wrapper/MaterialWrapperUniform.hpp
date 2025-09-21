@@ -1,7 +1,11 @@
 #pragma once
 
+#include <Common/Core/Reflection.hpp>
+
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
+
+#include <rflcpp/rfl.hpp>
 
 namespace Desert::Graphic::MaterialHelper
 {
@@ -24,26 +28,12 @@ namespace Desert::Graphic::MaterialHelper
             {
                 LOG_ERROR( "The uniform {} was not found!", m_UniformName );
             }
-
-            if constexpr ( has_data_method_v<MaterialUB> )
-            {
-                using ValueType = typename MaterialUB::value_type;
-                static std::vector<ValueType> zeroData( 1 );
-                m_UniformProperty->SetData( zeroData.data(), zeroData.size() * sizeof( ValueType ) );
-            }
-            else if constexpr ( has_iterators_v<MaterialUB> )
-            {
-                using ValueType = typename MaterialUB::value_type;
-                static std::vector<ValueType> zeroData( 1 );
-                m_UniformProperty->SetData( zeroData.data(), zeroData.size() * sizeof( ValueType ) );
-            }
             else
             {
-                static MaterialUB zeroData{};
-                m_UniformProperty->SetData( &zeroData, sizeof( MaterialUB ) );
-            }
+                InitializeDefaultValues();
 
-            LOG_UNIFORM( "Uniform {} initialized with default values", m_UniformName );
+                LOG_UNIFORM( "Uniform {} initialized with default values", m_UniformName );
+            }
         }
 
         virtual ~MaterialWrapperUniform() = default;
@@ -52,6 +42,11 @@ namespace Desert::Graphic::MaterialHelper
         {
             return m_MaterialExecutor;
         }
+
+        /* virtual const auto& GetWritableData() const final
+         {
+             return m_Data;
+         }*/
 
         virtual void Update( const MaterialUB& props ) final
         {
@@ -62,61 +57,49 @@ namespace Desert::Graphic::MaterialHelper
             }
             m_Data = props;
 
-            if constexpr ( has_data_method_v<MaterialUB> )
+            UpdateUniformData( m_Data );
+        }
+
+    private:
+        void InitializeDefaultValues()
+        {
+            if constexpr (is_container<MaterialUB>::value || is_reflected<MaterialUB>::value)
             {
-                if ( !m_Data.empty() )
+                using ValueType = typename MaterialUB::value_type;
+                std::vector<ValueType> zeroData( 1 );
+                m_UniformProperty->SetData( zeroData.data(), zeroData.size() * sizeof( ValueType ) );
+            }
+
+            else
+            {
+                MaterialUB zeroData{};
+                m_UniformProperty->SetData( &zeroData, sizeof( MaterialUB ) );
+            }
+        }
+
+        void UpdateUniformData( const MaterialUB& props )
+        {
+
+            if constexpr ( is_container<MaterialUB>::value)
+            {
+                if ( !props.empty() )
                 {
                     using ValueType = typename MaterialUB::value_type;
-                    m_UniformProperty->SetData( m_Data.data(), m_Data.size() * sizeof( ValueType ) );
+                    m_UniformProperty->SetData( props.data(), props.size() * sizeof( ValueType ) );
                 }
             }
-            else if constexpr ( has_iterators_v<MaterialUB> )
+            else if constexpr ( is_reflected<MaterialUB>::value) // reflected struct
             {
-                if ( !m_Data.empty() )
-                {
-                    using ValueType = typename MaterialUB::value_type;
-                    std::vector<ValueType> tempBuffer( m_Data.begin(), m_Data.end() );
-                    m_UniformProperty->SetData( tempBuffer.data(), tempBuffer.size() * sizeof( ValueType ) );
-                }
+                m_UniformProperty->SetData( props.data(), props.size() );
             }
             else
             {
-                m_UniformProperty->SetData( &m_Data, sizeof( MaterialUB ) );
+                m_UniformProperty->SetData( &props, sizeof( MaterialUB ) );
             }
         }
 
     private:
-        template <typename T, typename = void>
-        struct has_data_method : std::false_type
-        {
-        };
-
-        template <typename T>
-        struct has_data_method<
-             T, std::void_t<decltype( std::declval<T>().data() ), decltype( std::declval<T>().size() )>>
-             : std::true_type
-        {
-        };
-
-        template <typename T, typename = void>
-        struct has_iterators : std::false_type
-        {
-        };
-
-        template <typename T>
-        struct has_iterators<
-             T, std::void_t<decltype( std::declval<T>().begin() ), decltype( std::declval<T>().end() ),
-                            decltype( std::declval<T>().size() )>> : std::true_type
-        {
-        };
-
-        template <typename T>
-        static constexpr bool has_data_method_v = has_data_method<T>::value;
-
-        template <typename T>
-        static constexpr bool has_iterators_v = has_iterators<T>::value;
-
-        MaterialUB m_Data;
+        MaterialUB m_Data{};
 
     protected:
         std::shared_ptr<MaterialExecutor>      m_MaterialExecutor;
