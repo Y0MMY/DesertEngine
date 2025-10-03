@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Common/Core/Result.hpp>
+#include <Common/Core/ResultStr.hpp>
 #include <Common/Core/Core.hpp>
 #include <Common/Core/UUID.hpp>
 
@@ -21,8 +21,8 @@ namespace Desert::Assets
             return m_Metadata;
         }
 
-        virtual Common::BoolResult Load()   = 0;
-        virtual Common::BoolResult Unload() = 0;
+        virtual Common::BoolResultStr Load()   = 0;
+        virtual Common::BoolResultStr Unload() = 0;
 
         virtual bool IsReadyForUse() const = 0;
 

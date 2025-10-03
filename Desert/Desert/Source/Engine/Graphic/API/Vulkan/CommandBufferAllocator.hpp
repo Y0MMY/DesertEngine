@@ -9,15 +9,15 @@ namespace Desert::Graphic::API::Vulkan
     public:
         CommandBufferAllocator( const std::shared_ptr<VulkanLogicalDevice>& device );
 
-        Common::Result<VkCommandBuffer> RT_GetCommandBufferCompute( bool begin = false );
-        Common::Result<VkCommandBuffer> RT_AllocateCommandBufferGraphic( bool begin = false );
-        Common::Result<VkCommandBuffer> RT_AllocateCommandBufferTransferOps( bool begin = false );
+        Common::ResultStr<VkCommandBuffer> RT_GetCommandBufferCompute( bool begin = false );
+        Common::ResultStr<VkCommandBuffer> RT_AllocateCommandBufferGraphic( bool begin = false );
+        Common::ResultStr<VkCommandBuffer> RT_AllocateCommandBufferTransferOps( bool begin = false );
 
-        Common::Result<VkCommandBuffer> RT_AllocateSecondCommandBufferGraphic();
+        Common::ResultStr<VkCommandBuffer> RT_AllocateSecondCommandBufferGraphic();
 
-        Common::Result<VkResult> RT_FlushCommandBufferCompute( VkCommandBuffer commandBuffer );
-        Common::Result<VkResult> RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer );
-        Common::Result<VkResult> RT_FlushCommandBufferTransferOps( VkCommandBuffer commandBuffer );
+        Common::ResultStr<VkResult> RT_FlushCommandBufferCompute( VkCommandBuffer commandBuffer );
+        Common::ResultStr<VkResult> RT_FlushCommandBufferGraphic( VkCommandBuffer commandBuffer );
+        Common::ResultStr<VkResult> RT_FlushCommandBufferTransferOps( VkCommandBuffer commandBuffer );
 
         const auto& GetCommandGraphicPool() const
         {

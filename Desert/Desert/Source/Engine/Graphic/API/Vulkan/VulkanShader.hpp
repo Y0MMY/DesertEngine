@@ -41,7 +41,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override
         {
         }
-        virtual Common::BoolResult Reload() override;
+        virtual Common::BoolResultStr Reload() override;
         virtual const std::string  GetName() const override
         {
             return m_ShaderName;
@@ -107,7 +107,7 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         void               Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
-        Common::BoolResult CreateDescriptorsLayout();
+        Common::BoolResultStr CreateDescriptorsLayout();
 
     private:
         const std::weak_ptr<Assets::ShaderAsset> m_ShaderAsset;

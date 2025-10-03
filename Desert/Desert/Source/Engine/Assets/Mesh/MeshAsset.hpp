@@ -11,8 +11,8 @@ namespace Desert::Assets
     public:
         explicit MeshAsset( const AssetPriority priority, const Common::Filepath& filepath );
 
-        virtual Common::BoolResult Load() override;
-        virtual Common::BoolResult Unload() override;
+        virtual Common::BoolResultStr Load() override;
+        virtual Common::BoolResultStr Unload() override;
 
         const auto& GetRawData() const
         {

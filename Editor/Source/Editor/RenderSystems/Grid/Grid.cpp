@@ -2,7 +2,7 @@
 
 namespace Desert::Editor::Render
 {
-    Common::BoolResult Grid::Init()
+    Common::BoolResultStr Grid::Init()
     {
         const auto& scene = m_DstScene.lock();
         if ( !scene )

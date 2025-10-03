@@ -22,9 +22,9 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Use( BindUsage use = BindUsage::Bind ) const override;
         virtual void RT_Use( BindUsage use = BindUsage::Bind ) const override;
 
-        [[nodiscard]] virtual Common::BoolResult Invalidate() override;
-        [[nodiscard]] virtual Common::BoolResult Release() override;
-        [[nodiscard]] virtual Common::BoolResult RT_Invalidate() override;
+        [[nodiscard]] virtual Common::BoolResultStr Invalidate() override;
+        [[nodiscard]] virtual Common::BoolResultStr Release() override;
+        [[nodiscard]] virtual Common::BoolResultStr RT_Invalidate() override;
 
         virtual unsigned int GetSize() const override
         {

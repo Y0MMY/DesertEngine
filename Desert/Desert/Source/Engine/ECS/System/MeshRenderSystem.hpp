@@ -3,7 +3,7 @@
 #include "System.hpp"
 
 #include <Engine/ECS/Components.hpp>
-#include <Engine/Graphic/Geometry/PrimitiveMeshFactory.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
 namespace Desert::ECS
 {

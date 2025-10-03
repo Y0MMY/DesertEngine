@@ -5,7 +5,7 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult MeshRenderer::Initialize()
+    Common::BoolResultStr MeshRenderer::Initialize()
     {
         const auto& compositeFramebuffer = m_TargetFramebuffer.lock();
         if ( !compositeFramebuffer )

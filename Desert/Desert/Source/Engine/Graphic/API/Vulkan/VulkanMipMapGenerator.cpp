@@ -21,18 +21,12 @@ namespace Desert::Graphic::API::Vulkan
         //     return;
         // }
 
-        // Generate mipmaps for each layer
         for ( uint32_t layer = baseArrayLayer; layer < baseArrayLayer + layerCount; layer++ )
         {
-            // Уровень 0 уже должен быть в VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-            // (это делается в вызывающей функции)
-
-            // Generate each mip level
             for ( uint32_t i = 1; i < mipLevels; i++ )
             {
                 VkImageBlit imageBlit{};
 
-                // Source - previous mip level
                 imageBlit.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
                 imageBlit.srcSubresource.baseArrayLayer = layer;
                 imageBlit.srcSubresource.layerCount     = 1;
@@ -42,7 +36,6 @@ namespace Desert::Graphic::API::Vulkan
                 imageBlit.srcOffsets[1].y               = int32_t( std::max( height >> ( i - 1 ), 1u ) );
                 imageBlit.srcOffsets[1].z               = 1;
 
-                // Destination - current mip level
                 imageBlit.dstSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
                 imageBlit.dstSubresource.baseArrayLayer = layer;
                 imageBlit.dstSubresource.layerCount     = 1;
@@ -60,7 +53,6 @@ namespace Desert::Graphic::API::Vulkan
                 mipSubRange.levelCount              = 1;
 
                 // Prepare current mip level as image blit destination
-                // Уровни 1+ всегда UNDEFINED (они новые)
                 Utils::InsertImageMemoryBarrier( commandBuffer, image, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
                                                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -92,12 +84,12 @@ namespace Desert::Graphic::API::Vulkan
                                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, finalRange );
     }
 
-    Common::BoolResult VulkanMipMap2DGeneratorCS::GenerateMips( const std::shared_ptr<Image2D>& image ) const
+    Common::BoolResultStr VulkanMipMap2DGeneratorCS::GenerateMips( const std::shared_ptr<Image2D>& image ) const
     {
         return Common::MakeError( "Not impl" );
     }
 
-    Common::BoolResult
+    Common::BoolResultStr
     VulkanMipMapCubeGeneratorCS::GenerateMips( const std::shared_ptr<ImageCube>& imageCube ) const
     {
         return Common::MakeError( "Not impl" );
@@ -105,7 +97,7 @@ namespace Desert::Graphic::API::Vulkan
 
     // Transfer ops
 
-    Common::BoolResult VulkanMipMap2DGeneratorTO::GenerateMips( const std::shared_ptr<Image2D>& image ) const
+    Common::BoolResultStr VulkanMipMap2DGeneratorTO::GenerateMips( const std::shared_ptr<Image2D>& image ) const
     {
         const auto& vulkanImage    = SP_CAST( VulkanImage2D, image );
         const auto  originalLayout = vulkanImage->GetVulkanImageInfo().ImageInfo.imageLayout;
@@ -119,7 +111,6 @@ namespace Desert::Graphic::API::Vulkan
 
         VkCommandBuffer commandBuffer = cmdAlloc.GetValue();
 
-        // Переводим уровень 0 в TRANSFER_SRC_OPTIMAL до вызова GenerateMipmapsTO
         VkImageSubresourceRange baseMipRange = {};
         baseMipRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
         baseMipRange.baseMipLevel            = 0;
@@ -131,7 +122,6 @@ namespace Desert::Graphic::API::Vulkan
                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                          VK_PIPELINE_STAGE_TRANSFER_BIT, baseMipRange );
 
-        // Теперь вызываем GenerateMipmapsTO - уровень 0 уже в правильном layout'е
         GenerateMipmapsTO( commandBuffer, spec.Image, spec.Format, image->GetWidth(), image->GetHeight(),
                            image->GetMipmapLevels() );
 
@@ -140,7 +130,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult
+    Common::BoolResultStr
     VulkanMipMapCubeGeneratorTO::GenerateMips( const std::shared_ptr<ImageCube>& imageCube ) const
     {
         const auto& vulkanImage    = SP_CAST( VulkanImageCube, imageCube );
@@ -155,19 +145,17 @@ namespace Desert::Graphic::API::Vulkan
 
         VkCommandBuffer commandBuffer = cmdAlloc.GetValue();
 
-        // Переводим уровень 0 для всех 6 слоев в TRANSFER_SRC_OPTIMAL
         VkImageSubresourceRange baseMipRange = {};
         baseMipRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
         baseMipRange.baseMipLevel            = 0;
         baseMipRange.levelCount              = 1;
         baseMipRange.baseArrayLayer          = 0;
-        baseMipRange.layerCount              = 6; // Все 6 граней куба
+        baseMipRange.layerCount              = 6; 
 
         Utils::InsertImageMemoryBarrier( commandBuffer, spec.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, originalLayout,
                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
                                          VK_PIPELINE_STAGE_TRANSFER_BIT, baseMipRange );
 
-        // Теперь вызываем GenerateMipmapsTO - уровень 0 уже в правильном layout'е
         GenerateMipmapsTO( commandBuffer, spec.Image, spec.Format, imageCube->GetWidth(), imageCube->GetHeight(),
                            imageCube->GetMipmapLevels(), 0, 6 ); // 6 faces for cubemap
 

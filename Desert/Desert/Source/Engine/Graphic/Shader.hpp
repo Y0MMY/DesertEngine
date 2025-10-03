@@ -17,7 +17,7 @@ namespace Desert::Graphic
 
         virtual void                                           Use( BindUsage use = BindUsage::Bind ) const    = 0;
         virtual void                                           RT_Use( BindUsage use = BindUsage::Bind ) const = 0;
-        virtual Common::BoolResult                             Reload()                                        = 0;
+        virtual Common::BoolResultStr                          Reload()                                        = 0;
         virtual const std::string                              GetName() const                                 = 0;
         virtual const std::vector<Core::Models::UniformBuffer> GetUniformBufferModels() const                  = 0;
         virtual const std::vector<Core::Models::StorageBuffer> GetStorageBufferModels() const                  = 0;

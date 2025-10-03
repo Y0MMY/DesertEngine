@@ -1,10 +1,10 @@
 #include "MeshService.hpp"
 
-#include <Engine/Graphic/Geometry/MeshFactory.hpp>
+#include <Engine/Geometry/MeshFactory.hpp>
 
 namespace Desert::Runtime
 {
-    Common::BoolResult MeshService::Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+    Common::BoolResultStr MeshService::Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
     {
         if ( !meshAsset->GetMetadata().IsValid() )
         {

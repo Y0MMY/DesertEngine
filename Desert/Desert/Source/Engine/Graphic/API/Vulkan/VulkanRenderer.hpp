@@ -16,14 +16,14 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Init() override;
         virtual void Shutdown() override;
 
-        [[nodiscard]] virtual Common::BoolResult BeginFrame() override;
-        [[nodiscard]] virtual Common::BoolResult EndFrame() override;
-        [[nodiscard]] virtual Common::BoolResult PrepareNextFrame() override;
-        [[nodiscard]] virtual Common::BoolResult PresentFinalImage() override;
-        [[nodiscard]] virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
+        [[nodiscard]] virtual Common::BoolResultStr BeginFrame() override;
+        [[nodiscard]] virtual Common::BoolResultStr EndFrame() override;
+        [[nodiscard]] virtual Common::BoolResultStr PrepareNextFrame() override;
+        [[nodiscard]] virtual Common::BoolResultStr PresentFinalImage() override;
+        [[nodiscard]] virtual Common::BoolResultStr BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
                                                                   bool clearFrame ) override;
-        virtual Common::BoolResult               BeginSwapChainRenderPass() override;
-        [[nodiscard]] virtual Common::BoolResult EndRenderPass() override;
+        virtual Common::BoolResultStr               BeginSwapChainRenderPass() override;
+        [[nodiscard]] virtual Common::BoolResultStr EndRenderPass() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                  const std::shared_ptr<MaterialExecutor>& material ) override;
 

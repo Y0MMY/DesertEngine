@@ -13,7 +13,7 @@ namespace Desert::Graphic::API::Vulkan
 
         void                     PrepareFrame();
         void                     Present();
-        Common::Result<VkResult> Init();
+        Common::ResultStr<VkResult> Init();
         void                     Release();
 
         const auto& GetDrawCommandBuffers() const
@@ -27,7 +27,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        Common::Result<VkResult> QueuePresent( VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore );
+        Common::ResultStr<VkResult> QueuePresent( VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore );
 
     private:
         uint32_t m_ImageIndex = ~0;

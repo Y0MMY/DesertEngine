@@ -34,12 +34,12 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    [[nodiscard]] Common::BoolResult VulkanVertexBuffer::Invalidate()
+    [[nodiscard]] Common::BoolResultStr VulkanVertexBuffer::Invalidate()
     {
         return RT_Invalidate();
     }
 
-    [[nodiscard]] Common::BoolResult VulkanVertexBuffer::RT_Invalidate()
+    [[nodiscard]] Common::BoolResultStr VulkanVertexBuffer::RT_Invalidate()
     {
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();
@@ -126,7 +126,7 @@ namespace Desert::Graphic::API::Vulkan
         m_StorageBuffer.Allocate( size );
     }
 
-    Common::BoolResult VulkanVertexBuffer::Release()
+    Common::BoolResultStr VulkanVertexBuffer::Release()
     {
         m_StorageBuffer.Release();
 

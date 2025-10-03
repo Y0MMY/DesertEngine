@@ -44,7 +44,7 @@ namespace Desert::Graphic::API::Vulkan
         float    roughness;
     };
 
-    Common::BoolResult VulkanRendererAPI::BeginFrame()
+    Common::BoolResultStr VulkanRendererAPI::BeginFrame()
     {
         if ( m_CurrentCommandBuffer != nullptr )
         {
@@ -62,7 +62,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanRendererAPI::EndFrame()
+    Common::BoolResultStr VulkanRendererAPI::EndFrame()
     {
         if ( m_CurrentCommandBuffer == nullptr )
         {
@@ -77,14 +77,14 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanRendererAPI::PrepareNextFrame()
+    Common::BoolResultStr VulkanRendererAPI::PrepareNextFrame()
     {
         // static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PrepareNextFrame();
 
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanRendererAPI::PresentFinalImage()
+    Common::BoolResultStr VulkanRendererAPI::PresentFinalImage()
     {
         // static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PresentFinalImage();
 
@@ -146,7 +146,7 @@ namespace Desert::Graphic::API::Vulkan
         return renderPassBeginInfo;
     }
 
-    Common::BoolResult VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
+    Common::BoolResultStr VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
                                                            bool                               clearFrame )
     {
         const auto window = m_Window.lock();
@@ -175,7 +175,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanRendererAPI::BeginSwapChainRenderPass()
+    Common::BoolResultStr VulkanRendererAPI::BeginSwapChainRenderPass()
     {
         const auto window = m_Window.lock();
         if ( !window )
@@ -196,7 +196,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::BoolResult VulkanRendererAPI::EndRenderPass()
+    Common::BoolResultStr VulkanRendererAPI::EndRenderPass()
     {
         vkCmdEndRenderPass( m_CurrentCommandBuffer );
         return Common::MakeSuccess( true );

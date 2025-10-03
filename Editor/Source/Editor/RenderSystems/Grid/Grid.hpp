@@ -12,7 +12,7 @@ namespace Desert::Editor::Render
     public:
         using IRender::IRender;
 
-        virtual Common::BoolResult Init() override;
+        virtual Common::BoolResultStr Init() override;
         void                       UpdateCamera( const std::shared_ptr<Core::Camera>& camera );
         void                       SetGridProperties( float cellSize, float cellCount, const glm::vec4& color );
 

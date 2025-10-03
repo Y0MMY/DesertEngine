@@ -132,7 +132,7 @@ namespace Desert::Graphic
 
         [[nodiscard]] virtual unsigned int GetSize() const = 0;
 
-        [[nodiscard]] virtual Common::BoolResult RT_Invalidate() = 0;
+        [[nodiscard]] virtual Common::BoolResultStr RT_Invalidate() = 0;
 
         static std::shared_ptr<VertexBuffer> Create( void* data, uint32_t size,
                                                      BufferUsage usage = BufferUsage::Static );

@@ -2,7 +2,7 @@
 
 #include <Common/Core/Events/Event.hpp>
 #include <Common/Core/Timestep.hpp>
-#include <Common/Core/Result.hpp>
+#include <Common/Core/ResultStr.hpp>
 
 #include <string>
 
@@ -16,10 +16,10 @@ namespace Common
         {
         }
 
-        [[nodiscard]] virtual Common::BoolResult OnAttach()                             = 0;
-        [[nodiscard]] virtual Common::BoolResult OnDetach()                             = 0;
-        [[nodiscard]] virtual Common::BoolResult OnUpdate( const Common::Timestep& ts ) = 0;
-        [[nodiscard]] virtual Common::BoolResult OnImGuiRender()                        = 0;
+        [[nodiscard]] virtual Common::BoolResultStr OnAttach()                             = 0;
+        [[nodiscard]] virtual Common::BoolResultStr OnDetach()                             = 0;
+        [[nodiscard]] virtual Common::BoolResultStr OnUpdate( const Common::Timestep& ts ) = 0;
+        [[nodiscard]] virtual Common::BoolResultStr OnImGuiRender()                        = 0;
         /*virtual void OnEvent(Event& event) = 0; */
 
         inline const std::string& GetName()

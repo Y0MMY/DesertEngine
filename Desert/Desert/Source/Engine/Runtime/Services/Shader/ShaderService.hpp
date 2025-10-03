@@ -8,7 +8,7 @@ namespace Desert::Runtime
     class ShaderService
     {
     public:
-        Common::BoolResult               Register( const std::shared_ptr<Assets::ShaderAsset>& shaderAsset );
+        Common::BoolResultStr               Register( const std::shared_ptr<Assets::ShaderAsset>& shaderAsset );
         std::shared_ptr<Graphic::Shader> Get( const Assets::AssetHandle& handle ) const;
         std::shared_ptr<Graphic::Shader> GetByName( const std::string& name ) const;
         void                             Clear();

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Graphic/Geometry/Mesh.hpp>
+#include <Engine/Geometry/Mesh.hpp>
 
 namespace Desert
 {

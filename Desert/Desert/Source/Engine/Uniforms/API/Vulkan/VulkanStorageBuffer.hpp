@@ -13,8 +13,11 @@ namespace Desert::Uniforms::API::Vulkan
         VulkanStorageBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding );
         virtual ~VulkanStorageBuffer();
 
+        virtual uint8_t* MapMemory()  override { return nullptr; }
+        virtual void     UnmapMemory()override {}
+
         virtual void           SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
-        virtual void           RT_SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
+        //virtual void           RT_SetData( const void* data, uint32_t size, uint32_t offset = 0 ) override;
         virtual const uint32_t GetBinding() const override
         {
             return m_Binding;

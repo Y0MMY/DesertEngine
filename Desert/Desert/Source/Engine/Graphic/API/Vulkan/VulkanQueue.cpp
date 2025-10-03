@@ -11,7 +11,7 @@ namespace Desert::Graphic::API::Vulkan
 
     namespace
     {
-        Common::Result<VkSemaphore> CreateSemaphore( VkDevice device )
+        Common::ResultStr<VkSemaphore> CreateSemaphore( VkDevice device )
         {
             VkSemaphoreCreateInfo createInfo{
                  .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = VK_NULL_HANDLE, .flags = 0 };
@@ -81,7 +81,7 @@ namespace Desert::Graphic::API::Vulkan
         vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
     }
 
-    Common::Result<VkResult> VulkanQueue::QueuePresent( VkQueue queue, uint32_t imageIndex,
+    Common::ResultStr<VkResult> VulkanQueue::QueuePresent( VkQueue queue, uint32_t imageIndex,
                                                         VkSemaphore waitSemaphore )
     {
         VkPresentInfoKHR presentInfo = {};
@@ -105,7 +105,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeFormattedError<VkResult>( "result: {}", VkResultToString( res ) );
     }
 
-    Common::Result<VkResult> VulkanQueue::Init()
+    Common::ResultStr<VkResult> VulkanQueue::Init()
     {
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();

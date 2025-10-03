@@ -304,7 +304,7 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdPipelineBarrier( cmdBuf, sourceStage, destinationStage, 0, 0, NULL, 0, NULL, 1, &barrier );
     }
 
-    Common::Result<VkImageView> Utils::CreateImageView( VkDevice device, VkImage image, VkFormat format,
+    Common::ResultStr<VkImageView> Utils::CreateImageView( VkDevice device, VkImage image, VkFormat format,
                                                         VkImageAspectFlags aspectFlags, VkImageViewType viewType,
                                                         uint32_t layerCount, uint32_t mipLeveles )
     {

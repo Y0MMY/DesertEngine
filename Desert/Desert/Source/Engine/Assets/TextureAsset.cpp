@@ -8,7 +8,7 @@ namespace Desert::Assets
     {
     }
 
-    Common::BoolResult TextureAsset::Load()
+    Common::BoolResultStr TextureAsset::Load()
     {
         m_Texture = Graphic::Texture2D::Create( { true }, m_Metadata.Filepath);
         m_Texture->Invalidate();
@@ -17,7 +17,7 @@ namespace Desert::Assets
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult TextureAsset::Unload()
+    Common::BoolResultStr TextureAsset::Unload()
     {
         return BOOLSUCCESS;
     }

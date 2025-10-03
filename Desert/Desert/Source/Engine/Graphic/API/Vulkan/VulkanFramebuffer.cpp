@@ -26,7 +26,7 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        Common::Result<VkRenderPass>
+        Common::ResultStr<VkRenderPass>
         CreateRenderPass( VkDevice device, const std::vector<Core::Formats::ImageFormat>& colorAttachments,
                           const std::optional<Core::Formats::ImageFormat>& depthAttachment,
                           const std::vector<ExternalAttachment>&           externalColorAttachments,
@@ -260,7 +260,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    Common::BoolResult VulkanFramebuffer::Resize( uint32_t width, uint32_t height, bool forceRecreate )
+    Common::BoolResultStr VulkanFramebuffer::Resize( uint32_t width, uint32_t height, bool forceRecreate )
     {
         if ( m_Framebuffer != VK_NULL_HANDLE )
         {
@@ -301,7 +301,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::Result<VkFramebuffer> VulkanFramebuffer::CreateFramebuffer( VkDevice device, uint32_t width,
+    Common::ResultStr<VkFramebuffer> VulkanFramebuffer::CreateFramebuffer( VkDevice device, uint32_t width,
                                                                         uint32_t height )
     {
         if ( m_RenderPass == nullptr )
@@ -388,7 +388,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( m_Framebuffer );
     }
 
-    Common::BoolResult VulkanFramebuffer::Release()
+    Common::BoolResultStr VulkanFramebuffer::Release()
     {
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();

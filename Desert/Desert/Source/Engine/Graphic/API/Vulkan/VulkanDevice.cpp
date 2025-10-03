@@ -13,7 +13,7 @@ namespace Desert::Graphic::API::Vulkan
         CreateDevice();
     }
 
-    Common::Result<bool> VulkanPhysicalDevice::CreateDevice()
+    Common::ResultStr<bool> VulkanPhysicalDevice::CreateDevice()
     {
         auto& instance =
              SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanInstance();
@@ -166,7 +166,7 @@ namespace Desert::Graphic::API::Vulkan
         vkDestroyDevice( m_LogicalDevice, nullptr );
     }
 
-    Common::Result<bool> VulkanLogicalDevice::CreateDevice()
+    Common::ResultStr<bool> VulkanLogicalDevice::CreateDevice()
     {
         VkDeviceCreateInfo       createInfo{};
         VkPhysicalDeviceFeatures deviceFeatures{};

@@ -18,7 +18,7 @@ namespace Desert::Graphic
     {
     public:
         virtual ~Texture()                      = default;
-        virtual Common::BoolResult Invalidate() = 0;
+        virtual Common::BoolResultStr Invalidate() = 0;
         virtual void Release() = 0;
 
         virtual uint32_t GetWidth() const  = 0;

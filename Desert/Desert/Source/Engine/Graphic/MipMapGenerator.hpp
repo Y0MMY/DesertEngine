@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Common/Core/Result.hpp>
+#include <Common/Core/ResultStr.hpp>
 
 namespace Desert::Graphic
 {
@@ -16,7 +16,7 @@ namespace Desert::Graphic
     class MipMap2DGenerator
     {
     public:
-        virtual Common::BoolResult GenerateMips( const std::shared_ptr<Image2D>& image ) const = 0;
+        virtual Common::BoolResultStr GenerateMips( const std::shared_ptr<Image2D>& image ) const = 0;
 
         static std::unique_ptr<MipMap2DGenerator> Create( MipGenStrategy strategy );
     };
@@ -24,7 +24,7 @@ namespace Desert::Graphic
     class MipMapCubeGenerator
     {
     public:
-        virtual Common::BoolResult GenerateMips( const std::shared_ptr<ImageCube>& image ) const = 0;
+        virtual Common::BoolResultStr GenerateMips( const std::shared_ptr<ImageCube>& image ) const = 0;
 
         static std::unique_ptr<MipMapCubeGenerator> Create( MipGenStrategy strategy );
     };

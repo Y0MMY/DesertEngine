@@ -33,7 +33,6 @@ namespace Desert::Graphic::API::Vulkan
             }
             return arraySize;
         }
-#if 0
         static Core::Formats::ShaderDataType SPIRTypeToShaderDataType( spirv_cross::SPIRType type )
         {
             switch ( type.basetype )
@@ -74,7 +73,7 @@ namespace Desert::Graphic::API::Vulkan
             DESERT_VERIFY( false, "Unknown type!" );
             return Core::Formats::ShaderDataType::None;
         }
-#endif
+
         Core::Formats::ShaderStage GetShaderStageFlagBitsFromSPV( const spv::ExecutionModel& executionModel )
         {
             switch ( executionModel )
@@ -143,9 +142,9 @@ namespace Desert::Graphic::API::Vulkan
             return (VkShaderStageFlagBits)0;
         }
 
-        Common::Result<std::vector<uint32_t>> Compile( const Core::Formats::ShaderStage stage,
-                                                       const std::string                shaderSource,
-                                                       const std::string&               shaderPath )
+        Common::ResultStr<std::vector<uint32_t>> Compile( const Core::Formats::ShaderStage stage,
+                                                          const std::string                shaderSource,
+                                                          const std::string&               shaderPath )
         {
             static shaderc::Compiler compiler;
             shaderc::CompileOptions  shaderCOptions;
@@ -173,10 +172,10 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeSuccess( std::vector<uint32_t>( module.begin(), module.end() ) );
         }
 
-        Common::BoolResult CreateShaderModule( const Core::Formats::ShaderStage&             stage,
-                                               const std::vector<uint32_t>&                  shaderData,
-                                               const std::filesystem::path&                  filepath,
-                                               std::vector<VkPipelineShaderStageCreateInfo>& writeCreateInfo )
+        Common::BoolResultStr CreateShaderModule( const Core::Formats::ShaderStage&             stage,
+                                                  const std::vector<uint32_t>&                  shaderData,
+                                                  const std::filesystem::path&                  filepath,
+                                                  std::vector<VkPipelineShaderStageCreateInfo>& writeCreateInfo )
         {
             VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                    ->GetVulkanLogicalDevice();
@@ -214,7 +213,7 @@ namespace Desert::Graphic::API::Vulkan
         Reload();
     }
 
-    Common::BoolResult VulkanShader::Reload() // also load
+    Common::BoolResultStr VulkanShader::Reload() // also load
     {
         const auto asset = m_ShaderAsset.lock();
         if ( !asset )
@@ -282,26 +281,96 @@ namespace Desert::Graphic::API::Vulkan
 
                 if ( uniformBuffers.find( binding ) == uniformBuffers.end() )
                 {
-                    uint32_t                     member_type_id = bufferType.member_types[0];
-                    const spirv_cross::SPIRType& member_type    = compiler.get_type( member_type_id );
-
                     Core::Models::UniformBuffer uniformBuffer;
                     uniformBuffer.BindingPoint = binding;
                     uniformBuffer.Size         = size;
                     uniformBuffer.Name         = name;
-                    // uniformBuffer.Type         = Utils::SPIRTypeToShaderDataType(member_type);
                     uniformBuffer.ShaderStage =
                          Utils::GetShaderStageFlagBitsFromSPV( compiler.get_execution_model() );
+
+                    for ( uint32_t i = 0; i < memberCount; i++ )
+                    {
+                        uint32_t                     member_type_id = bufferType.member_types[i];
+                        const spirv_cross::SPIRType& member_type    = compiler.get_type( member_type_id );
+                        const std::string&           member_name = compiler.get_member_name( bufferType.self, i );
+
+                        Desert::Core::Models::Common::Field field;
+                        field.Name          = member_name;
+                        field.FieldDataType = Utils::SPIRTypeToShaderDataType( member_type );
+                        field.Size          = compiler.get_declared_struct_member_size( bufferType, i );
+                        field.Offset        = compiler.type_struct_member_offset( bufferType, i );
+
+                        if ( member_type.array.size() > 0 )
+                        {
+                            field.ArraySize = member_type.array[0];
+                            // for ( auto dim : member_type.array ) { ... }
+                        }
+                        else
+                        {
+                            field.ArraySize = 1;
+                        }
+
+                        uniformBuffer.Fields.push_back( field );
+                    }
 
                     uniformBuffers.insert( { binding, uniformBuffer } );
                 }
                 else
                 {
+                    auto& existingBuffer = uniformBuffers[binding];
+
+                    if ( existingBuffer.Fields.size() != memberCount )
+                    {
+                        existingBuffer.Fields.clear();
+
+                        for ( uint32_t i = 0; i < memberCount; i++ )
+                        {
+                            uint32_t                     member_type_id = bufferType.member_types[i];
+                            const spirv_cross::SPIRType& member_type    = compiler.get_type( member_type_id );
+                            const std::string& member_name = compiler.get_member_name( bufferType.self, i );
+
+                            Desert::Core::Models::Common::Field field;
+                            field.Name          = member_name;
+                            field.FieldDataType = Utils::SPIRTypeToShaderDataType( member_type );
+                            field.Size          = compiler.get_declared_struct_member_size( bufferType, i );
+                            field.Offset        = compiler.type_struct_member_offset( bufferType, i );
+
+                            if ( member_type.array.size() > 0 )
+                            {
+                                field.ArraySize = member_type.array[0];
+                            }
+                            else
+                            {
+                                field.ArraySize = 1;
+                            }
+
+                            existingBuffer.Fields.push_back( field );
+                        }
+                    }
                 }
 
                 LOG_TRACE( "  {0} ({1}, {2})", name, descriptorSet, binding );
                 LOG_TRACE( "  Member Count: {0}", memberCount );
                 LOG_TRACE( "  Size: {0}", size );
+
+                for ( uint32_t i = 0; i < memberCount; i++ )
+                {
+                    uint32_t                     member_type_id = bufferType.member_types[i];
+                    const spirv_cross::SPIRType& member_type    = compiler.get_type( member_type_id );
+                    const std::string&           member_name    = compiler.get_member_name( bufferType.self, i );
+                    uint32_t member_size   = compiler.get_declared_struct_member_size( bufferType, i );
+                    uint32_t member_offset = compiler.type_struct_member_offset( bufferType, i );
+
+                    std::string arrayInfo = "";
+                    if ( member_type.array.size() > 0 )
+                    {
+                        arrayInfo = ", ArraySize: " + std::to_string( member_type.array[0] );
+                    }
+
+                    LOG_TRACE( "    Field {0}: {1} (Type: {2}, Size: {3}, Offset: {4}{5})", i, member_name, "TODO",
+                               member_size, member_offset, arrayInfo );
+                }
+
                 LOG_TRACE( "-------------------" );
             }
         }
@@ -462,7 +531,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    Common::BoolResult VulkanShader::CreateDescriptorsLayout()
+    Common::BoolResultStr VulkanShader::CreateDescriptorsLayout()
     {
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();

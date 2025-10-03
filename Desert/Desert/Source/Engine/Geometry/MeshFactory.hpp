@@ -9,7 +9,7 @@ namespace Desert::Graphic
     public:
         static std::shared_ptr<Mesh> Create( const std::shared_ptr<Assets::MeshAsset>& baseAsset )
         {
-            const auto& mesh = std::make_shared<Mesh>( baseAsset );
+            const auto& mesh = Mesh::CreateStatic( baseAsset );
             mesh->Invalidate();
 
             return mesh;

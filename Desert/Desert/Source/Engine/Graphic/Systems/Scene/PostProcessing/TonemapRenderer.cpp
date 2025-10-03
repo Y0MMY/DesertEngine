@@ -4,7 +4,7 @@
 
 namespace Desert::Graphic::System
 {
-    Common::BoolResult TonemapRenderer::Initialize()
+    Common::BoolResultStr TonemapRenderer::Initialize()
     {
         const auto& targetFramebuffer = m_TargetFramebuffer.lock();
         if ( !targetFramebuffer )

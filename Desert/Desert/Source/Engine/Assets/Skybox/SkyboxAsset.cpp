@@ -9,7 +9,7 @@ namespace Desert::Assets
     {
     }
 
-    Common::BoolResult SkyboxAsset::Load()
+    Common::BoolResultStr SkyboxAsset::Load()
     {
         /*if ( !m_TextureAsset->Load() )
         {
@@ -21,7 +21,7 @@ namespace Desert::Assets
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult SkyboxAsset::Unload()
+    Common::BoolResultStr SkyboxAsset::Unload()
     {
         return BOOLSUCCESS;
     }

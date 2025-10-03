@@ -127,7 +127,7 @@ namespace Desert
                     { 7, 1, 0 } };
 
         s_Primitives[static_cast<size_t>( PrimitiveType::Cube )] =
-             std::make_shared<Mesh>( vertices, indices, "Cube" );
+             Mesh::CreateStatic( vertices, indices, "Cube" );
     }
 
     void PrimitiveMeshFactory::CreateSphere()
@@ -176,7 +176,7 @@ namespace Desert
         }
 
         s_Primitives[static_cast<size_t>( PrimitiveType::Sphere )] =
-             std::make_shared<Mesh>( vertices, indices, "Sphere" );
+             Mesh::CreateStatic( vertices, indices, "Sphere" );
     }
 
     void PrimitiveMeshFactory::CreatePyramid()
@@ -226,7 +226,7 @@ namespace Desert
                     { 3, 4, 0 } };
 
         s_Primitives[static_cast<size_t>( PrimitiveType::Pyramid )] =
-             std::make_shared<Mesh>( vertices, indices, "Pyramid" );
+             Mesh::CreateStatic( vertices, indices, "Pyramid" );
     }
 
     void PrimitiveMeshFactory::CreatePlane()
@@ -262,28 +262,28 @@ namespace Desert
         indices = { { 0, 1, 2 }, { 2, 3, 0 } };
 
         s_Primitives[static_cast<size_t>( PrimitiveType::Plane )] =
-             std::make_shared<Mesh>( vertices, indices, "Plane" );
+             Mesh::CreateStatic( vertices, indices, "Plane" );
     }
 
     void PrimitiveMeshFactory::CreateCylinder()
     {
         // Implementation for cylinder
         s_Primitives[static_cast<size_t>( PrimitiveType::Cylinder )] =
-             std::make_shared<Mesh>( std::vector<Vertex>{}, std::vector<Index>{}, "Cylinder" );
+             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Cylinder" );
     }
 
     void PrimitiveMeshFactory::CreateCapsule()
     {
         // Implementation for capsule
         s_Primitives[static_cast<size_t>( PrimitiveType::Capsule )] =
-             std::make_shared<Mesh>( std::vector<Vertex>{}, std::vector<Index>{}, "Capsule" );
+             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Capsule" );
     }
 
     void PrimitiveMeshFactory::CreateTerrain()
     {
         // Implementation for terrain
         s_Primitives[static_cast<size_t>( PrimitiveType::Terrain )] =
-             std::make_shared<Mesh>( std::vector<Vertex>{}, std::vector<Index>{}, "Terrain" );
+             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Terrain" );
     }
 
     void PrimitiveMeshFactory::CreateLightCube()

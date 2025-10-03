@@ -16,7 +16,7 @@ namespace Desert::Graphic
         virtual unsigned int GetSize() const  = 0;
         virtual unsigned int GetCount() const = 0;
 
-        [[nodiscard]] virtual Common::BoolResult RT_Invalidate() = 0;
+        [[nodiscard]] virtual Common::BoolResultStr RT_Invalidate() = 0;
 
         static std::shared_ptr<IndexBuffer> Create( const void* data, uint32_t size,
                                                     BufferUsage usage = BufferUsage::Static );

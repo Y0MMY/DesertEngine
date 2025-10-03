@@ -6,7 +6,7 @@
 
 namespace Desert::Graphic
 {
-    NO_DISCARD Common::BoolResult SceneRenderer::Init()
+    NO_DISCARD Common::BoolResultStr SceneRenderer::Init()
     {
         const uint32_t width  = EngineContext::GetInstance().GetCurrentWindow()->GetWidth();
         const uint32_t height = EngineContext::GetInstance().GetCurrentWindow()->GetHeight();
@@ -39,7 +39,7 @@ namespace Desert::Graphic
         return BOOLSUCCESS;
     }
 
-    NO_DISCARD Common::BoolResult SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>&  scene,
+    NO_DISCARD Common::BoolResultStr SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>&  scene,
                                                              const std::shared_ptr<Core::Camera>& camera )
     {
         m_SceneInfo.ActiveScene  = scene;
@@ -69,7 +69,7 @@ namespace Desert::Graphic
         CompositeRenderPass();
     }
 
-    NO_DISCARD Common::BoolResult SceneRenderer::EndScene()
+    NO_DISCARD Common::BoolResultStr SceneRenderer::EndScene()
     {
         m_MeshRenderData.clear();
         m_PointLight.clear();

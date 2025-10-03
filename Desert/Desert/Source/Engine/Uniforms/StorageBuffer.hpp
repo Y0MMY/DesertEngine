@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Common/Core/Result.hpp>
+#include <Common/Core/ResultStr.hpp>
 
 #include <Engine/Graphic/Shader.hpp>
 #include "BaseBuffer.hpp"
@@ -11,6 +11,11 @@ namespace Desert::Uniforms
     {
     public:
         virtual ~StorageBuffer() = default;
+
+        virtual const std::vector<Core::Models::Common::Field>& GetFields() const override
+        {
+            return {};
+        }
 
     private:
         static std::shared_ptr<StorageBuffer> Create( const std::string_view debugName, uint32_t size,

@@ -2,7 +2,7 @@
 
 namespace Desert::Runtime
 {
-    Common::BoolResult SkyboxService::Register( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset )
+    Common::BoolResultStr SkyboxService::Register( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset )
     {
         if ( !skyboxAsset->GetMetadata().IsValid() )
         {

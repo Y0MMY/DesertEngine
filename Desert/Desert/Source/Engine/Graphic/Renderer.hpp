@@ -7,7 +7,7 @@
 
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
-#include <Engine/Graphic/Geometry/Mesh.hpp>
+#include <Engine/Geometry/Mesh.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 
@@ -19,11 +19,11 @@ namespace Desert::Graphic
     class Renderer : public Common::Singleton<Renderer>
     {
     public:
-        Common::BoolResult Init();
+        Common::BoolResultStr Init();
         void               Shutdown();
 
-        [[nodiscard]] Common::BoolResult BeginFrame();
-        [[nodiscard]] Common::BoolResult EndFrame();
+        [[nodiscard]] Common::BoolResultStr BeginFrame();
+        [[nodiscard]] Common::BoolResultStr EndFrame();
         void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame = false );
         void BeginSwapChainRenderPass();
         void EndRenderPass();
@@ -52,7 +52,7 @@ namespace Desert::Graphic
         }
 
     private:
-        [[nodiscard]] Common::BoolResult InitGraphicAPI();
+        [[nodiscard]] Common::BoolResultStr InitGraphicAPI();
 
     private:
         static Common::Memory::CommandBuffer& GetRenderCommandQueue();

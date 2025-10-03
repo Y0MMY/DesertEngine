@@ -65,7 +65,7 @@ namespace Desert::Graphic::API::Vulkan
                                        VkPipelineStageFlags    dstStageMask,
                                        VkImageSubresourceRange subresourceRange );
 
-        Common::Result<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
+        Common::ResultStr<VkImageView> CreateImageView( VkDevice device, VkImage image, VkFormat format,
                                                      VkImageAspectFlags aspectFlags, VkImageViewType viewType,
                                                      uint32_t layerCount, uint32_t mipLeveles );
     } // namespace Utils

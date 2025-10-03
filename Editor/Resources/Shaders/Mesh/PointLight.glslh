@@ -22,10 +22,8 @@ vec3 CalculatePointLight(PointLight light, vec3 worldPosition, vec3 view, vec3 N
     vec3 L = light.position - worldPosition;
     float distance = length(L);
     
-    // Нормализуем направление к свету
     L = normalize(L);
     
-    // Вектор отражения и половинный вектор
     vec3 H = normalize(view + L);
     
     // Косинусы углов
@@ -37,23 +35,18 @@ vec3 CalculatePointLight(PointLight light, vec3 worldPosition, vec3 view, vec3 N
         return vec3(0.0);
     }
     
-    // Вычисляем затухание
     float attenuation = CalculateAttenuation(distance, light.radius);
     vec3 radiance = light.color * light.intensity * attenuation;
     
-    // Вычисляем компоненты BRDF
     float D = DistributionGGX(cosLh, roughness);
     float G = GeometrySchlickGGX(cosLi, cosLo, roughness);
     vec3 F = fresnelSchlick(F0, max(dot(H, view), 0.0));
     
-    // Вычисляем specular BRDF
     vec3 specular = (D * G * F) / (4.0 * cosLo * cosLi + 0.0001);
     
-    // Вычисляем diffuse BRDF (для диэлектриков)
     vec3 kd = (1.0 - F) * (1.0 - metalness);
     vec3 diffuse = kd * albedo / PI;
     
-    // Комбинируем результаты
     vec3 Lo = (diffuse + specular) * radiance * cosLi;
     
     return Lo;

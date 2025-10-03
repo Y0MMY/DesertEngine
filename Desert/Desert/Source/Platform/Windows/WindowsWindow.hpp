@@ -16,7 +16,7 @@ namespace Desert::Platform::Windows
 
         using EventCallbackFn = std::function<void( Common::Event& )>;
 
-        virtual Common::Result<bool> Init() override;
+        virtual Common::ResultStr<bool> Init() override;
 
         virtual void ProcessEvents() override;
 
@@ -54,7 +54,7 @@ namespace Desert::Platform::Windows
             m_Data.EventCallback = e;
         }
 
-        virtual Common::Result<bool> SetupSwapChain() override;
+        virtual Common::ResultStr<bool> SetupSwapChain() override;
 
     private:
         bool OnEventWindowResize( Common::EventWindowResize& e );

@@ -18,10 +18,10 @@ namespace Desert::Graphic::API::Vulkan
 
         void Init( const VkInstance instance, const std::shared_ptr<Engine::Device>& device );
 
-        Common::Result<bool> CreateSwapChain( const std::shared_ptr<Engine::Device>& device, uint32_t* width,
+        Common::ResultStr<bool> CreateSwapChain( const std::shared_ptr<Engine::Device>& device, uint32_t* width,
                                               uint32_t* height ) override;
 
-        Common::Result<bool> GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device );
+        Common::ResultStr<bool> GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device );
 
         uint32_t GetBackBufferCount() const override
         {
@@ -90,10 +90,10 @@ namespace Desert::Graphic::API::Vulkan
         void InitSurface( GLFWwindow* window, const VkInstance instance );
 
     private:
-        Common::Result<VkResult> AcquireNextImage( VkSemaphore presentCompleteSemaphore, uint32_t* imageIndex );
-        Common::Result<VkResult> CreateSwapChainRenderPass();
-        Common::Result<VkResult> CreateSwapChainFramebuffers();
-        Common::Result<VkResult>
+        Common::ResultStr<VkResult> AcquireNextImage( VkSemaphore presentCompleteSemaphore, uint32_t* imageIndex );
+        Common::ResultStr<VkResult> CreateSwapChainRenderPass();
+        Common::ResultStr<VkResult> CreateSwapChainFramebuffers();
+        Common::ResultStr<VkResult>
         CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device ); // TODO: remove depth
 
     private:

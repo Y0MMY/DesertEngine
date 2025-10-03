@@ -7,8 +7,8 @@
 namespace Desert::Uniforms::API::Vulkan
 {
 
-    VulkanUniformBuffer::VulkanUniformBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding )
-         : m_Size( size ), m_Binding( binding ), m_BufferName( bufferName )
+    VulkanUniformBuffer::VulkanUniformBuffer( const Core::Models::UniformBuffer& uniform )
+         : UniformBuffer( uniform )
     {
         RT_Invalidate();
     }
@@ -28,7 +28,6 @@ namespace Desert::Uniforms::API::Vulkan
              ->RT_DestroyBuffer( m_Buffer, m_MemoryAlloc );
         m_Buffer      = nullptr;
         m_MemoryAlloc = nullptr;
-        m_LocalStorage.Release();
     }
 
     void VulkanUniformBuffer::RT_Invalidate()
@@ -44,13 +43,14 @@ namespace Desert::Uniforms::API::Vulkan
         VkBufferCreateInfo bufferInfo = {};
         bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.usage              = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferInfo.size               = m_Size;
+        bufferInfo.size               = m_UniformModel.Size;
 
-        const auto allocatedBuffer = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
-                                              EngineContext::GetInstance().GetRendererContext() )
-                                          ->GetVulkanAllocator()
-                                          ->RT_AllocateBuffer( std::format( "{}-UniformBuffer", m_BufferName ),
-                                                               bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffer );
+        const auto allocatedBuffer =
+             SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
+                      EngineContext::GetInstance().GetRendererContext() )
+                  ->GetVulkanAllocator()
+                  ->RT_AllocateBuffer( std::format( "{}-UniformBuffer", m_UniformModel.Name ), bufferInfo,
+                                       VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffer );
 
         if ( !allocatedBuffer.IsSuccess() )
         {
@@ -60,25 +60,41 @@ namespace Desert::Uniforms::API::Vulkan
 
         m_DescriptorInfo.buffer = m_Buffer;
         m_DescriptorInfo.offset = 0;
-        m_DescriptorInfo.range  = m_Size;
+        m_DescriptorInfo.range  = m_UniformModel.Size;
     }
 
     void VulkanUniformBuffer::SetData( const void* data, uint32_t size, uint32_t offset )
     {
-        m_LocalStorage = Common::Memory::Buffer::Copy( data, size );
-        RT_SetData( m_LocalStorage.Data, size, offset );
+        if ( !m_MappedMemmory )
+        {
+            return; // TODO: result
+        }
+
+        memcpy( m_MappedMemmory + offset, data, size );
     }
 
-    void VulkanUniformBuffer::RT_SetData( const void* data, uint32_t size, uint32_t offset )
+    uint8_t* VulkanUniformBuffer::MapMemory()
     {
-        uint8_t* pData = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
-                                  EngineContext::GetInstance().GetRendererContext() )
-                              ->GetVulkanAllocator()
-                              ->MapMemory( m_MemoryAlloc );
-        memcpy( pData, (const uint8_t*)data + offset, size );
+        if ( m_MappedMemmory )
+        {
+            return m_MappedMemmory;
+        }
+
+        m_MappedMemmory = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
+                                   EngineContext::GetInstance().GetRendererContext() )
+                               ->GetVulkanAllocator()
+                               ->MapMemory( m_MemoryAlloc );
+
+        return m_MappedMemmory;
+    }
+
+    void VulkanUniformBuffer::UnmapMemory()
+    {
         SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext, EngineContext::GetInstance().GetRendererContext() )
              ->GetVulkanAllocator()
              ->UnmapMemory( m_MemoryAlloc );
+
+        m_MappedMemmory = nullptr;
     }
 
 } // namespace Desert::Uniforms::API::Vulkan

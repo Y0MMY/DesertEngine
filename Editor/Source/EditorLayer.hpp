@@ -14,10 +14,10 @@ namespace Desert::Editor
         explicit EditorLayer( const Engine::Application* window, const std::string& layerName );
         ~EditorLayer();
 
-        [[nodiscard]] virtual Common::BoolResult OnAttach() override;
-        [[nodiscard]] virtual Common::BoolResult OnDetach() override;
-        [[nodiscard]] virtual Common::BoolResult OnUpdate( const Common::Timestep& ts ) override;
-        [[nodiscard]] virtual Common::BoolResult OnImGuiRender() override;
+        [[nodiscard]] virtual Common::BoolResultStr OnAttach() override;
+        [[nodiscard]] virtual Common::BoolResultStr OnDetach() override;
+        [[nodiscard]] virtual Common::BoolResultStr OnUpdate( const Common::Timestep& ts ) override;
+        [[nodiscard]] virtual Common::BoolResultStr OnImGuiRender() override;
 
     private:
         void DrawMenuBar();

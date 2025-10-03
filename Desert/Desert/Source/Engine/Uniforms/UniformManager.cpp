@@ -30,7 +30,7 @@ namespace Desert::Uniforms
         m_Image2DData.Names[name] = index;
     }
 
-    Common::Result<std::shared_ptr<UniformBuffer>>
+    Common::ResultStr<std::shared_ptr<UniformBuffer>>
     UniformManager::GetUniformBuffer( const std::string& name ) const
     {
         auto it = m_UniformBuffersData.Names.find( name );
@@ -43,7 +43,7 @@ namespace Desert::Uniforms
         return Common::MakeSuccess( m_UniformBuffersData.Data[it->second] );
     }
 
-    Common::Result<std::shared_ptr<Desert::Uniforms::StorageBuffer>>
+    Common::ResultStr<std::shared_ptr<Desert::Uniforms::StorageBuffer>>
     UniformManager::GetStorageBuffer( const std::string& name ) const
     {
         auto it = m_SrorageBuffersData.Names.find( name );
@@ -56,7 +56,7 @@ namespace Desert::Uniforms
         return Common::MakeSuccess( m_SrorageBuffersData.Data[it->second] );
     }
 
-    Common::Result<std::shared_ptr<UniformImageCube>>
+    Common::ResultStr<std::shared_ptr<UniformImageCube>>
     UniformManager::GetUniformImageCube( const std::string& name ) const
     {
         auto it = m_ImageCubeData.Names.find( name );
@@ -70,7 +70,7 @@ namespace Desert::Uniforms
         return Common::MakeSuccess( m_ImageCubeData.Data[it->second] );
     }
 
-    Common::Result<std::shared_ptr<Desert::Uniforms::UniformImage2D>>
+    Common::ResultStr<std::shared_ptr<Desert::Uniforms::UniformImage2D>>
     UniformManager::GetUniformImage2D( const std::string& name ) const
     {
         auto it = m_Image2DData.Names.find( name );
@@ -104,16 +104,15 @@ namespace Desert::Uniforms
 
             for ( const auto& model : models )
             {
-                AddUniformBuffer( UniformBuffer::Create( model.Name, model.Size, model.BindingPoint ),
-                                  model.Name );
+                AddUniformBuffer( UniformBuffer::Create( model ), model.Name );
             }
 
             // Maybe it should be separated?
-            for ( const auto& model : storageModels )
+            /*for ( const auto& model : storageModels )
             {
                 AddStorageBuffer( StorageBuffer::Create( model.Name, 36, model.BindingPoint ),
                                   model.Name );
-            }
+            }*/
         }
 
         // ImageCube
