@@ -5,7 +5,8 @@
 #include "Constants.hpp"
 #include <Common/Core/UUID.hpp>
 #include <Common/Utilities/FileSystem.hpp>
-#include <Common/Core/Result.hpp>
+#include <Common/Core/ResultStr.hpp>
+#include <Common/Core/ResultWithCodes.hpp>
 
 #define BUILD_ID "v0.1a"
 

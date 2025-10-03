@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Common/Core/Result.hpp>
+#include <Common/Core/ResultStr.hpp>
 
 #include <Engine/Graphic/Shader.hpp>
 #include <Engine/Graphic/Image.hpp>

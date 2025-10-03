@@ -42,10 +42,10 @@ namespace Desert::Uniforms
         };
 
         // maybe std::reference_wrapper?
-        Common::Result<std::shared_ptr<UniformBuffer>>    GetUniformBuffer( const std::string& name ) const;
-        Common::Result<std::shared_ptr<StorageBuffer>>    GetStorageBuffer( const std::string& name ) const;
-        Common::Result<std::shared_ptr<UniformImageCube>> GetUniformImageCube( const std::string& name ) const;
-        Common::Result<std::shared_ptr<UniformImage2D>>   GetUniformImage2D( const std::string& name ) const;
+        Common::ResultStr<std::shared_ptr<UniformBuffer>>    GetUniformBuffer( const std::string& name ) const;
+        Common::ResultStr<std::shared_ptr<StorageBuffer>>    GetStorageBuffer( const std::string& name ) const;
+        Common::ResultStr<std::shared_ptr<UniformImageCube>> GetUniformImageCube( const std::string& name ) const;
+        Common::ResultStr<std::shared_ptr<UniformImage2D>>   GetUniformImage2D( const std::string& name ) const;
 
         const auto& GetUniformBufferTotal()
         {

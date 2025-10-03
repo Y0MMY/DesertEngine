@@ -7,9 +7,10 @@ layout(location = 2) in vec3 a_Tangent;
 layout(location = 3) in vec3 a_Bitangent;
 layout(location = 4) in vec2 a_TextureCoord;
 
+#include "Common/CameraUB.glslh"
+
 layout( push_constant ) uniform constants
 {
-	mat4 ViewProject;
 	mat4 Transform;
 } m_PushConstants;
 
@@ -20,6 +21,7 @@ layout(location=0) out Vertex
 	vec3 Normal;
 	vec2 Texcoord;
 	mat3 TBN;
+	vec3 CameraPosition;
 } outVertex;
 
 void main()
@@ -30,8 +32,9 @@ void main()
 	mat3 modelRotation =  transpose(inverse(mat3(m_PushConstants.Transform)));
 	outVertex.Normal = 	mat3(m_PushConstants.Transform) * a_Normal;
 	outVertex.TBN = modelRotation * mat3(a_Tangent, a_Bitangent, a_Normal);
+	outVertex.CameraPosition = cameraUB.CameraPos;
 
-	gl_Position =  m_PushConstants.ViewProject * m_PushConstants.Transform * vec4(a_Position, 1.0);
+	gl_Position =  cameraUB.Projection * cameraUB.View * m_PushConstants.Transform * vec4(a_Position, 1.0);
 }
 
 #pragma stage : fragment
@@ -46,6 +49,7 @@ layout(location=0) in Vertex
 	vec3 Normal;
 	vec2 Texcoord;
 	mat3 TBN;
+	vec3 CameraPosition;
 } inVertex;
 
 const float Epsilon = 0.00001;
@@ -55,7 +59,7 @@ const vec3 Fdielectric = vec3(0.04);
 
 layout(location = 0) out vec4 oColor;
 
-layout(binding = 0) uniform MaterialProperties {
+layout(binding = 2) uniform MaterialProperties {
 	vec3	  AlbedoColor;
     float     AlbedoBlend;
     float     MetallicValue;
@@ -67,13 +71,14 @@ layout(binding = 0) uniform MaterialProperties {
     float     AOValue;
 } pbr;
 
-layout(binding = 1) uniform LightningUB {
-	vec3 		Direction;
-} directionLights;
+struct DirectionLight
+{
+	vec3 Direction;
+};
 
-layout(binding = 2) uniform GlobalUB {
-	vec3 CameraPosition;
-} global;
+layout(binding = 1) uniform LightningUB {
+	DirectionLight 		directionLights;
+} directionLights;
 
 // Environment maps
 layout (binding = 8) uniform samplerCube u_EnvSpecularTex;
@@ -97,7 +102,7 @@ vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec
 
 	for(uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
 	{
-		vec3 Li = -directionLights.Direction;
+		vec3 Li = -directionLights.directionLights.Direction;
 		vec3 Lradiance = vec3(1.0, 1.0, 1.0);
 		vec3 Lh = normalize(Li + view);
 
@@ -166,13 +171,13 @@ void main() {
 	if(textureSize.x > 1 && textureSize.y > 1) // not fallback (TODO. bad way)
 	{
 		m_Params.Normal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
-		m_Params.Normal = normalize(inVertex.TBN * m_Params.Normal);
 	}
+	m_Params.Normal = normalize(inVertex.TBN * m_Params.Normal);
 
 	const float metalness = pbr.MetallicValue * pbr.MetallicBlend;
 	const float roughness  = pbr.RoughnessValue * pbr.RoughnessBlend;
 
-	const vec3 view = normalize(global.CameraPosition - inVertex.WorldPosition);
+	const vec3 view = normalize(inVertex.CameraPosition - inVertex.WorldPosition);
 
 	vec3 F0 = mix(Fdielectric, m_Params.AlbedoColor, metalness);
 	vec3 light = Lightning(view, m_Params.Normal, F0, metalness, roughness, m_Params.AlbedoColor );

@@ -19,7 +19,7 @@ namespace Desert::Platform::Windows
 
     static bool s_GLFWInitialized = false;
 
-    Common::Result<bool> WindowsWindow::Init()
+    Common::ResultStr<bool> WindowsWindow::Init()
     {
         if ( !s_GLFWInitialized )
         {
@@ -214,7 +214,7 @@ namespace Desert::Platform::Windows
         return false;
     }
 
-    Common::Result<bool> WindowsWindow::SetupSwapChain()
+    Common::ResultStr<bool> WindowsWindow::SetupSwapChain()
     {
         const auto device = EngineContext::GetInstance().GetMainDevice();
         return m_SwapChain->CreateSwapChain( device, &m_Data.Specification.Width, &m_Data.Specification.Height );

@@ -46,12 +46,12 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    Common::BoolResult VulkanIndexBuffer::Invalidate()
+    Common::BoolResultStr VulkanIndexBuffer::Invalidate()
     {
         return RT_Invalidate();
     }
 
-    Common::BoolResult VulkanIndexBuffer::RT_Invalidate()
+    Common::BoolResultStr VulkanIndexBuffer::RT_Invalidate()
     {
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();
@@ -130,7 +130,7 @@ namespace Desert::Graphic::API::Vulkan
         Release();
     }
 
-    Common::BoolResult VulkanIndexBuffer::Release()
+    Common::BoolResultStr VulkanIndexBuffer::Release()
     {
         m_StorageBuffer.Release();
 

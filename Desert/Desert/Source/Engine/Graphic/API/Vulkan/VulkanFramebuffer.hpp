@@ -49,17 +49,17 @@ namespace Desert::Graphic::API::Vulkan
                         : 0U;
         }
 
-        Common::BoolResult Invalidate() override
+        Common::BoolResultStr Invalidate() override
         {
             return Common::MakeError( "Use Resize()" );
         }
-        Common::BoolResult Release() override;
+        Common::BoolResultStr Release() override;
 
         virtual void Use( BindUsage = BindUsage::Bind ) const override
         {
         }
 
-        virtual Common::BoolResult Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
+        virtual Common::BoolResultStr Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
 
         virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const override
         {
@@ -77,7 +77,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        Common::Result<VkFramebuffer> CreateFramebuffer( VkDevice device, uint32_t width, uint32_t height );
+        Common::ResultStr<VkFramebuffer> CreateFramebuffer( VkDevice device, uint32_t width, uint32_t height );
 
     private:
         void TransitionImagesToInitialLayouts();

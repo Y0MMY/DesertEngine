@@ -9,7 +9,7 @@ namespace Desert::Assets
     {
     }
 
-    Common::BoolResult ShaderAsset::Load()
+    Common::BoolResultStr ShaderAsset::Load()
     {
         m_ShaderContent = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
 
@@ -17,7 +17,7 @@ namespace Desert::Assets
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult ShaderAsset::Unload()
+    Common::BoolResultStr ShaderAsset::Unload()
     {
         return BOOLSUCCESS;
     }

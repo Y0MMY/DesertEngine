@@ -1,4 +1,4 @@
-#include <Engine/Graphic/Geometry/Mesh.hpp>
+#include "Mesh.hpp"
 
 #include <assimp/Importer.hpp>
 #include <assimp/LogStream.hpp>
@@ -8,29 +8,56 @@
 
 namespace Desert
 {
-    glm::mat4 Mat4FromAssimpMat4( const aiMatrix4x4& matrix )
+    namespace
     {
-        glm::mat4 result;
-        // the a,b,c,d in assimp is the row ; the 1,2,3,4 is the column
-        result[0][0] = matrix.a1;
-        result[1][0] = matrix.a2;
-        result[2][0] = matrix.a3;
-        result[3][0] = matrix.a4;
-        result[0][1] = matrix.b1;
-        result[1][1] = matrix.b2;
-        result[2][1] = matrix.b3;
-        result[3][1] = matrix.b4;
-        result[0][2] = matrix.c1;
-        result[1][2] = matrix.c2;
-        result[2][2] = matrix.c3;
-        result[3][2] = matrix.c4;
-        result[0][3] = matrix.d1;
-        result[1][3] = matrix.d2;
-        result[2][3] = matrix.d3;
-        result[3][3] = matrix.d4;
-        return result;
-    }
 
+        glm::mat4 Mat4FromAssimpMat4( const aiMatrix4x4& matrix )
+        {
+            glm::mat4 result;
+            // the a,b,c,d in assimp is the row ; the 1,2,3,4 is the column
+            result[0][0] = matrix.a1;
+            result[1][0] = matrix.a2;
+            result[2][0] = matrix.a3;
+            result[3][0] = matrix.a4;
+            result[0][1] = matrix.b1;
+            result[1][1] = matrix.b2;
+            result[2][1] = matrix.b3;
+            result[3][1] = matrix.b4;
+            result[0][2] = matrix.c1;
+            result[1][2] = matrix.c2;
+            result[2][2] = matrix.c3;
+            result[3][2] = matrix.c4;
+            result[0][3] = matrix.d1;
+            result[1][3] = matrix.d2;
+            result[2][3] = matrix.d3;
+            result[3][3] = matrix.d4;
+            return result;
+        }
+
+        using ReturnType = std::pair<const aiScene*, std::unique_ptr<Assimp::Importer>>;
+        Common::ResultStr<ReturnType>
+        InitializeFromAssetData( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+        {
+            std::unique_ptr<Assimp::Importer> importer = std::make_unique<Assimp::Importer>();
+            const auto&                       rawData  = meshAsset->GetRawData();
+
+            static const uint32_t s_MeshImportFlags =
+                 aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_SortByPType |
+                 aiProcess_GenNormals | aiProcess_GenUVCoords | aiProcess_OptimizeMeshes |
+                 aiProcess_JoinIdenticalVertices | aiProcess_LimitBoneWeights | aiProcess_ValidateDataStructure |
+                 aiProcess_GlobalScale;
+
+            auto scene = importer->ReadFileFromMemory( rawData.data(), rawData.size(), s_MeshImportFlags );
+            if ( !scene )
+            {
+                 return Common::MakeError<ReturnType>( std::string( importer->GetErrorString() ) );
+            }
+
+            return Common::MakeSuccess( std::make_pair( scene, std::move( importer ) ) );
+        }
+
+    } // namespace
+  
     class ErrorLogStream : public Assimp::LogStream
     {
     public:
@@ -93,17 +120,38 @@ namespace Desert
 
     static std::unique_ptr<AssimpLogger> s_LogStream = nullptr;
 
+    // Static factory methods
+    std::shared_ptr<Mesh> Mesh::CreateStatic( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+    {
+        return std::make_shared<StaticMesh>( meshAsset );
+    }
+
+    std::shared_ptr<Mesh> Mesh::CreateStatic( const std::vector<Vertex>& vertices,
+                                              const std::vector<Index>& indices, const std::string& name )
+    {
+        return std::make_shared<StaticMesh>( vertices, indices, name );
+    }
+
+    std::shared_ptr<Mesh> Mesh::CreateAnimated( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+    {
+        return std::make_shared<AnimatedMesh>( meshAsset );
+    }
+
+    // Mesh base class implementation
     Mesh::Mesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
          : m_MeshAsset( meshAsset ), m_Filepath( meshAsset->GetMetadata().Filepath )
     {
-        if ( !s_LogStream )
-        {
-            ( s_LogStream = std::make_unique<AssimpLogger>() )->Init();
-        }
+        InitializeAssimpLogger();
     }
 
     Mesh::Mesh( const std::vector<Vertex>& vertices, const std::vector<Index>& indices, const std::string& name )
          : m_Filepath( "" ), m_Custom( true )
+    {
+        InitializeFromCustomData( vertices, indices, name );
+    }
+
+    void Mesh::InitializeFromCustomData( const std::vector<Vertex>& vertices, const std::vector<Index>& indices,
+                                         const std::string& name )
     {
         Submesh submesh;
         submesh.Name         = name;
@@ -123,7 +171,6 @@ namespace Desert
         }
 
         m_Submeshes.push_back( submesh );
-
         m_TriangleCache.resize( 1 );
         m_TriangleCache[0].reserve( indices.size() );
 
@@ -140,44 +187,44 @@ namespace Desert
         m_IndexBuffer->RT_Invalidate();
     }
 
-    Common::BoolResult Mesh::Invalidate()
+    void Mesh::InitializeAssimpLogger()
+    {
+        static bool initialized = false;
+        if ( !initialized )
+        {
+            initialized = true;
+        }
+    }
+
+    // StaticMesh implementation
+    StaticMesh::StaticMesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset ) : Mesh( meshAsset )
+    {
+    }
+
+    StaticMesh::StaticMesh( const std::vector<Vertex>& vertices, const std::vector<Index>& indices,
+                            const std::string& name )
+         : Mesh( vertices, indices, name )
+    {
+    }
+
+    Common::BoolResultWithCodes<MeshError> StaticMesh::Invalidate()
     {
         if ( m_Custom )
         {
-            return BOOLSUCCESS;
+            return Common::MakeSuccessWithCodes<bool, MeshError>( true );
         }
 
-        std::unique_ptr<Assimp::Importer> importer = std::make_unique<Assimp::Importer>();
-
-        const auto& meshAsset = m_MeshAsset.lock();
-        if ( !meshAsset )
+        auto result = InitializeFromAssetData( m_MeshAsset.lock() );
+        if ( !result.IsSuccess() )
         {
-            return Common::MakeError( "Mesh assset was destroyed!" );
+            return Common::MakeErrorWithSingleCode<bool, MeshError>( MeshError::ImportError, result.GetError() );
         }
 
-        const auto& rawData = meshAsset->GetRawData();
+        return ProcessAssimpScene( result.GetValue().first );
+    }
 
-        static const uint32_t s_MeshImportFlags =
-             aiProcess_CalcTangentSpace | // Create binormals/tangents just in case
-             aiProcess_Triangulate |      // Make sure we're triangles
-             aiProcess_SortByPType |      // Split meshes by primitive type
-             aiProcess_GenNormals |       // Make sure we have legit normals
-             aiProcess_GenUVCoords |      // Convert UVs if required
-             //		aiProcess_OptimizeGraph |
-             aiProcess_OptimizeMeshes | // Batch draws where possible
-             aiProcess_JoinIdenticalVertices |
-             aiProcess_LimitBoneWeights | // If more than N (=4) bone weights, discard least influencing bones and
-                                          // renormalise sum to 1
-             aiProcess_ValidateDataStructure | // Validation
-             aiProcess_GlobalScale; // e.g. convert cm to m for fbx import (and other formats where cm is native)
-
-        auto scene = importer->ReadFileFromMemory( rawData.data(), rawData.size(), s_MeshImportFlags );
-        if ( scene == nullptr )
-        {
-            LOG_ERROR( "An error occurred during mesh extraction: {}", std::string( importer->GetErrorString() ) );
-            return Common::MakeError( std::string( importer->GetErrorString() ) );
-        }
-
+    Common::BoolResultWithCodes<MeshError> StaticMesh::ProcessAssimpScene( const aiScene* scene )
+    {
         std::vector<Vertex> vertices;
         std::vector<Index>  indices;
 
@@ -257,7 +304,29 @@ namespace Desert
         m_IndexBuffer = Graphic::IndexBuffer::Create( indices.data(), indices.size() * sizeof( Index ) );
         m_IndexBuffer->RT_Invalidate();
 
-        return Common::MakeSuccess( true );
+        return Common::MakeSuccessWithCodes<bool, MeshError>( true );
+    }
+
+    // AnimatedMesh implementation
+    AnimatedMesh::AnimatedMesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset ) : Mesh( meshAsset )
+    {
+    }
+
+    Common::BoolResultWithCodes<MeshError> AnimatedMesh::Invalidate()
+    {
+        auto result = InitializeFromAssetData( m_MeshAsset.lock() );
+        if ( !result.IsSuccess() )
+        {
+            return Common::MakeErrorWithSingleCode<bool, MeshError>( MeshError::ImportError, result.GetError() );
+            ;
+        }
+
+        return ProcessAssimpScene( result.GetValue().first );
+    }
+
+    Common::BoolResultWithCodes<MeshError> AnimatedMesh::ProcessAssimpScene( const aiScene* scene )
+    {
+        return Common::MakeSuccessWithCodes<bool, MeshError>( true );
     }
 
 } // namespace Desert

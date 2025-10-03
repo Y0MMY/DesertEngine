@@ -9,8 +9,8 @@ namespace Desert::Assets
     public:
         ShaderAsset( AssetPriority priority, const Common::Filepath& filepath );
 
-        Common::BoolResult Load() override;
-        Common::BoolResult Unload() override;
+        Common::BoolResultStr Load() override;
+        Common::BoolResultStr Unload() override;
 
         bool IsReadyForUse() const
         {

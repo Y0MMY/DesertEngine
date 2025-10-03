@@ -18,11 +18,11 @@ namespace Desert::Graphic::API::Vulkan
     public:
         ~VulkanAllocator();
 
-        Common::Result<VmaAllocation> RT_AllocateImage( const std::string&       tag,
+        Common::ResultStr<VmaAllocation> RT_AllocateImage( const std::string&       tag,
                                                         const VkImageCreateInfo& imageCreateInfo,
                                                         VmaMemoryUsage usage, VkImage& outImage );
 
-        Common::Result<VmaAllocation> RT_AllocateBuffer( const std::string&        tag,
+        Common::ResultStr<VmaAllocation> RT_AllocateBuffer( const std::string&        tag,
                                                          const VkBufferCreateInfo& bufferCreateInfo,
                                                          VmaMemoryUsage usage, VkBuffer& outBuffer );
 

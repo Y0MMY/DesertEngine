@@ -9,18 +9,21 @@
 namespace Desert::Uniforms
 {
 
-    std::shared_ptr<UniformBuffer> UniformBuffer::Create( const std::string_view debugName, uint32_t size,
-                                                          uint32_t binding )
+    UniformBuffer::UniformBuffer( const Core::Models::UniformBuffer& uniform ) : m_UniformModel( uniform )
+    {
+    }
+
+    std::shared_ptr<UniformBuffer> UniformBuffer::Create( const Core::Models::UniformBuffer& uniform )
     {
         switch ( Graphic::RendererAPI::GetAPIType() )
         {
             case Graphic::RendererAPIType::None:
                 return nullptr;
             case Graphic::RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanUniformBuffer>( debugName, size, binding );
+                return std::make_shared<API::Vulkan::VulkanUniformBuffer>( uniform );
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;
     }
 
-} // namespace Desert::Graphic
+} // namespace Desert::Uniforms

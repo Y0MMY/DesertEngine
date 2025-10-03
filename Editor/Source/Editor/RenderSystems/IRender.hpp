@@ -10,7 +10,7 @@ namespace Desert::Editor::Render
         explicit IRender( const std::shared_ptr<Desert::Core::Scene>& scene ) : m_DstScene( scene ) {};
         virtual ~IRender() = default;
 
-        virtual Common::BoolResult Init() = 0;
+        virtual Common::BoolResultStr Init() = 0;
         virtual void Render() = 0;
     protected:
         std::weak_ptr<Desert::Core::Scene> m_DstScene;

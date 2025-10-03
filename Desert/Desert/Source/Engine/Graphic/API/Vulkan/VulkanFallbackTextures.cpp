@@ -98,7 +98,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    Common::BoolResult VulkanFallbackTextures::Release()
+    Common::BoolResultStr VulkanFallbackTextures::Release()
     {
         for ( auto& texture2D : m_FallbackTextures2D )
         {

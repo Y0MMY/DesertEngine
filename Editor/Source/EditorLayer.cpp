@@ -36,7 +36,7 @@ namespace Desert::Editor
         m_MainScene->Shutdown();
     }
 
-    [[nodiscard]] Common::BoolResult EditorLayer::OnAttach()
+    [[nodiscard]] Common::BoolResultStr EditorLayer::OnAttach()
     {
         // Setup ImGui docking
         ::ImGui::CreateContext();
@@ -84,7 +84,7 @@ namespace Desert::Editor
         return BOOLSUCCESS;
     }
 
-    [[nodiscard]] Common::BoolResult EditorLayer::OnUpdate( const Common::Timestep& ts )
+    [[nodiscard]] Common::BoolResultStr EditorLayer::OnUpdate( const Common::Timestep& ts )
     {
         const auto& beginResult = m_MainScene->BeginScene();
         if ( !beginResult )
@@ -115,7 +115,7 @@ namespace Desert::Editor
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult EditorLayer::OnImGuiRender()
+    Common::BoolResultStr EditorLayer::OnImGuiRender()
     {
 
         static bool               dockspaceOpen  = true;
@@ -536,7 +536,7 @@ namespace Desert::Editor
         }
     }
 
-    Common::BoolResult EditorLayer::OnDetach()
+    Common::BoolResultStr EditorLayer::OnDetach()
     {
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer->OnDetach();

@@ -3,7 +3,7 @@
 namespace Desert::Runtime
 {
 
-    Common::BoolResult ShaderService::Register( const std::shared_ptr<Assets::ShaderAsset>& shaderAsset )
+    Common::BoolResultStr ShaderService::Register( const std::shared_ptr<Assets::ShaderAsset>& shaderAsset )
     {
         if ( !shaderAsset->GetMetadata().IsValid() )
         {

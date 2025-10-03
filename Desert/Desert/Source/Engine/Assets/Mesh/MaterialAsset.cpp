@@ -36,7 +36,7 @@ namespace Desert::Assets
     {
     }
 
-    Common::BoolResult MaterialAsset::Load()
+    Common::BoolResultStr MaterialAsset::Load()
     {
         static constexpr uint32_t s_MeshImportFlags =
              aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_SortByPType | aiProcess_GenNormals |
@@ -73,7 +73,7 @@ namespace Desert::Assets
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult MaterialAsset::Unload()
+    Common::BoolResultStr MaterialAsset::Unload()
     {
         return BOOLSUCCESS;
     }

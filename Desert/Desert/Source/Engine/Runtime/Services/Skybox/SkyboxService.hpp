@@ -7,7 +7,7 @@ namespace Desert::Runtime
     class SkyboxService
     {
     public:
-        Common::BoolResult Register( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset );
+        Common::BoolResultStr Register( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset );
         std::shared_ptr<Graphic::MaterialSkybox> Get( const Assets::AssetHandle& handle ) const;
         void                                     Clear();
 

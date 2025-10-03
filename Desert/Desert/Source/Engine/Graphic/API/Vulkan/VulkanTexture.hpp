@@ -16,7 +16,7 @@ namespace Desert::Graphic::API::Vulkan
             return m_Image2D;
         }
 
-        virtual Common::BoolResult Invalidate() override;
+        virtual Common::BoolResultStr Invalidate() override;
         virtual void               Release() override;
 
         virtual uint32_t GetWidth() const
@@ -46,7 +46,7 @@ namespace Desert::Graphic::API::Vulkan
             return m_ImageCube;
         }
 
-        virtual Common::BoolResult Invalidate() override;
+        virtual Common::BoolResultStr Invalidate() override;
         virtual void               Release() override;
 
         virtual uint32_t GetWidth() const

@@ -11,7 +11,7 @@ namespace Desert::Graphic
 {
     static RendererAPI* s_RendererAPI = nullptr;
 
-    [[nodiscard]] Common::BoolResult Renderer::InitGraphicAPI()
+    [[nodiscard]] Common::BoolResultStr Renderer::InitGraphicAPI()
     {
         switch ( RendererAPI::GetAPIType() )
         {
@@ -28,7 +28,7 @@ namespace Desert::Graphic
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult Renderer::Init()
+    Common::BoolResultStr Renderer::Init()
     {
         const auto& init = InitGraphicAPI();
         if ( !init )
@@ -44,12 +44,12 @@ namespace Desert::Graphic
         return Common::MakeSuccess( true );
     }
 
-    [[nodiscard]] Common::BoolResult Renderer::EndFrame()
+    [[nodiscard]] Common::BoolResultStr Renderer::EndFrame()
     {
         return s_RendererAPI->EndFrame();
     }
 
-    [[nodiscard]] Common::BoolResult Renderer::BeginFrame()
+    [[nodiscard]] Common::BoolResultStr Renderer::BeginFrame()
     {
         return s_RendererAPI->BeginFrame();
     }

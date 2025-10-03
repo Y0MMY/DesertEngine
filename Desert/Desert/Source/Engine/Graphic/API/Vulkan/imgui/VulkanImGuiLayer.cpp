@@ -22,7 +22,7 @@
 
 namespace Desert::Graphic::API::Vulkan::ImGui
 {
-    Common::BoolResult VulkanImGui::OnAttach()
+    Common::BoolResultStr VulkanImGui::OnAttach()
     {
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                ->GetVulkanLogicalDevice();
@@ -83,7 +83,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult VulkanImGui::OnDetach()
+    Common::BoolResultStr VulkanImGui::OnDetach()
     {
         const auto& device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
                                   ->GetVulkanLogicalDevice();
@@ -102,7 +102,7 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult VulkanImGui::OnUpdate( const Common::Timestep& )
+    Common::BoolResultStr VulkanImGui::OnUpdate( const Common::Timestep& )
     {
         VulkanRenderCommandBuffer::GetInstance().RegisterUserCommand( []() { ::ImGui::ShowDemoWindow(); } );
 

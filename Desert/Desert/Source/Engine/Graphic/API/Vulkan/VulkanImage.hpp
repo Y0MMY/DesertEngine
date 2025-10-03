@@ -76,9 +76,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_VulkanImageInfo;
         }
 
-        Common::BoolResult RT_Invalidate();
-        Common::BoolResult Invalidate() override;
-        Common::BoolResult Release() override;
+        Common::BoolResultStr RT_Invalidate();
+        Common::BoolResultStr Invalidate() override;
+        Common::BoolResultStr Release() override;
 
         void TransitionImageLayout( VkCommandBuffer cmdBuffer, VkImageLayout newImageLayout,
                                     const uint32_t mip = 1U ) override;
@@ -95,8 +95,8 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         void               CopyBufferToImage2D( VkCommandBuffer commandBuffer, VkBuffer sourceBuffer );
-        Common::BoolResult CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo );
-        Common::BoolResult CreateAttachmentImage( VkDevice device, VkImageCreateInfo& imageInfo, VkFormat format );
+        Common::BoolResultStr CreateTextureImage( VkDevice device, const VkImageCreateInfo& imageInfo );
+        Common::BoolResultStr CreateAttachmentImage( VkDevice device, VkImageCreateInfo& imageInfo, VkFormat format );
 
         VkImageCreateInfo CreateImageInfo( VkFormat format );
 
@@ -156,9 +156,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_VulkanImageInfo;
         }
 
-        Common::BoolResult RT_Invalidate();
-        Common::BoolResult Invalidate() override;
-        Common::BoolResult Release() override;
+        Common::BoolResultStr RT_Invalidate();
+        Common::BoolResultStr Invalidate() override;
+        Common::BoolResultStr Release() override;
 
         void TransitionImageLayout( VkCommandBuffer cmdBuffer, VkImageLayout newImageLayout,
                                     const uint32_t mip = 1U ) override;
@@ -174,7 +174,7 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        Common::BoolResult CreateCubemapImage( VkDevice device, const VkImageCreateInfo& imageInfo,
+        Common::BoolResultStr CreateCubemapImage( VkDevice device, const VkImageCreateInfo& imageInfo,
                                                VkFormat format );
         VkImageCreateInfo  CreateImageInfo( VkFormat format );
 

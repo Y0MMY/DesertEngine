@@ -40,11 +40,11 @@ namespace Desert::Core
         Scene() = default;
         Scene( std::string&& sceneName );
 
-        [[nodiscard]] Common::BoolResult BeginScene();
+        [[nodiscard]] Common::BoolResultStr BeginScene();
         void                             OnUpdate( const Common::Timestep& ts );
-        [[nodiscard]] Common::BoolResult EndScene();
+        [[nodiscard]] Common::BoolResultStr EndScene();
 
-        [[nodiscard]] Common::BoolResult Init();
+        [[nodiscard]] Common::BoolResultStr Init();
 
         void Shutdown();
 

@@ -6,7 +6,7 @@
 
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
-#include <Engine/Graphic/Geometry/Mesh.hpp>
+#include <Engine/Geometry/Mesh.hpp>
 
 namespace Desert::Graphic
 {
@@ -28,14 +28,14 @@ namespace Desert::Graphic
         virtual void Init()     = 0;
         virtual void Shutdown() = 0;
 
-        virtual Common::BoolResult BeginFrame()                                                = 0;
-        virtual Common::BoolResult EndFrame()                                                  = 0;
-        virtual Common::BoolResult PrepareNextFrame()                                          = 0;
-        virtual Common::BoolResult PresentFinalImage()                                         = 0;
-        virtual Common::BoolResult BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
+        virtual Common::BoolResultStr BeginFrame()                                                = 0;
+        virtual Common::BoolResultStr EndFrame()                                                  = 0;
+        virtual Common::BoolResultStr PrepareNextFrame()                                          = 0;
+        virtual Common::BoolResultStr PresentFinalImage()                                         = 0;
+        virtual Common::BoolResultStr BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
                                                     bool                               clearFrame )                          = 0;
-        virtual Common::BoolResult BeginSwapChainRenderPass()                                  = 0;
-        virtual Common::BoolResult EndRenderPass()                                             = 0;
+        virtual Common::BoolResultStr BeginSwapChainRenderPass()                                  = 0;
+        virtual Common::BoolResultStr EndRenderPass()                                             = 0;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
                                  const std::shared_ptr<MaterialExecutor>& material )           = 0;
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,

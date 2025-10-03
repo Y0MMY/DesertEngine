@@ -3,7 +3,7 @@
 #include <string>
 
 #include <Common/Core/Events/Event.hpp>
-#include <Common/Core/Result.hpp>
+#include <Common/Core/ResultStr.hpp>
 #include <Common/Core/EventRegistry.hpp>
 
 #include <Engine/Graphic/SwapChain.hpp>
@@ -29,7 +29,7 @@ namespace Desert
     {
     public:
         virtual ~Window()                   = default;
-        virtual Common::Result<bool> Init() = 0;
+        virtual Common::ResultStr<bool> Init() = 0;
 
         virtual void ProcessEvents() = 0;
 
@@ -55,7 +55,7 @@ namespace Desert
 
         virtual void SetEventCallback( const EventCallbackFn& e ) = 0;
 
-        virtual Common::Result<bool>
+        virtual Common::ResultStr<bool>
         SetupSwapChain( ) = 0;
 
         static std::shared_ptr<Window> Create( const WindowSpecification& specification );

@@ -57,7 +57,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    Common::BoolResult VulkanTexture2D::Invalidate()
+    Common::BoolResultStr VulkanTexture2D::Invalidate()
     {
         const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 
@@ -93,7 +93,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    Common::BoolResult VulkanTextureCube::Invalidate()
+    Common::BoolResultStr VulkanTextureCube::Invalidate()
     {
         const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 

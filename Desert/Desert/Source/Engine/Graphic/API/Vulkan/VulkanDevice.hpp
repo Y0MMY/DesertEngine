@@ -44,7 +44,7 @@ namespace Desert::Graphic::API::Vulkan
             return m_QueueFamilyIndices.TransferFamily;
         }
 
-        Common::Result<bool> CreateDevice();
+        Common::ResultStr<bool> CreateDevice();
 
         VkFormat GetDepthFormat() const
         {
@@ -100,7 +100,7 @@ namespace Desert::Graphic::API::Vulkan
 
         void Destroy();
 
-        Common::Result<bool> CreateDevice();
+        Common::ResultStr<bool> CreateDevice();
 
     private:
         std::shared_ptr<VulkanPhysicalDevice> m_PhysicalDevice;

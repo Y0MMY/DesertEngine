@@ -9,7 +9,7 @@ namespace Desert::Assets
     {
     }
 
-    Common::BoolResult MeshAsset::Load()
+    Common::BoolResultStr MeshAsset::Load()
     {
         m_RawData = Common::Utils::FileSystem::ReadByteFileContent( m_Metadata.Filepath );
         m_ReadyForUse = true;
@@ -17,7 +17,7 @@ namespace Desert::Assets
         return BOOLSUCCESS;
     }
 
-    Common::BoolResult MeshAsset::Unload()
+    Common::BoolResultStr MeshAsset::Unload()
     {
         return BOOLSUCCESS;
     }

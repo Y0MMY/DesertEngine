@@ -28,15 +28,15 @@ namespace Desert::Graphic
     class SceneRenderer final
     {
     public:
-        [[nodiscard]] Common::BoolResult Init();
+        [[nodiscard]] Common::BoolResultStr Init();
         void                             Shutdown();
 
-        [[nodiscard]] Common::BoolResult BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene,
+        [[nodiscard]] Common::BoolResultStr BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene,
                                                      const std::shared_ptr<Core::Camera>&        camera );
 
         void OnUpdate( const SceneRendererUpdate& sceneRenderInfo );
 
-        [[nodiscard]] Common::BoolResult EndScene();
+        [[nodiscard]] Common::BoolResultStr EndScene();
 
         void Resize( const uint32_t width, const uint32_t height );
 

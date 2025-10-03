@@ -29,7 +29,7 @@ namespace Desert::Graphic::API::Vulkan
             return s_VulkanInstance;
         }
 
-        [[nodiscard]] Common::Result<VkResult> CreateVKInstance();
+        [[nodiscard]] Common::ResultStr<VkResult> CreateVKInstance();
 
         const auto& GetVulkanAllocator() const
         {

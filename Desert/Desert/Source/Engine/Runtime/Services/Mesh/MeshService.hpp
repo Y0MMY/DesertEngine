@@ -1,13 +1,13 @@
 #pragma once
 
-#include <Engine/Graphic/Geometry/Mesh.hpp>
+#include <Engine/Geometry/Mesh.hpp>
 
 namespace Desert::Runtime
 {
     class MeshService
     {
     public:
-        Common::BoolResult                  Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
+        Common::BoolResultStr                  Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
         std::shared_ptr<Mesh> Get( const Assets::AssetHandle& handle ) const;
         void                  Clear();
 

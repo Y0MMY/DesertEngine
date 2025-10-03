@@ -7,8 +7,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-#include <Engine/Graphic/Geometry/Mesh.hpp>
-#include <Engine/Graphic/Geometry/PrimitiveType.hpp>
+#include <Engine/Geometry/Mesh.hpp>
+#include <Engine/Geometry/PrimitiveType.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>

@@ -33,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
         glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
     }
 
-    Common::Result<bool> VulkanSwapChain::CreateSwapChain( const std::shared_ptr<Engine::Device>& device,
+    Common::ResultStr<bool> VulkanSwapChain::CreateSwapChain( const std::shared_ptr<Engine::Device>& device,
                                                            uint32_t* width, uint32_t* height )
     {
         const VkInstance instance =
@@ -154,7 +154,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    Common::Result<bool>
+    Common::ResultStr<bool>
     VulkanSwapChain::GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
 
@@ -206,7 +206,7 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
-    Common::Result<VkResult> VulkanSwapChain::AcquireNextImage( VkSemaphore presentCompleteSemaphore,
+    Common::ResultStr<VkResult> VulkanSwapChain::AcquireNextImage( VkSemaphore presentCompleteSemaphore,
                                                                 uint32_t*   imageIndex )
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
@@ -293,7 +293,7 @@ namespace Desert::Graphic::API::Vulkan
         m_SwapChain                             = VK_NULL_HANDLE;
     }
 
-    Common::Result<VkResult> VulkanSwapChain::CreateSwapChainFramebuffers()
+    Common::ResultStr<VkResult> VulkanSwapChain::CreateSwapChainFramebuffers()
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
         if ( !vkLogicalDevice )
@@ -326,7 +326,7 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( VK_SUCCESS );
     }
 
-    Common::Result<VkResult> VulkanSwapChain::CreateSwapChainRenderPass()
+    Common::ResultStr<VkResult> VulkanSwapChain::CreateSwapChainRenderPass()
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
         if ( !vkLogicalDevice )
@@ -383,7 +383,7 @@ namespace Desert::Graphic::API::Vulkan
                                               &m_VkRenderPass ) );
     }
 
-    Common::Result<VkResult>
+    Common::ResultStr<VkResult>
     VulkanSwapChain::CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
         // Color image

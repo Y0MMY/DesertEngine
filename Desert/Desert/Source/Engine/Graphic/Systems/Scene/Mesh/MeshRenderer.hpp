@@ -16,7 +16,7 @@ namespace Desert::Graphic::System
     public:
         using RenderSystem::RenderSystem;
 
-        virtual Common::BoolResult Initialize() override;
+        virtual Common::BoolResultStr Initialize() override;
         virtual void               Shutdown() override;
         virtual void               RegisterPasses( RenderGraphBuilder& builder ) override;
 

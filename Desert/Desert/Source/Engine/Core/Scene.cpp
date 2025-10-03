@@ -30,12 +30,12 @@ namespace Desert::Core
         m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }
 
-    NO_DISCARD Common::BoolResult Scene::BeginScene()
+    NO_DISCARD Common::BoolResultStr Scene::BeginScene()
     {
         return m_SceneRenderer->BeginScene( shared_from_this(), m_MainCamera );
     }
 
-    NO_DISCARD Common::BoolResult Scene::Init()
+    NO_DISCARD Common::BoolResultStr Scene::Init()
     {
         return m_SceneRenderer->Init();
     }
@@ -66,7 +66,7 @@ namespace Desert::Core
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }
 
-    NO_DISCARD Common::BoolResult Scene::EndScene()
+    NO_DISCARD Common::BoolResultStr Scene::EndScene()
     {
         return m_SceneRenderer->EndScene();
     }

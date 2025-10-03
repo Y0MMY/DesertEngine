@@ -2,7 +2,7 @@
 
 #include <Engine/Assets/TextureAsset.hpp>
 
-#include <Engine/Graphic/Geometry/Mesh.hpp>
+#include <Engine/Geometry/Mesh.hpp>
 
 namespace Desert::Assets
 {
@@ -23,8 +23,8 @@ namespace Desert::Assets
 
         bool CopyFrom( const MaterialAsset& source );
 
-        Common::BoolResult Load() override;
-        Common::BoolResult Unload() override;
+        Common::BoolResultStr Load() override;
+        Common::BoolResultStr Unload() override;
 
         bool IsReadyForUse() const
         {

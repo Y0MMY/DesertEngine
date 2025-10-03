@@ -71,10 +71,10 @@ namespace Desert::Uniforms::API::Vulkan
         }
 
         m_LocalStorage = Common::Memory::Buffer::Copy( data, size );
-        RT_SetData( m_LocalStorage.Data, size, offset );
+       // RT_SetData( m_LocalStorage.Data, size, offset );
     }
 
-    void VulkanStorageBuffer::RT_SetData( const void* data, uint32_t size, uint32_t offset )
+   /* void VulkanStorageBuffer::RT_SetData( const void* data, uint32_t size, uint32_t offset )
     {
         uint8_t* pData = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
                                   EngineContext::GetInstance().GetRendererContext() )
@@ -84,6 +84,6 @@ namespace Desert::Uniforms::API::Vulkan
         SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext, EngineContext::GetInstance().GetRendererContext() )
              ->GetVulkanAllocator()
              ->UnmapMemory( m_MemoryAlloc );
-    }
+    }*/
 
 } // namespace Desert::Uniforms::API::Vulkan

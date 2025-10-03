@@ -35,7 +35,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     } // namespace
 
-    Common::Result<VmaAllocation> VulkanAllocator::RT_AllocateImage( const std::string&       tag,
+    Common::ResultStr<VmaAllocation> VulkanAllocator::RT_AllocateImage( const std::string&       tag,
                                                                      const VkImageCreateInfo& imageCreateInfo,
                                                                      VmaMemoryUsage usage, VkImage& outImage )
     {
@@ -87,7 +87,7 @@ namespace Desert::Graphic::API::Vulkan
         vmaUnmapMemory( s_VmaAllocator, allocation );
     }
 
-    Common::Result<VmaAllocation> VulkanAllocator::RT_AllocateBuffer( const std::string&        tag,
+    Common::ResultStr<VmaAllocation> VulkanAllocator::RT_AllocateBuffer( const std::string&        tag,
                                                                       const VkBufferCreateInfo& bufferCreateInfo,
                                                                       VmaMemoryUsage usage, VkBuffer& outBuffer )
     {

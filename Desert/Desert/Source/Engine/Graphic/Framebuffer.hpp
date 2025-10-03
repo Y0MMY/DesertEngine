@@ -58,7 +58,7 @@ namespace Desert::Graphic
         virtual const FramebufferSpecification GetSpecification() const                 = 0;
         virtual void                           Use( BindUsage = BindUsage::Bind ) const = 0;
 
-        virtual Common::BoolResult Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) = 0;
+        virtual Common::BoolResultStr Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) = 0;
 
         virtual uint32_t GetFramebufferWidth() const  = 0;
         virtual uint32_t GetFramebufferHeight() const = 0;

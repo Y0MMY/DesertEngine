@@ -42,7 +42,7 @@ namespace Desert::Graphic::API::Vulkan
         CreateVKInstance();
     }
 
-    Common::Result<VkResult> VulkanContext::CreateVKInstance()
+    Common::ResultStr<VkResult> VulkanContext::CreateVKInstance()
     {
         LOG_TRACE( "VulkanRenderingContext::CreateVKInstance()" );
         DESERT_VERIFY( glfwVulkanSupported(), "GLFW must support Vulkan API" );
