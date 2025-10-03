@@ -5,13 +5,15 @@
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperArray.hpp>
 
+#include <Engine/Graphic/Materials/MaterialReflection.hpp>
+
 namespace Desert::Graphic::Models
 {
-    struct OutlineUB
-    {
-        float     Width;
-        glm::vec3 Color;
-    };
+    // clang-format off
+    RFL_UB_TYPE(OutlineUB,
+        FIELD_VALUEF(Width, "Width")
+        FIELD_COLOR3(Color, "Color"))
+    // clang-format on
 
     class OutlineData final : public MaterialHelper::MaterialWrapperArray
     {
@@ -24,9 +26,9 @@ namespace Desert::Graphic::Models
 
         void UpdateOutlineUB( const OutlineUB& ubOutline )
         {
-            m_OutlineUB = ubOutline;
-            m_UniformProperties[0]->SetData( &m_OutlineUB.Width, sizeof( float ) );
-            m_UniformProperties[1]->SetData( &m_OutlineUB.Color, sizeof( glm::vec3 ) );
+            /* m_OutlineUB = ubOutline;
+             m_UniformProperties[0]->SetData( &m_OutlineUB.Width, sizeof( float ) );
+             m_UniformProperties[1]->SetData( &m_OutlineUB.Color, sizeof( glm::vec3 ) );*/
         }
 
     private:

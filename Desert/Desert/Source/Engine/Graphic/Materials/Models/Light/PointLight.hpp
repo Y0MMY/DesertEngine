@@ -6,5 +6,10 @@
 
 namespace Desert::Graphic::Models::Light
 {
-    DEFINE_MATERIAL_WRAPPER_UNIFORM( PointLightUB, std::vector<PointLight>, "PointLights" );
+    // clang-format off
+    RFL_UB_TYPE(PointLightsUB,
+        FIELD(std::vector<PointLight>, lights, "lights"))
+    // clang-format on
+
+    DEFINE_MATERIAL_WRAPPER_UNIFORM( PointLightUB, PointLightsUB, "PointLights" );
 } // namespace Desert::Graphic::Models::Light

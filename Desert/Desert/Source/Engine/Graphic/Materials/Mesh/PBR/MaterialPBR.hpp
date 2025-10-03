@@ -4,7 +4,7 @@
 
 #include <Engine/Assets/Mesh/MaterialAsset.hpp>
 
-#include <Engine/Graphic/Materials/Models/Global.hpp>
+#include <Engine/Graphic/Materials/Models/Common/Camera.hpp>
 #include <Engine/Graphic/Materials/Models/Mesh/PBR/PBRTextures.hpp>
 #include <Engine/Graphic/Materials/Models/Mesh/PBR/MaterialPBRUB.hpp>
 #include <Engine/Graphic/Materials/Models/Light/DirectionLight.hpp>
@@ -146,6 +146,7 @@ namespace Desert::Graphic
 
     private:
         void UpdatePointLight( const std::vector<PointLight>& pointLights );
+        void UpdateCamera( const Core::Camera* pointLights );
         void UpdateDirectionLight( const std::vector<DirectionLight>& directionLights );
         void UpdateLightsMetadata( const std::vector<PointLight>&     pointLights,
                                    const std::vector<DirectionLight>& directionLights );
@@ -154,7 +155,7 @@ namespace Desert::Graphic
         std::unique_ptr<Models::Light::PointLightUB>     m_PointLightUB;
         std::unique_ptr<Models::Light::DirectionLightUB> m_DirectionLightUB;
         std::unique_ptr<Models::Light::LightsMetadataUB> m_LightsMetadataUB;
-        std::unique_ptr<Models::GlobalData>              m_GlobalUB;
+        std::unique_ptr<Models::CameraData>              m_CameraData;
         std::unique_ptr<Models::PBR::PBRMaterialTexture> m_PBRTextures;
         std::unique_ptr<Models::PBR::MaterialPBRUB>      m_MaterialProperties;
     };

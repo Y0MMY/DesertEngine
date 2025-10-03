@@ -7,19 +7,21 @@
 
 #include <Engine/Core/Camera.hpp>
 
+#include <Engine/Graphic/Materials/MaterialReflection.hpp>
+
 namespace Desert::Graphic::Models
 {
-    struct CameraDataUB
-    {
-        glm::mat4 Projection;
-        glm::mat4 View;
-        glm::vec3 CameraPos;
-    };
+    // clang-format off
+    RFL_UB_TYPE(CameraDataUB,
+        FIELD_MAT4(Projection, "Projection")
+        FIELD_MAT4(View, "View")
+        FIELD_POSITION(CameraPos, "Camera Pos"))
+    // clang-format on
 
     class CameraData final : public MaterialHelper::MaterialWrapperUniform<CameraDataUB>
     {
     public:
-        explicit CameraData( const std::shared_ptr<MaterialExecutor>& material, std::string&& ubName )
+        explicit CameraData( const std::shared_ptr<MaterialExecutor>& material, std::string&& ubName = "Camera" )
              : MaterialWrapperUniform( material, std::move( ubName ) )
         {
         }

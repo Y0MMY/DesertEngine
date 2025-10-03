@@ -16,8 +16,8 @@ namespace Desert::Graphic
         }
         MAKE_RESOURCE( Models::Light::DirectionLightUB, m_DirectionLightUB );
         MAKE_RESOURCE( Models::Light::PointLightUB, m_PointLightUB );
-        MAKE_RESOURCE( Models::Light::LightsMetadataUB, m_LightsMetadataUB);
-        MAKE_RESOURCE( Models::GlobalData, m_GlobalUB );
+        MAKE_RESOURCE( Models::Light::LightsMetadataUB, m_LightsMetadataUB );
+        MAKE_RESOURCE( Models::CameraData, m_CameraData );
         MAKE_RESOURCE( Models::PBR::PBRMaterialTexture, m_PBRTextures );
         MAKE_RESOURCE( Models::PBR::MaterialPBRUB, m_MaterialProperties );
     }
@@ -148,20 +148,11 @@ namespace Desert::Graphic
         return GetFinalTexture( type ) != nullptr;
     }
 
-    struct VP
-    {
-        glm::mat4 ViewProjection;
-        glm::mat4 Transform;
-    };
-
     void MaterialPBR::Bind( const UpdateMaterialPBRInfo& data )
     {
-        const VP vp{ .ViewProjection = data.Camera->GetProjectionMatrix() * data.Camera->GetViewMatrix(),
-                     .Transform      = data.MeshTransform };
-
-        m_GlobalUB->Update( Models::GlobalUB{ .CameraPosition = data.Camera->GetPosition() } );
+        UpdateCamera( data.Camera.get() );
         m_PBRTextures->UpdatePBR( data.PbrTextures );
-        m_MaterialExecutor->PushConstant( &vp, sizeof( vp ) );
+        m_MaterialExecutor->PushConstant( &data.MeshTransform, sizeof( glm::mat4 ) );
 
         UpdatePointLight( data.PointLights );
         UpdateDirectionLight( data.DirectionLights );
@@ -174,15 +165,15 @@ namespace Desert::Graphic
         {
             // Update uniform buffer properties
             Models::PBR::PBRMaterialPropertiesUB props;
-            props.AlbedoColor      = m_AlbedoColor;
-            props.AlbedoBlend      = m_AlbedoBlend;
-            props.MetallicValue    = m_MetallicValue;
+            props.AlbedoColor = m_AlbedoColor;
+            props.AlbedoBlend = m_AlbedoBlend;
+            /*props.MetallicValue    = m_MetallicValue;
             props.MetallicBlend    = m_MetallicBlend;
             props.RoughnessValue   = m_RoughnessValue;
             props.RoughnessBlend   = m_RoughnessBlend;
             props.EmissionColor    = m_EmissionColor;
             props.EmissionStrength = m_EmissionStrength;
-            props.AOValue          = m_AOValue;
+            props.AOValue          = m_AOValue;*/
 
             m_MaterialProperties->Update( props );
 
@@ -211,12 +202,16 @@ namespace Desert::Graphic
 
     void MaterialPBR::UpdatePointLight( const std::vector<PointLight>& pointLights )
     {
-        m_PointLightUB->Update( pointLights );
+        Models::Light::PointLightsUB pointUB;
+        pointUB.lights = pointLights;
+        m_PointLightUB->Update( pointUB );
     }
 
     void MaterialPBR::UpdateDirectionLight( const std::vector<DirectionLight>& directionLights )
     {
-        m_DirectionLightUB->Update( directionLights );
+        Models::Light::DirectionLightsUB dirUB;
+        dirUB.directionLights = directionLights;
+        m_DirectionLightUB->Update( dirUB );
     }
 
     void MaterialPBR::UpdateLightsMetadata( const std::vector<PointLight>&     pointLights,
@@ -226,4 +221,10 @@ namespace Desert::Graphic
                                       .PointLightCount     = static_cast<uint32_t>( pointLights.size() ) } );
     }
 
+    void MaterialPBR::UpdateCamera( const Core::Camera* camera )
+    {
+        m_CameraData->Update( { .Projection = camera->GetProjectionMatrix(),
+                                .View       = camera->GetViewMatrix(),
+                                .CameraPos  = camera->GetPosition() } );
+    }
 } // namespace Desert::Graphic
