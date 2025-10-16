@@ -8,8 +8,8 @@ namespace Desert::Graphic::Models::Light
 {
     // clang-format off
     RFL_UB_TYPE(LightsMetadata,
-        FIELD_VALUEUINT(DirectionLightCount, "LightsMetadata")
-        FIELD_VALUEUINT(PointLightCount, "PointLightCount"))
+        FIELD(uint32_t, DirectionLightCount, "LightsMetadata")
+        FIELD(uint32_t, PointLightCount, "PointLightCount"))
     // clang-format on
 
     DEFINE_MATERIAL_WRAPPER_UNIFORM( LightsMetadataUB, LightsMetadata, "LightsMetadata" );

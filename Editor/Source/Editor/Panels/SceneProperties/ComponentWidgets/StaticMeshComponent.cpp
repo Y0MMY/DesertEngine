@@ -1,7 +1,7 @@
 #include "StaticMeshComponent.hpp"
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
-#include <Engine/Graphic/Geometry/Mesh.hpp>
+#include <Engine/Geometry/Mesh.hpp>
 
 namespace Desert::Editor
 {

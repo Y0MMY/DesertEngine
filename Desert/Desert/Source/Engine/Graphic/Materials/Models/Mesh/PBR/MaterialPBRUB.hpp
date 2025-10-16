@@ -22,8 +22,8 @@ namespace Desert::Graphic::Models::PBR
 
     // clang-format off
     RFL_UB_TYPE( PBRMaterialPropertiesUB,
-        FIELD_COLOR3( AlbedoColor, "Albedo Color" ) 
-        FIELD_VALUEF( AlbedoBlend, "Albedo Blend" ) )
+        FIELD(glm::vec3, AlbedoColor, "Albedo Color" )
+        FIELD(float, AlbedoBlend, "Albedo Blend" ) )
     // clang-format on
 
     DEFINE_MATERIAL_WRAPPER_UNIFORM( MaterialPBRUB, PBRMaterialPropertiesUB, "MaterialProperties" )

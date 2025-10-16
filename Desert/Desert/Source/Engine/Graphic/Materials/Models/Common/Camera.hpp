@@ -13,9 +13,9 @@ namespace Desert::Graphic::Models
 {
     // clang-format off
     RFL_UB_TYPE(CameraDataUB,
-        FIELD_MAT4(Projection, "Projection")
-        FIELD_MAT4(View, "View")
-        FIELD_POSITION(CameraPos, "Camera Pos"))
+        FIELD(glm::mat4, Projection, "Projection")
+        FIELD(glm::mat4, View, "View")
+        FIELD(glm::vec3, CameraPos, "Camera Pos"))
     // clang-format on
 
     class CameraData final : public MaterialHelper::MaterialWrapperUniform<CameraDataUB>

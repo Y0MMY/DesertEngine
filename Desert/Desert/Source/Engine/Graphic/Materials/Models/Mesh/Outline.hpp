@@ -11,8 +11,8 @@ namespace Desert::Graphic::Models
 {
     // clang-format off
     RFL_UB_TYPE(OutlineUB,
-        FIELD_VALUEF(Width, "Width")
-        FIELD_COLOR3(Color, "Color"))
+        FIELD(glm::vec3, Width, "Width")
+        FIELD(glm::vec3, Color, "Color"))
     // clang-format on
 
     class OutlineData final : public MaterialHelper::MaterialWrapperArray
