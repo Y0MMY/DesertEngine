@@ -62,7 +62,7 @@ namespace Desert::Graphic
         Environment m_Environment;
 
     private:
-        std::unique_ptr<Models::CameraData> m_CameraModel;
+        std::unique_ptr<Models::CameraDataUB> m_CameraModel;
         std::unique_ptr<Models::SkyboxData> m_SkyboxModel;
     };
 } // namespace Desert::Graphic

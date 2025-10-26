@@ -190,7 +190,7 @@ namespace Desert::Graphic::System
         if ( !environment || !environment->IrradianceMap || !environment->PreFilteredMap )
             return std::nullopt;
 
-        return Models::PBR::PBRTextures{ .IrradianceMap  = environment->IrradianceMap,
-                                         .PreFilteredMap = environment->PreFilteredMap };
+        return Models::PBR::PBRTextures{ .u_EnvIrradianceTex = environment->IrradianceMap,
+                                         .u_EnvSpecularTex = environment->PreFilteredMap };
     }
 } // namespace Desert::Graphic::System

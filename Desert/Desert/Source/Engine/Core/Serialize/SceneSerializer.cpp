@@ -15,29 +15,29 @@
 
 #include <regex>
 
-namespace rfl
-{
-    template <>
-    struct Reflector<glm::vec3>
-    {
-        struct ReflType
-        {
-            float x;
-            float y;
-            float z;
-        };
-
-        static glm::vec3 to( const ReflType& v ) noexcept
-        {
-            return { v.x, v.y, v.z };
-        }
-
-        static ReflType from( const glm::vec3& v ) noexcept
-        {
-            return { v.x, v.y, v.z };
-        }
-    };
-} // namespace rfl
+//namespace rfl
+//{
+//    template <>
+//    struct Reflector<glm::vec3>
+//    {
+//        struct ReflType
+//        {
+//            float x;
+//            float y;
+//            float z;
+//        };
+//
+//        static glm::vec3 to( const ReflType& v ) noexcept
+//        {
+//            return { v.x, v.y, v.z };
+//        }
+//
+//        static ReflType from( const glm::vec3& v ) noexcept
+//        {
+//            return { v.x, v.y, v.z };
+//        }
+//    };
+//} // namespace rfl
 
 namespace Desert::Core
 {

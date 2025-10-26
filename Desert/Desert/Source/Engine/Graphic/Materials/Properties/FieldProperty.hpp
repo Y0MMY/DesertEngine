@@ -41,6 +41,11 @@ namespace Desert::Graphic
             return true;
         }
 
+        [[nodiscard]] bool IsArray() const
+        {
+            return m_Field.ArraySize > 1U;
+        }
+
         template <typename T>
         T GetValue() const
         {

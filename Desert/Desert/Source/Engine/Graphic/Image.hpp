@@ -9,6 +9,9 @@
 
 namespace Desert::Graphic
 {
+    using ImageCubeRef = std::shared_ptr<ImageCube>;
+    using Image2DRef   = std::shared_ptr<Image2D>;
+
     class Image
     {
     public:

@@ -2,15 +2,12 @@
 
 #include <glm/glm.hpp>
 
-#include <Engine/Graphic/Materials/Models/Wrapper/MaterialWrapperUniform.hpp>
-
 namespace Desert::Editor::Render::Model
 {
-    struct GridMaterialPropertiesUB
-    {
-        float CellSize;
-        float CellScale;
-    };
-    DEFINE_MATERIAL_WRAPPER_UNIFORM(MaterialGridProperties, GridMaterialPropertiesUB, "GridUniforms")
-
+    // clang-format off
+    RFL_UB_TYPE(GridMaterialPropertiesUB, "GridUniforms",
+        FIELD(float, CellSize, "CellSize")
+        FIELD(float, CellScale, "CellScale")
+        )
+    // clang-format on
 } // namespace Desert::Editor::Render::Model

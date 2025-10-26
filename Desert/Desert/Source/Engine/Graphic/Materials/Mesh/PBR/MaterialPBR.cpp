@@ -2,9 +2,13 @@
 
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
+#include <rflcpp/rfl/json/write.hpp>
+
+#include <Engine/Graphic/Renderer.hpp>
+
 namespace Desert::Graphic
 {
-#define MAKE_RESOURCE( type, var ) var = std::make_unique<type>( m_MaterialExecutor )
+#define MAKE_RESOURCE( type, var ) var = std::make_unique<type>( type{} )
 
     MaterialPBR::MaterialPBR( const std::shared_ptr<Assets::MaterialAsset>& baseAsset )
          : Material( "MaterialPBR", "StaticPBR.glsl" ), m_BaseMaterial( baseAsset )
@@ -14,84 +18,60 @@ namespace Desert::Graphic
         {
             InheritBaseMaterialProperties();
         }
-        MAKE_RESOURCE( Models::Light::DirectionLightUB, m_DirectionLightUB );
-        MAKE_RESOURCE( Models::Light::PointLightUB, m_PointLightUB );
-        MAKE_RESOURCE( Models::Light::LightsMetadataUB, m_LightsMetadataUB );
-        MAKE_RESOURCE( Models::CameraData, m_CameraData );
-        MAKE_RESOURCE( Models::PBR::PBRMaterialTexture, m_PBRTextures );
-        MAKE_RESOURCE( Models::PBR::MaterialPBRUB, m_MaterialProperties );
+        MAKE_RESOURCE( Models::Light::DirectionLightsUB, m_DirectionLightUB );
+        MAKE_RESOURCE( Models::Light::PointLightsUB, m_PointLightUB );
+        MAKE_RESOURCE( Models::Light::LightsMetadata, m_LightsMetadataUB );
+        MAKE_RESOURCE( Models::CameraDataUB, m_CameraData );
+        MAKE_RESOURCE( Models::PBR::PBRTextures, m_PBRTextures );
+        MAKE_RESOURCE( Models::PBR::PBRMaterialPropertiesUB, m_MaterialProperties );
+
+        m_MaterialProperties->for_each_field(
+             [this]( const auto& fieldName, auto& rflValue)
+             {
+                 using ValueType    = decltype( rflValue.get() );
+
+                 if constexpr ( std::is_same_v<std::decay_t<ValueType>, float> )
+                 {
+                     rflValue.SetValue( 1.0f );
+                 }
+             } );
+
+        InitializeUniforms();
     }
 
     void MaterialPBR::InheritBaseMaterialProperties()
     {
-        const auto& baseMaterial = m_BaseMaterial.lock();
-        if ( !baseMaterial )
-            return;
-
-        // Inherit properties from base material if they haven't been overridden
-        if ( m_AlbedoBlend == 1.0f ) // Default value means not overridden
-        {
-            if ( auto albedoSlot = baseMaterial->GetTextureSlot( Assets::TextureAsset::Type::Albedo ) )
-            {
-                m_AlbedoColor = albedoSlot->get().DefaultColor;
-            }
-        }
-
-        // Similar inheritance for other properties...
+      
     }
 
     // Albedo properties
     void MaterialPBR::SetAlbedo( const glm::vec3& color, float textureBlend )
     {
-        if ( m_AlbedoColor != color || m_AlbedoBlend != textureBlend )
-        {
-            m_AlbedoColor = color;
-            m_AlbedoBlend = textureBlend;
-            MarkDirty();
-        }
+        
     }
 
     // Metallic properties
     void MaterialPBR::SetMetallic( float value, float textureBlend )
     {
-        if ( m_MetallicValue != value || m_MetallicBlend != textureBlend )
-        {
-            m_MetallicValue = value;
-            m_MetallicBlend = textureBlend;
-            MarkDirty();
-        }
+        
     }
 
     // Roughness properties
     void MaterialPBR::SetRoughness( float value, float textureBlend )
     {
-        if ( m_RoughnessValue != value || m_RoughnessBlend != textureBlend )
-        {
-            m_RoughnessValue = value;
-            m_RoughnessBlend = textureBlend;
-            MarkDirty();
-        }
+        
     }
 
     // Emission properties
     void MaterialPBR::SetEmission( const glm::vec3& color, float strength )
     {
-        if ( m_EmissionColor != color || m_EmissionStrength != strength )
-        {
-            m_EmissionColor    = color;
-            m_EmissionStrength = strength;
-            MarkDirty();
-        }
+       
     }
 
     // Ambient Occlusion properties
     void MaterialPBR::SetAO( float value )
     {
-        if ( m_AOValue != value )
-        {
-            m_AOValue = value;
-            MarkDirty();
-        }
+      
     }
 
     // Texture operations
@@ -151,7 +131,7 @@ namespace Desert::Graphic
     void MaterialPBR::Bind( const UpdateMaterialPBRInfo& data )
     {
         UpdateCamera( data.Camera.get() );
-        m_PBRTextures->UpdatePBR( data.PbrTextures );
+        UpdatePBRTextures( data.PbrTextures );
         m_MaterialExecutor->PushConstant( &data.MeshTransform, sizeof( glm::mat4 ) );
 
         UpdatePointLight( data.PointLights );
@@ -163,19 +143,9 @@ namespace Desert::Graphic
         // This is where we'd connect to your Material class
 
         {
-            // Update uniform buffer properties
-            Models::PBR::PBRMaterialPropertiesUB props;
-            props.AlbedoColor = m_AlbedoColor;
-            props.AlbedoBlend = m_AlbedoBlend;
-            /*props.MetallicValue    = m_MetallicValue;
-            props.MetallicBlend    = m_MetallicBlend;
-            props.RoughnessValue   = m_RoughnessValue;
-            props.RoughnessBlend   = m_RoughnessBlend;
-            props.EmissionColor    = m_EmissionColor;
-            props.EmissionStrength = m_EmissionStrength;
-            props.AOValue          = m_AOValue;*/
 
-            m_MaterialProperties->Update( props );
+            SetUniformValue( *m_MaterialProperties );
+            SyncToGPU( Models::PBR::PBRMaterialPropertiesUB::shader_UB_name );
 
             // Update textures
             auto updateTexture = [&]( Assets::TextureAsset::Type type, const std::string& name )
@@ -202,29 +172,53 @@ namespace Desert::Graphic
 
     void MaterialPBR::UpdatePointLight( const std::vector<PointLight>& pointLights )
     {
-        Models::Light::PointLightsUB pointUB;
-        pointUB.lights = pointLights;
-        m_PointLightUB->Update( pointUB );
+        m_PointLightUB->lights = pointLights;
+
+        SetUniformValue( *m_PointLightUB );
+        SyncToGPU( Models::Light::PointLightsUB::shader_UB_name );
     }
 
     void MaterialPBR::UpdateDirectionLight( const std::vector<DirectionLight>& directionLights )
     {
-        Models::Light::DirectionLightsUB dirUB;
-        dirUB.directionLights = directionLights;
-        m_DirectionLightUB->Update( dirUB );
+        /* Models::Light::DirectionLightsUB dirUB;
+
+         dirUB.directionLights = directionLights;
+         const auto str        = rfl::json::write( dirUB );
+         m_DirectionLightUB->Update( dirUB );*/
     }
 
     void MaterialPBR::UpdateLightsMetadata( const std::vector<PointLight>&     pointLights,
                                             const std::vector<DirectionLight>& directionLights )
     {
-        m_LightsMetadataUB->Update( { .DirectionLightCount = static_cast<uint32_t>( directionLights.size() ),
-                                      .PointLightCount     = static_cast<uint32_t>( pointLights.size() ) } );
+        m_LightsMetadataUB->DirectionLightCount = directionLights.size();
+        m_LightsMetadataUB->PointLightCount     = pointLights.size();
+
+        SetUniformValue( *m_LightsMetadataUB );
+        SyncToGPU( Models::Light::LightsMetadata::shader_UB_name );
     }
 
     void MaterialPBR::UpdateCamera( const Core::Camera* camera )
     {
-        m_CameraData->Update( { .Projection = camera->GetProjectionMatrix(),
-                                .View       = camera->GetViewMatrix(),
-                                .CameraPos  = camera->GetPosition() } );
+        m_CameraData->View       = camera->GetViewMatrix();
+        m_CameraData->Projection = camera->GetProjectionMatrix();
+        m_CameraData->CameraPos  = camera->GetPosition();
+
+        SetUniformValue( *m_CameraData );
+        SyncToGPU( Models::CameraDataUB::shader_UB_name );
     }
+
+    void MaterialPBR::UpdatePBRTextures( const std::optional<Models::PBR::PBRTextures>& pbrTextures )
+    {
+        if ( pbrTextures )
+        {
+            SetUniformValue( pbrTextures.value() );
+            SyncToGPU( Models::PBR::PBRTextures::shader_UB_name );
+        }
+        else
+        {
+            //SetUniformValue(Models::PBR::PBRTextures{});
+            //SyncToGPU( Models::PBR::PBRTextures::shader_UB_name );
+        }
+    }
+
 } // namespace Desert::Graphic

@@ -52,51 +52,52 @@ namespace Desert::Graphic
         void             SetAlbedo( const glm::vec3& color, float textureBlend = 1.0f );
         const glm::vec3& GetAlbedoColor() const
         {
-            return m_AlbedoColor;
+            return m_MaterialProperties->AlbedoColor;
         }
         float GetAlbedoBlend() const
         {
-            return m_AlbedoBlend;
+            return m_MaterialProperties->AlbedoBlend;
         }
 
         // Metallic properties
         void  SetMetallic( float value, float textureBlend = 1.0f );
         float GetMetallicValue() const
         {
-            return m_MetallicValue;
+            return 0.0;
         }
         float GetMetallicBlend() const
         {
-            return m_MetallicBlend;
+            return 0.0;
         }
 
         // Roughness properties
         void  SetRoughness( float value, float textureBlend = 1.0f );
         float GetRoughnessValue() const
         {
-            return m_RoughnessValue;
+            return 0.0;
         }
         float GetRoughnessBlend() const
         {
-            return m_RoughnessBlend;
+            return 0.0;
         }
 
         // Emission properties
         void             SetEmission( const glm::vec3& color, float strength = 1.0f );
         const glm::vec3& GetEmissionColor() const
         {
-            return m_EmissionColor;
+            static glm::vec3 dummy{};
+            return dummy;
         }
         float GetEmissionStrength() const
         {
-            return m_EmissionStrength;
+            return 0.0;
         }
 
         // Ambient Occlusion properties
         void  SetAO( float value );
         float GetAOValue() const
         {
-            return m_AOValue;
+            return 0.0;
         }
 
         // Texture operations
@@ -116,27 +117,28 @@ namespace Desert::Graphic
             return m_ParametersDirty;
         }
 
+       template <typename Visitor> void VisitUniformFields(Visitor&& visitor) const {
+            auto visit_impl = [&](const auto& field_ptr, const char* field_name) { if (field_ptr) {
+                field_ptr->for_each_field([&](const auto& display_name, auto& value) { visitor(field_name, display_name, value); });
+            } }; visit_impl(m_MaterialProperties, "m_MaterialProperties");
+        };
+
+    private:
+        void InitializeUniforms()
+        {
+            InitializeUniformBuffer<Models::Light::PointLightsUB>();
+            InitializeUniformBuffer<Models::Light::DirectionLightsUB>();
+            InitializeUniformBuffer<Models::Light::LightsMetadata>();
+            InitializeUniformBuffer<Models::CameraDataUB>();
+            InitializeUniformBuffer<Models::PBR::PBRTextures>();
+            InitializeUniformBuffer<Models::PBR::PBRMaterialPropertiesUB>();
+        }
+
     private:
         // weak_ptr because AssetManager owns MaterialAsset
         // MaterialPBR only observes the base material
         std::weak_ptr<Assets::MaterialAsset> m_BaseMaterial;
-        // Material properties
-        glm::vec3 m_AlbedoColor = glm::vec3( 0.8f );
-        float     m_AlbedoBlend = 1.0f;
-
-        float m_MetallicValue = 0.0f;
-        float m_MetallicBlend = 1.0f;
-
-        float m_RoughnessValue = 0.5f;
-        float m_RoughnessBlend = 1.0f;
-
-        glm::vec3 m_EmissionColor    = glm::vec3( 0.0f );
-        float     m_EmissionStrength = 0.0f;
-
-        float m_AOValue = 1.0f;
-
-        bool m_ParametersDirty = false;
-
+    
         // Helper methods
         void InheritBaseMaterialProperties();
         void MarkDirty()
@@ -151,12 +153,14 @@ namespace Desert::Graphic
         void UpdateLightsMetadata( const std::vector<PointLight>&     pointLights,
                                    const std::vector<DirectionLight>& directionLights );
 
+        void UpdatePBRTextures( const std::optional<Models::PBR::PBRTextures>& pbrTextures );
+
     private:
-        std::unique_ptr<Models::Light::PointLightUB>     m_PointLightUB;
-        std::unique_ptr<Models::Light::DirectionLightUB> m_DirectionLightUB;
-        std::unique_ptr<Models::Light::LightsMetadataUB> m_LightsMetadataUB;
-        std::unique_ptr<Models::CameraData>              m_CameraData;
-        std::unique_ptr<Models::PBR::PBRMaterialTexture> m_PBRTextures;
-        std::unique_ptr<Models::PBR::MaterialPBRUB>      m_MaterialProperties;
+        std::unique_ptr<Models::Light::PointLightsUB>         m_PointLightUB;
+        std::unique_ptr<Models::Light::DirectionLightsUB>     m_DirectionLightUB;
+        std::unique_ptr<Models::Light::LightsMetadata>        m_LightsMetadataUB;
+        std::unique_ptr<Models::CameraDataUB>                 m_CameraData;
+        std::unique_ptr<Models::PBR::PBRTextures>             m_PBRTextures;
+        std::unique_ptr<Models::PBR::PBRMaterialPropertiesUB> m_MaterialProperties;
     };
 } // namespace Desert::Graphic

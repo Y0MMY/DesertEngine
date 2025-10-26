@@ -3,6 +3,8 @@
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Engine/Geometry/Mesh.hpp>
 
+#include "MaterialsPanelComponent.hpp"
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
@@ -34,6 +36,12 @@ namespace Desert::Editor
             default:
                 ImGui::TextDisabled( "No mesh selected" );
                 break;
+        }
+
+        if ( staticMesh.Material )
+        {
+            static MaterialComponentWidget materialComponent( m_AssetManager );
+            materialComponent.Render( entity );
         }
 
         ImGui::PopStyleVar();
@@ -161,7 +169,6 @@ namespace Desert::Editor
                     ImGui::TreePop();
                 }
                 ImGui::TreePop();
-
             }
         }
     }

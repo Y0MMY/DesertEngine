@@ -232,11 +232,11 @@ namespace Desert::Editor::Utils
             // std::string id = "##" + name;
             if ( (int)flags & (int)PropertyFlag::ColorProperty )
             {
-                if ( ImGui::ColorEdit4( std::format( "##{}", name ).c_str(), &value.x ) )
+                if ( ImGui::ColorEdit3( std::format( "##{}", name ).c_str(), &value.x ) )
                     updated = true;
             }
-            else if ( ( exposeW ? ImGui::DragFloat4( std::format( "##{}", name ).c_str(), &value.x )
-                                : ImGui::DragFloat4( std::format( "##{}", name ).c_str(), &value.x ) ) )
+            else if ( ( exposeW ? ImGui::DragFloat3( std::format( "##{}", name ).c_str(), &value.x )
+                                : ImGui::DragFloat3( std::format( "##{}", name ).c_str(), &value.x ) ) )
                 updated = true;
         }
         ImGui::PopItemWidth();

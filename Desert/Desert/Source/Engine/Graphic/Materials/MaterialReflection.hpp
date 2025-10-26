@@ -92,12 +92,12 @@ public:
     {
     }
 
-    ~Property() = default; 
+    ~Property() = default;
 
     Property( const Property& other )
          : value_( other.value_ ), display_name_( other.display_name_ ), description_( other.description_ ),
            category_( other.category_ ), editable_( other.editable_ ), visible_( other.visible_ ),
-           attributes_( other.attributes_ ) 
+           attributes_( other.attributes_ )
     {
     }
 
@@ -135,6 +135,13 @@ public:
             visible_      = other.visible_;
             attributes_   = std::move( other.attributes_ );
         }
+        return *this;
+    }
+
+    const Property& operator=( const T& new_value ) const
+    {
+        Validate( new_value );
+        const_cast<Property*>( this )->value_ = new_value;
         return *this;
     }
 
@@ -205,6 +212,7 @@ public:
 
     Property& operator=( const T& new_value )
     {
+        Validate( new_value );
         value_ = new_value;
         return *this;
     }
@@ -247,7 +255,13 @@ public:
         return value_;
     }
 
-    const std::string& display_name() const
+    void SetValue( const T& new_value )
+    {
+        Validate( new_value );
+        value_ = new_value;
+    }
+
+    const std::string& GetDisplayName() const
     {
         return display_name_;
     }
@@ -352,6 +366,57 @@ public:
                                          .visible      = visible_,
                                          .metadata     = metadata_vec };
     }
+
+    void Validate( const T& value ) const
+    {
+        if constexpr ( std::is_arithmetic_v<T> && !std::is_same_v<T, bool> )
+        {
+            if ( auto range_attr = get_attribute<RangeAttribute>() )
+            {
+                if ( value < static_cast<T>( range_attr->min_value ) )
+                {
+                    throw std::out_of_range( "Value " + std::to_string( value ) + " is less than minimum " +
+                                             std::to_string( range_attr->min_value ) );
+                }
+                if ( value > static_cast<T>( range_attr->max_value ) )
+                {
+                    throw std::out_of_range( "Value " + std::to_string( value ) + " is greater than maximum " +
+                                             std::to_string( range_attr->max_value ) );
+                }
+            }
+        }
+
+        if constexpr ( std::is_same_v<T, float> || std::is_same_v<T, double> )
+        {
+            if ( auto dir_attr = get_attribute<DirectionAttribute>() )
+            {
+                if ( !dir_attr->allow_zero && value == 0 )
+                {
+                    throw std::invalid_argument( "Zero value is not allowed for direction" );
+                }
+                if ( dir_attr->normalized && ( value < -1.0 || value > 1.0 ) )
+                {
+                    throw std::invalid_argument( "Direction value must be normalized [-1, 1]" );
+                }
+            }
+        }
+
+        /* if constexpr ( std::is_same_v<T, std::string> )
+         {
+             if ( auto regex_attr = get_attribute<RegexAttribute>() )
+             {
+                 if ( !regex_attr->pattern.empty() )
+                 {
+                     std::regex pattern( regex_attr->pattern );
+                     if ( !std::regex_match( value, pattern ) )
+                     {
+                         throw std::invalid_argument( "Value '" + value +
+                                                      "' does not match pattern: " + regex_attr->description );
+                     }
+                 }
+             }
+         }*/
+    }
 };
 
 namespace rfl
@@ -381,12 +446,31 @@ namespace rfl
 #define FIELD_ATTR( type, name, display_name, ... )                                                               \
     Property<#name, type> name = Property<#name, type>{ type{}, display_name } __VA_ARGS__;
 
-#define RFL_UB_TYPE( name, ... )                                                                                  \
-    struct name                                                                                                   \
+#define RFL_UB_TYPE( UBName, ShaderUBName, ... )                                                                  \
+    struct UBName                                                                                                 \
     {                                                                                                             \
-        using value_type = name;                                                                                  \
+        inline static const std::string shader_UB_name = ##ShaderUBName;                                          \
+                                                                                                                  \
+        using value_type = UBName;                                                                                \
         __VA_ARGS__                                                                                               \
                                                                                                                   \
+        template <typename Func>                                                                                  \
+        void for_each_field( Func&& func )                                                                        \
+        {                                                                                                         \
+            auto modified_tuple = rfl::to_named_tuple( *this ).transform(                                         \
+                 [&func]( auto field ) -> decltype( auto )                                                        \
+                 {                                                                                                \
+                     func( field.name(), field.value() );                                                         \
+                     return field;                                                                                \
+                 } );                                                                                             \
+            *this = rfl::from_named_tuple<UBName>( std::move( modified_tuple ) );                                 \
+        }                                                                                                         \
+        template <typename Func>                                                                                  \
+        void for_each_field_read( Func&& func ) const                                                              \
+        {                                                                                                         \
+            rfl::to_named_tuple( *this ).apply( [&func]( auto&&... fields )                                       \
+                                                { ( func( fields.name(), fields.value() ), ... ); } );            \
+        }                                                                                                         \
         template <typename Archive>                                                                               \
         void serialize( Archive& archive ) const                                                                  \
         {                                                                                                         \
@@ -400,6 +484,39 @@ namespace rfl
             auto named_tuple = rfl::to_named_tuple( *this );                                                      \
             named_tuple.apply( [&archive]( auto&... fields )                                                      \
                                { ( archive( fields.name(), fields.value() ), ... ); } );                          \
-            *this = rfl::from_named_tuple<name>( named_tuple );                                                   \
+            *this = rfl::from_named_tuple<UBName>( named_tuple );                                                 \
         }                                                                                                         \
     };
+
+#define UNIFORM_FIELDS( ... )                                                                                     \
+                                                                                                                  \
+    template <typename Visitor>                                                                                   \
+    void VisitUniformFields( Visitor&& visitor ) const                                                            \
+    {                                                                                                             \
+        auto visit_impl = [&]( const auto& field_ptr, const char* field_name )                                    \
+        {                                                                                                         \
+            if ( field_ptr )                                                                                      \
+            {                                                                                                     \
+                field_ptr->for_each_field( [&]( const auto& display_name, auto& value )                           \
+                                           { visitor( field_name, display_name, value ); } );                     \
+            }                                                                                                     \
+        };                                                                                                        \
+                                                                                                                  \
+        FOR_EACH_UNIFORM_FIELD( visit_impl, __VA_ARGS__ )                                                         \
+    }
+
+#define FOR_EACH_UNIFORM_FIELD_0( visitor )
+#define FOR_EACH_UNIFORM_FIELD_1( visitor, field1 ) visitor( field1, #field1 );
+#define FOR_EACH_UNIFORM_FIELD_2( visitor, field1, field2 )                                                       \
+    visitor( field1, #field1 );                                                                                   \
+    visitor( field2, #field2 );
+#define FOR_EACH_UNIFORM_FIELD_3( visitor, field1, field2, field3 )                                               \
+    visitor( field1, #field1 );                                                                                   \
+    visitor( field2, #field2 );                                                                                   \
+    visitor( field3, #field3 );
+
+#define GET_MACRO( _1, _2, _3, _4, _5, _6, NAME, ... ) NAME
+#define FOR_EACH_UNIFORM_FIELD( visitor, ... )                                                                    \
+    GET_MACRO( __VA_ARGS__, FOR_EACH_UNIFORM_FIELD_6, FOR_EACH_UNIFORM_FIELD_5, FOR_EACH_UNIFORM_FIELD_4,         \
+               FOR_EACH_UNIFORM_FIELD_3, FOR_EACH_UNIFORM_FIELD_2, FOR_EACH_UNIFORM_FIELD_1,                      \
+               FOR_EACH_UNIFORM_FIELD_0 )( visitor, __VA_ARGS__ )

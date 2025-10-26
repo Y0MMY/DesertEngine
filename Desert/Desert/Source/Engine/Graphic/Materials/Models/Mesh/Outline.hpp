@@ -10,7 +10,7 @@
 namespace Desert::Graphic::Models
 {
     // clang-format off
-    RFL_UB_TYPE(OutlineUB,
+    RFL_UB_TYPE(OutlineUB, "OutlineUBVertex", 
         FIELD(glm::vec3, Width, "Width")
         FIELD(glm::vec3, Color, "Color"))
     // clang-format on
