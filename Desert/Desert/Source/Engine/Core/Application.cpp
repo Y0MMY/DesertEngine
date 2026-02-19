@@ -51,7 +51,6 @@ namespace Desert::Engine
             }
 
             m_EngineStats.Update();
-            m_Window->SetTitle( m_EngineStats.GetFormattedStats() );
         }
         Destroy();
     }

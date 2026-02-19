@@ -24,6 +24,7 @@ namespace Desert::Graphic
     std::shared_ptr<Desert::Graphic::PipelineCompute>
     PipelineCompute::Create( const std::shared_ptr<Shader>& shader )
     {
+        DESERT_VERIFY( shader != nullptr, "Empty shader" );
         switch ( RendererAPI::GetAPIType() )
         {
             case RendererAPIType::None:

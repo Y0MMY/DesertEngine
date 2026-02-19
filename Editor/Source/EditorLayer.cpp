@@ -30,11 +30,7 @@ namespace Desert::Editor
         // PrimitiveMeshFactory::Initialize();
     }
 
-    EditorLayer::~EditorLayer()
-    {
-        // PrimitiveMeshFactory::Shutdown();
-        m_MainScene->Shutdown();
-    }
+    EditorLayer::~EditorLayer() = default;
 
     [[nodiscard]] Common::BoolResultStr EditorLayer::OnAttach()
     {
@@ -70,10 +66,8 @@ namespace Desert::Editor
         m_ImGuiLayer = ImGui::ImGuiLayer::Create();
         m_ImGuiLayer->OnAttach();
 
-
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene ) );
-        m_Panels.emplace_back(
-             std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>( "Resources/" ) );
@@ -539,10 +533,10 @@ namespace Desert::Editor
     Common::BoolResultStr EditorLayer::OnDetach()
     {
 #ifdef EBABLE_IMGUI
+        m_Panels.clear();
         m_ImGuiLayer->OnDetach();
         m_ImGuiLayer.reset();
-
-#endif // EBABLE_IMGUI
+#endif
         return BOOLSUCCESS;
     }
 

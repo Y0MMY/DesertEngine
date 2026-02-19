@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Engine/Core/Models/Shader.hpp>
+#include <Engine/ShaderResources/ShaderReflectionTypes.hpp>
 #include <Common/Core/Memory/Buffer.hpp>
 
 namespace Desert::Graphic
@@ -8,7 +8,8 @@ namespace Desert::Graphic
     class FieldProperty
     {
     public:
-        FieldProperty( const Core::Models::Common::Field& field ) : m_Field( field ), m_Dirty( false )
+        FieldProperty( const ShaderResources::ShaderLayout::ShaderFieldLayout& field )
+             : m_Field( field ), m_Dirty( false )
         {
             m_LocalData.Allocate( field.Size );
         }
@@ -31,8 +32,9 @@ namespace Desert::Graphic
         bool SetArray( const T* data, uint32_t count )
         {
             static_assert( std::is_standard_layout_v<T>, "T must be standard layout" );
-            if ( count > m_Field.ArraySize )
+            if ( count != m_Field.ArraySize )
             {
+                DESERT_VERIFY( false, "" );
                 return false;
             }
 
@@ -44,6 +46,11 @@ namespace Desert::Graphic
         [[nodiscard]] bool IsArray() const
         {
             return m_Field.ArraySize > 1U;
+        }
+
+        [[nodiscard]] uint32_t GetArraySize() const
+        {
+            return m_Field.ArraySize;
         }
 
         template <typename T>
@@ -73,7 +80,7 @@ namespace Desert::Graphic
             return m_Dirty;
         }
 
-        const Core::Models::Common::Field& GetFieldInfo() const
+        const ShaderResources::ShaderLayout::ShaderFieldLayout& GetFieldInfo() const
         {
             return m_Field;
         }
@@ -84,8 +91,8 @@ namespace Desert::Graphic
         }
 
     private:
-        Core::Models::Common::Field m_Field;
-        Common::Memory::Buffer      m_LocalData;
-        bool                        m_Dirty;
+        ShaderResources::ShaderLayout::ShaderFieldLayout m_Field;
+        Common::Memory::Buffer                           m_LocalData;
+        bool                                             m_Dirty;
     };
 } // namespace Desert::Graphic

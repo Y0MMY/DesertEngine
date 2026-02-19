@@ -4,10 +4,10 @@
 #include <filesystem>
 
 #include <Engine/Core/Formats/ImageFormat.hpp>
+#include <Engine/Runtime/ImageHandle.hpp>
 
 namespace Desert::Graphic
 {
-
     struct TextureSpecification
     {
         bool GenerateMips = true;
@@ -16,37 +16,82 @@ namespace Desert::Graphic
     class Texture
     {
     public:
-        virtual ~Texture()                      = default;
-        virtual Common::BoolResultStr Invalidate() = 0;
-        virtual void Release() = 0;
+        virtual ~Texture() = default;
 
         virtual uint32_t GetWidth() const  = 0;
         virtual uint32_t GetHeight() const = 0;
+
+        virtual const Runtime::ImageHandle& GetImageHandle() const = 0;
     };
 
-    class Texture2D : public Texture
+    class Texture2D final : public Texture
     {
     public:
+        Texture2D( const TextureSpecification& specification, const std::filesystem::path& path );
         virtual ~Texture2D() = default;
 
-        Core::Formats::Image2DUsage GetType() const
-        {
-            return Core::Formats::Image2DUsage::Image2D;
-        }
-        virtual const std::shared_ptr<Image2D>& GetImage2D() const = 0;
+        static constexpr Core::Formats::Image2DUsage Type = Core::Formats::Image2DUsage::Image2D;
 
-        static std::shared_ptr<Texture2D> Create( const TextureSpecification&  specification,
-                                                  const std::filesystem::path& path );
+        virtual uint32_t GetWidth() const override
+        {
+            return m_Width;
+        }
+        virtual uint32_t GetHeight() const override
+        {
+            return m_Height;
+        }
+
+        virtual const Runtime::ImageHandle& GetImageHandle() const override
+        {
+            return m_Handle;
+        }
+
+        static Common::ResultStr<std::shared_ptr<Texture2D>> Create( const TextureSpecification&  specification,
+                                                                     const std::filesystem::path& path );
+
+    private:
+        Common::BoolResultStr Invalidate();
+
+    private:
+        std::filesystem::path m_TexturePath;
+        TextureSpecification  m_Specification;
+
+        Runtime::ImageHandle m_Handle;
+        uint32_t             m_Width = 0, m_Height = 0;
     };
 
-    class TextureCube : public Texture
+    class TextureCube final : public Texture
     {
     public:
+        TextureCube( const TextureSpecification& specification, const std::filesystem::path& path );
         virtual ~TextureCube() = default;
 
-        virtual const std::shared_ptr<ImageCube>& GetImageCube() const = 0;
+        virtual uint32_t GetWidth() const override
+        {
+            return m_Width;
+        }
+        virtual uint32_t GetHeight() const override
+        {
+            return m_Height;
+        }
 
-        static std::shared_ptr<TextureCube> Create( const TextureSpecification&  specification,
-                                                    const std::filesystem::path& path );
+        virtual const Runtime::ImageHandle& GetImageHandle() const override
+        {
+            return m_Handle;
+        }
+
+        static Common::ResultStr<std::shared_ptr<TextureCube>> Create( const TextureSpecification&  specification,
+                                                                       const std::filesystem::path& path );
+
+    private:
+        Common::BoolResultStr Invalidate();
+
+    private:
+        std::filesystem::path m_TexturePath;
+        TextureSpecification  m_Specification;
+
+        Runtime::ImageHandle m_Handle;
+        uint32_t             m_Width = 0, m_Height = 0;
     };
+
 } // namespace Desert::Graphic

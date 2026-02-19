@@ -38,8 +38,8 @@ namespace Desert::Graphic
 
         Graphic::TextureSpecification spec;
         spec.GenerateMips = false;
-        m_BRDFTexture     = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" );
-        m_BRDFTexture->Invalidate();
+        m_BRDFTexture     = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" ).ExtractValue();
+        // m_BRDFTexture->Invalidate();
 
         return Common::MakeSuccess( true );
     }
@@ -75,15 +75,15 @@ namespace Desert::Graphic
         s_RendererAPI->PrepareNextFrame();
     }
 
-    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
-                                         const std::shared_ptr<MaterialExecutor>& material )
+    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+                                         const MaterialExecutor*          materialExecutor )
     {
-        s_RendererAPI->SubmitFullscreenQuad( pipeline, material );
+        s_RendererAPI->SubmitFullscreenQuad( pipeline, materialExecutor );
     }
 
-    void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame)
+    void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame )
     {
-        s_RendererAPI->BeginRenderPass( renderPass, clearFrame);
+        s_RendererAPI->BeginRenderPass( renderPass, clearFrame );
     }
 
     void Renderer::BeginSwapChainRenderPass()
@@ -107,9 +107,9 @@ namespace Desert::Graphic
     }
 
     void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                               const std::shared_ptr<MaterialExecutor>& material )
+                               const MaterialExecutor* materialExecutor )
     {
-        s_RendererAPI->RenderMesh( pipeline, mesh, material );
+        s_RendererAPI->RenderMesh( pipeline, mesh, materialExecutor );
     }
 
     const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const
@@ -120,7 +120,7 @@ namespace Desert::Graphic
     void Renderer::Shutdown()
     {
         s_RendererAPI->Shutdown();
-        m_BRDFTexture->GetImage2D()->Release();
+        // m_BRDFTexture->GetImage()->Release();
         FallbackTextures::Get().Release();
 
         delete s_RendererAPI;

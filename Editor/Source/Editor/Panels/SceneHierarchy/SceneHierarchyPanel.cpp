@@ -244,6 +244,13 @@ namespace Desert::Editor
                          Assets::AssetHandle{};
                 }
 
+                if ( ImGui::Selectable( "Skinned Model" ) )
+                {
+                    auto entity = scene->CreateNewEntity( "Skinned Model" );
+                    entity.AddComponent<ECS::SkinnedMeshComponent>();
+                    entity.AddComponent<ECS::AnimationComponent>();
+                }
+
                 if ( ImGui::Selectable( "Rigid Body" ) )
                 {
                 }

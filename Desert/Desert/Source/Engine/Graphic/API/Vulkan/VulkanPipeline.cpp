@@ -96,16 +96,71 @@ namespace Desert::Graphic::API::Vulkan
         {
             switch ( type )
             {
+                    // ===== Float =====
                 case ShaderDataType::Float:
+                {
                     return VK_FORMAT_R32_SFLOAT;
+                }
                 case ShaderDataType::Float2:
+                {
                     return VK_FORMAT_R32G32_SFLOAT;
+                }
                 case ShaderDataType::Float3:
+                {
                     return VK_FORMAT_R32G32B32_SFLOAT;
+                }
                 case ShaderDataType::Float4:
+                {
                     return VK_FORMAT_R32G32B32A32_SFLOAT;
+                }
+
+                // ===== Int (signed) =====
+                case ShaderDataType::Int:
+                {
+                    return VK_FORMAT_R32_SINT;
+                }
+                case ShaderDataType::Int2:
+                {
+                    return VK_FORMAT_R32G32_SINT;
+                }
+                case ShaderDataType::Int3:
+                {
+                    return VK_FORMAT_R32G32B32_SINT;
+                }
+                case ShaderDataType::Int4:
+                {
+                    return VK_FORMAT_R32G32B32A32_SINT;
+                }
+
+                // ===== UInt =====
+               /* case ShaderDataType::UInt:
+                {
+                    return VK_FORMAT_R32_UINT;
+                }
+                case ShaderDataType::UInt2:
+                {
+                    return VK_FORMAT_R32G32_UINT;
+                }
+                case ShaderDataType::UInt3:
+                {
+                    return VK_FORMAT_R32G32B32_UINT;
+                }
+                case ShaderDataType::UInt4:
+                {
+                    return VK_FORMAT_R32G32B32A32_UINT;
+                }*/
+
+                case ShaderDataType::Bool:
+                {
+                    return VK_FORMAT_R8_UINT;
+                }
+
+                default:
+                {
+                    DESERT_VERIFY( false, "Unknown ShaderDataType!" );
+                    return VK_FORMAT_UNDEFINED;
+                }
             }
-            return VK_FORMAT_UNDEFINED;
         }
 
     } // namespace

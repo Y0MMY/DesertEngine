@@ -6,7 +6,7 @@
 
 namespace Desert::ECS
 {
-    class PointLightRenderSystem : public System
+    class PointLightECSSystem : public System
     {
     public:
         using System::System;
@@ -28,14 +28,5 @@ namespace Desert::ECS
             }
         }
 
-        void OnInit( entt::registry& registry ) override
-        {
-            // Any initialization logic if needed
-        }
-
-        void OnShutdown( entt::registry& registry ) override
-        {
-            // Any cleanup logic if needed
-        }
     };
 } // namespace Desert::ECS

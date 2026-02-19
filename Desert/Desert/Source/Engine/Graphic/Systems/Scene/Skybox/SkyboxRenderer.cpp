@@ -22,7 +22,7 @@ namespace Desert::Graphic::System
         rpSpec.TargetFramebuffer = compositeFramebuffer;
 
         // Pipeline
-        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "skybox.glsl" );
+        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Skybox" );
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;
@@ -39,14 +39,14 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void SkyboxRenderer::PrepareCamera( const std::shared_ptr<Core::Camera>& camera )
+    void SkyboxRenderer::PrepareCamera( Core::Camera* camera )
     {
         m_ActiveCamera = camera;
     }
 
     void SkyboxRenderer::PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material )
     {
-        const auto& camera = m_ActiveCamera.lock();
+        const auto& camera = m_ActiveCamera;
         if ( !camera )
         {
             DESERT_VERIFY( false );

@@ -2,9 +2,9 @@
 
 namespace Desert::Graphic
 {
-    MaterialOutline::MaterialOutline() : Material( "MaterialOutline", "Outline.glsl" )
+    MaterialOutline::MaterialOutline() : Material( "MaterialOutline", "Outline" )
     {
-        m_OutlineData = std::make_unique<Models::OutlineData>( m_MaterialExecutor );
+        //m_OutlineData = std::make_unique<Models::OutlineData>( m_MaterialExecutor );
     }
 
     static struct VP

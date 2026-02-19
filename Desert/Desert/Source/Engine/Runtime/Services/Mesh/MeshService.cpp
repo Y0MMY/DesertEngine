@@ -25,4 +25,10 @@ namespace Desert::Runtime
     {
     }
 
+    std::optional<bool> MeshService::IsSkinned( const Assets::AssetHandle& handle ) const
+    {
+        auto it = m_Meshes.find( handle );
+        return ( it != m_Meshes.end() ) ? std::make_optional( it->second->IsSkinned() ) : std::nullopt;
+    }
+
 } // namespace Desert::Runtime

@@ -2,14 +2,14 @@
 
 #include <Engine/Graphic/Materials/Properties/MaterialProperty.hpp>
 
-#include <Engine/Uniforms/UniformImageCube.hpp>
+#include <Engine/ShaderResources/UniformImageCube.hpp>
 
 namespace Desert::Graphic
 {
     class TextureCubeProperty : public MaterialProperty
     {
     public:
-        TextureCubeProperty( std::shared_ptr<Uniforms::UniformImageCube> uniform ) : m_Uniform( uniform )
+        TextureCubeProperty( std::shared_ptr<ShaderResources::UniformImageCube> uniform ) : m_Uniform( uniform )
         {
         }
 
@@ -35,7 +35,7 @@ namespace Desert::Graphic
             return nullptr;
         }
 
-        void SetTexture( std::shared_ptr<ImageCube> texture )
+        void SetTexture( const ImageCube* texture )
         {
             m_Texture = texture;
             m_Dirty   = true;
@@ -47,7 +47,7 @@ namespace Desert::Graphic
         }
 
     private:
-        std::shared_ptr<Uniforms::UniformImageCube> m_Uniform;
-        std::shared_ptr<ImageCube>                  m_Texture;
+        std::shared_ptr<ShaderResources::UniformImageCube> m_Uniform;
+        const ImageCube*                            m_Texture = nullptr;
     };
 } // namespace Desert::Graphic

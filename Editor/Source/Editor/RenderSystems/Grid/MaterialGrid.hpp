@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Engine/Desert.hpp>
-#include <Engine/Graphic/Materials/Models/Common/Camera.hpp>
 
 #include "MaterialGridModel.hpp"
 
@@ -14,10 +13,9 @@ namespace Desert::Editor::Render
         MaterialGrid();
         ~MaterialGrid() = default;
 
-        void Bind( const std::shared_ptr<Desert::Core::Camera>& camera ) ;
+        void Bind( const std::shared_ptr<Desert::Core::Camera>& camera );
         void SetGridProperties( float cellSize, float cellCount, const glm::vec4& color );
 
     private:
-        std::unique_ptr<Graphic::Models::CameraDataUB>   m_CameraModel;
     };
 } // namespace Desert::Editor::Render

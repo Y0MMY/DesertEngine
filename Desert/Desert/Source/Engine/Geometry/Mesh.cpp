@@ -6,6 +6,10 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
+#include <Engine/Animation/Skeleton.hpp>
+#include <Engine/Animation/BoneInfo.hpp>
+#include <Engine/Animation/Import/AssimpAnimationImporter.hpp>
+
 namespace Desert
 {
     namespace
@@ -47,17 +51,36 @@ namespace Desert
                  aiProcess_JoinIdenticalVertices | aiProcess_LimitBoneWeights | aiProcess_ValidateDataStructure |
                  aiProcess_GlobalScale;
 
-            auto scene = importer->ReadFileFromMemory( rawData.data(), rawData.size(), s_MeshImportFlags );
+            std::filesystem::path filepath  = meshAsset->GetMetadata().Filepath;
+            std::string           extension = filepath.extension().string();
+
+            if ( !extension.empty() && extension[0] == '.' )
+            {
+                extension = extension.substr( 1 );
+            }
+
+            const aiScene* scene = nullptr;
+
+            if ( !extension.empty() )
+            {
+                scene = importer->ReadFileFromMemory( rawData.data(), rawData.size(), s_MeshImportFlags,
+                                                      extension.c_str() );
+            }
+            else
+            {
+                scene = importer->ReadFileFromMemory( rawData.data(), rawData.size(), s_MeshImportFlags );
+            }
+
             if ( !scene )
             {
-                 return Common::MakeError<ReturnType>( std::string( importer->GetErrorString() ) );
+                return Common::MakeError<ReturnType>( std::string( importer->GetErrorString() ) );
             }
 
             return Common::MakeSuccess( std::make_pair( scene, std::move( importer ) ) );
         }
 
     } // namespace
-  
+
     class ErrorLogStream : public Assimp::LogStream
     {
     public:
@@ -132,9 +155,42 @@ namespace Desert
         return std::make_shared<StaticMesh>( vertices, indices, name );
     }
 
-    std::shared_ptr<Mesh> Mesh::CreateAnimated( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+    std::shared_ptr<Mesh> Mesh::CreateSkinned( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
     {
-        return std::make_shared<AnimatedMesh>( meshAsset );
+        return std::make_shared<SkinnedMesh>( meshAsset );
+    }
+
+    bool Mesh::DetectIfSkinned( const std::shared_ptr<Assets::MeshAsset>& meshAsset )
+    {
+        auto result = InitializeFromAssetData( meshAsset );
+        if ( !result.IsSuccess() )
+        {
+            LOG_WARN( "Failed to detect mesh type for {}: {}", meshAsset->GetMetadata().Filepath.string(),
+                      result.GetError() );
+            return false;
+        }
+
+        const aiScene* scene = result.GetValue().first;
+
+        if ( scene->HasAnimations() )
+        {
+            LOG_DEBUG( "Mesh {} has animations, creating skinned mesh",
+                       meshAsset->GetMetadata().Filepath.string() );
+            return true;
+        }
+
+        for ( uint32_t i = 0; i < scene->mNumMeshes; ++i )
+        {
+            if ( scene->mMeshes[i]->HasBones() )
+            {
+                LOG_DEBUG( "Mesh {} has bones, creating skinned mesh",
+                           meshAsset->GetMetadata().Filepath.string() );
+                return true;
+            }
+        }
+
+        LOG_DEBUG( "Mesh {} is static (no animations or bones)", meshAsset->GetMetadata().Filepath.string() );
+        return false;
     }
 
     // Mesh base class implementation
@@ -307,12 +363,12 @@ namespace Desert
         return Common::MakeSuccessWithCodes<bool, MeshError>( true );
     }
 
-    // AnimatedMesh implementation
-    AnimatedMesh::AnimatedMesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset ) : Mesh( meshAsset )
+    // SkinnedMesh implementation
+    SkinnedMesh::SkinnedMesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset ) : Mesh( meshAsset )
     {
     }
 
-    Common::BoolResultWithCodes<MeshError> AnimatedMesh::Invalidate()
+    Common::BoolResultWithCodes<MeshError> SkinnedMesh::Invalidate()
     {
         auto result = InitializeFromAssetData( m_MeshAsset.lock() );
         if ( !result.IsSuccess() )
@@ -324,8 +380,136 @@ namespace Desert
         return ProcessAssimpScene( result.GetValue().first );
     }
 
-    Common::BoolResultWithCodes<MeshError> AnimatedMesh::ProcessAssimpScene( const aiScene* scene )
+    static aiNode* FindNodeRecursive( aiNode* node, const std::string& name )
     {
+        if ( name == node->mName.C_Str() )
+            return node;
+
+        for ( uint32_t i = 0; i < node->mNumChildren; ++i )
+        {
+            if ( auto* found = FindNodeRecursive( node->mChildren[i], name ) )
+                return found;
+        }
+
+        return nullptr;
+    }
+
+    Common::BoolResultWithCodes<MeshError> SkinnedMesh::ProcessAssimpScene( const aiScene* scene )
+    {
+        std::vector<SkinnedVertex>       vertices;
+        std::vector<Index>               indices;
+        std::vector<Animation::BoneInfo> bones;
+
+        m_Submeshes.reserve( scene->mNumMeshes );
+
+        // -----------------------------
+        // Mesh geometry
+        // -----------------------------
+        for ( uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx )
+        {
+            aiMesh* mesh = scene->mMeshes[meshIdx];
+
+            Submesh& submesh     = m_Submeshes.emplace_back();
+            submesh.Name         = mesh->mName.C_Str();
+            submesh.VertexOffset = static_cast<uint32_t>( vertices.size() );
+            submesh.IndexOffset  = static_cast<uint32_t>( indices.size() );
+            submesh.VertexCount  = mesh->mNumVertices;
+            submesh.IndexCount   = mesh->mNumFaces * 3;
+            submesh.Transform    = glm::mat4( 1.0f );
+
+            for ( uint32_t i = 0; i < mesh->mNumVertices; ++i )
+            {
+                SkinnedVertex v{};
+                v.StaticVertex.Position = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
+
+                if ( mesh->HasNormals() )
+                {
+                    v.StaticVertex.Normal = { mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z };
+                }
+
+                vertices.push_back( v );
+            }
+
+            for ( uint32_t i = 0; i < mesh->mNumFaces; ++i )
+            {
+                indices.emplace_back( submesh.VertexOffset + mesh->mFaces[i].mIndices[0],
+                                      submesh.VertexOffset + mesh->mFaces[i].mIndices[1],
+                                      submesh.VertexOffset + mesh->mFaces[i].mIndices[2] );
+            }
+
+            // -----------------------------
+            // Bones (bind pose only)
+            // -----------------------------
+            for ( uint32_t boneIdx = 0; boneIdx < mesh->mNumBones; ++boneIdx )
+            {
+                aiBone*           aiBone   = mesh->mBones[boneIdx];
+                const std::string boneName = aiBone->mName.C_Str();
+
+                uint32_t boneID = 0;
+
+                auto it = m_BoneNameToIndex.find( boneName );
+                if ( it == m_BoneNameToIndex.end() )
+                {
+                    boneID                      = static_cast<uint32_t>( bones.size() );
+                    m_BoneNameToIndex[boneName] = boneID;
+
+                    Animation::BoneInfo info;
+                    info.Name               = boneName;
+                    info.OffsetMatrix       = Mat4FromAssimpMat4( aiBone->mOffsetMatrix );
+                    info.LocalBindTransform = glm::mat4( 1.0f );
+
+                    bones.push_back( info );
+                }
+                else
+                {
+                    boneID = it->second;
+                }
+
+                for ( uint32_t w = 0; w < aiBone->mNumWeights; ++w )
+                {
+                    const aiVertexWeight& vw = aiBone->mWeights[w];
+                    vertices[submesh.VertexOffset + vw.mVertexId].AddBoneInfluence( boneID, vw.mWeight );
+                }
+            }
+        }
+
+        // -----------------------------
+        // GPU buffers
+        // -----------------------------
+        m_VertexBuffer =
+             Graphic::VertexBuffer::Create( vertices.data(), vertices.size() * sizeof( SkinnedVertex ) );
+
+        m_IndexBuffer = Graphic::IndexBuffer::Create( indices.data(), indices.size() * sizeof( Index ) );
+
+        m_VertexBuffer->RT_Invalidate();
+        m_IndexBuffer->RT_Invalidate();
+
+        for ( auto& bone : bones )
+        {
+            aiNode* node = FindNodeRecursive( scene->mRootNode, bone.Name );
+            if ( !node )
+                continue;
+
+            aiNode* parentNode = node->mParent;
+            if ( !parentNode )
+                continue;
+
+            auto it = m_BoneNameToIndex.find( parentNode->mName.C_Str() );
+            if ( it != m_BoneNameToIndex.end() )
+            {
+                bone.ParentBoneID       = it->second;
+                bone.LocalBindTransform = Mat4FromAssimpMat4( node->mTransformation );
+            }
+            else
+            {
+                bone.ParentBoneID.reset(); // not root
+            }
+        }
+
+        m_Skeleton = std::make_unique<Animation::Skeleton>( std::move( bones ) );
+
+        Animation::Import::AssimpAnimationImporter::ImportAnimations( scene, *m_Skeleton );
+
         return Common::MakeSuccessWithCodes<bool, MeshError>( true );
     }
 

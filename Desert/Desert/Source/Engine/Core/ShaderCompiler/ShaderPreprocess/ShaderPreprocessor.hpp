@@ -2,7 +2,12 @@
 
 #include <Engine/Core/Formats/Shader.hpp>
 
-namespace Desert::Core::Preprocess::Shader
+namespace Desert::Core::Preprocess
 {
-    std::unordered_map<Formats::ShaderStage, std::string> PreProcess( const std::string& source );
-}
+    class ShaderPreprocess
+    {
+    public:
+        static std::unordered_map<Core::Formats::ShaderStage, std::string>
+        PreProcessProgram( const std::string& source, const std::filesystem::path& basePath );
+    };
+} // namespace Desert::Core::Preprocess

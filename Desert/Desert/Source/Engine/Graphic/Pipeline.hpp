@@ -134,13 +134,13 @@ namespace Desert::Graphic
     public:
         virtual ~PipelineCompute() = default;
 
-        virtual void Begin()                                                                             = 0;
-        virtual void Execute( const std::shared_ptr<Image>& imageForProccess, std::shared_ptr<Image>& outputImage,
-                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )         = 0;
-        virtual void ExecuteMipLevel( const std::shared_ptr<Image>& imageForProccess, uint32_t mipLevel,
-                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) = 0;
-        virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )        = 0;
-        virtual void End()                                                                               = 0;
+        virtual void Begin()                                                                      = 0;
+        virtual void Execute( const Image* imageForProccess, std::shared_ptr<Image>& outputImage,
+                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )  = 0;
+        virtual void ExecuteMipLevel( const Image* imageForProccess, uint32_t mipLevel, uint32_t groupCountX,
+                                      uint32_t groupCountY, uint32_t groupCountZ )                = 0;
+        virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) = 0;
+        virtual void End()                                                                        = 0;
 
         virtual void UpdateStorageBuffer( void* data, std::size_t size ) final;
 

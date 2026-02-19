@@ -46,6 +46,9 @@ namespace Desert::Graphic::API::Vulkan
 
                 m_UniformBufferOffsetAlignment = deviceProperties.limits.minUniformBufferOffsetAlignment;
 
+                m_RendererCaps.MaxStorageBufferSize   = deviceProperties.limits.maxStorageBufferRange;
+                m_RendererCaps.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
+
                 break;
             }
         }
@@ -277,6 +280,5 @@ namespace Desert::Graphic::API::Vulkan
         }
         return VK_FORMAT_UNDEFINED;
     }
-
 
 } // namespace Desert::Graphic::API::Vulkan

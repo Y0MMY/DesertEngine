@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Engine/Graphic/Materials/Models/Mesh/Outline.hpp>
 #include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Core/Camera.hpp>
 
@@ -19,9 +18,9 @@ namespace Desert::Graphic
     public:
         MaterialOutline();
 
-        void Bind( const UpdateMaterialOutlineInfo& data ) ;
+        void Bind( const UpdateMaterialOutlineInfo& data );
 
     private:
-        std::unique_ptr<Models::OutlineData> m_OutlineData;
+        //   std::unique_ptr<Models::OutlineData> m_OutlineData;
     };
 } // namespace Desert::Graphic

@@ -32,7 +32,7 @@ namespace Desert::Assets
         }
 
         std::optional<std::reference_wrapper<const TextureSlot>> GetTextureSlot( TextureAsset::Type type ) const;
-        std::shared_ptr<Graphic::Texture2D>                      GetTexture( TextureAsset::Type type ) const;
+        TextureAsset*                                            GetTexture( TextureAsset::Type type ) const;
 
         bool AddTexture( const Common::Filepath& filepath, TextureAsset::Type type,
                          const glm::vec4& defaultColor = glm::vec4( 1.0f ) );

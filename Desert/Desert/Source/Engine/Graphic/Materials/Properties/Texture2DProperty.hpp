@@ -3,14 +3,14 @@
 #include <Engine/Graphic/Materials/Properties/MaterialProperty.hpp>
 
 #include <Engine/Graphic/Texture.hpp>
-#include <Engine/Uniforms/UniformImage2D.hpp>
+#include <Engine/ShaderResources/UniformImage2D.hpp>
 
 namespace Desert::Graphic
 {
     class Texture2DProperty : public MaterialProperty
     {
     public:
-        Texture2DProperty( std::shared_ptr<Uniforms::UniformImage2D> uniform ) : m_Uniform( uniform )
+        Texture2DProperty( std::shared_ptr<ShaderResources::UniformImage2D> uniform ) : m_Uniform( uniform )
         {
         }
 
@@ -36,14 +36,7 @@ namespace Desert::Graphic
             return nullptr;
         }
 
-        void SetTexture( const std::shared_ptr<Texture2D>& texture )
-        {
-            if ( texture )
-                m_Texture = texture->GetImage2D();
-            m_Dirty = true;
-        }
-
-        void SetImage( std::shared_ptr<Image2D> texture )
+        void SetImage( const Image2D* texture )
         {
             m_Texture = texture;
             m_Dirty   = true;
@@ -55,7 +48,7 @@ namespace Desert::Graphic
         }
 
     private:
-        std::shared_ptr<Uniforms::UniformImage2D> m_Uniform;
-        std::shared_ptr<Image2D>                  m_Texture;
+        std::shared_ptr<ShaderResources::UniformImage2D> m_Uniform;
+        const Image2D*                                   m_Texture = nullptr;
     };
 } // namespace Desert::Graphic

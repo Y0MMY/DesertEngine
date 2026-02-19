@@ -1,17 +1,18 @@
 #pragma once
 
 #include "Image.hpp"
+#include <Engine/Runtime/ImageHandle.hpp>
 
 namespace Desert::Graphic
 {
     struct ComputeImagesSpecification
     {
-        std::shared_ptr<Image> InputImage;
-        std::string            Tag;
-        std::string            ShaderName;
-        uint32_t               MipLevels;
-        uint32_t               Width;
-        uint32_t               Height;
+        Runtime::ImageHandle InputHandle;
+        std::string          Tag;
+        std::string          ShaderName;
+        uint32_t             MipLevels;
+        uint32_t             Width;
+        uint32_t             Height;
     };
 
     class ComputeImages final

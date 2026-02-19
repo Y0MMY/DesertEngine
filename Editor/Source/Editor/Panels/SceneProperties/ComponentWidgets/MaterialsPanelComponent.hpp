@@ -8,8 +8,6 @@
 #include <ImGui/imgui.h>
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 
-#include <Engine/Graphic/Materials/Models/Mesh/PBR/MaterialPBRUB.hpp>
-
 namespace Desert::Editor
 {
     class MaterialComponentWidget

@@ -30,12 +30,12 @@ namespace Desert::Editor::Render
              "EditorGridPass",
              [this]()
              {
-                 const auto& camera = m_DstScene.lock()->GetMainCamera();
+                 const auto& camera = m_DstScene.lock()->GetMainCamera().lock();
                  if ( camera )
                  {
                      // TODO: move to bind-class
                      SetGridProperties( 16.025f, 0.025f, glm::vec4( 0.5f, 0.5f, 0.5f, 0.3f ) );
-                     UpdateCamera( camera.value() );
+                     UpdateCamera( camera );
 
                      auto& renderer = Graphic::Renderer::GetInstance();
                      if ( const auto& material = m_Material )

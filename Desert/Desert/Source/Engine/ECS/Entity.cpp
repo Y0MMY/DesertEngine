@@ -5,14 +5,12 @@
 namespace Desert::ECS
 {
 
-    Entity::Entity( std::string&& tag, entt::entity handle, Common::Memory::not_null<Core::Scene>&& scene )
-         : m_Handle( handle ), m_Scene( std::move( scene ) )
+    Entity::Entity( std::string&& tag, entt::entity handle, entt::registry& registry )
+         : m_Handle( handle ), m_Registry( &registry )
     {
         AddComponent<TagComponent>( std::move( tag ) );
         AddComponent<UUIDComponent>();
         AddComponent<TransformComponent>();
     }
-
-
 
 } // namespace Desert::ECS

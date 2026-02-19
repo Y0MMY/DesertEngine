@@ -12,7 +12,7 @@ struct PointLight {
     float radius;
 };
 
-layout(std140, binding = 3) uniform PointLights
+layout(std140, binding = 3) uniform PointLightsUB
 {
     PointLight lights[MAX_POINT_LIGHT];    
 } pointLights;
@@ -26,7 +26,6 @@ vec3 CalculatePointLight(PointLight light, vec3 worldPosition, vec3 view, vec3 N
     
     vec3 H = normalize(view + L);
     
-    // Косинусы углов
     float cosLi = max(dot(N, L), 0.0);
     float cosLh = max(dot(N, H), 0.0);
     float cosLo = max(dot(N, view), 0.0);

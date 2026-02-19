@@ -1,8 +1,6 @@
 #pragma once
 
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Graphic/Models/SceneRendererUpdate.hpp>
-#include <Engine/Graphic/Models/MeshRenderData.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
 
 #include <Common/Core/Core.hpp>
@@ -14,6 +12,7 @@
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/System/System.hpp>
 
 namespace Desert::Graphic
@@ -22,31 +21,20 @@ namespace Desert::Graphic
     class Environment;
 } // namespace Desert::Graphic
 
-namespace Desert
-{
-    class Mesh;
-    namespace ECS
-    {
-        class Entity;
-    }
-
-} // namespace Desert
-
 namespace Desert::Core
 {
-    class Scene final : public std::enable_shared_from_this<Scene>
+    class Scene final
     {
     public:
         Scene() = default;
         Scene( std::string&& sceneName );
+        ~Scene() = default;
 
         [[nodiscard]] Common::BoolResultStr BeginScene();
-        void                             OnUpdate( const Common::Timestep& ts );
+        void                                OnUpdate( const Common::Timestep& ts );
         [[nodiscard]] Common::BoolResultStr EndScene();
 
         [[nodiscard]] Common::BoolResultStr Init();
-
-        void Shutdown();
 
         [[nodiscard]] const Graphic::Environment CreateEnvironment( const Common::Filepath& filepath );
 
@@ -92,9 +80,9 @@ namespace Desert::Core
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
                                    std::shared_ptr<Graphic::RenderPass>&& renderPass );
 
-        std::optional<std::shared_ptr<Core::Camera>> GetMainCamera() const
+        const std::weak_ptr<Core::Camera>& GetMainCamera() const
         {
-            return m_MainCamera ? std::make_optional( m_MainCamera ) : std::nullopt;
+            return m_MainCamera;
         }
 
     private:
@@ -109,18 +97,18 @@ namespace Desert::Core
         void OnEntityCreated_Camera();
 
     private:
-        static constexpr uint32_t SYSTEMS_COUNT = 3U; // TODO: uint8_t
+        entt::registry m_Registry;
 
-        std::string                                             m_SceneName;
-        std::shared_ptr<Graphic::SceneRenderer>                 m_SceneRenderer;
+        static constexpr uint32_t                               SYSTEMS_COUNT = 4U;
         std::array<std::unique_ptr<ECS::System>, SYSTEMS_COUNT> m_Systems;
 
-        entt::registry                           m_Registry;
         std::vector<ECS::Entity>                 m_Entitys;
         std::unordered_map<Common::UUID, size_t> m_EntitysMap;
 
-        SceneSettings m_Settings;
+        std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
+        std::weak_ptr<Core::Camera>             m_MainCamera;
 
-        std::shared_ptr<Core::Camera> m_MainCamera = nullptr;
+        SceneSettings m_Settings;
+        std::string   m_SceneName;
     };
 } // namespace Desert::Core

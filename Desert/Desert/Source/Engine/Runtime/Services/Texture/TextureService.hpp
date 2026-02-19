@@ -9,8 +9,9 @@ namespace Desert::Runtime
     {
     public:
         void Register( const Assets::AssetHandle& handle, std::shared_ptr<Graphic::Texture2D> texture );
-        std::shared_ptr<Graphic::Texture2D> Get( const Assets::AssetHandle& handle ) const;
-        void                                Clear();
+        std::shared_ptr<Graphic::Texture2D>
+             Get( const Assets::AssetHandle& handle ) const; // TODO: RETURN RUNTIME TUEXTURE'S HANDLE
+        void Clear();
 
     private:
         std::unordered_map<Assets::AssetHandle, std::shared_ptr<Graphic::Texture2D>> m_Textures;

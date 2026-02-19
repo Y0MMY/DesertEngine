@@ -13,11 +13,11 @@ namespace Desert::Graphic::System
         using RenderSystem::RenderSystem;
 
         virtual Common::BoolResultStr Initialize() override;
-        void                       Shutdown()
+        void                          Shutdown()
         {
         }
 
-        void PrepareCamera( const std::shared_ptr<Core::Camera>& camera );
+        void PrepareCamera( Core::Camera* camera );
         void PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material );
 
         const std::optional<Environment> GetEnvironment() const
@@ -33,11 +33,12 @@ namespace Desert::Graphic::System
 
     private:
         void Render();
+
     private:
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
 
-        std::weak_ptr<Core::Camera> m_ActiveCamera;
-        std::shared_ptr<Pipeline>   m_Pipeline;
-        std::shared_ptr<Shader>     m_Shader;
+        Core::Camera*             m_ActiveCamera = nullptr;
+        std::shared_ptr<Pipeline> m_Pipeline;
+        std::shared_ptr<Shader>   m_Shader;
     };
 } // namespace Desert::Graphic::System

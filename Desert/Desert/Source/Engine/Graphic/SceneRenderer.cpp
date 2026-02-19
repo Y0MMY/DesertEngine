@@ -6,7 +6,7 @@
 
 namespace Desert::Graphic
 {
-    NO_DISCARD Common::BoolResultStr SceneRenderer::Init()
+    void SceneRenderer::Init()
     {
         const uint32_t width  = EngineContext::GetInstance().GetCurrentWindow()->GetWidth();
         const uint32_t height = EngineContext::GetInstance().GetCurrentWindow()->GetHeight();
@@ -26,31 +26,28 @@ namespace Desert::Graphic
                                                  m_RenderGraphBuilder );
 
         if ( !SP_CAST( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->Initialize() )
-            return Common::MakeError( "Failed to initialize SkyboxRenderer system" );
+            DESERT_VERIFY( false );
 
         if ( !SP_CAST( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->Initialize() )
-            return Common::MakeError( "Failed to initialize MeshRenderer system" );
+            DESERT_VERIFY( false );
 
         if ( !SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Initialize() )
-            return Common::MakeError( "Failed to initialize TonemapRenderer system" );
+            DESERT_VERIFY( false );
 
         RebuildRenderGraph();
-
-        return BOOLSUCCESS;
     }
 
-    NO_DISCARD Common::BoolResultStr SceneRenderer::BeginScene( const std::shared_ptr<Core::Scene>&  scene,
-                                                             const std::shared_ptr<Core::Camera>& camera )
+    NO_DISCARD Common::BoolResultStr SceneRenderer::BeginScene( const Desert::Core::Scene& scene )
     {
-        m_SceneInfo.ActiveScene  = scene;
-        m_SceneInfo.ActiveCamera = camera;
+        const auto& mainCamera   = scene.GetMainCamera().lock();
+        m_SceneInfo.ActiveCamera = mainCamera.get();
 
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
         const auto& meshSystem   = UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] );
 
-        skyboxSystem->PrepareCamera( camera );
+        skyboxSystem->PrepareCamera( m_SceneInfo.ActiveCamera );
 
-        const auto& sceneSettings = scene->GetSettings();
+        const auto& sceneSettings = scene.GetSettings();
         meshSystem->SetOutlineColor( sceneSettings.OutlineColor );
         meshSystem->ToggleOutline( sceneSettings.EnableOutline );
         meshSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
@@ -59,10 +56,10 @@ namespace Desert::Graphic
         return renderer.BeginFrame();
     }
 
-    void SceneRenderer::OnUpdate( const SceneRendererUpdate& sceneRenderInfo )
+    void SceneRenderer::OnUpdate( const UpdateInfo& sceneRenderInfo )
     {
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
-        m_DirectionLights        = sceneRenderInfo.DirLights;
+        // m_DirectionLights        = sceneRenderInfo.DirLights;
 
         ClearMainFramebuffer();
         ExecuteRenderGraph();
@@ -71,8 +68,9 @@ namespace Desert::Graphic
 
     NO_DISCARD Common::BoolResultStr SceneRenderer::EndScene()
     {
-        m_MeshRenderData.clear();
-        m_PointLight.clear();
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->ClearQueues();
+
+        m_PointLight.PointLights.clear();
 
         auto& renderer = Renderer::GetInstance();
         return renderer.EndFrame();
@@ -99,11 +97,25 @@ namespace Desert::Graphic
         // renderer.EndRenderPass();
     }
 
-    void SceneRenderer::AddToRenderMeshList( const std::shared_ptr<Mesh>&        mesh,
-                                             const std::shared_ptr<MaterialPBR>& material,
-                                             const glm::mat4&                    transform )
+    void SceneRenderer::AddStaticMesh( const std::shared_ptr<Mesh>&              mesh,
+                                       const std::shared_ptr<StaticMaterialPBR>& material,
+                                       const glm::mat4&                          transform )
     {
-        m_MeshRenderData.emplace_back( mesh, transform, material );
+        if ( !mesh || !material )
+            return;
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->AddStaticMesh( mesh, material, transform );
+    }
+
+    void SceneRenderer::AddSkinnedMesh( const std::shared_ptr<Desert::SkinnedMesh>&         mesh,
+                                        const std::shared_ptr<Graphic::SkinnedMaterialPBR>& material,
+                                        const glm::mat4& transform, const std::vector<glm::mat4>& boneMatrices )
+    {
+        if ( !mesh || !material || boneMatrices.empty() )
+            return;
+
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->AddSkinnedMesh( mesh, material, transform, boneMatrices );
     }
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
@@ -121,14 +133,6 @@ namespace Desert::Graphic
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->GetEnvironment();
     }
 
-    void SceneRenderer::Shutdown()
-    {
-        /*for ( const auto& system : m_FixedRenderSystems )
-        {
-            system->Shutdown();
-        }*/
-    }
-
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage()
     {
         return SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
@@ -136,9 +140,9 @@ namespace Desert::Graphic
              ->GetColorAttachmentImage();
     }
 
-    void SceneRenderer::AddPointLight( PointLight&& pointLight )
+    void SceneRenderer::AddPointLight( ShaderProtocols::PointLightPayload&& pointLight )
     {
-        m_PointLight.push_back( std::move( pointLight ) );
+        m_PointLight.PointLights.push_back( std::move( pointLight ) );
     }
 
     void SceneRenderer::RegisterRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system )

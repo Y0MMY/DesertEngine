@@ -21,14 +21,14 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] virtual Common::BoolResultStr PrepareNextFrame() override;
         [[nodiscard]] virtual Common::BoolResultStr PresentFinalImage() override;
         [[nodiscard]] virtual Common::BoolResultStr BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
-                                                                  bool clearFrame ) override;
+                                                                     bool clearFrame ) override;
         virtual Common::BoolResultStr               BeginSwapChainRenderPass() override;
         [[nodiscard]] virtual Common::BoolResultStr EndRenderPass() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                                 const std::shared_ptr<MaterialExecutor>& material ) override;
+                                 const MaterialExecutor* materialExecutor ) override;
 
-        virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
-                                           const std::shared_ptr<MaterialExecutor>& material ) override;
+        virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+                                           const MaterialExecutor*          materialExecutor ) override;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
 

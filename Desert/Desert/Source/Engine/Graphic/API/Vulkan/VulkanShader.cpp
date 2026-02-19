@@ -2,7 +2,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
-#include <Engine/Core/Models/Shader.hpp>
+#include <Engine/ShaderResources/ShaderReflectionTypes.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
@@ -33,45 +33,45 @@ namespace Desert::Graphic::API::Vulkan
             }
             return arraySize;
         }
-        static Core::Formats::ShaderDataType SPIRTypeToShaderDataType( spirv_cross::SPIRType type )
+        static Core::Formats::ShaderValueType SPIRTypeToShaderValueType( spirv_cross::SPIRType type )
         {
             switch ( type.basetype )
             {
                 case spirv_cross::SPIRType::Boolean:
-                    return Core::Formats::ShaderDataType::Bool;
+                    return Core::Formats::ShaderValueType::Bool;
                 case spirv_cross::SPIRType::Int:
                     if ( type.vecsize == 1 )
-                        return Core::Formats::ShaderDataType::Int;
+                        return Core::Formats::ShaderValueType::Int;
                     if ( type.vecsize == 2 )
-                        return Core::Formats::ShaderDataType::Int2;
+                        return Core::Formats::ShaderValueType::Int2;
                     if ( type.vecsize == 3 )
-                        return Core::Formats::ShaderDataType::Int3;
+                        return Core::Formats::ShaderValueType::Int3;
                     if ( type.vecsize == 4 )
-                        return Core::Formats::ShaderDataType::Int4;
+                        return Core::Formats::ShaderValueType::Int4;
 
                 case spirv_cross::SPIRType::UInt:
-                    return Core::Formats::ShaderDataType::UInt;
+                    return Core::Formats::ShaderValueType::UInt;
                 case spirv_cross::SPIRType::Float:
                     if ( type.columns == 3 )
-                        return Core::Formats::ShaderDataType::Mat3;
+                        return Core::Formats::ShaderValueType::Mat3;
                     if ( type.columns == 4 )
-                        return Core::Formats::ShaderDataType::Mat4;
+                        return Core::Formats::ShaderValueType::Mat4;
 
                     if ( type.vecsize == 1 )
-                        return Core::Formats::ShaderDataType::Float;
+                        return Core::Formats::ShaderValueType::Float;
                     if ( type.vecsize == 2 )
-                        return Core::Formats::ShaderDataType::Float2;
+                        return Core::Formats::ShaderValueType::Float2;
                     if ( type.vecsize == 3 )
-                        return Core::Formats::ShaderDataType::Float3;
+                        return Core::Formats::ShaderValueType::Float3;
                     if ( type.vecsize == 4 )
-                        return Core::Formats::ShaderDataType::Float4;
+                        return Core::Formats::ShaderValueType::Float4;
                     break;
 
                 case spirv_cross::SPIRType::Struct:
-                    return Core::Formats::ShaderDataType::Struct;
+                    return Core::Formats::ShaderValueType::Struct;
             }
             DESERT_VERIFY( false, "Unknown type!" );
-            return Core::Formats::ShaderDataType::None;
+            return Core::Formats::ShaderValueType::Unknown;
         }
 
         Core::Formats::ShaderStage GetShaderStageFlagBitsFromSPV( const spv::ExecutionModel& executionModel )
@@ -202,11 +202,35 @@ namespace Desert::Graphic::API::Vulkan
             return Common::MakeSuccess( true );
         }
 
+        bool IsProgramFile( const std::string& source )
+        {
+            return source.find( "#pragma program" ) != std::string::npos;
+        }
+
+        std::string ExtractProgramName( const std::string& source )
+        {
+            std::istringstream stream( source );
+            std::string        line;
+
+            while ( std::getline( stream, line ) )
+            {
+                if ( line.find( "#pragma program" ) == std::string::npos )
+                    continue;
+
+                std::istringstream ls( line );
+                std::string        pragma, programKeyword, name;
+                ls >> pragma >> programKeyword >> name;
+
+                return name;
+            }
+
+            DESERT_VERIFY( false, "Shader program has no '#pragma program <name>'" );
+            return {};
+        }
     } // namespace Utils
 
     VulkanShader::VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines )
-         : m_ShaderAsset( asset ), m_ShaderPath( asset->GetMetadata().Filepath ),
-           m_ShaderName( m_ShaderPath.filename().string() )
+         : m_ShaderAsset( asset ), m_ShaderPath( asset->GetMetadata().Filepath ), m_ShaderName()
     {
         Utils::CreateDirectoriesIfNoExists(); // TODO: move to a better location (init project)
 
@@ -221,38 +245,20 @@ namespace Desert::Graphic::API::Vulkan
             DESERT_VERIFY( false );
         }
         m_PipelineShaderStageCreateInfos.clear();
-
-        const auto shaderContent    = asset->GetShaderContent();
-        const auto shadersWithStage = Core::Preprocess::Shader::PreProcess( shaderContent );
-
         m_ReflectionData.ShaderDescriptorSets.clear();
 
-        for ( auto [stage, source] : shadersWithStage )
+        const auto shaderContent = asset->GetShaderContent();
+
+        m_ShaderName = Utils::ExtractProgramName( shaderContent ); // bad way to get a shader name
+
+        if ( Utils::IsProgramFile( shaderContent ) )
         {
-            const auto compileResult = Utils::Compile( stage, source, m_ShaderPath.string() );
-
-            if ( !compileResult.IsSuccess() )
-            {
-                return Common::MakeError<bool>( compileResult.GetError() );
-            }
-
-            const auto createShaderModuleResult = Utils::CreateShaderModule(
-                 stage, compileResult.GetValue(), m_ShaderPath, m_PipelineShaderStageCreateInfos );
-
-            if ( !createShaderModuleResult.IsSuccess() )
-            {
-                return Common::MakeError<bool>( createShaderModuleResult.GetError() );
-            }
-
-            Reflect( Utils::ShaderStageToVkShader( stage ), compileResult.GetValue() );
-            const auto createDescriptorsResult = CreateDescriptorsLayout();
-            if ( !createDescriptorsResult.IsSuccess() )
-            {
-                return Common::MakeError<bool>( createDescriptorsResult.GetError() );
-            }
+            auto program = Core::Preprocess::ShaderPreprocess::PreProcessProgram( shaderContent, m_ShaderPath );
+            return CompileProgram( program );
         }
 
-        LOG_INFO( "The shader {} was created or reloaded", m_ShaderPath.filename().string() );
+        DESERT_VERIFY( false );
+        return Common::MakeError( "" );
     }
 
     void VulkanShader::Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary )
@@ -281,7 +287,7 @@ namespace Desert::Graphic::API::Vulkan
 
                 if ( uniformBuffers.find( binding ) == uniformBuffers.end() )
                 {
-                    Core::Models::UniformBuffer uniformBuffer;
+                    ShaderResources::ShaderLayout::UniformBuffer uniformBuffer;
                     uniformBuffer.BindingPoint = binding;
                     uniformBuffer.Size         = size;
                     uniformBuffer.Name         = name;
@@ -294,9 +300,9 @@ namespace Desert::Graphic::API::Vulkan
                         const spirv_cross::SPIRType& member_type    = compiler.get_type( member_type_id );
                         const std::string&           member_name = compiler.get_member_name( bufferType.self, i );
 
-                        Desert::Core::Models::Common::Field field;
+                        Desert::ShaderResources::ShaderLayout::ShaderFieldLayout field;
                         field.Name          = member_name;
-                        field.FieldDataType = Utils::SPIRTypeToShaderDataType( member_type );
+                        field.FieldDataType = Utils::SPIRTypeToShaderValueType( member_type );
                         field.Size          = compiler.get_declared_struct_member_size( bufferType, i );
                         field.Offset        = compiler.type_struct_member_offset( bufferType, i );
 
@@ -329,9 +335,9 @@ namespace Desert::Graphic::API::Vulkan
                             const spirv_cross::SPIRType& member_type    = compiler.get_type( member_type_id );
                             const std::string& member_name = compiler.get_member_name( bufferType.self, i );
 
-                            Desert::Core::Models::Common::Field field;
+                            Desert::ShaderResources::ShaderLayout::ShaderFieldLayout field;
                             field.Name          = member_name;
-                            field.FieldDataType = Utils::SPIRTypeToShaderDataType( member_type );
+                            field.FieldDataType = Utils::SPIRTypeToShaderValueType( member_type );
                             field.Size          = compiler.get_declared_struct_member_size( bufferType, i );
                             field.Offset        = compiler.type_struct_member_offset( bufferType, i );
 
@@ -402,7 +408,7 @@ namespace Desert::Graphic::API::Vulkan
                         arraySize = Utils::GetArraySize( imageType );
                     }
 
-                    Core::Models::Image2DSampler newImageSampler;
+                    ShaderResources::ShaderLayout::Image2DSampler newImageSampler;
                     newImageSampler.BindingPoint = binding;
                     newImageSampler.Name         = name;
                     newImageSampler.ArraySize    = arraySize;
@@ -427,7 +433,7 @@ namespace Desert::Graphic::API::Vulkan
                         arraySize = Utils::GetArraySize( imageType );
                     }
 
-                    Core::Models::ImageCubeSampler newImageSampler;
+                    ShaderResources::ShaderLayout::ImageCubeSampler newImageSampler;
                     newImageSampler.BindingPoint = binding;
                     newImageSampler.Name         = name;
                     newImageSampler.ArraySize    = arraySize;
@@ -454,7 +460,7 @@ namespace Desert::Graphic::API::Vulkan
 
             if ( storageBuffers.find( binding ) == storageBuffers.end() )
             {
-                Core::Models::StorageBuffer storageBuffer;
+                ShaderResources::ShaderLayout::StorageBuffer storageBuffer;
                 storageBuffer.BindingPoint = binding;
                 storageBuffer.Name         = name;
                 storageBuffer.Size         = size;
@@ -481,7 +487,7 @@ namespace Desert::Graphic::API::Vulkan
 
                 if ( !pushConstantReflection )
                 {
-                    Core::Models::PushConstant pushConstant;
+                    ShaderResources::ShaderLayout::PushConstantRange pushConstant;
                     pushConstant.Size   = size;
                     pushConstant.Offset = 0;
                     pushConstant.Name   = name;
@@ -519,7 +525,7 @@ namespace Desert::Graphic::API::Vulkan
                     arraySize = Utils::GetArraySize( imageType );
                 }
 
-                Core::Models::Image2DSampler newImageSampler;
+                ShaderResources::ShaderLayout::Image2DSampler newImageSampler;
                 newImageSampler.BindingPoint = binding;
                 newImageSampler.Name         = name;
                 newImageSampler.ArraySize    = arraySize;
@@ -620,7 +626,8 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    const std::vector<Desert::Core::Models::UniformBuffer> VulkanShader::GetUniformBufferModels() const
+    const std::vector<Desert::ShaderResources::ShaderLayout::UniformBuffer>
+    VulkanShader::GetUniformBufferModels() const
     {
         if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
         {
@@ -635,7 +642,8 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    const std::vector<Desert::Core::Models::ImageCubeSampler> VulkanShader::GetUniformImageCubeModels() const
+    const std::vector<Desert::ShaderResources::ShaderLayout::ImageCubeSampler>
+    VulkanShader::GetUniformImageCubeModels() const
     {
         if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
         {
@@ -650,7 +658,8 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    const std::vector<Desert::Core::Models::Image2DSampler> VulkanShader::GetUniformImage2DModels() const
+    const std::vector<Desert::ShaderResources::ShaderLayout::Image2DSampler>
+    VulkanShader::GetUniformImage2DModels() const
     {
         if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
         {
@@ -665,7 +674,7 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    const std::vector<Core::Models::StorageBuffer> VulkanShader::GetStorageBufferModels() const
+    const std::vector<ShaderResources::ShaderLayout::StorageBuffer> VulkanShader::GetStorageBufferModels() const
     {
         if ( !m_ReflectionData.ShaderDescriptorSets.size() ) [[unlikely]]
         {
@@ -678,6 +687,50 @@ namespace Desert::Graphic::API::Vulkan
                  uniformInfo | std::views::values | std::views::transform( []( const auto& p ) { return p; } );
             return { res.begin(), res.end() };
         }
+    }
+
+    Common::BoolResultStr
+    VulkanShader::CompileProgram( const std::unordered_map<Core::Formats::ShaderStage, std::string>& stages )
+    {
+        LOG_INFO( "Compiling shader program: {}", m_ShaderPath.filename().string() );
+
+        for ( const auto& [stage, source] : stages )
+        {
+            LOG_TRACE( "  Stage: {}", Shader::GetStringShaderStage( stage ) );
+
+            const auto compileResult = Utils::Compile( stage, source, m_ShaderPath.string() );
+
+            if ( !compileResult.IsSuccess() )
+            {
+                LOG_ERROR( "  Failed to compile {} stage", Shader::GetStringShaderStage( stage ) );
+                return Common::MakeError<bool>( compileResult.GetError() );
+            }
+
+            LOG_TRACE( "  {} stage compiled successfully", Shader::GetStringShaderStage( stage ) );
+
+            const auto createShaderModuleResult = Utils::CreateShaderModule(
+                 stage, compileResult.GetValue(), m_ShaderPath, m_PipelineShaderStageCreateInfos );
+
+            if ( !createShaderModuleResult.IsSuccess() )
+            {
+                LOG_ERROR( "  Failed to create shader module for {} stage",
+                           Shader::GetStringShaderStage( stage ) );
+                return Common::MakeError<bool>( createShaderModuleResult.GetError() );
+            }
+
+            Reflect( Utils::ShaderStageToVkShader( stage ), compileResult.GetValue() );
+        }
+
+        const auto createDescriptorsResult = CreateDescriptorsLayout();
+        if ( !createDescriptorsResult.IsSuccess() )
+        {
+            LOG_ERROR( "Failed to create descriptor layouts for shader program" );
+            return Common::MakeError<bool>( createDescriptorsResult.GetError() );
+        }
+
+        LOG_INFO( "Shader program {} compiled successfully", m_ShaderPath.filename().string() );
+
+        return BOOLSUCCESS;
     }
 
 } // namespace Desert::Graphic::API::Vulkan

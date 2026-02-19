@@ -4,7 +4,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
-#include <Engine/Uniforms/UniformManager.hpp>
+#include <Engine/ShaderResources/ShaderResourcesManager.hpp>
 
 static constexpr uint32_t kMaxPushConstantsSize = 128U;
 
@@ -17,11 +17,14 @@ namespace Desert::Graphic
     {
         m_PushConstantBuffer.Allocate( kMaxPushConstantsSize );
         InitializeProperties();
+
+        m_MaterialBackend->InitializeDefaults();
     }
 
     void MaterialExecutor::InitializeProperties()
     {
-        auto uniformManager = Uniforms::UniformManager::Create( "Material_" + m_Shader->GetName(), m_Shader );
+        auto uniformManager =
+             ShaderResources::ShaderResourcesManager::Create( "Material_" + m_Shader->GetName(), m_Shader );
 
         for ( auto [name, index] : uniformManager->GetUniformBufferTotal().Names )
         {
@@ -60,21 +63,29 @@ namespace Desert::Graphic
         }
     }
 
-    void MaterialExecutor::Apply()
+    void MaterialExecutor::Apply() const
     {
         const auto& backend = m_MaterialBackend.get();
 
         for ( auto& prop : m_UniformBufferPropertiesStorage )
+        {
             prop->Apply( backend );
+        }
 
         for ( auto& prop : m_Texture2DPropertiesStorage )
+        {
             prop->Apply( backend );
+        }
 
         for ( auto& prop : m_TextureCubePropertiesStorage )
+        {
             prop->Apply( backend );
+        }
 
         for ( auto& prop : m_StorageBufferPropertiesStorage )
+        {
             prop->Apply( backend );
+        }
 
         backend->FlushUpdates();
 
@@ -84,7 +95,7 @@ namespace Desert::Graphic
         }
     }
 
-    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&& debugName, std::string&& shaderName )
+    std::unique_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&& debugName, std::string&& shaderName )
     {
         const auto& resolvedShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( shaderName );
         if ( !resolvedShader )
@@ -99,7 +110,7 @@ namespace Desert::Graphic
                 return nullptr;
             case RendererAPIType::Vulkan:
             {
-                return std::make_shared<MaterialExecutor>(
+                return std::make_unique<MaterialExecutor>(
                      std::move( debugName ), resolvedShader,
                      std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( resolvedShader ) ) );
             }
@@ -108,7 +119,7 @@ namespace Desert::Graphic
         return nullptr;
     }
 
-    std::shared_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&&                  debugName,
+    std::unique_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&&                  debugName,
                                                                 const std::shared_ptr<Shader>& shader )
     {
         switch ( RendererAPI::GetAPIType() )
@@ -117,7 +128,7 @@ namespace Desert::Graphic
                 return nullptr;
             case RendererAPIType::Vulkan:
             {
-                return std::make_shared<MaterialExecutor>(
+                return std::make_unique<MaterialExecutor>(
                      std::move( debugName ), shader,
                      std::move( std::make_unique<API::Vulkan::VulkanMaterialBackend>( shader ) ) );
             }

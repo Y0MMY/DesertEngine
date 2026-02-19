@@ -13,6 +13,8 @@ namespace Desert::Graphic::API::Vulkan
         VulkanMaterialBackend( const std::shared_ptr<Shader>& shader );
         ~VulkanMaterialBackend();
 
+        virtual void InitializeDefaults() override;
+
         virtual void ApplyUniformBuffer( MaterialProperty* prop ) override;
         virtual void ApplyStorageBuffer( MaterialProperty* prop ) override;
         virtual void ApplyTexture2D( MaterialProperty* prop ) override;
@@ -28,6 +30,7 @@ namespace Desert::Graphic::API::Vulkan
                                  uint32_t frameIndex );
 
     private:
+        void InitializeWithFallbacks();
         bool HasDescriptorSets() const;
 
         void AllocateDescriptorSets();

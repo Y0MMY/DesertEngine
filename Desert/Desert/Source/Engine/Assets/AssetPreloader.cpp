@@ -2,9 +2,9 @@
 
 namespace Desert::Assets
 {
-    constexpr std::array<std::string_view, 2> SUPPORTED_MESH_EXTENSIONS    = { ".fbx", ".blend" };
+    constexpr std::array<std::string_view, 3> SUPPORTED_MESH_EXTENSIONS    = { ".fbx", ".blend", ".gltf" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS  = { ".hdr" };
-    constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS = { ".glsl" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS = { ".shader" };
 
     AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
          : m_AssetManager( assetManager )

@@ -60,7 +60,7 @@ namespace Desert::Graphic::API::Vulkan
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
     }
 
-    void VulkanPipelineCompute::ExecuteMipLevel( const std::shared_ptr<Image>& imageForProccess, uint32_t mipLevel,
+    void VulkanPipelineCompute::ExecuteMipLevel( const Image* imageForProccess, uint32_t mipLevel,
                                                  uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
     {
         const auto& shader = m_Shader.lock();
@@ -70,7 +70,7 @@ namespace Desert::Graphic::API::Vulkan
             return;
         }
 
-        auto vulkanInputImage = dynamic_pointer_cast<VulkanImageBase>( imageForProccess );
+        auto vulkanInputImage = dynamic_cast<const VulkanImageBase*>(imageForProccess);
         if ( !vulkanInputImage )
         {
             DESERT_VERIFY( false, "Failed to cast to VulkanImageBase" );
@@ -178,16 +178,15 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    void VulkanPipelineCompute::Execute( const std::shared_ptr<Image>& imageForProccess,
-                                         std::shared_ptr<Image>& outputImage, uint32_t groupCountX,
-                                         uint32_t groupCountY, uint32_t groupCountZ )
+    void VulkanPipelineCompute::Execute( const Image* imageForProccess, std::shared_ptr<Image>& outputImage,
+                                         uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
     {
         const auto& shader = m_Shader.lock();
         if ( !shader )
         {
             DESERT_VERIFY( false );
         }
-        auto vulkanInputImage  = dynamic_pointer_cast<VulkanImageBase>( imageForProccess );
+        auto vulkanInputImage = dynamic_cast<const VulkanImageBase*>(imageForProccess);
         auto vulkanOutputImage = dynamic_pointer_cast<VulkanImageBase>( outputImage );
 
         if ( !vulkanInputImage || !vulkanOutputImage )

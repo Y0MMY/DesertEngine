@@ -2,7 +2,7 @@
 
 #include <Engine/Graphic/Materials/Material.hpp>
 
-#include <Engine/Graphic/Materials/Models/ToneMap.hpp>
+#include <Engine/Graphic/Materials/MaterialBindings/Tonemap/Tonemap.hpp>
 
 namespace Desert::Graphic
 {
@@ -15,6 +15,6 @@ namespace Desert::Graphic
         void Bind( const std::shared_ptr<Image2D>& targetImage );
 
     private:
-        std::unique_ptr<Models::ToneMap> m_ToneMapModel;
+        std::unique_ptr<MaterialHelper::TonemapBinding> m_TonemapBinding;
     };
 } // namespace Desert::Graphic

@@ -12,7 +12,10 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
-#include <Engine/Graphic/Materials/Mesh/PBR/MaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
+
+#include <Engine/Animation/Animator.hpp>
 
 namespace Desert::ECS
 {
@@ -46,14 +49,17 @@ namespace Desert::ECS
             Primitive
         };
         std::optional<Assets::AssetHandle> MeshHandle     = std::nullopt;
-        std::optional<PrimitiveType>       PrimitiveShape = std::nullopt;
+        std::optional<PrimitiveType>       PrimitiveShape = std::nullopt; // TODO: std::variant
 
-        std::shared_ptr<Graphic::MaterialPBR> Material;
-        bool                                  OutlineDraw = false;
+        std::shared_ptr<Graphic::StaticMaterialPBR> Material;
+        bool                                        OutlineDraw = false;
 
         StaticMeshComponent()
         {
-            Material = std::make_shared<Graphic::MaterialPBR>( nullptr );
+            Material = std::make_shared<Graphic::StaticMaterialPBR>( nullptr );
+            // TODO: Do not allocate runtime materials in the component constructor.
+            //       Material should be lazily created by the render system (runtime-only),
+            //       or provided via a material asset / override mechanism.
         }
 
         Type GetMeshType() const
@@ -63,6 +69,44 @@ namespace Desert::ECS
             if ( PrimitiveShape.has_value() )
                 return Type::Primitive;
             return Type::None;
+        }
+    };
+
+    struct SkinnedMeshComponent
+    {
+        Assets::AssetHandle                          MeshHandle;
+        std::shared_ptr<Graphic::SkinnedMaterialPBR> Material;
+
+        SkinnedMeshComponent()
+        {
+            Material = std::make_shared<Graphic::SkinnedMaterialPBR>(
+                 nullptr ); // TODO: Do not allocate runtime materials in the component constructor.
+                            //       Material should be lazily created by the render system (runtime-only),
+                            //       or provided via a material asset / override mechanism.
+        }
+    };
+
+    struct AnimationComponent
+    {
+        // active Animator (runtime instance)
+        std::unique_ptr<Animation::Animator> Animator;
+
+        // current name (debug / editor / FSM)
+        std::string CurrentClip;
+
+        bool Playing = true;
+        bool Loop    = true;
+
+        float PlaybackSpeed = 1.0f;
+
+        // Root motion
+        bool EnableRootMotion = false;
+
+        AnimationComponent() = default;
+
+        explicit AnimationComponent( std::unique_ptr<Animation::Animator>&& animator )
+             : Animator( std::move( animator ) )
+        {
         }
     };
 

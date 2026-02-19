@@ -1,20 +1,21 @@
 #pragma once
 
 #include <Engine/Graphic/Texture.hpp>
+#include <Engine/Runtime/ImageHandle.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 
 namespace Desert::Graphic
 {
     struct Environment
     {
-        Common::Filepath           Filepath; // TODO: Asset Env
-        std::shared_ptr<ImageCube> RadianceMap;
-        std::shared_ptr<ImageCube> IrradianceMap;
-        std::shared_ptr<ImageCube> PreFilteredMap;
+        Common::Filepath     Filepath; // TODO: Asset Env
+        Runtime::ImageHandle RadianceMap;
+        Runtime::ImageHandle IrradianceMap;
+        Runtime::ImageHandle PreFilteredMap;
 
         operator bool() const
         {
-            return RadianceMap && IrradianceMap && PreFilteredMap;
+            return RadianceMap.IsValid() && IrradianceMap.IsValid() && PreFilteredMap.IsValid();
         }
     };
 

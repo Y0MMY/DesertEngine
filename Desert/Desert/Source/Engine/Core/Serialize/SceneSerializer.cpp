@@ -102,71 +102,71 @@ namespace Desert::Core
 
     std::string SceneSerializer::SerializeToJson() const
     {
-        internal::SceneSerialized scene;
-        scene.SceneName = m_Scene->GetSceneName();
+        //internal::SceneSerialized scene;
+        //scene.SceneName = m_Scene->GetSceneName();
 
-        for ( const auto& entity : m_Scene->GetAllEntities() )
-        {
-            internal::EntitySer entitySer;
+        //for ( const auto& entity : m_Scene->GetAllEntities() )
+        //{
+        //    internal::EntitySer entitySer;
 
-            if ( entity.HasComponent<ECS::TagComponent>() )
-            {
-                auto& tag     = entity.GetComponent<ECS::TagComponent>();
-                entitySer.Tag = internal::TagComponentSer{ tag.Tag };
-            }
+        //    if ( entity.HasComponent<ECS::TagComponent>() )
+        //    {
+        //        auto& tag     = entity.GetComponent<ECS::TagComponent>();
+        //        entitySer.Tag = internal::TagComponentSer{ tag.Tag };
+        //    }
 
-            if ( entity.HasComponent<ECS::UUIDComponent>() )
-            {
-                auto& uuid     = entity.GetComponent<ECS::UUIDComponent>();
-                entitySer.UUID = internal::UUIDComponentSer{ uuid.UUID.ToString() };
-            }
+        //    if ( entity.HasComponent<ECS::UUIDComponent>() )
+        //    {
+        //        auto& uuid     = entity.GetComponent<ECS::UUIDComponent>();
+        //        entitySer.UUID = internal::UUIDComponentSer{ uuid.UUID.ToString() };
+        //    }
 
-            if ( entity.HasComponent<ECS::TransformComponent>() )
-            {
-                auto& transform = entity.GetComponent<ECS::TransformComponent>();
-                entitySer.Transform =
-                     internal::TransformComponentSer{ transform.Translation, transform.Rotation, transform.Scale };
-            }
+        //    if ( entity.HasComponent<ECS::TransformComponent>() )
+        //    {
+        //        auto& transform = entity.GetComponent<ECS::TransformComponent>();
+        //        entitySer.Transform =
+        //             internal::TransformComponentSer{ transform.Translation, transform.Rotation, transform.Scale };
+        //    }
 
-           /* if ( entity.HasComponent<ECS::StaticMeshComponent>() )
-            {
-                auto&       meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
-                const auto& mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );
-                entitySer.StaticMesh =
-                     internal::StaticMeshComponentSer{ mesh ? mesh->GetBaseFilepath().string() : "" };
-            }*/
+        //   /* if ( entity.HasComponent<ECS::StaticMeshComponent>() )
+        //    {
+        //        auto&       meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
+        //        const auto& mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle );
+        //        entitySer.StaticMesh =
+        //             internal::StaticMeshComponentSer{ mesh ? mesh->GetBaseFilepath().string() : "" };
+        //    }*/
 
-           /* if ( entity.HasComponent<ECS::MaterialComponent>() )
-            {
-                auto&       materialhComponent = entity.GetComponent<ECS::MaterialComponent>();
-                const auto& material =
-                     m_AssetManager->FindByHandle<Assets::MeshAsset>( materialhComponent.MaterialHandle );
-                entitySer.Material =
-                     internal::MaterialComponentSer{ material ? material->GetFilepath().string() : "" };
-            }*/
+        //   /* if ( entity.HasComponent<ECS::MaterialComponent>() )
+        //    {
+        //        auto&       materialhComponent = entity.GetComponent<ECS::MaterialComponent>();
+        //        const auto& material =
+        //             m_AssetManager->FindByHandle<Assets::MeshAsset>( materialhComponent.MaterialHandle );
+        //        entitySer.Material =
+        //             internal::MaterialComponentSer{ material ? material->GetFilepath().string() : "" };
+        //    }*/
 
-            /*if ( entity.HasComponent<ECS::SkyboxComponent>() )
-            {
-                auto& skybox     = entity.GetComponent<ECS::SkyboxComponent>();
-                entitySer.Skybox = internal::SkyboxComponentSer{ skybox.Filepath.string() };
-            }*/
+        //    /*if ( entity.HasComponent<ECS::SkyboxComponent>() )
+        //    {
+        //        auto& skybox     = entity.GetComponent<ECS::SkyboxComponent>();
+        //        entitySer.Skybox = internal::SkyboxComponentSer{ skybox.Filepath.string() };
+        //    }*/
 
-            entitySer.HasDirectionLight = entity.HasComponent<ECS::DirectionLightComponent>();
+        //    entitySer.HasDirectionLight = entity.HasComponent<ECS::DirectionLightComponent>();
 
-            scene.Entities.push_back( std::move( entitySer ) );
-        }
+        //    scene.Entities.push_back( std::move( entitySer ) );
+        //}
 
         // Convert to JSON
-        return rfl::json::write(scene);
+        return "rfl::json::write(scene);";
     }
 
     void SceneSerializer::SaveToFile() const
     {
-        const auto& serialized = SerializeToJson();
+       /* const auto& serialized = SerializeToJson();
         auto        sceneName  = std::regex_replace( m_Scene->GetSceneName(), std::regex( "\\s+" ), "_" );
         sceneName += Common::Constants::Extensions::SCENE_EXTENSION;
         const Common::Filepath pathToSave = Common::Constants::Path::SCENE_PATH / sceneName;
-        Common::Utils::FileSystem::WriteContentToFile( pathToSave, serialized );
+        Common::Utils::FileSystem::WriteContentToFile( pathToSave, serialized );*/
     }
 
 } // namespace Desert::Core

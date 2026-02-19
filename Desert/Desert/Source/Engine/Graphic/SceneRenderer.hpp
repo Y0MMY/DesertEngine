@@ -28,20 +28,31 @@ namespace Desert::Graphic
     class SceneRenderer final
     {
     public:
-        [[nodiscard]] Common::BoolResultStr Init();
-        void                             Shutdown();
+        struct UpdateInfo
+        {
+            Common::Timestep                Timestep;
+            ShaderProtocols::DirectionLight DirLights;
+        };
 
-        [[nodiscard]] Common::BoolResultStr BeginScene( const std::shared_ptr<Desert::Core::Scene>& scene,
-                                                     const std::shared_ptr<Core::Camera>&        camera );
+        ~SceneRenderer() = default;
 
-        void OnUpdate( const SceneRendererUpdate& sceneRenderInfo );
+        void Init();
+
+        [[nodiscard]] Common::BoolResultStr BeginScene( const Desert::Core::Scene& scene );
+
+        void OnUpdate( const UpdateInfo& sceneRenderInfo );
 
         [[nodiscard]] Common::BoolResultStr EndScene();
 
         void Resize( const uint32_t width, const uint32_t height );
 
-        void AddToRenderMeshList( const std::shared_ptr<Mesh>& mesh, const std::shared_ptr<MaterialPBR>& material,
-                                  const glm::mat4& transform );
+        void AddStaticMesh( const std::shared_ptr<Mesh>& mesh, const std::shared_ptr<StaticMaterialPBR>& material,
+                            const glm::mat4& transform );
+
+        void AddSkinnedMesh( const std::shared_ptr<Desert::SkinnedMesh>&         mesh,
+                             const std::shared_ptr<Graphic::SkinnedMaterialPBR>& material,
+                             const glm::mat4& transform, const std::vector<glm::mat4>& boneMatrices );
+
         const Environment                 CreateEnvironment( const Common::Filepath& filepath );
         void                              SetEnvironment( const std::shared_ptr<MaterialSkybox>& material );
         const std::optional<Environment>& GetEnvironment();
@@ -49,11 +60,6 @@ namespace Desert::Graphic
         const auto& GetMainCamera() const
         {
             return m_SceneInfo.ActiveCamera;
-        }
-
-        const auto& GetMeshRenderList() const
-        {
-            return m_MeshRenderData;
         }
 
         const auto& GetDirectionLights() const
@@ -83,7 +89,7 @@ namespace Desert::Graphic
 
         void RebuildRenderGraph();
 
-        void AddPointLight( PointLight&& pointLight );
+        void AddPointLight( ShaderProtocols::PointLightPayload&& pointLight );
 
         const auto& GetPointLights() const
         {
@@ -98,13 +104,11 @@ namespace Desert::Graphic
     private:
         struct
         {
-            std::weak_ptr<Core::Scene>  ActiveScene;
-            std::weak_ptr<Core::Camera> ActiveCamera;
+            Core::Camera* ActiveCamera;
         } m_SceneInfo;
 
-        std::vector<DirectionLight> m_DirectionLights;
-        std::vector<PointLight>     m_PointLight;
-        std::vector<MeshRenderData> m_MeshRenderData;
+        ShaderProtocols::DirectionLight m_DirectionLights;
+        ShaderProtocols::PointLight     m_PointLight;
 
     private:
         std::shared_ptr<Framebuffer>                                    m_TargetFramebuffer;
@@ -115,7 +119,8 @@ namespace Desert::Graphic
         template <typename System, typename... Args>
         void RegisterSystem( const std::string& system, Args&&... args )
         {
-            m_RenderSystems[system] = std::make_unique<System>( std::forward<Args>( args )... );
+            m_RenderSystems.emplace( std::move( system ),
+                                     std::make_shared<System>( std::forward<Args>( args )... ) );
         }
     };
 } // namespace Desert::Graphic

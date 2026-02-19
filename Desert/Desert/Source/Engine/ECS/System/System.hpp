@@ -18,17 +18,14 @@ namespace Desert::ECS
         {
         }
 
+        System( const System& )            = delete;
+        System& operator=( const System& ) = delete;
+        System( System&& )                 = delete;
+        System& operator=( System&& )      = delete;
+
         virtual ~System() = default;
 
         virtual void Update( entt::registry& registry, const Common::Timestep& ts ) = 0;
-
-        virtual void OnInit( entt::registry& registry )
-        {
-        }
-
-        virtual void OnShutdown( entt::registry& registry )
-        {
-        }
 
     protected:
         const std::weak_ptr<Graphic::SceneRenderer> m_Renderer;

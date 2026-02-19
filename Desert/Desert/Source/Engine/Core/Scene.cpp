@@ -2,10 +2,10 @@
 
 #include <Engine/Graphic/SceneRenderer.hpp>
 
-#include <Engine/ECS/Entity.hpp>
-#include <Engine/ECS/System/MeshRenderSystem.hpp>
-#include <Engine/ECS/System/SkyboxRenderSystem.hpp>
+#include <Engine/ECS/System/MeshECSSystem.hpp>
+#include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
+#include <Engine/ECS/System/AnimationECSSystem.hpp>
 
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
@@ -13,36 +13,37 @@ namespace Desert::Core
 {
     enum SceneSystem
     {
-        MeshRenderer   = 0,
-        SkyboxRenderer = 1,
-        PointLight     = 2, // TODO: add direction light
+        MeshRenderer    = 0,
+        SkyboxRenderer  = 1,
+        PointLight      = 2, // TODO: add direction light
+        AnimationSystem = 3,
     };
 
     Scene::Scene( std::string&& sceneName )
-         : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( std::make_shared<Graphic::SceneRenderer>() ),
-           m_Systems()
+         : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( std::make_shared<Graphic::SceneRenderer>() )
     {
-
-        RegisterSystem<ECS::MeshRenderSystem>( SceneSystem::MeshRenderer, m_SceneRenderer );
-        RegisterSystem<ECS::SkyboxRenderSystem>( SceneSystem::SkyboxRenderer, m_SceneRenderer );
-        RegisterSystem<ECS::PointLightRenderSystem>( SceneSystem::PointLight, m_SceneRenderer );
+        RegisterSystem<ECS::MeshECSSystem>( MeshRenderer, m_SceneRenderer );
+        RegisterSystem<ECS::SkyboxECSSystem>( SkyboxRenderer, m_SceneRenderer );
+        RegisterSystem<ECS::PointLightECSSystem>( PointLight, m_SceneRenderer );
+        RegisterSystem<ECS::AnimationECSSystem>( AnimationSystem, m_SceneRenderer );
 
         m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }
 
     NO_DISCARD Common::BoolResultStr Scene::BeginScene()
     {
-        return m_SceneRenderer->BeginScene( shared_from_this(), m_MainCamera );
+        return m_SceneRenderer->BeginScene( *this );
     }
 
     NO_DISCARD Common::BoolResultStr Scene::Init()
     {
-        return m_SceneRenderer->Init();
+        m_SceneRenderer->Init();
+        return BOOLSUCCESS;
     }
 
     void Scene::OnUpdate( const Common::Timestep& ts )
     {
-        Graphic::SceneRendererUpdate sceneRendererInfo;
+        Graphic::SceneRenderer::UpdateInfo sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
 
         std::for_each( m_Systems.begin(), m_Systems.end(),
@@ -53,14 +54,18 @@ namespace Desert::Core
             auto dirLightGroup =
                  m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
-            dirLightGroup.each( [&]( const auto& light, const auto& transform )
-                                { sceneRendererInfo.DirLights.push_back( { transform.Translation } ); } );
+            dirLightGroup.each(
+                 [&]( const auto& light, const auto& transform )
+                 { sceneRendererInfo.DirLights.DirectionLights.push_back( { transform.Translation } ); } );
         }
 
         // TODO: system
-        if ( m_MainCamera )
+
+        const auto& mainCamera = m_MainCamera.lock();
+
+        if ( mainCamera )
         {
-            m_MainCamera->OnUpdate( ts );
+            mainCamera->OnUpdate( ts );
         }
 
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
@@ -84,7 +89,7 @@ namespace Desert::Core
     Desert::ECS::Entity& Scene::CreateNewEntity( std::string&& entityName )
     {
         const auto enttID = m_Registry.create();
-        auto&      entity = m_Entitys.emplace_back( std::move( entityName ), enttID, this );
+        auto&      entity = m_Entitys.emplace_back( std::move( entityName ), enttID, m_Registry );
         m_EntitysMap[entity.GetComponent<ECS::UUIDComponent>().UUID] = m_Entitys.size() - 1;
 
         return entity;
@@ -95,19 +100,14 @@ namespace Desert::Core
         return m_SceneRenderer->GetFinalImage();
     }
 
-    void Scene::Shutdown()
-    {
-        m_SceneRenderer->Shutdown();
-        m_SceneRenderer.reset();
-    }
-
     void Scene::Resize( const uint32_t width, const uint32_t height ) const
     {
         m_SceneRenderer->Resize( width, height );
 
-        if ( m_MainCamera )
+        const auto& mainCamera = m_MainCamera.lock();
+        if ( mainCamera )
         {
-            m_MainCamera->UpdateProjectionMatrix( width, height ); // TODO: Move to scene
+            mainCamera->UpdateProjectionMatrix( width, height ); // TODO: Move to scene
         }
     }
 
@@ -163,7 +163,7 @@ namespace Desert::Core
             }
         }
 
-        if ( !m_MainCamera && !cameraView.empty() )
+        if ( !cameraView.empty() )
         {
             auto  entity          = *cameraView.begin();
             auto& cameraComponent = cameraView.get<ECS::CameraComponent>( entity );

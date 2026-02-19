@@ -1,4 +1,4 @@
-layout(binding = 0) uniform Camera {
+layout(binding = 0) uniform CameraUB {
     mat4 Projection;
     mat4 View;
 	vec3 CameraPos;

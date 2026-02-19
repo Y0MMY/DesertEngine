@@ -5,10 +5,10 @@
 
 namespace Desert::Graphic
 {
-    std::shared_ptr<Desert::Graphic::MaterialPBR>
+    std::shared_ptr<Desert::Graphic::StaticMaterialPBR>
     MaterialFactory::CreatePBR( const std::shared_ptr<Assets::MaterialAsset>& baseAsset )
     {
-        return std::make_shared<MaterialPBR>( baseAsset );
+        return std::make_shared<StaticMaterialPBR>( baseAsset );
     }
 
     std::shared_ptr<Desert::Graphic::MaterialSkybox>

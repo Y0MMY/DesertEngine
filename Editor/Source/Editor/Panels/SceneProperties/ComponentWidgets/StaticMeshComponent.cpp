@@ -87,6 +87,11 @@ namespace Desert::Editor
 
             for ( const auto& [handle, meshAsset] : meshAssets )
             {
+                const auto isSkinnedOpt = Runtime::ResourceRegistry::GetMeshService()->IsSkinned( handle );
+                if ( isSkinnedOpt.has_value() && isSkinnedOpt.value() )
+                {
+                    continue;
+                }
                 const std::string& meshName =
                      Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
 

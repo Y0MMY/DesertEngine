@@ -29,7 +29,7 @@ namespace Desert::Graphic::System
         rpSpec.TargetFramebuffer = m_Framebuffer;
 
         // Pipeline
-        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "SceneComposite.glsl" );
+        m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "SceneComposite" );
 
         Graphic::PipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;

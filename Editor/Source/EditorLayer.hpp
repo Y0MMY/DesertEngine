@@ -32,16 +32,18 @@ namespace Desert::Editor
         EditorState m_EditorState;
 
     private:
-        const Engine::Application*           m_Application;
+        const Engine::Application* m_Application;
+
+        std::shared_ptr<Assets::AssetManager>   m_AssetManager;
+        std::unique_ptr<Assets::AssetPreloader> m_AssetPreloader;
+
         std::shared_ptr<Desert::Core::Scene> m_MainScene;
 
-        std::shared_ptr<Assets::AssetManager>      m_AssetManager;
-        std::unique_ptr<Assets::AssetPreloader>    m_AssetPreloader;
-        std::unique_ptr<Render::RenderRegistry>    m_RenderRegistry;
+        std::unique_ptr<Render::RenderRegistry> m_RenderRegistry;
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
         std::vector<std::unique_ptr<Editor::IPanel>> m_Panels;
-#endif // EBABLE_IMGUI
+#endif
     };
 } // namespace Desert::Editor

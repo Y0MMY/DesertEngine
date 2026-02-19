@@ -3,14 +3,14 @@
 #include <Engine/Graphic/Materials/Properties/MaterialProperty.hpp>
 
 #include "FieldProperty.hpp"
-#include <Engine/Uniforms/UniformBuffer.hpp>
+#include <Engine/ShaderResources/UniformBuffer.hpp>
 
 namespace Desert::Graphic
 {
     class UniformBufferProperty : public MaterialProperty
     {
     public:
-        UniformBufferProperty( const std::shared_ptr<Uniforms::UniformBuffer>& buffer ) : m_Buffer( buffer )
+        UniformBufferProperty( const std::shared_ptr<ShaderResources::UniformBuffer>& buffer ) : m_Buffer( buffer )
         {
             m_FieldProperties.assign( buffer->GetFields().begin(), buffer->GetFields().end() );
 
@@ -49,6 +49,24 @@ namespace Desert::Graphic
             m_Dirty = true;
         }
 
+        void SetRawData( const std::byte* data, size_t size )
+        {
+            DESERT_VERIFY( data != nullptr, "UniformBufferProperty::SetRawData: data is null" );
+
+            const size_t bufferSize = m_Buffer->GetSize();
+            DESERT_VERIFY( size <= bufferSize,
+                           "UniformBufferProperty::SetRawData: data size ({}) exceeds buffer size ({})", size,
+                           bufferSize );
+
+            [[maybe_unused]] const auto mapPtr = m_Buffer->MapMemory();
+
+            m_Buffer->SetData( reinterpret_cast<const void*>( data ), size, 0 );
+
+            m_Buffer->UnmapMemory();
+
+            m_Dirty = true;
+        }
+
         const auto& GetUniform() const
         {
             return m_Buffer;
@@ -75,8 +93,8 @@ namespace Desert::Graphic
         }
 
     private:
-        std::vector<FieldProperty>               m_FieldProperties;
-        std::unordered_map<std::string, size_t>  m_FieldIndexMap;
-        std::shared_ptr<Uniforms::UniformBuffer> m_Buffer;
+        std::vector<FieldProperty>                      m_FieldProperties;
+        std::unordered_map<std::string, size_t>         m_FieldIndexMap;
+        std::shared_ptr<ShaderResources::UniformBuffer> m_Buffer;
     };
 } // namespace Desert::Graphic

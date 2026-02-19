@@ -51,7 +51,7 @@ namespace Desert::Graphic
         std::shared_ptr<Texture2DProperty>     GetTexture2DProperty( const std::string& name ) const;
         std::shared_ptr<TextureCubeProperty>   GetTextureCubeProperty( const std::string& name ) const;
 
-        void                    Apply();
+        void                    Apply() const;
         std::shared_ptr<Shader> GetShader() const
         {
             return m_Shader;
@@ -62,8 +62,8 @@ namespace Desert::Graphic
             return m_MaterialBackend;
         }
 
-        static std::shared_ptr<MaterialExecutor> Create( std::string&& debugName, std::string&& shaderName );
-        static std::shared_ptr<MaterialExecutor> Create( std::string&&                  debugName,
+        static std::unique_ptr<MaterialExecutor> Create( std::string&& debugName, std::string&& shaderName );
+        static std::unique_ptr<MaterialExecutor> Create( std::string&&                  debugName,
                                                          const std::shared_ptr<Shader>& shader );
 
     protected:

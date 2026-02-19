@@ -8,7 +8,7 @@
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
-    ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>&       scene)
+    ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene )
          : IPanel( "Scene###scene" ), m_Scene( scene )
     {
         m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
@@ -19,7 +19,7 @@ namespace Desert::Editor
 
     void ViewportPanel::OnUIRender()
     {
-        const auto& mainCamera = m_Scene->GetMainCamera();
+        const auto& mainCamera = m_Scene->GetMainCamera().lock();
         if ( !mainCamera )
         {
             ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "Camera was not found" );
@@ -51,8 +51,8 @@ namespace Desert::Editor
         if ( oldSize != m_ViewportData.Size )
         {
             m_Scene->Resize( m_ViewportData.Size.x, m_ViewportData.Size.y );
-            mainCamera.value()->UpdateProjectionMatrix( m_ViewportData.Size.x,
-                                                        m_ViewportData.Size.y ); // TODO: Move to scene
+            mainCamera->UpdateProjectionMatrix( m_ViewportData.Size.x,
+                                                m_ViewportData.Size.y ); // TODO: Move to scene
         }
 
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
@@ -75,7 +75,7 @@ namespace Desert::Editor
     {
         ImGuizmo::BeginFrame();
 
-        const auto& mainCamera = m_Scene->GetMainCamera();
+        const auto& mainCamera = m_Scene->GetMainCamera().lock();
         if ( !mainCamera )
         {
             return;
@@ -99,8 +99,7 @@ namespace Desert::Editor
         ImGuizmo::SetDrawlist();
         ImGuizmo::SetRect( ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, rw, rh );
 
-        ImGuizmo::Manipulate( &mainCamera.value()->GetViewMatrix()[0][0],
-                              &mainCamera.value()->GetProjectionMatrix()[0][0],
+        ImGuizmo::Manipulate( &mainCamera->GetViewMatrix()[0][0], &mainCamera->GetProjectionMatrix()[0][0],
                               static_cast<ImGuizmo::OPERATION>( m_GizmoType ), ImGuizmo::WORLD, &transform[0][0] );
 
         if ( ImGuizmo::IsOver() )
@@ -126,7 +125,7 @@ namespace Desert::Editor
 
     void ViewportPanel::HandleObjectPicking()
     {
-        const auto& mainCamera = m_Scene->GetMainCamera();
+        const auto& mainCamera = m_Scene->GetMainCamera().lock();
         if ( !mainCamera )
         {
             return;
@@ -144,8 +143,8 @@ namespace Desert::Editor
         }
         auto [mouseX, mouseY] = GetMouseViewportSpace();
         const auto ray        = Common::Math::Ray::FromScreenPosition(
-             { mouseX, mouseY }, mainCamera.value()->GetProjectionMatrix(), mainCamera.value()->GetViewMatrix(),
-             mainCamera.value()->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
+             { mouseX, mouseY }, mainCamera->GetProjectionMatrix(), mainCamera->GetViewMatrix(),
+             mainCamera->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
              static_cast<uint32_t>( m_ViewportData.Size.y ) );
 
         float closestT = std::numeric_limits<float>::max();

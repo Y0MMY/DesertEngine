@@ -8,8 +8,6 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    static VmaAllocation s_VmaAllocation = nullptr;
-
     void VulkanSwapChain::Init( const VkInstance instance, const std::shared_ptr<Engine::Device>& device )
     {
         static bool hasInit = false;
@@ -34,7 +32,7 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     Common::ResultStr<bool> VulkanSwapChain::CreateSwapChain( const std::shared_ptr<Engine::Device>& device,
-                                                           uint32_t* width, uint32_t* height )
+                                                              uint32_t* width, uint32_t* height )
     {
         const VkInstance instance =
              SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanInstance();
@@ -207,7 +205,7 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     Common::ResultStr<VkResult> VulkanSwapChain::AcquireNextImage( VkSemaphore presentCompleteSemaphore,
-                                                                uint32_t*   imageIndex )
+                                                                   uint32_t*   imageIndex )
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
         if ( !vkLogicalDevice )

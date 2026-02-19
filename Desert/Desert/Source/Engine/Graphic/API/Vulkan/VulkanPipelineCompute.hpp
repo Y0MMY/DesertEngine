@@ -14,10 +14,10 @@ namespace Desert::Graphic::API::Vulkan
         VulkanPipelineCompute( const std::shared_ptr<Shader>& shader );
 
         virtual void Begin() override;
-        virtual void Execute( const std::shared_ptr<Image>& imageForProccess, std::shared_ptr<Image>& outputImage,
+        virtual void Execute( const Image* imageForProccess, std::shared_ptr<Image>& outputImage,
                               uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
-        virtual void ExecuteMipLevel( const std::shared_ptr<Image>& imageForProccess, uint32_t mipLevel,
-                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
+        virtual void ExecuteMipLevel( const Image* imageForProccess, uint32_t mipLevel, uint32_t groupCountX,
+                                      uint32_t groupCountY, uint32_t groupCountZ ) override;
         virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) override;
         virtual void End() override;
 

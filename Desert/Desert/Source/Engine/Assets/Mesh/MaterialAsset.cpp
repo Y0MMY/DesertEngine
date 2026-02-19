@@ -87,13 +87,13 @@ namespace Desert::Assets
         return std::nullopt;
     }
 
-    std::shared_ptr<Graphic::Texture2D> MaterialAsset::GetTexture( TextureAsset::Type type ) const
+    TextureAsset* MaterialAsset::GetTexture( TextureAsset::Type type ) const
     {
         if ( auto slot = GetTextureSlot( type ) )
         {
             if ( slot->get().Texture && slot->get().Texture->IsReadyForUse() )
             {
-                return slot->get().Texture->GetTexture();
+                return slot->get().Texture.get();
             }
         }
         return nullptr;

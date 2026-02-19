@@ -29,7 +29,7 @@ namespace Desert::Graphic::API::Vulkan
             std::unordered_map<SetPoint, ShaderResource::ShaderDescriptorSet>
                  ShaderDescriptorSets; // SetPoint = set
 
-            std::optional<Core::Models::PushConstant> PushConstantRanges;
+            std::optional<ShaderResources::ShaderLayout::PushConstantRange> PushConstantRanges;
         };
 
     public:
@@ -42,17 +42,17 @@ namespace Desert::Graphic::API::Vulkan
         {
         }
         virtual Common::BoolResultStr Reload() override;
-        virtual const std::string  GetName() const override
+        virtual const std::string     GetName() const override
         {
             return m_ShaderName;
         }
 
-        virtual const std::vector<Core::Models::UniformBuffer>
+        virtual const std::vector<ShaderResources::ShaderLayout::UniformBuffer>
         GetUniformBufferModels() const override; // don't use it often! TODO: cache
-        virtual const std::vector<Core::Models::StorageBuffer>
+        virtual const std::vector<ShaderResources::ShaderLayout::StorageBuffer>
         GetStorageBufferModels() const override; // don't use it often! TODO: cache
-        virtual const std::vector<Core::Models::ImageCubeSampler> GetUniformImageCubeModels() const override;
-        virtual const std::vector<Core::Models::Image2DSampler>   GetUniformImage2DModels() const override;
+        virtual const std::vector<ShaderResources::ShaderLayout::ImageCubeSampler> GetUniformImageCubeModels() const override;
+        virtual const std::vector<ShaderResources::ShaderLayout::Image2DSampler>   GetUniformImage2DModels() const override;
 
         virtual const Common::Filepath& GetFilepath() const override
         {
@@ -106,8 +106,11 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        void               Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
+        void                  Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
         Common::BoolResultStr CreateDescriptorsLayout();
+
+        Common::BoolResultStr
+        CompileProgram( const std::unordered_map<Core::Formats::ShaderStage, std::string>& stages );
 
     private:
         const std::weak_ptr<Assets::ShaderAsset> m_ShaderAsset;

@@ -1,15 +1,9 @@
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
 
-namespace Desert::Core::Preprocess::Shader
+namespace Desert::Core::Preprocess
 {
     namespace
     {
-        enum class PragmaType
-        {
-            Stage = 0,
-            Unknown
-        };
-
         Formats::ShaderStage ParseShaderType( const std::string& typeStr )
         {
             if ( typeStr == "vertex" )
@@ -22,87 +16,62 @@ namespace Desert::Core::Preprocess::Shader
             return Formats::ShaderStage::None;
         }
 
-        PragmaType GetPragmaType( std::string source )
-        {
-            source.erase( std::remove( source.begin(), source.end(), ' ' ), source.end() );
-
-            if ( source == "stage" )
-                return PragmaType::Stage;
-
-            return PragmaType::Unknown;
-        }
-
-        PragmaType ParseLineWithPragma( const std::string& pragmaLine )
-        {
-            size_t pragmaTypeStart = pragmaLine.find( " " );
-            if ( pragmaTypeStart != std::string::npos )
-            {
-                std::string pragmaTypeStr = pragmaLine.substr(
-                     pragmaTypeStart + 1, pragmaLine.find( ":", pragmaTypeStart ) - pragmaTypeStart - 1 );
-                return GetPragmaType( pragmaTypeStr );
-            }
-
-            return PragmaType::Unknown;
-        }
-
-        std::pair<Formats::ShaderStage, std::string>
-        ExtractShaderStage( const std::string& pragmaLine, const std::string& source, size_t pragmaEnd )
-        {
-            size_t stageStart = pragmaLine.find( ":" );
-            if ( stageStart != std::string::npos )
-            {
-                stageStart += 1;
-                size_t shaderTypeStart = pragmaLine.find_first_not_of( " ", stageStart );
-
-                if ( shaderTypeStart != std::string::npos )
-                {
-                    size_t shaderTypeEnd = pragmaLine.find_first_of( "\r\n", shaderTypeStart );
-                    if ( shaderTypeEnd == std::string::npos )
-                        shaderTypeEnd = pragmaLine.size();
-
-                    const std::string shaderTypeStr =
-                         pragmaLine.substr( shaderTypeStart, shaderTypeEnd - shaderTypeStart );
-                    Formats::ShaderStage shaderType = ParseShaderType( shaderTypeStr );
-
-                    size_t shaderStart = pragmaEnd + 1;
-                    size_t nextPragma  = source.find( "#pragma stage", shaderStart );
-                    size_t shaderEnd   = ( nextPragma != std::string::npos ) ? nextPragma : source.size();
-
-                    std::string shaderBody = source.substr( shaderStart, shaderEnd - shaderStart );
-
-                    return { shaderType, shaderBody };
-                }
-            }
-
-            return { Formats::ShaderStage::None, "" };
-        }
     } // namespace
 
-    std::unordered_map<Formats::ShaderStage, std::string> PreProcess( const std::string& source )
+    std::unordered_map<Desert::Core::Formats::ShaderStage, std::string>
+    ShaderPreprocess::PreProcessProgram( const std::string& source, const std::filesystem::path& basePath )
     {
-        std::unordered_map<Formats::ShaderStage, std::string> shaderMap;
+        using namespace Desert::Core::Formats;
 
-        size_t startSearch = source.find( "#pragma" );
-        while ( startSearch != std::string::npos )
+        std::unordered_map<ShaderStage, std::string> programStages;
+
+        std::istringstream stream( source );
+        std::string        line;
+
+        while ( std::getline( stream, line ) )
         {
-            size_t pragmaEnd = source.find_first_of( "\r\n", startSearch );
-            if ( pragmaEnd == std::string::npos )
-            {
-                pragmaEnd = source.size();
-            }
+            if ( line.find( "#pragma use_stage" ) == std::string::npos )
+                continue;
 
-            const std::string pragmaLine = source.substr( startSearch, pragmaEnd - startSearch );
+            // template:
+            // #pragma use_stage vertex "Static.vert.glsl"
 
-            PragmaType pragmaType = ParseLineWithPragma( pragmaLine );
+            std::istringstream lineStream( line );
+            std::string        pragma, keyword, stageStr, fileStr;
 
-            if ( pragmaType == PragmaType::Stage )
-            {
-                auto [shaderType, shaderBody] = ExtractShaderStage( pragmaLine, source, pragmaEnd );
-                shaderMap[shaderType]         = shaderBody;
-            }
-            startSearch = source.find( "#pragma", pragmaEnd );
+            lineStream >> pragma >> keyword >> stageStr >> fileStr;
+
+            if ( pragma != "#pragma" || keyword != "use_stage" )
+                continue;
+
+            ShaderStage stage = ParseShaderType( stageStr );
+            DESERT_VERIFY( stage != ShaderStage::None, "Unknown shader stage in use_stage" );
+
+            if ( !fileStr.empty() && fileStr.front() == '"' )
+                fileStr.erase( 0, 1 );
+            if ( !fileStr.empty() && fileStr.back() == '"' )
+                fileStr.pop_back();
+
+            std::filesystem::path stagePath = ( basePath.parent_path() / fileStr ).lexically_normal();
+
+            DESERT_VERIFY( std::filesystem::exists( stagePath ), "Shader stage file not found: {}",
+                           stagePath.string() );
+
+            std::ifstream file( stagePath );
+            DESERT_VERIFY( file.is_open(), "Failed to open shader stage file: {}", stagePath.string() );
+
+            std::string stageSource( ( std::istreambuf_iterator<char>( file ) ),
+                                     std::istreambuf_iterator<char>() );
+
+            DESERT_VERIFY( programStages.find( stage ) == programStages.end(),
+                           "Duplicate shader stage in program: {}", Shader::GetStringShaderStage( stage ) );
+
+            programStages.emplace( stage, std::move( stageSource ) );
         }
-        return shaderMap;
+
+        DESERT_VERIFY( !programStages.empty(), "Shader program contains no stages" );
+
+        return programStages;
     }
 
-} // namespace Desert::Core::Preprocess::Shader
+} // namespace Desert::Core::Preprocess

@@ -7,6 +7,8 @@
 #include "ComponentWidgets/StaticMeshComponent.hpp"
 #include "ComponentWidgets/SkyboxComponent.hpp"
 #include "ComponentWidgets/PointLightComponent.hpp"
+#include "ComponentWidgets/AnimationComponentWidget.hpp"
+#include "ComponentWidgets/SkinnedMeshComponentWidget.hpp"
 
 namespace Desert::Editor
 {
@@ -27,7 +29,9 @@ namespace Desert::Editor
     {
         RegisterComponent( []() { return std::make_unique<TransformComponentWidget>(); } );
         RegisterComponent( [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager ); } );
+        RegisterComponent( [this]() { return std::make_unique<AnimationComponentWidget>( m_AssetManager ); } );
         RegisterComponent( [this]() { return std::make_unique<SkyboxComponentWidget>( m_AssetManager ); } );
+        RegisterComponent( [this]() { return std::make_unique<SkinnedMeshComponentWidget>( m_AssetManager ); } );
         RegisterComponent( [this]() { return std::make_unique<PointLightComponentWidget>(); } );
     }
 

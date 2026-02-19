@@ -15,26 +15,42 @@ namespace Desert::Core::Formats
         None = 0,
     };
 
-    enum class ShaderDataType
+    enum class ShaderValueType : uint8_t
     {
-        None = 0,
+        Unknown = 0,
+
         Float,
         Float2,
         Float3,
         Float4,
+
         Int,
         Int2,
         Int3,
         Int4,
+
         UInt,
-        Mat3,
-        Mat4,
         Bool,
 
-        Sampler1D,
-        Sampler2D,
-        Sampler3D,
+        Mat3,
+        Mat4,
 
         Struct
     };
-}
+
+    enum class ShaderResourceType
+    {
+        Sampler1D,
+        Sampler2D,
+        Sampler3D,
+        SamplerCube
+    };
+
+    enum class BufferKind : uint8_t
+    {
+        Uniform,
+        Storage,
+        PushConstant
+    };
+
+} // namespace Desert::Core::Formats

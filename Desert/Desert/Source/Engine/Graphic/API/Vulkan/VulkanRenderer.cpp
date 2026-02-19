@@ -147,7 +147,7 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     Common::BoolResultStr VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
-                                                           bool                               clearFrame )
+                                                              bool                               clearFrame )
     {
         const auto window = m_Window.lock();
         if ( !window )
@@ -269,14 +269,14 @@ namespace Desert::Graphic::API::Vulkan
         return nullptr;
     }
 
-    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
-                                                  const std::shared_ptr<MaterialExecutor>& material )
+    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+                                                  const MaterialExecutor*          materialExecutor )
     {
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        material->Apply();
+        materialExecutor->Apply();
 
         const auto& vulkanLayout = std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline );
-        static_cast<VulkanMaterialBackend*>( material->GetMaterialBackend().get() )
+        static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() )
              ->BindDescriptorSets( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
                                    VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
 
@@ -286,16 +286,16 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDraw( m_CurrentCommandBuffer, 6, 1, 0, 0 );
     }
 
-    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>&         pipeline,
-                                        const std::shared_ptr<Mesh>&             mesh,
-                                        const std::shared_ptr<MaterialExecutor>& material )
+    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,
+                                        const std::shared_ptr<Mesh>&     mesh,
+                                        const MaterialExecutor*          materialExecutor )
     {
 
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        material->Apply();
+        materialExecutor->Apply();
 
         const auto& vulkanLayout = std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline );
-        static_cast<VulkanMaterialBackend*>( material->GetMaterialBackend().get() )
+        static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() )
              ->BindDescriptorSets( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
                                    VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
         vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -314,7 +314,7 @@ namespace Desert::Graphic::API::Vulkan
             vkCmdSetLineWidth( m_CurrentCommandBuffer, pipeline->GetSpecification().LineWidth );
         }
 
-        const auto& pcBuffer = material->GetPushConstantBuffer();
+        const auto& pcBuffer = materialExecutor->GetPushConstantBuffer();
         if ( pcBuffer.Size )
         {
             vkCmdPushConstants( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),

@@ -20,7 +20,7 @@ namespace Desert::Graphic
     {
     public:
         Common::BoolResultStr Init();
-        void               Shutdown();
+        void                  Shutdown();
 
         [[nodiscard]] Common::BoolResultStr BeginFrame();
         [[nodiscard]] Common::BoolResultStr EndFrame();
@@ -28,10 +28,10 @@ namespace Desert::Graphic
         void BeginSwapChainRenderPass();
         void EndRenderPass();
         void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                         const std::shared_ptr<MaterialExecutor>& material );
+                         const MaterialExecutor* materialExecutor );
 
-        void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>&         pipeline,
-                                   const std::shared_ptr<MaterialExecutor>& material );
+        void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
+                                   const MaterialExecutor*          materialExecutor );
 
         void PrepareNextFrame();
         void PresentFinalImage();

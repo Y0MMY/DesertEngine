@@ -23,7 +23,7 @@ namespace Desert::Graphic
         auto& shader = shaderCache[spec.ShaderName];
         if ( !shader )
         {
-            shader = Runtime::ResourceRegistry::GetShaderService()->GetByName(spec.ShaderName);
+            shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( spec.ShaderName );
         }
 
         Core::Formats::ImageCubeSpecification outputImageInfo = {
@@ -43,8 +43,8 @@ namespace Desert::Graphic
         const uint32_t workGroupsX = spec.Width / kWorkGroups;
         const uint32_t workGroupsY = spec.Height / kWorkGroups;
         const uint32_t workGroupsZ = 6;
-
-        computePipeline->Execute( spec.InputImage, outputImage, workGroupsX, workGroupsY, workGroupsZ );
+        computePipeline->Execute( Runtime::ResourceRegistry::GetImageService()->Resolve( spec.InputHandle ),
+                                  outputImage, workGroupsX, workGroupsY, workGroupsZ );
 
         return SP_CAST( ImageCube, outputImage );
     }
@@ -56,7 +56,7 @@ namespace Desert::Graphic
         static std::unordered_map<std::string, std::shared_ptr<Shader>> shaderCache;
 
         auto& shader = shaderCache[spec.ShaderName];
-        if ( !shader )        
+        if ( !shader )
         {
             shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( spec.ShaderName );
         }
@@ -78,7 +78,9 @@ namespace Desert::Graphic
             float updatedDelta = deltaRoughness * mipLevel;
 
             computePipeline->UpdateStorageBuffer( (void*)&updatedDelta, sizeof( float ) );
-            computePipeline->ExecuteMipLevel( spec.InputImage, mipLevel, workGroupsX, workGroupsY, workGroupsZ );
+            computePipeline->ExecuteMipLevel(
+                 Runtime::ResourceRegistry::GetImageService()->Resolve( spec.InputHandle ), mipLevel, workGroupsX,
+                 workGroupsY, workGroupsZ );
         }
     }
 

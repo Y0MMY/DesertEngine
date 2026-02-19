@@ -10,8 +10,7 @@ namespace Desert::Assets
 
     Common::BoolResultStr TextureAsset::Load()
     {
-        m_Texture = Graphic::Texture2D::Create( { true }, m_Metadata.Filepath);
-        m_Texture->Invalidate();
+        m_Texture = Graphic::Texture2D::Create( { true }, m_Metadata.Filepath).ExtractValue();
 
         m_IsReadyForUse = true;
         return BOOLSUCCESS;

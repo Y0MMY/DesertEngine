@@ -1,0 +1,22 @@
+#pragma once
+
+#include <glm/glm.hpp>
+
+namespace Desert::Graphic::ShaderProtocols
+{
+    struct PointLightPayload
+    {
+        glm::vec3 Color;
+        float     Intensity; // 16 bytes offset
+        glm::vec3 Position;
+        float     Radius; // 32 bytes offset
+    };
+
+    struct PointLight
+    {
+        inline const static std::string Name = "PointLightsUB";
+
+        std::vector<PointLightPayload> PointLights;
+    };
+
+} // namespace Desert::Graphic::ShaderProtocols

@@ -14,11 +14,11 @@ namespace Desert::Editor
 
     void LightGizmoRenderer::Render( float width, float height, float xpos, float ypos )
     {
-        const auto camera = m_Scene->GetMainCamera();
+        const auto camera = m_Scene->GetMainCamera().lock();
         if ( !camera )
             return;
 
-        RenderPointLights( camera.value(), width, height, xpos, ypos );
+        RenderPointLights( camera, width, height, xpos, ypos );
     }
 
     void LightGizmoRenderer::RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,

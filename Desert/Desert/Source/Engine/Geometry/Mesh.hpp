@@ -11,6 +11,12 @@ struct aiAnimation;
 struct aiNodeAnim;
 struct aiScene;
 
+namespace Desert::Animation
+{
+    class Skeleton;
+    struct BoneInfo;
+} // namespace Desert::Animation
+
 namespace Assimp
 {
     class Importer;
@@ -25,6 +31,87 @@ namespace Desert
         glm::vec3 Tangent;
         glm::vec3 Bitangent;
         glm::vec2 TexCoord;
+    };
+
+    struct SkinnedVertex
+    {
+        static constexpr size_t MAX_BONE_INFLUENCES = 4;
+
+        Vertex StaticVertex;
+
+        std::array<uint32_t, MAX_BONE_INFLUENCES> BoneIDs     = { 0, 0, 0, 0 };
+        std::array<float, MAX_BONE_INFLUENCES>    BoneWeights = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+        bool AddBoneInfluence( uint32_t boneID, float weight )
+        {
+            for ( size_t i = 0; i < MAX_BONE_INFLUENCES; i++ )
+            {
+                if ( BoneWeights[i] == 0.0f )
+                {
+                    BoneIDs[i]     = boneID;
+                    BoneWeights[i] = weight;
+                    return true;
+                }
+            }
+
+            size_t smallestIdx = 0;
+            for ( size_t i = 1; i < MAX_BONE_INFLUENCES; i++ )
+            {
+                if ( BoneWeights[i] < BoneWeights[smallestIdx] )
+                {
+                    smallestIdx = i;
+                }
+            }
+
+            if ( weight > BoneWeights[smallestIdx] )
+            {
+                BoneIDs[smallestIdx]     = boneID;
+                BoneWeights[smallestIdx] = weight;
+                NormalizeWeights();
+                return true;
+            }
+
+            return false;
+        }
+
+        void NormalizeWeights()
+        {
+            float sum = 0.0f;
+            for ( float weight : BoneWeights )
+            {
+                sum += weight;
+            }
+
+            if ( sum > 0.0f )
+            {
+                float invSum = 1.0f / sum;
+                for ( float& weight : BoneWeights )
+                {
+                    weight *= invSum;
+                }
+            }
+        }
+
+        bool HasFreeSlot() const
+        {
+            for ( float weight : BoneWeights )
+            {
+                if ( weight == 0.0f )
+                    return true;
+            }
+            return false;
+        }
+
+        size_t GetActiveInfluenceCount() const
+        {
+            size_t count = 0;
+            for ( float weight : BoneWeights )
+            {
+                if ( weight > 0.0f )
+                    count++;
+            }
+            return count;
+        }
     };
 
     struct Index
@@ -51,7 +138,7 @@ namespace Desert
     enum class MeshType
     {
         Static,
-        Animated
+        Skinned
     };
 
     class Mesh
@@ -64,13 +151,16 @@ namespace Desert
         static std::shared_ptr<Mesh> CreateStatic( const std::vector<Vertex>& vertices,
                                                    const std::vector<Index>&  indices,
                                                    const std::string&         name = "CustomMesh" );
-        static std::shared_ptr<Mesh> CreateAnimated( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
+
+        static std::shared_ptr<Mesh> CreateSkinned( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
+
+        static bool DetectIfSkinned( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
 
         // Common interface
         [[nodiscard]] virtual MeshType GetType() const = 0;
-        [[nodiscard]] bool             IsAnimated() const
+        [[nodiscard]] bool             IsSkinned() const
         {
-            return GetType() == MeshType::Animated;
+            return GetType() == MeshType::Skinned;
         }
 
         [[nodiscard]] virtual const std::vector<Submesh>& GetSubmeshes() const
@@ -134,41 +224,34 @@ namespace Desert
         Common::BoolResultWithCodes<MeshError> ProcessAssimpScene( const aiScene* scene );
     };
 
-    class AnimatedMesh : public Mesh
+    class SkinnedMesh : public Mesh
     {
     public:
-        explicit AnimatedMesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
+        explicit SkinnedMesh( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
 
         [[nodiscard]] MeshType GetType() const override
         {
-            return MeshType::Animated;
+            return MeshType::Skinned;
         }
+
         [[nodiscard]] Common::BoolResultWithCodes<MeshError> Invalidate() override;
 
-        // Animation-specific methods
-        [[nodiscard]] const auto& GetBoneData() const
+        // Skinned-specific methods
+        const Animation::Skeleton& GetSkeleton() const
         {
-            return m_BoneData;
+            return *m_Skeleton;
         }
-        [[nodiscard]] const auto& GetAnimationData() const
+
+        const std::unordered_map<std::string, uint32_t>& GetBoneMapping() const
         {
-            return m_AnimationData;
+            return m_BoneNameToIndex;
         }
 
     private:
-        struct BoneData
-        {
-            // Bone data implementation
-        };
-
-        struct AnimationData
-        {
-            // Animation data implementation
-        };
-
         Common::BoolResultWithCodes<MeshError> ProcessAssimpScene( const aiScene* scene );
 
-        std::vector<BoneData>      m_BoneData;
-        std::vector<AnimationData> m_AnimationData;
+    private:
+        std::unique_ptr<Animation::Skeleton>      m_Skeleton;
+        std::unordered_map<std::string, uint32_t> m_BoneNameToIndex;
     };
 } // namespace Desert

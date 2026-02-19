@@ -2,14 +2,14 @@
 
 #include <Engine/Graphic/Materials/Properties/MaterialProperty.hpp>
 
-#include <Engine/Uniforms/StorageBuffer.hpp>
+#include <Engine/ShaderResources/StorageBuffer.hpp>
 
 namespace Desert::Graphic
 {
     class StorageBufferProperty : public MaterialProperty
     {
     public:
-        StorageBufferProperty( const std::shared_ptr<Uniforms::StorageBuffer>& buffer ) : m_Buffer( buffer )
+        StorageBufferProperty( const std::shared_ptr<ShaderResources::StorageBuffer>& buffer ) : m_Buffer( buffer )
         {
         }
 
@@ -27,7 +27,7 @@ namespace Desert::Graphic
             return nullptr; // std::make_unique<UniformBufferProperty>( m_Buffer );
         }
 
-        void SetData( const void* data, uint32_t size )
+        void SetRawData( const void* data, uint32_t size )
         {
             m_Buffer->SetData( data, size );
             m_Dirty = true;
@@ -39,6 +39,6 @@ namespace Desert::Graphic
         }
 
     private:
-        std::shared_ptr<Uniforms::StorageBuffer> m_Buffer;
+        std::shared_ptr<ShaderResources::StorageBuffer> m_Buffer;
     };
 } // namespace Desert::Graphic

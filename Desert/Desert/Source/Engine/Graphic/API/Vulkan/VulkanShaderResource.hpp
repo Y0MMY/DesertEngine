@@ -2,7 +2,7 @@
 
 #include <vulkan/vulkan.h>
 
-#include <Engine/Core/Models/Shader.hpp>
+#include <Engine/ShaderResources/ShaderReflectionTypes.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -13,10 +13,14 @@ namespace Desert::Graphic::API::Vulkan
 
         struct ShaderDescriptorSet
         {
-            using UniformBufferMap    = std::unordered_map<BindingPoint, Core::Models::UniformBuffer>;
-            using ImageSampler2DMap   = std::unordered_map<BindingPoint, Core::Models::Image2DSampler>;
-            using ImageSamplerCubeMap = std::unordered_map<BindingPoint, Core::Models::ImageCubeSampler>;
-            using StorageBufferMap    = std::unordered_map<BindingPoint, Core::Models::StorageBuffer>;
+            using UniformBufferMap =
+                 std::unordered_map<BindingPoint, ShaderResources::ShaderLayout::UniformBuffer>;
+            using ImageSampler2DMap =
+                 std::unordered_map<BindingPoint, ShaderResources::ShaderLayout::Image2DSampler>;
+            using ImageSamplerCubeMap =
+                 std::unordered_map<BindingPoint, ShaderResources::ShaderLayout::ImageCubeSampler>;
+            using StorageBufferMap =
+                 std::unordered_map<BindingPoint, ShaderResources::ShaderLayout::StorageBuffer>;
 
             UniformBufferMap    UniformBuffers;
             ImageSampler2DMap   Image2DSamplers;

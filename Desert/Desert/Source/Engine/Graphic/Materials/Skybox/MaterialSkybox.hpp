@@ -4,17 +4,16 @@
 
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
-
-#include <Engine/Graphic/Materials/Models/Common/Camera.hpp>
-#include <Engine/Graphic/Materials/Models/Skybox/Skybox.hpp>
-
+#include <Engine/Graphic/Materials/MaterialBindings/Skybox/Skybox.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
+
+#include <Engine/Core/Camera.hpp>
 
 namespace Desert::Graphic
 {
     struct UpdateMaterialSkyboxInfo
     {
-        std::shared_ptr<Core::Camera> Camera;
+        Core::Camera* Camera;
     };
 
     class MaterialSkybox final : public Material
@@ -51,7 +50,7 @@ namespace Desert::Graphic
         }
 
         // Parameter updates
-        void Bind( const UpdateMaterialSkyboxInfo& data ) ;
+        void Bind( const UpdateMaterialSkyboxInfo& data );
 
     private:
         // weak_ptr because AssetManager owns MaterialAsset
@@ -62,7 +61,6 @@ namespace Desert::Graphic
         Environment m_Environment;
 
     private:
-        std::unique_ptr<Models::CameraDataUB> m_CameraModel;
-        std::unique_ptr<Models::SkyboxData> m_SkyboxModel;
+        std::unique_ptr<MaterialHelper::SkyboxDataBinding> m_SkyboxBinding;
     };
 } // namespace Desert::Graphic

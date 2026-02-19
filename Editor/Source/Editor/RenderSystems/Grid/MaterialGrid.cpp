@@ -2,7 +2,7 @@
 
 namespace Desert::Editor::Render
 {
-    MaterialGrid::MaterialGrid() : Material( "Grid", "Grid.glsl" )
+    MaterialGrid::MaterialGrid() : Material( "Grid", "Grid" )
     {
         //m_CameraModel = std::make_unique<Graphic::Models::CameraDataUB>( m_MaterialExecutor, "Camera" );
     }

@@ -1,26 +1,42 @@
 #include "MaterialSkybox.hpp"
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
+#include <Engine/Graphic/ShaderProtocols/Camera.hpp>
+
 namespace Desert::Graphic
 {
     MaterialSkybox::MaterialSkybox( const std::shared_ptr<Assets::SkyboxAsset>& baseAsset )
-         : Material( "MaterialSkybox", "skybox.glsl" ), m_BaseMaterial( baseAsset )
+         : Material( "MaterialSkybox", "Skybox" ), m_BaseMaterial( baseAsset )
     {
-
-       // m_CameraModel = std::make_unique<Models::CameraData>( m_MaterialExecutor, "Camera" );
-        m_SkyboxModel = std::make_unique<Models::SkyboxData>( m_MaterialExecutor );
+        m_SkyboxBinding = std::make_unique<MaterialHelper::SkyboxDataBinding>( m_MaterialExecutor.get() );
 
         m_Environment = Graphic::EnvironmentManager::Create( baseAsset );
     }
 
-    void MaterialSkybox::Bind(const UpdateMaterialSkyboxInfo& data)
+    void MaterialSkybox::Bind( const UpdateMaterialSkyboxInfo& data )
     {
-        m_SkyboxModel->UpdateSkybox(
-             m_Environment.RadianceMap ); // TODO: maybe it will be unnecessary to update every frame! the
-                                          // approach needs to be reconsidered!
+        if ( !m_Environment.RadianceMap.IsValid() ||
+             m_Environment.RadianceMap.ImageType != Runtime::ImageHandle::Type::ImageCube )
+        {
+            return;
+        }
+        ImageCube* image =
+             (ImageCube*)Runtime::ResourceRegistry::GetImageService()->Resolve( m_Environment.RadianceMap );
+        if ( !image )
+        {
+            return;
+        }
 
-        //m_CameraModel->Update( Models::CameraDataUB{ .Projection = data.Camera->GetProjectionMatrix(),
-        //                                             .View       = data.Camera->GetViewMatrix(),
-        //                                             .CameraPos  = data.Camera->GetPosition() } ); // TODO: constant push
+        m_SkyboxBinding->UpdateSkybox( image );
+
+        static ShaderProtocols::Camera CameraUB;
+        CameraUB.View       = data.Camera->GetViewMatrix();
+        CameraUB.Projection = data.Camera->GetProjectionMatrix();
+        CameraUB.CameraPos  = data.Camera->GetPosition();
+
+        Get<UniformBufferProperty>( CameraUB.Name )
+             ->SetRawData( (std::byte*)&CameraUB, sizeof( ShaderProtocols::Camera ) );
     }
 
 } // namespace Desert::Graphic

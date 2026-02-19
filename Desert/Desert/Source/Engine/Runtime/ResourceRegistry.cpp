@@ -26,4 +26,10 @@ namespace Desert::Runtime
         return &shaderService;
     }
 
+    ImageService* ResourceRegistry::GetImageService()
+    {
+        static ImageService imageService;
+        return &imageService;
+    }
+
 } // namespace Desert::Runtime

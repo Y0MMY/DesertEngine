@@ -9,6 +9,12 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanPhysicalDevice final
     {
     public:
+        struct RendererCaps
+        {
+            uint64_t MaxStorageBufferSize;
+            uint64_t StorageBufferAlignment;
+        };
+
         VulkanPhysicalDevice();
         ~VulkanPhysicalDevice() = default;
 
@@ -51,6 +57,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_DepthFormat;
         }
 
+        const auto& GetRendererCaps() const
+        {
+            return m_RendererCaps;
+        }
+
         static std::shared_ptr<VulkanPhysicalDevice> Create();
 
     private:
@@ -67,6 +78,8 @@ namespace Desert::Graphic::API::Vulkan
 
         bool         m_SupportWideLines = false;
         VkDeviceSize m_UniformBufferOffsetAlignment;
+
+        RendererCaps m_RendererCaps;
 
         std::unordered_set<std::string> m_SupportedExtensions;
 
