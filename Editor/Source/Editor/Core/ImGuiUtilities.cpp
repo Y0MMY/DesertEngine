@@ -21,40 +21,29 @@ namespace Desert::Editor::Utils
 
     bool ImGuiUtilities::InputText( std::string& currentText, const char* ID )
     {
-        static bool keyboardActive    = false;
-        static bool updatedExternally = false;
-
-        ImGui::PushStyleColor( ImGuiStyleVar_FrameBorderSize, 0.0f );
         ImGui::PushStyleColor( ImGuiCol_FrameBg, IM_COL32( 0, 0, 0, 0 ) );
-
         ImGuiUtilities::DrawItemActivityOutline( 2.0f, false, ImColor( 80, 80, 80 ) );
+
         ImGui::PushID( ID );
 
-        currentText.reserve( 256 );
-
         bool edited = ImGui::InputText(
-             ID, &currentText[0], currentText.capacity(), ImGuiInputTextFlags_CallbackResize,
+             ID, currentText.data(), currentText.size() + 1, ImGuiInputTextFlags_CallbackResize,
              []( ImGuiInputTextCallbackData* data ) -> int
              {
                  if ( data->EventFlag == ImGuiInputTextFlags_CallbackResize )
                  {
-                     std::string* str = (std::string*)data->UserData;
+                     std::string* str = static_cast<std::string*>( data->UserData );
                      str->resize( data->BufTextLen );
-                     data->Buf = &( *str )[0];
+                     data->Buf = str->data();
                  }
                  return 0;
              },
              &currentText );
 
         ImGui::PopID();
+        ImGui::PopStyleColor();
 
-        if ( ImGui::IsItemActivated() && !keyboardActive )
-        {
-            keyboardActive = true;
-        }
-
-        ImGui::PopStyleColor( 2 );
-        return edited || updatedExternally;
+        return edited;
     }
 
     void ImGuiUtilities::DrawItemActivityOutline( float rounding, bool drawWhenInactive, ImColor colourWhenActive )

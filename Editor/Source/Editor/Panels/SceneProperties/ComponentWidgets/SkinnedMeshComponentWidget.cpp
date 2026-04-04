@@ -4,6 +4,8 @@
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include "Helper/MeshDetailsWidget.hpp"
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
@@ -27,13 +29,10 @@ namespace Desert::Editor
         auto meshAssets = assetManager->FindAllByType<Assets::MeshAsset>();
 
         std::string currentMeshName = "None";
-        // if ( skinnedMesh.MeshHandle.IsValid() )
+        auto        asset           = assetManager->FindByHandle<Assets::MeshAsset>( skinnedMesh.MeshHandle );
+        if ( asset )
         {
-            auto asset = assetManager->FindByHandle<Assets::MeshAsset>( skinnedMesh.MeshHandle );
-            if ( asset )
-            {
-                currentMeshName = Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath );
-            }
+            currentMeshName = Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath );
         }
 
         ImGui::Columns( 2 );
@@ -59,7 +58,9 @@ namespace Desert::Editor
                 auto isSkinned = Runtime::ResourceRegistry::GetMeshService()->IsSkinned( handle );
 
                 if ( !isSkinned.has_value() || !isSkinned.value() )
+                {
                     continue;
+                }
 
                 const std::string name = Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath );
 
@@ -82,5 +83,73 @@ namespace Desert::Editor
 
         ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
+
+        MeshDetailsWidget::ShowMeshInfo( asset, skinnedMesh.MeshHandle );
+
+        if ( !skinnedMesh.MeshHandle )
+        {
+            return;
+        }
+
+        auto meshService = Runtime::ResourceRegistry::GetMeshService();
+        auto mesh        = meshService->Get( skinnedMesh.MeshHandle );
+
+        if ( !mesh || !mesh->IsSkinned() )
+        {
+            return;
+        }
+
+        auto        skinned  = std::static_pointer_cast<SkinnedMesh>( mesh );
+        const auto& skeleton = skinned->GetSkeleton();
+
+        if ( ImGui::CollapsingHeader( "Skeleton", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            const auto& bones = skeleton.GetBones();
+
+            ImGui::Text( "Bone Count: %zu", bones.size() );
+            ImGui::Separator();
+
+            // Build hierarchy
+            std::unordered_map<size_t, std::vector<size_t>> children;
+
+            for ( size_t i = 0; i < bones.size(); ++i )
+            {
+                if ( bones[i].ParentBoneID.has_value() )
+                    children[bones[i].ParentBoneID.value()].push_back( i );
+            }
+
+            std::function<void( size_t )> DrawBone;
+            DrawBone = [&]( size_t boneIndex )
+            {
+                const auto& bone = bones[boneIndex];
+
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow;
+
+                if ( children[boneIndex].empty() )
+                    flags |= ImGuiTreeNodeFlags_Leaf;
+
+                bool opened =
+                     ImGui::TreeNodeEx( ( bone.Name + "##" + std::to_string( boneIndex ) ).c_str(), flags );
+
+                if ( opened )
+                {
+                    for ( auto child : children[boneIndex] )
+                    {
+                        DrawBone( child );
+                    }
+
+                    ImGui::TreePop();
+                }
+            };
+
+            // Draw roots
+            for ( size_t i = 0; i < bones.size(); ++i )
+            {
+                if ( !bones[i].ParentBoneID.has_value() )
+                {
+                    DrawBone( i );
+                }
+            }
+        }
     }
 } // namespace Desert::Editor

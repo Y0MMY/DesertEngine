@@ -2,33 +2,33 @@
 
 #include <Common/Utilities/FileSystem.hpp>
 
-#include <assimp/Importer.hpp>
-#include <assimp/LogStream.hpp>
-#include <assimp/DefaultLogger.hpp>
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
+//#include <assimp/Importer.hpp>
+//#include <assimp/LogStream.hpp>
+//#include <assimp/DefaultLogger.hpp>
+//#include <assimp/postprocess.h>
+//#include <assimp/scene.h>
 
 namespace Desert::Assets
 {
     namespace
     {
-        constexpr std::array<aiTextureType, static_cast<size_t>( 6U )> kTextureTypeMapping = {
-             aiTextureType_DIFFUSE,           // Albedo
-             aiTextureType_NORMALS,           // Normal
-             aiTextureType_METALNESS,         // Metallic
-             aiTextureType_DIFFUSE_ROUGHNESS, // Roughness
-             aiTextureType_AMBIENT_OCCLUSION, // AO
-             aiTextureType_EMISSIVE           // Emissive
-        };
+        //constexpr std::array<aiTextureType, static_cast<size_t>( 6U )> kTextureTypeMapping = {
+        //     aiTextureType_DIFFUSE,           // Albedo
+        //     aiTextureType_NORMALS,           // Normal
+        //     aiTextureType_METALNESS,         // Metallic
+        //     aiTextureType_DIFFUSE_ROUGHNESS, // Roughness
+        //     aiTextureType_AMBIENT_OCCLUSION, // AO
+        //     aiTextureType_EMISSIVE           // Emissive
+        //};
 
-        constexpr std::array<glm::vec4, static_cast<size_t>( 6U )> kDefaultColors = {
-             glm::vec4( 1.0f ),                   // Albedo (white)
-             glm::vec4( 0.5f, 0.5f, 1.0f, 1.0f ), // Normal (blue)
-             glm::vec4( 0.0f ),                   // Metallic (black)
-             glm::vec4( 1.0f ),                   // Roughness (white)
-             glm::vec4( 1.0f ),                   // AO (white)
-             glm::vec4( 0.0f )                    // Emissive (black)
-        };
+        //constexpr std::array<glm::vec4, static_cast<size_t>( 6U )> kDefaultColors = {
+        //     glm::vec4( 1.0f ),                   // Albedo (white)
+        //     glm::vec4( 0.5f, 0.5f, 1.0f, 1.0f ), // Normal (blue)
+        //     glm::vec4( 0.0f ),                   // Metallic (black)
+        //     glm::vec4( 1.0f ),                   // Roughness (white)
+        //     glm::vec4( 1.0f ),                   // AO (white)
+        //     glm::vec4( 0.0f )                    // Emissive (black)
+        //};
     } // namespace
 
     MaterialAsset::MaterialAsset( AssetPriority priority, const Common::Filepath& filepath )
@@ -38,7 +38,7 @@ namespace Desert::Assets
 
     Common::BoolResultStr MaterialAsset::Load()
     {
-        static constexpr uint32_t s_MeshImportFlags =
+       /* static constexpr uint32_t s_MeshImportFlags =
              aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_SortByPType | aiProcess_GenNormals |
              aiProcess_GenUVCoords | aiProcess_OptimizeMeshes | aiProcess_ValidateDataStructure;
 
@@ -67,7 +67,7 @@ namespace Desert::Assets
                     AddTexture( fullPath, type, kDefaultColors[i] );
                 }
             }
-        }
+        }*/
 
         m_ReadyForUse = true;
         return BOOLSUCCESS;

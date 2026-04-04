@@ -11,6 +11,7 @@ namespace Desert::Animation
     public:
         explicit Skeleton( std::vector<BoneInfo>&& bones ) : m_Bones( std::move( bones ) )
         {
+            m_Signature = ComputeSignature( m_Bones );
         }
 
         const std::vector<BoneInfo>& GetBones() const
@@ -18,24 +19,15 @@ namespace Desert::Animation
             return m_Bones;
         }
 
-        void AddClip( const std::string& name, std::shared_ptr<AnimationClip> clip )
+        uint64_t GetSignature() const
         {
-            m_Clips.emplace( name, std::move( clip ) );
+            return m_Signature;
         }
 
-        std::shared_ptr<AnimationClip> GetClip( const std::string& name ) const
-        {
-            auto it = m_Clips.find( name );
-            return it != m_Clips.end() ? it->second : nullptr;
-        }
-
-        const auto& GetClips() const
-        {
-            return m_Clips;
-        }
+        static uint64_t ComputeSignature( const std::vector<BoneInfo>& bones );
 
     private:
-        std::vector<BoneInfo>                                           m_Bones;
-        std::unordered_map<std::string, std::shared_ptr<AnimationClip>> m_Clips;
+        std::vector<BoneInfo> m_Bones;
+        uint64_t              m_Signature;
     };
 } // namespace Desert::Animation

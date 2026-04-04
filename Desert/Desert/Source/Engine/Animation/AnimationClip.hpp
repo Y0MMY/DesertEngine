@@ -5,6 +5,8 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/compatibility.hpp>
 
+#include <unordered_map>
+
 namespace Desert::Animation
 {
     struct PositionKeyFrame
@@ -54,6 +56,9 @@ namespace Desert::Animation
 
     struct BoneTrack
     {
+        std::string BoneName;
+        uint32_t    BoneIndex;
+
         std::vector<PositionKeyFrame> PositionKeys;
         std::vector<RotationKeyFrame> RotationKeys;
         std::vector<ScaleKeyFrame>    ScaleKeys;
@@ -144,9 +149,12 @@ namespace Desert::Animation
     class AnimationClip
     {
     public:
-        float Duration       = 0.0f;
-        float TicksPerSecond = 25.0f;
+        std::string AnimationName;
+        float       Duration       = 0.0f;
+        float       TicksPerSecond = 25.0f;
+        uint64_t    SkeletonSignature;
 
-        std::unordered_map<std::string, BoneTrack> Tracks;
+         std::vector<BoneTrack> Tracks; // it = bone index
+        //std::unordered_map<std::string, BoneTrack> Tracks;
     };
 } // namespace Desert::Animation

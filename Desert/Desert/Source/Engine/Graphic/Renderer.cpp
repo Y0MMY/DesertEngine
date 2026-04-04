@@ -107,9 +107,9 @@ namespace Desert::Graphic
     }
 
     void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                               const MaterialExecutor* materialExecutor )
+                               const glm::mat4 transform, const MaterialExecutor* materialExecutor )
     {
-        s_RendererAPI->RenderMesh( pipeline, mesh, materialExecutor );
+        s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor );
     }
 
     const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const

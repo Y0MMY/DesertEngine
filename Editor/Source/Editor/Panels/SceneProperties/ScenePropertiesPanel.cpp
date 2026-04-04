@@ -130,7 +130,7 @@ namespace Desert::Editor
         }
 
         ImGui::BeginChild( "Components", ImVec2( 0.0f, 0.0f ), false, ImGuiWindowFlags_None );
-        static ComponentEditor componentEditor( m_AssetManager );
+        static ComponentEditor componentEditor( m_AssetManager, m_AnimationLibrary );
         componentEditor.Render( const_cast<ECS::Entity&>( selectedEntity ) );
         ImGui::EndChild();
     }

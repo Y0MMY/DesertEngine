@@ -92,7 +92,7 @@ namespace Desert::Graphic::System
             data.Material->Bind(
                  { camera, data.Transform, m_SceneRenderer->GetDirectionLights(), pointLights, textures } );
 
-            renderer.RenderMesh( m_StaticPipeline, data.Mesh, data.Material->GetMaterialExecutor() );
+            renderer.RenderMesh( m_StaticPipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
         }
     }
 
@@ -111,7 +111,7 @@ namespace Desert::Graphic::System
             data.Material->Bind( { camera, data.Transform, m_SceneRenderer->GetDirectionLights(), pointLights,
                                    textures, data.BoneMatrices } );
 
-            renderer.RenderMesh( m_SkinnedPipeline, data.Mesh, data.Material->GetMaterialExecutor() );
+            renderer.RenderMesh( m_SkinnedPipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
         }
     }
 

@@ -21,7 +21,6 @@ namespace Desert::Graphic
 
         UpdateTextures( m_MaterialExecutor.get() );
 
-        m_MaterialExecutor->PushConstant( &info.MeshTransform, sizeof( glm::mat4 ) );
     }
 
 } // namespace Desert::Graphic

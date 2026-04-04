@@ -1,10 +1,18 @@
 #include "AssetPreloader.hpp"
 
+#include "Shader/ShaderAsset.hpp"
+#include "Mesh/StaticMeshAsset.hpp"
+#include "Mesh/SkinnedMeshAsset.hpp"
+#include "Mesh/AnimationAsset.hpp"
+
 namespace Desert::Assets
 {
-    constexpr std::array<std::string_view, 3> SUPPORTED_MESH_EXTENSIONS    = { ".fbx", ".blend", ".gltf" };
-    constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS  = { ".hdr" };
-    constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS = { ".shader" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SKINNED_MESH_EXTENSIONS = { ".skmesh" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_STATIC_MESH_EXTENSIONS  = { ".stmesh" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SKELETON_EXTENSIONS     = { ".skeleton" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_ANIMATION_EXTENSIONS    = { ".anim" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS       = { ".hdr" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS      = { ".shader" };
 
     AssetPreloader::AssetPreloader( const std::shared_ptr<AssetManager>& assetManager )
          : m_AssetManager( assetManager )
@@ -71,11 +79,21 @@ namespace Desert::Assets
 
     void AssetPreloader::PreloadMeshes()
     {
-        ProcessAssetFiles<MeshAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
-                                      m_AssetManager, AssetPriority::Low );
+        ProcessAssetFiles<StaticMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+                                            SUPPORTED_STATIC_MESH_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
-        ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
-                                          m_AssetManager, AssetPriority::Low );
+        ProcessAssetFiles<AnimationAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+                                           SUPPORTED_ANIMATION_EXTENSIONS, m_AssetManager, AssetPriority::Low );
+
+        ProcessAssetFiles<SkeletonAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+                                          SUPPORTED_SKELETON_EXTENSIONS, m_AssetManager, AssetPriority::Low );
+
+        ProcessAssetFiles<SkinnedMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+                                             SUPPORTED_SKINNED_MESH_EXTENSIONS, m_AssetManager,
+                                             AssetPriority::Low );
+
+        /* ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
+                                          m_AssetManager, AssetPriority::Low );*/
 
         if ( auto manager = m_AssetManager.lock() )
         {
@@ -95,7 +113,7 @@ namespace Desert::Assets
         {
             for ( const auto& [handle, skyboxAsset] : manager->FindAllByType<Assets::SkyboxAsset>() )
             {
-                Runtime::ResourceRegistry::GetSkyboxService()->Register( skyboxAsset );
+                //  m_RuntimeServices->Skyboxes().Register( skyboxAsset );
                 return;
             }
         }

@@ -8,6 +8,8 @@ namespace Desert::Animation
 {
     struct BoneInfo
     {
+        uint32_t BoneIndex;
+
         std::string Name;
 
         // Inverse bind pose (mesh space > bone space)

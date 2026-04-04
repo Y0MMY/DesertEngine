@@ -9,8 +9,7 @@ namespace Desert::Runtime
             return Common::MakeError( "Skybox asset is invalid" );
         }
 
-        m_Skyboxes[skyboxAsset->GetMetadata().Handle] =
-             std::make_shared<Graphic::MaterialSkybox>(skyboxAsset);
+        m_Skyboxes[skyboxAsset->GetMetadata().Handle] = std::make_shared<Graphic::MaterialSkybox>( skyboxAsset );
         return BOOLSUCCESS;
     }
 

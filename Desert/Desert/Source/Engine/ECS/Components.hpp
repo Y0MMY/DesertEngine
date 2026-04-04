@@ -16,6 +16,7 @@
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
 
 #include <Engine/Animation/Animator.hpp>
+#include <Engine/Animation/FSM/AnimationStateMachine.hpp>
 
 namespace Desert::ECS
 {
@@ -90,6 +91,7 @@ namespace Desert::ECS
     {
         // active Animator (runtime instance)
         std::unique_ptr<Animation::Animator> Animator;
+        //std::unique_ptr<Animation::AnimationStateMachine> StateMachine;
 
         // current name (debug / editor / FSM)
         std::string CurrentClip;

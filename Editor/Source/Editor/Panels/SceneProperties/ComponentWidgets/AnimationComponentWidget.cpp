@@ -7,8 +7,9 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    AnimationComponentWidget::AnimationComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager )
-         : ComponentWidget( "Animation" )
+    AnimationComponentWidget::AnimationComponentWidget( const Assets::AssetManager*        assetManager,
+                                                        const Animation::AnimationLibrary* animationLibrary )
+         : ComponentWidget( "Animation" ), m_AnimationLibrary( animationLibrary )
     {
     }
 
@@ -51,6 +52,64 @@ namespace Desert::Editor
         ImGui::Columns( 1 );
         ImGui::Separator();
 
+        // --- Clip Selection ---
+        if ( animation.Animator )
+        {
+            const auto&    skeleton = animation.Animator->GetSkeleton();
+            const uint64_t sig      = skeleton.GetSignature();
+
+            static std::vector<Assets::Asset<Assets::AnimationAsset>> cached;
+            static uint64_t                                           cachedSig = 0;
+
+            if ( cachedSig != sig )
+            {
+                cached    = m_AnimationLibrary->GetBySkeleton( sig );
+                cachedSig = sig;
+            }
+
+            const char* preview = animation.CurrentClip.empty() ? "Select Clip" : animation.CurrentClip.c_str();
+
+            if ( ImGui::BeginCombo( "##ClipSelect", preview ) )
+            {
+                for ( const auto& animAsset : cached )
+                {
+                    const auto&        clip = animAsset->GetClip();
+                    const std::string& name = clip.AnimationName;
+
+                    bool selected = ( animation.CurrentClip == name );
+
+                    if ( ImGui::Selectable( name.c_str(), selected ) )
+                    {
+                        animation.CurrentClip = name;
+                        animation.Animator->Play( clip );
+                    }
+
+                    if ( selected )
+                        ImGui::SetItemDefaultFocus();
+                }
+
+                ImGui::EndCombo();
+            }
+        }
+
+        // --- Timeline ---
+        const auto& animator = animation.Animator;
+
+        if ( animator && animator->GetDuration() > 0.0f )
+        {
+            float currentTime = animator->GetCurrentTime();
+            float duration    = animator->GetDuration();
+
+            ImGui::TextUnformatted( "Timeline" );
+            ImGui::SliderFloat( "##Timeline", &currentTime, 0.0f, duration, "%.3f" );
+
+            if ( ImGui::IsItemActive() )
+            {
+                animation.Playing = false;
+                animator->SetTime( currentTime );
+            }
+        }
+
         // --- Debug info ---
         if ( ImGui::TreeNodeEx( "Animation Info", ImGuiTreeNodeFlags_Framed ) )
         {
@@ -65,12 +124,12 @@ namespace Desert::Editor
 
             ImGui::TextUnformatted( "Time" );
             ImGui::NextColumn();
-          //  ImGui::Text( "%.3f", animator->GetCurrentTime() );
+            ImGui::Text( "%.3f", animator->GetCurrentTime() );
             ImGui::NextColumn();
 
             ImGui::TextUnformatted( "Duration" );
             ImGui::NextColumn();
-         //   ImGui::Text( "%.3f", animator->GetDuration() );
+            ImGui::Text( "%.3f", animator->GetDuration() );
             ImGui::NextColumn();
 
             ImGui::Columns( 1 );

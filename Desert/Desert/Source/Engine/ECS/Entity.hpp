@@ -8,7 +8,7 @@ namespace Desert::ECS
     class Entity final
     {
     public:
-        explicit Entity( std::string&& tag, entt::entity handle, entt::registry& registry );
+        explicit Entity( entt::entity handle, entt::registry& registry );
         ~Entity() = default;
 
         template <typename EntityT>

@@ -3,20 +3,14 @@
 #include <entt/entt.hpp>
 #include <Common/Core/Timestep.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
-
-namespace Desert::Graphic
-{
-    class SceneRenderer;
-} // namespace Desert::Graphic
+#include <Engine/Graphic/Render/RenderCommandBuffer.hpp>
 
 namespace Desert::ECS
 {
     class System
     {
     public:
-        explicit System( const std::weak_ptr<Graphic::SceneRenderer>& sceneRenderer ) : m_Renderer( sceneRenderer )
-        {
-        }
+        explicit System() = default;
 
         System( const System& )            = delete;
         System& operator=( const System& ) = delete;
@@ -25,10 +19,8 @@ namespace Desert::ECS
 
         virtual ~System() = default;
 
-        virtual void Update( entt::registry& registry, const Common::Timestep& ts ) = 0;
-
-    protected:
-        const std::weak_ptr<Graphic::SceneRenderer> m_Renderer;
+        virtual void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
+                             const Common::Timestep& ts ) = 0;
     };
 
 } // namespace Desert::ECS

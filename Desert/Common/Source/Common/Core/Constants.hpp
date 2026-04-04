@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 
 namespace Common::Constants // TODO: should be merge from config
 {
@@ -14,6 +15,7 @@ namespace Common::Constants // TODO: should be merge from config
         const std::filesystem::path SCENE_PATH            = "Resources/Assets/Scene/";
         const std::filesystem::path MATERIAL_PATH         = "Resources/Assets/Material/";
         const std::filesystem::path MESH_PATH             = "Resources/Mesh/";
+        const std::filesystem::path MESH_PATH_COOKED      = "Cooked/Meshes/";
         const std::filesystem::path SKYBOX_PATH           = "Resources/Textures/HDR/";
     } // namespace Path
 
@@ -25,5 +27,7 @@ namespace Common::Constants // TODO: should be merge from config
         const std::string SCENE_EXTENSION             = ".desce";
         const std::string MESH_SERIALIZBLE_EXTENSION  = ".demesh";
         const std::string MATERIAL_EXTENSION          = ".demat";
+        const std::string STATIC_MESH                 = ".skmesh";
+        const std::string SKINNED_MESH                = ".stmesh";
     } // namespace Extensions
 } // namespace Common::Constants

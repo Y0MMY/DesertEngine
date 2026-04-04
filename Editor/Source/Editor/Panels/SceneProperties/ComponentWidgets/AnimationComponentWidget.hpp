@@ -7,7 +7,8 @@ namespace Desert::Editor
     class AnimationComponentWidget final : public ComponentWidget<ECS::AnimationComponent>
     {
     public:
-        AnimationComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager );
+        AnimationComponentWidget( const Assets::AssetManager*        assetManager,
+                                  const Animation::AnimationLibrary* animationLibrary );
 
         bool CanRemove() const override
         {
@@ -17,6 +18,7 @@ namespace Desert::Editor
         void Render( ECS::Entity& entity ) override;
 
     private:
-        const std::weak_ptr<Assets::AssetManager> m_AssetManager;
+        const Assets::AssetManager*        m_AssetManager;
+        const Animation::AnimationLibrary* m_AnimationLibrary;
     };
 } // namespace Desert::Editor

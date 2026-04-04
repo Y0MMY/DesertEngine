@@ -13,8 +13,7 @@ namespace Desert::Runtime
         Graphic::Image*           Resolve( const ImageHandle& handle ) const;
 
     private:
-        Common::Core::HandlePool m_HandlePool;
-
+        Common::Core::HandlePool                     m_HandlePool;
         std::vector<std::shared_ptr<Graphic::Image>> m_Images;
     };
 } // namespace Desert::Runtime

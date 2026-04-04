@@ -25,7 +25,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual Common::BoolResultStr               BeginSwapChainRenderPass() override;
         [[nodiscard]] virtual Common::BoolResultStr EndRenderPass() override;
         virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                                 const MaterialExecutor* materialExecutor ) override;
+                                 const glm::mat4 transform, const MaterialExecutor* materialExecutor ) override;
 
         virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
                                            const MaterialExecutor*          materialExecutor ) override;

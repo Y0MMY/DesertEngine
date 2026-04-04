@@ -2,62 +2,83 @@
 
 #include "Mesh.hpp"
 
+#include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
+#include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
+#include <Engine/Assets/Mesh/SkeletonAsset.hpp>
+
 namespace Desert::Graphic
 {
     class MeshFactory
     {
     public:
-        enum class MeshType
+        static std::shared_ptr<Mesh> Create( const std::shared_ptr<Assets::MeshAsset>& asset )
         {
-            Auto,
-            Static,
-            Skinned
-        };
-
-        static std::shared_ptr<Mesh> Create( const std::shared_ptr<Assets::MeshAsset>& baseAsset,
-                                             MeshType                                  type = MeshType::Auto )
-        {
-            std::shared_ptr<Mesh> mesh;
-
-            switch ( type )
-            {
-                case MeshType::Static:
-                    mesh = Mesh::CreateStatic( baseAsset );
-                    break;
-
-                case MeshType::Skinned:
-                    mesh = Mesh::CreateSkinned( baseAsset );
-                    break;
-
-                case MeshType::Auto:
-                default:
-                    mesh = CreateAuto( baseAsset );
-                    break;
-            }
-
-            auto result = mesh->Invalidate();
-            if ( !result.IsSuccess() )
-            {
-                LOG_ERROR( "Failed to invalidate mesh: {}", result.GetError() );
+            if ( !asset )
                 return nullptr;
-            }
 
-            return mesh;
-        }
-
-    private:
-        static std::shared_ptr<Mesh> CreateAuto( const std::shared_ptr<Assets::MeshAsset>& baseAsset )
-        {
-            const bool isSkinned = Mesh::DetectIfSkinned( baseAsset );
-
-            if ( isSkinned )
+            if ( asset->IsSkinned() )
             {
-                return Mesh::CreateSkinned( baseAsset );
+                return CreateSkinned( asset );
             }
             else
             {
-                return Mesh::CreateStatic( baseAsset );
+                return CreateStatic( asset );
             }
+        }
+
+    private:
+        static std::shared_ptr<Mesh> CreateStatic( const std::shared_ptr<Assets::MeshAsset>& baseAsset )
+        {
+            auto asset = std::dynamic_pointer_cast<Assets::StaticMeshAsset>( baseAsset );
+
+            if ( !asset )
+            {
+                LOG_ERROR( "MeshFactory: Asset is not StaticMeshAsset" );
+                return nullptr;
+            }
+
+            const auto staticMesh =
+                 std::make_shared<StaticMesh>( asset->GetVertices(), asset->GetIndices(), asset->GetSubmeshes() );
+            if ( !staticMesh->Invalidate() )
+            {
+                DESERT_VERIFY( false );
+            }
+
+            return staticMesh;
+        }
+
+        static std::shared_ptr<Mesh> CreateSkinned( const std::shared_ptr<Assets::MeshAsset>& baseAsset )
+        {
+            auto asset = std::dynamic_pointer_cast<Assets::SkinnedMeshAsset>( baseAsset );
+
+            if ( !asset )
+            {
+                LOG_ERROR( "MeshFactory: Asset is not SkinnedMeshAsset" );
+                return nullptr;
+            }
+            const auto skeletonAsset = asset->GetSkeletonDependency().Get();
+            if ( !skeletonAsset )
+            {
+                LOG_ERROR( "MeshFactory: Skeleton dependency invalid" );
+                return nullptr;
+            }
+
+            const Animation::Skeleton* skeletonRT = skeletonAsset->GetSkeleton();
+
+            if ( !skeletonRT )
+            {
+                LOG_ERROR( "MeshFactory: Skeleton runtime object is null" );
+                return nullptr;
+            }
+
+            const auto skinnedMesh = std::make_shared<SkinnedMesh>( asset->GetVertices(), asset->GetIndices(),
+                                                                    asset->GetSubmeshes(), skeletonRT );
+            if ( !skinnedMesh->Invalidate() )
+            {
+                DESERT_VERIFY( false );
+            }
+
+            return skinnedMesh;
         }
     };
 } // namespace Desert::Graphic

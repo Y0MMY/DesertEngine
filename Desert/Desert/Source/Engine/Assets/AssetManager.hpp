@@ -47,6 +47,12 @@ namespace Desert::Assets
             const auto& metadata = asset->GetMetadata();
             m_AssetsCache.push_back( { metadata, asset } );
             m_HandleLookup[metadata.Handle] = m_AssetsCache.size() - 1;
+
+            if constexpr ( std::is_base_of_v<AssetBase, AssetType> )
+            {
+                asset->ResolveDependencies( *this );
+            }
+
             return asset;
         }
 
@@ -83,5 +89,33 @@ namespace Desert::Assets
     private:
         AssetContainer                              m_AssetsCache;
         std::unordered_map<AssetHandle, AssetIndex> m_HandleLookup;
+    };
+
+    template <typename T>
+    struct AssetDependency
+    {
+        AssetHandle      Handle;
+        std::weak_ptr<T> Cached;
+
+        void Resolve( AssetManager& manager )
+        {
+            auto asset = manager.FindByHandle<T>( Handle );
+            Cached     = asset;
+        }
+
+        bool IsValid() const
+        {
+            return !Cached.expired();
+        }
+
+        T* Get() const
+        {
+            if (auto ptr = Cached.lock())
+            {
+                return ptr.get();
+            }
+
+            return nullptr;
+        }
     };
 } // namespace Desert::Assets

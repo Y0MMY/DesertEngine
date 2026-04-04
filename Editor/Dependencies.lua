@@ -1,15 +1,25 @@
+local baseDir = "%{wks.location}/ThirdParty"
+
 Dependencies = {
-    Common = {
-        IncludeDir = {
-            imGuizmo = "ThirdParty/ImGuizmo",
-            
+
+
+    EditorSpecific = {
+         IncludeDir = {
+            imGuizmo   = "ThirdParty/ImGuizmo",
+            assimp     = "ThirdParty/assimp/include",
+            reflect_cpp = baseDir .. "/reflect-cpp/include",
         },
+
         Libraries = {
-        },
-        Defines = {
+            Debug = {
+                assimp = "ThirdParty/assimp/lib/Debug/assimp-vc142-mtd.lib",
+            },
+
+            Release = {
+                assimp =  "ThirdParty/assimp/lib/Release/assimp-vc142-mt.lib",
+            }
         }
     }
-    
 }
 
 return Dependencies

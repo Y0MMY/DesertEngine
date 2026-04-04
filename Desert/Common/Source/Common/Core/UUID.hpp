@@ -11,10 +11,11 @@ namespace Common
         UUID();
         explicit UUID( uint64_t uuid );
         UUID( const UUID& other );
+        explicit UUID( const std::string& uuidStr );
 
         const std::string ToString() const
         {
-            return std::to_string( m_UUID ); //TODO: Cache
+            return std::to_string( m_UUID ); // TODO: Cache
         }
 
         operator uint64_t()
@@ -29,7 +30,7 @@ namespace Common
     private:
         uint64_t m_UUID;
     };
-} // namespace Radiant
+} // namespace Common
 
 namespace std
 {

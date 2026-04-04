@@ -14,10 +14,11 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    ComponentEditor::ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager )
+    ComponentEditor::ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager,
+                                      const Animation::AnimationLibrary*           animationLibrary )
          : m_AssetManager( assetManager )
     {
-        RegisterDefaultComponents();
+        RegisterDefaultComponents( animationLibrary );
     }
 
     void ComponentEditor::RegisterComponent( std::function<std::unique_ptr<IComponentWidget>()> factory )
@@ -25,11 +26,16 @@ namespace Desert::Editor
         m_AvailableComponents.emplace_back( factory );
     }
 
-    void ComponentEditor::RegisterDefaultComponents()
+    void ComponentEditor::RegisterDefaultComponents( const Animation::AnimationLibrary* animationLibrary )
     {
         RegisterComponent( []() { return std::make_unique<TransformComponentWidget>(); } );
         RegisterComponent( [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager ); } );
-        RegisterComponent( [this]() { return std::make_unique<AnimationComponentWidget>( m_AssetManager ); } );
+        RegisterComponent(
+             [this, animationLibrary]()
+             {
+                 return std::make_unique<AnimationComponentWidget>( m_AssetManager.lock().get(),
+                                                                    animationLibrary );
+             } );
         RegisterComponent( [this]() { return std::make_unique<SkyboxComponentWidget>( m_AssetManager ); } );
         RegisterComponent( [this]() { return std::make_unique<SkinnedMeshComponentWidget>( m_AssetManager ); } );
         RegisterComponent( [this]() { return std::make_unique<PointLightComponentWidget>(); } );

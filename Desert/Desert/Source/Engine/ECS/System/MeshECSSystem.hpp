@@ -7,6 +7,9 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Animation/Animator.hpp>
 
+#include <Engine/Graphic/Render/Commands/DrawMeshCommand.hpp>
+#include <Engine/Graphic/Render/Commands/DrawSkinnedMeshCommand.hpp>
+
 namespace Desert::ECS
 {
     class MeshECSSystem : public System
@@ -14,12 +17,9 @@ namespace Desert::ECS
     public:
         using System::System;
 
-        void Update( entt::registry& registry, const Common::Timestep& ts ) override
+        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
+                     const Common::Timestep& ts ) override
         {
-            const auto& renderer = m_Renderer.lock();
-            if ( !renderer )
-                return;
-
             /* =========================
                STATIC MESHES
                ========================= */
@@ -60,8 +60,8 @@ namespace Desert::ECS
                              default:
                                  return;
                          }
-
-                         renderer->AddStaticMesh( targetMesh, mesh.Material, transform.GetTransform() );
+                         renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
+                              targetMesh, mesh.Material, transform.GetTransform() );
                      } );
             }
 
@@ -75,7 +75,7 @@ namespace Desert::ECS
                      [&]( entt::entity entity, const SkinnedMeshComponent& mesh,
                           const AnimationComponent& animation, const TransformComponent& transform )
                      {
-                         if ( !mesh.Material || !animation.Animator)
+                         if ( !mesh.Material || !animation.Animator )
                              return;
 
                          auto baseMesh = Runtime::ResourceRegistry::GetMeshService()->Get( mesh.MeshHandle );
@@ -87,8 +87,8 @@ namespace Desert::ECS
 
                          const Animation::Pose& pose = animation.Animator->GetPose();
 
-                         renderer->AddSkinnedMesh( skinnedMesh, mesh.Material, transform.GetTransform(),
-                                                   pose.BoneMatrices );
+                         renderCommandBuffer.Emplace<Graphic::Render::DrawSkinnedMeshCommand>(
+                              skinnedMesh, mesh.Material, transform.GetTransform(), pose.BoneMatrices );
                      } );
             }
         }

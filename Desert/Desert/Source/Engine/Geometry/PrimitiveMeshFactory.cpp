@@ -126,8 +126,8 @@ namespace Desert
                     { 0, 4, 7 },
                     { 7, 1, 0 } };
 
-        s_Primitives[static_cast<size_t>( PrimitiveType::Cube )] =
-             Mesh::CreateStatic( vertices, indices, "Cube" );
+        /*s_Primitives[static_cast<size_t>( PrimitiveType::Cube )] =
+             Mesh::CreateStatic( vertices, indices, "Cube" );*/
     }
 
     void PrimitiveMeshFactory::CreateSphere()
@@ -175,8 +175,8 @@ namespace Desert
             }
         }
 
-        s_Primitives[static_cast<size_t>( PrimitiveType::Sphere )] =
-             Mesh::CreateStatic( vertices, indices, "Sphere" );
+       /* s_Primitives[static_cast<size_t>( PrimitiveType::Sphere )] =
+             Mesh::CreateStatic( vertices, indices, "Sphere" );*/
     }
 
     void PrimitiveMeshFactory::CreatePyramid()
@@ -225,8 +225,8 @@ namespace Desert
                     { 2, 4, 3 },
                     { 3, 4, 0 } };
 
-        s_Primitives[static_cast<size_t>( PrimitiveType::Pyramid )] =
-             Mesh::CreateStatic( vertices, indices, "Pyramid" );
+       /* s_Primitives[static_cast<size_t>( PrimitiveType::Pyramid )] =
+             Mesh::CreateStatic( vertices, indices, "Pyramid" );*/
     }
 
     void PrimitiveMeshFactory::CreatePlane()
@@ -261,29 +261,29 @@ namespace Desert
 
         indices = { { 0, 1, 2 }, { 2, 3, 0 } };
 
-        s_Primitives[static_cast<size_t>( PrimitiveType::Plane )] =
-             Mesh::CreateStatic( vertices, indices, "Plane" );
+       /* s_Primitives[static_cast<size_t>( PrimitiveType::Plane )] =
+             Mesh::CreateStatic( vertices, indices, "Plane" );*/
     }
 
     void PrimitiveMeshFactory::CreateCylinder()
     {
         // Implementation for cylinder
-        s_Primitives[static_cast<size_t>( PrimitiveType::Cylinder )] =
-             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Cylinder" );
+      /*  s_Primitives[static_cast<size_t>( PrimitiveType::Cylinder )] =
+             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Cylinder" );*/
     }
 
     void PrimitiveMeshFactory::CreateCapsule()
     {
         // Implementation for capsule
-        s_Primitives[static_cast<size_t>( PrimitiveType::Capsule )] =
-             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Capsule" );
+        /*s_Primitives[static_cast<size_t>( PrimitiveType::Capsule )] =
+             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Capsule" );*/
     }
 
     void PrimitiveMeshFactory::CreateTerrain()
     {
         // Implementation for terrain
-        s_Primitives[static_cast<size_t>( PrimitiveType::Terrain )] =
-             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Terrain" );
+       /* s_Primitives[static_cast<size_t>( PrimitiveType::Terrain )] =
+             Mesh::CreateStatic( std::vector<Vertex>{}, std::vector<Index>{}, "Terrain" );*/
     }
 
     void PrimitiveMeshFactory::CreateLightCube()

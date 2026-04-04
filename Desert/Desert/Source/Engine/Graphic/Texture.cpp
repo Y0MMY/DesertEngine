@@ -4,6 +4,8 @@
 #include <Engine/Core/IO/ImageReader.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <Common/Utilities/FileSystem.hpp>
+
 namespace Desert::Graphic
 {
     struct ImageBaseSpec
@@ -59,7 +61,10 @@ namespace Desert::Graphic
 
     Common::BoolResultStr Texture2D::Invalidate()
     {
-        // TODO: check if m_TexturePath exists
+        if ( !Common::Utils::FileSystem::Exists( m_TexturePath ) )
+        {
+            return Common::MakeError( "File does not exists" );
+        }
         const ImageBaseSpec imageBaseSpec = LoadTexture( m_TexturePath, true, false, m_Specification );
 
         const Core::Formats::Image2DSpecification imageSpec = { .Tag        = imageBaseSpec.Tag,

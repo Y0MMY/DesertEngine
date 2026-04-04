@@ -8,15 +8,16 @@ namespace Desert::Core
     class SceneSerializer
     {
     public:
-        explicit SceneSerializer( const Scene* scene, const std::shared_ptr<Assets::AssetManager>& assetManager );
+        explicit SceneSerializer( const Scene* scene, const Assets::AssetManager* assetManager );
 
         std::string SerializeToJson() const;
+        void        DeserializeFromJson( const std::string& json ) const;
 
         void SaveToFile() const;
 
     private:
-        Scene*                                      m_Scene;
-        const std::shared_ptr<Assets::AssetManager> m_AssetManager;
+        Scene*                m_Scene;
+        Assets::AssetManager* m_AssetManager;
     };
 
 } // namespace Desert::Core

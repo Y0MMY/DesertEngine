@@ -2,32 +2,15 @@
 
 #include <Engine/Graphic/SceneRenderer.hpp>
 
-#include <Engine/ECS/System/MeshECSSystem.hpp>
-#include <Engine/ECS/System/SkyboxECSSystem.hpp>
-#include <Engine/ECS/System/PointLightSystem.hpp>
-#include <Engine/ECS/System/AnimationECSSystem.hpp>
-
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
 namespace Desert::Core
 {
-    enum SceneSystem
+    Scene::Scene( std::string&& sceneName, Graphic::SceneRenderer* sceneRenderer )
+         : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( sceneRenderer )
     {
-        MeshRenderer    = 0,
-        SkyboxRenderer  = 1,
-        PointLight      = 2, // TODO: add direction light
-        AnimationSystem = 3,
-    };
-
-    Scene::Scene( std::string&& sceneName )
-         : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( std::make_shared<Graphic::SceneRenderer>() )
-    {
-        RegisterSystem<ECS::MeshECSSystem>( MeshRenderer, m_SceneRenderer );
-        RegisterSystem<ECS::SkyboxECSSystem>( SkyboxRenderer, m_SceneRenderer );
-        RegisterSystem<ECS::PointLightECSSystem>( PointLight, m_SceneRenderer );
-        RegisterSystem<ECS::AnimationECSSystem>( AnimationSystem, m_SceneRenderer );
-
-        m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
+        SetupRegistryCallbacks();
+        m_CommandBuffer = std::make_unique<Graphic::Render::RenderCommandBuffer>();
     }
 
     NO_DISCARD Common::BoolResultStr Scene::BeginScene()
@@ -46,8 +29,8 @@ namespace Desert::Core
         Graphic::SceneRenderer::UpdateInfo sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
 
-        std::for_each( m_Systems.begin(), m_Systems.end(),
-                       [&]( const auto& system ) { system->Update( m_Registry, ts ); } );
+        std::ranges::for_each( m_Systems,
+                               [&]( const auto& system ) { system->Update( m_Registry, *m_CommandBuffer, ts ); } );
 
         // Dir lights
         {
@@ -60,7 +43,6 @@ namespace Desert::Core
         }
 
         // TODO: system
-
         const auto& mainCamera = m_MainCamera.lock();
 
         if ( mainCamera )
@@ -68,6 +50,8 @@ namespace Desert::Core
             mainCamera->OnUpdate( ts );
         }
 
+        m_CommandBuffer->ExecuteAll( *m_SceneRenderer );
+        m_CommandBuffer->Clear();
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }
 
@@ -89,8 +73,29 @@ namespace Desert::Core
     Desert::ECS::Entity& Scene::CreateNewEntity( std::string&& entityName )
     {
         const auto enttID = m_Registry.create();
-        auto&      entity = m_Entitys.emplace_back( std::move( entityName ), enttID, m_Registry );
+
+        auto& entity = m_Entitys.emplace_back( enttID, m_Registry );
+
+        entity.AddComponent<ECS::TagComponent>( std::move( entityName ) );
+        entity.AddComponent<ECS::UUIDComponent>();
+        entity.AddComponent<ECS::TransformComponent>();
+
         m_EntitysMap[entity.GetComponent<ECS::UUIDComponent>().UUID] = m_Entitys.size() - 1;
+
+        return entity;
+    }
+
+    Desert::ECS::Entity& Scene::CreateEntityWithUUID( const Common::UUID& uuid, const std::string& name )
+    {
+        const auto enttID = m_Registry.create();
+
+        auto& entity = m_Entitys.emplace_back( enttID, m_Registry );
+
+        entity.AddComponent<ECS::TagComponent>( name );
+        entity.AddComponent<ECS::UUIDComponent>( uuid );
+        entity.AddComponent<ECS::TransformComponent>();
+
+        m_EntitysMap[uuid] = m_Entitys.size() - 1;
 
         return entity;
     }
@@ -124,10 +129,10 @@ namespace Desert::Core
         }
     }
 
-    void Scene::Serialize() const
+    void Scene::Serialize( const Assets::AssetManager* assetManager ) const
     {
-        //   SceneSerializer serializer( this, m_AssetManager );
-        // return serializer.SaveToFile();
+        SceneSerializer serializer( this, assetManager );
+        return serializer.SaveToFile();
     }
 
     void Scene::RegisterExternalPass( std::string&& name, std::function<void()> execute,
@@ -176,6 +181,21 @@ namespace Desert::Core
     const std::shared_ptr<Desert::Graphic::Framebuffer> Scene::GetTargetFramebuffer() const
     {
         return m_SceneRenderer->GetTargetFramebuffer();
+    }
+
+    void Scene::Clear()
+    {
+        m_Registry.clear();
+
+        m_Entitys.clear();
+        m_EntitysMap.clear();
+
+        SetupRegistryCallbacks();
+    }
+
+    void Scene::SetupRegistryCallbacks()
+    {
+        m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }
 
 } // namespace Desert::Core

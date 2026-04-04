@@ -27,7 +27,7 @@ namespace Desert::Graphic
         void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame = false );
         void BeginSwapChainRenderPass();
         void EndRenderPass();
-        void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
+        void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh, const glm::mat4 transform,
                          const MaterialExecutor* materialExecutor );
 
         void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,

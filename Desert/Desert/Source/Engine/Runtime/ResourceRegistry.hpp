@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <Engine/Assets/AssetManager.hpp>
@@ -18,10 +19,10 @@ namespace Desert::Runtime
     class ResourceRegistry final
     {
     public:
-        static MeshService*      GetMeshService();
-        static SkyboxService*    GetSkyboxService();
-        static TextureService*   GetTextureService();
-        static ShaderService*    GetShaderService();
-        static ImageService*     GetImageService();
+        static MeshService*    GetMeshService();
+        static SkyboxService*  GetSkyboxService();
+        static TextureService* GetTextureService();
+        static ShaderService*  GetShaderService();
+        static ImageService*   GetImageService();
     };
 } // namespace Desert::Runtime

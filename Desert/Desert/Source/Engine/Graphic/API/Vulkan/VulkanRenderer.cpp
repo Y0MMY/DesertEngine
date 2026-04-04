@@ -287,8 +287,8 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,
-                                        const std::shared_ptr<Mesh>&     mesh,
-                                        const MaterialExecutor*          materialExecutor )
+                                        const std::shared_ptr<Mesh>& mesh, const glm::mat4 transform,
+                                        const MaterialExecutor* materialExecutor )
     {
 
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
@@ -314,16 +314,20 @@ namespace Desert::Graphic::API::Vulkan
             vkCmdSetLineWidth( m_CurrentCommandBuffer, pipeline->GetSpecification().LineWidth );
         }
 
-        const auto& pcBuffer = materialExecutor->GetPushConstantBuffer();
-        if ( pcBuffer.Size )
-        {
-            vkCmdPushConstants( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
-                                VK_SHADER_STAGE_VERTEX_BIT, 0, pcBuffer.Size, pcBuffer.Data );
-        }
-
         const auto& submeshes = mesh->GetSubmeshes();
         for ( const auto& submesh : submeshes )
         {
+            MaterialExecutor* materialExec = (MaterialExecutor*)materialExecutor;
+            auto finalTransform = (transform * submesh.Transform);
+            materialExec->PushConstant( &finalTransform, sizeof( glm::mat4 ) );
+
+            const auto& pcBuffer = materialExecutor->GetPushConstantBuffer();
+            if ( pcBuffer.Size )
+            {
+                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
+                                    VK_SHADER_STAGE_VERTEX_BIT, 0, pcBuffer.Size, pcBuffer.Data );
+            }
+
             vkCmdDrawIndexed( m_CurrentCommandBuffer, submesh.IndexCount, 1, submesh.IndexOffset,
                               submesh.VertexOffset, 0 );
         }

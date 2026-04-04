@@ -21,6 +21,6 @@ namespace Desert::Assets
         void PreloadShaders();
 
     private:
-        std::weak_ptr<AssetManager> m_AssetManager;
+        std::weak_ptr<AssetManager>               m_AssetManager;
     };
 } // namespace Desert::Assets

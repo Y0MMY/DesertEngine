@@ -83,8 +83,10 @@ Dependencies = {
     
     CommonSpecific = {
         IncludeDir = {
+            reflect_cpp = baseDir .. "/reflect-cpp/include",
         },
         Libraries = {
+            reflect_cpp = baseDir .. "/reflect-cpp/bin/Debug/reflectcpp.lib",
         },
         Defines = {
         }
@@ -96,7 +98,6 @@ Dependencies = {
             stb = baseDir .. "/stb/include",
             vkallocator = baseDir .. "/VulkanAllocator",
             imgui = baseDir .. "/stb/ImGui",
-            assimp = baseDir .. "/assimp/include",
             entt = baseDir .. "/entt/include",
             reflect_cpp = baseDir .. "/reflect-cpp/include",
             Vulkan = vulkan_sdk and (vulkan_sdk .. "/Include") or nil,
@@ -105,7 +106,6 @@ Dependencies = {
         },
         Libraries = {
             Debug = {
-                assimp = baseDir .. "/assimp/bin/Debug/assimp-vc142-mtd.lib",
                 reflect_cpp = baseDir .. "/reflect-cpp/bin/Debug/reflectcpp.lib",
                 getVulkanLibs("Debug")
             },

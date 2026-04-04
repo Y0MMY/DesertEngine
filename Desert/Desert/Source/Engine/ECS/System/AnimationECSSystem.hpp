@@ -9,9 +9,13 @@ namespace Desert::ECS
     class AnimationECSSystem : public System
     {
     public:
-        using System::System;
+        explicit AnimationECSSystem( Animation::AnimationLibrary* animationLibrary )
+             : m_AnimationLibrary( animationLibrary )
+        {
+        }
 
-        void Update( entt::registry& registry, const Common::Timestep& ts ) override
+        void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
+                     const Common::Timestep& ts ) override
         {
             auto view = registry.view<ECS::SkinnedMeshComponent, ECS::AnimationComponent>();
 
@@ -37,39 +41,57 @@ namespace Desert::ECS
 
                 if ( !anim.CurrentClip.empty() )
                 {
-                    const auto clip = skinnedMeshPtr->GetSkeleton().GetClip( anim.CurrentClip );
+                    const uint64_t sig = skinnedMeshPtr->GetSkeleton().GetSignature();
 
-                    if ( clip )
+                    const auto animations = m_AnimationLibrary->GetBySkeleton( sig );
+
+                    for ( const auto& animAsset : animations )
                     {
-                        if ( anim.Animator->GetCurrentClip() != clip.get() )
+                        const auto& clip = animAsset->GetClip();
+
+                        if ( clip.AnimationName == anim.CurrentClip )
                         {
-                            anim.Animator->Play( *clip, anim.Loop );
+                            if ( anim.Animator->GetCurrentClip() != &clip )
+                            {
+                                anim.Animator->Play( clip, anim.Loop );
+                            }
+
+                            break;
                         }
                     }
                 }
 
                 else
                 {
-                    const auto& clips = skinnedMeshPtr->GetSkeleton().GetClips();
+                    const uint64_t sig = skinnedMeshPtr->GetSkeleton().GetSignature();
 
-                    if ( !clips.empty() )
+                    const auto animations = m_AnimationLibrary->GetBySkeleton( sig );
+
+                    if ( !animations.empty() )
                     {
-                        const auto& firstPair    = *clips.begin();
-                        const auto& firstClipPtr = firstPair.second;
+                        const auto& clip = animations.front()->GetClip();
 
-                        if ( firstClipPtr )
-                        {
-                            anim.CurrentClip = firstPair.first;
-                            anim.Animator->Play( *firstClipPtr, anim.Loop );
-                        }
+                        anim.CurrentClip = clip.AnimationName;
+                        anim.Animator->Play( clip, anim.Loop );
                     }
                 }
 
-                if ( anim.Playing && anim.Animator->IsPlaying() )
+                if ( anim.Playing )
                 {
-                    anim.Animator->Update( ts.GetSeconds() * anim.PlaybackSpeed );
+                    anim.Animator->SetLoop( anim.Loop );
+                    anim.Animator->SetPlaybackSpeed( anim.PlaybackSpeed );
+
+                    anim.Animator->Update( ts );
+
+                    if ( !anim.Loop && anim.Animator->IsFinished() )
+                    {
+                        anim.Playing = false;
+                    }
                 }
             }
         }
+
+    private:
+        Animation::AnimationLibrary* m_AnimationLibrary;
     };
 } // namespace Desert::ECS

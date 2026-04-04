@@ -22,11 +22,10 @@ project "Editor"
         "%{wks.location}/ThirdParty/entt/include/",
         "%{wks.location}/ThirdParty/ImGui/",
         "%{wks.location}/ThirdParty/glm/",
-        "%{wks.location}/ThirdParty/assimp/include",
         "%{wks.location}/ThirdParty/",
     }
 
-    for name, path in pairs(deps.Common.IncludeDir) do
+    for name, path in pairs(deps.EditorSpecific.IncludeDir) do
         includedirs { path }
     end
 
@@ -37,6 +36,16 @@ project "Editor"
         "yaml-cpp",
         "GLFW",
     }
+
+    filter "configurations:Debug"
+    for name, path in pairs(deps.EditorSpecific.Libraries.Debug) do
+        links { path }
+    end
+
+    filter "configurations:Release"
+    for name, path in pairs(deps.EditorSpecific.Libraries.Release) do
+        links { path }
+    end
 
     filter "configurations:Debug"
         defines { "DESERT_CONFIG_DEBUG" }

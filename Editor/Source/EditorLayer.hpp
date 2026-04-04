@@ -22,6 +22,36 @@ namespace Desert::Editor
     private:
         void DrawMenuBar();
 
+        // ===== Menus =====
+        void DrawFileMenu();
+        void DrawEditMenu();
+        void DrawViewMenu();
+        void DrawScenesMenu();
+        void DrawGraphicsMenu();
+        void DrawAboutMenu();
+
+        // ===== Menu sections =====
+        void DrawStyleSubmenu();
+        void DrawOpenSceneMenuItem();
+
+        // ===== Top Bar Sections =====
+        void DrawProjectSection();
+        void DrawSceneRenameSection();
+        void DrawPlaybackControls();
+        void DrawPlayButton();
+        void DrawPauseButton();
+        void DrawEngineStats();
+
+        // ===== Popups =====
+        void DrawPopups();
+        void DrawOpenScenePopup();
+        void DrawSaveScenePopup();
+        void DrawNewScenePopup();
+        void DrawReloadScenePopup();
+        void DrawProjectPopup();
+
+        void PrepareScenePopup();
+
     private:
         enum class EditorState
         {
@@ -34,8 +64,9 @@ namespace Desert::Editor
     private:
         const Engine::Application* m_Application;
 
-        std::shared_ptr<Assets::AssetManager>   m_AssetManager;
-        std::unique_ptr<Assets::AssetPreloader> m_AssetPreloader;
+        std::shared_ptr<Assets::AssetManager>        m_AssetManager;
+        std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
+        std::unique_ptr<Animation::AnimationLibrary> m_AnimationLibrary;
 
         std::shared_ptr<Desert::Core::Scene> m_MainScene;
 
@@ -45,5 +76,10 @@ namespace Desert::Editor
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
         std::vector<std::unique_ptr<Editor::IPanel>> m_Panels;
 #endif
+        std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
+        bool                                    m_OpenScenePopup     = false;
+        bool                                    m_SaveSceneRequested = false;
+        std::vector<Common::Filepath>           m_AvailableScenes;
+        int                                     m_SelectedSceneIndex = -1;
     };
 } // namespace Desert::Editor

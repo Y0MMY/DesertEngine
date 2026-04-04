@@ -8,12 +8,21 @@
 
 #include "SceneSettings.hpp"
 
+#include <Common/Core/ResultStr.hpp>
+#include <Common/Core/Timestep.hpp>
+#include <Common/Core/UUID.hpp>
+#include <cstdint>
 #include <Engine/Assets/AssetManager.hpp>
-
-#include <Engine/Runtime/ResourceRegistry.hpp>
-
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/System/System.hpp>
+#include <Engine/Graphic/Framebuffer.hpp>
+#include <entt/entt.hpp>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Desert::Graphic
 {
@@ -27,8 +36,10 @@ namespace Desert::Core
     {
     public:
         Scene() = default;
-        Scene( std::string&& sceneName );
+        Scene( std::string&& sceneName, Graphic::SceneRenderer* sceneRenderer );
         ~Scene() = default;
+
+        void Clear();
 
         [[nodiscard]] Common::BoolResultStr BeginScene();
         void                                OnUpdate( const Common::Timestep& ts );
@@ -42,6 +53,7 @@ namespace Desert::Core
         const std::shared_ptr<Graphic::Framebuffer> GetTargetFramebuffer() const;
 
         ECS::Entity& CreateNewEntity( std::string&& entityName );
+        ECS::Entity& CreateEntityWithUUID( const Common::UUID& uuid, const std::string& name );
 
         [[nodiscard]] const auto& GetAllEntities() const
         {
@@ -62,6 +74,11 @@ namespace Desert::Core
             return m_SceneName;
         }
 
+        void SetSceneName( const std::string& name )
+        {
+            m_SceneName = name;
+        }
+
         [[nodiscard]] std::optional<std::reference_wrapper<const ECS::Entity>>
         FindEntityByID( const Common::UUID& uuid ) const;
 
@@ -75,7 +92,7 @@ namespace Desert::Core
             return m_Settings;
         }
 
-        void Serialize() const;
+        void Serialize( const Assets::AssetManager* assetManager ) const;
 
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
                                    std::shared_ptr<Graphic::RenderPass>&& renderPass );
@@ -85,28 +102,31 @@ namespace Desert::Core
             return m_MainCamera;
         }
 
-    private:
-        template <typename System, typename... Args>
-        void RegisterSystem( const uint32_t system, Args&&... args )
+        template <typename T, typename... Args>
+        void AddSystem( Args&&... args )
         {
-            m_Systems[system] = std::make_unique<System>( std::forward<Args>( args )... );
+            DESERT_VERIFY( (std::is_base_of_v<ECS::System, T>));
+            m_Systems.emplace_back( std::make_unique<T>( std::forward<Args>( args )... ) );
         }
 
     private:
         void FindMainCamera();
         void OnEntityCreated_Camera();
 
+        void SetupRegistryCallbacks();
+
     private:
         entt::registry m_Registry;
 
-        static constexpr uint32_t                               SYSTEMS_COUNT = 4U;
-        std::array<std::unique_ptr<ECS::System>, SYSTEMS_COUNT> m_Systems;
+        std::vector<std::unique_ptr<ECS::System>> m_Systems;
 
         std::vector<ECS::Entity>                 m_Entitys;
         std::unordered_map<Common::UUID, size_t> m_EntitysMap;
 
-        std::shared_ptr<Graphic::SceneRenderer> m_SceneRenderer;
-        std::weak_ptr<Core::Camera>             m_MainCamera;
+        Graphic::SceneRenderer*     m_SceneRenderer;
+        std::weak_ptr<Core::Camera> m_MainCamera;
+
+        std::unique_ptr<Graphic::Render::RenderCommandBuffer> m_CommandBuffer;
 
         SceneSettings m_Settings;
         std::string   m_SceneName;

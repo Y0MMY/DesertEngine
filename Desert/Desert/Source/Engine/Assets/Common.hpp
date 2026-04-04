@@ -23,6 +23,8 @@ namespace Desert::Assets
         Material,
         Texture2D,
         Skybox,
-        Shader
+        Shader,
+        Skeleton,
+        Animation
     };
 } // namespace Desert::Assets

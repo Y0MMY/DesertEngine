@@ -50,3 +50,7 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/AssetPreloader.hpp>
+
+// =================== Animation =================== //
+
+#include <Engine/Animation/AnimationLibrary.hpp>

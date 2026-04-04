@@ -10,6 +10,7 @@
 namespace Desert::Assets
 {
     class MeshAsset;
+    class AssetManager;
 
     class AssetBase
     {
@@ -20,6 +21,8 @@ namespace Desert::Assets
         {
             return m_Metadata;
         }
+
+        virtual void ResolveDependencies(AssetManager& manager) {}
 
         virtual Common::BoolResultStr Load()   = 0;
         virtual Common::BoolResultStr Unload() = 0;

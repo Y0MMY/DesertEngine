@@ -12,8 +12,9 @@ namespace Desert::Editor
     public:
         using ComponentFactory = std::function<std::unique_ptr<IComponentWidget>()>;
 
-        ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager );
-        void RegisterDefaultComponents();
+        ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager,
+                         const Animation::AnimationLibrary*           animationLibrary );
+        void RegisterDefaultComponents( const Animation::AnimationLibrary* animationLibrary );
         void RegisterComponent( ComponentFactory factory );
         void Render( ECS::Entity& entity );
 
