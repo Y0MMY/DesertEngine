@@ -39,7 +39,7 @@ namespace Desert::Editor
         {
             if ( image )
             {
-                helperUI->Image( image, ImVec2( 128, 128) );
+                helperUI->Image( image, ImVec2( 128, 128 ) );
 
                 if ( ImGui::IsItemHovered() )
                 {
@@ -53,7 +53,7 @@ namespace Desert::Editor
             return false;
         };
 
-        auto displayPlaceholder = [&]( const char* text ) { ImGui::Button( text, ImVec2(128, 128) ); };
+        auto displayPlaceholder = [&]( const char* text ) { ImGui::Button( text, ImVec2( 128, 128 ) ); };
 
         auto handleDragDrop = [&]( const char* payloadType, auto&& dropHandler )
         {
@@ -68,20 +68,20 @@ namespace Desert::Editor
         };
 
         //// Handle Texture2D
-        //if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Texture2DRef> )
+        // if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Texture2DRef> )
         //{
-        //    if ( value )
-        //    {
-        //        auto image = value->GetImage2D();
-        //        if ( !displayImage2D( image, "Texture2D" ) )
-        //        {
-        //            displayPlaceholder( "Invalid Texture" );
-        //        }
-        //    }
-        //    else
-        //    {
-        //        displayPlaceholder( "Drop Texture Here" );
-        //    }
+        //     if ( value )
+        //     {
+        //         auto image = value->GetImage2D();
+        //         if ( !displayImage2D( image, "Texture2D" ) )
+        //         {
+        //             displayPlaceholder( "Invalid Texture" );
+        //         }
+        //     }
+        //     else
+        //     {
+        //         displayPlaceholder( "Drop Texture Here" );
+        //     }
 
         //    handleDragDrop( "TEXTURE_ASSET",
         //                    [&]( const ImGuiPayload* payload )
@@ -90,14 +90,14 @@ namespace Desert::Editor
         //                    } );
         //}
         //// Handle TextureCube
-        //else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::TextureCubeRef> )
+        // else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::TextureCubeRef> )
         //{
-        //    if ( value )
-        //    {
-        //        auto image = value->GetImageCube();
-        //        if ( image )
-        //        {
-        //            displayPlaceholder( "Cubemap" );
+        //     if ( value )
+        //     {
+        //         auto image = value->GetImageCube();
+        //         if ( image )
+        //         {
+        //             displayPlaceholder( "Cubemap" );
 
         //            if ( ImGui::IsItemHovered() )
         //            {
@@ -120,7 +120,7 @@ namespace Desert::Editor
         //                    } );
         //}
         // Handle Image2D
-         if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Image2DRef> )
+        if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Image2DRef> )
         {
             if ( !displayImage2D( value, "Image2D" ) )
             {
@@ -228,11 +228,11 @@ namespace Desert::Editor
 
         if ( ImGui::TreeNodeEx( "Materials", ImGuiTreeNodeFlags_Framed ) )
         {
-            auto material = materialComp.Material;
+            auto material = materialComp.MaterialSlots;
             int  matIndex = 0;
 
             {
-                if ( !material )
+                if ( !material.empty() )
                 {
                     ImGui::TextUnformatted( "Empty Material" );
                     if ( ImGui::Button( "Add Material", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
@@ -266,11 +266,10 @@ namespace Desert::Editor
                     }
                 }
 
-                if ( ImGui::TreeNodeEx( (void*)(intptr_t)material.get(), ImGuiTreeNodeFlags_Framed,
-                                        matName.c_str() ) )
+                if ( ImGui::TreeNodeEx( (void*)(intptr_t)material[0], ImGuiTreeNodeFlags_Framed, matName.c_str()))
                 {
                     ImGui::Indent();
-                    ImGui::PushID( (int)(uintptr_t)material.get() );
+                    ImGui::PushID( (int)(uintptr_t)material[0]);
 
                     // Material name editing
                     if ( Utils::ImGuiUtilities::InputText( matName, "##materialName" ) )
@@ -321,31 +320,31 @@ namespace Desert::Editor
                     ImGui::Columns( 1 );
 
                     //// Render material properties dynamically
-                    //material->VisitUniformFields(
-                    //     [this]( const auto& uniformName, const auto& field_name, auto& property )
-                    //     {
-                    //         // Group texture properties together
-                    //         if constexpr ( std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                       Desert::Graphic::Texture2DRef> ||
-                    //                        std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                       Desert::Graphic::TextureCubeRef> ||
-                    //                        std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                       Desert::Graphic::Image2DRef> ||
-                    //                        std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                       Desert::Graphic::ImageCubeRef> )
-                    //         {
-                    //             if ( ImGui::TreeNodeEx( property.GetDisplayName().c_str(),
-                    //                                     ImGuiTreeNodeFlags_Framed ) )
-                    //             {
-                    //                 RenderField( m_UIHelper, property.GetDisplayName(), property );
-                    //                 ImGui::TreePop();
-                    //             }
-                    //         }
-                    //         else
-                    //         {
-                    //             RenderField( m_UIHelper, property.GetDisplayName(), property );
-                    //         }
-                    //     } );
+                    // material->VisitUniformFields(
+                    //      [this]( const auto& uniformName, const auto& field_name, auto& property )
+                    //      {
+                    //          // Group texture properties together
+                    //          if constexpr ( std::is_same_v<std::decay_t<decltype( property.get() )>,
+                    //                                        Desert::Graphic::Texture2DRef> ||
+                    //                         std::is_same_v<std::decay_t<decltype( property.get() )>,
+                    //                                        Desert::Graphic::TextureCubeRef> ||
+                    //                         std::is_same_v<std::decay_t<decltype( property.get() )>,
+                    //                                        Desert::Graphic::Image2DRef> ||
+                    //                         std::is_same_v<std::decay_t<decltype( property.get() )>,
+                    //                                        Desert::Graphic::ImageCubeRef> )
+                    //          {
+                    //              if ( ImGui::TreeNodeEx( property.GetDisplayName().c_str(),
+                    //                                      ImGuiTreeNodeFlags_Framed ) )
+                    //              {
+                    //                  RenderField( m_UIHelper, property.GetDisplayName(), property );
+                    //                  ImGui::TreePop();
+                    //              }
+                    //          }
+                    //          else
+                    //          {
+                    //              RenderField( m_UIHelper, property.GetDisplayName(), property );
+                    //          }
+                    //      } );
 
                     ImGui::Unindent();
                     ImGui::TreePop();

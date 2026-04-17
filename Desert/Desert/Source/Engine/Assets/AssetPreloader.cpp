@@ -10,6 +10,7 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_SKINNED_MESH_EXTENSIONS = { ".skmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_STATIC_MESH_EXTENSIONS  = { ".stmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKELETON_EXTENSIONS     = { ".skeleton" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_MATERIAL_EXTENSIONS     = { ".mat" };
     constexpr std::array<std::string_view, 1> SUPPORTED_ANIMATION_EXTENSIONS    = { ".anim" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS       = { ".hdr" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS      = { ".shader" };
@@ -21,8 +22,8 @@ namespace Desert::Assets
 
     void AssetPreloader::PreloadAllAssets()
     {
-        PreloadMeshes();
         PreloadShaders();
+        PreloadMeshes();
         PreloadSkyboxes();
     }
 
@@ -88,6 +89,9 @@ namespace Desert::Assets
         ProcessAssetFiles<SkeletonAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                           SUPPORTED_SKELETON_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
+        ProcessAssetFiles<PBRMaterialAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+                                             SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager, AssetPriority::Low );
+
         ProcessAssetFiles<SkinnedMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                              SUPPORTED_SKINNED_MESH_EXTENSIONS, m_AssetManager,
                                              AssetPriority::Low );
@@ -100,6 +104,11 @@ namespace Desert::Assets
             for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
             {
                 Runtime::ResourceRegistry::GetMeshService()->Register( meshAsset );
+            }
+
+            for ( const auto& [handle, materialAsset] : manager->FindAllByType<Assets::MaterialAsset>() )
+            {
+                Runtime::ResourceRegistry::GetMaterialService()->Register( materialAsset );
             }
         }
     }

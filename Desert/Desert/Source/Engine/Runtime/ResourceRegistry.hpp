@@ -4,6 +4,7 @@
 #include <Engine/Assets/AssetManager.hpp>
 
 #include "Services/Mesh/MeshService.hpp"
+#include "Services/Material/MaterialService.hpp"
 #include "Services/Skybox/SkyboxService.hpp"
 #include "Services/Texture/TextureService.hpp"
 #include "Services/Shader/ShaderService.hpp"
@@ -19,10 +20,11 @@ namespace Desert::Runtime
     class ResourceRegistry final
     {
     public:
-        static MeshService*    GetMeshService();
-        static SkyboxService*  GetSkyboxService();
-        static TextureService* GetTextureService();
-        static ShaderService*  GetShaderService();
-        static ImageService*   GetImageService();
+        static MaterialService* GetMaterialService();
+        static MeshService*     GetMeshService();
+        static SkyboxService*   GetSkyboxService();
+        static TextureService*  GetTextureService();
+        static ShaderService*   GetShaderService();
+        static ImageService*    GetImageService();
     };
 } // namespace Desert::Runtime

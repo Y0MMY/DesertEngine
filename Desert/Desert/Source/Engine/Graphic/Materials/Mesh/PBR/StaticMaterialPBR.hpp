@@ -14,7 +14,7 @@ namespace Desert::Graphic
 
             ShaderProtocols::DirectionLight DirectionLights;
             ShaderProtocols::PointLight     PointLights;
-            ShaderProtocols::PBRTexturesUB               PBREnvTextures;
+            ShaderProtocols::PBRTexturesUB  PBREnvTextures;
         };
 
         StaticMaterialPBR( const std::shared_ptr<Assets::MaterialAsset>& asset )

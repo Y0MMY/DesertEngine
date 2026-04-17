@@ -109,6 +109,8 @@ namespace Desert::Core
             m_Systems.emplace_back( std::make_unique<T>( std::forward<Args>( args )... ) );
         }
 
+        void Attach( ECS::Entity parent, ECS::Entity child );
+
     private:
         void FindMainCamera();
         void OnEntityCreated_Camera();

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Mesh/MeshAsset.hpp"
-#include "Mesh/MaterialAsset.hpp"
+#include "Mesh/PBRMaterialAsset.hpp"
 #include "Skybox/SkyboxAsset.hpp"
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -21,6 +21,6 @@ namespace Desert::Assets
         void PreloadShaders();
 
     private:
-        std::weak_ptr<AssetManager>               m_AssetManager;
+        std::weak_ptr<AssetManager> m_AssetManager;
     };
 } // namespace Desert::Assets

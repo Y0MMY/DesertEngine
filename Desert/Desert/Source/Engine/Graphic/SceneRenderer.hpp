@@ -34,6 +34,11 @@ namespace Desert::Graphic
             ShaderProtocols::DirectionLight DirLights;
         };
 
+        struct RenderSubmissionExtra
+        {
+            std::vector<glm::mat4> BoneMatrices; // optional
+        };
+
         ~SceneRenderer() = default;
 
         void Init();
@@ -46,12 +51,8 @@ namespace Desert::Graphic
 
         void Resize( const uint32_t width, const uint32_t height );
 
-        void AddStaticMesh( const std::shared_ptr<Mesh>& mesh, const std::shared_ptr<StaticMaterialPBR>& material,
-                            const glm::mat4& transform );
-
-        void AddSkinnedMesh( const std::shared_ptr<Desert::SkinnedMesh>&         mesh,
-                             const std::shared_ptr<Graphic::SkinnedMaterialPBR>& material,
-                             const glm::mat4& transform, const std::vector<glm::mat4>& boneMatrices );
+        void SubmitMesh( const Mesh* mesh, const std::vector<Material*> materialSlots, const glm::mat4& transform,
+                         const RenderSubmissionExtra& extra );
 
         const Environment                 CreateEnvironment( const Common::Filepath& filepath );
         void                              SetEnvironment( const std::shared_ptr<MaterialSkybox>& material );

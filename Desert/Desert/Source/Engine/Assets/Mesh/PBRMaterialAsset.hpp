@@ -1,12 +1,13 @@
 #pragma once
 
 #include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Assets/MaterialAsset.hpp>
 
 #include <Engine/Geometry/Mesh.hpp>
 
 namespace Desert::Assets
 {
-    class MaterialAsset final : public AssetBase
+    class PBRMaterialAsset final : public MaterialAsset
     {
     public:
         struct TextureSlot
@@ -19,7 +20,7 @@ namespace Desert::Assets
             }
         };
 
-        MaterialAsset( AssetPriority priority, const Common::Filepath& filepath );
+        PBRMaterialAsset( AssetPriority priority, const Common::Filepath& filepath );
 
         bool CopyFrom( const MaterialAsset& source );
 
@@ -42,9 +43,21 @@ namespace Desert::Assets
             return AssetTypeID::Material;
         }
 
+        virtual MaterialType GetMaterialType() const override
+        {
+            return MaterialAsset::MaterialType::PBR;
+        }
+
+        virtual Common::UUID GetMaterialUUID() const override
+        {
+            return m_MaterialUUID;
+        }
+
     private:
         bool m_ReadyForUse = false;
 
         std::array<std::unique_ptr<TextureSlot>, static_cast<size_t>( 6U )> m_TextureSlots;
+
+        Common::UUID m_MaterialUUID;
     };
 } // namespace Desert::Assets

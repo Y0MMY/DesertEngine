@@ -8,57 +8,127 @@
 
 namespace Desert::Editor
 {
+    enum class FileType
+    {
+        Unknown = 0,
+        Scene,
+        Prefab,
+        Script,
+        Audio,
+        Shader,
+        Texture,
+        Cubemap,
+        Model,
+        Material,
+        Project,
+        Ini,
+        Font
+    };
 
+    struct DirectoryInformation
+    {
+        DirectoryInformation*              Parent;
+        std::vector<DirectoryInformation*> Children;
+
+        std::string AssetPath;
+        // SharedPtr<Graphics::Texture2D> Thumbnail = nullptr;
+        FileType Type;
+        uint64_t FileSize;
+        ImVec4   FileTypeColour;
+
+        bool Hidden = false;
+        bool IsFile = true;
+        bool Opened = false;
+        bool Leaf   = true;
+
+    public:
+        DirectoryInformation( const std::string& path, bool isFile )
+        {
+            AssetPath = path;
+            IsFile    = isFile;
+            Hidden    = false;
+        }
+
+        ~DirectoryInformation()
+        {
+        }
+    };
     class FileExplorerPanel : public IPanel
     {
     public:
-        FileExplorerPanel( const std::filesystem::path& rootPath )
-             : IPanel( " FileExplorer" ), m_CurrentPath( rootPath )
-        {
-            RefreshCurrentDirectory();
-        }
-
+        explicit FileExplorerPanel( const std::filesystem::path& rootPath );
         void OnUIRender() override;
 
-        void SetOnFileClickedCallback( std::function<void( const std::filesystem::path& )> callback )
+        bool RenderFile( int dirIndex, bool folder, int shownIndex, bool gridView );
+        void DrawFolder( DirectoryInformation* dirInfo, bool defaultOpen = false );
+
+        void DestroyGraphicsResources()
         {
-            m_FileClickedCallback = callback;
+            /* m_FolderIcon.reset();
+             m_FileIcon.reset();
+             m_Directories.clear();*/
+        }
+
+        std::string ProcessDirectory( const std::string& directoryPath, DirectoryInformation* parent,
+                                      bool processChildren );
+
+        void ChangeDirectory( DirectoryInformation* directory );
+        void RemoveDirectory( DirectoryInformation* directory, bool removeFromParent = true );
+        // void OnNewProject() override;
+        void Refresh();
+        void QueueRefresh()
+        {
+            m_Refresh = true;
         }
 
     private:
-        // UI Drawing functions
-        void DrawNavigationBar();
-        void DrawDirectoryContents();
-        void DrawPathBreadcrumbs();
-        void DrawEntryContextMenu( const std::filesystem::directory_entry& entry );
-        void DrawContextMenu();
-
-        // Utility functions
-        const char* GetFileIcon( const std::filesystem::path& path );
-        void        NavigateTo( const std::filesystem::path& path );
-        void        RefreshCurrentDirectory();
-        void        CreateNewFolder();
-        void        CreateNewFile();
-        void        HandleRenaming();
-        void        CompleteRenaming( const char* newName );
-        void        CancelRenaming();
+        void CreateThumbnailPath( DirectoryInformation* directoryInfo, std::string& assetPath,
+                                  std::string& AbsolutePath );
 
     private:
-        std::string                          m_PanelName;
-        std::filesystem::path                m_RootPath;
-        std::filesystem::path                m_CurrentPath;
-        bool                                 m_ShowRenameModal   = false;
-        char                                 m_RenameBuffer[256] = { 0 };
-        std::filesystem::path                m_EntryToRename;
-        std::filesystem::path                m_SelectedFile;
+        std::filesystem::path m_CurrentPath;
 
-        std::stack<std::filesystem::path> m_PathHistory;
-        std::stack<std::filesystem::path> m_ForwardHistory;
+        float       m_MinGridSize = 50;
+        float       m_MaxGridSize = 400;
+        std::string m_MovePath;
+        std::string m_LastNavPath;
+        std::string m_Delimiter;
 
-        std::vector<std::filesystem::directory_entry> m_Directories;
-        std::vector<std::filesystem::directory_entry> m_Files;
+        size_t m_BasePathLen;
+        bool   m_IsDragging;
+        bool   m_IsInListView;
+        bool   m_UpdateBreadCrumbs;
+        bool   m_ShowHiddenFiles;
+        int    m_GridItemsPerRow;
+        float  m_GridSize = 360.0f;
 
-        std::function<void( const std::filesystem::path& )> m_FileClickedCallback;
+        ImGuiTextFilter m_Filter;
+
+        bool m_TextureCreated = false;
+
+        std::string m_BasePath;
+        std::string m_AssetPath;
+
+        bool m_Refresh = false;
+
+        bool m_UpdateNavigationPath = true;
+
+        DirectoryInformation* m_CurrentDir;
+        DirectoryInformation* m_BaseProjectDir;
+        DirectoryInformation* m_NextDirectory;
+        DirectoryInformation* m_PreviousDirectory;
+
+        std::unordered_map<std::string, std::shared_ptr<DirectoryInformation>> m_Directories;
+        std::vector<DirectoryInformation*>                                     m_BreadCrumbData;
+        /* TDArray<DirectoryInformation*>                                                     m_BreadCrumbData;
+         SharedPtr<Graphics::Texture2D>                                                     m_FolderIcon;
+         SharedPtr<Graphics::Texture2D>                                                     m_FileIcon;*/
+
+        DirectoryInformation* m_CurrentSelected;
+
+        std::string m_RequestedThumbnailPath;
+        std::string m_CopiedPath;
+        bool        m_CutFile = false;
     };
 
 } // namespace Desert::Editor

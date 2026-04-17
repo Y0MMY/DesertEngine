@@ -151,7 +151,7 @@ namespace Desert::Editor
 
         const auto entities = m_Scene->GetAllEntities();
 
-        std::vector<std::pair<Common::UUID, std::pair<glm::mat4, std::shared_ptr<Desert::Mesh>>>> allMeshes;
+        std::vector<std::pair<Common::UUID, std::pair<glm::mat4, Desert::Mesh*>>> allMeshes;
 
         for ( const auto& entity : entities )
         {
@@ -244,7 +244,7 @@ namespace Desert::Editor
         return false;
     }
 
-    std::shared_ptr<Desert::Mesh> ViewportPanel::GetMeshComponent( const ECS::StaticMeshComponent& component )
+    Desert::Mesh* ViewportPanel::GetMeshComponent( const ECS::StaticMeshComponent& component )
     {
         if ( component.GetMeshType() == ECS::StaticMeshComponent::Type::Asset )
         {

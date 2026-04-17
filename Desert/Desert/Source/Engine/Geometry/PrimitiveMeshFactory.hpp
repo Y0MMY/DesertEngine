@@ -2,7 +2,7 @@
 
 #include <Engine/Geometry/Mesh.hpp>
 
-#include "PrimitiveType.hpp"
+#include <Engine/Geometry/PrimitiveType.hpp>
 
 namespace Desert
 {
@@ -12,8 +12,8 @@ namespace Desert
         static void Initialize();
         static void Shutdown();
 
-        static std::shared_ptr<Mesh> GetPrimitive( PrimitiveType type );
-        static const std::string&    GetPrimitiveName( PrimitiveType type );
+        static Mesh*              GetPrimitive( PrimitiveType type );
+        static const std::string& GetPrimitiveName( PrimitiveType type );
 
         static bool IsInitialized()
         {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Assets/Mesh/MaterialAsset.hpp>
+#include <Engine/Assets/MaterialAsset.hpp>
 
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
@@ -20,8 +20,7 @@ namespace Desert::Graphic
         // ---- Update helpers ----
         void UpdateCamera( Material& material, const Core::Camera* camera );
         void UpdatePointLights( Material& material, const ShaderProtocols::PointLight& lights );
-        void UpdateDirectionLights( Material&                                           material,
-                                    const ShaderProtocols::DirectionLight& lights );
+        void UpdateDirectionLights( Material& material, const ShaderProtocols::DirectionLight& lights );
         void UpdateLightsMetadata( Material& material, const ShaderProtocols::PointLight& point,
                                    const ShaderProtocols::DirectionLight& dir );
 

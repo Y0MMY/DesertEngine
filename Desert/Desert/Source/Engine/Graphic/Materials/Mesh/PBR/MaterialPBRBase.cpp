@@ -81,7 +81,7 @@ namespace Desert::Graphic
             // Then check base material
             if ( baseMaterial )
             {
-                return baseMaterial->GetTexture( type );
+               // return baseMaterial->GetTexture( type );
             }
 
             return (Assets::TextureAsset*)nullptr;
@@ -89,13 +89,13 @@ namespace Desert::Graphic
 
         auto updateTexture = [&]( Assets::TextureAsset::Type type, const std::string& name )
         {
-            auto texture = GetFinalTexture( type );
-            {
-                if ( auto texProp = executor->GetTexture2DProperty( name ) )
-                {
-                    // texProp->SetImage( texture-> );
-                }
-            }
+            //auto texture = GetFinalTexture( type );
+            //{
+            //    if ( auto texProp = executor->GetTexture2DProperty( name ) )
+            //    {
+            //        // texProp->SetImage( texture-> );
+            //    }
+            //}
         };
 
         updateTexture( Assets::TextureAsset::Type::Albedo, "u_AlbedoTexture" );

@@ -7,6 +7,7 @@
 #include <Engine/Assets/Serialization/Mesh.hpp>
 #include <Engine/Assets/Serialization/Animation.hpp>
 #include <Engine/Assets/Serialization/Skeleton.hpp>
+#include <Engine/Assets/Serialization/Material.hpp>
 
 namespace Desert::Editor
 {
@@ -15,5 +16,6 @@ namespace Desert::Editor
         std::optional<Desert::Assets::Serialization::MeshAssetData>     Mesh;
         std::optional<Desert::Assets::Serialization::SkeletonAssetData> Skeleton;
         std::vector<Desert::Assets::Serialization::AnimationAssetData>  Animations;
+        std::vector<Desert::Assets::Serialization::MaterialAssetData>   Material;
     };
 } // namespace Desert::Editor

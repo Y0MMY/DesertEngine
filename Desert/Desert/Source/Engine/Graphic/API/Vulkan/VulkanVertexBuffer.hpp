@@ -40,7 +40,7 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t    m_Size = 0;
         BufferUsage m_Usage;
 
-        VkBuffer               m_VulkanBuffer;
+        VkBuffer               m_VulkanBuffer = nullptr;
         VmaAllocation          m_MemoryAllocation;
         Common::Memory::Buffer m_StorageBuffer;
     };

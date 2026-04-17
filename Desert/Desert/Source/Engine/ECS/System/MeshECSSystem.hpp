@@ -30,7 +30,7 @@ namespace Desert::ECS
                      [&]( entt::entity entity, const StaticMeshComponent& mesh,
                           const TransformComponent& transform )
                      {
-                         std::shared_ptr<Desert::Mesh> targetMesh = nullptr;
+                         Desert::Mesh* targetMesh = nullptr;
 
                          switch ( mesh.GetMeshType() )
                          {
@@ -45,7 +45,7 @@ namespace Desert::ECS
 
                              case StaticMeshComponent::Type::Asset:
                              {
-                                 if ( !mesh.MeshHandle || !mesh.Material )
+                                 if ( !mesh.MeshHandle || mesh.MaterialSlots.empty() )
                                      return;
 
                                  targetMesh = Runtime::ResourceRegistry::GetMeshService()->Get( *mesh.MeshHandle );
@@ -60,8 +60,19 @@ namespace Desert::ECS
                              default:
                                  return;
                          }
+                         // TODO: avoid reallocating and rebuilding this vector every frame.
+                         // Cache resolved material pointers per entity (or per component) and update only when
+                         // MaterialSlots change.
+                         std::vector<Graphic::Material*> materialSlots;
+                         materialSlots.reserve( mesh.MaterialSlots.size() );
+                         for ( const auto& assetHandle : mesh.MaterialSlots )
+                         {
+                             materialSlots.push_back(
+                                  Runtime::ResourceRegistry::GetMaterialService()->Get( assetHandle ) );
+                         }
+
                          renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
-                              targetMesh, mesh.Material, transform.GetTransform() );
+                              targetMesh, materialSlots, transform.GetTransform() );
                      } );
             }
 
@@ -75,7 +86,7 @@ namespace Desert::ECS
                      [&]( entt::entity entity, const SkinnedMeshComponent& mesh,
                           const AnimationComponent& animation, const TransformComponent& transform )
                      {
-                         if ( !mesh.Material || !animation.Animator )
+                         if ( mesh.MaterialSlots.empty() || !animation.Animator )
                              return;
 
                          auto baseMesh = Runtime::ResourceRegistry::GetMeshService()->Get( mesh.MeshHandle );
@@ -83,12 +94,12 @@ namespace Desert::ECS
                          if ( !baseMesh || !baseMesh->IsSkinned() )
                              return;
 
-                         auto skinnedMesh = std::static_pointer_cast<Desert::SkinnedMesh>( baseMesh );
+                         auto skinnedMesh = static_cast<Desert::SkinnedMesh*>( baseMesh );
 
                          const Animation::Pose& pose = animation.Animator->GetPose();
 
-                         renderCommandBuffer.Emplace<Graphic::Render::DrawSkinnedMeshCommand>(
-                              skinnedMesh, mesh.Material, transform.GetTransform(), pose.BoneMatrices );
+                         /* renderCommandBuffer.Emplace<Graphic::Render::DrawSkinnedMeshCommand>(
+                               skinnedMesh, mesh.Material, transform.GetTransform(), pose.BoneMatrices );*/
                      } );
             }
         }

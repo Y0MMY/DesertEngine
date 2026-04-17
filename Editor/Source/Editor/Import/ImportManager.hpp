@@ -21,6 +21,9 @@ namespace Desert::Editor
         void SerializeMeshAsset( const Desert::Assets::Serialization::MeshAssetData& data,
                                  const std::filesystem::path&                        sourcePath );
 
+        void SerializeMaterialAsset( const Desert::Assets::Serialization::MaterialAssetData& data,
+                                     const std::filesystem::path&                            sourcePath );
+
         void SerializeSkeletonAsset( const Desert::Assets::Serialization::SkeletonAssetData& data,
                                      const std::filesystem::path&                            sourcePath );
 

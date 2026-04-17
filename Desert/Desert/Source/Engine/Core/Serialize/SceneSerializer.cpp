@@ -4,7 +4,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
-#include <Engine/Assets/Mesh/MaterialAsset.hpp>
+#include <Engine/Assets/MaterialAsset.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
 

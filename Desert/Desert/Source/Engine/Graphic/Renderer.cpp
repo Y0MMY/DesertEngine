@@ -75,13 +75,12 @@ namespace Desert::Graphic
         s_RendererAPI->PrepareNextFrame();
     }
 
-    void Renderer::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                         const MaterialExecutor*          materialExecutor )
+    void Renderer::SubmitFullscreenQuad( const Pipeline* pipeline, const MaterialExecutor* materialExecutor )
     {
         s_RendererAPI->SubmitFullscreenQuad( pipeline, materialExecutor );
     }
 
-    void Renderer::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame )
+    void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
     {
         s_RendererAPI->BeginRenderPass( renderPass, clearFrame );
     }
@@ -106,8 +105,8 @@ namespace Desert::Graphic
         return s_RendererAPI->GetCompositeFramebuffer();
     }
 
-    void Renderer::RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                               const glm::mat4 transform, const MaterialExecutor* materialExecutor )
+    void Renderer::RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
+                               const MaterialExecutor* materialExecutor )
     {
         s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor );
     }

@@ -15,10 +15,10 @@ namespace Desert::Runtime
         return BOOLSUCCESS;
     }
 
-    std::shared_ptr<Desert::Mesh> MeshService::Get( const Assets::AssetHandle& handle ) const
+    Desert::Mesh* MeshService::Get( const Assets::AssetHandle& handle ) const
     {
         auto it = m_Meshes.find( handle );
-        return ( it != m_Meshes.end() ) ? it->second : nullptr;
+        return ( it != m_Meshes.end() ) ? it->second.get() : nullptr;
     }
 
     void MeshService::Clear()

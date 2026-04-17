@@ -3,6 +3,8 @@
 #include <Engine/Graphic/RendererTypes.hpp>
 #include <Engine/Graphic/DynamicResources.hpp>
 
+#include <vector>
+
 namespace Desert::Graphic
 {
     enum class ShaderDataType

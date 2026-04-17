@@ -17,7 +17,9 @@ namespace Desert::Assets
             return AssetTypeID::Mesh;
         }
 
-        virtual bool IsSkinned() const = 0;
+        virtual const Common::UUID&              GetMaterialHandle( const uint32_t submeshIndex ) const = 0;
+        virtual const std::vector<Common::UUID>& GetMaterialHandles() const                             = 0;
+        virtual bool                             IsSkinned() const                                      = 0;
     };
 
 } // namespace Desert::Assets

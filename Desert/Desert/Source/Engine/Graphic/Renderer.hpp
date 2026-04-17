@@ -24,14 +24,13 @@ namespace Desert::Graphic
 
         [[nodiscard]] Common::BoolResultStr BeginFrame();
         [[nodiscard]] Common::BoolResultStr EndFrame();
-        void BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass, bool clearFrame = false );
+        void BeginRenderPass( const RenderPass* renderPass, bool clearFrame = false );
         void BeginSwapChainRenderPass();
         void EndRenderPass();
-        void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh, const glm::mat4 transform,
+        void RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                          const MaterialExecutor* materialExecutor );
 
-        void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                   const MaterialExecutor*          materialExecutor );
+        void SubmitFullscreenQuad( const Pipeline* pipeline, const MaterialExecutor* materialExecutor );
 
         void PrepareNextFrame();
         void PresentFinalImage();

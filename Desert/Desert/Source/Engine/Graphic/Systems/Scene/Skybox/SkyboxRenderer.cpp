@@ -77,7 +77,7 @@ namespace Desert::Graphic::System
         auto& renderer = Renderer::GetInstance();
         if ( const auto& material = m_MaterialSkybox.lock() )
         {
-            renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
+            renderer.SubmitFullscreenQuad( m_Pipeline.get(), material->GetMaterialExecutor() );
         }
     }
 

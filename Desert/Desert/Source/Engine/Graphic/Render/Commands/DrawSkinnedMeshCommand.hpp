@@ -8,22 +8,20 @@ namespace Desert::Graphic::Render
 {
     struct DrawSkinnedMeshCommand : RenderCommand
     {
-        std::shared_ptr<Desert::SkinnedMesh>         Mesh;
-        std::shared_ptr<Graphic::SkinnedMaterialPBR> Material;
-        glm::mat4                                    Transform;
-        std::vector<glm::mat4>                       BoneMatrices;
+        Desert::SkinnedMesh*            Mesh;
+        std::vector<Graphic::Material*> MaterialSlot;
+        glm::mat4                       Transform;
+        std::vector<glm::mat4>          BoneMatrices;
 
-        DrawSkinnedMeshCommand( std::shared_ptr<Desert::SkinnedMesh>         mesh,
-                                std::shared_ptr<Graphic::SkinnedMaterialPBR> material, const glm::mat4& transform,
-                                const std::vector<glm::mat4>& bones )
-             : Mesh( std::move( mesh ) ), Material( std::move( material ) ), Transform( transform ),
-               BoneMatrices( bones )
+        DrawSkinnedMeshCommand( Desert::SkinnedMesh* mesh, const std::vector<Graphic::Material*>& materialSlot,
+                                const glm::mat4& transform, const std::vector<glm::mat4>& bones )
+             : Mesh( mesh ), MaterialSlot( materialSlot ), Transform( transform ), BoneMatrices( bones )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
-            renderer.AddSkinnedMesh( Mesh, Material, Transform, BoneMatrices );
+            renderer.SubmitMesh( Mesh, MaterialSlot, Transform, { .BoneMatrices = BoneMatrices } );
         }
     };
 } // namespace Desert::Graphic::Render

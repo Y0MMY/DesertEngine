@@ -32,7 +32,7 @@ namespace Desert::ECS
                     continue;
                 }
 
-                auto skinnedMeshPtr = std::static_pointer_cast<Desert::SkinnedMesh>( meshBase );
+                auto skinnedMeshPtr = static_cast<Desert::SkinnedMesh*>( meshBase );
 
                 if ( !anim.Animator )
                 {
@@ -51,7 +51,9 @@ namespace Desert::ECS
 
                         if ( clip.AnimationName == anim.CurrentClip )
                         {
-                            if ( anim.Animator->GetCurrentClip() != &clip )
+                            const auto* current = anim.Animator->GetCurrentClip();
+
+                            if ( !current || current->AnimationName != clip.AnimationName )
                             {
                                 anim.Animator->Play( clip, anim.Loop );
                             }

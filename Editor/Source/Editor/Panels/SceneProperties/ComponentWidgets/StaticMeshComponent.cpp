@@ -40,7 +40,7 @@ namespace Desert::Editor
                 break;
         }
 
-        if ( staticMesh.Material )
+        // if ( staticMesh.Material )
         {
             static MaterialComponentWidget materialComponent( m_AssetManager );
             materialComponent.Render( entity );
@@ -103,7 +103,16 @@ namespace Desert::Editor
                          ( staticMesh.MeshHandle.has_value() && ( *staticMesh.MeshHandle ) == handle );
                     if ( ImGui::Selectable( meshName.c_str(), isSelected ) )
                     {
-                        staticMesh.MeshHandle = handle;
+                        const auto selectedMeshAsset = assetManager->FindByHandle<Assets::MeshAsset>( handle );
+                        staticMesh.MeshHandle        = handle;
+                        const auto handles           = selectedMeshAsset->GetMaterialHandles();
+                        staticMesh.MaterialSlots.reserve( handles.size() );
+                        for ( const auto handle : handles )
+                        {
+                            staticMesh.MaterialSlots.emplace_back(
+                                 Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal(
+                                      handle ) );
+                        }
                     }
 
                     if ( isSelected )

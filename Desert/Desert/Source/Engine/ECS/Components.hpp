@@ -52,16 +52,8 @@ namespace Desert::ECS
         std::optional<Assets::AssetHandle> MeshHandle     = std::nullopt;
         std::optional<PrimitiveType>       PrimitiveShape = std::nullopt; // TODO: std::variant
 
-        std::shared_ptr<Graphic::StaticMaterialPBR> Material;
-        bool                                        OutlineDraw = false;
-
-        StaticMeshComponent()
-        {
-            Material = std::make_shared<Graphic::StaticMaterialPBR>( nullptr );
-            // TODO: Do not allocate runtime materials in the component constructor.
-            //       Material should be lazily created by the render system (runtime-only),
-            //       or provided via a material asset / override mechanism.
-        }
+        std::vector<Assets::AssetHandle> MaterialSlots;
+        bool                        OutlineDraw = false;
 
         Type GetMeshType() const
         {
@@ -75,23 +67,15 @@ namespace Desert::ECS
 
     struct SkinnedMeshComponent
     {
-        Assets::AssetHandle                          MeshHandle;
-        std::shared_ptr<Graphic::SkinnedMaterialPBR> Material;
-
-        SkinnedMeshComponent()
-        {
-            Material = std::make_shared<Graphic::SkinnedMaterialPBR>(
-                 nullptr ); // TODO: Do not allocate runtime materials in the component constructor.
-                            //       Material should be lazily created by the render system (runtime-only),
-                            //       or provided via a material asset / override mechanism.
-        }
+        Assets::AssetHandle              MeshHandle;
+        std::vector<Assets::AssetHandle> MaterialSlots;
     };
 
     struct AnimationComponent
     {
         // active Animator (runtime instance)
         std::unique_ptr<Animation::Animator> Animator;
-        //std::unique_ptr<Animation::AnimationStateMachine> StateMachine;
+        // std::unique_ptr<Animation::AnimationStateMachine> StateMachine;
 
         // current name (debug / editor / FSM)
         std::string CurrentClip;
@@ -145,5 +129,16 @@ namespace Desert::ECS
         Assets::AssetHandle SkyboxHandle;
 
         float Intensity;
+    };
+
+    struct PrefabComponent
+    {
+        Assets::AssetHandle Prefab;
+    };
+
+    struct RelationshipComponent
+    {
+        entt::entity              Parent = entt::null;
+        std::vector<entt::entity> Children;
     };
 } // namespace Desert::ECS

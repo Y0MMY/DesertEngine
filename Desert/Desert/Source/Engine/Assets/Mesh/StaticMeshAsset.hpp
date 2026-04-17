@@ -32,15 +32,26 @@ namespace Desert::Assets
             return m_Submeshes;
         }
 
+        virtual const Common::UUID& GetMaterialHandle( const uint32_t submeshIndex ) const override
+        {
+            return m_MaterialAssetHandles[submeshIndex];
+        }
+
+        virtual const std::vector<Common::UUID>& GetMaterialHandles() const override
+        {
+            return m_MaterialAssetHandles;
+        }
+
         bool IsReadyForUse() const override
         {
             return m_IsReadyForUse;
         }
 
     private:
-        std::vector<Vertex>  m_Vertices;
-        std::vector<Index>   m_Indices;
-        std::vector<Submesh> m_Submeshes;
+        std::vector<Vertex>       m_Vertices;
+        std::vector<Index>        m_Indices;
+        std::vector<Submesh>      m_Submeshes;
+        std::vector<Common::UUID> m_MaterialAssetHandles;
 
         bool m_IsReadyForUse = false;
     };

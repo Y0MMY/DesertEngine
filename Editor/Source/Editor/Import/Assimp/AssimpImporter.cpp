@@ -9,6 +9,7 @@
 #include <Engine/Assets/Serialization/Mesh.hpp>
 #include <Engine/Assets/Serialization/Skeleton.hpp>
 #include <Engine/Assets/Serialization/Animation.hpp>
+#include <Engine/Assets/Serialization/Material.hpp>
 
 #include <Common/Core/Logger.hpp>
 
@@ -175,12 +176,81 @@ namespace Desert::Editor
         }
     }
 
+    static glm::vec4 GetColor( aiMaterial* mat, const char* key, unsigned type, unsigned idx, glm::vec4 def )
+    {
+        aiColor4D color;
+        if ( aiGetMaterialColor( mat, key, type, idx, &color ) == AI_SUCCESS )
+        {
+            return { color.r, color.g, color.b, color.a };
+        }
+        return def;
+    }
+
+    static float GetFloat( aiMaterial* mat, const char* key, unsigned type, unsigned idx, float def )
+    {
+        float value;
+        if ( aiGetMaterialFloat( mat, key, type, idx, &value ) == AI_SUCCESS )
+            return value;
+        return def;
+    }
+
+    static std::vector<MaterialAssetData> ExtractMaterials( const aiScene*               scene,
+                                                            const std::filesystem::path& basePath )
+    {
+        std::vector<MaterialAssetData> result;
+
+        for ( uint32_t i = 0; i < scene->mNumMaterials; ++i )
+        {
+            aiMaterial* mat = scene->mMaterials[i];
+
+            MaterialAssetData data;
+
+            aiString name;
+            mat->Get( AI_MATKEY_NAME, name );
+            data.Name           = name.C_Str();
+            data.MaterialHandle = Common::UUID{};
+
+            auto loadTex = [&]( aiTextureType type ) -> std::optional<TextureRef>
+            {
+                if ( mat->GetTextureCount( type ) == 0 )
+                    return std::nullopt;
+
+                aiString path;
+                if ( mat->GetTexture( type, 0, &path ) != AI_SUCCESS )
+                    return std::nullopt;
+
+                TextureRef ref;
+                ref.Path = ( basePath.parent_path() / path.C_Str() ).string();
+                return ref;
+            };
+
+            // TEXTURES
+            data.Albedo.Texture    = loadTex( aiTextureType_DIFFUSE );
+            data.Metallic.Texture  = loadTex( aiTextureType_METALNESS );
+            data.Roughness.Texture = loadTex( aiTextureType_DIFFUSE_ROUGHNESS );
+            data.AO.Texture        = loadTex( aiTextureType_AMBIENT_OCCLUSION );
+            data.Emissive.Texture  = loadTex( aiTextureType_EMISSIVE );
+
+            data.Albedo.Value    = GetColor( mat, AI_MATKEY_COLOR_DIFFUSE, glm::vec4( 1.0f ) );
+            data.Metallic.Value  = GetFloat( mat, AI_MATKEY_METALLIC_FACTOR, 0.0f );
+            data.Roughness.Value = GetFloat( mat, AI_MATKEY_ROUGHNESS_FACTOR, 1.0f );
+            auto emissive        = GetColor( mat, AI_MATKEY_COLOR_EMISSIVE, glm::vec4( 0.0f ) );
+            data.Emissive.Value  = glm::vec3( emissive );
+
+            result.push_back( data );
+        }
+
+        return result;
+    }
+
     static ImportResult ProcessScene( const aiScene* scene )
     {
         ImportResult result;
 
         MeshAssetData     meshData;
         SkeletonAssetData skeletonData;
+
+        const auto materialData = ExtractMaterials( scene, std::filesystem::path( "Resources" ) );
 
         std::unordered_map<std::string, uint32_t> boneMapping;
 
@@ -202,10 +272,11 @@ namespace Desert::Editor
 
             submesh.VertexOffset = meshHasBones ? meshData.SkinnedVertices.size() : meshData.StaticVertices.size();
 
-            submesh.IndexOffset = meshData.Indices.size() * 3;
-            submesh.VertexCount = mesh->mNumVertices;
-            submesh.IndexCount  = mesh->mNumFaces * 3;
-            submesh.Transform   = glm::mat4( 1.0f );
+            submesh.IndexOffset    = meshData.Indices.size() * 3;
+            submesh.VertexCount    = mesh->mNumVertices;
+            submesh.IndexCount     = mesh->mNumFaces * 3;
+            submesh.Transform      = glm::mat4( 1.0f );
+            submesh.MaterialHandle = materialData[mesh->mMaterialIndex].MaterialHandle;
 
             // ============================
             // VERTICES
@@ -425,6 +496,8 @@ namespace Desert::Editor
 
             result.Animations.push_back( animData );
         }
+
+        result.Material = materialData;
 
         return result;
     }

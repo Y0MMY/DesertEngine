@@ -105,6 +105,11 @@ namespace Desert::Editor
         {
             SerializeAnimationAsset( anim, sourcePath );
         }
+
+        for ( auto& anim : result.Material )
+        {
+            SerializeMaterialAsset( anim, sourcePath );
+        }
     }
 
     void ImportManager::SerializeMeshAsset( const Desert::Assets::Serialization::MeshAssetData& data,
@@ -134,6 +139,13 @@ namespace Desert::Editor
     {
         auto cookedPath = BuildCookedPath( sourcePath, "_" + data.Name + ".anim" );
         WriteJsonToFile( data, cookedPath );
+    }
+
+    void ImportManager::SerializeMaterialAsset( const Desert::Assets::Serialization::MaterialAssetData& data,
+                                                const std::filesystem::path& sourcePath )
+    {
+        auto path = BuildCookedPath( sourcePath, "_" + data.Name + ".mat" );
+        WriteJsonToFile( data, path );
     }
 
 } // namespace Desert::Editor

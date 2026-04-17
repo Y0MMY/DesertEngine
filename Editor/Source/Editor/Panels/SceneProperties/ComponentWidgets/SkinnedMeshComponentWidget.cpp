@@ -99,7 +99,7 @@ namespace Desert::Editor
             return;
         }
 
-        auto        skinned  = std::static_pointer_cast<SkinnedMesh>( mesh );
+        auto        skinned  = static_cast<SkinnedMesh*>( mesh );
         const auto& skeleton = skinned->GetSkeleton();
 
         if ( ImGui::CollapsingHeader( "Skeleton", ImGuiTreeNodeFlags_DefaultOpen ) )

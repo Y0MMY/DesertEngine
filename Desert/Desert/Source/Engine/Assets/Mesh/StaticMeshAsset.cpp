@@ -41,6 +41,7 @@ namespace Desert::Assets
         m_Vertices.reserve( data.StaticVertices.size() );
         m_Indices.reserve( data.Indices.size() );
         m_Submeshes.reserve( data.Submeshes.size() );
+        m_MaterialAssetHandles.reserve( data.Submeshes.size() );
 
         for ( const auto& v : data.StaticVertices )
         {
@@ -75,6 +76,7 @@ namespace Desert::Assets
             submesh.Transform    = s.Transform;
             submesh.BoundingBox  = s.BoundingBox;
 
+            m_MaterialAssetHandles.emplace_back( s.MaterialHandle );
             m_Submeshes.emplace_back( std::move( submesh ) );
         }
 

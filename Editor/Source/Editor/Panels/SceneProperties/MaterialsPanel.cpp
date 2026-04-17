@@ -10,7 +10,7 @@ namespace Desert::Editor
     // =========================================================================
     // Main Material Editor Function
     // =========================================================================
-    void MaterialsPanel::DrawMaterialEditor( const std::shared_ptr<Graphic::StaticMaterialPBR>& material )
+    void MaterialsPanel::DrawMaterialEditor( const Graphic::StaticMaterialPBR* material )
     {
         if ( !material )
             return;
@@ -48,7 +48,7 @@ namespace Desert::Editor
             if ( ImGui::CollapsingHeader( "Material", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
                 ImGui::Dummy( ImVec2( 0, 4 ) );
-                DrawMaterialEditor( meshComponent.Material );
+              //  DrawMaterialEditor( meshComponent.Material );
             }
         }
     }
@@ -56,58 +56,58 @@ namespace Desert::Editor
     // =========================================================================
     // Material Information Section
     // =========================================================================
-    void MaterialsPanel::DrawMaterialInfo( const std::shared_ptr<Graphic::StaticMaterialPBR>& material )
+    void MaterialsPanel::DrawMaterialInfo( const Graphic::StaticMaterialPBR* material )
     {
         // Section header styling
-        //ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
-        //ImGui::Text( "Material Info" );
-        //ImGui::PopStyleColor();
-        //ImGui::Dummy( ImVec2( 0, 4 ) );
+        // ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
+        // ImGui::Text( "Material Info" );
+        // ImGui::PopStyleColor();
+        // ImGui::Dummy( ImVec2( 0, 4 ) );
 
         //// Display base material information
-        //if ( material->IsUsingBaseMaterial() )
+        // if ( material->IsUsingBaseMaterial() )
         //{
-        //    auto baseMaterial = material->GetBaseMaterial();
-        //    ImGui::Text( "Base Material: %s", "Name" );
-        //}
-        //else
+        //     auto baseMaterial = material->GetBaseMaterial();
+        //     ImGui::Text( "Base Material: %s", "Name" );
+        // }
+        // else
         //{
-        //    ImGui::Text( "Base Material: None (Custom)" );
-        //}
+        //     ImGui::Text( "Base Material: None (Custom)" );
+        // }
 
         //// Draw texture slots with spacing
-        //ImGui::Dummy( ImVec2( 0, 6 ) );
-        //DrawTextureSlot( "Albedo", Assets::TextureAsset::Type::Albedo, material );
-        //DrawTextureSlot( "Normal", Assets::TextureAsset::Type::Normal, material );
-        //DrawTextureSlot( "Metallic", Assets::TextureAsset::Type::Metallic, material );
-        //DrawTextureSlot( "Roughness", Assets::TextureAsset::Type::Roughness, material );
-        //DrawTextureSlot( "AO", Assets::TextureAsset::Type::AO, material );
+        // ImGui::Dummy( ImVec2( 0, 6 ) );
+        // DrawTextureSlot( "Albedo", Assets::TextureAsset::Type::Albedo, material );
+        // DrawTextureSlot( "Normal", Assets::TextureAsset::Type::Normal, material );
+        // DrawTextureSlot( "Metallic", Assets::TextureAsset::Type::Metallic, material );
+        // DrawTextureSlot( "Roughness", Assets::TextureAsset::Type::Roughness, material );
+        // DrawTextureSlot( "AO", Assets::TextureAsset::Type::AO, material );
     }
 
     // =========================================================================
     // Texture Slot UI Element
     // =========================================================================
     void MaterialsPanel::DrawTextureSlot( const char* label, Assets::TextureAsset::Type type,
-                                          const std::shared_ptr<Graphic::StaticMaterialPBR>& material )
+                                          const Graphic::StaticMaterialPBR* material )
     {
-        //bool hasTexture = material->HasFinalTexture( type );
-        //ImGui::PushID( label );
+        // bool hasTexture = material->HasFinalTexture( type );
+        // ImGui::PushID( label );
 
         //// Two-column layout for label and button
-        //ImGui::Columns( 2, nullptr, false );
-        //ImGui::SetColumnWidth( 0, 100.0f );
+        // ImGui::Columns( 2, nullptr, false );
+        // ImGui::SetColumnWidth( 0, 100.0f );
 
         //// Texture slot label
-        //ImGui::Text( "%s", label );
-        //ImGui::NextColumn();
+        // ImGui::Text( "%s", label );
+        // ImGui::NextColumn();
 
         //// Button logic based on texture presence
-        //if ( hasTexture )
+        // if ( hasTexture )
         //{
-        //    // Styling for remove button
-        //    ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.3f, 0.3f, 0.3f, 1.0f ) );
-        //    ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.4f, 0.4f, 0.4f, 1.0f ) );
-        //    ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 0.25f, 0.25f, 0.25f, 1.0f ) );
+        //     // Styling for remove button
+        //     ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.3f, 0.3f, 0.3f, 1.0f ) );
+        //     ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.4f, 0.4f, 0.4f, 1.0f ) );
+        //     ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 0.25f, 0.25f, 0.25f, 1.0f ) );
 
         //    // Remove texture button
         //    if ( ImGui::Button( "Remove", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
@@ -132,7 +132,7 @@ namespace Desert::Editor
 
         //    ImGui::PopStyleColor( 3 );
         //}
-        //else
+        // else
         //{
         //    // Styling for add button
         //    ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.2f, 0.2f, 0.2f, 1.0f ) );
@@ -155,31 +155,31 @@ namespace Desert::Editor
         //}
 
         //// Restore single-column layout
-        //ImGui::Columns( 1 );
-        //ImGui::PopID();
+        // ImGui::Columns( 1 );
+        // ImGui::PopID();
     }
 
     // =========================================================================
     // Material Properties Section with Tabs
     // =========================================================================
-    void MaterialsPanel::DrawMaterialProperties( const std::shared_ptr<Graphic::StaticMaterialPBR>& material )
+    void MaterialsPanel::DrawMaterialProperties( const Graphic::StaticMaterialPBR* material )
     {
         // Section header styling
-        //ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
-        //ImGui::Text( "Material Properties" );
-        //ImGui::PopStyleColor();
-        //ImGui::Dummy( ImVec2( 0, 4 ) );
+        // ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.8f, 0.8f, 0.85f, 1.0f ) );
+        // ImGui::Text( "Material Properties" );
+        // ImGui::PopStyleColor();
+        // ImGui::Dummy( ImVec2( 0, 4 ) );
 
         //// Create tab bar for material properties
-        //if ( ImGui::BeginTabBar( "MaterialPropertiesTabs" ) )
+        // if ( ImGui::BeginTabBar( "MaterialPropertiesTabs" ) )
         //{
-        //    // -----------------------------------------------------------------
-        //    // Albedo Tab
-        //    // -----------------------------------------------------------------
-        //    if ( ImGui::BeginTabItem( "Albedo" ) )
-        //    {
-        //        ImGui::Dummy( ImVec2( 0, 4 ) );
-        //        auto albedoColor = material->GetAlbedoColor();
+        //     // -----------------------------------------------------------------
+        //     // Albedo Tab
+        //     // -----------------------------------------------------------------
+        //     if ( ImGui::BeginTabItem( "Albedo" ) )
+        //     {
+        //         ImGui::Dummy( ImVec2( 0, 4 ) );
+        //         auto albedoColor = material->GetAlbedoColor();
 
         //        // Color picker styling
         //        ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0.11f, 0.11f, 0.12f, 1.0f ) );

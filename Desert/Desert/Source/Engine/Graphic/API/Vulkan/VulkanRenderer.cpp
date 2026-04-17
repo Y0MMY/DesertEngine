@@ -26,7 +26,7 @@ namespace Desert::Graphic::API::Vulkan
 {
     namespace
     {
-        bool ShouldUseDynamicLineWidth( const std::shared_ptr<Pipeline>& pipeline )
+        bool ShouldUseDynamicLineWidth( const Pipeline* pipeline )
         {
             const auto& spec = pipeline->GetSpecification();
             if ( spec.PolygonMode == PrimitivePolygonMode::Wireframe || Graphic::PrimitiveIsLine( spec.Topology ) )
@@ -103,7 +103,7 @@ namespace Desert::Graphic::API::Vulkan
              SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->GetVulkanQueue().get() );
     }
 
-    std::shared_ptr<VulkanFramebuffer> GetFramebuffer( const std::shared_ptr<RenderPass>& renderPass )
+    std::shared_ptr<VulkanFramebuffer> GetFramebuffer( const RenderPass* renderPass )
     {
         return sp_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
              renderPass->GetSpecification().TargetFramebuffer );
@@ -146,8 +146,7 @@ namespace Desert::Graphic::API::Vulkan
         return renderPassBeginInfo;
     }
 
-    Common::BoolResultStr VulkanRendererAPI::BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
-                                                              bool                               clearFrame )
+    Common::BoolResultStr VulkanRendererAPI::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
     {
         const auto window = m_Window.lock();
         if ( !window )
@@ -269,13 +268,13 @@ namespace Desert::Graphic::API::Vulkan
         return nullptr;
     }
 
-    void VulkanRendererAPI::SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                                  const MaterialExecutor*          materialExecutor )
+    void VulkanRendererAPI::SubmitFullscreenQuad( const Pipeline*         pipeline,
+                                                  const MaterialExecutor* materialExecutor )
     {
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
         materialExecutor->Apply();
 
-        const auto& vulkanLayout = std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline );
+        const auto& vulkanLayout = static_cast<const Graphic::API::Vulkan::VulkanPipeline*>( pipeline );
         static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() )
              ->BindDescriptorSets( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
                                    VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
@@ -286,15 +285,14 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDraw( m_CurrentCommandBuffer, 6, 1, 0, 0 );
     }
 
-    void VulkanRendererAPI::RenderMesh( const std::shared_ptr<Pipeline>& pipeline,
-                                        const std::shared_ptr<Mesh>& mesh, const glm::mat4 transform,
+    void VulkanRendererAPI::RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                         const MaterialExecutor* materialExecutor )
     {
 
         uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
         materialExecutor->Apply();
 
-        const auto& vulkanLayout = std::static_pointer_cast<Graphic::API::Vulkan::VulkanPipeline>( pipeline );
+        const auto& vulkanLayout = static_cast<const Graphic::API::Vulkan::VulkanPipeline*>( pipeline );
         static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() )
              ->BindDescriptorSets( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
                                    VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
@@ -317,8 +315,8 @@ namespace Desert::Graphic::API::Vulkan
         const auto& submeshes = mesh->GetSubmeshes();
         for ( const auto& submesh : submeshes )
         {
-            MaterialExecutor* materialExec = (MaterialExecutor*)materialExecutor;
-            auto finalTransform = (transform * submesh.Transform);
+            MaterialExecutor* materialExec   = (MaterialExecutor*)materialExecutor;
+            auto              finalTransform = ( transform * submesh.Transform );
             materialExec->PushConstant( &finalTransform, sizeof( glm::mat4 ) );
 
             const auto& pcBuffer = materialExecutor->GetPushConstantBuffer();

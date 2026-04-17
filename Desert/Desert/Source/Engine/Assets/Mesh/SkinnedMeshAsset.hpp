@@ -40,6 +40,16 @@ namespace Desert::Assets
             return m_Indices;
         }
 
+        virtual const Common::UUID& GetMaterialHandle( const uint32_t submeshIndex ) const override
+        {
+            return m_MaterialAssetHandles[submeshIndex];
+        }
+
+        virtual const std::vector<Common::UUID>& GetMaterialHandles() const override
+        {
+            return m_MaterialAssetHandles;
+        }
+
         const std::vector<Submesh>& GetSubmeshes() const
         {
             return m_Submeshes;
@@ -77,6 +87,7 @@ namespace Desert::Assets
         std::vector<SkinnedVertex> m_Vertices;
         std::vector<Index>         m_Indices;
         std::vector<Submesh>       m_Submeshes;
+        std::vector<Common::UUID>  m_MaterialAssetHandles;
 
         uint64_t m_SkeletonSignature = 0U;
 

@@ -48,7 +48,7 @@ namespace Desert::Editor
         }
 
     private:
-        std::shared_ptr<Mesh> GetMeshComponent( const ECS::StaticMeshComponent& component );
+        Mesh* GetMeshComponent( const ECS::StaticMeshComponent& component );
 
     private:
         void                    HandleObjectPicking();

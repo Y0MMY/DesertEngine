@@ -9,27 +9,43 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/RenderGraphBuilder.hpp>
 
+#include <Engine/Geometry/SkinnedMesh.hpp>
+#include <Engine/Geometry/StaticMesh.hpp>
+
 namespace Desert::Graphic::System
 {
-    struct StaticMeshRenderData
+    struct MeshRenderData
     {
-        std::shared_ptr<Mesh>              Mesh;
-        glm::mat4                          Transform;
-        std::shared_ptr<StaticMaterialPBR> Material;
-        bool                               Outlined = false;
-    };
+        class Mesh* Mesh;
+        glm::mat4   Transform;
 
-    struct SkinnedMeshRenderData
-    {
-        std::shared_ptr<Desert::SkinnedMesh>         Mesh;
-        glm::mat4                                    Transform;
-        std::shared_ptr<Graphic::SkinnedMaterialPBR> Material;
-        std::vector<glm::mat4>                       BoneMatrices;
+        std::vector<Material*> MaterialSlots;
+
+        // optional
+        std::vector<glm::mat4> BoneMatrices;
+
+        bool Outlined = false;
     };
 
     class MeshRenderer final : public RenderSystem
     {
     public:
+        struct StaticMeshRenderData
+        {
+            class Desert::StaticMesh* Mesh;
+            glm::mat4                 Transform;
+            class StaticMaterialPBR*  Material;
+            bool                      Outlined = false;
+        };
+
+        struct SkinnedMeshRenderData
+        {
+            class Desert::SkinnedMesh*         Mesh;
+            glm::mat4                          Transform;
+            class Graphic::SkinnedMaterialPBR* Material;
+            std::vector<glm::mat4>             BoneMatrices;
+        };
+
         using RenderSystem::RenderSystem;
 
         virtual Common::BoolResultStr Initialize() override;
@@ -53,13 +69,7 @@ namespace Desert::Graphic::System
             m_OutlineWidth = width;
         }
 
-        void AddStaticMesh( const std::shared_ptr<Desert::Mesh>&      mesh,
-                            const std::shared_ptr<StaticMaterialPBR>& material, const glm::mat4& transform );
-
-        void AddSkinnedMesh( const std::shared_ptr<Desert::SkinnedMesh>& mesh,
-                             const std::shared_ptr<SkinnedMaterialPBR>& material, const glm::mat4& transform,
-                             const std::vector<glm::mat4>& boneMatrices );
-
+        void SubmitMesh( const MeshRenderData& data );
         void ClearQueues();
 
     private:

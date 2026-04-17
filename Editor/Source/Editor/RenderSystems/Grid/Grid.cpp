@@ -40,7 +40,7 @@ namespace Desert::Editor::Render
                      auto& renderer = Graphic::Renderer::GetInstance();
                      if ( const auto& material = m_Material )
                      {
-                         renderer.SubmitFullscreenQuad( m_Pipeline, material->GetMaterialExecutor() );
+                         renderer.SubmitFullscreenQuad( m_Pipeline.get(), material->GetMaterialExecutor() );
                      }
                  }
              },
@@ -52,7 +52,7 @@ namespace Desert::Editor::Render
 
     bool Grid::CreateGridGeometry()
     {
-        //m_MeshGrid = std::make_shared<Desert::Mesh>();
+        // m_MeshGrid = std::make_shared<Desert::Mesh>();
         return true;
     }
 

@@ -1,6 +1,8 @@
 #pragma once
 
-#include "Mesh.hpp"
+#include "SkinnedMesh.hpp"
+#include "StaticMesh.hpp"
+#include "DynamicMesh.hpp"
 
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
@@ -11,6 +13,20 @@ namespace Desert::Graphic
     class MeshFactory
     {
     public:
+        static std::shared_ptr<Mesh> CreateProcedural( const std::vector<Vertex>&  vertices,
+                                                       const std::vector<Index>&   indices,
+                                                       const std::vector<Submesh>& submeshes )
+        {
+            auto mesh = std::make_shared<DynamicMesh>( vertices, indices, submeshes );
+
+            if ( !mesh->Invalidate() )
+            {
+                DESERT_VERIFY( false );
+            }
+
+            return mesh;
+        }
+
         static std::shared_ptr<Mesh> Create( const std::shared_ptr<Assets::MeshAsset>& asset )
         {
             if ( !asset )

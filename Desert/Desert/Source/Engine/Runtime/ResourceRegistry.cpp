@@ -32,4 +32,10 @@ namespace Desert::Runtime
         return &imageService;
     }
 
+    MaterialService* ResourceRegistry::GetMaterialService()
+    {
+        static MaterialService materialService;
+        return &materialService;
+    }
+
 } // namespace Desert::Runtime

@@ -25,6 +25,7 @@ namespace Desert::Assets
         Skybox,
         Shader,
         Skeleton,
-        Animation
+        Animation,
+        Prefab,
     };
 } // namespace Desert::Assets

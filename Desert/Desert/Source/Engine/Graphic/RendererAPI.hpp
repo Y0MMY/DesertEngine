@@ -32,14 +32,13 @@ namespace Desert::Graphic
         virtual Common::BoolResultStr EndFrame()                                                       = 0;
         virtual Common::BoolResultStr PrepareNextFrame()                                               = 0;
         virtual Common::BoolResultStr PresentFinalImage()                                              = 0;
-        virtual Common::BoolResultStr BeginRenderPass( const std::shared_ptr<RenderPass>& renderPass,
-                                                       bool                               clearFrame )                               = 0;
+        virtual Common::BoolResultStr BeginRenderPass( const RenderPass* renderPass, bool clearFrame ) = 0;
         virtual Common::BoolResultStr BeginSwapChainRenderPass()                                       = 0;
         virtual Common::BoolResultStr EndRenderPass()                                                  = 0;
-        virtual void RenderMesh( const std::shared_ptr<Pipeline>& pipeline, const std::shared_ptr<Mesh>& mesh,
-                                 const glm::mat4 transform, const MaterialExecutor* materialExecutor ) = 0;
-        virtual void SubmitFullscreenQuad( const std::shared_ptr<Pipeline>& pipeline,
-                                           const MaterialExecutor*          materialExecutor )                  = 0;
+        virtual void RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
+                                 const MaterialExecutor* materialExecutor )                            = 0;
+        virtual void SubmitFullscreenQuad( const Pipeline*         pipeline,
+                                           const MaterialExecutor* materialExecutor )                  = 0;
 
         virtual void                         ResizeWindowEvent( uint32_t width, uint32_t height ) = 0;
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const                      = 0;

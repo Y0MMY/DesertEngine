@@ -8,8 +8,50 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/compatibility.hpp>
 
+#include <Common/Core/UUID.hpp>
+#include <Common/Core/Math/AABB.hpp>
+
 namespace rfl
 {
+    template <>
+    struct Reflector<Common::Math::AABB>
+    {
+        struct ReflType
+        {
+            glm::vec3 Min;
+            glm::vec3 Max;
+        };
+
+        static inline Common::Math::AABB to( const ReflType& r ) noexcept
+        {
+            Common::Math::AABB aabb;
+            aabb.Min = r.Min;
+            aabb.Max = r.Max;
+            return aabb;
+        }
+
+        static inline ReflType from( const Common::Math::AABB& aabb )
+        {
+            return ReflType{ aabb.Min, aabb.Max };
+        }
+    };
+
+    template <>
+    struct Reflector<Common::UUID>
+    {
+        using ReflType = uint64_t;
+
+        static inline Common::UUID to( const ReflType& value ) noexcept
+        {
+            return Common::UUID{ value };
+        }
+
+        static inline ReflType from( const Common::UUID& value )
+        {
+            return static_cast<uint64_t>( value );
+        }
+    };
+
     template <>
     struct Reflector<glm::mat4>
     {
@@ -79,6 +121,22 @@ namespace rfl
         static inline ReflType from( const glm::vec3& v )
         {
             return { v.x, v.y, v.z };
+        }
+    };
+
+    template <>
+    struct Reflector<glm::vec4>
+    {
+        using ReflType = std::array<float, 4>;
+
+        static inline glm::vec4 to( const ReflType& arr ) noexcept
+        {
+            return glm::vec4( arr[0], arr[1], arr[2], arr[3] );
+        }
+
+        static inline ReflType from( const glm::vec4& v )
+        {
+            return { v.x, v.y, v.z, v.w };
         }
     };
 

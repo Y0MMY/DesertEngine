@@ -24,6 +24,18 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanVertexBuffer::SetData( void* data, uint32_t size, uint32_t offset /*= 0 */ )
     {
+        if ( m_Usage != BufferUsage::Dynamic )
+        {
+            return;
+        }
+
+        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                              ->GetVulkanAllocator()
+                              .get();
+
+        void* dst = allocator->MapMemory( m_MemoryAllocation );
+        memcpy( (uint8_t*)dst + offset, data, size );
+        allocator->UnmapMemory( m_MemoryAllocation );
     }
 
     void VulkanVertexBuffer::Use( BindUsage use /*= BindUsage::Bind */ ) const
@@ -47,6 +59,37 @@ namespace Desert::Graphic::API::Vulkan
         auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
                               ->GetVulkanAllocator()
                               .get();
+
+        if ( m_VulkanBuffer )
+        {
+            allocator->RT_DestroyBuffer( m_VulkanBuffer, m_MemoryAllocation );
+            m_VulkanBuffer     = nullptr;
+            m_MemoryAllocation = nullptr;
+        }
+
+        if ( m_Usage == BufferUsage::Dynamic )
+        {
+            VkBufferCreateInfo bufferInfo =
+                 CreateVertexBufferInfo( m_Size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_SHARING_MODE_EXCLUSIVE );
+
+            auto allocation = allocator->RT_AllocateBuffer( "DynamicVertexBuffer", bufferInfo,
+                                                            VMA_MEMORY_USAGE_CPU_TO_GPU, m_VulkanBuffer );
+
+            if ( !allocation.IsSuccess() )
+                return Common::MakeError<bool>( allocation.GetError() );
+
+            m_MemoryAllocation = allocation.GetValue();
+
+            // initial upload
+            if ( m_StorageBuffer.Data )
+            {
+                void* dst = allocator->MapMemory( m_MemoryAllocation );
+                memcpy( dst, m_StorageBuffer.Data, m_Size );
+                allocator->UnmapMemory( m_MemoryAllocation );
+            }
+
+            return Common::MakeSuccess( true );
+        }
 
         if ( m_StorageBuffer.Data == nullptr ) [[unlikely]]
         {

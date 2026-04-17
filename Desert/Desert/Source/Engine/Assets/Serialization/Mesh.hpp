@@ -6,6 +6,9 @@
 #include <glm/glm.hpp>
 #include <Common/Core/Math/AABB.hpp>
 
+#include <Common/Core/UUID.hpp>
+#include <Engine/Assets/Common.hpp>
+
 namespace Desert::Assets::Serialization
 {
     struct StaticVertexData
@@ -43,6 +46,8 @@ namespace Desert::Assets::Serialization
         uint32_t           IndexCount;
         glm::mat4          Transform;
         Common::Math::AABB BoundingBox;
+
+        Common::UUID MaterialHandle;
     };
 
     struct MeshAssetData

@@ -198,4 +198,18 @@ namespace Desert::Core
         m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }
 
+    void Scene::Attach( ECS::Entity parent, ECS::Entity child )
+    {
+        auto& parentRel = parent.GetComponent<ECS::RelationshipComponent>();
+        auto& childRel  = child.GetComponent<ECS::RelationshipComponent>();
+
+        if ( childRel.Parent != entt::null )
+        {
+          //  Detach( child );
+        }
+
+        childRel.Parent = parent.GetHandle();
+        parentRel.Children.push_back( child.GetHandle() );
+    }
+
 } // namespace Desert::Core

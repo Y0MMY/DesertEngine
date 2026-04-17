@@ -32,20 +32,6 @@ namespace Desert::Graphic::System
         m_OutlineMaterial.reset();
     }
 
-    void MeshRenderer::AddStaticMesh( const std::shared_ptr<Desert::Mesh>&      mesh,
-                                      const std::shared_ptr<StaticMaterialPBR>& material,
-                                      const glm::mat4&                          transform )
-    {
-        m_StaticQueue.emplace_back( mesh, transform, material, false );
-    }
-
-    void MeshRenderer::AddSkinnedMesh( const std::shared_ptr<Desert::SkinnedMesh>& mesh,
-                                       const std::shared_ptr<SkinnedMaterialPBR>&  material,
-                                       const glm::mat4& transform, const std::vector<glm::mat4>& boneMatrices )
-    {
-        m_SkinnedQueue.emplace_back( mesh, transform, material, boneMatrices );
-    }
-
     void MeshRenderer::ClearQueues()
     {
         m_StaticQueue.clear();
@@ -73,7 +59,7 @@ namespace Desert::Graphic::System
 
         if ( m_OutlineDraw )
         {
-            //RegisterOutlinePass( builder );
+            // RegisterOutlinePass( builder );
         }
     }
 
@@ -92,7 +78,8 @@ namespace Desert::Graphic::System
             data.Material->Bind(
                  { camera, data.Transform, m_SceneRenderer->GetDirectionLights(), pointLights, textures } );
 
-            renderer.RenderMesh( m_StaticPipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
+            renderer.RenderMesh( m_StaticPipeline.get(), data.Mesh, data.Transform,
+                                 data.Material->GetMaterialExecutor() );
         }
     }
 
@@ -111,7 +98,8 @@ namespace Desert::Graphic::System
             data.Material->Bind( { camera, data.Transform, m_SceneRenderer->GetDirectionLights(), pointLights,
                                    textures, data.BoneMatrices } );
 
-            renderer.RenderMesh( m_SkinnedPipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
+            renderer.RenderMesh( m_SkinnedPipeline.get(), data.Mesh, data.Transform,
+                                 data.Material->GetMaterialExecutor() );
         }
     }
 
@@ -269,6 +257,41 @@ namespace Desert::Graphic::System
                          },
                          m_OutlinePipeline->GetSpecification(), targetFb,
                          { RenderPassDependency( RenderPhase::Geometry ) } );
+    }
+
+    void MeshRenderer::SubmitMesh( const MeshRenderData& data )
+    {
+        if ( !data.Mesh )
+        {
+            return;
+        }
+
+        switch ( data.Mesh->GetType() )
+        {
+            case MeshType::Static:
+            {
+                StaticMeshRenderData staticData;
+                staticData.Mesh      = static_cast<StaticMesh*>( data.Mesh );
+                staticData.Transform = data.Transform;
+                staticData.Material  = static_cast<StaticMaterialPBR*>( data.MaterialSlots[0] );
+                staticData.Outlined  = data.Outlined;
+
+                m_StaticQueue.push_back( staticData );
+                break;
+            }
+
+            case MeshType::Skinned:
+            {
+                SkinnedMeshRenderData skinnedData;
+                skinnedData.Mesh         = static_cast<SkinnedMesh*>( data.Mesh );
+                skinnedData.Transform    = data.Transform;
+                skinnedData.Material     = static_cast<SkinnedMaterialPBR*>( data.MaterialSlots[0] );
+                skinnedData.BoneMatrices = data.BoneMatrices;
+
+                m_SkinnedQueue.push_back( skinnedData );
+                break;
+            }
+        }
     }
 
 } // namespace Desert::Graphic::System

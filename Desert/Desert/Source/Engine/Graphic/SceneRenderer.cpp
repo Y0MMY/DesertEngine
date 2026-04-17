@@ -97,25 +97,18 @@ namespace Desert::Graphic
         // renderer.EndRenderPass();
     }
 
-    void SceneRenderer::AddStaticMesh( const std::shared_ptr<Mesh>&              mesh,
-                                       const std::shared_ptr<StaticMaterialPBR>& material,
-                                       const glm::mat4&                          transform )
+    void SceneRenderer::SubmitMesh( const Mesh* mesh, const std::vector<Material*> materialSlots,
+                                    const glm::mat4& transform, const RenderSubmissionExtra& extra )
     {
-        if ( !mesh || !material )
+        if ( !mesh || materialSlots.empty() )
+        {
             return;
+        }
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->AddStaticMesh( mesh, material, transform );
-    }
-
-    void SceneRenderer::AddSkinnedMesh( const std::shared_ptr<Desert::SkinnedMesh>&         mesh,
-                                        const std::shared_ptr<Graphic::SkinnedMaterialPBR>& material,
-                                        const glm::mat4& transform, const std::vector<glm::mat4>& boneMatrices )
-    {
-        if ( !mesh || !material || boneMatrices.empty() )
-            return;
-
-        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->AddSkinnedMesh( mesh, material, transform, boneMatrices );
+             ->SubmitMesh( { .Mesh          = (Mesh*)mesh,
+                             .Transform     = transform,
+                             .MaterialSlots = materialSlots,
+                             .BoneMatrices  = extra.BoneMatrices } );
     }
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
@@ -188,7 +181,7 @@ namespace Desert::Graphic
                  .DebugName         = pass.Name,
             } );
 
-            renderer.BeginRenderPass( renderPass );
+            renderer.BeginRenderPass( renderPass.get() );
 
             pass.ExecuteFunc();
 
@@ -205,7 +198,7 @@ namespace Desert::Graphic
              .DebugName         = "ClearTargetFramebuffer",
         } );
 
-        renderer.BeginRenderPass( clearRenderPass, true );
+        renderer.BeginRenderPass( clearRenderPass.get(), true );
         renderer.EndRenderPass();
     }
 
