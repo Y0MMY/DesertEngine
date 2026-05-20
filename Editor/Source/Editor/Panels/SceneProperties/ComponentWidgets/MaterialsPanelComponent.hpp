@@ -13,7 +13,7 @@ namespace Desert::Editor
     class MaterialComponentWidget
     {
     public:
-        MaterialComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager );
+        MaterialComponentWidget( const Assets::AssetManager* assetManager );
 
         void Render( ECS::Entity& entity );
 
@@ -24,7 +24,7 @@ namespace Desert::Editor
 
     private:
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
-        std::weak_ptr<Assets::AssetManager>   m_AssetManager;
+        const Assets::AssetManager*           m_AssetManager;
     };
 
 } // namespace Desert::Editor

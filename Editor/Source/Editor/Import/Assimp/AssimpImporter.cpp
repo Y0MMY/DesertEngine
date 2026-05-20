@@ -15,6 +15,8 @@
 
 #include <Engine/Animation/Skeleton.hpp>
 
+#include <Editor/Import/ImportManager.hpp>
+
 struct aiNode;
 struct aiAnimation;
 struct aiNodeAnim;
@@ -194,8 +196,8 @@ namespace Desert::Editor
         return def;
     }
 
-    static std::vector<MaterialAssetData> ExtractMaterials( const aiScene*               scene,
-                                                            const std::filesystem::path& basePath )
+    static std::vector<MaterialAssetData>
+    ExtractMaterials( const aiScene* scene, const std::filesystem::path& basePath, ImportManager& manager )
     {
         std::vector<MaterialAssetData> result;
 
@@ -219,8 +221,21 @@ namespace Desert::Editor
                 if ( mat->GetTexture( type, 0, &path ) != AI_SUCCESS )
                     return std::nullopt;
 
-                TextureRef ref;
-                ref.Path = ( basePath.parent_path() / path.C_Str() ).string();
+                TextureRef            ref;
+                std::filesystem::path assimpPath = path.C_Str();
+                std::filesystem::path finalPath;
+
+                if ( !assimpPath.is_absolute() )
+                {
+                    finalPath = ( basePath / assimpPath ).lexically_normal();
+                }
+                else
+                {
+                    finalPath = basePath / assimpPath.filename();
+                }
+
+                ref.Path   = finalPath.string();
+                ref.Handle = manager.ImportTexture( ref.Path );
                 return ref;
             };
 
@@ -243,14 +258,15 @@ namespace Desert::Editor
         return result;
     }
 
-    static ImportResult ProcessScene( const aiScene* scene )
+    static ImportResult ProcessScene( const aiScene* scene, ImportManager& manager, const std::string& assetName )
     {
         ImportResult result;
 
         MeshAssetData     meshData;
         SkeletonAssetData skeletonData;
 
-        const auto materialData = ExtractMaterials( scene, std::filesystem::path( "Resources" ) );
+        const auto materialData =
+             ExtractMaterials( scene, ( std::filesystem::path( "Resources/Textures/" ) / assetName ), manager );
 
         std::unordered_map<std::string, uint32_t> boneMapping;
 
@@ -502,7 +518,7 @@ namespace Desert::Editor
         return result;
     }
 
-    ImportResult AssimpImporter::Import( const std::filesystem::path& path )
+    ImportResult AssimpImporter::Import( const std::filesystem::path& path, ImportManager& manager )
     {
         static ScopedAssimpLogger logger;
         Assimp::Importer          importer;
@@ -518,7 +534,7 @@ namespace Desert::Editor
             throw std::runtime_error( "Failed to import: " + path.string() );
         }
 
-        return ProcessScene( scene );
+        return ProcessScene( scene, manager, path.stem().string() );
     }
 
 } // namespace Desert::Editor

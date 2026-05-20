@@ -38,7 +38,7 @@ namespace Desert::Editor
 
         bool valid = false;
 
-        if (m_AssetManager)
+        if ( m_AssetManager )
         {
             auto asset = m_AssetManager->FindByHandle<Assets::PrefabAsset>( prefab.Prefab );
             valid      = ( asset != nullptr );
@@ -64,7 +64,6 @@ namespace Desert::Editor
 
         if ( ImGui::Button( "Select Prefab" ) )
         {
-            // TODO: открыть Asset Picker
             // prefab.Prefab = selectedHandle;
         }
 
@@ -81,21 +80,18 @@ namespace Desert::Editor
 
         if ( valid && ImGui::Button( "Reapply Prefab" ) )
         {
-            auto scene = entity.GetScene();
+            /* auto scene = entity.GetScene();
 
-            auto asset = assetManager->FindByHandle<Assets::PrefabAsset>( prefab.Prefab );
+             auto asset = assetManager->FindByHandle<Assets::PrefabAsset>( prefab.Prefab );
 
-            if ( scene && asset )
-            {
-                std::unordered_set<Common::UUID> stack;
+             if ( scene && asset )
+             {
+                 std::unordered_set<Common::UUID> stack;
 
-                // Удаляем старую сущность (или детей)
-                // ?? зависит от твоей архитектуры
-                scene->DestroyEntity( entity );
+                 scene->DestroyEntity( entity );
 
-                // Инстансим заново
-                Runtime::Factory::PrefabFactory::Instantiate( *asset, *scene, *assetManager, stack );
-            }
+                 Runtime::Factory::PrefabFactory::Instantiate( *asset, *scene, *assetManager, stack );
+             }*/
         }
 
         // =========================

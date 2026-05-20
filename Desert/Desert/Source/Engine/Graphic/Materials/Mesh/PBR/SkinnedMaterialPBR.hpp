@@ -16,13 +16,13 @@ namespace Desert::Graphic
 
             ShaderProtocols::DirectionLight DirectionLights;
             ShaderProtocols::PointLight     PointLights;
-            ShaderProtocols::PBRTexturesUB               PBREnvTextures;
+            ShaderProtocols::PBRTexturesUB  PBREnvTextures;
 
             ShaderProtocols::SkinnedUB SkinnedUB;
         };
 
-        SkinnedMaterialPBR( const std::shared_ptr<Assets::MaterialAsset>& asset )
-             : Material( "SkinnedMaterialPBR", "SkinnedMeshPBR" ), MaterialPBRBase( asset )
+        SkinnedMaterialPBR( const MaterialPBRBase::PBRMaterialData& data )
+             : Material( "SkinnedMaterialPBR", "SkinnedMeshPBR" ), MaterialPBRBase( data )
         {
         }
 

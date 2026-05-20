@@ -19,7 +19,7 @@ namespace Desert::Graphic::System
         class Mesh* Mesh;
         glm::mat4   Transform;
 
-        std::vector<Material*> MaterialSlots;
+        std::vector<MaterialInstance*> MaterialSlots;
 
         // optional
         std::vector<glm::mat4> BoneMatrices;
@@ -32,10 +32,10 @@ namespace Desert::Graphic::System
     public:
         struct StaticMeshRenderData
         {
-            class Desert::StaticMesh* Mesh;
-            glm::mat4                 Transform;
-            class StaticMaterialPBR*  Material;
-            bool                      Outlined = false;
+            class Desert::StaticMesh* Mesh             = nullptr;
+            glm::mat4                 Transform        = glm::mat4( 1.0f );
+            class MaterialInstance*   MaterialInstance = nullptr;
+            bool                      Outlined         = false;
         };
 
         struct SkinnedMeshRenderData
@@ -83,6 +83,9 @@ namespace Desert::Graphic::System
 
         ShaderProtocols::PBRTexturesUB PreparePBRTextures() const;
 
+        void UpdateGlobalUniforms( const Core::Camera* camera, const ShaderProtocols::PointLight& pointLights,
+                                   const ShaderProtocols::DirectionLight& dirLights );
+
     private:
         // Static
         std::shared_ptr<Pipeline> m_StaticPipeline;
@@ -103,5 +106,10 @@ namespace Desert::Graphic::System
         bool      m_OutlineDraw  = true;
         glm::vec3 m_OutlineColor = glm::vec3( 1.0f, 0.5f, 0.0f );
         float     m_OutlineWidth = 0.005f;
+
+    private:
+        // fallbacks
+        std::unique_ptr<Graphic::StaticMaterialPBR>  m_StaticMaterialFallback;
+        std::unique_ptr<Graphic::SkinnedMaterialPBR> m_SkinnedMaterialFallback;
     };
 } // namespace Desert::Graphic::System

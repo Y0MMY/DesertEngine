@@ -8,8 +8,7 @@
 namespace Desert::Graphic
 {
 
-    MaterialPBRBase::MaterialPBRBase( const std::shared_ptr<Assets::MaterialAsset>& asset )
-         : m_BaseMaterial( asset )
+    MaterialPBRBase::MaterialPBRBase( const PBRMaterialData& data ) : m_RuntimeData( data )
     {
     }
 
@@ -74,36 +73,47 @@ namespace Desert::Graphic
 
     void MaterialPBRBase::UpdateTextures( const MaterialExecutor* executor )
     {
-
-        auto GetFinalTexture = [&]( Assets::TextureAsset::Type type )
+        auto resolveTexture = [&]( Assets::TextureAsset::Type type ) -> Image2D*
         {
-            const auto& baseMaterial = m_BaseMaterial.lock();
-            // Then check base material
-            if ( baseMaterial )
+            // 1. runtime override
+            switch ( type )
             {
-               // return baseMaterial->GetTexture( type );
+                case Assets::TextureAsset::Type::Albedo:
+                    return m_RuntimeData.Albedo;
+                case Assets::TextureAsset::Type::Normal:
+                    return m_RuntimeData.Normal;
+                case Assets::TextureAsset::Type::Metallic:
+                    return m_RuntimeData.Metallic;
+                case Assets::TextureAsset::Type::Roughness:
+                    return m_RuntimeData.Roughness;
+                case Assets::TextureAsset::Type::AO:
+                    return m_RuntimeData.AO;
+                case Assets::TextureAsset::Type::Emissive:
+                    return m_RuntimeData.Emissive;
             }
 
-            return (Assets::TextureAsset*)nullptr;
+            
+            return nullptr;
         };
 
-        auto updateTexture = [&]( Assets::TextureAsset::Type type, const std::string& name )
+        auto bind = [&]( Assets::TextureAsset::Type type, const std::string& name )
         {
-            //auto texture = GetFinalTexture( type );
-            //{
-            //    if ( auto texProp = executor->GetTexture2DProperty( name ) )
-            //    {
-            //        // texProp->SetImage( texture-> );
-            //    }
-            //}
+            auto tex = resolveTexture( type );
+            if ( !tex )
+                return;
+
+            if ( auto prop = executor->GetTexture2DProperty( name ) )
+            {
+                prop->SetImage( tex );
+            }
         };
 
-        updateTexture( Assets::TextureAsset::Type::Albedo, "u_AlbedoTexture" );
-        updateTexture( Assets::TextureAsset::Type::Normal, "u_NormalTexture" );
-        updateTexture( Assets::TextureAsset::Type::Metallic, "metallicMap" );
-        updateTexture( Assets::TextureAsset::Type::Roughness, "roughnessMap" );
-        updateTexture( Assets::TextureAsset::Type::AO, "aoMap" );
-        updateTexture( Assets::TextureAsset::Type::Emissive, "emissiveMap" );
+        bind( Assets::TextureAsset::Type::Albedo, "u_AlbedoTexture" );
+        bind( Assets::TextureAsset::Type::Normal, "u_NormalTexture" );
+        bind( Assets::TextureAsset::Type::Metallic, "metallicMap" );
+        bind( Assets::TextureAsset::Type::Roughness, "roughnessMap" );
+        bind( Assets::TextureAsset::Type::AO, "aoMap" );
+        bind( Assets::TextureAsset::Type::Emissive, "emissiveMap" );
     }
 
 } // namespace Desert::Graphic

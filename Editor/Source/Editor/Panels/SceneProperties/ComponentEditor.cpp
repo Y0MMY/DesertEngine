@@ -29,7 +29,8 @@ namespace Desert::Editor
     void ComponentEditor::RegisterDefaultComponents( const Animation::AnimationLibrary* animationLibrary )
     {
         RegisterComponent( []() { return std::make_unique<TransformComponentWidget>(); } );
-        RegisterComponent( [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager ); } );
+        RegisterComponent(
+             [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager.lock().get() ); } );
         RegisterComponent(
              [this, animationLibrary]()
              {

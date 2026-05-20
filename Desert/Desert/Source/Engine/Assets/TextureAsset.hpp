@@ -5,6 +5,8 @@
 
 #include <Engine/Assets/AssetManager.hpp>
 
+#include <Engine/Core/Formats/ImageFormat.hpp>
+
 namespace Desert::Assets
 {
     class TextureAsset : public AssetBase
@@ -23,7 +25,7 @@ namespace Desert::Assets
             Skybox
         };
 
-        explicit TextureAsset( AssetPriority priority, const Common::Filepath& filepath, Type type );
+        explicit TextureAsset( AssetPriority priority, const Common::Filepath& filepath /*, Type type*/ );
 
         virtual Common::BoolResultStr Load() override;
 
@@ -34,14 +36,19 @@ namespace Desert::Assets
             return m_IsReadyForUse;
         }
 
-        const std::shared_ptr<Graphic::Texture2D>& GetTexture() const
-        {
-            return m_Texture;
-        }
-
         Type GetType() const
         {
             return m_Type;
+        }
+
+        const auto& GetSourcePath() const
+        {
+            return m_SourcePath;
+        }
+
+        const auto& GetHandle() const
+        {
+            return m_Handle;
         }
 
         static AssetTypeID GetTypeID()
@@ -50,9 +57,17 @@ namespace Desert::Assets
         }
 
     private:
-        Type                                m_Type;
-        bool                                m_IsReadyForUse = false;
-        std::shared_ptr<Graphic::Texture2D> m_Texture;
+        Type         m_Type;
+        bool         m_IsReadyForUse = false;
+        Common::UUID m_Handle;
+        std::string  m_SourcePath;
+        std::string  m_CookedPath;
+
+        uint32_t m_Width;
+        uint32_t m_Height;
+        uint32_t m_Channels;
+
+        Desert::Core::Formats::ImageFormat m_Format;
     };
 
 } // namespace Desert::Assets

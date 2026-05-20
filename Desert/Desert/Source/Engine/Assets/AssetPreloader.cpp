@@ -4,6 +4,7 @@
 #include "Mesh/StaticMeshAsset.hpp"
 #include "Mesh/SkinnedMeshAsset.hpp"
 #include "Mesh/AnimationAsset.hpp"
+#include "TextureAsset.hpp"
 
 namespace Desert::Assets
 {
@@ -12,6 +13,7 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_SKELETON_EXTENSIONS     = { ".skeleton" };
     constexpr std::array<std::string_view, 1> SUPPORTED_MATERIAL_EXTENSIONS     = { ".mat" };
     constexpr std::array<std::string_view, 1> SUPPORTED_ANIMATION_EXTENSIONS    = { ".anim" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_TEXTURE_EXTENSIONS      = { ".tex" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS       = { ".hdr" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SHADERS_EXTENSIONS      = { ".shader" };
 
@@ -83,6 +85,9 @@ namespace Desert::Assets
         ProcessAssetFiles<StaticMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                             SUPPORTED_STATIC_MESH_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
+        ProcessAssetFiles<TextureAsset>( "Cooked/Textures/", false, SUPPORTED_TEXTURE_EXTENSIONS, m_AssetManager,
+                                         AssetPriority::Low );
+
         ProcessAssetFiles<AnimationAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                            SUPPORTED_ANIMATION_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
@@ -101,6 +106,11 @@ namespace Desert::Assets
 
         if ( auto manager = m_AssetManager.lock() )
         {
+            for ( const auto& [handle, textureAsset] : manager->FindAllByType<Assets::TextureAsset>() )
+            {
+                Runtime::ResourceRegistry::GetTextureService()->Register( textureAsset );
+            }
+
             for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
             {
                 Runtime::ResourceRegistry::GetMeshService()->Register( meshAsset );

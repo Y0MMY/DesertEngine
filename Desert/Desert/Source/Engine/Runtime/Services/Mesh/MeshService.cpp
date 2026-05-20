@@ -15,6 +15,13 @@ namespace Desert::Runtime
         return BOOLSUCCESS;
     }
 
+    Assets::AssetHandle MeshService::RegisterProcedural( const std::shared_ptr<Mesh>& mesh )
+    {
+        Assets::AssetHandle handle{};
+        m_Meshes[handle] = mesh;
+        return handle;
+    }
+
     Desert::Mesh* MeshService::Get( const Assets::AssetHandle& handle ) const
     {
         auto it = m_Meshes.find( handle );

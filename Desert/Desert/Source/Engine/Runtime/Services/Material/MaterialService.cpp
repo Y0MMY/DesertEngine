@@ -12,7 +12,7 @@ namespace Desert::Runtime
         }
 
         auto handle   = materialAsset->GetMetadata().Handle;
-        auto material = Graphic::MaterialFactory::Create( materialAsset );
+        auto material = Graphic::MaterialFactory::CreateMaterial( materialAsset.get() );
 
         m_Materials[handle] = material;
 

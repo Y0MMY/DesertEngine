@@ -2,12 +2,14 @@
 
 #include "IComponentWidget.hpp"
 
+#include <Editor/Core/PrimitiveType.hpp>
+
 namespace Desert::Editor
 {
     class StaticMeshComponentWidget final : public ComponentWidget<ECS::StaticMeshComponent>
     {
     public:
-        StaticMeshComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager );
+        StaticMeshComponentWidget( const Assets::AssetManager* assetManager );
 
         bool CanRemove() const override
         {
@@ -21,6 +23,13 @@ namespace Desert::Editor
         void RenderAssetSection( ECS::StaticMeshComponent& staticMesh );
 
     private:
-        const std::weak_ptr<Assets::AssetManager> m_AssetManager;
+        void        SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle );
+        void        SetPrimitive( ECS::StaticMeshComponent& staticMesh, PrimitiveType type );
+        bool        IsPrimitiveSelected( const ECS::StaticMeshComponent& staticMesh, PrimitiveType type ) const;
+        std::string GetPrimitiveName( const ECS::StaticMeshComponent& staticMesh ) const;
+        void        RenderPrimitiveInfo( ECS::StaticMeshComponent& staticMesh );
+
+    private:
+        const Assets::AssetManager* m_AssetManager;
     };
 } // namespace Desert::Editor

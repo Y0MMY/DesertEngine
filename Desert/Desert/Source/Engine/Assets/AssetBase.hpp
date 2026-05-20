@@ -22,7 +22,9 @@ namespace Desert::Assets
             return m_Metadata;
         }
 
-        virtual void ResolveDependencies(AssetManager& manager) {}
+        virtual void ResolveDependencies( AssetManager& manager )
+        {
+        }
 
         virtual Common::BoolResultStr Load()   = 0;
         virtual Common::BoolResultStr Unload() = 0;
@@ -33,6 +35,7 @@ namespace Desert::Assets
              : m_Metadata{ Common::UUID(), filepath, priority, assetType }
         {
         }
+
     protected:
         AssetMetadata m_Metadata;
     };

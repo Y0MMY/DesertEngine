@@ -52,6 +52,7 @@ namespace Desert::Editor
 
     ImportManager::ImportManager()
     {
+        m_TextureImporter    = std::make_unique<TextureImporter>();
         m_Importers[".fbx"]  = std::make_unique<AssimpImporter>();
         m_Importers[".gltf"] = std::make_unique<AssimpImporter>();
         m_Importers[".glb"]  = std::make_unique<AssimpImporter>();
@@ -63,7 +64,7 @@ namespace Desert::Editor
 
         if ( m_Importers.contains( ext ) )
         {
-            auto result = m_Importers[ext]->Import( path );
+            auto result = m_Importers[ext]->Import( path, *this );
 
             CreateAssetsFromImport( result, path );
         }
@@ -146,6 +147,11 @@ namespace Desert::Editor
     {
         auto path = BuildCookedPath( sourcePath, "_" + data.Name + ".mat" );
         WriteJsonToFile( data, path );
+    }
+
+    Common::UUID ImportManager::ImportTexture( const std::filesystem::path& path )
+    {
+        return m_TextureImporter->Import( path );
     }
 
 } // namespace Desert::Editor

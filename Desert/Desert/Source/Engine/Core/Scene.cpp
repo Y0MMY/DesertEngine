@@ -79,6 +79,7 @@ namespace Desert::Core
         entity.AddComponent<ECS::TagComponent>( std::move( entityName ) );
         entity.AddComponent<ECS::UUIDComponent>();
         entity.AddComponent<ECS::TransformComponent>();
+        entity.AddComponent<ECS::RelationshipComponent>();
 
         m_EntitysMap[entity.GetComponent<ECS::UUIDComponent>().UUID] = m_Entitys.size() - 1;
 
@@ -94,6 +95,7 @@ namespace Desert::Core
         entity.AddComponent<ECS::TagComponent>( name );
         entity.AddComponent<ECS::UUIDComponent>( uuid );
         entity.AddComponent<ECS::TransformComponent>();
+        entity.AddComponent<ECS::RelationshipComponent>();
 
         m_EntitysMap[uuid] = m_Entitys.size() - 1;
 
@@ -205,7 +207,7 @@ namespace Desert::Core
 
         if ( childRel.Parent != entt::null )
         {
-          //  Detach( child );
+            //  Detach( child );
         }
 
         childRel.Parent = parent.GetHandle();

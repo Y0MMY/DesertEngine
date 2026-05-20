@@ -8,7 +8,6 @@
 #include <glm/gtx/quaternion.hpp>
 
 #include <Engine/Geometry/Mesh.hpp>
-#include <Engine/Geometry/PrimitiveType.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
@@ -43,26 +42,9 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        enum class Type : uint8_t
-        {
-            None,
-            Asset,
-            Primitive
-        };
-        std::optional<Assets::AssetHandle> MeshHandle     = std::nullopt;
-        std::optional<PrimitiveType>       PrimitiveShape = std::nullopt; // TODO: std::variant
-
+        Assets::AssetHandle              MeshHandle;
         std::vector<Assets::AssetHandle> MaterialSlots;
-        bool                        OutlineDraw = false;
-
-        Type GetMeshType() const
-        {
-            if ( MeshHandle.has_value() )
-                return Type::Asset;
-            if ( PrimitiveShape.has_value() )
-                return Type::Primitive;
-            return Type::None;
-        }
+        bool                             OutlineDraw = false;
     };
 
     struct SkinnedMeshComponent

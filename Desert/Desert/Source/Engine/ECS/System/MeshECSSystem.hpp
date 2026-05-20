@@ -3,7 +3,6 @@
 #include "System.hpp"
 
 #include <Engine/ECS/Components.hpp>
-#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Animation/Animator.hpp>
 
@@ -30,36 +29,15 @@ namespace Desert::ECS
                      [&]( entt::entity entity, const StaticMeshComponent& mesh,
                           const TransformComponent& transform )
                      {
-                         Desert::Mesh* targetMesh = nullptr;
+                         if ( !mesh.MeshHandle || mesh.MaterialSlots.empty() )
+                             return;
 
-                         switch ( mesh.GetMeshType() )
-                         {
-                             case StaticMeshComponent::Type::Primitive:
-                             {
-                                 if ( !mesh.PrimitiveShape )
-                                     return;
+                         Desert::Mesh* targetMesh =
+                              Runtime::ResourceRegistry::GetMeshService()->Get( mesh.MeshHandle );
 
-                                 targetMesh = PrimitiveMeshFactory::GetPrimitive( *mesh.PrimitiveShape );
-                                 break;
-                             }
+                         if ( !targetMesh )
+                             return;
 
-                             case StaticMeshComponent::Type::Asset:
-                             {
-                                 if ( !mesh.MeshHandle || mesh.MaterialSlots.empty() )
-                                     return;
-
-                                 targetMesh = Runtime::ResourceRegistry::GetMeshService()->Get( *mesh.MeshHandle );
-
-                                 if ( !targetMesh )
-                                     return;
-
-                                 break;
-                             }
-
-                             case StaticMeshComponent::Type::None:
-                             default:
-                                 return;
-                         }
                          // TODO: avoid reallocating and rebuilding this vector every frame.
                          // Cache resolved material pointers per entity (or per component) and update only when
                          // MaterialSlots change.

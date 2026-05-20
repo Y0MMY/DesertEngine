@@ -8,6 +8,8 @@
 
 #include <ImGui/imgui_internal.h>
 
+#include <Editor/Builtin/BuiltinMeshRegistry.hpp>
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
@@ -241,7 +243,7 @@ namespace Desert::Editor
                 if ( ImGui::Selectable( "3D Model" ) )
                 {
                     scene->CreateNewEntity( "3D Model" ).AddComponent<ECS::StaticMeshComponent>().MeshHandle =
-                         Assets::AssetHandle{};
+                         Assets::AssetHandle{ 0 };
                 }
 
                 if ( ImGui::Selectable( "Skinned Model" ) )
@@ -274,49 +276,56 @@ namespace Desert::Editor
                     if ( ImGui::MenuItem( "Cube" ) )
                     {
                         auto& cubeMesh = scene->CreateNewEntity( "Cube" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::Cube;
+                        cubeMesh.MeshHandle = BuiltinMeshRegistry::Get( BuiltinMeshType::Cube );
                     }
 
                     if ( ImGui::MenuItem( "Sphere" ) )
                     {
-                        auto& cubeMesh = scene->CreateNewEntity( "Sphere" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::Sphere;
+                        /*  auto& cubeMesh =
+                               scene->CreateNewEntity( "Sphere" ).AddComponent<ECS::StaticMeshComponent>();
+                          cubeMesh.PrimitiveShape = PrimitiveType::Sphere;*/
                     }
 
                     if ( ImGui::MenuItem( "Pyramid" ) )
                     {
-                        auto& cubeMesh = scene->CreateNewEntity( "Pyramid" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::Pyramid;
+                        /* auto& cubeMesh =
+                              scene->CreateNewEntity( "Pyramid" ).AddComponent<ECS::StaticMeshComponent>();
+                         cubeMesh.PrimitiveShape = PrimitiveType::Pyramid;*/
                     }
 
                     if ( ImGui::MenuItem( "Plane" ) )
                     {
-                        auto& cubeMesh = scene->CreateNewEntity( "Plane" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::Plane;
+                        /*  auto& cubeMesh =
+                               scene->CreateNewEntity( "Plane" ).AddComponent<ECS::StaticMeshComponent>();
+                          cubeMesh.PrimitiveShape = PrimitiveType::Plane;*/
                     }
 
                     if ( ImGui::MenuItem( "Cylinder" ) )
                     {
-                        auto& cubeMesh = scene->CreateNewEntity( "Cylinder" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::Cylinder;
+                        /*   auto& cubeMesh =
+                                scene->CreateNewEntity( "Cylinder" ).AddComponent<ECS::StaticMeshComponent>();
+                           cubeMesh.PrimitiveShape = PrimitiveType::Cylinder;*/
                     }
 
                     if ( ImGui::MenuItem( "Capsule" ) )
                     {
-                        auto& cubeMesh = scene->CreateNewEntity( "Capsule" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::Capsule;
+                        /*auto& cubeMesh =
+                             scene->CreateNewEntity( "Capsule" ).AddComponent<ECS::StaticMeshComponent>();
+                        cubeMesh.PrimitiveShape = PrimitiveType::Capsule;*/
                     }
 
                     if ( ImGui::MenuItem( "Terrain" ) )
                     {
-                        auto& cubeMesh = scene->CreateNewEntity( "Terrain" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::Terrain;
+                        /*  auto& cubeMesh =
+                               scene->CreateNewEntity( "Terrain" ).AddComponent<ECS::StaticMeshComponent>();
+                          cubeMesh.PrimitiveShape = PrimitiveType::Terrain;*/
                     }
 
                     if ( ImGui::MenuItem( "Light Cube" ) )
                     {
-                        auto& cubeMesh = scene->CreateNewEntity( "Light Cube" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.PrimitiveShape = PrimitiveType::LightCube;
+                        /* auto& cubeMesh =
+                              scene->CreateNewEntity( "Light Cube" ).AddComponent<ECS::StaticMeshComponent>();
+                         cubeMesh.PrimitiveShape = PrimitiveType::LightCube;*/
                     }
 
                     ImGui::EndMenu();

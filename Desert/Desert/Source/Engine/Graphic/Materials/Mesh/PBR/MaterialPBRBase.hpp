@@ -13,8 +13,22 @@ namespace Desert::Graphic
 {
     class MaterialPBRBase
     {
+    public:
+        struct PBRMaterialData
+        {
+            Image2D* Albedo    = nullptr;
+            Image2D* Normal    = nullptr;
+            Image2D* Metallic  = nullptr;
+            Image2D* Roughness = nullptr;
+            Image2D* AO        = nullptr;
+            Image2D* Emissive  = nullptr;
+
+            float MetallicFactor  = 0.0f;
+            float RoughnessFactor = 1.0f;
+        };
+
     protected:
-        explicit MaterialPBRBase( const std::shared_ptr<Assets::MaterialAsset>& asset );
+        explicit MaterialPBRBase( const PBRMaterialData& data );
         ~MaterialPBRBase() = default;
 
         // ---- Update helpers ----
@@ -31,8 +45,6 @@ namespace Desert::Graphic
         void UpdateTextures( const MaterialExecutor* executor );
 
     protected:
-        // weak_ptr because AssetManager owns MaterialAsset
-        // MaterialPBR only observes the base material
-        std::weak_ptr<Assets::MaterialAsset> m_BaseMaterial;
+        PBRMaterialData m_RuntimeData;
     };
 } // namespace Desert::Graphic

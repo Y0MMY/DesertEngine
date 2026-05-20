@@ -8,8 +8,8 @@ namespace Desert::Runtime
     class TextureService
     {
     public:
-        void Register( const Assets::AssetHandle& handle, std::shared_ptr<Graphic::Texture2D> texture );
-        std::shared_ptr<Graphic::Texture2D>
+        void Register( const std::shared_ptr<Assets::TextureAsset>& texture );
+        Graphic::Texture2D*
              Get( const Assets::AssetHandle& handle ) const; // TODO: RETURN RUNTIME TUEXTURE'S HANDLE
         void Clear();
 

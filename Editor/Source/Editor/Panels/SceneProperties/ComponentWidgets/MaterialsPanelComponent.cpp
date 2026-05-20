@@ -11,7 +11,7 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    MaterialComponentWidget::MaterialComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager )
+    MaterialComponentWidget::MaterialComponentWidget( const Assets::AssetManager* assetManager )
          : m_AssetManager( assetManager )
     {
         m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
@@ -266,10 +266,11 @@ namespace Desert::Editor
                     }
                 }
 
-                if ( ImGui::TreeNodeEx( (void*)(intptr_t)material[0], ImGuiTreeNodeFlags_Framed, matName.c_str()))
+                if ( ImGui::TreeNodeEx( (void*)(intptr_t)material[0], ImGuiTreeNodeFlags_Framed,
+                                        matName.c_str() ) )
                 {
                     ImGui::Indent();
-                    ImGui::PushID( (int)(uintptr_t)material[0]);
+                    ImGui::PushID( (int)(uintptr_t)material[0] );
 
                     // Material name editing
                     if ( Utils::ImGuiUtilities::InputText( matName, "##materialName" ) )

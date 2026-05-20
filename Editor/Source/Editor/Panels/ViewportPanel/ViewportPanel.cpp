@@ -246,12 +246,7 @@ namespace Desert::Editor
 
     Desert::Mesh* ViewportPanel::GetMeshComponent( const ECS::StaticMeshComponent& component )
     {
-        if ( component.GetMeshType() == ECS::StaticMeshComponent::Type::Asset )
-        {
-            return Runtime::ResourceRegistry::GetMeshService()->Get( *component.MeshHandle );
-        }
-
-        return PrimitiveMeshFactory::GetPrimitive( *component.PrimitiveShape );
+        return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
     }
 
 } // namespace Desert::Editor

@@ -2,7 +2,7 @@
 
 #include <Engine/Geometry/Mesh.hpp>
 
-namespace Desert
+namespace Desert::Editor
 {
     enum PrimitiveType
     {
@@ -18,4 +18,4 @@ namespace Desert
         Count
     };
 
-} // namespace Desert
+} // namespace Desert::Editor

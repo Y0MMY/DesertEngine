@@ -12,7 +12,8 @@ namespace Desert::Assets::Serialization
 {
     struct TextureRef
     {
-        std::string Path;
+        std::string  Path;
+        Common::UUID Handle;
     };
 
     template <typename T>

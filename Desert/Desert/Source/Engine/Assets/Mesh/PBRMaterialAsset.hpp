@@ -12,17 +12,15 @@ namespace Desert::Assets
     public:
         struct TextureSlot
         {
-            std::unique_ptr<TextureAsset> Texture;
-            glm::vec4                     DefaultColor = glm::vec4( 1.0f );
-            bool                          IsValid() const
+            AssetHandle TextureHandle;
+            glm::vec4   DefaultColor = glm::vec4( 1.0f );
+            bool        IsValid() const
             {
-                return Texture != nullptr;
+                return TextureHandle != 0;
             }
         };
 
         PBRMaterialAsset( AssetPriority priority, const Common::Filepath& filepath );
-
-        bool CopyFrom( const MaterialAsset& source );
 
         Common::BoolResultStr Load() override;
         Common::BoolResultStr Unload() override;
@@ -32,10 +30,9 @@ namespace Desert::Assets
             return m_ReadyForUse;
         }
 
-        std::optional<std::reference_wrapper<const TextureSlot>> GetTextureSlot( TextureAsset::Type type ) const;
-        TextureAsset*                                            GetTexture( TextureAsset::Type type ) const;
+        std::optional<Assets::AssetHandle> GetTextureHandle( TextureAsset::Type type ) const;
 
-        bool AddTexture( const Common::Filepath& filepath, TextureAsset::Type type,
+        bool AddTexture( const Assets::AssetHandle& handle, TextureAsset::Type type,
                          const glm::vec4& defaultColor = glm::vec4( 1.0f ) );
 
         static AssetTypeID GetTypeID()
@@ -53,11 +50,59 @@ namespace Desert::Assets
             return m_MaterialUUID;
         }
 
+        std::optional<glm::vec3> GetAlbedoColor() const
+        {
+            return m_Parameters.AlbedoColor;
+        }
+
+        std::optional<glm::vec3> GetEmissiveColor() const
+        {
+            return m_Parameters.EmissiveColor;
+        }
+
+        std::optional<float> GetMetallicFactor() const
+        {
+            return m_Parameters.MetallicFactor;
+        }
+
+        std::optional<float> GetRoughnessFactor() const
+        {
+            return m_Parameters.RoughnessFactor;
+        }
+
+        std::optional<float> GetAOStrength() const
+        {
+            return m_Parameters.AOStrength;
+        }
+
+        std::optional<float> GetEmissiveIntensity() const
+        {
+            return m_Parameters.EmissiveIntensity;
+        }
+
     private:
         bool m_ReadyForUse = false;
 
-        std::array<std::unique_ptr<TextureSlot>, static_cast<size_t>( 6U )> m_TextureSlots;
+        std::array<TextureSlot, static_cast<size_t>( 6U )> m_TextureSlots;
 
         Common::UUID m_MaterialUUID;
+
+        struct PBRParameters
+        {
+            glm::vec3 AlbedoColor       = glm::vec3( 1.0f );
+            glm::vec3 EmissiveColor     = glm::vec3( 0.0f );
+            float     MetallicFactor    = 0.0f;
+            float     RoughnessFactor   = 0.5f;
+            float     AOStrength        = 1.0f;
+            float     EmissiveIntensity = 1.0f;
+
+            // Flags to track which parameters are explicitly set
+            bool bHasAlbedoColor       = false;
+            bool bHasMetallicFactor    = false;
+            bool bHasRoughnessFactor   = false;
+            bool bHasEmissiveColor     = false;
+            bool bHasEmissiveIntensity = false;
+            bool bHasAOStrength        = false;
+        } m_Parameters;
     };
 } // namespace Desert::Assets

@@ -27,26 +27,26 @@ namespace Desert::Assets
 
         for ( auto& slot : m_TextureSlots )
         {
-            slot.reset();
+            // slot.reset();
         }
 
         auto loadParam = [&]( const auto& param, TextureAsset::Type type, const glm::vec4& defaultColor )
         {
             if ( param.Texture.has_value() )
             {
-                const auto& path = param.Texture->Path;
+                const Common::UUID& handle = param.Texture->Handle;
 
-                if ( !AddTexture( path, type, defaultColor ) )
+                if ( !AddTexture( handle, type, defaultColor ) )
                 {
-                    LOG_WARN( "Failed to load texture for material: {}", path );
+                    LOG_WARN( "Failed to load texture for material: {}", handle.ToString() );
                 }
             }
             else
             {
-                auto textureSlot          = std::make_unique<TextureSlot>();
-                textureSlot->DefaultColor = defaultColor;
+                TextureSlot textureSlot{};
+                textureSlot.DefaultColor = defaultColor;
 
-                m_TextureSlots[static_cast<size_t>( type )] = std::move( textureSlot );
+                m_TextureSlots[static_cast<size_t>( type )] = textureSlot;
             }
         };
 
@@ -72,54 +72,36 @@ namespace Desert::Assets
         return BOOLSUCCESS;
     }
 
-    std::optional<std::reference_wrapper<const PBRMaterialAsset::TextureSlot>>
-    PBRMaterialAsset::GetTextureSlot( TextureAsset::Type type ) const
-    {
-        const auto& slot = m_TextureSlots[static_cast<size_t>( type )];
-        if ( slot )
-            return std::cref( *slot );
-        return std::nullopt;
-    }
-
-    TextureAsset* PBRMaterialAsset::GetTexture( TextureAsset::Type type ) const
-    {
-        if ( auto slot = GetTextureSlot( type ) )
-        {
-            if ( slot->get().Texture && slot->get().Texture->IsReadyForUse() )
-            {
-                return slot->get().Texture.get();
-            }
-        }
-        return nullptr;
-    }
-
-    bool PBRMaterialAsset::AddTexture( const Common::Filepath& filepath, TextureAsset::Type type,
+    bool PBRMaterialAsset::AddTexture( const Assets::AssetHandle& handle, TextureAsset::Type type,
                                        const glm::vec4& defaultColor )
     {
-        if ( m_TextureSlots[static_cast<size_t>( type )] )
+        auto index = static_cast<size_t>( type );
+
+        // if ( !m_TextureSlots[index] )
         {
-            LOG_WARN( "Texture slot for type {} is already occupied", static_cast<int>( type ) );
-            return false;
+            m_TextureSlots[index].TextureHandle = handle;
+            m_TextureSlots[index].DefaultColor  = defaultColor;
         }
-
-        auto textureSlot          = std::make_unique<TextureSlot>();
-        textureSlot->Texture      = std::make_unique<TextureAsset>( AssetPriority::Low, filepath, type );
-        textureSlot->DefaultColor = defaultColor;
-
-        if ( !textureSlot->Texture->Load() )
-        {
-            LOG_WARN( "Failed to load texture: {}", filepath.string() );
-            return false;
-        }
-
-        m_TextureSlots[static_cast<size_t>( type )] = std::move( textureSlot );
         return true;
     }
 
-    bool PBRMaterialAsset::CopyFrom( const MaterialAsset& source )
+    std::optional<AssetHandle> PBRMaterialAsset::GetTextureHandle( TextureAsset::Type type ) const
     {
+        const auto index = static_cast<size_t>( type );
 
-        return true;
+        if ( index >= m_TextureSlots.size() )
+        {
+            return std::nullopt;
+        }
+
+        const auto& slot = m_TextureSlots[index];
+
+        if ( !slot.IsValid() )
+        {
+            return std::nullopt;
+        }
+
+        return slot.TextureHandle;
     }
 
 } // namespace Desert::Assets

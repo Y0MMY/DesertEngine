@@ -40,6 +40,11 @@ namespace Desert::Graphic
             return m_PushConstantBuffer;
         }
 
+        const auto& GetDubugName()const
+        {
+            return m_DebugName;
+        }
+
         // NOTE:temporary solution! in the future it is worth getting when parsing
         void PushConstant( const void* buffer, const uint32_t bufferSize )
         {

@@ -5,11 +5,12 @@
 
 namespace Desert::Editor
 {
+    class ImportManager;
     class IAssetImporter
     {
     public:
         virtual ~IAssetImporter() = default;
 
-        virtual ImportResult Import( const std::filesystem::path& path ) = 0;
+        virtual ImportResult Import( const std::filesystem::path& path, ImportManager& manager ) = 0;
     };
 } // namespace Desert::Editor

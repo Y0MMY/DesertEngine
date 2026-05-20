@@ -23,6 +23,8 @@
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/AnimationECSSystem.hpp>
 
+#include <Editor/Builtin/BuiltinMeshRegistry.hpp>
+
 namespace Desert::Editor
 {
     static constexpr uint32_t s_ShaderLibraryPanelIndex = 2;
@@ -41,7 +43,7 @@ namespace Desert::Editor
         m_SceneRenderer    = std::make_unique<Graphic::SceneRenderer>();
         m_MainScene        = std::make_shared<Desert::Core::Scene>( "New Scene", m_SceneRenderer.get() );
 
-        // PrimitiveMeshFactory::Initialize();
+        BuiltinMeshRegistry::Init( nullptr );
     }
 
     EditorLayer::~EditorLayer() = default;

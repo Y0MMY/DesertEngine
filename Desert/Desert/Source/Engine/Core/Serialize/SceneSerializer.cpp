@@ -120,7 +120,7 @@ namespace Desert::Core
             {
                 const auto& meshComponent = entity.GetComponent<ECS::StaticMeshComponent>();
 
-                if ( meshComponent.GetMeshType() == ECS::StaticMeshComponent::Type::Asset )
+               // if ( meshComponent.GetMeshType() == ECS::StaticMeshComponent::Type::Asset )
                 {
                     /*const auto& meshAsset =
                          m_AssetManager->FindByHandle<Assets::MeshAsset>( meshComponent.MeshHandle.value() );

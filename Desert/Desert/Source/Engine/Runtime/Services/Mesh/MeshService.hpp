@@ -10,6 +10,7 @@ namespace Desert::Runtime
     {
     public:
         Common::BoolResultStr Register( const std::shared_ptr<Assets::MeshAsset>& meshAsset );
+        Assets::AssetHandle   RegisterProcedural( const std::shared_ptr<Mesh>& mesh );
         Mesh*                 Get( const Assets::AssetHandle& handle ) const; // todo: raw ptr
         void                  Clear();
         std::optional<bool>                                   /*TOOD: error class*/

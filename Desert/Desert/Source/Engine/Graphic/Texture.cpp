@@ -86,8 +86,7 @@ namespace Desert::Graphic
     Common::ResultStr<std::shared_ptr<Texture2D>> Texture2D::Create( const TextureSpecification&  specification,
                                                                      const std::filesystem::path& path )
     {
-        auto texture =
-             std::make_shared<Texture2D>( specification, Common::Constants::Path::TEXTUREDIR_PATH / path );
+        auto texture   = std::make_shared<Texture2D>( specification, path );
         auto invResult = texture->Invalidate();
         if ( !invResult.IsSuccess() )
         {

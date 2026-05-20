@@ -21,6 +21,9 @@ namespace Desert::Graphic::System
         if ( !SetupOutlinePass() )
             return Common::MakeError( "Failed to setup outline pass" );
 
+        m_StaticMaterialFallback =
+             std::make_unique<Graphic::StaticMaterialPBR>( MaterialPBRBase::PBRMaterialData{} );
+
         return BOOLSUCCESS;
     }
 
@@ -51,6 +54,9 @@ namespace Desert::Graphic::System
                              if ( !camera )
                                  return;
 
+                             UpdateGlobalUniforms( camera, m_SceneRenderer->GetPointLights(),
+                                                   m_SceneRenderer->GetDirectionLights() );
+
                              DrawStaticMeshes();
                              DrawSkinnedMeshes();
                          },
@@ -63,23 +69,43 @@ namespace Desert::Graphic::System
         }
     }
 
+    void MeshRenderer::UpdateGlobalUniforms( const Core::Camera*                    camera,
+                                             const ShaderProtocols::PointLight&     pointLights,
+                                             const ShaderProtocols::DirectionLight& dirLights )
+    {
+        if ( !camera )
+            return;
+    }
+
     void MeshRenderer::DrawStaticMeshes()
     {
         if ( m_StaticQueue.empty() )
             return;
 
-        auto&       renderer    = Renderer::GetInstance();
-        const auto  camera      = m_SceneRenderer->GetMainCamera();
-        const auto  textures    = PreparePBRTextures();
+        auto&      renderer = Renderer::GetInstance();
+        const auto camera   = m_SceneRenderer->GetMainCamera();
+        if ( !camera )
+            return;
+
         const auto& pointLights = m_SceneRenderer->GetPointLights();
+        const auto& dirLights   = m_SceneRenderer->GetDirectionLights();
 
         for ( const auto& data : m_StaticQueue )
         {
-            data.Material->Bind(
-                 { camera, data.Transform, m_SceneRenderer->GetDirectionLights(), pointLights, textures } );
+            if ( !data.Mesh || !data.MaterialInstance )
+                continue;
 
+            MaterialInstance* inst = data.MaterialInstance;
+
+            auto* material = static_cast<StaticMaterialPBR*>( inst->GetParentMaterial() );
+
+            material->UpdateTransform( data.Transform );
+            material->UpdateCamera( camera );
+            material->UpdateLights( pointLights, dirLights );
+
+            inst->MarkNeedsApply();
             renderer.RenderMesh( m_StaticPipeline.get(), data.Mesh, data.Transform,
-                                 data.Material->GetMaterialExecutor() );
+                                 material->GetMaterialExecutor() );
         }
     }
 

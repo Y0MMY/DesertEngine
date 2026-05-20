@@ -36,7 +36,6 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Geometry/Mesh.hpp>
-#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 #include <Engine/Graphic/Materials/Material.hpp>
