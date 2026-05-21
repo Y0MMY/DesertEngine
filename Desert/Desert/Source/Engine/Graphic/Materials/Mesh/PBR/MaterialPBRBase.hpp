@@ -11,7 +11,7 @@
 
 namespace Desert::Graphic
 {
-    class MaterialPBRBase
+    class MaterialPBRBase : public Material
     {
     public:
         struct PBRMaterialData
@@ -27,22 +27,21 @@ namespace Desert::Graphic
             float RoughnessFactor = 1.0f;
         };
 
+        static void UpdateCamera( MaterialInstance* instance, const Core::Camera* camera );
+        static void UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
+                                  const ShaderProtocols::DirectionLight& dirLights );
+
     protected:
-        explicit MaterialPBRBase( const PBRMaterialData& data );
-        ~MaterialPBRBase() = default;
+        MaterialPBRBase( std::string&& debugName, std::string&& shaderName, const PBRMaterialData& data );
+        ~MaterialPBRBase() override = default;
 
-        // ---- Update helpers ----
-        void UpdateCamera( Material& material, const Core::Camera* camera );
-        void UpdatePointLights( Material& material, const ShaderProtocols::PointLight& lights );
-        void UpdateDirectionLights( Material& material, const ShaderProtocols::DirectionLight& lights );
-        void UpdateLightsMetadata( Material& material, const ShaderProtocols::PointLight& point,
-                                   const ShaderProtocols::DirectionLight& dir );
+        static void UpdatePointLights( MaterialInstance* instance, const ShaderProtocols::PointLight& lights );
+        static void UpdateDirectionLights( MaterialInstance* instance, const ShaderProtocols::DirectionLight& lights );
+        static void UpdateLightsMetadata( MaterialInstance* instance, const ShaderProtocols::PointLight& point,
+                                          const ShaderProtocols::DirectionLight& dir );
 
-        void UpdatePBRTextures( Material& material, const ShaderProtocols::PBRTexturesUB& textures );
-
-        void UpdatePBRMaterial( Material& material, const ShaderProtocols::PBRMeshMaterialsUB& meshUB );
-
-        void UpdateTextures( const MaterialExecutor* executor );
+        static void UpdatePBRTextures( MaterialInstance* instance, const ShaderProtocols::PBRTexturesUB& textures );
+        static void UpdatePBRMaterial( MaterialInstance* instance, const ShaderProtocols::PBRMeshMaterialsUB& meshUB );
 
     protected:
         PBRMaterialData m_RuntimeData;

@@ -29,6 +29,10 @@ namespace Desert::Graphic
         {
             prop->SetRawData( reinterpret_cast<const std::byte*>( &value ), sizeof( float ) );
         }
+        else
+        {
+            LOG_WARN( "Material [{0}]: Property '{1}' (Float) not found in shader.", m_MaterialExecutor->GetDubugName(), propertyName );
+        }
     }
 
     void Material::SetInt( const std::string& propertyName, int value )
@@ -36,6 +40,10 @@ namespace Desert::Graphic
         if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( propertyName ) )
         {
             prop->SetRawData( reinterpret_cast<const std::byte*>( &value ), sizeof( int ) );
+        }
+        else
+        {
+            LOG_WARN( "Material [{0}]: Property '{1}' (Int) not found in shader.", m_MaterialExecutor->GetDubugName(), propertyName );
         }
     }
 
@@ -45,6 +53,10 @@ namespace Desert::Graphic
         {
             prop->SetRawData( reinterpret_cast<const std::byte*>( &value ), sizeof( glm::vec3 ) );
         }
+        else
+        {
+            LOG_WARN( "Material [{0}]: Property '{1}' (Vec3) not found in shader.", m_MaterialExecutor->GetDubugName(), propertyName );
+        }
     }
 
     void Material::SetVec4( const std::string& propertyName, const glm::vec4& value )
@@ -52,6 +64,10 @@ namespace Desert::Graphic
         if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( propertyName ) )
         {
             prop->SetRawData( reinterpret_cast<const std::byte*>( &value ), sizeof( glm::vec4 ) );
+        }
+        else
+        {
+            LOG_WARN( "Material [{0}]: Property '{1}' (Vec4) not found in shader.", m_MaterialExecutor->GetDubugName(), propertyName );
         }
     }
 
@@ -61,13 +77,21 @@ namespace Desert::Graphic
         {
             prop->SetRawData( reinterpret_cast<const std::byte*>( &value ), sizeof( glm::mat4 ) );
         }
+        else
+        {
+            LOG_WARN( "Material [{0}]: Property '{1}' (Mat4) not found in shader.", m_MaterialExecutor->GetDubugName(), propertyName );
+        }
     }
 
     void Material::SetTexture( const std::string& propertyName, Texture2D* texture )
     {
         if ( auto prop = m_MaterialExecutor->GetTexture2DProperty( propertyName ) )
         {
-            // prop->SetTexture( texture );
+            // prop->SetImage( texture );
+        }
+        else
+        {
+            LOG_WARN( "Material [{0}]: Texture property '{1}' (2D) not found in shader.", m_MaterialExecutor->GetDubugName(), propertyName );
         }
     }
 
@@ -76,6 +100,10 @@ namespace Desert::Graphic
         if ( auto prop = m_MaterialExecutor->GetTextureCubeProperty( propertyName ) )
         {
             // prop->SetTexture( texture );
+        }
+        else
+        {
+            LOG_WARN( "Material [{0}]: Texture property '{1}' (Cube) not found in shader.", m_MaterialExecutor->GetDubugName(), propertyName );
         }
     }
 

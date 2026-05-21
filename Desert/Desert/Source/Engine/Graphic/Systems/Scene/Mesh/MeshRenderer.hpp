@@ -32,10 +32,10 @@ namespace Desert::Graphic::System
     public:
         struct StaticMeshRenderData
         {
-            class Desert::StaticMesh* Mesh             = nullptr;
-            glm::mat4                 Transform        = glm::mat4( 1.0f );
-            class MaterialInstance*   MaterialInstance = nullptr;
-            bool                      Outlined         = false;
+            class Desert::StaticMesh*      Mesh = nullptr;
+            glm::mat4                      Transform = glm::mat4( 1.0f );
+            std::vector<MaterialInstance*> MaterialSlots;
+            bool                           Outlined = false;
         };
 
         struct SkinnedMeshRenderData

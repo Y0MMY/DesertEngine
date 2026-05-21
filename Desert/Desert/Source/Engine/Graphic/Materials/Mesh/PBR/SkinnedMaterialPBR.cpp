@@ -7,21 +7,21 @@ namespace Desert::Graphic
 {
     void SkinnedMaterialPBR::Bind( const UpdateSkinnedMaterialPBRInfo& info )
     {
-        UpdateCamera( *this, info.MainCamera );
-        UpdatePointLights( *this, info.PointLights );
-        UpdateDirectionLights( *this, info.DirectionLights );
-        UpdateLightsMetadata( *this, info.PointLights, info.DirectionLights );
+        UpdateCamera( info.instance, info.MainCamera );
+        UpdatePointLights( info.instance, info.PointLights );
+        UpdateDirectionLights( info.instance, info.DirectionLights );
+        UpdateLightsMetadata( info.instance, info.PointLights, info.DirectionLights );
 
-        UpdatePBRTextures( *this, info.PBREnvTextures );
-        UpdatePBRMaterial( *this, {} );
+        UpdatePBRTextures( info.instance, info.PBREnvTextures );
+        UpdatePBRMaterial( info.instance, {} );
 
-        UpdateSkinnedUB( info.SkinnedUB );
+        UpdateSkinnedUB( info.instance, info.SkinnedUB );
 
-        UpdateTextures( m_MaterialExecutor.get() );
-
+        // Apply all properties and bind the material
+        MaterialPBRBase::Bind( info.instance );
     }
 
-    void SkinnedMaterialPBR::UpdateSkinnedUB( const ShaderProtocols::SkinnedUB& skinnedUB )
+    void SkinnedMaterialPBR::UpdateSkinnedUB( MaterialInstance* instance, const ShaderProtocols::SkinnedUB& skinnedUB )
     {
         static ShaderProtocols::SkinnedUB SkinnedUB;
 

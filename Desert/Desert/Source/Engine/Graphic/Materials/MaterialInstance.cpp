@@ -183,6 +183,16 @@ namespace Desert::Graphic
 
         if ( m_ParentMaterial )
         {
+            // Validation: Check if all shader properties are initialized in this instance
+            const auto& shaderProperties = m_ParentMaterial->GetPropertyNames();
+            for ( const auto& name : shaderProperties )
+            {
+                if ( !m_Properties.HasProperty( name ) )
+                {
+                    LOG_WARN( "MaterialInstance [{0}]: Property '{1}' required by shader is NOT initialized in code.", m_Name, name );
+                }
+            }
+
             m_ParentMaterial->Bind( this );
         }
 

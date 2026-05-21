@@ -42,15 +42,17 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Assets::AssetHandle              MeshHandle;
-        std::vector<Assets::AssetHandle> MaterialSlots;
-        bool                             OutlineDraw = false;
+        Assets::AssetHandle                       MeshHandle;
+        std::vector<Assets::AssetHandle>          MaterialSlots;
+        std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+        bool                                      OutlineDraw = false;
     };
 
     struct SkinnedMeshComponent
     {
-        Assets::AssetHandle              MeshHandle;
-        std::vector<Assets::AssetHandle> MaterialSlots;
+        Assets::AssetHandle                       MeshHandle;
+        std::vector<Assets::AssetHandle>          MaterialSlots;
+        std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
     };
 
     struct AnimationComponent

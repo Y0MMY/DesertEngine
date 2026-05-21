@@ -6,11 +6,12 @@
 
 namespace Desert::Graphic
 {
-    class SkinnedMaterialPBR final : public Material, public MaterialPBRBase
+    class SkinnedMaterialPBR final : public MaterialPBRBase
     {
     public:
         struct UpdateSkinnedMaterialPBRInfo
         {
+            MaterialInstance* instance; // New stateless instance
             Core::Camera* MainCamera;
             glm::mat4     MeshTransform{ 1.0f };
 
@@ -22,13 +23,13 @@ namespace Desert::Graphic
         };
 
         SkinnedMaterialPBR( const MaterialPBRBase::PBRMaterialData& data )
-             : Material( "SkinnedMaterialPBR", "SkinnedMeshPBR" ), MaterialPBRBase( data )
+             : MaterialPBRBase( "SkinnedMaterialPBR", "SkinnedMeshPBR", data )
         {
         }
 
         void Bind( const UpdateSkinnedMaterialPBRInfo& info );
 
     private:
-        void UpdateSkinnedUB( const ShaderProtocols::SkinnedUB& skinnedUB );
+        void UpdateSkinnedUB( MaterialInstance* instance, const ShaderProtocols::SkinnedUB& skinnedUB );
     };
 } // namespace Desert::Graphic

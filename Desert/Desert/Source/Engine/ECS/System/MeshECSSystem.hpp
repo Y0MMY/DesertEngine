@@ -26,7 +26,7 @@ namespace Desert::ECS
                 auto view = registry.view<StaticMeshComponent, TransformComponent>();
 
                 view.each(
-                     [&]( entt::entity entity, const StaticMeshComponent& mesh,
+                     [&]( entt::entity entity, StaticMeshComponent& mesh,
                           const TransformComponent& transform )
                      {
                          if ( !mesh.MeshHandle || mesh.MaterialSlots.empty() )
@@ -38,15 +38,28 @@ namespace Desert::ECS
                          if ( !targetMesh )
                              return;
 
-                         // TODO: avoid reallocating and rebuilding this vector every frame.
-                         // Cache resolved material pointers per entity (or per component) and update only when
-                         // MaterialSlots change.
-                         std::vector<Graphic::Material*> materialSlots;
-                         materialSlots.reserve( mesh.MaterialSlots.size() );
-                         for ( const auto& assetHandle : mesh.MaterialSlots )
+                         // Ensure runtime material instances are initialized and match the slots
+                         if ( mesh.RuntimeMaterialInstances.size() != mesh.MaterialSlots.size() )
                          {
-                             materialSlots.push_back(
-                                  Runtime::ResourceRegistry::GetMaterialService()->Get( assetHandle ) );
+                             mesh.RuntimeMaterialInstances.clear();
+                             mesh.RuntimeMaterialInstances.reserve( mesh.MaterialSlots.size() );
+
+                             for ( const auto& assetHandle : mesh.MaterialSlots )
+                             {
+                                 auto* baseMaterial = Runtime::ResourceRegistry::GetMaterialService()->Get( assetHandle );
+                                 if ( baseMaterial )
+                                 {
+                                     mesh.RuntimeMaterialInstances.push_back( baseMaterial->CreateInstance() );
+                                 }
+                             }
+                         }
+
+                         // Prepare raw pointers for the render command (the instances are kept alive by the component)
+                         std::vector<Graphic::MaterialInstance*> materialSlots;
+                         materialSlots.reserve( mesh.RuntimeMaterialInstances.size() );
+                         for ( const auto& inst : mesh.RuntimeMaterialInstances )
+                         {
+                             materialSlots.push_back( inst.get() );
                          }
 
                          renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(

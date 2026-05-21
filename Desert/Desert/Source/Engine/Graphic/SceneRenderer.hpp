@@ -51,7 +51,7 @@ namespace Desert::Graphic
 
         void Resize( const uint32_t width, const uint32_t height );
 
-        void SubmitMesh( const Mesh* mesh, const std::vector<Material*> materialSlots, const glm::mat4& transform,
+        void SubmitMesh( const Mesh* mesh, const std::vector<MaterialInstance*> materialSlots, const glm::mat4& transform,
                          const RenderSubmissionExtra& extra );
 
         const Environment                 CreateEnvironment( const Common::Filepath& filepath );

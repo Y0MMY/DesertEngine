@@ -8,11 +8,11 @@ namespace Desert::Graphic::Render
 {
     struct DrawStaticMeshCommand : RenderCommand
     {
-        Desert::Mesh*                   Mesh;
-        std::vector<Graphic::Material*> MaterialSlots;
+        Desert::Mesh*                           Mesh;
+        std::vector<Graphic::MaterialInstance*> MaterialSlots;
         glm::mat4                       Transform;
 
-        DrawStaticMeshCommand( Desert::Mesh* mesh, const std::vector<Graphic::Material*>& materialSlots,
+        DrawStaticMeshCommand( Desert::Mesh* mesh, const std::vector<Graphic::MaterialInstance*>& materialSlots,
                                const glm::mat4& transform )
              : Mesh( mesh ), MaterialSlots( materialSlots ), Transform( transform )
         {

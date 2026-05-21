@@ -17,6 +17,6 @@ namespace Desert::Editor
         void Render( ECS::Entity& entity ) override;
 
     private:
-        const Assets::AssetManager* m_AssetManager
+        const Assets::AssetManager* m_AssetManager;
     };
 } // namespace Desert::Editor

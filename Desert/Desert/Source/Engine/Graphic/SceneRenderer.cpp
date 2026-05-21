@@ -97,7 +97,7 @@ namespace Desert::Graphic
         // renderer.EndRenderPass();
     }
 
-    void SceneRenderer::SubmitMesh( const Mesh* mesh, const std::vector<Material*> materialSlots,
+    void SceneRenderer::SubmitMesh( const Mesh* mesh, const std::vector<MaterialInstance*> materialSlots,
                                     const glm::mat4& transform, const RenderSubmissionExtra& extra )
     {
         if ( !mesh || materialSlots.empty() )

@@ -1,21 +1,21 @@
 #include "StaticMaterialPBR.hpp"
+#include "MaterialPBRBase.hpp"
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 
 namespace Desert::Graphic
 {
     StaticMaterialPBR::StaticMaterialPBR() : Material( "PBRMaterial", "StaticMeshPBR" )
     {
-        // Set default parameters
+        // Set default parameters matching shader property names in PBR.glsl.frag
         SetDefaultParameter( "AlbedoColor", glm::vec3( 1.0f ), MaterialPropertyType::Vec3 );
-        SetDefaultParameter( "MetallicFactor", 0.0f, MaterialPropertyType::Float );
-        SetDefaultParameter( "RoughnessFactor", 0.5f, MaterialPropertyType::Float );
-        SetDefaultParameter( "EmissiveIntensity", 1.0f, MaterialPropertyType::Float );
-        SetDefaultParameter( "UseAlbedoTexture", 0, MaterialPropertyType::Int );
-        SetDefaultParameter( "UseNormalTexture", 0, MaterialPropertyType::Int );
-        SetDefaultParameter( "UseMetallicTexture", 0, MaterialPropertyType::Int );
-        SetDefaultParameter( "UseRoughnessTexture", 0, MaterialPropertyType::Int );
-        SetDefaultParameter( "UseAOTexture", 0, MaterialPropertyType::Int );
-        SetDefaultParameter( "UseEmissiveTexture", 0, MaterialPropertyType::Int );
+        SetDefaultParameter( "AlbedoBlend", 1.0f, MaterialPropertyType::Float );
+        SetDefaultParameter( "MetallicValue", 0.0f, MaterialPropertyType::Float );
+        SetDefaultParameter( "MetallicBlend", 1.0f, MaterialPropertyType::Float );
+        SetDefaultParameter( "RoughnessValue", 0.5f, MaterialPropertyType::Float );
+        SetDefaultParameter( "RoughnessBlend", 1.0f, MaterialPropertyType::Float );
+        SetDefaultParameter( "EmissionColor", glm::vec3( 0.0f ), MaterialPropertyType::Vec3 );
+        SetDefaultParameter( "EmissionStrength", 1.0f, MaterialPropertyType::Float );
+        SetDefaultParameter( "AOValue", 1.0f, MaterialPropertyType::Float );
     }
 
     void StaticMaterialPBR::SetAlbedo( MaterialInstance* instance, const Image2D* texture, const glm::vec3& color )
@@ -23,12 +23,7 @@ namespace Desert::Graphic
         instance->SetVec3( "AlbedoColor", color );
         if ( texture )
         {
-            instance->SetTexture( "AlbedoTexture", const_cast<Image2D*>( texture ) );
-            instance->SetInt( "UseAlbedoTexture", 1 );
-        }
-        else
-        {
-            instance->SetInt( "UseAlbedoTexture", 0 );
+            instance->SetTexture( "u_AlbedoTexture", const_cast<Image2D*>( texture ) );
         }
     }
 
@@ -36,40 +31,25 @@ namespace Desert::Graphic
     {
         if ( texture )
         {
-            instance->SetTexture( "NormalTexture", const_cast<Image2D*>( texture ) );
-            instance->SetInt( "UseNormalTexture", 1 );
-        }
-        else
-        {
-            instance->SetInt( "UseNormalTexture", 0 );
+            instance->SetTexture( "u_NormalTexture", const_cast<Image2D*>( texture ) );
         }
     }
 
     void StaticMaterialPBR::SetMetallic( MaterialInstance* instance, float value, const Image2D* texture )
     {
-        instance->SetFloat( "MetallicFactor", value );
+        instance->SetFloat( "MetallicValue", value );
         if ( texture )
         {
-            instance->SetTexture( "MetallicTexture", const_cast<Image2D*>( texture ) );
-            instance->SetInt( "UseMetallicTexture", 1 );
-        }
-        else
-        {
-            instance->SetInt( "UseMetallicTexture", 0 );
+            // Update MetallicTexture if needed
         }
     }
 
     void StaticMaterialPBR::SetRoughness( MaterialInstance* instance, float value, const Image2D* texture )
     {
-        instance->SetFloat( "RoughnessFactor", value );
+        instance->SetFloat( "RoughnessValue", value );
         if ( texture )
         {
-            instance->SetTexture( "RoughnessTexture", const_cast<Image2D*>( texture ) );
-            instance->SetInt( "UseRoughnessTexture", 1 );
-        }
-        else
-        {
-            instance->SetInt( "UseRoughnessTexture", 0 );
+            // Update RoughnessTexture if needed
         }
     }
 
@@ -77,27 +57,34 @@ namespace Desert::Graphic
     {
         if ( texture )
         {
-            instance->SetTexture( "AOTexture", const_cast<Image2D*>( texture ) );
-            instance->SetInt( "UseAOTexture", 1 );
-        }
-        else
-        {
-            instance->SetInt( "UseAOTexture", 0 );
+            // Update AOTexture if needed
         }
     }
 
     void StaticMaterialPBR::SetEmissive( MaterialInstance* instance, const Image2D* texture, float intensity )
     {
-        instance->SetFloat( "EmissiveIntensity", intensity );
+        instance->SetFloat( "EmissionStrength", intensity );
         if ( texture )
         {
-            instance->SetTexture( "EmissiveTexture", const_cast<Image2D*>( texture ) );
-            instance->SetInt( "UseEmissiveTexture", 1 );
+            // Update EmissiveTexture if needed
         }
-        else
-        {
-            instance->SetInt( "UseEmissiveTexture", 0 );
-        }
+    }
+
+    void StaticMaterialPBR::UpdateTransform( MaterialInstance* instance, const glm::mat4& transform )
+    {
+        // For static meshes, transform is usually in push constants, but we store it in instance for generality
+        instance->SetMat4( "ModelMatrix", transform );
+    }
+
+    void StaticMaterialPBR::UpdateCamera( MaterialInstance* instance, const Core::Camera* camera )
+    {
+        MaterialPBRBase::UpdateCamera( instance, camera );
+    }
+
+    void StaticMaterialPBR::UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
+                                         const ShaderProtocols::DirectionLight& dirLights )
+    {
+        MaterialPBRBase::UpdateLights( instance, pointLights, dirLights );
     }
 
     void StaticMaterialPBR::Bind( const MaterialInstance* instance )
@@ -105,141 +92,44 @@ namespace Desert::Graphic
         if ( !m_MaterialExecutor )
             return;
 
-        // Apply instance properties first (calls SetFloat, SetInt, etc. which use the property system)
+        // Update push constants for transform (direct from instance)
+        glm::mat4 transform = instance->GetMat4( "ModelMatrix" );
+        m_MaterialExecutor->PushConstant( &transform, sizeof( glm::mat4 ) );
+
+        // Base Material::Bind will apply all MaterialInstance property overrides to the executor
         Material::Bind( instance );
-
-        // Update PBR specific uniforms if dirty
-        if ( m_UniformsDirty )
-        {
-            // Update transform
-            if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "ModelMatrix" ) )
-            {
-                prop->SetRawData( reinterpret_cast<const std::byte*>( &m_TransformMatrix ), sizeof( glm::mat4 ) );
-            }
-
-            m_UniformsDirty = false;
-        }
-
-        // Apply all pending changes to GPU
-        m_MaterialExecutor->Apply();
     }
 
     void StaticMaterialPBR::OnBind( MaterialInstance* instance )
     {
-        // Update uniforms from instance
-        m_CurrentUniforms.AlbedoColor         = instance->GetVec3( "AlbedoColor" );
-        m_CurrentUniforms.MetallicFactor      = instance->GetFloat( "MetallicFactor" );
-        m_CurrentUniforms.RoughnessFactor     = instance->GetFloat( "RoughnessFactor" );
-        m_CurrentUniforms.EmissiveIntensity   = instance->GetFloat( "EmissiveIntensity" );
-        m_CurrentUniforms.UseAlbedoTexture    = instance->GetInt( "UseAlbedoTexture" );
-        m_CurrentUniforms.UseNormalTexture    = instance->GetInt( "UseNormalTexture" );
-        m_CurrentUniforms.UseMetallicTexture  = instance->GetInt( "UseMetallicTexture" );
-        m_CurrentUniforms.UseRoughnessTexture = instance->GetInt( "UseRoughnessTexture" );
-        m_CurrentUniforms.UseAOTexture        = instance->GetInt( "UseAOTexture" );
-        m_CurrentUniforms.UseEmissiveTexture  = instance->GetInt( "UseEmissiveTexture" );
+        // Reconstruct uniform struct from instance properties for single-call GPU update
+        PBRUniforms uniforms;
+        uniforms.AlbedoColor     = instance->GetVec3( "AlbedoColor" );
+        uniforms.AlbedoBlend     = instance->GetFloat( "AlbedoBlend" );
+        uniforms.MetallicValue   = instance->GetFloat( "MetallicValue" );
+        uniforms.MetallicBlend   = instance->GetFloat( "MetallicBlend" );
+        uniforms.RoughnessValue  = instance->GetFloat( "RoughnessValue" );
+        uniforms.RoughnessBlend  = instance->GetFloat( "RoughnessBlend" );
+        uniforms.EmissionColor   = instance->GetVec3( "EmissionColor" );
+        uniforms.EmissionStrength = instance->GetFloat( "EmissionStrength" );
+        uniforms.AOValue         = instance->GetFloat( "AOValue" );
 
-        // Get texture pointers from instance
-        m_AlbedoTexture    = static_cast<const Image2D*>( instance->GetTexture( "AlbedoTexture" ) );
-        m_NormalTexture    = static_cast<const Image2D*>( instance->GetTexture( "NormalTexture" ) );
-        m_MetallicTexture  = static_cast<const Image2D*>( instance->GetTexture( "MetallicTexture" ) );
-        m_RoughnessTexture = static_cast<const Image2D*>( instance->GetTexture( "RoughnessTexture" ) );
-        m_AOTexture        = static_cast<const Image2D*>( instance->GetTexture( "AOTexture" ) );
-        m_EmissiveTexture  = static_cast<const Image2D*>( instance->GetTexture( "EmissiveTexture" ) );
-
-        // Apply PBR uniform values through the property system
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "PBRData" ) )
+        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "PBRMaterialPropertiesUB" ) )
         {
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &m_CurrentUniforms ), sizeof( PBRUniforms ) );
+            prop->SetRawData( reinterpret_cast<const std::byte*>( &uniforms ), sizeof( PBRUniforms ) );
         }
 
-        // Bind textures through MaterialExecutor properties
-        if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( "AlbedoTexture" ) )
+        // Texture bindings from instance
+        if ( auto tex = static_cast<Image2D*>( instance->GetTexture( "u_AlbedoTexture" ) ) )
         {
-            if ( m_AlbedoTexture && m_CurrentUniforms.UseAlbedoTexture )
-                texProp->SetImage( m_AlbedoTexture );
+            if ( auto prop = m_MaterialExecutor->GetTexture2DProperty( "u_AlbedoTexture" ) )
+                prop->SetImage( tex );
         }
-
-        if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( "NormalTexture" ) )
+        
+        if ( auto tex = static_cast<Image2D*>( instance->GetTexture( "u_NormalTexture" ) ) )
         {
-            if ( m_NormalTexture && m_CurrentUniforms.UseNormalTexture )
-                texProp->SetImage( m_NormalTexture );
+            if ( auto prop = m_MaterialExecutor->GetTexture2DProperty( "u_NormalTexture" ) )
+                prop->SetImage( tex );
         }
-
-        if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( "MetallicTexture" ) )
-        {
-            if ( m_MetallicTexture && m_CurrentUniforms.UseMetallicTexture )
-                texProp->SetImage( m_MetallicTexture );
-        }
-
-        if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( "RoughnessTexture" ) )
-        {
-            if ( m_RoughnessTexture && m_CurrentUniforms.UseRoughnessTexture )
-                texProp->SetImage( m_RoughnessTexture );
-        }
-
-        if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( "AOTexture" ) )
-        {
-            if ( m_AOTexture && m_CurrentUniforms.UseAOTexture )
-                texProp->SetImage( m_AOTexture );
-        }
-
-        if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( "EmissiveTexture" ) )
-        {
-            if ( m_EmissiveTexture && m_CurrentUniforms.UseEmissiveTexture )
-                texProp->SetImage( m_EmissiveTexture );
-        }
-
-        m_UniformsDirty = true;
-    }
-
-    void StaticMaterialPBR::UpdateCamera( const Core::Camera* camera )
-    {
-        if ( !m_MaterialExecutor || !camera )
-            return;
-
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "ViewMatrix" ) )
-        {
-            const auto& viewMat = camera->GetViewMatrix();
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &viewMat ), sizeof( glm::mat4 ) );
-        }
-
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "ProjectionMatrix" ) )
-        {
-            const auto& projMat = camera->GetProjectionMatrix();
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &projMat ), sizeof( glm::mat4 ) );
-        }
-
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "CameraPosition" ) )
-        {
-            const auto& camPos = camera->GetPosition();
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &camPos ), sizeof( glm::vec3 ) );
-        }
-    }
-
-    void StaticMaterialPBR::UpdateLights( const ShaderProtocols::PointLight&     pointLights,
-                                    const ShaderProtocols::DirectionLight& dirLights )
-    {
-        if ( !m_MaterialExecutor )
-            return;
-
-        // Update directional light
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "DirectionLight" ) )
-        {
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &dirLights ),
-                              sizeof( ShaderProtocols::DirectionLight ) );
-        }
-
-        // Update point lights
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "PointLights" ) )
-        {
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &pointLights ),
-                              sizeof( ShaderProtocols::PointLight ) );
-        }
-    }
-
-    void StaticMaterialPBR::UpdateTransform( const glm::mat4& modelMatrix )
-    {
-        m_TransformMatrix = modelMatrix;
-        m_UniformsDirty   = true;
     }
 } // namespace Desert::Graphic

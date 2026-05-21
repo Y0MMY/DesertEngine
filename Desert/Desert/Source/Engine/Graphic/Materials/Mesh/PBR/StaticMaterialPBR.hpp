@@ -27,11 +27,11 @@ namespace Desert::Graphic
         static void SetAmbientOcclusion( MaterialInstance* instance, const Image2D* texture );
         static void SetEmissive( MaterialInstance* instance, const Image2D* texture, float intensity = 1.0f );
 
-        // Runtime data update (these will be called per frame)
-        void UpdateCamera( const Core::Camera* camera );
-        void UpdateLights( const ShaderProtocols::PointLight&     pointLights,
-                           const ShaderProtocols::DirectionLight& dirLights );
-        void UpdateTransform( const glm::mat4& modelMatrix );
+        // Runtime data update (Stateless: writes to instance)
+        static void UpdateTransform( MaterialInstance* instance, const glm::mat4& transform );
+        static void UpdateCamera( MaterialInstance* instance, const Core::Camera* camera );
+        static void UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
+                                  const ShaderProtocols::DirectionLight& dirLights );
 
     protected:
         void OnBind( MaterialInstance* instance ) override;
@@ -39,28 +39,15 @@ namespace Desert::Graphic
     private:
         struct PBRUniforms
         {
-            glm::vec3 AlbedoColor         = glm::vec3( 1.0f );
-            float     MetallicFactor      = 0.0f;
-            float     RoughnessFactor     = 0.5f;
-            float     EmissiveIntensity   = 1.0f;
-            int       UseAlbedoTexture    = 0;
-            int       UseNormalTexture    = 0;
-            int       UseMetallicTexture  = 0;
-            int       UseRoughnessTexture = 0;
-            int       UseAOTexture        = 0;
-            int       UseEmissiveTexture  = 0;
+            glm::vec3 AlbedoColor;
+            float     AlbedoBlend;
+            float     MetallicValue;
+            float     MetallicBlend;
+            float     RoughnessValue;
+            float     RoughnessBlend;
+            glm::vec3 EmissionColor;
+            float     EmissionStrength;
+            float     AOValue;
         };
-
-        PBRUniforms m_CurrentUniforms;
-        bool        m_UniformsDirty   = true;
-        glm::mat4   m_TransformMatrix = glm::mat4( 1.0f );
-
-        // Cached texture pointers
-        const Image2D* m_AlbedoTexture    = nullptr;
-        const Image2D* m_NormalTexture    = nullptr;
-        const Image2D* m_MetallicTexture  = nullptr;
-        const Image2D* m_RoughnessTexture = nullptr;
-        const Image2D* m_AOTexture        = nullptr;
-        const Image2D* m_EmissiveTexture  = nullptr;
     };
 } // namespace Desert::Graphic

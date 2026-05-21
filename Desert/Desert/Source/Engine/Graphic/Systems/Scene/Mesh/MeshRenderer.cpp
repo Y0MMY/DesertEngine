@@ -22,7 +22,7 @@ namespace Desert::Graphic::System
             return Common::MakeError( "Failed to setup outline pass" );
 
         m_StaticMaterialFallback =
-             std::make_unique<Graphic::StaticMaterialPBR>( MaterialPBRBase::PBRMaterialData{} );
+             std::make_unique<Graphic::StaticMaterialPBR>();
 
         return BOOLSUCCESS;
     }
@@ -92,20 +92,28 @@ namespace Desert::Graphic::System
 
         for ( const auto& data : m_StaticQueue )
         {
-            if ( !data.Mesh || !data.MaterialInstance )
+            if ( !data.Mesh || data.MaterialSlots.empty() )
                 continue;
 
-            MaterialInstance* inst = data.MaterialInstance;
+            // We use the first material slot for now, as the current renderer doesn't support submeshes with different materials yet
+            MaterialInstance* inst = data.MaterialSlots[0];
+            if ( !inst )
+                continue;
 
-            auto* material = static_cast<StaticMaterialPBR*>( inst->GetParentMaterial() );
+            Material* parentMaterial = inst->GetParentMaterial();
 
-            material->UpdateTransform( data.Transform );
-            material->UpdateCamera( camera );
-            material->UpdateLights( pointLights, dirLights );
+            // Update scene data on the specific instance using static PBR helpers
+            StaticMaterialPBR::UpdateCamera( inst, camera );
+            StaticMaterialPBR::UpdateLights( inst, pointLights, dirLights );
 
-            inst->MarkNeedsApply();
+            // Update object data on the specific instance
+            StaticMaterialPBR::UpdateTransform( inst, data.Transform );
+
+            // Bind the material instance.
+            parentMaterial->Bind( inst );
+
             renderer.RenderMesh( m_StaticPipeline.get(), data.Mesh, data.Transform,
-                                 material->GetMaterialExecutor() );
+                                 parentMaterial->GetMaterialExecutor() );
         }
     }
 
@@ -121,8 +129,16 @@ namespace Desert::Graphic::System
 
         for ( const auto& data : m_SkinnedQueue )
         {
-            data.Material->Bind( { camera, data.Transform, m_SceneRenderer->GetDirectionLights(), pointLights,
-                                   textures, data.BoneMatrices } );
+            // For now, we assume the first material instance is the PBR one
+            MaterialInstance* inst = (MaterialInstance*)data.Material;
+            
+            data.Material->Bind( { .instance        = inst,
+                                   .MainCamera      = camera,
+                                   .MeshTransform   = data.Transform,
+                                   .DirectionLights = m_SceneRenderer->GetDirectionLights(),
+                                   .PointLights     = pointLights,
+                                   .PBREnvTextures  = textures,
+                                   .SkinnedUB       = { .BoneMatrices = data.BoneMatrices } } );
 
             renderer.RenderMesh( m_SkinnedPipeline.get(), data.Mesh, data.Transform,
                                  data.Material->GetMaterialExecutor() );
@@ -297,10 +313,10 @@ namespace Desert::Graphic::System
             case MeshType::Static:
             {
                 StaticMeshRenderData staticData;
-                staticData.Mesh      = static_cast<StaticMesh*>( data.Mesh );
-                staticData.Transform = data.Transform;
-                staticData.Material  = static_cast<StaticMaterialPBR*>( data.MaterialSlots[0] );
-                staticData.Outlined  = data.Outlined;
+                staticData.Mesh          = static_cast<StaticMesh*>( data.Mesh );
+                staticData.Transform     = data.Transform;
+                staticData.MaterialSlots = data.MaterialSlots;
+                staticData.Outlined      = data.Outlined;
 
                 m_StaticQueue.push_back( staticData );
                 break;
@@ -311,7 +327,7 @@ namespace Desert::Graphic::System
                 SkinnedMeshRenderData skinnedData;
                 skinnedData.Mesh         = static_cast<SkinnedMesh*>( data.Mesh );
                 skinnedData.Transform    = data.Transform;
-                skinnedData.Material     = static_cast<SkinnedMaterialPBR*>( data.MaterialSlots[0] );
+             //   skinnedData.Material     = static_cast<SkinnedMaterialPBR*>( data.MaterialSlots[0] );
                 skinnedData.BoneMatrices = data.BoneMatrices;
 
                 m_SkinnedQueue.push_back( skinnedData );
