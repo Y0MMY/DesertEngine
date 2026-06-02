@@ -71,10 +71,7 @@ namespace Desert::ShaderResources::API::Vulkan
     void VulkanStorageBuffer::SetData( const void* data, uint32_t size, uint32_t offset )
     {
 
-        const auto& caps =
-             SP_CAST( Graphic::API::Vulkan::VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
-                  ->GetPhysicalDevice()
-                  ->GetRendererCaps();
+        const auto& caps = EngineContext::GetInstance().GetCapabilities();
 
         DESERT_VERIFY( offset % caps.StorageBufferAlignment == 0,
                        "StorageBuffer '{}' offset {} is not aligned to {}", m_BufferName, offset,

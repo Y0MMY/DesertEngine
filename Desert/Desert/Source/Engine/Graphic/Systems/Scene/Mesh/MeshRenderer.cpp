@@ -156,7 +156,7 @@ namespace Desert::Graphic::System
         if ( !targetFb )
             return false;
 
-        PipelineSpecification spec;
+        GraphicsPipelineSpecification spec;
         spec.DebugName = "StaticMeshGeometry";
 
         spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" },
@@ -170,7 +170,7 @@ namespace Desert::Graphic::System
         spec.Shader         = m_GeometryShader;
         spec.Framebuffer    = targetFb;
 
-        m_StaticPipeline = Pipeline::Create( spec );
+        m_StaticPipeline = GraphicsPipeline::Create( spec );
         m_StaticPipeline->Invalidate();
 
         return true;
@@ -187,7 +187,7 @@ namespace Desert::Graphic::System
         if ( !targetFb )
             return false;
 
-        PipelineSpecification spec;
+        GraphicsPipelineSpecification spec;
         spec.DebugName = "SkinnedMeshGeometry";
 
         spec.Layout = { { Graphic::ShaderDataType::Float3, "a_Position" },
@@ -203,7 +203,7 @@ namespace Desert::Graphic::System
         spec.Shader         = m_SkinnedShader;
         spec.Framebuffer    = targetFb;
 
-        m_SkinnedPipeline = Pipeline::Create( spec );
+        m_SkinnedPipeline = GraphicsPipeline::Create( spec );
         m_SkinnedPipeline->Invalidate();
 
         return true;
@@ -222,7 +222,7 @@ namespace Desert::Graphic::System
         if ( !targetFb )
             return false;
 
-        PipelineSpecification outlinePipeSpec;
+        GraphicsPipelineSpecification outlinePipeSpec;
         outlinePipeSpec.DebugName = "OutlinePipeline";
         outlinePipeSpec.Layout    = { { Graphic::ShaderDataType::Float3, "a_Position" },
                                       { Graphic::ShaderDataType::Float3, "a_Normal" },
@@ -247,7 +247,7 @@ namespace Desert::Graphic::System
         outlinePipeSpec.PolygonMode        = PrimitivePolygonMode::Wireframe;
         outlinePipeSpec.LineWidth          = 5.0F;
 
-        m_OutlinePipeline = Pipeline::Create( outlinePipeSpec );
+        m_OutlinePipeline = GraphicsPipeline::Create( outlinePipeSpec );
         m_OutlinePipeline->Invalidate();
 
         m_OutlineMaterial = std::make_unique<MaterialOutline>();

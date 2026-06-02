@@ -7,6 +7,11 @@
 #include <Engine/Graphic/API/Vulkan/VulkanQueue.hpp>
 
 #include <Engine/Graphic/SwapChain.hpp>
+#include <Engine/Graphic/Framebuffer.hpp>
+
+#include <memory>
+#include <vector>
+#include <array>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -14,7 +19,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanSwapChain( const GLFWwindow* window );
-        ~VulkanSwapChain();
+        ~VulkanSwapChain() override;
 
         void Init( const VkInstance instance, const std::shared_ptr<Engine::Device>& device );
 
@@ -25,7 +30,7 @@ namespace Desert::Graphic::API::Vulkan
 
         uint32_t GetBackBufferCount() const override
         {
-            return m_SwapChainImages.Images.size();
+            return (uint32_t)m_SwapChainImages.Images.size();
         }
 
         const auto& GetSwapChainVKImage() const
@@ -82,9 +87,18 @@ namespace Desert::Graphic::API::Vulkan
             return m_VulkanQueue;
         }
 
-        void OnResize( uint32_t width, uint32_t height );
+        void OnResize( uint32_t width, uint32_t height ) override;
 
-        void Release();
+        void Release() override;
+
+        uint32_t GetCurrentBufferIndex() const;
+        void     PrepareFrame();
+        void     Present();
+
+        [[nodiscard]] std::shared_ptr<::Desert::Graphic::Framebuffer> GetCompositeFramebuffer() const
+        {
+            return m_CompositeFramebuffer;
+        }
 
     private:
         void InitSurface( GLFWwindow* window, const VkInstance instance );
@@ -94,7 +108,7 @@ namespace Desert::Graphic::API::Vulkan
         Common::ResultStr<VkResult> CreateSwapChainRenderPass();
         Common::ResultStr<VkResult> CreateSwapChainFramebuffers();
         Common::ResultStr<VkResult>
-        CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device ); // TODO: remove depth
+        CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device );
 
     private:
         std::unique_ptr<VulkanQueue>       m_VulkanQueue;
@@ -133,6 +147,8 @@ namespace Desert::Graphic::API::Vulkan
         VkRenderPass m_VkRenderPass = VK_NULL_HANDLE;
 
         std::array<const void*, 2> m_VmaAllocation;
+
+        std::shared_ptr<::Desert::Graphic::Framebuffer> m_CompositeFramebuffer;
 
     private:
         friend class VulkanQueue;

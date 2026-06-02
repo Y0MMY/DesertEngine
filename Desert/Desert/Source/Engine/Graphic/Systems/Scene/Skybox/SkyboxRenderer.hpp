@@ -38,7 +38,7 @@ namespace Desert::Graphic::System
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
 
         Core::Camera*             m_ActiveCamera = nullptr;
-        std::shared_ptr<Pipeline> m_Pipeline;
+        std::shared_ptr<GraphicsPipeline> m_Pipeline;
         std::shared_ptr<Shader>   m_Shader;
     };
 } // namespace Desert::Graphic::System

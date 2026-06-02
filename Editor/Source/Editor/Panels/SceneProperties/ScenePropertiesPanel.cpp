@@ -10,6 +10,7 @@
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
 #include <ImGui/imgui.h>
+#include <Engine/Assets/Prefab/PrefabAsset.hpp>
 
 namespace Desert::Editor
 {
@@ -106,6 +107,17 @@ namespace Desert::Editor
 
             if ( ImGui::Button( "OK", ImVec2( 120, 0 ) ) )
             {
+                // Implement actual saving logic
+                const Common::Filepath fullPath = Common::Filepath( prefabNamePath ) / ( tag + ".prefab" );
+                
+                auto newPrefab = std::make_shared<Assets::PrefabAsset>( Assets::AssetPriority::High, fullPath );
+                newPrefab->CreateFromEntity( const_cast<ECS::Entity&>( selectedEntity ), *m_AssetManager );
+                
+                const std::string serialized = newPrefab->Serialize();
+                Common::Utils::FileSystem::WriteContentToFile( fullPath, serialized );
+                
+                LOG_INFO( "Prefab saved successfully: {0}", fullPath.string() );
+
                 ImGui::CloseCurrentPopup();
             }
 

@@ -75,7 +75,7 @@ namespace Desert::Graphic
         }
 
         void RegisterRenderPass( RenderPhase phase, const std::string& name, std::function<void()> executeFunc,
-                                 const PipelineSpecification& pipeSpec = {} );
+                                 const GraphicsPipelineSpecification& pipeSpec = {} );
 
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
                                    std::shared_ptr<RenderPass>&& renderPass )

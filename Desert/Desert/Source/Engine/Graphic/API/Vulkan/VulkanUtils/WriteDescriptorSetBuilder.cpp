@@ -77,10 +77,13 @@ namespace Desert::Graphic::API::Vulkan
             }
 
             const VkDescriptorImageInfo* outputImageInfo = pImageInfo;
-            if ( pImageInfo->imageView == VK_NULL_HANDLE || pImageInfo->sampler == VK_NULL_HANDLE ||
-                 pImageInfo->imageLayout == VK_IMAGE_LAYOUT_UNDEFINED )
+            if ( pImageInfo == nullptr || pImageInfo->imageView == VK_NULL_HANDLE || 
+                 pImageInfo->sampler == VK_NULL_HANDLE || pImageInfo->imageLayout == VK_IMAGE_LAYOUT_UNDEFINED )
             {
-                outputImageInfo = &sp_cast<TextureType>( getFallback() )->GetVulkanImageInfo().ImageInfo;
+                // NOTE: This still uses a static for fallback, which is okay as fallback texture info is constant
+                static VkDescriptorImageInfo fallbackInfo;
+                fallbackInfo = sp_cast<TextureType>( getFallback() )->GetResource().GetDescriptorInfo();
+                outputImageInfo = &fallbackInfo;
             }
 
             VkWriteDescriptorSet writeDescriptor = {};

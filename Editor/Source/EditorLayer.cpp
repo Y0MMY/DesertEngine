@@ -1,29 +1,37 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 
 #include "EditorLayer.hpp"
+#include <Common/Core/Core.hpp>
 
-#include "Editor/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
-#include "Editor/Panels/SceneProperties/ScenePropertiesPanel.hpp"
+// 1. Engine Core
+#include <Engine/Core/Scene.hpp>
+#include <Engine/ECS/Entity.hpp>
+#include <Engine/ECS/Components.hpp>
+#include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Core/Serialize/SceneSerializer.hpp>
+
+// 2. Editor Base & Infrastructure
 #include "Editor/Core/EditorResources.hpp"
 #include "Editor/Core/ThemeManager.hpp"
+#include "Editor/Core/ImGuiUtilities.hpp"
+#include <ImGui/imgui_internal.h>
+#include "Editor/Import/ImportManager.hpp"
+#include "Editor/Builtin/BuiltinMeshRegistry.hpp"
+
+// 3. Editor Panels
+#include "Editor/Panels/SceneHierarchy/SceneHierarchyPanel.hpp"
+#include "Editor/Panels/SceneProperties/ScenePropertiesPanel.hpp"
 #include "Editor/Panels/Debug/ShaderLibraryPanel.hpp"
 #include "Editor/Panels/FileExplorer/FileExplorerPanel.hpp"
 #include "Editor/Panels/ViewportPanel/ViewportPanel.hpp"
-#include "Editor/Core/EditorResources.hpp"
-#include "Editor/Core/ImGuiUtilities.hpp"
-#include <ImGui/imgui_internal.h>
+#include "Editor/Panels/MeshEditor/MeshEditorPanel.hpp"
 
-#include "Editor/Import/ImportManager.hpp"
-
+// 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
-#include <Engine/Core/Serialize/SceneSerializer.hpp>
-
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/AnimationECSSystem.hpp>
-
-#include <Editor/Builtin/BuiltinMeshRegistry.hpp>
 
 namespace Desert::Editor
 {
@@ -50,10 +58,17 @@ namespace Desert::Editor
 
     [[nodiscard]] Common::BoolResultStr EditorLayer::OnAttach()
     {
-        // Setup ImGui docking
+        // 1. Create ImGui Context first
         ::ImGui::CreateContext();
 
+        // 2. Initialize Editor Resources (Adds fonts to the atlas)
         Editor::EditorResources::Initialize( "Resources/Fonts/materialdesignicons-webfont.ttf" );
+
+#ifdef EBABLE_IMGUI
+        // 3. Initialize Engine ImGui Layer (Initializes backend and uploads fonts)
+        m_ImGuiLayer = ImGui::ImGuiLayer::Create();
+        m_ImGuiLayer->OnAttach();
+#endif // EBABLE_IMGUI
 
         ImGuiIO& io = ::ImGui::GetIO();
         (void)io;
@@ -63,7 +78,7 @@ namespace Desert::Editor
         io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;   // Enable Multi-Viewport / Platform Windows
 
         // Setup ImGui style
-        ThemeManager::SetBlackTheme();
+        ThemeManager::SetDarkTheme();
 
         // When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to
         // regular ones
@@ -74,14 +89,12 @@ namespace Desert::Editor
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
         }
 
-        Editor::ThemeManager::SetDarkTheme();
+        m_AssetPreloader->PreloadAllAssets();
 
         m_MainScene->AddSystem<ECS::MeshECSSystem>();
         m_MainScene->AddSystem<ECS::SkyboxECSSystem>();
         m_MainScene->AddSystem<ECS::PointLightECSSystem>();
         m_MainScene->AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
-
-        m_AssetPreloader->PreloadAllAssets();
 
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
 
@@ -95,16 +108,13 @@ namespace Desert::Editor
 
         m_MainScene->Init();
 #ifdef EBABLE_IMGUI
-        m_ImGuiLayer = ImGui::ImGuiLayer::Create();
-        m_ImGuiLayer->OnAttach();
-
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager,
                                                                                m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>( "Resources/" ) );
-
+        m_Panels.emplace_back( std::make_unique<Editor::MeshEditorPanel>( m_MainScene ) );
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
@@ -123,27 +133,20 @@ namespace Desert::Editor
         m_MainScene->OnUpdate( ts );
 
         const auto& endResult = m_MainScene->EndScene();
-        m_Application->GetWindow()->PrepareNextFrame();
 
         if ( !endResult )
         {
             return Common::MakeError( endResult.GetError() );
         }
 
-        {
-            m_ImGuiLayer->Begin();
-
-            OnImGuiRender();
-
-            m_ImGuiLayer->End();
-        }
-
-        m_Application->GetWindow()->PresentFinalImage();
         return BOOLSUCCESS;
     }
 
     Common::BoolResultStr EditorLayer::OnImGuiRender()
     {
+#ifdef EBABLE_IMGUI
+        m_ImGuiLayer->Begin();
+#endif
 
         static bool               dockspaceOpen  = true;
         static bool               opt_fullscreen = true;
@@ -233,6 +236,9 @@ namespace Desert::Editor
 
         ::ImGui::End(); // End dockspace
 
+#ifdef EBABLE_IMGUI
+        m_ImGuiLayer->End();
+#endif
         return BOOLSUCCESS;
     }
 
@@ -653,6 +659,18 @@ namespace Desert::Editor
 
     void EditorLayer::DrawProjectPopup()
     {
+    }
+
+    void EditorLayer::OnEvent( Common::Event& event )
+    {
+#ifdef EBABLE_IMGUI
+        for ( auto& panel : m_Panels )
+        {
+            if ( event.m_Handled )
+                break;
+            // panel->OnEvent(event);
+        }
+#endif
     }
 
     Common::BoolResultStr EditorLayer::OnDetach()

@@ -58,6 +58,7 @@ namespace Desert::Engine
     private:
         NO_DISCARD bool OnClose( Common::EventWindowClose& e )
         {
+            m_IsRunningApplication = false;
             return true;
         }
         void ProcessEvents( Common::Event& e );

@@ -34,6 +34,7 @@ namespace Desert::Graphic::API::Vulkan
 
     public:
         VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines );
+        ~VulkanShader();
 
         virtual void Use( BindUsage use = BindUsage::Bind ) const override
         {
@@ -117,6 +118,7 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         std::vector<VkPipelineShaderStageCreateInfo> m_PipelineShaderStageCreateInfos;
+        std::vector<VkShaderModule>                  m_ShaderModules;
         std::filesystem::path                        m_ShaderPath;
         std::string                                  m_ShaderName;
 

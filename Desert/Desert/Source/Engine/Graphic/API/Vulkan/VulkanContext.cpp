@@ -156,7 +156,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanContext::Init()
     {
-        const auto logicalDeivce = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() );
+        const auto logicalDeivce = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() );
 
         m_VulkanAllocator = std::make_unique<VulkanAllocator>();
         m_VulkanAllocator->Init( logicalDeivce, s_VulkanInstance );

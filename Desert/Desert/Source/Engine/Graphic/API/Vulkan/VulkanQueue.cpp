@@ -1,6 +1,6 @@
-
 #include <Engine/Graphic/API/Vulkan/VulkanQueue.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
@@ -8,7 +8,6 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-
     namespace
     {
         Common::ResultStr<VkSemaphore> CreateSemaphore( VkDevice device )
@@ -31,54 +30,67 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::PrepareFrame()
     {
-        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentFrameIndex;
+        uint32_t currentIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
 
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                ->GetVulkanLogicalDevice();
+
+        vkResetFences( device, 1, &m_WaitFences[currentIndex] );
+
+        const auto acquire = m_SwapChain->AcquireNextImage( m_FrameSemaphores[currentIndex].PresentComplete, &m_ImageIndex );
+        if ( !acquire )
+        {
+            LOG_ERROR( "[AcquireNextImage] Error: {}", acquire.GetError() );
+        }
+    }
+
+    void VulkanQueue::Submit()
+    {
+        uint32_t currentIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+
         const auto& queue =
-             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )->GetGraphicsQueue();
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetGraphicsQueue();
 
         VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo         submitInfo    = {};
         submitInfo.sType                   = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.pWaitDstStageMask       = &waitStageMask;
-        submitInfo.pWaitSemaphores         = &m_Semaphores.PresentComplete;
+        submitInfo.pWaitSemaphores         = &m_FrameSemaphores[currentIndex].PresentComplete;
         submitInfo.waitSemaphoreCount      = 1;
-        submitInfo.pSignalSemaphores       = &m_Semaphores.RenderComplete;
+        submitInfo.pSignalSemaphores       = &m_FrameSemaphores[currentIndex].RenderComplete;
         submitInfo.signalSemaphoreCount    = 1;
         submitInfo.pCommandBuffers         = &m_DrawCommandBuffers[currentIndex];
         submitInfo.commandBufferCount      = 1;
 
-        vkResetFences( device, 1, &m_WaitFences[currentIndex] );
-
-        const auto acquire = m_SwapChain->AcquireNextImage( m_Semaphores.PresentComplete, &m_ImageIndex );
-        if ( !acquire )
-        {
-            LOG_ERROR( "[AcquireNextImage] Error: {}", acquire.GetError() );
-        }
-
-        // Submit to the graphics queue passing a wait fence
         VK_CHECK_RESULT( vkQueueSubmit( queue, 1, &submitInfo, m_WaitFences[currentIndex] ) );
     }
 
-    void VulkanQueue::Present() // TODO: result
+    void VulkanQueue::Present()
     {
-        uint32_t currentIndex = EngineContext::GetInstance().m_CurrentFrameIndex;
-
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+        uint32_t currentIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                ->GetVulkanLogicalDevice();
         const auto& queue =
-             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )->GetGraphicsQueue();
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetGraphicsQueue();
 
-        const auto& queuePresent = QueuePresent( queue, m_ImageIndex, m_Semaphores.RenderComplete );
+        const auto& queuePresent = QueuePresent( queue, m_ImageIndex, m_FrameSemaphores[currentIndex].RenderComplete );
         if ( !queuePresent.IsSuccess() )
         {
             LOG_INFO( "[QueuePresent] Error: {}", queuePresent.GetError() );
         }
 
-        uint32_t newCurrentFrame = ( currentIndex + 1 ) % m_SwapChain->GetBackBufferCount();
-        EngineContext::GetInstance().m_CurrentFrameIndex = newCurrentFrame;
+        Engine::FrameManager::GetInstance().NextFrame();
+        uint32_t newCurrentFrame = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
         vkWaitForFences( device, 1, &m_WaitFences[newCurrentFrame], VK_TRUE, UINT64_MAX );
+
+        SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+             ->GetVulkanAllocator()
+             ->ProcessDeletionQueue();
+    }
+
+    VkCommandBuffer VulkanQueue::GetDrawCommandBuffer() const
+    {
+        return m_DrawCommandBuffers[EngineContext::GetInstance().GetCurrentFrameIndex()];
     }
 
     Common::ResultStr<VkResult> VulkanQueue::QueuePresent( VkQueue queue, uint32_t imageIndex,
@@ -90,7 +102,6 @@ namespace Desert::Graphic::API::Vulkan
         presentInfo.swapchainCount   = 1;
         presentInfo.pSwapchains      = &m_SwapChain->m_SwapChain;
         presentInfo.pImageIndices    = &imageIndex;
-        // Check if a wait semaphore has been specified to wait for before presenting the image
         if ( waitSemaphore != VK_NULL_HANDLE )
         {
             presentInfo.pWaitSemaphores    = &waitSemaphore;
@@ -107,28 +118,22 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::ResultStr<VkResult> VulkanQueue::Init()
     {
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                ->GetVulkanLogicalDevice();
-        const auto semaphore1 = CreateSemaphore( device );
-        const auto semaphore2 = CreateSemaphore( device );
 
-        if ( !semaphore1.IsSuccess() )
+        uint32_t backBufferCount = m_SwapChain->GetBackBufferCount();
+
+        m_FrameSemaphores.resize( backBufferCount );
+        for ( uint32_t i = 0; i < backBufferCount; i++ )
         {
-            return Common::MakeError<VkResult>( semaphore1.GetError() );
+            m_FrameSemaphores[i].PresentComplete = CreateSemaphore( device ).GetValue();
+            m_FrameSemaphores[i].RenderComplete  = CreateSemaphore( device ).GetValue();
         }
 
-        if ( !semaphore2.IsSuccess() )
-        {
-            return Common::MakeError<VkResult>( semaphore2.GetError() );
-        }
+        m_DrawCommandBuffers.resize( backBufferCount );
+        m_ComputeCommandBuffers.resize( backBufferCount );
 
-        m_Semaphores.PresentComplete = semaphore1.GetValue();
-        m_Semaphores.RenderComplete  = semaphore2.GetValue();
-
-        m_DrawCommandBuffers.resize( m_SwapChain->GetBackBufferCount() );
-        m_ComputeCommandBuffers.resize( m_SwapChain->GetBackBufferCount() );
-
-        for ( uint32_t i = 0; i < m_SwapChain->GetBackBufferCount(); i++ )
+        for ( uint32_t i = 0; i < backBufferCount; i++ )
         {
             // graphic
             {
@@ -160,8 +165,8 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        m_WaitFences.resize( m_SwapChain->GetBackBufferCount() );
-        // Wait fences to sync command buffer access
+        m_WaitFences.resize( backBufferCount );
+
         VkFenceCreateInfo fenceCreateInfo{};
         fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -169,9 +174,7 @@ namespace Desert::Graphic::API::Vulkan
         {
 
             VK_RETURN_RESULT_IF_FALSE(
-                 vkCreateFence( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
-                                     ->GetVulkanLogicalDevice(),
-                                &fenceCreateInfo, nullptr, &m_WaitFences[i] ) );
+                 vkCreateFence( device, &fenceCreateInfo, nullptr, &m_WaitFences[i] ) );
         }
 
         return Common::MakeSuccess( VK_SUCCESS );
@@ -179,21 +182,15 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanQueue::Release()
     {
-
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                ->GetVulkanLogicalDevice();
 
-        if ( m_Semaphores.PresentComplete != VK_NULL_HANDLE )
+        for ( auto& sem : m_FrameSemaphores )
         {
-            vkDestroySemaphore( device, m_Semaphores.PresentComplete, nullptr );
-            m_Semaphores.PresentComplete = VK_NULL_HANDLE;
+            if ( sem.PresentComplete != VK_NULL_HANDLE ) vkDestroySemaphore( device, sem.PresentComplete, nullptr );
+            if ( sem.RenderComplete != VK_NULL_HANDLE ) vkDestroySemaphore( device, sem.RenderComplete, nullptr );
         }
-
-        if ( m_Semaphores.RenderComplete != VK_NULL_HANDLE )
-        {
-            vkDestroySemaphore( device, m_Semaphores.RenderComplete, nullptr );
-            m_Semaphores.RenderComplete = VK_NULL_HANDLE;
-        }
+        m_FrameSemaphores.clear();
 
         for ( auto& fence : m_WaitFences )
         {

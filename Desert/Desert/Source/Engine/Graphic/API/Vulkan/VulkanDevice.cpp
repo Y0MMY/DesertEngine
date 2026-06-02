@@ -29,7 +29,7 @@ namespace Desert::Graphic::API::Vulkan
 
         auto isDeviceSuitable = [&deviceProperties,
                                  &deviceFeatures]( VkPhysicalDevice device )
-             -> bool // NOTE: Lambda function to check is device suitable
+             -> bool
         {
             vkGetPhysicalDeviceProperties( device, &deviceProperties );
             vkGetPhysicalDeviceFeatures( device, &deviceFeatures );
@@ -44,28 +44,26 @@ namespace Desert::Graphic::API::Vulkan
             {
                 selectedPhysicalDevice = device;
 
-                m_UniformBufferOffsetAlignment = deviceProperties.limits.minUniformBufferOffsetAlignment;
-
-                m_RendererCaps.MaxStorageBufferSize   = deviceProperties.limits.maxStorageBufferRange;
-                m_RendererCaps.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
+                m_Capabilities.MaxStorageBufferSize   = deviceProperties.limits.maxStorageBufferRange;
+                m_Capabilities.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
+                m_Capabilities.SupportsWideLines      = deviceFeatures.wideLines == VK_TRUE;
+                m_Capabilities.MaxLineWidth           = deviceProperties.limits.lineWidthRange[1];
 
                 break;
             }
         }
 
-        if ( deviceFeatures.wideLines )
-        {
-            m_SupportWideLines = true;
-        }
-        else
-        {
-            LOG_WARN( "Device doesn't support wide lines, line width will be clamped to 1.0" );
-        }
-
         if ( !selectedPhysicalDevice )
         {
-            DESERT_VERIFY( "Could not find discrete GPU." );
+            LOG_WARN( "Could not find discrete GPU. Using fallback." );
             selectedPhysicalDevice = devices.back();
+            vkGetPhysicalDeviceProperties( selectedPhysicalDevice, &deviceProperties );
+            vkGetPhysicalDeviceFeatures( selectedPhysicalDevice, &deviceFeatures );
+            
+            m_Capabilities.MaxStorageBufferSize   = deviceProperties.limits.maxStorageBufferRange;
+            m_Capabilities.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
+            m_Capabilities.SupportsWideLines      = deviceFeatures.wideLines == VK_TRUE;
+            m_Capabilities.MaxLineWidth           = deviceProperties.limits.lineWidthRange[1];
         }
 
         DESERT_VERIFY( selectedPhysicalDevice, "Could not find any physical devices!" );
@@ -86,7 +84,6 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( requestedQueueTypes & VK_QUEUE_GRAPHICS_BIT )
         {
-            // Graphics queue
             VkDeviceQueueCreateInfo queueCreateInfo{};
             queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             queueCreateInfo.queueFamilyIndex = m_QueueFamilyIndices.GraphicsFamily.value_or( -1 );
@@ -95,41 +92,28 @@ namespace Desert::Graphic::API::Vulkan
             m_QueueCreateInfos.push_back( queueCreateInfo );
         }
 
-        if ( requestedQueueTypes & VK_QUEUE_COMPUTE_BIT )
+        if ( (requestedQueueTypes & VK_QUEUE_COMPUTE_BIT) && 
+             (m_QueueFamilyIndices.ComputeFamily != m_QueueFamilyIndices.GraphicsFamily) )
         {
-            if ( m_QueueFamilyIndices.ComputeFamily != m_QueueFamilyIndices.GraphicsFamily )
-            {
-                // Graphics queue
-                VkDeviceQueueCreateInfo queueCreateInfo{};
-                queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-                queueCreateInfo.queueFamilyIndex = m_QueueFamilyIndices.ComputeFamily.value_or( -1 );
-                queueCreateInfo.queueCount       = 1;
-                queueCreateInfo.pQueuePriorities = &queuePriority;
-                m_QueueCreateInfos.push_back( queueCreateInfo );
-            }
+            VkDeviceQueueCreateInfo queueCreateInfo{};
+            queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfo.queueFamilyIndex = m_QueueFamilyIndices.ComputeFamily.value_or( -1 );
+            queueCreateInfo.queueCount       = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+            m_QueueCreateInfos.push_back( queueCreateInfo );
         }
 
-        if ( requestedQueueTypes & VK_QUEUE_TRANSFER_BIT )
+        if ( (requestedQueueTypes & VK_QUEUE_TRANSFER_BIT) &&
+             (m_QueueFamilyIndices.TransferFamily != m_QueueFamilyIndices.GraphicsFamily &&
+              m_QueueFamilyIndices.TransferFamily != m_QueueFamilyIndices.ComputeFamily) )
         {
-            if ( m_QueueFamilyIndices.TransferFamily != m_QueueFamilyIndices.GraphicsFamily &&
-                 m_QueueFamilyIndices.TransferFamily != m_QueueFamilyIndices.ComputeFamily )
-            {
-                // Transfer queue
-                VkDeviceQueueCreateInfo queueCreateInfo{};
-                queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-                queueCreateInfo.queueFamilyIndex = m_QueueFamilyIndices.TransferFamily.value_or( -1 );
-                queueCreateInfo.queueCount       = 1;
-                queueCreateInfo.pQueuePriorities = &queuePriority;
-                m_QueueCreateInfos.push_back( queueCreateInfo );
-            }
+            VkDeviceQueueCreateInfo queueCreateInfo{};
+            queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfo.queueFamilyIndex = m_QueueFamilyIndices.TransferFamily.value_or( -1 );
+            queueCreateInfo.queueCount       = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+            m_QueueCreateInfos.push_back( queueCreateInfo );
         }
-        else
-        {
-            // Else we use the same queue
-            //  queueFamilyIndices.transfer = queueFamilyIndices.graphics;
-        }
-
-        // Check for ext.
 
         uint32_t extensionCount;
         vkEnumerateDeviceExtensionProperties( m_PhysicalDevice, nullptr, &extensionCount, nullptr );
@@ -140,7 +124,6 @@ namespace Desert::Graphic::API::Vulkan
             vkEnumerateDeviceExtensionProperties( m_PhysicalDevice, nullptr, &extensionCount,
                                                   availableExtensions.data() );
 
-            DESERT_VERIFY( "Selected physical device has {0} extensions", extensions.size() );
             for ( const auto& ext : availableExtensions )
             {
                 m_SupportedExtensions.emplace( ext.extensionName );
@@ -152,47 +135,71 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeSuccess( true );
     }
 
-    std::shared_ptr<Desert::Graphic::API::Vulkan::VulkanPhysicalDevice> VulkanPhysicalDevice::Create()
+    std::shared_ptr<VulkanPhysicalDevice> VulkanPhysicalDevice::Create()
     {
-        return std::make_shared<Desert::Graphic::API::Vulkan::VulkanPhysicalDevice>();
+        return std::make_shared<VulkanPhysicalDevice>();
     }
 
     VulkanLogicalDevice::VulkanLogicalDevice()
     {
         m_PhysicalDevice = std::make_shared<VulkanPhysicalDevice>();
         CreateDevice();
+
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties( m_PhysicalDevice->GetVulkanPhysicalDevice(), &props );
+        m_DeviceName = props.deviceName;
+    }
+
+    VulkanLogicalDevice::~VulkanLogicalDevice()
+    {
+        Destroy();
+    }
+
+    const Engine::DeviceCapabilities& VulkanLogicalDevice::GetCapabilities() const
+    {
+        return m_PhysicalDevice->GetCapabilities();
+    }
+
+    void VulkanLogicalDevice::WaitIdle() const
+    {
+        vkDeviceWaitIdle( m_LogicalDevice );
+    }
+
+    std::string VulkanLogicalDevice::GetName() const
+    {
+        return m_DeviceName;
     }
 
     void VulkanLogicalDevice::Destroy()
     {
-        vkDeviceWaitIdle( m_LogicalDevice );
-        vkDestroyDevice( m_LogicalDevice, nullptr );
+        if ( m_LogicalDevice != VK_NULL_HANDLE )
+        {
+            vkDeviceWaitIdle( m_LogicalDevice );
+            vkDestroyDevice( m_LogicalDevice, nullptr );
+            m_LogicalDevice = VK_NULL_HANDLE;
+        }
     }
 
     Common::ResultStr<bool> VulkanLogicalDevice::CreateDevice()
     {
         VkDeviceCreateInfo       createInfo{};
         VkPhysicalDeviceFeatures deviceFeatures{};
-        if ( m_PhysicalDevice->m_SupportWideLines )
+        if ( m_PhysicalDevice->m_Capabilities.SupportsWideLines )
         {
             deviceFeatures.wideLines        = VK_TRUE;
             deviceFeatures.fillModeNonSolid = VK_TRUE;
         }
         createInfo.sType                 = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         createInfo.pQueueCreateInfos     = m_PhysicalDevice->m_QueueCreateInfos.data();
-        createInfo.queueCreateInfoCount  = m_PhysicalDevice->m_QueueCreateInfos.size();
+        createInfo.queueCreateInfoCount  = (uint32_t)m_PhysicalDevice->m_QueueCreateInfos.size();
         createInfo.pEnabledFeatures      = &deviceFeatures;
-        createInfo.enabledExtensionCount = 0;
 
         std::vector<const char*> deviceExtensions;
         DESERT_VERIFY( m_PhysicalDevice->IsExtensionSupported( VK_KHR_SWAPCHAIN_EXTENSION_NAME ) );
         deviceExtensions.push_back( VK_KHR_SWAPCHAIN_EXTENSION_NAME );
 
-        if ( deviceExtensions.size() > 0 )
-        {
-            createInfo.ppEnabledExtensionNames = deviceExtensions.data();
-            createInfo.enabledExtensionCount   = (uint32_t)deviceExtensions.size();
-        }
+        createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+        createInfo.enabledExtensionCount   = (uint32_t)deviceExtensions.size();
 
         VK_CHECK_RESULT( vkCreateDevice( m_PhysicalDevice->GetVulkanPhysicalDevice(), &createInfo, nullptr,
                                          &m_LogicalDevice ) );
@@ -211,11 +218,9 @@ namespace Desert::Graphic::API::Vulkan
     {
         QueueFamilyIndices indices;
 
-        // Dedicated queue for compute
-        // Try to find a queue family index that supports compute but not graphics
         if ( flags & VK_QUEUE_COMPUTE_BIT )
         {
-            for ( uint32_t i = 0; i < m_QueueFamilyProperties.size(); i++ )
+            for ( uint32_t i = 0; i < (uint32_t)m_QueueFamilyProperties.size(); i++ )
             {
                 auto& queueFamilyProperties = m_QueueFamilyProperties[i];
                 if ( ( queueFamilyProperties.queueFlags & VK_QUEUE_COMPUTE_BIT ) &&
@@ -229,7 +234,7 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( ( flags & VK_QUEUE_TRANSFER_BIT ) )
         {
-            for ( uint32_t i = 0; i < ( m_QueueFamilyProperties.size() ); i++ )
+            for ( uint32_t i = 0; i < (uint32_t)m_QueueFamilyProperties.size(); i++ )
             {
                 auto& queueFamilyProperties = m_QueueFamilyProperties[i];
                 if ( ( queueFamilyProperties.queueFlags & VK_QUEUE_TRANSFER_BIT ) &&
@@ -242,9 +247,7 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        // For other queue types or if no separate compute queue is present, return the first one to support the
-        // requested flags
-        for ( uint32_t i = 0; i < m_QueueFamilyProperties.size(); i++ )
+        for ( uint32_t i = 0; i < (uint32_t)m_QueueFamilyProperties.size(); i++ )
         {
             if ( ( flags & VK_QUEUE_COMPUTE_BIT ) && !indices.ComputeFamily )
             {
@@ -252,7 +255,7 @@ namespace Desert::Graphic::API::Vulkan
                     indices.ComputeFamily = i;
             }
 
-            if ( flags & VK_QUEUE_GRAPHICS_BIT )
+            if ( ( flags & VK_QUEUE_GRAPHICS_BIT ) && !indices.GraphicsFamily )
             {
                 if ( m_QueueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT )
                     indices.GraphicsFamily = i;
@@ -264,8 +267,6 @@ namespace Desert::Graphic::API::Vulkan
 
     VkFormat VulkanPhysicalDevice::FindDepthFormat() const
     {
-        // Since all depth formats may be optional, we need to find a suitable depth format to use
-        // Start with the highest precision packed format
         std::array<VkFormat, 5> depthFormats = { VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D32_SFLOAT,
                                                  VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM_S8_UINT,
                                                  VK_FORMAT_D16_UNORM };
@@ -274,7 +275,6 @@ namespace Desert::Graphic::API::Vulkan
         {
             VkFormatProperties formatProps;
             vkGetPhysicalDeviceFormatProperties( m_PhysicalDevice, format, &formatProps );
-            // Format must support depth stencil attachment for optimal tiling
             if ( formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT )
                 return format;
         }

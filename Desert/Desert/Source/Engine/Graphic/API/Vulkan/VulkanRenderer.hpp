@@ -3,7 +3,7 @@
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 
-#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan.h>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -24,11 +24,16 @@ namespace Desert::Graphic::API::Vulkan
                                                                      bool              clearFrame ) override;
         virtual Common::BoolResultStr               BeginSwapChainRenderPass() override;
         [[nodiscard]] virtual Common::BoolResultStr EndRenderPass() override;
-        virtual void RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
+        
+        virtual void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                  const MaterialExecutor* materialExecutor ) override;
 
-        virtual void SubmitFullscreenQuad( const Pipeline*         pipeline,
+        virtual void SubmitFullscreenQuad( const GraphicsPipeline*         pipeline,
                                            const MaterialExecutor* materialExecutor ) override;
+
+        virtual void DispatchCompute( const ComputePipeline* pipeline, 
+                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ,
+                                      const MaterialExecutor* materialExecutor = nullptr ) override;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
 
@@ -37,7 +42,7 @@ namespace Desert::Graphic::API::Vulkan
         VkCommandBuffer GetCurrentCmdBuffer() const;
 
     private:
-        void SetViewportAndScissor( const uint32_t wdith, const uint32_t height );
+        void SetViewportAndScissor( const uint32_t width, const uint32_t height );
         void ClearAttachments( const std::vector<VkClearValue>&    clearValues,
                                const std::shared_ptr<Framebuffer>& framebuffer );
 

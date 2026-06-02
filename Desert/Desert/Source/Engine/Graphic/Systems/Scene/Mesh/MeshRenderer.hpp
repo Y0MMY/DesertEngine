@@ -88,15 +88,15 @@ namespace Desert::Graphic::System
 
     private:
         // Static
-        std::shared_ptr<Pipeline> m_StaticPipeline;
+        std::shared_ptr<GraphicsPipeline> m_StaticPipeline;
         std::shared_ptr<Shader>   m_GeometryShader;
 
         // Skinned
-        std::shared_ptr<Pipeline> m_SkinnedPipeline;
+        std::shared_ptr<GraphicsPipeline> m_SkinnedPipeline;
         std::shared_ptr<Shader>   m_SkinnedShader;
 
         // Outline
-        std::shared_ptr<Pipeline>        m_OutlinePipeline;
+        std::shared_ptr<GraphicsPipeline>        m_OutlinePipeline;
         std::shared_ptr<Shader>          m_OutlineShader;
         std::unique_ptr<MaterialOutline> m_OutlineMaterial;
 

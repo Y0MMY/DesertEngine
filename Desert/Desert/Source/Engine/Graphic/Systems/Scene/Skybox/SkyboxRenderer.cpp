@@ -24,7 +24,7 @@ namespace Desert::Graphic::System
         // Pipeline
         m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Skybox" );
 
-        Graphic::PipelineSpecification pipeSpec;
+        Graphic::GraphicsPipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;
         pipeSpec.Framebuffer = compositeFramebuffer;
         pipeSpec.Shader      = m_Shader;
@@ -33,7 +33,7 @@ namespace Desert::Graphic::System
         pipeSpec.DepthTestEnabled  = false;
         pipeSpec.DepthWriteEnabled = false;
 
-        m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
+        m_Pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 
         return BOOLSUCCESS;
@@ -68,7 +68,7 @@ namespace Desert::Graphic::System
             return;
 
         builder.AddPass( "SkyboxPass", RenderPhase::Sky, [this]() { Render(); },
-                         m_Pipeline ? m_Pipeline->GetSpecification() : PipelineSpecification{}, targetFb,
+                         m_Pipeline ? m_Pipeline->GetSpecification() : GraphicsPipelineSpecification{}, targetFb,
                          { RenderPassDependency( RenderPhase::Geometry ) } );
     }
 

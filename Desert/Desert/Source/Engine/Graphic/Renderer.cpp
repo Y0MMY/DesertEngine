@@ -18,7 +18,7 @@ namespace Desert::Graphic
             case RendererAPIType::Vulkan:
             {
                 s_RendererAPI = new Graphic::API::Vulkan::VulkanRendererAPI(
-                     EngineContext::GetInstance().GetCurrentWindow() );
+                     EngineContext::GetInstance().GetWindow() );
 
                 break;
             }
@@ -39,7 +39,6 @@ namespace Desert::Graphic
         Graphic::TextureSpecification spec;
         spec.GenerateMips = false;
         m_BRDFTexture     = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" ).ExtractValue();
-        // m_BRDFTexture->Invalidate();
 
         return Common::MakeSuccess( true );
     }
@@ -75,9 +74,15 @@ namespace Desert::Graphic
         s_RendererAPI->PrepareNextFrame();
     }
 
-    void Renderer::SubmitFullscreenQuad( const Pipeline* pipeline, const MaterialExecutor* materialExecutor )
+    void Renderer::SubmitFullscreenQuad( const GraphicsPipeline* pipeline, const MaterialExecutor* materialExecutor )
     {
         s_RendererAPI->SubmitFullscreenQuad( pipeline, materialExecutor );
+    }
+
+    void Renderer::DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
+                                    uint32_t groupCountZ, const MaterialExecutor* materialExecutor )
+    {
+        s_RendererAPI->DispatchCompute( pipeline, groupCountX, groupCountY, groupCountZ, materialExecutor );
     }
 
     void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
@@ -105,7 +110,7 @@ namespace Desert::Graphic
         return s_RendererAPI->GetCompositeFramebuffer();
     }
 
-    void Renderer::RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
+    void Renderer::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                const MaterialExecutor* materialExecutor )
     {
         s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor );
@@ -119,7 +124,6 @@ namespace Desert::Graphic
     void Renderer::Shutdown()
     {
         s_RendererAPI->Shutdown();
-        // m_BRDFTexture->GetImage()->Release();
         FallbackTextures::Get().Release();
 
         delete s_RendererAPI;

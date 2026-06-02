@@ -8,6 +8,7 @@
 #include <glm/gtx/quaternion.hpp>
 
 #include <Engine/Geometry/Mesh.hpp>
+#include <Engine/Geometry/PrimitiveType.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 
 #include <Engine/Assets/Common.hpp>
@@ -16,6 +17,12 @@
 
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/Animation/FSM/AnimationStateMachine.hpp>
+
+namespace Desert
+{
+    class Mesh;
+    class DynamicMesh;
+}
 
 namespace Desert::ECS
 {
@@ -45,6 +52,8 @@ namespace Desert::ECS
         Assets::AssetHandle                       MeshHandle;
         std::vector<Assets::AssetHandle>          MaterialSlots;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+        std::optional<Geometry::PrimitiveType>    Primitive;                // Optional primitive type for dynamic generation
+        std::shared_ptr<DynamicMesh>              RuntimeMesh;              // Unique mesh instance for modifications
         bool                                      OutlineDraw = false;
     };
 

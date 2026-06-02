@@ -27,7 +27,7 @@ namespace Desert::Graphic
             std::string                       Name;
             RenderPhase                       Phase;
             std::function<void()>             ExecuteFunc;
-            PipelineSpecification             PipelineSpec;
+            GraphicsPipelineSpecification             PipelineSpec;
             std::shared_ptr<Framebuffer>      TargetFramebuffer;
             std::vector<RenderPassDependency> Dependencies;
         };
@@ -37,7 +37,7 @@ namespace Desert::Graphic
 
         void AddPass( const PassConfig& config );
         void AddPass( const std::string& name, RenderPhase phase, std::function<void()> executeFunc,
-                      const PipelineSpecification&             pipelineSpec      = {},
+                      const GraphicsPipelineSpecification&             pipelineSpec      = {},
                       std::shared_ptr<Framebuffer>             targetFramebuffer = nullptr,
                       const std::vector<RenderPassDependency>& dependencies      = {} );
 

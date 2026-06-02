@@ -1,9 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
-
 #include <Engine/Core/Window.hpp>
-
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Geometry/Mesh.hpp>
@@ -35,10 +33,19 @@ namespace Desert::Graphic
         virtual Common::BoolResultStr BeginRenderPass( const RenderPass* renderPass, bool clearFrame ) = 0;
         virtual Common::BoolResultStr BeginSwapChainRenderPass()                                       = 0;
         virtual Common::BoolResultStr EndRenderPass()                                                  = 0;
-        virtual void RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
+        
+        virtual void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                  const MaterialExecutor* materialExecutor )                            = 0;
-        virtual void SubmitFullscreenQuad( const Pipeline*         pipeline,
+        
+        virtual void SubmitFullscreenQuad( const GraphicsPipeline* pipeline,
                                            const MaterialExecutor* materialExecutor )                  = 0;
+
+        /**
+         * @brief Dispatches a compute shader.
+         */
+        virtual void DispatchCompute( const ComputePipeline* pipeline, 
+                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ,
+                                      const MaterialExecutor* materialExecutor = nullptr ) = 0;
 
         virtual void                         ResizeWindowEvent( uint32_t width, uint32_t height ) = 0;
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const                      = 0;

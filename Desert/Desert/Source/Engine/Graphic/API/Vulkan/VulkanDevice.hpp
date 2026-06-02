@@ -9,12 +9,6 @@ namespace Desert::Graphic::API::Vulkan
     class VulkanPhysicalDevice final
     {
     public:
-        struct RendererCaps
-        {
-            uint64_t MaxStorageBufferSize;
-            uint64_t StorageBufferAlignment;
-        };
-
         VulkanPhysicalDevice();
         ~VulkanPhysicalDevice() = default;
 
@@ -57,9 +51,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_DepthFormat;
         }
 
-        const auto& GetRendererCaps() const
+        const auto& GetCapabilities() const
         {
-            return m_RendererCaps;
+            return m_Capabilities;
         }
 
         static std::shared_ptr<VulkanPhysicalDevice> Create();
@@ -76,10 +70,7 @@ namespace Desert::Graphic::API::Vulkan
 
         VkFormat m_DepthFormat = VK_FORMAT_UNDEFINED;
 
-        bool         m_SupportWideLines = false;
-        VkDeviceSize m_UniformBufferOffsetAlignment;
-
-        RendererCaps m_RendererCaps;
+        Engine::DeviceCapabilities m_Capabilities;
 
         std::unordered_set<std::string> m_SupportedExtensions;
 
@@ -91,7 +82,12 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanLogicalDevice();
-        ~VulkanLogicalDevice() = default;
+        ~VulkanLogicalDevice() override;
+
+        // Device interface implementation
+        [[nodiscard]] const Engine::DeviceCapabilities& GetCapabilities() const override;
+        virtual void                                    WaitIdle() const override;
+        [[nodiscard]] virtual std::string               GetName() const override;
 
         const auto& GetPhysicalDevice() const
         {
@@ -118,6 +114,7 @@ namespace Desert::Graphic::API::Vulkan
     private:
         std::shared_ptr<VulkanPhysicalDevice> m_PhysicalDevice;
         VkDevice                              m_LogicalDevice;
+        std::string                           m_DeviceName;
 
         VkQueue m_GraphicsQueue;
         VkQueue m_ComputeQueue;

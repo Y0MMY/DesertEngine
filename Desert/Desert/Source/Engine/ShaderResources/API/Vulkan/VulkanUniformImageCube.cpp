@@ -29,13 +29,14 @@ namespace Desert::ShaderResources::API::Vulkan
         m_ImageCube = imageCube;
         if ( !m_ImageCube )
         {
+            m_DescriptorInfo = {};
             return;
         }
 
-        const auto& vulkanImageInfo  = ( (Graphic::API::Vulkan::VulkanImageCube*)imageCube )->GetVulkanImageInfo();
-        m_DescriptorInfo.imageView   = vulkanImageInfo.ImageInfo.imageView;
-        m_DescriptorInfo.sampler     = vulkanImageInfo.ImageInfo.sampler;
-        m_DescriptorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // vulkanImageInfo.Layout;
+        const auto& res              = ( (Graphic::API::Vulkan::VulkanImageCube*)imageCube )->GetResource();
+        m_DescriptorInfo.imageView   = res.ImageView;
+        m_DescriptorInfo.sampler     = res.Sampler;
+        m_DescriptorInfo.imageLayout = res.Layout;
     }
 
 } // namespace Desert::ShaderResources::API::Vulkan

@@ -37,6 +37,8 @@ namespace Desert::Graphic
 
         Get<UniformBufferProperty>( CameraUB.Name )
              ->SetRawData( (std::byte*)&CameraUB, sizeof( ShaderProtocols::Camera ) );
+
+        m_MaterialExecutor->Apply();
     }
 
 } // namespace Desert::Graphic

@@ -8,13 +8,17 @@
 
 #include <Engine/Graphic/Render/Commands/DrawMeshCommand.hpp>
 #include <Engine/Graphic/Render/Commands/DrawSkinnedMeshCommand.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
 namespace Desert::ECS
 {
     class MeshECSSystem : public System
     {
     public:
-        using System::System;
+        explicit MeshECSSystem() : System()
+        {
+            m_DefaultMaterial = std::make_shared<Graphic::StaticMaterialPBR>();
+        }
 
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
@@ -29,27 +33,80 @@ namespace Desert::ECS
                      [&]( entt::entity entity, StaticMeshComponent& mesh,
                           const TransformComponent& transform )
                      {
-                         if ( !mesh.MeshHandle || mesh.MaterialSlots.empty() )
+                         if ( !mesh.RuntimeMesh && !mesh.Primitive.has_value() && !mesh.MeshHandle )
                              return;
 
-                         Desert::Mesh* targetMesh =
-                              Runtime::ResourceRegistry::GetMeshService()->Get( mesh.MeshHandle );
+                         Desert::Mesh* targetMesh = nullptr;
+
+                         if ( mesh.RuntimeMesh )
+                         {
+                             // Use unique modified mesh
+                             targetMesh = mesh.RuntimeMesh.get();
+                         }
+                         else if ( mesh.Primitive.has_value() )
+                         {
+                             // Dynamic primitive generation (Cache in RuntimeMesh to avoid per-frame buffer creation)
+                             mesh.RuntimeMesh = Geometry::PrimitiveMeshFactory::Create( mesh.Primitive.value() );
+                             if ( mesh.RuntimeMesh )
+                             {
+                                 mesh.RuntimeMesh->Invalidate();
+                                 targetMesh = mesh.RuntimeMesh.get();
+                             }
+                         }
+                         else if ( mesh.MeshHandle )
+                         {
+                             // Asset-based mesh
+                             targetMesh = Runtime::ResourceRegistry::GetMeshService()->Get( mesh.MeshHandle );
+                         }
 
                          if ( !targetMesh )
                              return;
 
+                         // --- Auto-Initialize Material Slots ---
+                         // If the component has no materials assigned, try to fetch defaults from the asset
+                         if ( mesh.MaterialSlots.empty() && mesh.MeshHandle )
+                         {
+                             auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( mesh.MeshHandle );
+                             if ( meshAsset )
+                             {
+                                 const auto& defaultHandles = meshAsset->GetMaterialHandles();
+                                 for ( const auto& h : defaultHandles )
+                                 {
+                                     // Resolve external handle to internal asset handle
+                                     mesh.MaterialSlots.push_back( 
+                                         Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal( h ) 
+                                     );
+                                 }
+                             }
+                         }
+
                          // Ensure runtime material instances are initialized and match the slots
-                         if ( mesh.RuntimeMaterialInstances.size() != mesh.MaterialSlots.size() )
+                         size_t slotCount = mesh.MaterialSlots.empty() ? 1 : mesh.MaterialSlots.size();
+
+                         if ( mesh.RuntimeMaterialInstances.size() != slotCount )
                          {
                              mesh.RuntimeMaterialInstances.clear();
-                             mesh.RuntimeMaterialInstances.reserve( mesh.MaterialSlots.size() );
+                             mesh.RuntimeMaterialInstances.reserve( slotCount );
 
-                             for ( const auto& assetHandle : mesh.MaterialSlots )
+                             if ( mesh.MaterialSlots.empty() )
                              {
-                                 auto* baseMaterial = Runtime::ResourceRegistry::GetMaterialService()->Get( assetHandle );
-                                 if ( baseMaterial )
+                                 // Use persistent system default material template
+                                 mesh.RuntimeMaterialInstances.push_back( m_DefaultMaterial->CreateInstance() );
+                             }
+                             else
+                             {
+                                 for ( const auto& assetHandle : mesh.MaterialSlots )
                                  {
-                                     mesh.RuntimeMaterialInstances.push_back( baseMaterial->CreateInstance() );
+                                     auto* baseMaterial = Runtime::ResourceRegistry::GetMaterialService()->Get( assetHandle );
+                                     if ( baseMaterial )
+                                     {
+                                         mesh.RuntimeMaterialInstances.push_back( baseMaterial->CreateInstance() );
+                                     }
+                                     else
+                                     {
+                                         // Fallback to system default if asset is not loaded
+                                         mesh.RuntimeMaterialInstances.push_back( m_DefaultMaterial->CreateInstance() );
+                                     }
                                  }
                              }
                          }
@@ -94,5 +151,8 @@ namespace Desert::ECS
                      } );
             }
         }
+
+    private:
+        std::shared_ptr<Graphic::StaticMaterialPBR> m_DefaultMaterial;
     };
 } // namespace Desert::ECS

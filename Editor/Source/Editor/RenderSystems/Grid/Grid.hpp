@@ -24,7 +24,7 @@ namespace Desert::Editor::Render
         bool CreateGridGeometry();
         bool SetupPipeline();
 
-        std::shared_ptr<Graphic::Pipeline>    m_Pipeline;
+        std::shared_ptr<Graphic::GraphicsPipeline> m_Pipeline;
         std::shared_ptr<Graphic::Shader>      m_Shader;
         std::shared_ptr<MaterialGrid>         m_Material;
     };

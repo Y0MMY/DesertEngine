@@ -7,18 +7,22 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-    class VulkanPipeline final : public Pipeline
+    class VulkanPipeline final : public GraphicsPipeline
     {
     public:
-        VulkanPipeline( const PipelineSpecification& specification );
-        ~VulkanPipeline();
+        VulkanPipeline( const GraphicsPipelineSpecification& specification );
+        ~VulkanPipeline() override;
 
-        virtual const PipelineSpecification GetSpecification() const override
+        virtual void Invalidate() override;
+        virtual void Release() override;
+
+        [[nodiscard]] virtual PipelineType GetType() const override { return PipelineType::Graphics; }
+        [[nodiscard]] virtual std::shared_ptr<Shader> GetShader() const override { return m_Specification.Shader; }
+
+        [[nodiscard]] virtual const GraphicsPipelineSpecification& GetSpecification() const override
         {
             return m_Specification;
         }
-
-        virtual void Invalidate() override;
 
         const VkPipeline GetVkPipeline() const
         {
@@ -52,7 +56,7 @@ namespace Desert::Graphic::API::Vulkan
         std::pair<uint32_t, VkPushConstantRange> SetUpPushConstantRange() const;
 
     private:
-        PipelineSpecification m_Specification;
+        GraphicsPipelineSpecification m_Specification;
 
         VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
         VkPipeline       m_Pipeline= VK_NULL_HANDLE;

@@ -1,6 +1,6 @@
 #include "BuiltinMeshRegistry.hpp"
 
-#include <Editor/Core/PrimitiveMeshFactory.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Editor
@@ -42,11 +42,9 @@ namespace Desert::Editor
         //material->SetRoughness( 0.5f );
         //material->SetMetallic( 0.0f );
 
-        //// Создаем asset для материала
         //auto materialAsset = assetManager->CreateRuntimeAsset<Assets::MaterialAsset>( material );
         //auto handle        = materialAsset->GetMetadata().Handle;
 
-        //// Регистрируем в MaterialService
         //Runtime::ResourceRegistry::GetMaterialService()->Register( materialAsset );
         Assets::AssetHandle handle{};
 
@@ -59,7 +57,7 @@ namespace Desert::Editor
     // =========================
     void BuiltinMeshRegistry::RegisterCube( const std::shared_ptr<Assets::AssetManager>& assetManager )
     {
-        auto cubeMesh = PrimitiveMeshFactory::Create( PrimitiveType::Cube );
+        auto cubeMesh = Geometry::PrimitiveMeshFactory::Create( Geometry::PrimitiveType::Cube );
 
         const auto handle = Runtime::ResourceRegistry::GetMeshService()->RegisterProcedural( cubeMesh );
 

@@ -1,0 +1,198 @@
+#include "EntitySerializer.hpp"
+#include <Engine/ECS/Components.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Assets/MaterialAsset.hpp>
+#include <Engine/Geometry/DynamicMesh.hpp>
+
+namespace Desert::Core::Serialize
+{
+    Assets::EntityData EntitySerializer::SerializeEntity( ECS::Entity entity, const Assets::AssetManager& assetManager )
+    {
+        Assets::EntityData data;
+        
+        // Basic Info
+        if ( entity.HasComponent<ECS::UUIDComponent>() )
+            data.id = entity.GetComponent<ECS::UUIDComponent>().UUID;
+        else
+            data.id = Common::UUID();
+
+        if ( entity.HasComponent<ECS::RelationshipComponent>() )
+        {
+            entt::entity parentHandle = entity.GetComponent<ECS::RelationshipComponent>().Parent;
+            if ( parentHandle != entt::null )
+            {
+                ECS::Entity parentEntity{ parentHandle, *entity.GetRegistry() };
+                if ( parentEntity.HasComponent<ECS::UUIDComponent>() )
+                {
+                    data.parent = parentEntity.GetComponent<ECS::UUIDComponent>().UUID;
+                }
+            }
+        }
+
+        if ( entity.HasComponent<ECS::TagComponent>() )
+            data.Tag = entity.GetComponent<ECS::TagComponent>().Tag;
+
+        if ( entity.HasComponent<ECS::PrefabComponent>() )
+            data.PrefabRef = entity.GetComponent<ECS::PrefabComponent>().Prefab;
+
+        // Transform
+        if ( entity.HasComponent<ECS::TransformComponent>() )
+        {
+            const auto& tc = entity.GetComponent<ECS::TransformComponent>();
+            data.Translation = tc.Translation;
+            data.Rotation = tc.Rotation;
+            data.Scale = tc.Scale;
+        }
+
+        // Static Mesh
+        if ( entity.HasComponent<ECS::StaticMeshComponent>() )
+        {
+            const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
+            Assets::StaticMeshComponentSer meshSer;
+            meshSer.MeshHandle = smc.MeshHandle;
+            meshSer.MaterialSlots = smc.MaterialSlots;
+            meshSer.Primitive = smc.Primitive;
+            
+            if ( smc.RuntimeMesh )
+            {
+                const auto& vertices = smc.RuntimeMesh->GetVertices();
+                const auto& indices  = smc.RuntimeMesh->GetIndices();
+                
+                std::vector<Assets::VertexSer> customVertices;
+                for ( const auto& v : vertices )
+                {
+                    customVertices.push_back( { .Position = v.Position,
+                                                .Normal   = v.Normal,
+                                                .TexCoord = v.TexCoord } );
+                }
+                meshSer.CustomVertices = customVertices;
+
+                std::vector<uint32_t> flattenedIndices;
+                for ( const auto& i : indices )
+                {
+                    flattenedIndices.push_back( i.V1 );
+                    flattenedIndices.push_back( i.V2 );
+                    flattenedIndices.push_back( i.V3 );
+                }
+                meshSer.CustomIndices = flattenedIndices;
+            }
+
+            data.StaticMesh = meshSer;
+        }
+
+        // Skinned Mesh
+        if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
+        {
+            const auto& smc = entity.GetComponent<ECS::SkinnedMeshComponent>();
+            Assets::SkinnedMeshComponentSer meshSer;
+            meshSer.MeshHandle = smc.MeshHandle;
+            meshSer.MaterialSlots = smc.MaterialSlots;
+            data.SkinnedMesh = meshSer;
+        }
+
+        // Camera
+        if ( entity.HasComponent<ECS::CameraComponent>() )
+        {
+            data.Camera = Assets::CameraComponentSer{ .IsMainCamera = entity.GetComponent<ECS::CameraComponent>().IsMainCamera };
+        }
+
+        // Lights
+        if ( entity.HasComponent<ECS::DirectionLightComponent>() )
+        {
+            const auto& light = entity.GetComponent<ECS::DirectionLightComponent>();
+            data.DirectionLight = Assets::DirectionLightComponentSer{ .Intensity = light.Intensity };
+        }
+
+        if ( entity.HasComponent<ECS::PointLightComponent>() )
+        {
+            const auto& light = entity.GetComponent<ECS::PointLightComponent>();
+            data.PointLight = Assets::PointLightComponentSer{ .Color = light.Color, .Intensity = light.Intensity, .Radius = light.Radius };
+        }
+
+        return data;
+    }
+
+    void EntitySerializer::DeserializeEntity( const Assets::EntityData& data, ECS::Entity entity, const Assets::AssetManager& assetManager )
+    {
+        // Tag
+        if ( data.Tag )
+            entity.AddComponent<ECS::TagComponent>().Tag = *data.Tag;
+
+        // Transform
+        if ( data.Translation || data.Rotation || data.Scale )
+        {
+            auto& tc = entity.GetComponent<ECS::TransformComponent>();
+            if ( data.Translation ) tc.Translation = *data.Translation;
+            if ( data.Rotation )    tc.Rotation = *data.Rotation;
+            if ( data.Scale )       tc.Scale = *data.Scale;
+        }
+
+        // Static Mesh
+        if ( data.StaticMesh )
+        {
+            auto& smc = entity.AddComponent<ECS::StaticMeshComponent>();
+            smc.MeshHandle = data.StaticMesh->MeshHandle;
+            smc.MaterialSlots = data.StaticMesh->MaterialSlots;
+            smc.Primitive = data.StaticMesh->Primitive;
+
+            if ( data.StaticMesh->CustomVertices && data.StaticMesh->CustomIndices )
+            {
+                std::vector<Vertex> vertices;
+                for ( const auto& vs : *data.StaticMesh->CustomVertices )
+                {
+                    Vertex v;
+                    v.Position = vs.Position;
+                    v.Normal   = vs.Normal;
+                    v.TexCoord = vs.TexCoord;
+                    vertices.push_back( v );
+                }
+
+                std::vector<Index> indices;
+                const auto& rawIndices = *data.StaticMesh->CustomIndices;
+                for ( size_t i = 0; i + 2 < rawIndices.size(); i += 3 )
+                {
+                    indices.push_back( { rawIndices[i], rawIndices[i+1], rawIndices[i+2] } );
+                }
+
+                smc.RuntimeMesh = std::make_shared<DynamicMesh>( vertices, indices, std::vector<Submesh>{} );
+                smc.RuntimeMesh->Invalidate();
+            }
+        }
+
+        // Skinned Mesh
+        if ( data.SkinnedMesh )
+        {
+            auto& smc = entity.AddComponent<ECS::SkinnedMeshComponent>();
+            smc.MeshHandle = data.SkinnedMesh->MeshHandle;
+            smc.MaterialSlots = data.SkinnedMesh->MaterialSlots;
+        }
+
+        // Camera
+        if ( data.Camera )
+        {
+            auto& cam = entity.AddComponent<ECS::CameraComponent>();
+            cam.IsMainCamera = data.Camera->IsMainCamera;
+        }
+
+        // Lights
+        if ( data.DirectionLight )
+        {
+            auto& light = entity.AddComponent<ECS::DirectionLightComponent>();
+            light.Intensity = data.DirectionLight->Intensity;
+        }
+
+        if ( data.PointLight )
+        {
+            auto& light = entity.AddComponent<ECS::PointLightComponent>();
+            light.Color = data.PointLight->Color;
+            light.Intensity = data.PointLight->Intensity;
+            light.Radius = data.PointLight->Radius;
+        }
+
+        if ( data.PrefabRef )
+        {
+            entity.AddComponent<ECS::PrefabComponent>().Prefab = *data.PrefabRef;
+        }
+    }
+} // namespace Desert::Core::Serialize

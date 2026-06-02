@@ -12,8 +12,9 @@ namespace Desert::Core
 
     Camera::Camera()
     {
-        const auto width  = EngineContext::GetInstance().GetCurrentWindow()->GetWidth();
-        const auto height = EngineContext::GetInstance().GetCurrentWindow()->GetHeight();
+        const auto window = EngineContext::GetInstance().GetWindow();
+        const auto width  = window ? window->GetWidth() : 1280;
+        const auto height = window ? window->GetHeight() : 720;
 
         UpdateProjectionMatrix( width, height );
 

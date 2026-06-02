@@ -2,7 +2,10 @@
 
 #include <Engine/Graphic/Framebuffer.hpp>
 
-#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan.h>
+#include <memory>
+#include <vector>
+#include <optional>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -10,7 +13,7 @@ namespace Desert::Graphic::API::Vulkan
     {
     public:
         VulkanFramebuffer( const FramebufferSpecification& spec );
-        virtual ~VulkanFramebuffer();
+        virtual ~VulkanFramebuffer() override;
 
         virtual const FramebufferSpecification GetSpecification() const override
         {
@@ -38,7 +41,7 @@ namespace Desert::Graphic::API::Vulkan
 
         uint32_t GetColorAttachmentCount() const override
         {
-            return m_ColorAttachments.size() + m_ExternalColorAttachments.size();
+            return (uint32_t)(m_ColorAttachments.size() + m_ExternalColorAttachments.size());
         }
 
         uint32_t GetDepthAttachmentCount() const override
@@ -49,10 +52,7 @@ namespace Desert::Graphic::API::Vulkan
                         : 0U;
         }
 
-        Common::BoolResultStr Invalidate() override
-        {
-            return Common::MakeError( "Use Resize()" );
-        }
+        Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
 
         virtual void Use( BindUsage = BindUsage::Bind ) const override
@@ -61,7 +61,7 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual Common::BoolResultStr Resize( uint32_t width, uint32_t height, bool forceRecreate = false ) override;
 
-        virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const override //TODO: Raw ptr
+        virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const override
         {
             return m_ColorAttachments.at( index );
         }
@@ -76,11 +76,8 @@ namespace Desert::Graphic::API::Vulkan
             return m_ClearValues;
         }
 
-    private:
-        Common::ResultStr<VkFramebuffer> CreateFramebuffer( VkDevice device, uint32_t width, uint32_t height );
-
-    private:
-        void TransitionImagesToInitialLayouts();
+        // --- Vulkan Specific ---
+        Common::BoolResultStr RT_Invalidate();
 
     private:
         std::shared_ptr<Image2D>              m_DepthAttachment;

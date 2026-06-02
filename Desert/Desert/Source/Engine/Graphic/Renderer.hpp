@@ -27,10 +27,13 @@ namespace Desert::Graphic
         void BeginRenderPass( const RenderPass* renderPass, bool clearFrame = false );
         void BeginSwapChainRenderPass();
         void EndRenderPass();
-        void RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
+        void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                          const MaterialExecutor* materialExecutor );
 
-        void SubmitFullscreenQuad( const Pipeline* pipeline, const MaterialExecutor* materialExecutor );
+        void SubmitFullscreenQuad( const GraphicsPipeline* pipeline, const MaterialExecutor* materialExecutor );
+
+        void DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
+                              uint32_t groupCountZ, const MaterialExecutor* materialExecutor = nullptr );
 
         void PrepareNextFrame();
         void PresentFinalImage();

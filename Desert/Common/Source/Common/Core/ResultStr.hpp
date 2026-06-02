@@ -27,9 +27,6 @@ namespace Common
     class ResultStr
     {
     public:
-        ResultStr() = default;
-
-    public:
         class Error
         {
         public:
@@ -52,6 +49,14 @@ namespace Common
             std::string m_ErrorMessage;
         };
 
+    public:
+        /**
+         * @brief Default constructor creates an error state.
+         */
+        ResultStr() : m_Outcome( Error( "Uninitialized Result" ) ), m_IsSuccess( false )
+        {
+        }
+
         bool IsSuccess() const
         {
             return m_IsSuccess;
@@ -61,6 +66,7 @@ namespace Common
         {
             if ( !m_IsSuccess )
             {
+                // NOTE: This is dangerous for non-POD types, but T is often shared_ptr or bool
                 static T empty{};
                 return empty;
             }
@@ -91,16 +97,22 @@ namespace Common
         }
 
     private:
+        /**
+         * @brief Constructor for Success state.
+         */
         template <typename U, typename = std::enable_if_t<!std::is_same_v<std::decay_t<U>, Error>>>
         explicit ResultStr( U&& value ) : m_Outcome( std::forward<U>( value ) ), m_IsSuccess( true )
         {
         }
 
+        /**
+         * @brief Constructor for Error state.
+         */
         explicit ResultStr( Error&& error ) : m_Outcome( std::move( error ) ), m_IsSuccess( false )
         {
         }
 
-        static inline std::string s_NoError = "Cannot get error message, ResultStr is a success";
+        static inline std::string s_NoError = "No error";
         std::variant<T, Error>    m_Outcome;
         bool                      m_IsSuccess = false;
 

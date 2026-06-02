@@ -70,7 +70,7 @@ namespace Desert::Editor::Render
 
         m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Grid.glsl" );
 
-        Graphic::PipelineSpecification pipeSpec;
+        Graphic::GraphicsPipelineSpecification pipeSpec;
         pipeSpec.DebugName         = debugName;
         pipeSpec.Framebuffer       = scene->GetTargetFramebuffer();
         pipeSpec.Shader            = m_Shader;
@@ -79,7 +79,7 @@ namespace Desert::Editor::Render
         pipeSpec.DepthCompareOp    = CompareOp::Less;
         pipeSpec.CullMode          = CullMode::None;
 
-        m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
+        m_Pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 
         return m_Pipeline != nullptr;

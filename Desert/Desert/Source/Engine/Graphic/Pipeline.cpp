@@ -1,5 +1,4 @@
 #include <Engine/Graphic/Pipeline.hpp>
-
 #include <Engine/Graphic/RendererAPI.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
@@ -7,8 +6,7 @@
 
 namespace Desert::Graphic
 {
-
-    std::shared_ptr<Pipeline> Pipeline::Create( const PipelineSpecification& spec )
+    std::shared_ptr<GraphicsPipeline> GraphicsPipeline::Create( const GraphicsPipelineSpecification& spec )
     {
         switch ( RendererAPI::GetAPIType() )
         {
@@ -21,26 +19,18 @@ namespace Desert::Graphic
         return nullptr;
     }
 
-    std::shared_ptr<Desert::Graphic::PipelineCompute>
-    PipelineCompute::Create( const std::shared_ptr<Shader>& shader )
+    std::shared_ptr<ComputePipeline> ComputePipeline::Create( const ComputePipelineSpecification& spec )
     {
-        DESERT_VERIFY( shader != nullptr, "Empty shader" );
+        DESERT_VERIFY( spec.Shader != nullptr, "Empty shader" );
         switch ( RendererAPI::GetAPIType() )
         {
             case RendererAPIType::None:
                 return nullptr;
             case RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanPipelineCompute>( shader );
+                return std::make_shared<API::Vulkan::VulkanPipelineCompute>( spec );
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;
-    }
-
-    void PipelineCompute::UpdateStorageBuffer( void* data, std::size_t size )
-    {
-        DESERT_VERIFY( size <= 128 );
-
-        m_StorageBuffer = Common::Memory::Buffer::Copy( data, size );
     }
 
 } // namespace Desert::Graphic

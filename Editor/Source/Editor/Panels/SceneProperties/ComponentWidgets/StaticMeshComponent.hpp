@@ -2,7 +2,7 @@
 
 #include "IComponentWidget.hpp"
 
-#include <Editor/Core/PrimitiveType.hpp>
+#include <Engine/Geometry/PrimitiveType.hpp>
 
 namespace Desert::Editor
 {
@@ -19,15 +19,8 @@ namespace Desert::Editor
         void Render( ECS::Entity& entity ) override;
 
     private:
-        void RenderPrimitiveSection( ECS::StaticMeshComponent& staticMesh );
-        void RenderAssetSection( ECS::StaticMeshComponent& staticMesh );
-
-    private:
         void        SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle );
-        void        SetPrimitive( ECS::StaticMeshComponent& staticMesh, PrimitiveType type );
-        bool        IsPrimitiveSelected( const ECS::StaticMeshComponent& staticMesh, PrimitiveType type ) const;
         std::string GetPrimitiveName( const ECS::StaticMeshComponent& staticMesh ) const;
-        void        RenderPrimitiveInfo( ECS::StaticMeshComponent& staticMesh );
 
     private:
         const Assets::AssetManager* m_AssetManager;

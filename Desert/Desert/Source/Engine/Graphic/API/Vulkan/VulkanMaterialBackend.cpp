@@ -9,9 +9,7 @@
 #include <Engine/ShaderResources/API/Vulkan/VulkanStorageBuffer.hpp>
 
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
-
 #include <Engine/Core/EngineContext.hpp>
-
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -27,8 +25,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         if ( m_DescriptorPool != VK_NULL_HANDLE )
         {
-
-            vkDestroyDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+            vkDestroyDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                           ->GetVulkanLogicalDevice(),
                                      m_DescriptorPool, nullptr );
         }
@@ -36,7 +33,7 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanMaterialBackend::CreateDescriptorPool()
     {
-        const uint32_t framesInFlight = EngineContext::GetInstance().GetFramesInFlight();
+        const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
         const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
 
         auto& descriptorSets = m_VulkanShader->GetShaderDescriptorSets();
@@ -48,18 +45,11 @@ namespace Desert::Graphic::API::Vulkan
 
         for ( const auto& [setIndex, descriptorSet] : descriptorSets )
         {
-            // Uniform buffers
-            uniformBufferCount += descriptorSet.UniformBuffers.size();
-
-            // Combined image samplers (2D + Cube)
-            combinedImageSamplerCount += descriptorSet.Image2DSamplers.size();
-            combinedImageSamplerCount += descriptorSet.ImageCubeSamplers.size();
-
-            // Storage images
-            storageImageCount += descriptorSet.StorageImage2DSamplers.size();
-
-            // Storage buffers
-            storageBufferCount += descriptorSet.StorageBuffers.size();
+            uniformBufferCount += (uint32_t)descriptorSet.UniformBuffers.size();
+            combinedImageSamplerCount += (uint32_t)descriptorSet.Image2DSamplers.size();
+            combinedImageSamplerCount += (uint32_t)descriptorSet.ImageCubeSamplers.size();
+            storageImageCount += (uint32_t)descriptorSet.StorageImage2DSamplers.size();
+            storageBufferCount += (uint32_t)descriptorSet.StorageBuffers.size();
         }
 
         uniformBufferCount *= framesInFlight;
@@ -68,31 +58,12 @@ namespace Desert::Graphic::API::Vulkan
         storageBufferCount *= framesInFlight;
 
         std::vector<VkDescriptorPoolSize> poolSizes;
+        if ( uniformBufferCount > 0 ) poolSizes.push_back( { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBufferCount } );
+        if ( combinedImageSamplerCount > 0 ) poolSizes.push_back( { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, combinedImageSamplerCount } );
+        if ( storageImageCount > 0 ) poolSizes.push_back( { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, storageImageCount } );
+        if ( storageBufferCount > 0 ) poolSizes.push_back( { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storageBufferCount } );
 
-        if ( uniformBufferCount > 0 )
-        {
-            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBufferCount } );
-        }
-
-        if ( combinedImageSamplerCount > 0 )
-        {
-            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, combinedImageSamplerCount } );
-        }
-
-        if ( storageImageCount > 0 )
-        {
-            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, storageImageCount } );
-        }
-
-        if ( storageBufferCount > 0 )
-        {
-            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storageBufferCount } );
-        }
-
-        if ( poolSizes.empty() )
-        {
-            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 } );
-        }
+        if ( poolSizes.empty() ) poolSizes.push_back( { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 } );
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -101,15 +72,13 @@ namespace Desert::Graphic::API::Vulkan
         poolInfo.maxSets       = framesInFlight * setCount;
         poolInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
-        VK_CHECK_RESULT(
-             vkCreateDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
-                                          ->GetVulkanLogicalDevice(),
-                                     &poolInfo, nullptr, &m_DescriptorPool ) );
+        VK_CHECK_RESULT( vkCreateDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                                          ->GetVulkanLogicalDevice(), &poolInfo, nullptr, &m_DescriptorPool ) );
     }
 
     void VulkanMaterialBackend::AllocateDescriptorSets()
     {
-        const uint32_t framesInFlight = EngineContext::GetInstance().GetFramesInFlight();
+        const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
         const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
 
         m_DescriptorSets.resize( framesInFlight );
@@ -131,7 +100,7 @@ namespace Desert::Graphic::API::Vulkan
             allocInfo.pSetLayouts        = layouts.data();
 
             VK_CHECK_RESULT( vkAllocateDescriptorSets(
-                 SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
+                 SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                       ->GetVulkanLogicalDevice(),
                  &allocInfo, m_DescriptorSets[frame].data() ) );
         }
@@ -146,8 +115,18 @@ namespace Desert::Graphic::API::Vulkan
         return VK_NULL_HANDLE;
     }
 
-    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* material, Pipeline* pipeline )
+    void VulkanMaterialBackend::ApplyPushConstants( MaterialExecutor* material, GraphicsPipeline* pipeline )
     {
+    }
+
+    void VulkanMaterialBackend::UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes )
+    {
+        if ( writes.empty() ) return;
+
+        vkUpdateDescriptorSets( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                                     ->GetVulkanLogicalDevice(),
+                                static_cast<uint32_t>( writes.size() ),
+                                writes.data(), 0, nullptr );
     }
 
     void VulkanMaterialBackend::ApplyUniformBuffer( MaterialProperty* prop )
@@ -156,17 +135,17 @@ namespace Desert::Graphic::API::Vulkan
         if ( !uniformProp || !uniformProp->IsDirty() )
             return;
 
-        const auto& frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        const auto& frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
 
         if ( auto bufferInfo = uniformProp->GetUniform() )
         {
             if ( auto vulkanBuffer = sp_cast<ShaderResources::API::Vulkan::VulkanUniformBuffer>( bufferInfo ) )
             {
-                auto& bufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
-                auto  wds        = DescriptorSetBuilder::GetUniformWDS( this, frameIndex, 0, // set 0
-                                                                        vulkanBuffer->GetBinding(), 1U, &bufferInfo );
+                auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
+                auto  wds = DescriptorSetBuilder::GetUniformWDS( this, frameIndex, 0,
+                                                                 vulkanBuffer->GetBinding(), 1U, &descriptorBufferInfo );
 
-                m_PendingDescriptorWrites.push_back( wds );
+                UpdateDescriptorSets( { wds } );
                 uniformProp->MarkClean();
             }
         }
@@ -178,17 +157,17 @@ namespace Desert::Graphic::API::Vulkan
         if ( !storageProp || !storageProp->IsDirty() )
             return;
 
-        const auto& frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        const auto& frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
 
         if ( auto bufferInfo = storageProp->GetStorageBuffer() )
         {
             if ( auto vulkanBuffer = sp_cast<ShaderResources::API::Vulkan::VulkanStorageBuffer>( bufferInfo ) )
             {
-                auto& bufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
-                auto  wds        = DescriptorSetBuilder::GetStorageWDS( this, frameIndex, 0, // set 0
-                                                                        vulkanBuffer->GetBinding(), 1U, &bufferInfo );
+                auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
+                auto  wds = DescriptorSetBuilder::GetStorageWDS( this, frameIndex, 0,
+                                                                 vulkanBuffer->GetBinding(), 1U, &descriptorBufferInfo );
 
-                m_PendingDescriptorWrites.push_back( wds );
+                UpdateDescriptorSets( { wds } );
                 storageProp->MarkClean();
             }
         }
@@ -200,18 +179,17 @@ namespace Desert::Graphic::API::Vulkan
         if ( !textureProp || !textureProp->IsDirty() )
             return;
 
-        const auto& frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
-        const auto& vulkanShader = std::static_pointer_cast<VulkanShader>( m_Shader );
+        const auto& frameIndex   = EngineContext::GetInstance().GetCurrentFrameIndex();
 
         if ( auto imageUniform = textureProp->GetUniform() )
         {
             if ( auto vulkanImage = sp_cast<ShaderResources::API::Vulkan::VulkanUniformImage2D>( imageUniform ) )
             {
-                auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
-                auto  wds       = DescriptorSetBuilder::GetSampler2DWDS( this, frameIndex, 0, // set 0
-                                                                         vulkanImage->GetBinding(), 1U, &imageInfo );
+                auto descriptorImageInfo = vulkanImage->GetDescriptorImageInfo();
+                auto wds = DescriptorSetBuilder::GetSampler2DWDS( this, frameIndex, 0,
+                                                                  vulkanImage->GetBinding(), 1U, &descriptorImageInfo );
 
-                m_PendingDescriptorWrites.push_back( wds );
+                UpdateDescriptorSets( { wds } );
                 textureProp->MarkClean();
             }
         }
@@ -223,18 +201,17 @@ namespace Desert::Graphic::API::Vulkan
         if ( !textureProp || !textureProp->IsDirty() )
             return;
 
-        const auto& frameIndex   = Renderer::GetInstance().GetCurrentFrameIndex();
-        const auto& vulkanShader = std::static_pointer_cast<VulkanShader>( m_Shader );
+        const auto& frameIndex   = EngineContext::GetInstance().GetCurrentFrameIndex();
 
         if ( auto imageUniform = textureProp->GetUniform() )
         {
             if ( auto vulkanImage = sp_cast<ShaderResources::API::Vulkan::VulkanUniformImageCube>( imageUniform ) )
             {
-                auto& imageInfo = vulkanImage->GetDescriptorImageInfo();
-                auto  wds       = DescriptorSetBuilder::GetSamplerCubeWDS( this, frameIndex, 0, // set 0
-                                                                           vulkanImage->GetBinding(), 1U, &imageInfo );
+                auto descriptorImageInfo = vulkanImage->GetDescriptorImageInfo();
+                auto wds = DescriptorSetBuilder::GetSamplerCubeWDS( this, frameIndex, 0,
+                                                                    vulkanImage->GetBinding(), 1U, &descriptorImageInfo );
 
-                m_PendingDescriptorWrites.push_back( wds );
+                UpdateDescriptorSets( { wds } );
                 textureProp->MarkClean();
             }
         }
@@ -244,9 +221,7 @@ namespace Desert::Graphic::API::Vulkan
                                                     VkPipelineBindPoint bindPoint, uint32_t frameIndex )
     {
         if ( frameIndex >= m_DescriptorSets.size() || m_DescriptorSets[frameIndex].empty() )
-        {
             return;
-        }
 
         std::vector<VkDescriptorSet> setsToBind;
         setsToBind.reserve( m_DescriptorSets[frameIndex].size() );
@@ -254,15 +229,11 @@ namespace Desert::Graphic::API::Vulkan
         for ( VkDescriptorSet descriptorSet : m_DescriptorSets[frameIndex] )
         {
             if ( descriptorSet != VK_NULL_HANDLE )
-            {
                 setsToBind.push_back( descriptorSet );
-            }
         }
 
         if ( setsToBind.empty() )
-        {
             return;
-        }
 
         vkCmdBindDescriptorSets( cmdBuffer, bindPoint, layout, 0, static_cast<uint32_t>( setsToBind.size() ),
                                  setsToBind.data(), 0, nullptr );
@@ -275,131 +246,49 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanMaterialBackend::FlushUpdates()
     {
-        if ( !m_PendingDescriptorWrites.empty() )
-        {
-            vkUpdateDescriptorSets( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
-                                         ->GetVulkanLogicalDevice(),
-                                    static_cast<uint32_t>( m_PendingDescriptorWrites.size() ),
-                                    m_PendingDescriptorWrites.data(), 0, nullptr );
-            m_PendingDescriptorWrites.clear();
-        }
-
-        m_PendingDescriptorWrites.clear();
+        // No longer using a queue to avoid dangling pointer issues
     }
 
     void VulkanMaterialBackend::InitializeWithFallbacks()
     {
-        const uint32_t framesInFlight = EngineContext::GetInstance().GetFramesInFlight();
+        const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
         auto&          descriptorSets = m_VulkanShader->GetShaderDescriptorSets();
 
         for ( uint32_t frame = 0; frame < framesInFlight; ++frame )
         {
             for ( const auto& [setIndex, descriptorSet] : descriptorSets )
             {
-                // =========================================================
-                // UNIFORM BUFFERS
-                // =========================================================
-               /* for ( const auto& [binding, ubLayout] : descriptorSet.UniformBuffers )
-                {
-                    Desert::ShaderResources::ShaderLayout::UniformBuffer fallbackLayout = ubLayout;
-                    fallbackLayout.Size = std::max<uint32_t>( 1, ubLayout.Size );
-
-                    static auto fallbackBuffer =
-                         std::make_shared<ShaderResources::API::Vulkan::VulkanUniformBuffer>( fallbackLayout );
-
-                    auto& bufferInfo = fallbackBuffer->GetDescriptorBufferInfo();
-
-                    auto wds =
-                         DescriptorSetBuilder::GetUniformWDS( this, frame, setIndex, binding, 1, &bufferInfo );
-
-                    m_PendingDescriptorWrites.push_back( wds );
-                }*/
-
-                // =========================================================
-                // STORAGE BUFFERS
-                // =========================================================
-                for ( const auto& [binding, sbLayout] : descriptorSet.StorageBuffers )
-                {
-                    /* Desert::ShaderResources::ShaderLayout::StorageBuffer fallbackLayout = sbLayout;
-                     fallbackLayout.Size = std::max<uint32_t>( 1, sbLayout.Size );
-
-                     auto fallbackBuffer =
-                          std::make_shared<ShaderResources::API::Vulkan::VulkanStorageBuffer>( fallbackLayout );
-
-                     auto& bufferInfo = fallbackBuffer->GetDescriptorBufferInfo();
-
-                     auto wds =
-                          DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding, 1, &bufferInfo );
-
-                     m_PendingDescriptorWrites.push_back( wds );*/
-                }
-
-                // =========================================================
                 // IMAGE 2D SAMPLERS
-                // =========================================================
                 for ( const auto& [binding, imageLayout] : descriptorSet.Image2DSamplers )
                 {
-                    static   auto fallbackImage =
+                    auto fallbackImage =
                          FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F );
 
                     if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
                     {
-                        auto& bufferInfo = vulkanImage->GetVulkanImageInfo();
-
+                        auto descriptorImageInfo = vulkanImage->GetResource().GetDescriptorInfo();
                         auto wds = DescriptorSetBuilder::GetSampler2DWDS( this, frame, setIndex, binding, 1,
-                                                                          &bufferInfo.ImageInfo );
-
-                        m_PendingDescriptorWrites.push_back( wds );
-                    }
-
-                    else
-                    {
-                        DESERT_VERIFY( false );
+                                                                          &descriptorImageInfo );
+                        UpdateDescriptorSets( { wds } );
                     }
                 }
 
-                // =========================================================
                 // IMAGE CUBE SAMPLERS
-                // =========================================================
                 for ( const auto& [binding, imageLayout] : descriptorSet.ImageCubeSamplers )
                 {
-                    static   auto fallbackCube =
+                    auto fallbackCube =
                          FallbackTextures::Get().GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F );
 
                     if ( auto vulkanImage = sp_cast<VulkanImageCube>( fallbackCube ) )
                     {
-                        auto& bufferInfo = vulkanImage->GetVulkanImageInfo();
-
+                        auto descriptorImageInfo = vulkanImage->GetResource().GetDescriptorInfo();
                         auto wds = DescriptorSetBuilder::GetSamplerCubeWDS( this, frame, setIndex, binding, 1,
-                                                                            &bufferInfo.ImageInfo );
-
-                        m_PendingDescriptorWrites.push_back( wds );
-                    }
-
-                    else
-                    {
-                        DESERT_VERIFY( false );
+                                                                            &descriptorImageInfo );
+                        UpdateDescriptorSets( { wds } );
                     }
                 }
-
-                // =========================================================
-                // STORAGE IMAGES
-                // =========================================================
-                /* for ( const auto& [binding, imageLayout] : descriptorSet.StorageImage2DSamplers )
-                 {
-                     auto fallbackImage = ShaderResources::API::Vulkan::VulkanUniformImage2D::GetFallbackStorage();
-
-                     auto& imageInfo = fallbackImage->GetDescriptorImageInfo();
-
-                     auto wds =
-                          DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding, 1, &imageInfo );
-
-                     m_PendingDescriptorWrites.push_back( wds );
-                 }*/
             }
         }
-
-        FlushUpdates();
     }
 
     void VulkanMaterialBackend::InitializeDefaults()

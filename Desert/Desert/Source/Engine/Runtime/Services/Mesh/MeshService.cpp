@@ -11,7 +11,10 @@ namespace Desert::Runtime
             return Common::MakeError( "Mesh asset is invalid" );
         }
 
-        m_Meshes[meshAsset->GetMetadata().Handle] = Graphic::MeshFactory::Create( meshAsset );
+        const auto handle = meshAsset->GetMetadata().Handle;
+        m_Meshes[handle] = Graphic::MeshFactory::Create( meshAsset );
+        m_MeshAssets[handle] = meshAsset;
+        
         return BOOLSUCCESS;
     }
 
@@ -28,8 +31,16 @@ namespace Desert::Runtime
         return ( it != m_Meshes.end() ) ? it->second.get() : nullptr;
     }
 
+    Assets::MeshAsset* MeshService::GetAsset( const Assets::AssetHandle& handle ) const
+    {
+        auto it = m_MeshAssets.find( handle );
+        return ( it != m_MeshAssets.end() ) ? it->second.get() : nullptr;
+    }
+
     void MeshService::Clear()
     {
+        m_Meshes.clear();
+        m_MeshAssets.clear();
     }
 
     std::optional<bool> MeshService::IsSkinned( const Assets::AssetHandle& handle ) const

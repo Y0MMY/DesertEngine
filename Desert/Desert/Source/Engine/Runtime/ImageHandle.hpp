@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Common/Core/Core.hpp>
 #include <Common/Core/Handle.hpp>
 
 namespace Desert::Runtime

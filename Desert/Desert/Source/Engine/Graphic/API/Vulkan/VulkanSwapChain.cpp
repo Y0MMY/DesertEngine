@@ -2,47 +2,59 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
-#include <Engine/Graphic/Framebuffer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
+#include <Engine/Core/FrameManager.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
+    VulkanSwapChain::VulkanSwapChain( const GLFWwindow* window ) : SwapChain( window )
+    {
+    }
+
+    VulkanSwapChain::~VulkanSwapChain()
+    {
+        Release();
+    }
+
     void VulkanSwapChain::Init( const VkInstance instance, const std::shared_ptr<Engine::Device>& device )
     {
-        static bool hasInit = false;
-        if ( hasInit )
-        {
-            return;
-        }
-        hasInit = true;
-
         const auto vkLogicalDevice = SP_CAST( VulkanLogicalDevice, device );
         m_LogicalDevice            = std::weak_ptr<VulkanLogicalDevice>( vkLogicalDevice );
 
         InitSurface( const_cast<GLFWwindow*>( m_Window ), instance );
         GetImageFormatAndColorSpace( vkLogicalDevice );
-
-        CreateSwapChainRenderPass();
     }
 
     void VulkanSwapChain::InitSurface( GLFWwindow* window, const VkInstance instance )
     {
-        glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
+        if ( m_Surface == VK_NULL_HANDLE )
+        {
+            glfwCreateWindowSurface( instance, window, nullptr, &m_Surface );
+        }
     }
 
     Common::ResultStr<bool> VulkanSwapChain::CreateSwapChain( const std::shared_ptr<Engine::Device>& device,
                                                               uint32_t* width, uint32_t* height )
     {
+        const auto vkLogicalDevice = SP_CAST( VulkanLogicalDevice, device );
+        const auto& lDevice = vkLogicalDevice->GetVulkanLogicalDevice();
+
         const VkInstance instance =
              SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanInstance();
+        
         Init( instance, device );
-        auto       oldSwapchain    = m_SwapChain;
-        const auto vkLogicalDevice = SP_CAST( VulkanLogicalDevice, device );
+
+        if ( m_VkRenderPass == VK_NULL_HANDLE )
+        {
+            CreateSwapChainRenderPass();
+        }
+
+        auto oldSwapchain = m_SwapChain;
 
         const auto& pDevice = vkLogicalDevice->GetPhysicalDevice()->GetVulkanPhysicalDevice();
-        const auto& lDevice = vkLogicalDevice->GetVulkanLogicalDevice();
-        // Get physical device surface properties and formats
+        
         VkSurfaceCapabilitiesKHR surfCaps;
         VK_CHECK_RESULT( vkGetPhysicalDeviceSurfaceCapabilitiesKHR( pDevice, m_Surface, &surfCaps ) );
 
@@ -51,31 +63,20 @@ namespace Desert::Graphic::API::Vulkan
 
         VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 
-        // Find the transformation of the surface
         VkSurfaceTransformFlagsKHR preTransform;
         if ( surfCaps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR )
-        {
-            // We prefer a non-rotated transform
             preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-        }
         else
-        {
             preTransform = surfCaps.currentTransform;
-        }
 
         VkExtent2D swapchainExtent = {};
-        // If width (and height) equals the special value 0xFFFFFFFF, the size of the surface will be set by the
-        // swapchain
         if ( surfCaps.currentExtent.width == (uint32_t)-1 )
         {
-            // If the surface size is undefined, the size is set to
-            // the size of the images requested.
             swapchainExtent.width  = *width;
             swapchainExtent.height = *height;
         }
         else
         {
-            // If the surface size is defined, the swap chain size must match
             swapchainExtent = surfCaps.currentExtent;
             *width          = surfCaps.currentExtent.width;
             *height         = surfCaps.currentExtent.height;
@@ -86,7 +87,6 @@ namespace Desert::Graphic::API::Vulkan
 
         VkSwapchainCreateInfoKHR swapChainCreateInfo{};
         swapChainCreateInfo.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        swapChainCreateInfo.pNext            = nullptr;
         swapChainCreateInfo.surface          = m_Surface;
         swapChainCreateInfo.minImageCount    = numberOfSwapChainImages;
         swapChainCreateInfo.imageColorSpace  = m_ColorSpace;
@@ -103,104 +103,87 @@ namespace Desert::Graphic::API::Vulkan
         swapChainCreateInfo.compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         swapChainCreateInfo.oldSwapchain          = oldSwapchain;
 
-        VK_CHECK_RESULT( vkCreateSwapchainKHR( vkLogicalDevice->GetVulkanLogicalDevice(), &swapChainCreateInfo,
-                                               nullptr, &m_SwapChain ) );
+        VK_CHECK_RESULT( vkCreateSwapchainKHR( lDevice, &swapChainCreateInfo, nullptr, &m_SwapChain ) );
 
-        // If an existing swap chain is re-created, destroy the old swap chain
-        // This also cleans up all the presentable images
         if ( oldSwapchain != VK_NULL_HANDLE )
         {
-            for ( uint32_t i = 0; i < m_SwapChainImages.ImagesView.size(); i++ )
-            {
-                vkDestroyImageView( lDevice, m_SwapChainImages.ImagesView[i], nullptr );
-            }
+            for ( auto& imageView : m_SwapChainImages.ImagesView )
+                vkDestroyImageView( lDevice, imageView, nullptr );
             vkDestroySwapchainKHR( lDevice, oldSwapchain, nullptr );
         }
 
-        LOG_TRACE( "Swap chain created" );
+        uint32_t swapChainImagesCount = 0u;
+        VK_CHECK_RESULT( vkGetSwapchainImagesKHR( lDevice, m_SwapChain, &swapChainImagesCount, VK_NULL_HANDLE ) );
+        m_SwapChainImages.Images.resize( swapChainImagesCount );
+        m_SwapChainImages.ImagesView.resize( swapChainImagesCount );
 
-        uint32_t swapChainImages = 0u;
-        VK_CHECK_RESULT( vkGetSwapchainImagesKHR( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
-                                                  &swapChainImages, VK_NULL_HANDLE ) );
-        m_SwapChainImages.Images.resize( swapChainImages );
-        m_SwapChainImages.ImagesView.resize( swapChainImages );
+        Engine::FrameManager::GetInstance().Initialize( swapChainImagesCount );
+        VK_CHECK_RESULT( vkGetSwapchainImagesKHR( lDevice, m_SwapChain, &swapChainImagesCount, m_SwapChainImages.Images.data() ) );
 
-        EngineContext::GetInstance().m_FramesInFlight = m_SwapChainImages.ImagesView.size();
-        VK_CHECK_RESULT( vkGetSwapchainImagesKHR( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
-                                                  &swapChainImages, m_SwapChainImages.Images.data() ) );
-
-        for ( uint32_t i = 0; i < swapChainImages; i++ )
+        for ( uint32_t i = 0; i < swapChainImagesCount; i++ )
         {
             const auto& createdImageView =
-                 Utils::CreateImageView( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChainImages.Images[i],
+                 Utils::CreateImageView( lDevice, m_SwapChainImages.Images[i],
                                          m_ColorFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1U, 1U );
-            if ( !createdImageView.IsSuccess() )
-            {
-                return Common::MakeError<bool>( createdImageView.GetError() );
-            }
-
+            if ( !createdImageView.IsSuccess() ) return Common::MakeError<bool>( createdImageView.GetError() );
             m_SwapChainImages.ImagesView[i] = createdImageView.GetValue();
         }
 
-        CreateColorAndDepthImages( SP_CAST( VulkanLogicalDevice, device ) );
+        CreateColorAndDepthImages( vkLogicalDevice );
         CreateSwapChainFramebuffers();
+
         if ( !m_VulkanQueue )
         {
             m_VulkanQueue = std::make_unique<VulkanQueue>( this );
             m_VulkanQueue->Init();
         }
+
+        FramebufferSpecification fbSpec;
+        fbSpec.Width = m_Width;
+        fbSpec.Height = m_Height;
+        fbSpec.DebugName = "SwapchainFramebufferWrapper";
+        fbSpec.Attachments.Attachments = { (Core::Formats::ImageFormat)0 };
+        m_CompositeFramebuffer = std::make_shared<VulkanFramebuffer>( fbSpec );
+        std::static_pointer_cast<VulkanFramebuffer>( m_CompositeFramebuffer )->RT_Invalidate();
+
         return Common::MakeSuccess( true );
     }
 
     Common::ResultStr<bool>
     VulkanSwapChain::GetImageFormatAndColorSpace( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
-
         VkPhysicalDevice physicalDevice = device->GetPhysicalDevice()->GetVulkanPhysicalDevice();
-
         uint32_t formatCount;
         vkGetPhysicalDeviceSurfaceFormatsKHR( physicalDevice, m_Surface, &formatCount, nullptr );
-
-        if ( !formatCount )
-        {
-            return Common::MakeError<bool>( "null format count" );
-        }
+        if ( !formatCount ) return Common::MakeError<bool>( "null format count" );
 
         std::vector<VkSurfaceFormatKHR> surfaceFormats( formatCount );
         vkGetPhysicalDeviceSurfaceFormatsKHR( physicalDevice, m_Surface, &formatCount, surfaceFormats.data() );
 
-        // If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
-        // there is no preferered format, so we assume VK_FORMAT_B8G8R8A8_UNORM
-        if ( ( formatCount == 1 ) && ( surfaceFormats[0].format == VK_FORMAT_UNDEFINED ) ) [[unlikely]]
+        if ( ( formatCount == 1 ) && ( surfaceFormats[0].format == VK_FORMAT_UNDEFINED ) )
         {
             m_ColorFormat = VK_FORMAT_B8G8R8A8_UNORM;
             m_ColorSpace  = surfaceFormats[0].colorSpace;
         }
-        else [[likely]]
+        else
         {
-            // iterate over the list of available surface format and
-            // check for the presence of VK_FORMAT_B8G8R8A8_UNORM
-            bool found_B8G8R8A8_UNORM = false;
+            bool found = false;
             for ( auto&& surfaceFormat : surfaceFormats )
             {
                 if ( surfaceFormat.format == VK_FORMAT_B8G8R8A8_UNORM )
                 {
-                    m_ColorFormat        = surfaceFormat.format;
-                    m_ColorSpace         = surfaceFormat.colorSpace;
-                    found_B8G8R8A8_UNORM = true;
+                    m_ColorFormat = surfaceFormat.format;
+                    m_ColorSpace  = surfaceFormat.colorSpace;
+                    found = true;
                     break;
                 }
             }
-
-            // in case VK_FORMAT_B8G8R8A8_UNORM is not available
-            // select the first available color format
-            if ( !found_B8G8R8A8_UNORM )
+            if ( !found )
             {
                 m_ColorFormat = surfaceFormats[0].format;
                 m_ColorSpace  = surfaceFormats[0].colorSpace;
             }
         }
-
         return BOOLSUCCESS;
     }
 
@@ -208,10 +191,7 @@ namespace Desert::Graphic::API::Vulkan
                                                                    uint32_t*   imageIndex )
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
-        if ( !vkLogicalDevice )
-        {
-            DESERT_VERIFY( false );
-        }
+        if ( !vkLogicalDevice ) DESERT_VERIFY( false );
 
         VK_RETURN_RESULT( vkAcquireNextImageKHR( vkLogicalDevice->GetVulkanLogicalDevice(), m_SwapChain,
                                                  UINT64_MAX, presentCompleteSemaphore, VK_NULL_HANDLE,
@@ -221,105 +201,75 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanSwapChain::OnResize( uint32_t width, uint32_t height )
     {
         const auto device = m_LogicalDevice.lock();
-        if ( !device )
-        {
-            DESERT_VERIFY( false );
-        }
+        if ( !device ) DESERT_VERIFY( false );
+        
         Release();
         CreateSwapChain( device, &width, &height );
 
-        auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
-
+        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
         for ( auto& image : GetSwapChainVKImage() )
         {
-            VkImageMemoryBarrier barrier{};
-            barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
-            barrier.newLayout                   = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-            barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image                       = image;
-            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange.levelCount = 1;
-            barrier.subresourceRange.layerCount = 1;
-
-            vkCmdPipelineBarrier( commandBuffer.GetValue(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                                  &barrier );
+            VkImageMemoryBarrier barrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = image, .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 } };
+            vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier );
         }
-
-        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer.GetValue() );
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
     }
 
     void VulkanSwapChain::Release()
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
-        if ( !vkLogicalDevice )
-        {
-            DESERT_VERIFY( false );
-        }
+        if ( !vkLogicalDevice ) return;
 
         const auto& device = vkLogicalDevice->GetVulkanLogicalDevice();
         vkDeviceWaitIdle( device );
 
         if ( m_SwapChain != VK_NULL_HANDLE )
         {
-            for ( uint32_t i = 0; i < m_SwapChainImages.ImagesView.size(); i++ )
-            {
-                vkDestroyImageView( device, m_SwapChainImages.ImagesView[i], nullptr );
-            }
-        }
-        if ( m_Surface != VK_NULL_HANDLE )
-        {
+            for ( auto& view : m_SwapChainImages.ImagesView ) vkDestroyImageView( device, view, nullptr );
             vkDestroySwapchainKHR( device, m_SwapChain, nullptr );
+            m_SwapChain = VK_NULL_HANDLE;
         }
 
-        for ( const auto framebuffer : m_SwapChainFramebuffers )
+        for ( auto fb : m_SwapChainFramebuffers ) vkDestroyFramebuffer( device, fb, nullptr );
+        m_SwapChainFramebuffers.clear();
+
+        if ( m_VkRenderPass != VK_NULL_HANDLE )
         {
-            vkDestroyFramebuffer( device, framebuffer, VK_NULL_HANDLE );
+            vkDestroyRenderPass( device, m_VkRenderPass, nullptr );
+            m_VkRenderPass = VK_NULL_HANDLE;
         }
 
-        SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
-             ->GetVulkanAllocator()
-             ->RT_DestroyImage( m_ColorImages.Image,
-                                (VmaAllocation)m_VmaAllocation[0] ); // color
-        SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
-             ->GetVulkanAllocator()
-             ->RT_DestroyImage( m_DepthStencilImages.Image,
-                                (VmaAllocation)m_VmaAllocation[1] ); // depth stancil
-        m_VmaAllocation[0] = m_VmaAllocation[1] = nullptr;
-        m_SwapChain                             = VK_NULL_HANDLE;
+        if ( m_ColorImages.Image )
+        {
+            VmaAllocator allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator()->GetVMAAllocator();
+            vmaDestroyImage( allocator, m_ColorImages.Image, (VmaAllocation)m_VmaAllocation[0] );
+            vkDestroyImageView( device, m_ColorImages.ImageView, nullptr );
+            
+            vmaDestroyImage( allocator, m_DepthStencilImages.Image, (VmaAllocation)m_VmaAllocation[1] );
+            vkDestroyImageView( device, m_DepthStencilImages.ImageView, nullptr );
+
+            m_VmaAllocation[0] = m_VmaAllocation[1] = nullptr;
+            m_ColorImages = {}; m_DepthStencilImages = {};
+        }
+
+        m_CompositeFramebuffer = nullptr;
     }
+
+    uint32_t VulkanSwapChain::GetCurrentBufferIndex() const { return m_VulkanQueue->GetImageIndex(); }
+    void VulkanSwapChain::PrepareFrame() { m_VulkanQueue->PrepareFrame(); }
+    void VulkanSwapChain::Present() { m_VulkanQueue->Present(); }
 
     Common::ResultStr<VkResult> VulkanSwapChain::CreateSwapChainFramebuffers()
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
-        if ( !vkLogicalDevice )
-        {
-            DESERT_VERIFY( false );
-        }
+        if ( !vkLogicalDevice ) DESERT_VERIFY( false );
 
         m_SwapChainFramebuffers.resize( m_SwapChainImages.ImagesView.size() );
         for ( uint32_t i = 0; i < m_SwapChainFramebuffers.size(); i++ )
         {
-            std::array<VkImageView, 1> attachments = { GetSwapChainVKImagesView()[i] };
-
-            VkFramebufferCreateInfo fbCreateInfo = {};
-            fbCreateInfo.sType                   = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            fbCreateInfo.renderPass              = m_VkRenderPass;
-            fbCreateInfo.attachmentCount         = static_cast<uint32_t>( attachments.size() );
-            fbCreateInfo.pAttachments            = attachments.data();
-            fbCreateInfo.width                   = m_Width;
-            fbCreateInfo.height                  = m_Height;
-            fbCreateInfo.layers                  = 1;
-
-            const auto& device = vkLogicalDevice->GetVulkanLogicalDevice();
-            auto        res    = vkCreateFramebuffer( device, &fbCreateInfo, NULL, &m_SwapChainFramebuffers[i] );
-
-            if ( res != VK_SUCCESS )
-            {
-                return Common::MakeError<VkResult>( "TODO: make error info" );
-            }
+            VkImageView attachments[] = { m_SwapChainImages.ImagesView[i] };
+            VkFramebufferCreateInfo fbCreateInfo = { .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, .renderPass = m_VkRenderPass, .attachmentCount = 1, .pAttachments = attachments, .width = m_Width, .height = m_Height, .layers = 1 };
+            VK_CHECK_RESULT( vkCreateFramebuffer( vkLogicalDevice->GetVulkanLogicalDevice(), &fbCreateInfo, NULL, &m_SwapChainFramebuffers[i] ) );
         }
         return Common::MakeSuccess( VK_SUCCESS );
     }
@@ -327,163 +277,37 @@ namespace Desert::Graphic::API::Vulkan
     Common::ResultStr<VkResult> VulkanSwapChain::CreateSwapChainRenderPass()
     {
         const auto vkLogicalDevice = m_LogicalDevice.lock();
-        if ( !vkLogicalDevice )
-        {
-            DESERT_VERIFY( false );
-        }
+        if ( !vkLogicalDevice ) DESERT_VERIFY( false );
 
-        VkFormat depthFormat = vkLogicalDevice->GetPhysicalDevice()->GetDepthFormat();
+        VkAttachmentDescription attachment = { .format = m_ColorFormat, .samples = VK_SAMPLE_COUNT_1_BIT, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, .storeOp = VK_ATTACHMENT_STORE_OP_STORE, .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR };
+        VkAttachmentReference colorRef = { .attachment = 0, .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+        VkSubpassDescription subpass = { .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS, .colorAttachmentCount = 1, .pColorAttachments = &colorRef };
+        VkSubpassDependency dependency = { .srcSubpass = VK_SUBPASS_EXTERNAL, .dstSubpass = 0, .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, .srcAccessMask = 0, .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT };
 
-        // Render Pass
-        std::array<VkAttachmentDescription, 1> attachments = {};
-
-        // Color attachment
-        attachments[0].format         = m_ColorFormat;
-        attachments[0].samples        = VK_SAMPLE_COUNT_1_BIT;
-        attachments[0].loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attachments[0].storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-        attachments[0].stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        attachments[0].initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-        attachments[0].finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-        VkAttachmentReference colorReference = {};
-        colorReference.attachment            = 0;
-        colorReference.layout                = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription subpassDescription = {};
-        subpassDescription.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpassDescription.colorAttachmentCount = 1;
-        subpassDescription.pColorAttachments    = &colorReference;
-        subpassDescription.inputAttachmentCount = 0;
-        subpassDescription.pInputAttachments    = nullptr;
-        subpassDescription.pPreserveAttachments = nullptr;
-        subpassDescription.pResolveAttachments  = nullptr;
-
-        VkSubpassDependency dependency = {};
-        dependency.srcSubpass          = VK_SUBPASS_EXTERNAL;
-        dependency.dstSubpass          = 0;
-        dependency.srcStageMask        = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstStageMask        = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.srcAccessMask       = 0;
-        dependency.dstAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        VkRenderPassCreateInfo renderPassInfo = {};
-        renderPassInfo.sType                  = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount        = 1;
-        renderPassInfo.pAttachments           = attachments.data();
-        renderPassInfo.subpassCount           = 1;
-        renderPassInfo.pSubpasses             = &subpassDescription;
-        renderPassInfo.dependencyCount        = 1;
-        renderPassInfo.pDependencies          = &dependency;
-
-        VK_RETURN_RESULT( vkCreateRenderPass( vkLogicalDevice->GetVulkanLogicalDevice(), &renderPassInfo, nullptr,
-                                              &m_VkRenderPass ) );
+        VkRenderPassCreateInfo rpInfo = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .attachmentCount = 1, .pAttachments = &attachment, .subpassCount = 1, .pSubpasses = &subpass, .dependencyCount = 1, .pDependencies = &dependency };
+        VK_RETURN_RESULT( vkCreateRenderPass( vkLogicalDevice->GetVulkanLogicalDevice(), &rpInfo, nullptr, &m_VkRenderPass ) );
     }
 
-    Common::ResultStr<VkResult>
-    VulkanSwapChain::CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device )
+    Common::ResultStr<VkResult> VulkanSwapChain::CreateColorAndDepthImages( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
-        // Color image
-        {
-            VkImageCreateInfo imageInfo{};
-            imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-            imageInfo.imageType     = VK_IMAGE_TYPE_2D;
-            imageInfo.extent.width  = m_Width;
-            imageInfo.extent.height = m_Height;
-            imageInfo.extent.depth  = 1;
-            imageInfo.mipLevels     = 1;
-            imageInfo.arrayLayers   = 1;
-            imageInfo.format        = m_ColorFormat;
-            imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            imageInfo.usage       = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-            imageInfo.samples     = m_MSAASamples;
-            imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VmaAllocator allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator()->GetVMAAllocator();
+        
+        // Color
+        VkImageCreateInfo cInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = m_ColorFormat, .extent = { m_Width, m_Height, 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = m_MSAASamples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+        VmaAllocationCreateInfo cAllocInfo = { .usage = VMA_MEMORY_USAGE_GPU_ONLY };
+        VK_CHECK_RESULT( vmaCreateImage( allocator, &cInfo, &cAllocInfo, &m_ColorImages.Image, (VmaAllocation*)&m_VmaAllocation[0], nullptr ) );
+        
+        m_ColorImages.ImageView = Utils::CreateImageView( device->GetVulkanLogicalDevice(), m_ColorImages.Image, m_ColorFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1, 1 ).GetValue();
 
-            const auto& resultAlloc = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
-                                           ->GetVulkanAllocator()
-                                           ->RT_AllocateImage( "Swapchain image color", imageInfo,
-                                                               VMA_MEMORY_USAGE_GPU_ONLY, m_ColorImages.Image );
-            if ( !resultAlloc.IsSuccess() )
-            {
-                return Common::MakeError<VkResult>( resultAlloc.GetError() );
-            }
-
-            m_VmaAllocation[0] = resultAlloc.GetValue();
-
-            VkImageViewCreateInfo imageViewCI{};
-            imageViewCI.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            imageViewCI.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-            imageViewCI.image                           = m_ColorImages.Image;
-            imageViewCI.format                          = m_ColorFormat;
-            imageViewCI.subresourceRange.baseMipLevel   = 0;
-            imageViewCI.subresourceRange.levelCount     = 1;
-            imageViewCI.subresourceRange.baseArrayLayer = 0;
-            imageViewCI.subresourceRange.layerCount     = 1;
-            imageViewCI.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-
-            VK_CHECK_RESULT( vkCreateImageView( device->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
-                                                &m_ColorImages.ImageView ) );
-        }
-
-        // Depth image
-        {
-            VkFormat depthFormat = device->GetPhysicalDevice()->GetDepthFormat();
-
-            VkImageCreateInfo imageInfo{};
-            imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-            imageInfo.imageType     = VK_IMAGE_TYPE_2D;
-            imageInfo.extent.width  = m_Width;
-            imageInfo.extent.height = m_Height;
-            imageInfo.extent.depth  = 1;
-            imageInfo.mipLevels     = 1;
-            imageInfo.arrayLayers   = 1;
-            imageInfo.format        = depthFormat;
-            imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL;
-            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            imageInfo.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            imageInfo.samples       = m_MSAASamples;
-            imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
-
-            const auto& resultAlloc =
-                 SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
-                      ->GetVulkanAllocator()
-                      ->RT_AllocateImage( "Swapchain image depth", imageInfo, VMA_MEMORY_USAGE_GPU_ONLY,
-                                          m_DepthStencilImages.Image );
-
-            if ( !resultAlloc.IsSuccess() )
-            {
-                return Common::MakeError<VkResult>( resultAlloc.GetError() );
-            }
-
-            m_VmaAllocation[1] = resultAlloc.GetValue();
-
-            VkImageViewCreateInfo imageViewCI{};
-            imageViewCI.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            imageViewCI.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-            imageViewCI.image                           = m_DepthStencilImages.Image;
-            imageViewCI.format                          = depthFormat;
-            imageViewCI.subresourceRange.baseMipLevel   = 0;
-            imageViewCI.subresourceRange.levelCount     = 1;
-            imageViewCI.subresourceRange.baseArrayLayer = 0;
-            imageViewCI.subresourceRange.layerCount     = 1;
-            imageViewCI.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT;
-
-            VK_CHECK_RESULT( vkCreateImageView( device->GetVulkanLogicalDevice(), &imageViewCI, nullptr,
-                                                &m_DepthStencilImages.ImageView ) );
-        }
+        // Depth
+        VkFormat dFormat = device->GetPhysicalDevice()->GetDepthFormat();
+        VkImageCreateInfo dInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D, .format = dFormat, .extent = { m_Width, m_Height, 1 }, .mipLevels = 1, .arrayLayers = 1, .samples = m_MSAASamples, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+        VmaAllocationCreateInfo dAllocInfo = { .usage = VMA_MEMORY_USAGE_GPU_ONLY };
+        VK_CHECK_RESULT( vmaCreateImage( allocator, &dInfo, &dAllocInfo, &m_DepthStencilImages.Image, (VmaAllocation*)&m_VmaAllocation[1], nullptr ) );
+        
+        m_DepthStencilImages.ImageView = Utils::CreateImageView( device->GetVulkanLogicalDevice(), m_DepthStencilImages.Image, dFormat, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_VIEW_TYPE_2D, 1, 1 ).GetValue();
 
         return Common::MakeSuccess( VK_SUCCESS );
-    }
-
-    VulkanSwapChain::~VulkanSwapChain()
-    {
-        Release();
-    }
-
-    VulkanSwapChain::VulkanSwapChain( const GLFWwindow* window ) : SwapChain( window )
-    {
     }
 
 } // namespace Desert::Graphic::API::Vulkan

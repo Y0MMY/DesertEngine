@@ -13,6 +13,35 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t    Size;
     };
 
+    struct BufferDeletionEntry
+    {
+        VkBuffer      Buffer;
+        VmaAllocation Allocation;
+        uint32_t      FrameIndex;
+    };
+
+    struct ImageDeletionEntry
+    {
+        VkImage                  Image;
+        VmaAllocation            Allocation;
+        VkImageView              ImageView;
+        VkSampler                Sampler;
+        std::vector<VkImageView> MipImageViews;
+        uint32_t                 FrameIndex;
+    };
+
+    struct FramebufferDeletionEntry
+    {
+        VkFramebuffer Framebuffer;
+        uint32_t      FrameIndex;
+    };
+
+    struct RenderPassDeletionEntry
+    {
+        VkRenderPass RenderPass;
+        uint32_t     FrameIndex;
+    };
+
     class VulkanAllocator
     {
     public:
@@ -27,7 +56,13 @@ namespace Desert::Graphic::API::Vulkan
                                                          VmaMemoryUsage usage, VkBuffer& outBuffer );
 
         void RT_DestroyBuffer( VkBuffer buffer, VmaAllocation allocation );
-        void RT_DestroyImage( VkImage image, VmaAllocation allocation );
+        void RT_DestroyImage( VkImage image, VmaAllocation allocation, VkImageView imageView = VK_NULL_HANDLE,
+                              VkSampler sampler = VK_NULL_HANDLE,
+                              const std::vector<VkImageView>& mipImageViews = {} );
+        void RT_DestroyFramebuffer( VkFramebuffer framebuffer );
+        void RT_DestroyRenderPass( VkRenderPass renderPass );
+
+        void ProcessDeletionQueue();
 
         uint8_t* MapMemory( VmaAllocation allocation )
         {
@@ -52,5 +87,10 @@ namespace Desert::Graphic::API::Vulkan
 
     private:
         friend class Common::Singleton<VulkanAllocator>;
+
+        std::vector<BufferDeletionEntry>      m_BufferDeletionQueue;
+        std::vector<ImageDeletionEntry>       m_ImageDeletionQueue;
+        std::vector<FramebufferDeletionEntry> m_FramebufferDeletionQueue;
+        std::vector<RenderPassDeletionEntry>  m_RenderPassDeletionQueue;
     };
 } // namespace Desert::Graphic::API::Vulkan

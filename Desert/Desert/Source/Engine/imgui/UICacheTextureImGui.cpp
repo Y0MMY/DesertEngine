@@ -4,7 +4,7 @@
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 
-#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan.h>
 
 #include <ImGui/backends/imgui_impl_vulkan.h>
 
@@ -19,23 +19,25 @@ namespace Desert::ImGui
         {
             static std::unordered_map<VkImageView, ImTextureID> g_TextureCache;
 
-            const auto vulkanImageInfo =
-                 sp_cast<Graphic::API::Vulkan::VulkanImage2D>( image )->GetVulkanImageInfo();
-            if ( !vulkanImageInfo.ImageInfo.imageView )
+            auto vulkanImage = sp_cast<Graphic::API::Vulkan::VulkanImage2D>( image );
+            const auto& res = vulkanImage->GetResource();
+            
+            if ( res.ImageView == VK_NULL_HANDLE )
                 return nullptr;
 
-            auto it = g_TextureCache.find( vulkanImageInfo.ImageInfo.imageView );
+            auto it = g_TextureCache.find( res.ImageView );
             if ( it != g_TextureCache.end() )
             {
                 return it->second;
             }
 
-            ImTextureID textureID = ImGui_ImplVulkan_AddTexture(
-                 vulkanImageInfo.ImageInfo.sampler, vulkanImageInfo.ImageInfo.imageView, vulkanImageInfo.ImageInfo.imageLayout);
+            ImTextureID textureID = ImGui_ImplVulkan_AddTexture( res.Sampler, res.ImageView, res.Layout );
 
-            g_TextureCache[vulkanImageInfo.ImageInfo.imageView] = textureID;
+            g_TextureCache[res.ImageView] = textureID;
             return textureID;
         }
+
+        return nullptr;
     }
 
 } // namespace Desert::ImGui

@@ -42,6 +42,8 @@ namespace Desert::Graphic
 
     struct FramebufferSpecification
     {
+        uint32_t                           Width   = 1280;
+        uint32_t                           Height  = 720;
         uint32_t                           Samples = 2; // Multisampling
         FramebufferAttachmentSpecification Attachments;
         std::string                        DebugName;

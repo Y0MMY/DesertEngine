@@ -1,10 +1,8 @@
 #pragma once
 
-#include <Engine/Geometry/Mesh.hpp>
-
-namespace Desert::Editor
+namespace Desert::Geometry
 {
-    enum PrimitiveType
+    enum class PrimitiveType
     {
         Cube = 0,
         Sphere,
@@ -17,5 +15,4 @@ namespace Desert::Editor
 
         Count
     };
-
-} // namespace Desert::Editor
+} // namespace Desert::Geometry

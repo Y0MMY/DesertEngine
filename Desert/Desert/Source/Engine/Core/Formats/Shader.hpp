@@ -5,9 +5,9 @@ namespace Desert::Core::Formats
     enum class ShaderStage
     {
         None     = 0,
-        Vertex   = 1,
-        Fragment = 2,
-        Compute  = 3
+        Vertex   = 0x00000001,
+        Fragment = 0x00000010,
+        Compute  = 0x00000020
     };
 
     enum class ShaderPragmas

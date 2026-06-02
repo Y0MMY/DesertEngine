@@ -8,8 +8,10 @@ namespace Desert::Graphic
 {
     void SceneRenderer::Init()
     {
-        const uint32_t width  = EngineContext::GetInstance().GetCurrentWindow()->GetWidth();
-        const uint32_t height = EngineContext::GetInstance().GetCurrentWindow()->GetHeight();
+        const auto window = EngineContext::GetInstance().GetWindow();
+        const auto width  = window ? window->GetWidth() : 1280;
+        const auto height = window ? window->GetHeight() : 720;
+
 
         // Framebuffer
         FramebufferSpecification fbSpec;
@@ -53,7 +55,7 @@ namespace Desert::Graphic
         meshSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
         auto& renderer = Renderer::GetInstance();
 
-        return renderer.BeginFrame();
+        return BOOLSUCCESS;
     }
 
     void SceneRenderer::OnUpdate( const UpdateInfo& sceneRenderInfo )
@@ -72,8 +74,7 @@ namespace Desert::Graphic
 
         m_PointLight.PointLights.clear();
 
-        auto& renderer = Renderer::GetInstance();
-        return renderer.EndFrame();
+        return BOOLSUCCESS;
     }
 
     void SceneRenderer::Resize( const uint32_t width, const uint32_t height )

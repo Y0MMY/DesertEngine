@@ -8,8 +8,12 @@ namespace Desert::ECS
     class Entity final
     {
     public:
+        Entity() : m_Handle( entt::null ), m_Registry( nullptr ) {}
         explicit Entity( entt::entity handle, entt::registry& registry );
         ~Entity() = default;
+
+        operator bool() const { return m_Handle != entt::null && m_Registry != nullptr; }
+        bool operator!() const { return !((bool)*this); }
 
         template <typename EntityT>
         bool HasComponent() const
@@ -44,6 +48,11 @@ namespace Desert::ECS
         const auto GetHandle() const
         {
             return m_Handle;
+        }
+
+        entt::registry* GetRegistry() const
+        {
+            return m_Registry;
         }
 
     private:

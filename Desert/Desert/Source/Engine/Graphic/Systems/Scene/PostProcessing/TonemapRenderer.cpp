@@ -31,12 +31,12 @@ namespace Desert::Graphic::System
         // Pipeline
         m_Shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "SceneComposite" );
 
-        Graphic::PipelineSpecification pipeSpec;
+        Graphic::GraphicsPipelineSpecification pipeSpec;
         pipeSpec.DebugName   = debugName;
         pipeSpec.Framebuffer = m_Framebuffer;
         pipeSpec.Shader      = m_Shader;
 
-        m_Pipeline = Graphic::Pipeline::Create( pipeSpec );
+        m_Pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 
         m_MaterialTonemap = std::make_unique<MaterialTonemap>();
@@ -47,7 +47,7 @@ namespace Desert::Graphic::System
     void TonemapRenderer::RegisterPasses( RenderGraphBuilder& builder )
     {
         builder.AddPass( "TonemapPass", RenderPhase::PostProcess, [this]() { Render(); },
-                         m_Pipeline ? m_Pipeline->GetSpecification() : PipelineSpecification{}, m_Framebuffer,
+                         m_Pipeline ? m_Pipeline->GetSpecification() : GraphicsPipelineSpecification{}, m_Framebuffer,
                          { RenderPassDependency( RenderPhase::Debug ) } );
     }
 

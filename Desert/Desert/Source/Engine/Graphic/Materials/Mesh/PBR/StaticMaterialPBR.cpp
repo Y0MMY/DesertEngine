@@ -72,8 +72,8 @@ namespace Desert::Graphic
 
     void StaticMaterialPBR::UpdateTransform( MaterialInstance* instance, const glm::mat4& transform )
     {
-        // For static meshes, transform is usually in push constants, but we store it in instance for generality
-        instance->SetMat4( "ModelMatrix", transform );
+        // Property name must match the push constant in Static.glsl.vert
+        instance->SetMat4( "Transform", transform );
     }
 
     void StaticMaterialPBR::UpdateCamera( MaterialInstance* instance, const Core::Camera* camera )
@@ -92,34 +92,28 @@ namespace Desert::Graphic
         if ( !m_MaterialExecutor )
             return;
 
-        // Update push constants for transform (direct from instance)
-        glm::mat4 transform = instance->GetMat4( "ModelMatrix" );
+        // 1. Update push constants (Transform)
+        glm::mat4 transform = instance->GetMat4( "Transform" );
         m_MaterialExecutor->PushConstant( &transform, sizeof( glm::mat4 ) );
 
-        // Base Material::Bind will apply all MaterialInstance property overrides to the executor
-        Material::Bind( instance );
-    }
-
-    void StaticMaterialPBR::OnBind( MaterialInstance* instance )
-    {
-        // Reconstruct uniform struct from instance properties for single-call GPU update
+        // 2. Pack PBR properties into the uniform block
         PBRUniforms uniforms;
-        uniforms.AlbedoColor     = instance->GetVec3( "AlbedoColor" );
-        uniforms.AlbedoBlend     = instance->GetFloat( "AlbedoBlend" );
-        uniforms.MetallicValue   = instance->GetFloat( "MetallicValue" );
-        uniforms.MetallicBlend   = instance->GetFloat( "MetallicBlend" );
-        uniforms.RoughnessValue  = instance->GetFloat( "RoughnessValue" );
-        uniforms.RoughnessBlend  = instance->GetFloat( "RoughnessBlend" );
-        uniforms.EmissionColor   = instance->GetVec3( "EmissionColor" );
-        uniforms.EmissionStrength = instance->GetFloat( "EmissionStrength" );
-        uniforms.AOValue         = instance->GetFloat( "AOValue" );
+        uniforms.AlbedoColor      = instance->GetVec3( "AlbedoColor", glm::vec3(1.0f) );
+        uniforms.AlbedoBlend      = instance->GetFloat( "AlbedoBlend", 1.0f );
+        uniforms.MetallicValue    = instance->GetFloat( "MetallicValue", 0.0f );
+        uniforms.MetallicBlend    = instance->GetFloat( "MetallicBlend", 1.0f );
+        uniforms.RoughnessValue   = instance->GetFloat( "RoughnessValue", 0.5f );
+        uniforms.RoughnessBlend   = instance->GetFloat( "RoughnessBlend", 1.0f );
+        uniforms.EmissionColor    = instance->GetVec3( "EmissionColor", glm::vec3(0.0f) );
+        uniforms.EmissionStrength = instance->GetFloat( "EmissionStrength", 1.0f );
+        uniforms.AOValue          = instance->GetFloat( "AOValue", 1.0f );
 
         if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "PBRMaterialPropertiesUB" ) )
         {
             prop->SetRawData( reinterpret_cast<const std::byte*>( &uniforms ), sizeof( PBRUniforms ) );
         }
 
-        // Texture bindings from instance
+        // 3. Bind textures
         if ( auto tex = static_cast<Image2D*>( instance->GetTexture( "u_AlbedoTexture" ) ) )
         {
             if ( auto prop = m_MaterialExecutor->GetTexture2DProperty( "u_AlbedoTexture" ) )
@@ -131,5 +125,13 @@ namespace Desert::Graphic
             if ( auto prop = m_MaterialExecutor->GetTexture2DProperty( "u_NormalTexture" ) )
                 prop->SetImage( tex );
         }
+
+        // 4. Finalize and apply to GPU
+        m_MaterialExecutor->Apply();
+    }
+
+    void StaticMaterialPBR::OnBind( MaterialInstance* instance )
+    {
+        // Handled manually in Bind() to avoid top-level property warnings
     }
 } // namespace Desert::Graphic

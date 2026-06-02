@@ -4,7 +4,7 @@
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include "PrimitiveType.hpp"
 
-namespace Desert::Editor
+namespace Desert::Geometry
 {
     class PrimitiveMeshFactory
     {
@@ -17,4 +17,4 @@ namespace Desert::Editor
         static std::shared_ptr<DynamicMesh> CreatePlane();
         static std::shared_ptr<DynamicMesh> CreatePyramid();
     };
-} // namespace Desert::Editor
+} // namespace Desert::Geometry

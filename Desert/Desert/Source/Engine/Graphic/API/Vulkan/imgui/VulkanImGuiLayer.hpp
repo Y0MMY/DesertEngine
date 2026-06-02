@@ -5,14 +5,15 @@
 
 #include <vulkan/vulkan.h>
 
-namespace Desert::Graphic::API::Vulkan::ImGui
+namespace Desert::Graphic::API::Vulkan
 {
-    class VulkanImGui : public Desert::ImGui::ImGuiLayer
+    class VulkanImGui final : public Desert::ImGui::ImGuiLayer
     {
     public:
         virtual Common::BoolResultStr OnAttach() override;
         virtual Common::BoolResultStr OnDetach() override;
         virtual Common::BoolResultStr OnUpdate( const Common::Timestep& ts ) override;
+        virtual void               OnEvent( Common::Event& event ) override;
         virtual void               Begin() override;
         virtual void               End() override;
 
@@ -22,6 +23,6 @@ namespace Desert::Graphic::API::Vulkan::ImGui
         }
 
     private:
-        VkDescriptorPool m_ImguiPool;
+        VkDescriptorPool m_ImguiPool = VK_NULL_HANDLE;
     };
-} // namespace Desert::Graphic::API::Vulkan::ImGui
+} // namespace Desert::Graphic::API::Vulkan

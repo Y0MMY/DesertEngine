@@ -186,8 +186,9 @@ namespace Desert::Platform::Windows
 
     void WindowsWindow::PresentFinalImage() const
     {
-        EngineContext::GetInstance().GetRendererContext()->EndFrame();
+        Graphic::Renderer::GetInstance().PresentFinalImage();
     }
+
 
     void WindowsWindow::PrepareNextFrame() const
     {
@@ -216,7 +217,7 @@ namespace Desert::Platform::Windows
 
     Common::ResultStr<bool> WindowsWindow::SetupSwapChain()
     {
-        const auto device = EngineContext::GetInstance().GetMainDevice();
+        const auto device = EngineContext::GetInstance().GetDevice();
         return m_SwapChain->CreateSwapChain( device, &m_Data.Specification.Width, &m_Data.Specification.Height );
     }
 

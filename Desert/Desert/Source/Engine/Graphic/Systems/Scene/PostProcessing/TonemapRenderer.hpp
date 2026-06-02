@@ -22,7 +22,7 @@ namespace Desert::Graphic::System
     private:
         void Render();
     private:
-        std::shared_ptr<Pipeline> m_Pipeline;
+        std::shared_ptr<GraphicsPipeline> m_Pipeline;
         std::shared_ptr<Shader>   m_Shader;
 
         std::unique_ptr<MaterialTonemap> m_MaterialTonemap;

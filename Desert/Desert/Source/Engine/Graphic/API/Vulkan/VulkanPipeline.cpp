@@ -2,6 +2,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
@@ -9,7 +10,6 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
-
     namespace
     {
         static VkPolygonMode ConvertVkPolygonMode( PrimitivePolygonMode mode )
@@ -21,7 +21,6 @@ namespace Desert::Graphic::API::Vulkan
                 case PrimitivePolygonMode::Wireframe:
                     return VK_POLYGON_MODE_LINE;
             }
-
             return VK_POLYGON_MODE_FILL;
         }
 
@@ -29,24 +28,15 @@ namespace Desert::Graphic::API::Vulkan
         {
             switch ( op )
             {
-                case StencilOp::Keep:
-                    return VK_STENCIL_OP_KEEP;
-                case StencilOp::Zero:
-                    return VK_STENCIL_OP_ZERO;
-                case StencilOp::Replace:
-                    return VK_STENCIL_OP_REPLACE;
-                case StencilOp::IncrementAndClamp:
-                    return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
-                case StencilOp::DecrementAndClamp:
-                    return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
-                case StencilOp::Invert:
-                    return VK_STENCIL_OP_INVERT;
-                case StencilOp::IncrementAndWrap:
-                    return VK_STENCIL_OP_INCREMENT_AND_WRAP;
-                case StencilOp::DecrementAndWrap:
-                    return VK_STENCIL_OP_DECREMENT_AND_WRAP;
-                default:
-                    return VK_STENCIL_OP_KEEP;
+                case StencilOp::Keep: return VK_STENCIL_OP_KEEP;
+                case StencilOp::Zero: return VK_STENCIL_OP_ZERO;
+                case StencilOp::Replace: return VK_STENCIL_OP_REPLACE;
+                case StencilOp::IncrementAndClamp: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+                case StencilOp::DecrementAndClamp: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+                case StencilOp::Invert: return VK_STENCIL_OP_INVERT;
+                case StencilOp::IncrementAndWrap: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+                case StencilOp::DecrementAndWrap: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+                default: return VK_STENCIL_OP_KEEP;
             }
         }
 
@@ -54,24 +44,15 @@ namespace Desert::Graphic::API::Vulkan
         {
             switch ( op )
             {
-                case CompareOp::Never:
-                    return VK_COMPARE_OP_NEVER;
-                case CompareOp::Less:
-                    return VK_COMPARE_OP_LESS;
-                case CompareOp::Equal:
-                    return VK_COMPARE_OP_EQUAL;
-                case CompareOp::LessOrEqual:
-                    return VK_COMPARE_OP_LESS_OR_EQUAL;
-                case CompareOp::Greater:
-                    return VK_COMPARE_OP_GREATER;
-                case CompareOp::NotEqual:
-                    return VK_COMPARE_OP_NOT_EQUAL;
-                case CompareOp::GreaterOrEqual:
-                    return VK_COMPARE_OP_GREATER_OR_EQUAL;
-                case CompareOp::Always:
-                    return VK_COMPARE_OP_ALWAYS;
-                default:
-                    return VK_COMPARE_OP_ALWAYS;
+                case CompareOp::Never: return VK_COMPARE_OP_NEVER;
+                case CompareOp::Less: return VK_COMPARE_OP_LESS;
+                case CompareOp::Equal: return VK_COMPARE_OP_EQUAL;
+                case CompareOp::LessOrEqual: return VK_COMPARE_OP_LESS_OR_EQUAL;
+                case CompareOp::Greater: return VK_COMPARE_OP_GREATER;
+                case CompareOp::NotEqual: return VK_COMPARE_OP_NOT_EQUAL;
+                case CompareOp::GreaterOrEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+                case CompareOp::Always: return VK_COMPARE_OP_ALWAYS;
+                default: return VK_COMPARE_OP_ALWAYS;
             }
         }
 
@@ -79,16 +60,11 @@ namespace Desert::Graphic::API::Vulkan
         {
             switch ( mode )
             {
-                case CullMode::None:
-                    return VK_CULL_MODE_NONE;
-                case CullMode::Front:
-                    return VK_CULL_MODE_FRONT_BIT;
-                case CullMode::Back:
-                    return VK_CULL_MODE_BACK_BIT;
-                case CullMode::FrontAndBack:
-                    return VK_CULL_MODE_FRONT_AND_BACK;
-                default:
-                    return VK_CULL_MODE_BACK_BIT;
+                case CullMode::None: return VK_CULL_MODE_NONE;
+                case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
+                case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
+                case CullMode::FrontAndBack: return VK_CULL_MODE_FRONT_AND_BACK;
+                default: return VK_CULL_MODE_BACK_BIT;
             }
         }
 
@@ -96,65 +72,15 @@ namespace Desert::Graphic::API::Vulkan
         {
             switch ( type )
             {
-                    // ===== Float =====
-                case ShaderDataType::Float:
-                {
-                    return VK_FORMAT_R32_SFLOAT;
-                }
-                case ShaderDataType::Float2:
-                {
-                    return VK_FORMAT_R32G32_SFLOAT;
-                }
-                case ShaderDataType::Float3:
-                {
-                    return VK_FORMAT_R32G32B32_SFLOAT;
-                }
-                case ShaderDataType::Float4:
-                {
-                    return VK_FORMAT_R32G32B32A32_SFLOAT;
-                }
-
-                // ===== Int (signed) =====
-                case ShaderDataType::Int:
-                {
-                    return VK_FORMAT_R32_SINT;
-                }
-                case ShaderDataType::Int2:
-                {
-                    return VK_FORMAT_R32G32_SINT;
-                }
-                case ShaderDataType::Int3:
-                {
-                    return VK_FORMAT_R32G32B32_SINT;
-                }
-                case ShaderDataType::Int4:
-                {
-                    return VK_FORMAT_R32G32B32A32_SINT;
-                }
-
-                // ===== UInt =====
-               /* case ShaderDataType::UInt:
-                {
-                    return VK_FORMAT_R32_UINT;
-                }
-                case ShaderDataType::UInt2:
-                {
-                    return VK_FORMAT_R32G32_UINT;
-                }
-                case ShaderDataType::UInt3:
-                {
-                    return VK_FORMAT_R32G32B32_UINT;
-                }
-                case ShaderDataType::UInt4:
-                {
-                    return VK_FORMAT_R32G32B32A32_UINT;
-                }*/
-
-                case ShaderDataType::Bool:
-                {
-                    return VK_FORMAT_R8_UINT;
-                }
-
+                case ShaderDataType::Float:  return VK_FORMAT_R32_SFLOAT;
+                case ShaderDataType::Float2: return VK_FORMAT_R32G32_SFLOAT;
+                case ShaderDataType::Float3: return VK_FORMAT_R32G32B32_SFLOAT;
+                case ShaderDataType::Float4: return VK_FORMAT_R32G32B32A32_SFLOAT;
+                case ShaderDataType::Int:    return VK_FORMAT_R32_SINT;
+                case ShaderDataType::Int2:   return VK_FORMAT_R32G32_SINT;
+                case ShaderDataType::Int3:   return VK_FORMAT_R32G32B32_SINT;
+                case ShaderDataType::Int4:   return VK_FORMAT_R32G32B32A32_SINT;
+                case ShaderDataType::Bool:   return VK_FORMAT_R8_UINT;
                 default:
                 {
                     DESERT_VERIFY( false, "Unknown ShaderDataType!" );
@@ -162,11 +88,58 @@ namespace Desert::Graphic::API::Vulkan
                 }
             }
         }
+    }
 
-    } // namespace
-
-    VulkanPipeline::VulkanPipeline( const PipelineSpecification& specification ) : m_Specification( specification )
+    VulkanPipeline::VulkanPipeline( const GraphicsPipelineSpecification& specification ) 
+        : m_Specification( specification )
     {
+    }
+
+    VulkanPipeline::~VulkanPipeline()
+    {
+        Release();
+    }
+
+    void VulkanPipeline::Release()
+    {
+        if ( m_Pipeline == VK_NULL_HANDLE && m_PipelineLayout == VK_NULL_HANDLE )
+            return;
+
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                              ->GetVulkanLogicalDevice();
+        if ( m_Pipeline != VK_NULL_HANDLE )
+        {
+            vkDestroyPipeline( device, m_Pipeline, nullptr );
+            m_Pipeline = VK_NULL_HANDLE;
+        }
+        if ( m_PipelineLayout != VK_NULL_HANDLE )
+        {
+            vkDestroyPipelineLayout( device, m_PipelineLayout, nullptr );
+            m_PipelineLayout = VK_NULL_HANDLE;
+        }
+    }
+
+    void VulkanPipeline::Invalidate()
+    {
+        Release();
+
+        CreatePipelineLayout();
+        CreateVertexInputState();
+        CreateInputAssemblyState();
+        CreateDynamicState();
+        CreateViewportState();
+        CreateRasterizationState();
+        CreateMultisampleState();
+        CreateDepthStencilState();
+        CreateColorBlendState();
+
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                              ->GetVulkanLogicalDevice();        VulkanShader* vulkanShader =
+             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
+
+        CreateGraphicsPipeline( device, vulkanShader );
+
+        LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
     }
 
     void VulkanPipeline::CreatePipelineLayout()
@@ -184,14 +157,8 @@ namespace Desert::Graphic::API::Vulkan
              .pushConstantRangeCount = pushConstant.first,
              .pPushConstantRanges    = pushConstant.first > 0 ? &pushConstant.second : nullptr };
 
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
-                               ->GetVulkanLogicalDevice();
-        VkResult result = vkCreatePipelineLayout( device, &layoutInfo, nullptr, &m_PipelineLayout );
-
-        if ( result != VK_SUCCESS )
-        {
-            throw std::runtime_error( "Failed to create pipeline layout" );
-        }
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                              ->GetVulkanLogicalDevice();        VK_CHECK_RESULT( vkCreatePipelineLayout( device, &layoutInfo, nullptr, &m_PipelineLayout ) );
     }
 
     void VulkanPipeline::CreateVertexInputState()
@@ -248,21 +215,12 @@ namespace Desert::Graphic::API::Vulkan
 
         switch ( m_Specification.Topology )
         {
-            case PrimitiveTopology::Points:
-                topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-                break;
-            case PrimitiveTopology::Lines:
-                topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-                break;
-            case PrimitiveTopology::LineStrip:
-                topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-                break;
-            case PrimitiveTopology::Triangles:
-                topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-                break;
-            case PrimitiveTopology::TriangleStrip:
-                topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-                break;
+            case PrimitiveTopology::Points:        topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
+            case PrimitiveTopology::Lines:         topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
+            case PrimitiveTopology::LineStrip:    topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP; break;
+            case PrimitiveTopology::Triangles:     topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
+            case PrimitiveTopology::TriangleStrip: topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP; break;
+            case PrimitiveTopology::TriangleFan:   topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN; break;
         }
 
         m_InputAssembly = VkPipelineInputAssemblyStateCreateInfo{
@@ -299,7 +257,7 @@ namespace Desert::Graphic::API::Vulkan
              .rasterizerDiscardEnable = VK_FALSE,
              .polygonMode             = ConvertVkPolygonMode( m_Specification.PolygonMode ),
              .cullMode                = ConvertCullMode( m_Specification.CullMode ),
-             .frontFace               = VK_FRONT_FACE_CLOCKWISE,
+             .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
              .depthBiasEnable         = VK_FALSE,
              .lineWidth               = m_Specification.LineWidth };
     }
@@ -382,48 +340,8 @@ namespace Desert::Graphic::API::Vulkan
              .basePipelineHandle  = VK_NULL_HANDLE,
              .basePipelineIndex   = -1 };
 
-        VkResult result =
-             vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline );
-
-        if ( result != VK_SUCCESS )
-        {
-            throw std::runtime_error( "Failed to create graphics pipeline" );
-        }
-    }
-
-    void VulkanPipeline::Invalidate()
-    {
-        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
-                               ->GetVulkanLogicalDevice();
-
-        if ( m_Pipeline != VK_NULL_HANDLE )
-        {
-            vkDestroyPipeline( device, m_Pipeline, nullptr );
-            m_Pipeline = VK_NULL_HANDLE;
-        }
-        if ( m_PipelineLayout != VK_NULL_HANDLE )
-        {
-            vkDestroyPipelineLayout( device, m_PipelineLayout, nullptr );
-            m_PipelineLayout = VK_NULL_HANDLE;
-        }
-
-        CreatePipelineLayout();
-
-        CreateVertexInputState();
-        CreateInputAssemblyState();
-        CreateDynamicState();
-        CreateViewportState();
-        CreateRasterizationState();
-        CreateMultisampleState();
-        CreateDepthStencilState();
-        CreateColorBlendState();
-
-        VulkanShader* vulkanShader =
-             std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
-
-        CreateGraphicsPipeline( device, vulkanShader );
-
-        LOG_INFO( "Created {} VulkanPipeline", m_Specification.DebugName );
+        VK_CHECK_RESULT(
+             vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline ) );
     }
 
     std::pair<uint32_t, VkPushConstantRange> VulkanPipeline::SetUpPushConstantRange() const
@@ -437,32 +355,11 @@ namespace Desert::Graphic::API::Vulkan
             return { 0, {} };
         }
 
-        const auto& pcValue = pushConstant.value();
-        // setup push constants
+        const auto&          pcValue = pushConstant.value();
         VkPushConstantRange pushConstantCI;
-        pushConstantCI.offset = pcValue.Offset;
-        pushConstantCI.size   = pcValue.Size;
-
-        switch ( pcValue.ShaderStage ) // TODO
-        {
-            case Core::Formats::ShaderStage::Vertex:
-            {
-                pushConstantCI.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-                break;
-            }
-
-            case Core::Formats::ShaderStage::Fragment:
-            {
-                pushConstantCI.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-                break;
-            }
-
-            case Core::Formats::ShaderStage::Compute:
-            {
-                pushConstantCI.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-                break;
-            }
-        }
+        pushConstantCI.offset     = pcValue.Offset;
+        pushConstantCI.size       = pcValue.Size;
+        pushConstantCI.stageFlags = (VkShaderStageFlags)pcValue.ShaderStage;
 
         return { 1, pushConstantCI };
     }
@@ -471,7 +368,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         const auto& attachments = m_Specification.Framebuffer->GetSpecification().Attachments.Attachments;
         return std::any_of( attachments.begin(), attachments.end(),
-                            []( const auto& attachment ) { return Utils::IsDepthFormat( attachment ); } );
+                            []( const auto& attachment ) { return Graphic::Utils::IsDepthFormat( attachment ); } );
     }
 
     VkStencilOpState VulkanPipeline::ConvertStencilOpState( const StencilOpState& state )
@@ -483,10 +380,6 @@ namespace Desert::Graphic::API::Vulkan
                                  .compareMask = state.CompareMask,
                                  .writeMask   = state.WriteMask,
                                  .reference   = state.Reference };
-    }
-
-    VulkanPipeline::~VulkanPipeline()
-    {
     }
 
 } // namespace Desert::Graphic::API::Vulkan

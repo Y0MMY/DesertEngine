@@ -10,36 +10,42 @@
 
 namespace Desert::Graphic
 {
+    enum class PipelineType
+    {
+        Graphics,
+        Compute
+    };
+
+    /**
+     * @brief Base interface for all pipeline states.
+     */
+    class IPipeline
+    {
+    public:
+        virtual ~IPipeline() = default;
+
+        virtual void Invalidate() = 0;
+        virtual void Release()    = 0;
+
+        [[nodiscard]] virtual PipelineType GetType() const = 0;
+        [[nodiscard]] virtual std::shared_ptr<Shader> GetShader() const = 0;
+    };
+
+    // --- Graphics Pipeline ---
+
     enum class StencilOp
     {
-        Keep = 0,
-        Zero,
-        Replace,
-        IncrementAndClamp,
-        DecrementAndClamp,
-        Invert,
-        IncrementAndWrap,
-        DecrementAndWrap
+        Keep = 0, Zero, Replace, IncrementAndClamp, DecrementAndClamp, Invert, IncrementAndWrap, DecrementAndWrap
     };
 
     enum class CompareOp
     {
-        Never = 0,
-        Less,
-        Equal,
-        LessOrEqual,
-        Greater,
-        NotEqual,
-        GreaterOrEqual,
-        Always
+        Never = 0, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always
     };
 
     enum class CullMode
     {
-        None = 0,
-        Front,
-        Back,
-        FrontAndBack
+        None = 0, Front, Back, FrontAndBack
     };
 
     struct StencilOpState
@@ -55,28 +61,17 @@ namespace Desert::Graphic
 
     enum class PrimitiveTopology
     {
-        Points = 0,
-        Lines,
-        Triangles,
-        LineStrip,
-        TriangleStrip,
-        TriangleFan
+        Points = 0, Lines, Triangles, LineStrip, TriangleStrip, TriangleFan
     };
 
     inline bool PrimitiveIsLine( PrimitiveTopology topology )
     {
-        if ( topology == PrimitiveTopology::Lines || topology == PrimitiveTopology::LineStrip )
-        {
-            return true;
-        }
-
-        return false;
+        return topology == PrimitiveTopology::Lines || topology == PrimitiveTopology::LineStrip;
     }
 
     enum class PrimitivePolygonMode
     {
-        Solid = 0,
-        Wireframe,
+        Solid = 0, Wireframe
     };
 
     struct VertexPullingAttribute
@@ -94,7 +89,7 @@ namespace Desert::Graphic
         BufferUsage                         Usage = BufferUsage::Dynamic;
     };
 
-    struct PipelineSpecification
+    struct GraphicsPipelineSpecification
     {
         std::shared_ptr<Shader>            Shader;
         std::shared_ptr<Framebuffer>       Framebuffer;
@@ -110,47 +105,40 @@ namespace Desert::Graphic
         CullMode       CullMode          = CullMode::None;
         bool           DepthWriteEnabled = true;
 
-        float                LineWidth   = 1.0F; // Also affects the PrimitivePolygonMode::Wireframe
+        float                LineWidth   = 1.0F;
         PrimitiveTopology    Topology    = PrimitiveTopology::Triangles;
         PrimitivePolygonMode PolygonMode = PrimitivePolygonMode::Solid;
 
         std::string DebugName;
     };
 
-    class Pipeline
+    class GraphicsPipeline : public IPipeline
     {
     public:
-        virtual ~Pipeline() = default;
-
-        virtual const PipelineSpecification GetSpecification() const = 0;
-
-        virtual void Invalidate() = 0;
-
-        static std::shared_ptr<Pipeline> Create( const PipelineSpecification& spec );
+        [[nodiscard]] virtual const GraphicsPipelineSpecification& GetSpecification() const = 0;
+        
+        static std::shared_ptr<GraphicsPipeline> Create( const GraphicsPipelineSpecification& spec );
     };
 
-    class PipelineCompute
+    // --- Compute Pipeline ---
+
+    struct ComputePipelineSpecification
+    {
+        std::shared_ptr<Shader> Shader;
+        std::string             DebugName;
+    };
+
+    class ComputePipeline : public IPipeline
     {
     public:
-        virtual ~PipelineCompute() = default;
+        [[nodiscard]] virtual const ComputePipelineSpecification& GetSpecification() const = 0;
+        
+        /**
+         * @brief Updates the internal storage buffer (if any) associated with this pipeline.
+         */
+        virtual void UpdateStorageBuffer( void* data, std::size_t size ) = 0;
 
-        virtual void Begin()                                                                      = 0;
-        virtual void Execute( const Image* imageForProccess, std::shared_ptr<Image>& outputImage,
-                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )  = 0;
-        virtual void ExecuteMipLevel( const Image* imageForProccess, uint32_t mipLevel, uint32_t groupCountX,
-                                      uint32_t groupCountY, uint32_t groupCountZ )                = 0;
-        virtual void Dispatch( uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) = 0;
-        virtual void End()                                                                        = 0;
-
-        virtual void UpdateStorageBuffer( void* data, std::size_t size ) final;
-
-        virtual void Invalidate() = 0;
-        virtual void Release()    = 0;
-
-        static std::shared_ptr<PipelineCompute> Create( const std::shared_ptr<Shader>& shader );
-
-    protected:
-        Common::Memory::Buffer m_StorageBuffer; // 128 bytes
+        static std::shared_ptr<ComputePipeline> Create( const ComputePipelineSpecification& spec );
     };
 
 } // namespace Desert::Graphic

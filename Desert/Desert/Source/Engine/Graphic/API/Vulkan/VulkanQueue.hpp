@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vector>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -11,8 +12,10 @@ namespace Desert::Graphic::API::Vulkan
     public:
         VulkanQueue( VulkanSwapChain* swapChain );
 
-        void                     PrepareFrame();
-        void                     Present();
+        void PrepareFrame();
+        void Submit();
+        void Present();
+
         Common::ResultStr<VkResult> Init();
         void                     Release();
 
@@ -26,6 +29,9 @@ namespace Desert::Graphic::API::Vulkan
             return m_ComputeCommandBuffers;
         }
 
+        uint32_t GetImageIndex() const { return m_ImageIndex; }
+        VkCommandBuffer GetDrawCommandBuffer() const;
+
     private:
         Common::ResultStr<VkResult> QueuePresent( VkQueue queue, uint32_t imageIndex, VkSemaphore waitSemaphore );
 
@@ -34,15 +40,14 @@ namespace Desert::Graphic::API::Vulkan
 
         VulkanSwapChain* m_SwapChain;
 
-        struct
+        struct Semaphores
         {
-            // Swap chain
             VkSemaphore PresentComplete;
-            // Command buffer
             VkSemaphore RenderComplete;
-        } m_Semaphores;
+        };
 
-        std::vector<VkCommandBuffer> m_DrawCommandBuffers; // main command buffer | second command buffer
+        std::vector<Semaphores>      m_FrameSemaphores;
+        std::vector<VkCommandBuffer> m_DrawCommandBuffers;
         std::vector<VkCommandBuffer> m_ComputeCommandBuffers;
         std::vector<VkFence>         m_WaitFences;
     };

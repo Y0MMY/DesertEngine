@@ -53,7 +53,7 @@ def main():
     print(f"{Style.BRIGHT}{Back.BLUE}Compiling {sln_path} ({config}|{platform})...{Style.RESET_ALL}")
     print(f"{Fore.YELLOW}Tip: Ensure Editor.exe is closed to avoid LNK1168.{Style.RESET_ALL}")
     
-    # Use incremental build flags
+    # Use incremental build flags and force synchronous PDB writes
     compile_args = [
         msbuild_path, 
         sln_path, 
@@ -61,7 +61,9 @@ def main():
         f"/p:Platform={platform}", 
         "-m", 
         "-verbosity:minimal",
-        "/t:Build" # Just build, don't clean
+        "/t:Build",
+        "/p:CL_MPcount=8",
+        "/p:AdditionalOptions=/FS" 
     ]
     
     print(f"Command: {' '.join(compile_args)}")

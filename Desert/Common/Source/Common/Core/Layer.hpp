@@ -20,7 +20,7 @@ namespace Common
         [[nodiscard]] virtual Common::BoolResultStr OnDetach()                             = 0;
         [[nodiscard]] virtual Common::BoolResultStr OnUpdate( const Common::Timestep& ts ) = 0;
         [[nodiscard]] virtual Common::BoolResultStr OnImGuiRender()                        = 0;
-        /*virtual void OnEvent(Event& event) = 0; */
+        virtual void                                OnEvent( Common::Event& event )        = 0;
 
         inline const std::string& GetName()
         {

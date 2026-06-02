@@ -7,7 +7,9 @@
 
 #include "Helper/MeshDetailsWidget.hpp"
 
-#include <Editor/Core/PrimitiveMeshFactory.hpp>
+#include "../../MeshEditor/MeshEditorPanel.hpp"
+
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
 namespace Desert::Editor
 {
@@ -28,102 +30,104 @@ namespace Desert::Editor
         ImGui::Columns( 2 );
         ImGui::Separator();
 
-        ImGui::TextUnformatted( "Mesh" );
+        ImGui::TextUnformatted( "Mesh Type" );
         ImGui::NextColumn();
         ImGui::PushItemWidth( -1 );
 
-        std::string currentSelectionName = "Select Mesh";
-
-        if ( staticMesh.MeshHandle )
+        const char* meshTypes[] = { "Asset", "Primitive" };
+        int currentType = staticMesh.Primitive.has_value() ? 1 : 0;
+        if ( ImGui::Combo( "##MeshType", &currentType, meshTypes, IM_ARRAYSIZE( meshTypes ) ) )
         {
-            const bool isAsset =
-                 m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle ) != nullptr;
-            if ( isAsset )
-            {
-                auto meshAsset = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
-                if ( meshAsset )
-                {
-                    currentSelectionName =
-                         Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
-                }
-            }
+            if ( currentType == 0 )
+                staticMesh.Primitive.reset();
             else
-            {
-                currentSelectionName = GetPrimitiveName( staticMesh );
-            }
-        }
-
-        if ( ImGui::Button( currentSelectionName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
-        {
-            ImGui::OpenPopup( "mesh_selector" );
+                staticMesh.Primitive = Geometry::PrimitiveType::Cube;
         }
 
         ImGui::PopItemWidth();
         ImGui::NextColumn();
-        ImGui::Columns( 1 );
-        ImGui::Separator();
 
-        if ( ImGui::BeginPopup( "mesh_selector" ) )
+        if ( !staticMesh.Primitive.has_value() )
         {
-            auto                   meshAssets = m_AssetManager->FindAllByType<Assets::MeshAsset>();
-            static ImGuiTextFilter meshFilter;
+            ImGui::TextUnformatted( "Asset" );
+            ImGui::NextColumn();
+            ImGui::PushItemWidth( -1 );
 
-            meshFilter.Draw( "##Search", 200 );
-            ImGui::Separator();
-
-            for ( const auto& [handle, meshAsset] : meshAssets )
-            {
-                const auto isSkinnedOpt = Runtime::ResourceRegistry::GetMeshService()->IsSkinned( handle );
-                if ( isSkinnedOpt.has_value() && isSkinnedOpt.value() )
-                {
-                    continue;
-                }
-
-                const std::string& meshName =
-                     Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
-
-                if ( meshFilter.PassFilter( meshName.c_str() ) )
-                {
-                    bool isSelected = ( staticMesh.MeshHandle == handle );
-
-                    if ( ImGui::Selectable( meshName.c_str(), isSelected ) )
-                    {
-                        SetMeshAsset( staticMesh, handle );
-                    }
-
-                    if ( isSelected )
-                    {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-            }
-
-            if ( meshAssets.empty() )
-            {
-                ImGui::TextDisabled( "No mesh assets available" );
-            }
-
-            ImGui::EndPopup();
-        }
-
-        if ( staticMesh.MeshHandle )
-        {
-            const bool isAsset =
-                 m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle ) != nullptr;
-            if ( isAsset )
+            std::string currentSelectionName = "Select Mesh";
+            if ( staticMesh.MeshHandle )
             {
                 auto meshAsset = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
-                MeshDetailsWidget::ShowMeshInfo( meshAsset, staticMesh.MeshHandle );
+                if ( meshAsset )
+                {
+                    currentSelectionName = Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
+                }
             }
-            else
+
+            if ( ImGui::Button( currentSelectionName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
             {
-                RenderPrimitiveInfo( staticMesh );
+                ImGui::OpenPopup( "mesh_selector" );
             }
+
+            if ( ImGui::BeginPopup( "mesh_selector" ) )
+            {
+                auto meshAssets = m_AssetManager->FindAllByType<Assets::MeshAsset>();
+                static ImGuiTextFilter meshFilter;
+                meshFilter.Draw( "##Search", 200 );
+                ImGui::Separator();
+
+                for ( const auto& [handle, meshAsset] : meshAssets )
+                {
+                    const auto isSkinnedOpt = Runtime::ResourceRegistry::GetMeshService()->IsSkinned( handle );
+                    if ( isSkinnedOpt.has_value() && isSkinnedOpt.value() )
+                    {
+                        continue;
+                    }
+
+                    const std::string& meshName = Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
+                    if ( meshFilter.PassFilter( meshName.c_str() ) )
+                    {
+                        if ( ImGui::Selectable( meshName.c_str(), staticMesh.MeshHandle == handle ) )
+                        {
+                            SetMeshAsset( staticMesh, handle );
+                        }
+                    }
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::PopItemWidth();
+            ImGui::NextColumn();
         }
         else
         {
-            ImGui::TextDisabled( "No mesh or primitive selected. Click the button above to select." );
+            ImGui::TextUnformatted( "Shape" );
+            ImGui::NextColumn();
+            ImGui::PushItemWidth( -1 );
+
+            const char* shapes[] = { "Cube", "Sphere", "Pyramid", "Plane", "Cylinder", "Capsule" };
+            int currentShape = (int)staticMesh.Primitive.value();
+            if ( ImGui::Combo( "##Shape", &currentShape, shapes, IM_ARRAYSIZE( shapes ) ) )
+            {
+                staticMesh.Primitive = (Geometry::PrimitiveType)currentShape;
+                // MeshECSSystem will handle the dynamic mesh generation/update
+            }
+
+            ImGui::PopItemWidth();
+            ImGui::NextColumn();
+
+            ImGui::TextUnformatted( "Geometry Editor" );
+            ImGui::NextColumn();
+            if ( ImGui::Button( "Open Mesh Editor", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+            {
+                if ( auto* meshEditor = MeshEditorPanel::GetInstance() )
+                {
+                    meshEditor->SetTarget( entity );
+                }
+            }
+            ImGui::NextColumn();
         }
+
+        ImGui::Columns( 1 );
+        ImGui::Separator();
 
         {
             static MaterialComponentWidget materialComponent( m_AssetManager );
@@ -134,194 +138,22 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::PopID();
     }
 
-    void StaticMeshComponentWidget::RenderPrimitiveInfo( ECS::StaticMeshComponent& staticMesh )
+    void StaticMeshComponentWidget::SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle )
     {
-        if ( ImGui::TreeNodeEx( "Primitive Details", ImGuiTreeNodeFlags_Framed ) )
-        {
-            ImGui::Columns( 2 );
-
-            ImGui::TextUnformatted( "Type" );
-            ImGui::NextColumn();
-            ImGui::TextUnformatted( GetPrimitiveName( staticMesh ).c_str() );
-            ImGui::NextColumn();
-
-            ImGui::NextColumn();
-            ImGui::Columns( 1 );
-            ImGui::TreePop();
-        }
-    }
-
-    void StaticMeshComponentWidget::SetMeshAsset( ECS::StaticMeshComponent&  staticMesh,
-                                                  const Assets::AssetHandle& handle )
-    {
-        staticMesh.MeshHandle        = handle;
-        const auto selectedMeshAsset = m_AssetManager->FindByHandle<Assets::MeshAsset>( handle );
-        if ( selectedMeshAsset )
-        {
-            const auto handles = selectedMeshAsset->GetMaterialHandles();
-            staticMesh.MaterialSlots.reserve( handles.size() );
-            for ( const auto materialHandle : handles )
-            {
-                staticMesh.MaterialSlots.emplace_back(
-                     Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal( materialHandle ) );
-            }
-        }
-
-        // staticMesh.PrimitiveShape.reset();
-    }
-
-    void StaticMeshComponentWidget::SetPrimitive( ECS::StaticMeshComponent& staticMesh, PrimitiveType type )
-    {
-        /* auto primitiveMesh        = PrimitiveMeshFactory::CreatePrimitive( type );
-         staticMesh.MeshHandle     = primitiveMesh->GetHandle();
-         staticMesh.PrimitiveShape = std::make_shared<PrimitiveShape>( type );*/
-    }
-
-    bool StaticMeshComponentWidget::IsPrimitiveSelected( const ECS::StaticMeshComponent& staticMesh,
-                                                         PrimitiveType                   type ) const
-    {
-        return false; // staticMesh.PrimitiveShape && staticMesh.PrimitiveShape->GetType() == type;
+        staticMesh.MeshHandle = handle;
+        staticMesh.Primitive.reset();
+        // Load default materials from asset...
     }
 
     std::string StaticMeshComponentWidget::GetPrimitiveName( const ECS::StaticMeshComponent& staticMesh ) const
     {
-        /* if ( staticMesh.PrimitiveShape )
-         {
-             switch ( staticMesh.PrimitiveShape->GetType() )
-             {
-                 case PrimitiveType::Cube:
-                     return "Cube";
-                 case PrimitiveType::Sphere:
-                     return "Sphere";
-                 case PrimitiveType::Cylinder:
-                     return "Cylinder";
-                 case PrimitiveType::Plane:
-                     return "Plane";
-                 case PrimitiveType::Cone:
-                     return "Cone";
-                 default:
-                     return "Unknown Primitive";
-             }
-         }*/
-        return "Primitive";
-    }
-
-    void StaticMeshComponentWidget::RenderAssetSection( ECS::StaticMeshComponent& staticMesh )
-    {
-
-        auto meshAssets = m_AssetManager->FindAllByType<Assets::MeshAsset>();
-
-        const auto& currentSelectedMesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
-
-        std::string currentMeshName =
-             currentSelectedMesh
-                  ? Common::Utils::FileSystem::GetFileName( currentSelectedMesh->GetMetadata().Filepath )
-                  : "None";
-
-        ImGui::Columns( 2 );
-        ImGui::Separator();
-
-        // Mesh selection section
-        ImGui::TextUnformatted( "Mesh" );
-        ImGui::NextColumn();
-        ImGui::PushItemWidth( -1 );
-
-        if ( ImGui::Button( currentMeshName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+        if ( !staticMesh.Primitive ) return "None";
+        switch ( *staticMesh.Primitive )
         {
-            ImGui::OpenPopup( "mesh_selector" );
-        }
-
-        if ( ImGui::BeginPopup( "mesh_selector" ) )
-        {
-            static ImGuiTextFilter meshFilter;
-            meshFilter.Draw( "##Search", 200 );
-            ImGui::Separator();
-
-            for ( const auto& [handle, meshAsset] : meshAssets )
-            {
-                const auto isSkinnedOpt = Runtime::ResourceRegistry::GetMeshService()->IsSkinned( handle );
-                if ( isSkinnedOpt.has_value() && isSkinnedOpt.value() )
-                {
-                    continue;
-                }
-                const std::string& meshName =
-                     Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
-
-                if ( meshFilter.PassFilter( meshName.c_str() ) )
-                {
-                    bool isSelected = ( ( staticMesh.MeshHandle ) == handle );
-                    if ( ImGui::Selectable( meshName.c_str(), isSelected ) )
-                    {
-                        const auto selectedMeshAsset = m_AssetManager->FindByHandle<Assets::MeshAsset>( handle );
-                        staticMesh.MeshHandle        = handle;
-                        const auto handles           = selectedMeshAsset->GetMaterialHandles();
-                        staticMesh.MaterialSlots.reserve( handles.size() );
-                        for ( const auto handle : handles )
-                        {
-                            staticMesh.MaterialSlots.emplace_back(
-                                 Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal(
-                                      handle ) );
-                        }
-                    }
-
-                    if ( isSelected )
-                    {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-            }
-
-            if ( meshAssets.empty() )
-            {
-                ImGui::TextDisabled( "No mesh assets available" );
-            }
-
-            ImGui::EndPopup();
-        }
-
-        ImGui::PopItemWidth();
-        ImGui::NextColumn();
-        ImGui::Columns( 1 );
-        ImGui::Separator();
-
-        // Show mesh info if mesh is loaded
-        MeshDetailsWidget::ShowMeshInfo( currentSelectedMesh, staticMesh.MeshHandle );
-    }
-
-    void StaticMeshComponentWidget::RenderPrimitiveSection( ECS::StaticMeshComponent& staticMesh )
-    {
-
-        ImGui::Columns( 2 );
-        ImGui::Separator();
-
-        // Primitive selection section
-        ImGui::TextUnformatted( "Primitive" );
-        ImGui::NextColumn();
-        ImGui::PushItemWidth( -1 );
-
-        // Get current primitive name
-        std::string currentPrimitiveName =
-             "Cube"; // PrimitiveMeshFactory::GetPrimitiveName( *staticMesh.PrimitiveShape );
-
-        ImGui::TextUnformatted( currentPrimitiveName.c_str() );
-
-        ImGui::PopItemWidth();
-        ImGui::NextColumn();
-        ImGui::Columns( 1 );
-        ImGui::Separator();
-
-        // Show primitive info
-        if ( ImGui::TreeNodeEx( "Primitive Details", ImGuiTreeNodeFlags_Framed ) )
-        {
-            ImGui::Columns( 2 );
-
-            ImGui::TextUnformatted( "Type" );
-            ImGui::NextColumn();
-            ImGui::TextUnformatted( currentPrimitiveName.c_str() );
-            ImGui::NextColumn();
-
-            ImGui::Columns( 1 );
-            ImGui::TreePop();
+            case Geometry::PrimitiveType::Cube: return "Cube";
+            case Geometry::PrimitiveType::Sphere: return "Sphere";
+            case Geometry::PrimitiveType::Plane: return "Plane";
+            default: return "Primitive";
         }
     }
 

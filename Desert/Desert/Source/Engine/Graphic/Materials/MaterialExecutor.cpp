@@ -6,7 +6,7 @@
 
 #include <Engine/ShaderResources/ShaderResourcesManager.hpp>
 
-static constexpr uint32_t kMaxPushConstantsSize = 128U;
+static constexpr uint32_t kMaxPushConstantsSize = 64U;
 
 namespace Desert::Graphic
 {
@@ -100,7 +100,7 @@ namespace Desert::Graphic
         const auto& resolvedShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( shaderName );
         if ( !resolvedShader )
         {
-            LOG_ERROR( "Could not find the shader" );
+            LOG_ERROR( "Could not find the shader: {}", shaderName );
             DESERT_VERIFY( false )
         }
 

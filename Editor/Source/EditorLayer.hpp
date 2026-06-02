@@ -18,6 +18,7 @@ namespace Desert::Editor
         [[nodiscard]] virtual Common::BoolResultStr OnDetach() override;
         [[nodiscard]] virtual Common::BoolResultStr OnUpdate( const Common::Timestep& ts ) override;
         [[nodiscard]] virtual Common::BoolResultStr OnImGuiRender() override;
+        virtual void                                OnEvent( Common::Event& event ) override;
 
     private:
         void DrawMenuBar();

@@ -1,6 +1,8 @@
 #include "ViewportPanel.hpp"
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
+#include <Engine/Geometry/DynamicMesh.hpp>
 
 #include <ImGuizmo.h>
 #include <glm/gtx/matrix_decompose.hpp>
@@ -77,20 +79,19 @@ namespace Desert::Editor
 
         const auto& mainCamera = m_Scene->GetMainCamera().lock();
         if ( !mainCamera )
-        {
             return;
-        }
 
         const auto& selected = Core::SelectionManager::GetSelected();
         if ( !selected )
             return;
 
-        const auto& selectedEntity = m_Scene->FindEntityByID( *selected );
-        if ( !selectedEntity )
+        const auto& selectedEntityOpt = m_Scene->FindEntityByID( *selected );
+        if ( !selectedEntityOpt )
             return;
-
-        auto& transformComponent = selectedEntity->get().GetComponent<ECS::TransformComponent>();
-        auto  transform          = transformComponent.GetTransform();
+            
+        auto& selectedEntity = selectedEntityOpt->get();
+        auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
+        auto  modelMatrix = transformComponent.GetTransform();
 
         float rw = static_cast<float>( ImGui::GetWindowWidth() );
         float rh = static_cast<float>( ImGui::GetWindowHeight() );
@@ -99,23 +100,67 @@ namespace Desert::Editor
         ImGuizmo::SetDrawlist();
         ImGuizmo::SetRect( ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, rw, rh );
 
-        ImGuizmo::Manipulate( &mainCamera->GetViewMatrix()[0][0], &mainCamera->GetProjectionMatrix()[0][0],
-                              static_cast<ImGuizmo::OPERATION>( m_GizmoType ), ImGuizmo::WORLD, &transform[0][0] );
+        const auto& view = mainCamera->GetViewMatrix();
+        const auto& proj = mainCamera->GetProjectionMatrix();
 
-        if ( ImGuizmo::IsOver() )
+        // --- MESH EDITOR OVERRIDE ---
+        // If Mesh Editor is active and target matches selection, draw vertex gizmos
+        auto* meshEditor = MeshEditorPanel::GetInstance();
+        if ( meshEditor && meshEditor->GetTargetEntity() == selectedEntity && meshEditor->GetActiveMesh() )
         {
-            m_GizmoHovered = true;
+            auto& selection = meshEditor->GetSelection();
+            if ( !selection.VertexIndices.empty() )
+            {
+                auto mesh = meshEditor->GetActiveMesh();
+                glm::vec3 localCenter = selection.GetCenter( *mesh );
+                glm::vec3 worldCenter = glm::vec3( modelMatrix * glm::vec4( localCenter, 1.0f ) );
+                
+                glm::mat4 gizmoTransform = glm::translate( glm::mat4( 1.0f ), worldCenter );
+
+                if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], 
+                                           ImGuizmo::TRANSLATE, ImGuizmo::WORLD, &gizmoTransform[0][0] ) )
+                {
+                    glm::vec3 newWorldCenter, scale, skew;
+                    glm::quat rotation;
+                    glm::vec4 perspective;
+                    glm::decompose( gizmoTransform, scale, rotation, newWorldCenter, skew, perspective );
+
+                    glm::vec3 deltaWorld = newWorldCenter - worldCenter;
+                    glm::vec3 deltaLocal = glm::vec3( glm::inverse( modelMatrix ) * glm::vec4( deltaWorld, 0.0f ) );
+
+                    auto& vertices = mesh->GetVertices();
+                    for ( auto idx : selection.VertexIndices )
+                    {
+                        vertices[idx].Position += deltaLocal;
+                    }
+
+                    mesh->Update( vertices, mesh->GetIndices() );
+                }
+                
+                if ( ImGuizmo::IsOver() ) m_GizmoHovered = true;
+                return; // Don't draw object gizmo if vertex gizmo is active
+            }
         }
 
-        // Decompose and update transform
-        glm::vec3 scale, translation, skew;
-        glm::quat rotation;
-        glm::vec4 perspective;
-        glm::decompose( transform, scale, rotation, translation, skew, perspective );
+        // --- STANDARD OBJECT GIZMO ---
+        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0],
+                                  static_cast<ImGuizmo::OPERATION>( m_GizmoType ), ImGuizmo::WORLD, &modelMatrix[0][0] ) )
+        {
+            if ( ImGuizmo::IsOver() )
+            {
+                m_GizmoHovered = true;
+            }
 
-        transformComponent.Translation = translation;
-        transformComponent.Rotation    = glm::eulerAngles( rotation );
-        transformComponent.Scale       = scale;
+            // Decompose and update transform
+            glm::vec3 scale, translation, skew;
+            glm::quat rotation;
+            glm::vec4 perspective;
+            glm::decompose( modelMatrix, scale, rotation, translation, skew, perspective );
+
+            transformComponent.Translation = translation;
+            transformComponent.Rotation    = glm::eulerAngles( rotation );
+            transformComponent.Scale       = scale;
+        }
     }
 
     std::pair<float, float> ViewportPanel::GetMouseViewportSpace() const

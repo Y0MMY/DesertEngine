@@ -26,7 +26,7 @@ namespace Desert::Graphic
 
         virtual void FlushUpdates() = 0;
 
-        virtual void ApplyPushConstants( MaterialExecutor* material, Pipeline* pipeline ) = 0;
+        virtual void ApplyPushConstants( MaterialExecutor* material, GraphicsPipeline* pipeline ) = 0;
 
     protected:
         const std::shared_ptr<Shader> m_Shader;

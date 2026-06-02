@@ -14,7 +14,7 @@ namespace Desert::Editor::UI
     void UIHelper::Image( const std::shared_ptr<Graphic::Image2D>& image, const ImVec2& size, const ImVec2& uv0,
                           const ImVec2& uv1, const ImVec4& tint_col, const ImVec4& border_col )
     {
-        if ( !image )
+        if ( !image || size.x <= 0.0f || size.y <= 0.0f )
             return;
 
         const auto* id = m_CacherTexture->AddTextureCache( image );

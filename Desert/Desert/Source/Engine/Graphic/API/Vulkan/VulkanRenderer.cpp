@@ -1,383 +1,261 @@
-﻿#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanPipelineCompute.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanVertexBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanIndexBuffer.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
-#include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
-#include <Engine/Graphic/ComputeImages.hpp>
-
-#include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
-
-#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
-#include <Engine/Graphic/Texture.hpp>
-
 #include <Engine/Core/EngineContext.hpp>
-#include "stb_image/stb_image_write.h"
-
-#include <glm/glm.hpp>
+#include <Engine/Core/FrameManager.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
-    namespace
-    {
-        bool ShouldUseDynamicLineWidth( const Pipeline* pipeline )
-        {
-            const auto& spec = pipeline->GetSpecification();
-            if ( spec.PolygonMode == PrimitivePolygonMode::Wireframe || Graphic::PrimitiveIsLine( spec.Topology ) )
-            {
-                return true;
-            }
-
-            return false;
-        }
-    } // namespace
-
-    struct SpecularFilterPushConstants
-    {
-        uint32_t mipLevel;
-        float    roughness;
-    };
+    void VulkanRendererAPI::Init() {}
+    void VulkanRendererAPI::Shutdown() {}
 
     Common::BoolResultStr VulkanRendererAPI::BeginFrame()
     {
-        if ( m_CurrentCommandBuffer != nullptr )
-        {
-            return Common::MakeError<bool>( "BeginFrame(): Error! Have you call EndFrame() ?" );
-        }
+        auto window = m_Window.lock();
+        if ( !window ) return Common::MakeError( "Window is null" );
 
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        auto swapChain = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() );
+        m_CurrentCommandBuffer = swapChain->GetVulkanQueue()->GetDrawCommandBuffer();
 
-        VkCommandBufferBeginInfo cmdBufferBeginInfo{};
-        cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+        VK_CHECK_RESULT_BOOL( vkBeginCommandBuffer( m_CurrentCommandBuffer, &beginInfo ) );
 
-        m_CurrentCommandBuffer = VulkanRenderCommandBuffer::GetInstance().GetCommandBuffer();
-        vkBeginCommandBuffer( m_CurrentCommandBuffer, &cmdBufferBeginInfo );
-
-        return Common::MakeSuccess( true );
+        return BOOLSUCCESS;
     }
 
     Common::BoolResultStr VulkanRendererAPI::EndFrame()
     {
-        if ( m_CurrentCommandBuffer == nullptr )
+        if ( m_CurrentCommandBuffer )
         {
-            return Common::MakeError<bool>( "EndFrame(): Error! Have you call BeginFrame() ?" );
+            VK_CHECK_RESULT_BOOL( vkEndCommandBuffer( m_CurrentCommandBuffer ) );
+            m_CurrentCommandBuffer = nullptr;
         }
-
-        VulkanRenderCommandBuffer::GetInstance().ExecuteUserCommands();
-        VkResult res = vkEndCommandBuffer( m_CurrentCommandBuffer );
-
-        m_CurrentCommandBuffer = nullptr;
-
-        return Common::MakeSuccess( true );
+        return BOOLSUCCESS;
     }
 
     Common::BoolResultStr VulkanRendererAPI::PrepareNextFrame()
     {
-        // static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PrepareNextFrame();
-
-        return Common::MakeSuccess( true );
+        auto window = m_Window.lock();
+        if ( !window ) return Common::MakeError( "Window is null" );
+        SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->PrepareFrame();
+        return BOOLSUCCESS;
     }
 
     Common::BoolResultStr VulkanRendererAPI::PresentFinalImage()
     {
-        // static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )->PresentFinalImage();
+        auto window = m_Window.lock();
+        if ( !window ) return Common::MakeError( "Window is null" );
+        auto swapChain = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() );
 
-        return Common::MakeSuccess( true );
-    }
-
-    void VulkanRendererAPI::Init()
-    {
-        const auto window = m_Window.lock();
-        if ( !window )
-        {
-            DESERT_VERIFY( false );
-        }
-
-        VulkanRenderCommandBuffer::CreateInstance( "Main" ).Init(
-             SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() )->GetVulkanQueue().get() );
-    }
-
-    std::shared_ptr<VulkanFramebuffer> GetFramebuffer( const RenderPass* renderPass )
-    {
-        return sp_cast<Graphic::API::Vulkan::VulkanFramebuffer>(
-             renderPass->GetSpecification().TargetFramebuffer );
-    }
-
-    VulkanSwapChain* GetSwapChain( const std::shared_ptr<Window>& window )
-    {
-        return SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() ).get();
-    }
-
-    VkRenderPassBeginInfo CreateRenderPassBeginInfo( VulkanSwapChain*                          swapChain,
-                                                     const std::shared_ptr<VulkanFramebuffer>& framebuffer,
-                                                     const std::vector<VkClearValue>&          clearValues )
-    {
-        const auto width  = framebuffer->GetFramebufferWidth();
-        const auto height = framebuffer->GetFramebufferHeight();
-
-        VkRenderPassBeginInfo renderPassBeginInfo = {};
-        renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassBeginInfo.renderPass            = framebuffer->GetVKRenderPass();
-        renderPassBeginInfo.renderArea.offset     = { 0, 0 };
-        renderPassBeginInfo.renderArea.extent     = { width, height };
-        renderPassBeginInfo.clearValueCount       = clearValues.size();
-        renderPassBeginInfo.pClearValues          = clearValues.data();
-        renderPassBeginInfo.framebuffer           = framebuffer->GetVKFramebuffer();
-        return renderPassBeginInfo;
-    }
-
-    VkRenderPassBeginInfo CreateRenderPassBeginInfo( VulkanSwapChain* swapChain, const VkFramebuffer framebuffer,
-                                                     const std::array<VkClearValue, 2>& clearValues )
-    {
-        VkRenderPassBeginInfo renderPassBeginInfo = {};
-        renderPassBeginInfo.sType                 = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassBeginInfo.renderPass            = swapChain->GetRenderPass();
-        renderPassBeginInfo.renderArea.offset     = { 0, 0 };
-        renderPassBeginInfo.renderArea.extent     = { swapChain->GetWidth(), swapChain->GetHeight() };
-        renderPassBeginInfo.clearValueCount       = static_cast<uint32_t>( clearValues.size() );
-        renderPassBeginInfo.pClearValues          = clearValues.data();
-        renderPassBeginInfo.framebuffer           = framebuffer;
-        return renderPassBeginInfo;
+        EndFrame();
+        swapChain->GetVulkanQueue()->Submit();
+        swapChain->Present();
+        
+        return BOOLSUCCESS;
     }
 
     Common::BoolResultStr VulkanRendererAPI::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
     {
-        const auto window = m_Window.lock();
-        if ( !window )
+        if ( !m_CurrentCommandBuffer ) return Common::MakeError( "No active command buffer" );
+
+        const auto framebuffer = renderPass->GetSpecification().TargetFramebuffer;
+        const auto vulkanFramebuffer = sp_cast<VulkanFramebuffer>( framebuffer );
+
+        VkRenderPassBeginInfo renderPassInfo = { 
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, 
+            .renderPass = vulkanFramebuffer->GetVKRenderPass(), 
+            .framebuffer = vulkanFramebuffer->GetVKFramebuffer(), 
+            .renderArea = { .offset = { 0, 0 }, .extent = { framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() } } 
+        };
+
+        std::vector<VkClearValue> clearValues;
+        for ( const auto& attachment : framebuffer->GetSpecification().Attachments.Attachments )
         {
-            DESERT_VERIFY( false );
+            VkClearValue clearValue{};
+            if ( Graphic::Utils::IsDepthFormat( attachment ) ) clearValue.depthStencil = { 1.0f, 0 };
+            else clearValue.color = { { 0.1f, 0.1f, 0.1f, 1.0f } };
+            clearValues.push_back( clearValue );
         }
 
-        auto clearValues =
-             std::static_pointer_cast<VulkanFramebuffer>( renderPass->GetSpecification().TargetFramebuffer )
-                  ->GetClearValues();
-        auto        framebuffer = GetFramebuffer( renderPass );
-        const auto& swapChain   = GetSwapChain( window );
+        renderPassInfo.clearValueCount = static_cast<uint32_t>( clearValues.size() );
+        renderPassInfo.pClearValues    = clearValues.data();
 
-        m_CompositeFramebuffer = framebuffer;
-
-        VkRenderPassBeginInfo renderPassBeginInfo =
-             CreateRenderPassBeginInfo( swapChain, framebuffer, clearValues );
-        vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
-
-        if ( clearFrame )
-        {
-            ClearAttachments( clearValues, framebuffer );
-        }
+        vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE );
         SetViewportAndScissor( framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() );
-        return Common::MakeSuccess( true );
+
+        return BOOLSUCCESS;
     }
 
     Common::BoolResultStr VulkanRendererAPI::BeginSwapChainRenderPass()
     {
-        const auto window = m_Window.lock();
-        if ( !window )
-        {
-            DESERT_VERIFY( false );
-        }
+        if ( !m_CurrentCommandBuffer ) return Common::MakeError( "No active command buffer" );
 
-        uint32_t                    frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        std::array<VkClearValue, 2> clearValues{};
-        const auto&                 swapChain   = GetSwapChain( window );
-        const auto                  framebuffer = swapChain->GetVKFramebuffers();
+        auto window      = m_Window.lock();
+        auto vulkanSwap  = SP_CAST( VulkanSwapChain, window->GetWindowSwapChain() );
+        auto framebuffer = vulkanSwap->GetCompositeFramebuffer();
+        m_CompositeFramebuffer = framebuffer;
 
-        VkRenderPassBeginInfo renderPassBeginInfo =
-             CreateRenderPassBeginInfo( swapChain, framebuffer[frameIndex], clearValues );
-        vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE );
+        uint32_t imageIndex = vulkanSwap->GetCurrentBufferIndex();
+        
+        VkRenderPassBeginInfo renderPassInfo = { 
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, 
+            .renderPass = vulkanSwap->GetRenderPass(), 
+            .framebuffer = vulkanSwap->GetVKFramebuffers()[imageIndex], 
+            .renderArea = { .offset = { 0, 0 }, .extent = { framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() } } 
+        };
 
-        SetViewportAndScissor( swapChain->GetWidth(), swapChain->GetHeight() );
-        return Common::MakeSuccess( true );
+        VkClearValue clearValue = { .color = { { 0.1f, 0.1f, 0.1f, 1.0f } } };
+        renderPassInfo.clearValueCount = 1;
+        renderPassInfo.pClearValues    = &clearValue;
+
+        vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE );
+        SetViewportAndScissor( framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() );
+
+        return BOOLSUCCESS;
     }
 
     Common::BoolResultStr VulkanRendererAPI::EndRenderPass()
     {
-        vkCmdEndRenderPass( m_CurrentCommandBuffer );
-        return Common::MakeSuccess( true );
+        if ( m_CurrentCommandBuffer ) vkCmdEndRenderPass( m_CurrentCommandBuffer );
+        return BOOLSUCCESS;
     }
 
-    void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
+    void VulkanRendererAPI::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform, const MaterialExecutor* materialExecutor )
     {
-        /* if ( width == 0 && height == 0 )
-             return;
-         const auto device       = VulkanLogicalDevice::GetInstance().GetVulkanLogicalDevice();
-         uint32_t   currentIndex = Renderer::GetInstance().GetCurrentFrameIndex();
+        if ( !m_CurrentCommandBuffer ) return;
+        const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
+        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanPipeline->GetVkPipeline() );
 
-         const auto& pool = CommandBufferAllocator::GetInstance().GetCommandGraphicPool();
-         VK_CHECK_RESULT( vkResetCommandPool( device, pool[currentIndex], 0 ) );
-
-         const auto& swapChain = static_cast<VulkanContext*>( Renderer::GetInstance().GetRendererContext().get() )
-                                      ->GetVulkanSwapChain();
-         if ( width == swapChain->GetWidth() && height == swapChain->GetHeight() )
-             return;
-
-         swapChain->OnResize( width, height );
-
-         auto commandBuffer = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
-
-         for ( auto& image : swapChain->GetSwapChainVKImage() )
-         {
-             VkImageMemoryBarrier barrier{};
-             barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-             barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
-             barrier.newLayout                   = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-             barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-             barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-             barrier.image                       = image;
-             barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-             barrier.subresourceRange.levelCount = 1;
-             barrier.subresourceRange.layerCount = 1;
-
-             vkCmdPipelineBarrier( commandBuffer.GetValue(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1,
-                                   &barrier );
-         }
-
-         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer.GetValue() );*/
-    }
-
-    void VulkanRendererAPI::SetViewportAndScissor( const uint32_t wdith, const uint32_t height )
-    {
-        VkViewport viewport = {};
-        viewport.x          = 0.0f;
-        viewport.y          = (float)height;
-        viewport.height     = -(float)height;
-        viewport.width      = (float)wdith;
-        viewport.minDepth   = 0.0f;
-        viewport.maxDepth   = 1.0f;
-
-        VkRect2D scissor = {};
-        scissor.offset   = { 0, 0 };
-        scissor.extent   = { wdith, height };
-
-        vkCmdSetViewport( m_CurrentCommandBuffer, 0, 1, &viewport );
-        vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
-    }
-
-    std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
-    {
-        if ( const auto& framebuffer = m_CompositeFramebuffer.lock() ) [[likely]]
+        // Bind Descriptor Sets
+        if ( materialExecutor )
         {
-            return framebuffer;
+            auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
+            uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+            vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(), VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
         }
-        return nullptr;
-    }
-
-    void VulkanRendererAPI::SubmitFullscreenQuad( const Pipeline*         pipeline,
-                                                  const MaterialExecutor* materialExecutor )
-    {
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        materialExecutor->Apply();
-
-        const auto& vulkanLayout = static_cast<const Graphic::API::Vulkan::VulkanPipeline*>( pipeline );
-        static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() )
-             ->BindDescriptorSets( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
-                                   VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
-
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanLayout->GetVkPipeline() );
-
-        vkCmdDraw( m_CurrentCommandBuffer, 6, 1, 0, 0 );
-    }
-
-    void VulkanRendererAPI::RenderMesh( const Pipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
-                                        const MaterialExecutor* materialExecutor )
-    {
-
-        uint32_t frameIndex = Renderer::GetInstance().GetCurrentFrameIndex();
-        materialExecutor->Apply();
-
-        const auto& vulkanLayout = static_cast<const Graphic::API::Vulkan::VulkanPipeline*>( pipeline );
-        static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() )
-             ->BindDescriptorSets( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
-                                   VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           vulkanLayout->GetVkPipeline() );
 
         VkDeviceSize offsets[] = { 0 };
-        const auto   vbuffer =
-             sp_cast<API::Vulkan::VulkanVertexBuffer>( mesh->GetVertexBuffer() )->GetVulkanBuffer();
+        auto vbuffer = sp_cast<API::Vulkan::VulkanVertexBuffer>( mesh->GetVertexBuffer() )->GetVulkanBuffer();
         vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &vbuffer, offsets );
 
-        const auto ibuffer = sp_cast<API::Vulkan::VulkanIndexBuffer>( mesh->GetIndexBuffer() )->GetVulkanBuffer();
-        vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
-
-        if ( ShouldUseDynamicLineWidth( pipeline ) )
+        if ( auto indexBuffer = mesh->GetIndexBuffer() )
         {
-            vkCmdSetLineWidth( m_CurrentCommandBuffer, pipeline->GetSpecification().LineWidth );
+            auto ibuffer = sp_cast<API::Vulkan::VulkanIndexBuffer>( indexBuffer )->GetVulkanBuffer();
+            vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
         }
 
         const auto& submeshes = mesh->GetSubmeshes();
         for ( const auto& submesh : submeshes )
         {
-            MaterialExecutor* materialExec   = (MaterialExecutor*)materialExecutor;
-            auto              finalTransform = ( transform * submesh.Transform );
+            MaterialExecutor* materialExec = (MaterialExecutor*)materialExecutor;
+            auto finalTransform = transform * submesh.Transform;
             materialExec->PushConstant( &finalTransform, sizeof( glm::mat4 ) );
 
             const auto& pcBuffer = materialExecutor->GetPushConstantBuffer();
-            if ( pcBuffer.Size )
+            VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
+            if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
             {
-                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanLayout->GetVkPipelineLayout(),
-                                    VK_SHADER_STAGE_VERTEX_BIT, 0, pcBuffer.Size, pcBuffer.Data );
+                auto pcInfo = vulkanShader->GetShaderPushConstant().value();
+                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(), (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size, pcBuffer.Data );
             }
 
-            vkCmdDrawIndexed( m_CurrentCommandBuffer, submesh.IndexCount, 1, submesh.IndexOffset,
-                              submesh.VertexOffset, 0 );
+            if ( mesh->GetIndexBuffer() )
+                vkCmdDrawIndexed( m_CurrentCommandBuffer, submesh.IndexCount, 1, submesh.IndexOffset, submesh.VertexOffset, 0 );
+            else
+                vkCmdDraw( m_CurrentCommandBuffer, submesh.VertexCount, 1, submesh.VertexOffset, 0 );
         }
     }
 
-    void VulkanRendererAPI::Shutdown()
+    void VulkanRendererAPI::SubmitFullscreenQuad( const GraphicsPipeline* pipeline, const MaterialExecutor* materialExecutor )
     {
-        vkDeviceWaitIdle( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetMainDevice() )
-                               ->GetVulkanLogicalDevice() );
-    }
+        if ( !m_CurrentCommandBuffer ) return;
+        const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
+        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanPipeline->GetVkPipeline() );
 
-    VkCommandBuffer VulkanRendererAPI::GetCurrentCmdBuffer() const
-    {
-        return m_CurrentCommandBuffer;
-    }
-
-    void VulkanRendererAPI::ClearAttachments( const std::vector<VkClearValue>&    clearValues,
-                                              const std::shared_ptr<Framebuffer>& framebuffer )
-    {
-        const uint32_t colorAttachmentCount = (uint32_t)framebuffer->GetColorAttachmentCount();
-        const uint32_t totalAttachmentCount =
-             colorAttachmentCount + ( ( framebuffer->GetDepthAttachmentCount() != 0 ) ? 1 : 0 );
-        DESERT_VERIFY( clearValues.size() == totalAttachmentCount );
-
-        std::vector<VkClearAttachment> attachments( totalAttachmentCount );
-        std::vector<VkClearRect>       clearRects( totalAttachmentCount );
-        for ( uint32_t i = 0; i < colorAttachmentCount; i++ )
+        // Bind Descriptor Sets
+        if ( materialExecutor )
         {
-            attachments[i].aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
-            attachments[i].colorAttachment = i;
-            attachments[i].clearValue      = clearValues[i];
-
-            clearRects[i].rect.offset    = { (int32_t)0, (int32_t)0 };
-            clearRects[i].rect.extent    = { framebuffer->GetFramebufferWidth(),
-                                             framebuffer->GetFramebufferHeight() };
-            clearRects[i].baseArrayLayer = 0;
-            clearRects[i].layerCount     = 1;
+            auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
+            uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+            vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(), VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
         }
 
-        if ( framebuffer->GetDepthAttachmentCount() != 0 )
+        const auto& pcBuffer = materialExecutor->GetPushConstantBuffer();
+        VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
+        if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
         {
-            attachments[colorAttachmentCount].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-            attachments[colorAttachmentCount].clearValue = clearValues[colorAttachmentCount];
-            clearRects[colorAttachmentCount].rect.offset = { (int32_t)0, (int32_t)0 };
-            clearRects[colorAttachmentCount].rect.extent = { framebuffer->GetFramebufferWidth(),
-                                                             framebuffer->GetFramebufferHeight() };
-            clearRects[colorAttachmentCount].baseArrayLayer = 0;
-            clearRects[colorAttachmentCount].layerCount     = 1;
+            auto pcInfo = vulkanShader->GetShaderPushConstant().value();
+            vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(), (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size, pcBuffer.Data );
         }
 
-        vkCmdClearAttachments( m_CurrentCommandBuffer, totalAttachmentCount, attachments.data(),
-                               totalAttachmentCount, clearRects.data() );
+        vkCmdDraw( m_CurrentCommandBuffer, 6, 1, 0, 0 );
+    }
+
+    void VulkanRendererAPI::DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ, const MaterialExecutor* materialExecutor )
+    {
+        if ( !m_CurrentCommandBuffer ) return;
+        const auto vulkanPipeline = static_cast<const VulkanPipelineCompute*>( pipeline );
+        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkanPipeline->GetVkPipeline() );
+
+        // Bind Descriptor Sets
+        if ( materialExecutor )
+        {
+            auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
+            uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+            vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(), VK_PIPELINE_BIND_POINT_COMPUTE, frameIndex );
+        }
+
+        vkCmdDispatch( m_CurrentCommandBuffer, groupCountX, groupCountY, groupCountZ );
+    }
+
+    void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height ) {}
+    std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const { return m_CompositeFramebuffer.lock(); }
+    VkCommandBuffer VulkanRendererAPI::GetCurrentCmdBuffer() const { return m_CurrentCommandBuffer; }
+
+    void VulkanRendererAPI::SetViewportAndScissor( const uint32_t width, const uint32_t height )
+    {
+        if ( !m_CurrentCommandBuffer ) return;
+        if ( width == 0 || height == 0 ) return;
+        
+        // Modern Vulkan: use negative height to flip Y coordinate system to match OpenGL (Y-up)
+        VkViewport viewport = { 
+            .x = 0.0f, 
+            .y = (float)height, 
+            .width = (float)width, 
+            .height = -(float)height, 
+            .minDepth = 0.0f, 
+            .maxDepth = 1.0f 
+        };
+        vkCmdSetViewport( m_CurrentCommandBuffer, 0, 1, &viewport );
+        
+        VkRect2D scissor = { .offset = { 0, 0 }, .extent = { width, height } };
+        vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
+    }
+
+    void VulkanRendererAPI::ClearAttachments( const std::vector<VkClearValue>& clearValues, const std::shared_ptr<Framebuffer>& framebuffer )
+    {
+        if ( !m_CurrentCommandBuffer ) return;
+        uint32_t attachmentCount = (uint32_t)clearValues.size();
+        std::vector<VkClearAttachment> attachments( attachmentCount );
+        std::vector<VkClearRect> clearRects( attachmentCount );
+        for ( uint32_t i = 0; i < attachmentCount; i++ )
+        {
+            attachments[i] = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = i, .clearValue = clearValues[i] };
+            if ( Graphic::Utils::IsDepthFormat( framebuffer->GetSpecification().Attachments.Attachments[i] ) )
+                attachments[i].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            clearRects[i] = { .rect = { .offset = { 0, 0 }, .extent = { framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() } }, .baseArrayLayer = 0, .layerCount = 1 };
+        }
+        vkCmdClearAttachments( m_CurrentCommandBuffer, attachmentCount, attachments.data(), attachmentCount, clearRects.data() );
     }
 
 } // namespace Desert::Graphic::API::Vulkan

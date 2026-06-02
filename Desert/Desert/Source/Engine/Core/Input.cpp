@@ -7,19 +7,18 @@ namespace Desert::Input
 {
     bool Keyboard::IsKeyPressed( Common::KeyCode key )
     {
-        auto state = glfwGetKey( (GLFWwindow*)EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw(),
-                                 static_cast<int32_t>( key ) );
-
+        auto state = glfwGetKey( static_cast<GLFWwindow*>( EngineContext::GetInstance().GetNativeWindowHandle() ),
+                                 static_cast<int>( key ) );
         return state == GLFW_PRESS || state == GLFW_REPEAT;
     }
 
-    Mouse::Mouse() : m_Window( EngineContext::GetInstance().GetCurrentPointerToGLFWwinodw() )
+    Mouse::Mouse() : m_Window( EngineContext::GetInstance().GetNativeWindowHandle() )
     {
     }
 
     bool Mouse::IsMouseButtonPressed( Common::MouseButton button )
     {
-        auto state = glfwGetMouseButton( (GLFWwindow*)m_Window, static_cast<int32_t>( button ) );
+        auto state = glfwGetMouseButton( static_cast<GLFWwindow*>( const_cast<void*>( m_Window ) ), static_cast<int32_t>( button ) );
 
         return state == GLFW_PRESS;
     }
@@ -39,7 +38,7 @@ namespace Desert::Input
     std::pair<float, float> Mouse::GetMousePosition()
     {
         double x, y;
-        glfwGetCursorPos( (GLFWwindow*)m_Window, &x, &y );
+        glfwGetCursorPos( static_cast<GLFWwindow*>( const_cast<void*>( m_Window ) ), &x, &y );
         return { (float)x, (float)y };
     }
 
@@ -53,7 +52,7 @@ namespace Desert::Input
     {
         m_MouseMode = mode;
 
-        glfwSetInputMode( (GLFWwindow*)( m_Window ), GLFW_CURSOR, GLFW_CURSOR_NORMAL + (int)mode );
+        glfwSetInputMode( static_cast<GLFWwindow*>( const_cast<void*>( m_Window ) ), GLFW_CURSOR, GLFW_CURSOR_NORMAL + (int)mode );
     }
 
 } // namespace Desert::Input

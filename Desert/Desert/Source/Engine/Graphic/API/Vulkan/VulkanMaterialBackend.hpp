@@ -22,9 +22,11 @@ namespace Desert::Graphic::API::Vulkan
 
         virtual void FlushUpdates() override;
 
-        virtual void ApplyPushConstants( MaterialExecutor* material, Pipeline* pipeline ) override;
+        virtual void ApplyPushConstants( MaterialExecutor* material, GraphicsPipeline* pipeline ) override;
 
         VkDescriptorSet GetDescriptorSet( uint32_t frameIndex, uint32_t setIndex = 0 ) const;
+
+        void UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes );
 
         void BindDescriptorSets( VkCommandBuffer cmdBuffer, VkPipelineLayout layout, VkPipelineBindPoint bindPoint,
                                  uint32_t frameIndex );
@@ -41,6 +43,5 @@ namespace Desert::Graphic::API::Vulkan
 
         // [frame][set]
         std::vector<std::vector<VkDescriptorSet>> m_DescriptorSets;
-        std::vector<VkWriteDescriptorSet>         m_PendingDescriptorWrites;
     };
 } // namespace Desert::Graphic::API::Vulkan

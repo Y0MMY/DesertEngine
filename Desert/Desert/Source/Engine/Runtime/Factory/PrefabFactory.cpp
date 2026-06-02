@@ -1,39 +1,40 @@
 #include "PrefabFactory.hpp"
+#include <Engine/ECS/Components.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Core/Serialize/EntitySerializer.hpp>
 
 namespace Desert::Runtime::Factory
 {
-    void CopyComponents( const Assets::EntityData& data, ECS::Entity entity )
-    {
-        if ( data.Tag )
-        {
-            entity.AddComponent<ECS::TagComponent>().Tag = data.Tag.value();
-        }
-
-       /* if ( data.Transform )
-            entity.GetComponent<TransformComponent>() = *data.Transform;*/
-    }
-
     ECS::Entity PrefabFactory::Instantiate( const Assets::PrefabAsset& prefab, Core::Scene& scene,
                                             const Assets::AssetManager&       assetManager,
                                             std::unordered_set<Common::UUID>& stack )
     {
-        std::unordered_map<Common::UUID, ECS::Entity> entityMap;
+        if ( prefab.GetEntities().empty() )
+            return {};
 
-     /*   const auto& prefabID = prefab.GetMetadata().Handle;
+        const auto& prefabID = prefab.GetMetadata().Handle;
 
         if ( stack.contains( prefabID ) )
         {
-            throw std::runtime_error( "Prefab cyclic dependency detected" );
+            LOG_ERROR( "Prefab cyclic dependency detected for asset: {0}", prefab.GetMetadata().Filepath.string() );
+            return {};
         }
 
         stack.insert( prefabID );
 
+        std::unordered_map<Common::UUID, ECS::Entity> entityMap;
+        ECS::Entity rootEntity = {};
+
+        // 1. Create all entities first
         for ( const auto& data : prefab.GetEntities() )
         {
-            ECS::Entity e      = scene.CreateNewEntity( "PrefabEntity" );
+            ECS::Entity e = scene.CreateNewEntity( data.Tag.value_or( "PrefabEntity" ) );
             entityMap[data.id] = e;
+            
+            if ( !rootEntity ) rootEntity = e;
         }
 
+        // 2. Apply components and setup hierarchy
         for ( const auto& data : prefab.GetEntities() )
         {
             ECS::Entity e = entityMap[data.id];
@@ -41,27 +42,26 @@ namespace Desert::Runtime::Factory
             if ( data.PrefabRef.has_value() )
             {
                 auto nested = assetManager.FindByHandle<Assets::PrefabAsset>( *data.PrefabRef );
-
-                ECS::Entity childRoot = Instantiate( *nested, scene, assetManager, stack );
-
-                scene.Attach( e, childRoot );
-                continue;
+                if ( nested )
+                {
+                    ECS::Entity nestedRoot = Instantiate( *nested, scene, assetManager, stack );
+                    scene.Attach( e, nestedRoot );
+                }
             }
 
-            CopyComponents( data, e );
-        }
+            Core::Serialize::EntitySerializer::DeserializeEntity( data, e, assetManager );
 
-        for ( const auto& data : prefab.GetEntities() )
-        {
             if ( data.parent != Common::UUID{} )
             {
-                scene.Attach( entityMap[data.parent], entityMap[data.id] );
+                if ( entityMap.contains( data.parent ) )
+                {
+                    scene.Attach( entityMap[data.parent], e );
+                }
             }
         }
 
-        stack.erase( prefabID );*/
-
-        return entityMap.at( prefab.GetEntities().front().id );
+        stack.erase( prefabID );
+        return rootEntity;
     }
 
 } // namespace Desert::Runtime::Factory

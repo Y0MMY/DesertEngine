@@ -30,7 +30,7 @@ namespace Desert::Graphic
     }
 
     void RenderGraphBuilder::AddPass( const std::string& name, RenderPhase phase,
-                                      std::function<void()> executeFunc, const PipelineSpecification& pipelineSpec,
+                                      std::function<void()> executeFunc, const GraphicsPipelineSpecification& pipelineSpec,
                                       std::shared_ptr<Framebuffer>             targetFramebuffer,
                                       const std::vector<RenderPassDependency>& dependencies )
     {

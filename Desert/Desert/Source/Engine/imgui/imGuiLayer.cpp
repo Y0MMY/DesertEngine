@@ -13,7 +13,7 @@ namespace Desert::ImGui
             case Graphic::RendererAPIType::None:
                 return nullptr;
             case Graphic::RendererAPIType::Vulkan:
-                return std::make_shared<Graphic::API::Vulkan::ImGui::VulkanImGui>();
+                return std::make_shared<Graphic::API::Vulkan::VulkanImGui>();
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;

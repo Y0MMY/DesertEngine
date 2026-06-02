@@ -28,10 +28,17 @@ namespace Desert::ShaderResources::API::Vulkan
     {
         m_Image2D = image2D;
 
-        const auto& vulkanImageInfo  = ( (Graphic::API::Vulkan::VulkanImage2D*)image2D )->GetVulkanImageInfo();
-        m_DescriptorInfo.imageView   = vulkanImageInfo.ImageInfo.imageView;
-        m_DescriptorInfo.sampler     = vulkanImageInfo.ImageInfo.sampler;
-        m_DescriptorInfo.imageLayout = vulkanImageInfo.ImageInfo.imageLayout;
+        if ( image2D )
+        {
+            const auto& res              = ( (Graphic::API::Vulkan::VulkanImage2D*)image2D )->GetResource();
+            m_DescriptorInfo.imageView   = res.ImageView;
+            m_DescriptorInfo.sampler     = res.Sampler;
+            m_DescriptorInfo.imageLayout = res.Layout;
+        }
+        else
+        {
+            m_DescriptorInfo = {};
+        }
     }
 
 } // namespace Desert::ShaderResources::API::Vulkan

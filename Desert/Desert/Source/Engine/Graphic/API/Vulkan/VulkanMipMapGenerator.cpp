@@ -4,7 +4,7 @@
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 
-#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan.h>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -12,15 +12,6 @@ namespace Desert::Graphic::API::Vulkan
                                    uint32_t width, uint32_t height, uint32_t mipLevels,
                                    uint32_t baseArrayLayer = 0, uint32_t layerCount = 1 )
     {
-        // Check if image format supports linear blitting
-        // VkFormatProperties formatProperties;
-        // vkGetPhysicalDeviceFormatProperties(VKDevice::Get().GetGPU(), imageFormat, &formatProperties);
-        // if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT))
-        // {
-        //     LERROR("Texture image format does not support linear blitting!");
-        //     return;
-        // }
-
         for ( uint32_t layer = baseArrayLayer; layer < baseArrayLayer + layerCount; layer++ )
         {
             for ( uint32_t i = 1; i < mipLevels; i++ )
@@ -52,17 +43,14 @@ namespace Desert::Graphic::API::Vulkan
                 mipSubRange.baseMipLevel            = i;
                 mipSubRange.levelCount              = 1;
 
-                // Prepare current mip level as image blit destination
                 Utils::InsertImageMemoryBarrier( commandBuffer, image, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
                                                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                                                  mipSubRange );
 
-                // Blit from previous level
                 vkCmdBlitImage( commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageBlit, VK_FILTER_LINEAR );
 
-                // Prepare current mip level as image blit source for next level
                 Utils::InsertImageMemoryBarrier(
                      commandBuffer, image, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -70,7 +58,6 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
-        // Transition all mip levels to SHADER_READ layout
         VkImageSubresourceRange finalRange = {};
         finalRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
         finalRange.baseArrayLayer          = baseArrayLayer;
@@ -95,34 +82,23 @@ namespace Desert::Graphic::API::Vulkan
         return Common::MakeError( "Not impl" );
     }
 
-    // Transfer ops
-
     Common::BoolResultStr VulkanMipMap2DGeneratorTO::GenerateMips( const std::shared_ptr<Image2D>& image ) const
     {
         const auto& vulkanImage    = SP_CAST( VulkanImage2D, image );
-        const auto  originalLayout = vulkanImage->GetVulkanImageInfo().ImageInfo.imageLayout;
-        const auto& spec           = vulkanImage->GetVulkanImageInfo();
+        const auto& res            = vulkanImage->GetResource();
 
         const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
-        if ( !cmdAlloc )
-        {
-            return Common::MakeError( cmdAlloc.GetError() );
-        }
+        if ( !cmdAlloc ) return Common::MakeError( cmdAlloc.GetError() );
 
         VkCommandBuffer commandBuffer = cmdAlloc.GetValue();
 
-        VkImageSubresourceRange baseMipRange = {};
-        baseMipRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
-        baseMipRange.baseMipLevel            = 0;
-        baseMipRange.levelCount              = 1;
-        baseMipRange.baseArrayLayer          = 0;
-        baseMipRange.layerCount              = 1;
+        VkImageSubresourceRange baseMipRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 };
 
-        Utils::InsertImageMemoryBarrier( commandBuffer, spec.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, originalLayout,
+        Utils::InsertImageMemoryBarrier( commandBuffer, res.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, res.Layout,
                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                          VK_PIPELINE_STAGE_TRANSFER_BIT, baseMipRange );
 
-        GenerateMipmapsTO( commandBuffer, spec.Image, spec.Format, image->GetWidth(), image->GetHeight(),
+        GenerateMipmapsTO( commandBuffer, res.Image, res.Format, image->GetWidth(), image->GetHeight(),
                            image->GetMipmapLevels() );
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
@@ -134,30 +110,21 @@ namespace Desert::Graphic::API::Vulkan
     VulkanMipMapCubeGeneratorTO::GenerateMips( const std::shared_ptr<ImageCube>& imageCube ) const
     {
         const auto& vulkanImage    = SP_CAST( VulkanImageCube, imageCube );
-        const auto  originalLayout = vulkanImage->GetVulkanImageInfo().ImageInfo.imageLayout;
-        const auto& spec           = vulkanImage->GetVulkanImageInfo();
+        const auto& res            = vulkanImage->GetResource();
 
         const auto cmdAlloc = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true );
-        if ( !cmdAlloc )
-        {
-            return Common::MakeError( cmdAlloc.GetError() );
-        }
+        if ( !cmdAlloc ) return Common::MakeError( cmdAlloc.GetError() );
 
         VkCommandBuffer commandBuffer = cmdAlloc.GetValue();
 
-        VkImageSubresourceRange baseMipRange = {};
-        baseMipRange.aspectMask              = VK_IMAGE_ASPECT_COLOR_BIT;
-        baseMipRange.baseMipLevel            = 0;
-        baseMipRange.levelCount              = 1;
-        baseMipRange.baseArrayLayer          = 0;
-        baseMipRange.layerCount              = 6; 
+        VkImageSubresourceRange baseMipRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 6 }; 
 
-        Utils::InsertImageMemoryBarrier( commandBuffer, spec.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, originalLayout,
+        Utils::InsertImageMemoryBarrier( commandBuffer, res.Image, 0, VK_ACCESS_TRANSFER_READ_BIT, res.Layout,
                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
                                          VK_PIPELINE_STAGE_TRANSFER_BIT, baseMipRange );
 
-        GenerateMipmapsTO( commandBuffer, spec.Image, spec.Format, imageCube->GetWidth(), imageCube->GetHeight(),
-                           imageCube->GetMipmapLevels(), 0, 6 ); // 6 faces for cubemap
+        GenerateMipmapsTO( commandBuffer, res.Image, res.Format, imageCube->GetWidth(), imageCube->GetHeight(),
+                           imageCube->GetMipmapLevels(), 0, 6 );
 
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( commandBuffer );
 

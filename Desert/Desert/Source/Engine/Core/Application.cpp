@@ -10,54 +10,52 @@ namespace Desert::Engine
 {
     Application::Application( const ApplicationInfo& appInfo ) : m_ApplicationInfo( appInfo )
     {
-        EngineContext::CreateInstance();
-
-        WindowSpecification specWindow;
-        specWindow.Title      = appInfo.Title;
-        specWindow.Width      = appInfo.Width;
-        specWindow.Height     = appInfo.Height;
-        specWindow.Fullscreen = appInfo.Fullscreen;
-
-        m_Window = Window::Create( specWindow );
+        m_Window = Window::Create( WindowSpecification( appInfo.Title, appInfo.Width, appInfo.Height ) );
         m_Window->Init();
-        m_RendererContext = Graphic::RendererContext::Create( m_Window );
-        m_Device          = Device::Create();
-        EngineContext::GetInstance().Initialize( m_Window, m_Device, m_RendererContext );
-        m_RendererContext->Init();
-        m_Window->SetupSwapChain();
 
-        m_Window->SetEventCallback( [this]( Common::Event& e ) { this->ProcessEvents( e ); } );
+        // 1. Create RendererContext (Vulkan Instance)
+        m_RendererContext = Graphic::RendererContext::Create( m_Window );
+        
+        // 2. Partially initialize EngineContext
+        EngineContext::CreateInstance().Initialize( m_Window, nullptr, m_RendererContext );
+
+        // 3. Create Device
+        m_Device = Device::Create();
+        
+        // 4. Register Device
+        EngineContext::GetInstance().SetDevice( m_Device );
+
+        // 5. Init Context (Allocators)
+        m_RendererContext->Init();
+
+        // 6. Setup SwapChain
+        auto swapChainResult = m_Window->SetupSwapChain();
+        DESERT_VERIFY( swapChainResult.IsSuccess(), "Failed to setup SwapChain" );
+
+        // 7. Initialize Global Renderer
         Graphic::Renderer::CreateInstance().Init();
+
+        m_Window->SetEventCallback( [this]( Common::Event& e ) { ProcessEvents( e ); } );
     }
 
-    void Application::Run()
+    void Application::ProcessEvents( Common::Event& e )
     {
-        OnCreate();
-        Init();
+        Common::EventManager eventManager( e );
+        eventManager.Notify<Common::EventWindowClose>( [this]( Common::EventWindowClose& e )
+                                                       { return this->OnClose( e ); } );
 
-        while ( m_IsRunningApplication )
+        for ( auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )
         {
-            m_Window->ProcessEvents();
-            if ( !m_Minimized )
-            {
-                for ( const auto& layer : m_LayerStack )
-                {
-                    const auto& result = layer->OnUpdate( m_EngineStats.GetDeltaTime() );
-                    if ( !result )
-                    {
-                        throw std::logic_error( result.GetError() );
-                    }
-                }
-            }
-
-            m_EngineStats.Update();
+            ( *--it )->OnEvent( e );
+            if ( e.m_Handled )
+                break;
         }
-        Destroy();
     }
 
     void Application::PushLayer( Common::Layer* layer )
     {
         m_LayerStack.PushLayer( layer );
+        layer->OnAttach();
     }
 
     void Application::PopLayer( Common::Layer* layer )
@@ -66,52 +64,46 @@ namespace Desert::Engine
         layer->OnDetach();
     }
 
-    void Application::ProcessEvents( Common::Event& e )
+    void Application::Run()
     {
-        Common::EventManager eventManager( e );
-        eventManager.Notify<Common::EventWindowClose>(
-             [this]( const Common::EventWindowClose& e ) -> bool
-             {
-                 m_IsRunningApplication = false;
-                 return true;
-             } );
+        float m_LastFrameTime = 0.0f;
+        while ( m_IsRunningApplication )
+        {
+            float    time     = (float)glfwGetTime();
+            float    timestep = time - m_LastFrameTime;
+            m_LastFrameTime   = time;
 
-        eventManager.Notify<Common::EventWindowResize>(
-             [this]( const Common::EventWindowResize& e ) -> bool
-             {
-                 int width = e.width, height = e.height;
-                 if ( width == 0 || height == 0 )
-                 {
-                     m_Minimized = true;
-                     return false;
-                 }
-                 m_Minimized = false;
+            // 1. Prepare Frame (Acquire next image)
+            // This MUST be first because subsequent rendering might depend on the acquired image index
+            m_Window->PrepareNextFrame();
 
-                 return true;
-             } );
+            // 2. Start recording commands for this frame
+            Graphic::Renderer::GetInstance().BeginFrame();
 
-        Common::EventHandler::ForEach( [&]( Common::EventHandler& handler ) { handler.OnEvent( e ); } );
+            // 3. Update layers (Scene rendering to offscreen buffers)
+            for ( Common::Layer* layer : m_LayerStack )
+                layer->OnUpdate( Common::Timestep( timestep ) );
+
+            // 4. UI Rendering
+            // The ImGui Layer implementation itself should handle Begin() and End() 
+            // inside its OnImGuiRender if it's the one managing the ImGui context.
+            // Or we call it explicitly here if we have a handle to it.
+            for ( Common::Layer* layer : m_LayerStack )
+                layer->OnImGuiRender();
+
+            m_Window->ProcessEvents();
+            
+            // 5. Submit all recorded commands and Present
+            m_Window->PresentFinalImage();
+        }
     }
 
     void Application::Init()
     {
-        for ( const auto& layer : m_LayerStack )
-        {
-            layer->OnAttach();
-        }
     }
 
     void Application::Destroy()
     {
-        for ( const auto& layer : m_LayerStack )
-        {
-            layer->OnDetach();
-            delete layer;
-        }
-
-        m_Window.reset();
-        Graphic::Renderer::GetInstance().Shutdown();
-    //    m_RendererContext->Shutdown();
     }
 
     void Application::ProcessImGui()
