@@ -13,14 +13,14 @@ namespace Desert::Graphic
 
         bool IsDirty() const
         {
-            return m_Dirty;
+            return m_DirtyCount > 0;
         }
         void MarkClean()
         {
-            m_Dirty = false;
+            if ( m_DirtyCount > 0 ) m_DirtyCount--;
         }
 
     protected:
-        bool m_Dirty = true;
+        uint32_t m_DirtyCount = 3;
     };
 } // namespace Desert::Graphic

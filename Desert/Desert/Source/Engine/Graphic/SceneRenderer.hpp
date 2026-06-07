@@ -37,6 +37,7 @@ namespace Desert::Graphic
         struct RenderSubmissionExtra
         {
             std::vector<glm::mat4> BoneMatrices; // optional
+            bool                   Outlined = false;
         };
 
         ~SceneRenderer() = default;

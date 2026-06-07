@@ -11,7 +11,7 @@ namespace Desert::Editor
     {
     }
 
-    void TransformComponentWidget::Render( ECS::Entity& entity )
+    void TransformComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         if ( !entity.HasComponent<ECS::DirectionLightComponent>() )
         {

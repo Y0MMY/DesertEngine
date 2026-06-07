@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 
+#include <limits>
 #include <Engine/ShaderResources/API/Vulkan/VulkanUniformBuffer.hpp>
 #include <Engine/ShaderResources/API/Vulkan/VulkanUniformImage2D.hpp>
 #include <Engine/ShaderResources/API/Vulkan/VulkanUniformImageCube.hpp>
@@ -10,6 +11,7 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Core/EngineContext.hpp>
+#include <Engine/Core/FrameManager.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
 
 namespace Desert::Graphic::API::Vulkan
@@ -19,15 +21,36 @@ namespace Desert::Graphic::API::Vulkan
     {
         CreateDescriptorPool();
         AllocateDescriptorSets();
+
+        // Create a dummy buffer to initialize unused bindings
+        VmaAllocator allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                                      ->GetVulkanAllocator()
+                                      ->GetVMAAllocator();
+
+        VkBufferCreateInfo      bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                               .size  = 65536,
+                                               .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT };
+        VmaAllocationCreateInfo allocInfo  = { .usage = VMA_MEMORY_USAGE_GPU_ONLY };
+
+        VK_CHECK_RESULT( vmaCreateBuffer( allocator, &bufferInfo, &allocInfo, &m_DummyBuffer, &m_DummyAllocation, nullptr ) );
     }
 
     VulkanMaterialBackend::~VulkanMaterialBackend()
     {
+        VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                               ->GetVulkanLogicalDevice();
+
         if ( m_DescriptorPool != VK_NULL_HANDLE )
         {
-            vkDestroyDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
-                                          ->GetVulkanLogicalDevice(),
-                                     m_DescriptorPool, nullptr );
+            vkDestroyDescriptorPool( device, m_DescriptorPool, nullptr );
+        }
+
+        if ( m_DummyBuffer != VK_NULL_HANDLE )
+        {
+            VmaAllocator allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                                          ->GetVulkanAllocator()
+                                          ->GetVMAAllocator();
+            vmaDestroyBuffer( allocator, m_DummyBuffer, m_DummyAllocation );
         }
     }
 
@@ -82,6 +105,7 @@ namespace Desert::Graphic::API::Vulkan
         const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
 
         m_DescriptorSets.resize( framesInFlight );
+        m_DescriptorSetsUpdateFrame.resize( framesInFlight, std::vector<uint64_t>( setCount, std::numeric_limits<uint64_t>::max() ) );
 
         for ( uint32_t frame = 0; frame < framesInFlight; ++frame )
         {
@@ -119,10 +143,10 @@ namespace Desert::Graphic::API::Vulkan
     {
     }
 
-    void VulkanMaterialBackend::UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes )
+    void VulkanMaterialBackend::UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes, bool force )
     {
         if ( writes.empty() ) return;
-
+        
         vkUpdateDescriptorSets( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                                      ->GetVulkanLogicalDevice(),
                                 static_cast<uint32_t>( writes.size() ),
@@ -135,7 +159,13 @@ namespace Desert::Graphic::API::Vulkan
         if ( !uniformProp || !uniformProp->IsDirty() )
             return;
 
-        const auto& frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+        const uint32_t setIndex = 0; // Simplified
+
+        // Only update if not already updated this absolute frame
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+            return;
 
         if ( auto bufferInfo = uniformProp->GetUniform() )
         {
@@ -157,7 +187,12 @@ namespace Desert::Graphic::API::Vulkan
         if ( !storageProp || !storageProp->IsDirty() )
             return;
 
-        const auto& frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+        const uint32_t setIndex = 0; // Simplified
+
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+            return;
 
         if ( auto bufferInfo = storageProp->GetStorageBuffer() )
         {
@@ -179,7 +214,12 @@ namespace Desert::Graphic::API::Vulkan
         if ( !textureProp || !textureProp->IsDirty() )
             return;
 
-        const auto& frameIndex   = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint32_t frameIndex   = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+        const uint32_t setIndex = 0; // Simplified
+
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+            return;
 
         if ( auto imageUniform = textureProp->GetUniform() )
         {
@@ -201,7 +241,12 @@ namespace Desert::Graphic::API::Vulkan
         if ( !textureProp || !textureProp->IsDirty() )
             return;
 
-        const auto& frameIndex   = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint32_t frameIndex   = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+        const uint32_t setIndex = 0; // Simplified
+
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+            return;
 
         if ( auto imageUniform = textureProp->GetUniform() )
         {
@@ -229,14 +274,24 @@ namespace Desert::Graphic::API::Vulkan
         for ( VkDescriptorSet descriptorSet : m_DescriptorSets[frameIndex] )
         {
             if ( descriptorSet != VK_NULL_HANDLE )
+            {
                 setsToBind.push_back( descriptorSet );
+            }
+            else
+            {
+                // Instead of falling back or just warning, we log a critical error and skip
+                // binding this entire set to prevent vkCmdBindDescriptorSets from crashing.
+                LOG_ERROR( "VulkanMaterialBackend: Attempting to bind NULL descriptor set! This indicates a failure in descriptor set initialization or asset loading." );
+                return;
+            }
         }
-
-        if ( setsToBind.empty() )
-            return;
 
         vkCmdBindDescriptorSets( cmdBuffer, bindPoint, layout, 0, static_cast<uint32_t>( setsToBind.size() ),
                                  setsToBind.data(), 0, nullptr );
+    }
+
+    void VulkanMaterialBackend::ResetFrameUpdateState( uint32_t frameIndex )
+    {
     }
 
     bool VulkanMaterialBackend::HasDescriptorSets() const
@@ -246,7 +301,12 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanMaterialBackend::FlushUpdates()
     {
-        // No longer using a queue to avoid dangling pointer issues
+        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
+        
+        // Mark all sets as updated for this absolute frame
+        for ( uint32_t i = 0; i < m_DescriptorSetsUpdateFrame[frameIndex].size(); ++i )
+            m_DescriptorSetsUpdateFrame[frameIndex][i] = absoluteFrame;
     }
 
     void VulkanMaterialBackend::InitializeWithFallbacks()
@@ -258,6 +318,33 @@ namespace Desert::Graphic::API::Vulkan
         {
             for ( const auto& [setIndex, descriptorSet] : descriptorSets )
             {
+                std::vector<VkWriteDescriptorSet> writes;
+                
+                // Track infos to keep them alive until vkUpdateDescriptorSets
+                std::vector<VkDescriptorImageInfo> imageInfos;
+                imageInfos.reserve(descriptorSet.Image2DSamplers.size() + descriptorSet.ImageCubeSamplers.size());
+
+                std::vector<VkDescriptorBufferInfo> bufferInfos;
+                bufferInfos.reserve(descriptorSet.UniformBuffers.size() + descriptorSet.StorageBuffers.size());
+
+                // UNIFORM BUFFERS
+                for ( const auto& [binding, size] : descriptorSet.UniformBuffers )
+                {
+                    VkDescriptorBufferInfo info = { .buffer = m_DummyBuffer, .offset = 0, .range = VK_WHOLE_SIZE };
+                    bufferInfos.push_back( info );
+                    writes.push_back( DescriptorSetBuilder::GetUniformWDS( this, frame, setIndex, binding, 1,
+                                                                           &bufferInfos.back() ) );
+                }
+
+                // STORAGE BUFFERS
+                for ( const auto& [binding, size] : descriptorSet.StorageBuffers )
+                {
+                    VkDescriptorBufferInfo info = { .buffer = m_DummyBuffer, .offset = 0, .range = VK_WHOLE_SIZE };
+                    bufferInfos.push_back( info );
+                    writes.push_back( DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding, 1,
+                                                                           &bufferInfos.back() ) );
+                }
+
                 // IMAGE 2D SAMPLERS
                 for ( const auto& [binding, imageLayout] : descriptorSet.Image2DSamplers )
                 {
@@ -266,10 +353,9 @@ namespace Desert::Graphic::API::Vulkan
 
                     if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
                     {
-                        auto descriptorImageInfo = vulkanImage->GetResource().GetDescriptorInfo();
-                        auto wds = DescriptorSetBuilder::GetSampler2DWDS( this, frame, setIndex, binding, 1,
-                                                                          &descriptorImageInfo );
-                        UpdateDescriptorSets( { wds } );
+                        imageInfos.push_back(vulkanImage->GetResource().GetDescriptorInfo());
+                        writes.push_back(DescriptorSetBuilder::GetSampler2DWDS( this, frame, setIndex, binding, 1,
+                                                                          &imageInfos.back() ));
                     }
                 }
 
@@ -281,12 +367,13 @@ namespace Desert::Graphic::API::Vulkan
 
                     if ( auto vulkanImage = sp_cast<VulkanImageCube>( fallbackCube ) )
                     {
-                        auto descriptorImageInfo = vulkanImage->GetResource().GetDescriptorInfo();
-                        auto wds = DescriptorSetBuilder::GetSamplerCubeWDS( this, frame, setIndex, binding, 1,
-                                                                            &descriptorImageInfo );
-                        UpdateDescriptorSets( { wds } );
+                        imageInfos.push_back(vulkanImage->GetResource().GetDescriptorInfo());
+                        writes.push_back(DescriptorSetBuilder::GetSamplerCubeWDS( this, frame, setIndex, binding, 1,
+                                                                            &imageInfos.back() ));
                     }
                 }
+                
+                UpdateDescriptorSets( writes, true );
             }
         }
     }

@@ -15,10 +15,10 @@ namespace Desert::Graphic
 
         void Apply( MaterialBackend* backend ) override
         {
-            if ( m_Dirty )
+            if ( IsDirty() )
             {
                 backend->ApplyStorageBuffer( this );
-                m_Dirty = false;
+                MarkClean();
             }
         }
 
@@ -30,7 +30,7 @@ namespace Desert::Graphic
         void SetRawData( const void* data, uint32_t size )
         {
             m_Buffer->SetData( data, size );
-            m_Dirty = true;
+            m_DirtyCount = 3;
         }
 
         const auto& GetStorageBuffer() const

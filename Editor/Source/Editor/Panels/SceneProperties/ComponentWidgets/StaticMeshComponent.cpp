@@ -20,7 +20,7 @@ namespace Desert::Editor
     {
     }
 
-    void StaticMeshComponentWidget::Render( ECS::Entity& entity )
+    void StaticMeshComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         auto& staticMesh = entity.GetComponent<ECS::StaticMeshComponent>();
 

@@ -12,7 +12,7 @@ namespace Desert::Editor
     {
     }
 
-    void PointLightComponentWidget::Render( ECS::Entity& entity )
+    void PointLightComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
         ImGui::Columns( 2 );

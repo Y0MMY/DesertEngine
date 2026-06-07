@@ -42,7 +42,7 @@ namespace Desert::Editor
         RegisterComponent( [this]() { return std::make_unique<PointLightComponentWidget>(); } );
     }
 
-    void ComponentEditor::Render( ECS::Entity& entity )
+    void ComponentEditor::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         std::vector<std::unique_ptr<IComponentWidget>> activeWidgets;
 
@@ -57,7 +57,7 @@ namespace Desert::Editor
 
         for ( auto& widget : activeWidgets )
         {
-            RenderComponentHeader( *widget, entity );
+            RenderComponentHeader( *widget, entity, scene );
         }
 
         if ( ImGui::Button( ICON_MDI_PLUS_BOX_OUTLINE " Add Component",
@@ -102,7 +102,7 @@ namespace Desert::Editor
         }
     }
 
-    void ComponentEditor::RenderComponentHeader( IComponentWidget& widget, ECS::Entity& entity )
+    void ComponentEditor::RenderComponentHeader( IComponentWidget& widget, ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         bool removed = false;
 
@@ -138,7 +138,7 @@ namespace Desert::Editor
         else if ( open )
         {
             ImGui::PushID( widget.GetName().c_str() );
-            widget.Render( entity );
+            widget.Render( entity, scene );
             ImGui::PopID();
         }
     }

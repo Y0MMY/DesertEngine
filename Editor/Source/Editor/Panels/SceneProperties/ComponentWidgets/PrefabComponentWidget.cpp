@@ -14,7 +14,7 @@ namespace Desert::Editor
     {
     }
 
-    void PrefabComponentWidget::Render( ECS::Entity& entity )
+    void PrefabComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         auto& prefab = entity.GetComponent<ECS::PrefabComponent>();
 
@@ -80,18 +80,23 @@ namespace Desert::Editor
 
         if ( valid && ImGui::Button( "Reapply Prefab" ) )
         {
-            /* auto scene = entity.GetScene();
-
-             auto asset = assetManager->FindByHandle<Assets::PrefabAsset>( prefab.Prefab );
+             auto asset = m_AssetManager->FindByHandle<Assets::PrefabAsset>( prefab.Prefab );
 
              if ( scene && asset )
              {
-                 std::unordered_set<Common::UUID> stack;
+                 // Store position to re-apply
+                 std::optional<glm::vec3> position;
+                 if ( entity.HasComponent<ECS::TransformComponent>() )
+                     position = entity.GetComponent<ECS::TransformComponent>().Translation;
 
+                 // We should destroy the current entity and instantiate the new one
                  scene->DestroyEntity( entity );
 
-                 Runtime::Factory::PrefabFactory::Instantiate( *asset, *scene, *assetManager, stack );
-             }*/
+                 if ( position )
+                     asset->Instantiate( scene, *m_AssetManager, &position.value() );
+                 else
+                     asset->Instantiate( scene, *m_AssetManager, nullptr );
+             }
         }
 
         // =========================

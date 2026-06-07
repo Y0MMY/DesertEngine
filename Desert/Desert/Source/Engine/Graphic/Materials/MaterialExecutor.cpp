@@ -6,7 +6,7 @@
 
 #include <Engine/ShaderResources/ShaderResourcesManager.hpp>
 
-static constexpr uint32_t kMaxPushConstantsSize = 64U;
+static constexpr uint32_t kMaxPushConstantsSize = 128U;
 
 namespace Desert::Graphic
 {
@@ -65,7 +65,12 @@ namespace Desert::Graphic
 
     void MaterialExecutor::Apply() const
     {
-        const auto& backend = m_MaterialBackend.get();
+        auto backend = m_MaterialBackend.get();
+        if ( !backend )
+        {
+            LOG_ERROR( "MaterialExecutor::Apply: MaterialBackend is null for: {}", m_DebugName );
+            return;
+        }
 
         for ( auto& prop : m_UniformBufferPropertiesStorage )
         {
@@ -88,11 +93,6 @@ namespace Desert::Graphic
         }
 
         backend->FlushUpdates();
-
-        if ( m_PushConstantBuffer.Size )
-        {
-            // m_MaterialBackend->ApplyPushConstants( this, m_Shader-> );
-        }
     }
 
     std::unique_ptr<MaterialExecutor> MaterialExecutor::Create( std::string&& debugName, std::string&& shaderName )

@@ -9,7 +9,7 @@ namespace Desert::Graphic
     {
     public:
         FieldProperty( const ShaderResources::ShaderLayout::ShaderFieldLayout& field )
-             : m_Field( field ), m_Dirty( false )
+             : m_Field( field ), m_DirtyCount( 3 )
         {
             m_LocalData.Allocate( field.Size );
         }
@@ -24,7 +24,7 @@ namespace Desert::Graphic
             }
 
             memcpy( m_LocalData.Data, &value, sizeof( T ) );
-            m_Dirty = true;
+            m_DirtyCount = 3;
             return true;
         }
 
@@ -39,7 +39,7 @@ namespace Desert::Graphic
             }
 
             memcpy( m_LocalData.Data, data, sizeof( T ) * count );
-            m_Dirty = true;
+            m_DirtyCount = 3;
             return true;
         }
 
@@ -73,11 +73,18 @@ namespace Desert::Graphic
 
         void MarkDirty()
         {
-            m_Dirty = true;
+            m_DirtyCount = 3;
+        }
+        void MarkClean()
+        {
+            if ( m_DirtyCount > 0 )
+            {
+                m_DirtyCount--;
+            }
         }
         bool IsDirty() const
         {
-            return m_Dirty;
+            return m_DirtyCount > 0;
         }
 
         const ShaderResources::ShaderLayout::ShaderFieldLayout& GetFieldInfo() const
@@ -93,6 +100,6 @@ namespace Desert::Graphic
     private:
         ShaderResources::ShaderLayout::ShaderFieldLayout m_Field;
         Common::Memory::Buffer                           m_LocalData;
-        bool                                             m_Dirty;
+        uint32_t                                         m_DirtyCount;
     };
 } // namespace Desert::Graphic

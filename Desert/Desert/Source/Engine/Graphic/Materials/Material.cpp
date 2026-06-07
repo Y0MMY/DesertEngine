@@ -122,9 +122,6 @@ namespace Desert::Graphic
             }
         }
 
-        // Apply all pending changes
-        m_MaterialExecutor->Apply();
-
         OnBind( const_cast<MaterialInstance*>( instance ) );
     }
 

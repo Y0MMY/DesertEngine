@@ -2,8 +2,12 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
+#include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Core::Serialize
 {
@@ -34,7 +38,17 @@ namespace Desert::Core::Serialize
             data.Tag = entity.GetComponent<ECS::TagComponent>().Tag;
 
         if ( entity.HasComponent<ECS::PrefabComponent>() )
-            data.PrefabRef = entity.GetComponent<ECS::PrefabComponent>().Prefab;
+        {
+            auto handle = entity.GetComponent<ECS::PrefabComponent>().Prefab;
+            if ( handle )
+            {
+                auto asset = assetManager.FindByHandle<Assets::PrefabAsset>( handle );
+                if ( asset )
+                {
+                    data.PrefabPath = asset->GetMetadata().Filepath.string();
+                }
+            }
+        }
 
         // Transform
         if ( entity.HasComponent<ECS::TransformComponent>() )
@@ -50,7 +64,16 @@ namespace Desert::Core::Serialize
         {
             const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
             Assets::StaticMeshComponentSer meshSer;
-            meshSer.MeshHandle = smc.MeshHandle;
+            
+            if ( smc.MeshHandle )
+            {
+                auto asset = assetManager.FindByHandle<Assets::MeshAsset>( smc.MeshHandle );
+                if ( asset )
+                {
+                    meshSer.MeshPath = asset->GetMetadata().Filepath.string();
+                }
+            }
+
             meshSer.MaterialSlots = smc.MaterialSlots;
             meshSer.Primitive = smc.Primitive;
             
@@ -86,7 +109,16 @@ namespace Desert::Core::Serialize
         {
             const auto& smc = entity.GetComponent<ECS::SkinnedMeshComponent>();
             Assets::SkinnedMeshComponentSer meshSer;
-            meshSer.MeshHandle = smc.MeshHandle;
+            
+            if ( smc.MeshHandle )
+            {
+                auto asset = assetManager.FindByHandle<Assets::MeshAsset>( smc.MeshHandle );
+                if ( asset )
+                {
+                    meshSer.MeshPath = asset->GetMetadata().Filepath.string();
+                }
+            }
+
             meshSer.MaterialSlots = smc.MaterialSlots;
             data.SkinnedMesh = meshSer;
         }
@@ -108,6 +140,27 @@ namespace Desert::Core::Serialize
         {
             const auto& light = entity.GetComponent<ECS::PointLightComponent>();
             data.PointLight = Assets::PointLightComponentSer{ .Color = light.Color, .Intensity = light.Intensity, .Radius = light.Radius };
+        }
+
+        // Skybox
+        if ( entity.HasComponent<ECS::SkyboxComponent>() )
+        {
+            const auto& skybox = entity.GetComponent<ECS::SkyboxComponent>();
+            Assets::SkyboxComponentSer skyboxSer;
+            skyboxSer.Intensity = skybox.Intensity;
+
+            if ( skybox.SkyboxHandle != 0 )
+            {
+                auto asset = assetManager.FindByHandle<Assets::MeshAsset>( skybox.SkyboxHandle ); // NOTE: Skybox is often handled as MeshAsset/Texture
+                if ( !asset )
+                {
+                     // Fallback check in other asset types if needed, but let's assume it's stored correctly
+                }
+
+                if ( asset )
+                    skyboxSer.SkyboxPath = asset->GetMetadata().Filepath.string();
+            }
+            data.Skybox = skyboxSer;
         }
 
         return data;
@@ -132,7 +185,27 @@ namespace Desert::Core::Serialize
         if ( data.StaticMesh )
         {
             auto& smc = entity.AddComponent<ECS::StaticMeshComponent>();
-            smc.MeshHandle = data.StaticMesh->MeshHandle;
+            
+            if ( data.StaticMesh->MeshPath )
+            {
+                auto asset = assetManager.FindByPath<Assets::MeshAsset>( *data.StaticMesh->MeshPath );
+                if ( !asset )
+                {
+                    auto newAsset = const_cast<Assets::AssetManager&>(assetManager).CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, *data.StaticMesh->MeshPath );
+                    if ( newAsset )
+                    {
+                        Runtime::ResourceRegistry::GetMeshService()->Register( newAsset );
+                        newAsset->Load();
+                        asset = newAsset;
+                    }
+                }
+
+                if ( asset )
+                {
+                    smc.MeshHandle = asset->GetMetadata().Handle;
+                }
+            }
+
             smc.MaterialSlots = data.StaticMesh->MaterialSlots;
             smc.Primitive = data.StaticMesh->Primitive;
 
@@ -164,7 +237,27 @@ namespace Desert::Core::Serialize
         if ( data.SkinnedMesh )
         {
             auto& smc = entity.AddComponent<ECS::SkinnedMeshComponent>();
-            smc.MeshHandle = data.SkinnedMesh->MeshHandle;
+            
+            if ( data.SkinnedMesh->MeshPath )
+            {
+                auto asset = assetManager.FindByPath<Assets::MeshAsset>( *data.SkinnedMesh->MeshPath );
+                if ( !asset )
+                {
+                    auto newAsset = const_cast<Assets::AssetManager&>(assetManager).CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, *data.SkinnedMesh->MeshPath );
+                    if ( newAsset )
+                    {
+                        Runtime::ResourceRegistry::GetMeshService()->Register( newAsset );
+                        newAsset->Load();
+                        asset = newAsset;
+                    }
+                }
+
+                if ( asset )
+                {
+                    smc.MeshHandle = asset->GetMetadata().Handle;
+                }
+            }
+
             smc.MaterialSlots = data.SkinnedMesh->MaterialSlots;
         }
 
@@ -190,9 +283,29 @@ namespace Desert::Core::Serialize
             light.Radius = data.PointLight->Radius;
         }
 
-        if ( data.PrefabRef )
+        // Skybox
+        if ( data.Skybox )
         {
-            entity.AddComponent<ECS::PrefabComponent>().Prefab = *data.PrefabRef;
+            auto& skybox = entity.AddComponent<ECS::SkyboxComponent>();
+            skybox.Intensity = data.Skybox->Intensity;
+            
+            if ( data.Skybox->SkyboxPath )
+            {
+                 // Assuming Skybox uses Environment asset or similar. 
+                 // For now just store the handle if we can find it
+                 auto asset = assetManager.FindByPath<Assets::MeshAsset>( *data.Skybox->SkyboxPath );
+                 if ( asset )
+                     skybox.SkyboxHandle = asset->GetMetadata().Handle;
+            }
+        }
+
+        if ( data.PrefabPath )
+        {
+            auto asset = assetManager.FindByPath<Assets::PrefabAsset>( *data.PrefabPath );
+            if ( asset )
+            {
+                entity.AddComponent<ECS::PrefabComponent>().Prefab = asset->GetMetadata().Handle;
+            }
         }
     }
 } // namespace Desert::Core::Serialize

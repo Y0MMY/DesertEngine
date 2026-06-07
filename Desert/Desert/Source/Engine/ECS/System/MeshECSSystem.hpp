@@ -10,6 +10,8 @@
 #include <Engine/Graphic/Render/Commands/DrawSkinnedMeshCommand.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
+#include <Editor/Core/Selection/SelectionManager.hpp>
+
 namespace Desert::ECS
 {
     class MeshECSSystem : public System
@@ -119,8 +121,34 @@ namespace Desert::ECS
                              materialSlots.push_back( inst.get() );
                          }
 
+                         glm::mat4 worldTransform = transform.GetTransform();
+
+                         entt::entity current = entity;
+                         while ( registry.has<RelationshipComponent>( current ) )
+                         {
+                             const auto& rel = registry.get<RelationshipComponent>( current );
+                             if ( rel.Parent == entt::null ) break;
+
+                             current = rel.Parent;
+                             if ( registry.has<TransformComponent>( current ) )
+                             {
+                                 const auto& parentTransform = registry.get<TransformComponent>( current );
+                                 worldTransform = parentTransform.GetTransform() * worldTransform;
+                             }
+                         }
+
+                         bool isSelected = false;
+                         if ( auto selected = Editor::Core::SelectionManager::GetSelected() )
+                         {
+                             if ( registry.has<UUIDComponent>( entity ) )
+                             {
+                                 if ( registry.get<UUIDComponent>( entity ).UUID == *selected )
+                                     isSelected = true;
+                             }
+                         }
+
                          renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
-                              targetMesh, materialSlots, transform.GetTransform() );
+                              targetMesh, materialSlots, worldTransform, isSelected );
                      } );
             }
 

@@ -22,10 +22,10 @@ namespace Desert::Graphic
 
         void Apply( MaterialBackend* backend ) override
         {
-            if ( true || m_Dirty )
+            if ( IsDirty() )
             {
                 backend->ApplyUniformBuffer( this );
-                m_Dirty = true;
+                MarkClean();
             }
         }
 
@@ -43,10 +43,11 @@ namespace Desert::Graphic
                 {
                     m_Buffer->SetData( field.GetLocalData().Data, field.GetFieldInfo().Size,
                                        field.GetFieldInfo().Offset );
+                    field.MarkClean();
                 }
             }
             m_Buffer->UnmapMemory();
-            m_Dirty = true;
+            m_DirtyCount = 3;
         }
 
         void SetRawData( const std::byte* data, size_t size )
@@ -64,7 +65,7 @@ namespace Desert::Graphic
 
             m_Buffer->UnmapMemory();
 
-            m_Dirty = true;
+            m_DirtyCount = 3;
         }
 
         const auto& GetUniform() const

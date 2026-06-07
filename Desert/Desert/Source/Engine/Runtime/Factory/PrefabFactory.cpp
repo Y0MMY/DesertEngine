@@ -29,7 +29,8 @@ namespace Desert::Runtime::Factory
         for ( const auto& data : prefab.GetEntities() )
         {
             ECS::Entity e = scene.CreateNewEntity( data.Tag.value_or( "PrefabEntity" ) );
-            entityMap[data.id] = e;
+            Common::UUID id = data.id.value_or( Common::UUID{} );
+            entityMap[id] = e;
             
             if ( !rootEntity ) rootEntity = e;
         }
@@ -37,11 +38,12 @@ namespace Desert::Runtime::Factory
         // 2. Apply components and setup hierarchy
         for ( const auto& data : prefab.GetEntities() )
         {
-            ECS::Entity e = entityMap[data.id];
+            Common::UUID id = data.id.value_or( Common::UUID{} );
+            ECS::Entity e = entityMap[id];
 
-            if ( data.PrefabRef.has_value() )
+            if ( data.PrefabPath.has_value() )
             {
-                auto nested = assetManager.FindByHandle<Assets::PrefabAsset>( *data.PrefabRef );
+                auto nested = assetManager.FindByPath<Assets::PrefabAsset>( *data.PrefabPath );
                 if ( nested )
                 {
                     ECS::Entity nestedRoot = Instantiate( *nested, scene, assetManager, stack );
@@ -51,11 +53,11 @@ namespace Desert::Runtime::Factory
 
             Core::Serialize::EntitySerializer::DeserializeEntity( data, e, assetManager );
 
-            if ( data.parent != Common::UUID{} )
+            if ( data.parent.has_value() && *data.parent != Common::UUID{} )
             {
-                if ( entityMap.contains( data.parent ) )
+                if ( entityMap.contains( *data.parent ) )
                 {
-                    scene.Attach( entityMap[data.parent], e );
+                    scene.Attach( entityMap[*data.parent], e );
                 }
             }
         }

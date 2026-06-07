@@ -11,9 +11,10 @@ namespace Desert::Graphic::API::Vulkan
 {
     namespace Utils
     {
-        static VkImageLayout GetDefaultLayout( Core::Formats::ImageProperties props )
+        static VkImageLayout GetDefaultLayout( Core::Formats::ImageFormat format, Core::Formats::ImageProperties props )
         {
             if ( props & Core::Formats::Storage ) return VK_IMAGE_LAYOUT_GENERAL;
+            if ( Graphic::Utils::IsDepthFormat( format ) ) return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
 
@@ -106,7 +107,7 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.LayerCount = 1;
         m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED; 
         
-        VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Properties );
+        VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
         VkImageCreateInfo info = {
              .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -228,7 +229,7 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED;
 
         uint32_t faceSize = m_Specification.Width / 4;
-        VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Properties );
+        VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
         VkImageCreateInfo info = {
              .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,

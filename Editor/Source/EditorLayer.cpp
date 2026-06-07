@@ -52,7 +52,9 @@ namespace Desert::Editor
         m_MainScene        = std::make_shared<Desert::Core::Scene>( "New Scene", m_SceneRenderer.get() );
 
         BuiltinMeshRegistry::Init( nullptr );
-    }
+
+        LoadScene( "Resources/Assets/Scene/HouseDemo.desce" );
+        }
 
     EditorLayer::~EditorLayer() = default;
 
@@ -123,6 +125,13 @@ namespace Desert::Editor
 
     [[nodiscard]] Common::BoolResultStr EditorLayer::OnUpdate( const Common::Timestep& ts )
     {
+        if ( m_SceneLoadRequested )
+        {
+            auto path = m_SceneLoadRequested.value();
+            m_SceneLoadRequested.reset();
+            LoadSceneInternal( path );
+        }
+
         const auto& beginResult = m_MainScene->BeginScene();
         if ( !beginResult )
         {
@@ -479,6 +488,47 @@ namespace Desert::Editor
         ImGui::EndMenu();
     }
 
+    void EditorLayer::LoadScene( const Common::Filepath& path )
+    {
+        m_SceneLoadRequested = path;
+    }
+
+    void EditorLayer::LoadSceneInternal( const Common::Filepath& path )
+    {
+        if ( !std::filesystem::exists( path ) )
+        {
+            LOG_ERROR( "Scene file does not exist: {0}", path.string() );
+            return;
+        }
+
+        // Wait for GPU to be idle before destroying resources mid-frame
+        EngineContext::GetInstance().GetDevice()->WaitIdle();
+
+        m_MainScene->Clear();
+
+        Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
+        const std::string             content = Common::Utils::FileSystem::ReadFileContent( path );
+        serializer.DeserializeFromJson( content );
+
+        m_MainScene->Init();
+
+        m_RenderRegistry.release();
+        m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+
+        // Update recent scenes
+        auto it = std::find( m_RecentScenes.begin(), m_RecentScenes.end(), path );
+        if ( it != m_RecentScenes.end() )
+        {
+            m_RecentScenes.erase( it );
+        }
+        m_RecentScenes.insert( m_RecentScenes.begin(), path );
+
+        if ( m_RecentScenes.size() > 5 )
+        {
+            m_RecentScenes.pop_back();
+        }
+    }
+
     void EditorLayer::DrawScenesMenu()
     {
         namespace ImGui = ::ImGui;
@@ -486,6 +536,27 @@ namespace Desert::Editor
         if ( !ImGui::BeginMenu( "Scenes" ) )
         {
             return;
+        }
+
+        if ( ImGui::MenuItem( "Load Scene..." ) )
+        {
+            PrepareScenePopup();
+            m_OpenScenePopup = true;
+        }
+
+        if ( !m_RecentScenes.empty() )
+        {
+            ImGui::Separator();
+            ImGui::TextDisabled( "Recent Scenes" );
+
+            for ( const auto& path : m_RecentScenes )
+            {
+                std::string label = path.filename().string();
+                if ( ImGui::MenuItem( label.c_str() ) )
+                {
+                    LoadScene( path );
+                }
+            }
         }
 
         ImGui::EndMenu();
@@ -610,18 +681,7 @@ namespace Desert::Editor
                 if ( m_SelectedSceneIndex >= 0 &&
                      m_SelectedSceneIndex < static_cast<int>( m_AvailableScenes.size() ) )
                 {
-                    const auto& selectedPath = m_AvailableScenes[m_SelectedSceneIndex];
-
-                    m_MainScene->Clear();
-
-                    Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
-                    const std::string content = Common::Utils::FileSystem::ReadFileContent( selectedPath );
-                    serializer.DeserializeFromJson( content );
-
-                    m_MainScene->Init();
-
-                    m_RenderRegistry.release();
-                    m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+                    LoadScene( m_AvailableScenes[m_SelectedSceneIndex] );
                 }
 
                 ImGui::CloseCurrentPopup();

@@ -16,7 +16,7 @@ namespace Desert::Editor
     {
     }
 
-    void SkinnedMeshComponentWidget::Render( ECS::Entity& entity )
+    void SkinnedMeshComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         auto& skinnedMesh  = entity.GetComponent<ECS::SkinnedMeshComponent>();
         auto  assetManager = m_AssetManager.lock();

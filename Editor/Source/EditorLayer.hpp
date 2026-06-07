@@ -52,6 +52,8 @@ namespace Desert::Editor
         void DrawProjectPopup();
 
         void PrepareScenePopup();
+        void LoadScene( const Common::Filepath& path );
+        void LoadSceneInternal( const Common::Filepath& path );
 
     private:
         enum class EditorState
@@ -80,7 +82,9 @@ namespace Desert::Editor
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         bool                                    m_OpenScenePopup     = false;
         bool                                    m_SaveSceneRequested = false;
+        std::optional<Common::Filepath>         m_SceneLoadRequested;
         std::vector<Common::Filepath>           m_AvailableScenes;
+        std::vector<Common::Filepath>           m_RecentScenes;
         int                                     m_SelectedSceneIndex = -1;
     };
 } // namespace Desert::Editor

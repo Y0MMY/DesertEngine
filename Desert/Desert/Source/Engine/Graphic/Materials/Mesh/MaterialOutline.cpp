@@ -26,8 +26,6 @@ namespace Desert::Graphic
 
         m_MaterialExecutor->PushConstant( &vp, sizeof( vp ) );
 
-        m_MaterialExecutor->Apply();
-
         //m_OutlineData->UpdateOutlineUB( { 1.0f + dynamicWidth, data.Color } );
     }
 

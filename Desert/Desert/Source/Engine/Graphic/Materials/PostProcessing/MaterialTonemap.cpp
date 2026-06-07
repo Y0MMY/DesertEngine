@@ -10,6 +10,5 @@ namespace Desert::Graphic
     void MaterialTonemap::Bind( const std::shared_ptr<Image2D>& targetImage )
     {
         m_TonemapBinding->UpdateTexture( targetImage.get() );
-        m_MaterialExecutor->Apply();
     }
 } // namespace Desert::Graphic

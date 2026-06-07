@@ -73,6 +73,8 @@ namespace Desert::Engine
             float    timestep = time - m_LastFrameTime;
             m_LastFrameTime   = time;
 
+            m_EngineStats.Update();
+
             // 1. Prepare Frame (Acquire next image)
             // This MUST be first because subsequent rendering might depend on the acquired image index
             m_Window->PrepareNextFrame();

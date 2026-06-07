@@ -109,7 +109,8 @@ namespace Desert::Graphic
              ->SubmitMesh( { .Mesh          = (Mesh*)mesh,
                              .Transform     = transform,
                              .MaterialSlots = materialSlots,
-                             .BoneMatrices  = extra.BoneMatrices } );
+                             .BoneMatrices  = extra.BoneMatrices,
+                             .Outlined      = extra.Outlined } );
     }
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )

@@ -28,7 +28,6 @@ namespace Desert::Editor
 
         const std::string& name  = entity.GetComponent<ECS::TagComponent>().Tag;
         const auto         UUID  = entity.GetComponent<ECS::UUIDComponent>().UUID;
-        const auto         UUIDs = UUID.ToString();
 
         if ( visible && m_HierarchyFilter.IsActive() )
         {
@@ -40,9 +39,13 @@ namespace Desert::Editor
 
         if ( show )
         {
-            // ImGui::PushID((int)node);
             Utils::ImGuiUtilities::PushID();
-            bool noChildren = true;
+            
+            const auto UUID = entity.GetComponent<ECS::UUIDComponent>().UUID;
+            std::string uuidStr = UUID.ToString();
+
+            bool hasRelationship = entity.HasComponent<ECS::RelationshipComponent>();
+            bool hasChildren = hasRelationship && !entity.GetComponent<ECS::RelationshipComponent>().Children.empty();
 
             const auto& selectedEntity = Core::SelectionManager::GetSelected();
             const bool  isSelected     = selectedEntity.has_value() && *selectedEntity == UUID;
@@ -52,7 +55,7 @@ namespace Desert::Editor
             nodeFlags |= ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding |
                          ImGuiTreeNodeFlags_AllowItemOverlap | ImGuiTreeNodeFlags_SpanAvailWidth;
 
-            if ( noChildren )
+            if ( !hasChildren )
             {
                 nodeFlags |= ImGuiTreeNodeFlags_Leaf;
             }
@@ -67,40 +70,43 @@ namespace Desert::Editor
             char* icon = (char*)ICON_MDI_CUBE_OUTLINE;
 
             if ( entity.HasComponent<ECS::CameraComponent>() )
-            {
                 icon = (char*)ICON_MDI_CAMERA;
-            }
-
-            else if ( entity.HasComponent<ECS::DirectionLightComponent>() )
-            {
+            else if ( entity.HasComponent<ECS::DirectionLightComponent>() || entity.HasComponent<ECS::PointLightComponent>() )
                 icon = (char*)ICON_MDI_LIGHTBULB;
-            }
-
-            else if ( entity.HasComponent<ECS::PointLightComponent>() )
-            {
-                icon = (char*)ICON_MDI_LIGHTBULB;
-            }
-
             else if ( entity.HasComponent<ECS::SkyboxComponent>() )
-            {
                 icon = (char*)ICON_MDI_EARTH;
-            }
 
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetIconColor() );
 
-            bool nodeOpen = ImGui::TreeNodeEx( name.c_str(), nodeFlags, "%s", icon );
+            bool nodeOpen = ImGui::TreeNodeEx( (void*)(uint64_t)entity.GetHandle(), nodeFlags, "%s", icon );
+            
+            // Selection logic
+            if ( ImGui::IsItemClicked() )
             {
-
-                // TODO: Allow clicking of icon and text. Need twice as they are separated
-                if ( ImGui::IsMouseReleased( ImGuiMouseButton_Left ) && ImGui::IsItemHovered() &&
-                     !ImGui::IsItemToggledOpen() )
-                {
-                }
+                Core::SelectionManager::SetSelected( UUID );
             }
 
-            if ( visible && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) &&
-                 ImGui::IsItemHovered( ImGuiHoveredFlags_None ) )
+            // Drag and Drop Source
+            if ( ImGui::BeginDragDropSource() )
             {
+                ImGui::SetDragDropPayload( "ENTITY_RELATIONSHIP", &UUID, sizeof( Common::UUID ) );
+                ImGui::TextUnformatted( name.c_str() );
+                ImGui::EndDragDropSource();
+            }
+
+            // Drag and Drop Target
+            if ( ImGui::BeginDragDropTarget() )
+            {
+                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "ENTITY_RELATIONSHIP" ) )
+                {
+                    Common::UUID childUUID = *(const Common::UUID*)payload->Data;
+                    auto childEntityRef = m_Scene->FindEntityByID( childUUID );
+                    if ( childEntityRef )
+                    {
+                        m_Scene->Attach( entity, const_cast<ECS::Entity&>( childEntityRef.value().get() ) );
+                    }
+                }
+                ImGui::EndDragDropTarget();
             }
 
             bool hovered = ImGui::IsItemHovered( ImGuiHoveredFlags_None );
@@ -108,62 +114,29 @@ namespace Desert::Editor
             ImGui::PopStyleColor();
             ImGui::SameLine();
 
-            ImGui::TextUnformatted( (const char*)name.c_str() );
+            ImGui::TextUnformatted( name.c_str() );
 
             if ( !active )
                 ImGui::PopStyleColor();
 
             bool deleteEntity = false;
 
-            if ( ImGui::BeginPopupContextItem( (const char*)name.c_str() ) )
+            if ( ImGui::BeginPopupContextItem( uuidStr.c_str() ) )
             {
-                if ( ImGui::Selectable( "Copy" ) )
-                {
-                }
-
-                if ( ImGui::Selectable( "Cut" ) )
-                {
-                }
-
-                ImGui::Separator();
-
-                if ( ImGui::Selectable( "Duplicate" ) )
-                {
-                }
                 if ( ImGui::Selectable( "Delete" ) )
-                {
                     deleteEntity = true;
-                }
 
                 ImGui::Separator();
-                if ( ImGui::Selectable( "Rename" ) )
-                {
-                }
-                ImGui::Separator();
-
                 if ( ImGui::Selectable( "Add Child" ) )
                 {
+                    auto child = m_Scene->CreateNewEntity( "Child Entity" );
+                    m_Scene->Attach( entity, child );
                 }
 
-                if ( ImGui::Selectable( "Zoom to" ) )
-                {
-                }
                 ImGui::EndPopup();
             }
 
-            if ( ImGui::IsItemClicked() && !deleteEntity )
-            {
-                Core::SelectionManager::SetSelected( UUID );
-            }
-
-            if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) &&
-                 ImGui::IsItemHovered( ImGuiHoveredFlags_None ) )
-            {
-            }
-
-#if 1
-            bool showButton = true; // hovered || !active;
-
+            bool showButton = true;
             if ( showButton )
             {
                 ImGui::SameLine( ImGui::GetWindowContentRegionMax().x -
@@ -174,25 +147,31 @@ namespace Desert::Editor
                 }
                 ImGui::PopStyleColor();
             }
-#endif
 
-            if ( nodeOpen == false )
+            if ( nodeOpen )
             {
-                Utils::ImGuiUtilities::PopID();
-                return;
+                if ( hasChildren )
+                {
+                    auto& rel = entity.GetComponent<ECS::RelationshipComponent>();
+                    auto& registry = *entity.GetRegistry();
+                    
+                    // Recursive call for children
+                    for ( auto childHandle : rel.Children )
+                    {
+                        ECS::Entity child( childHandle, registry );
+                        DrawEntityNode( child );
+                    }
+                }
+                ImGui::TreePop();
             }
 
-            const ImColor TreeLineColor = ImColor( 128, 128, 128, 128 );
-            const float   SmallOffsetX  = 6.0f;
-            ImDrawList*   drawList      = ImGui::GetWindowDrawList();
+            if ( deleteEntity )
+            {
+                m_Scene->DestroyEntity( entity );
+                if ( isSelected )
+                    Core::SelectionManager::ClearSelection();
+            }
 
-            ImVec2 verticalLineStart = ImGui::GetCursorScreenPos();
-            verticalLineStart.x += SmallOffsetX; // to nicely line up with the arrow symbol
-            ImVec2 verticalLineEnd = verticalLineStart;
-
-            drawList->AddLine( verticalLineStart, verticalLineEnd, TreeLineColor );
-
-            ImGui::TreePop();
             Utils::ImGuiUtilities::PopID();
         }
     }
@@ -419,13 +398,25 @@ namespace Desert::Editor
             ImGui::EndPopup();
         }
         {
-
             ImGui::Indent();
 
-            auto& view = m_Scene->GetAllEntities();
-            for ( auto& entity : view )
+            auto& registry = m_Scene->GetRegistry();
+            
+            // Render root entities (those with no parent or no RelationshipComponent)
+            auto view = registry.view<ECS::UUIDComponent>();
+            for ( auto entityHandle : view )
             {
-                DrawEntityNode( const_cast<ECS::Entity&>( entity ) );
+                ECS::Entity entity( entityHandle, registry );
+                bool hasParent = false;
+                if ( entity.HasComponent<ECS::RelationshipComponent>() )
+                {
+                    hasParent = ( entity.GetComponent<ECS::RelationshipComponent>().Parent != entt::null );
+                }
+
+                if ( !hasParent )
+                {
+                    DrawEntityNode( entity );
+                }
             }
 
             // Only supports one scene
@@ -441,7 +432,16 @@ namespace Desert::Editor
 
             if ( ImGui::BeginDragDropTargetCustom( windowRect, ImGui::GetCurrentWindow()->ID ) )
             {
-
+                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "ENTITY_RELATIONSHIP" ) )
+                {
+                    Common::UUID uuid = *(const Common::UUID*)payload->Data;
+                    auto entityRef = m_Scene->FindEntityByID( uuid );
+                    if ( entityRef )
+                    {
+                        // Logic to unparent (or re-parent to root)
+                        // TODO: Implement Scene::Detach if needed
+                    }
+                }
                 ImGui::EndDragDropTarget();
             }
         }

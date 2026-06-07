@@ -7,14 +7,9 @@ int main( int argc, char** argv )
     Common::Logger::LogInit();
 
     auto app = CreateApplication( argc, argv );
-   // try
-   // {
-        app->Run();
-   // }
-   // catch ( const std::exception& e )
-   // {
-    //    LOG_CRITICAL( "{}", e.what() );
-   // }
+    app->OnCreate();
+    app->Run();
+    app->OnDestroy();
 
     return 0;
 }

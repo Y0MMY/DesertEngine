@@ -2,6 +2,8 @@
 
 #include <Engine/Desert.hpp>
 
+namespace Desert::Core { class Scene; }
+
 namespace Desert::Editor
 {
     class IComponentWidget
@@ -10,8 +12,8 @@ namespace Desert::Editor
         explicit IComponentWidget( std::string&& widgetName ) : m_WidgetName( std::move( widgetName ) )
         {
         }
-        virtual ~IComponentWidget()                              = default;
-        virtual void               Render( ECS::Entity& entity ) = 0;
+        virtual ~IComponentWidget()                                                          = default;
+        virtual void               Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr ) = 0;
         virtual const std::string& GetName() const final
         {
             return m_WidgetName;

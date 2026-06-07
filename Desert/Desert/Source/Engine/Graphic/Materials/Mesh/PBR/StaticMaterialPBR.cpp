@@ -125,9 +125,6 @@ namespace Desert::Graphic
             if ( auto prop = m_MaterialExecutor->GetTexture2DProperty( "u_NormalTexture" ) )
                 prop->SetImage( tex );
         }
-
-        // 4. Finalize and apply to GPU
-        m_MaterialExecutor->Apply();
     }
 
     void StaticMaterialPBR::OnBind( MaterialInstance* instance )

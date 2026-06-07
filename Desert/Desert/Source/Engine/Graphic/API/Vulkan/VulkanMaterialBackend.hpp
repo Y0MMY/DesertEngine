@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Materials/MaterialBackend.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 
 #include <vulkan/vulkan.hpp>
 
@@ -26,14 +27,16 @@ namespace Desert::Graphic::API::Vulkan
 
         VkDescriptorSet GetDescriptorSet( uint32_t frameIndex, uint32_t setIndex = 0 ) const;
 
-        void UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes );
+        void UpdateDescriptorSets( const std::vector<VkWriteDescriptorSet>& writes, bool force = false );
 
         void BindDescriptorSets( VkCommandBuffer cmdBuffer, VkPipelineLayout layout, VkPipelineBindPoint bindPoint,
                                  uint32_t frameIndex );
 
+        void ResetFrameUpdateState( uint32_t frameIndex );
+        bool HasDescriptorSets() const;
+
     private:
         void InitializeWithFallbacks();
-        bool HasDescriptorSets() const;
 
         void AllocateDescriptorSets();
         void CreateDescriptorPool();
@@ -43,5 +46,11 @@ namespace Desert::Graphic::API::Vulkan
 
         // [frame][set]
         std::vector<std::vector<VkDescriptorSet>> m_DescriptorSets;
+
+        // Track updates per frame: [frame][set] (Absolute frame count)
+        std::vector<std::vector<uint64_t>> m_DescriptorSetsUpdateFrame;
+
+        VkBuffer      m_DummyBuffer = VK_NULL_HANDLE;
+        VmaAllocation m_DummyAllocation = nullptr;
     };
 } // namespace Desert::Graphic::API::Vulkan

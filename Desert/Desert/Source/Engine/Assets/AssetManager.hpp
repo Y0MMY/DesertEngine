@@ -67,6 +67,24 @@ namespace Desert::Assets
         }
 
         template <typename TypeAsset>
+        Asset<TypeAsset> FindByPath( const Common::Filepath& path ) const
+        {
+            const auto typeId = TypeAsset::GetTypeID();
+            auto       it     = std::find_if( m_AssetsCache.begin(), m_AssetsCache.end(),
+                                              [&]( const auto& assetCache )
+                                              {
+                                                  return assetCache.first.AssetType == typeId &&
+                                                         assetCache.first.Filepath == path;
+                                              } );
+
+            if ( it != m_AssetsCache.end() )
+            {
+                return sp_cast<TypeAsset>( it->second );
+            }
+            return nullptr;
+        }
+
+        template <typename TypeAsset>
         std::vector<std::pair<AssetHandle, Asset<TypeAsset>>> FindAllByType() const
         {
             std::vector<std::pair<AssetHandle, Asset<TypeAsset>>> result;

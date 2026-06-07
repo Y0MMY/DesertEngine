@@ -16,11 +16,11 @@ namespace Desert::Editor
                          const Animation::AnimationLibrary*           animationLibrary );
         void RegisterDefaultComponents( const Animation::AnimationLibrary* animationLibrary );
         void RegisterComponent( ComponentFactory factory );
-        void Render( ECS::Entity& entity );
+        void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr );
 
     private:
         void RenderAddComponentPopup( ECS::Entity& entity );
-        void RenderComponentHeader( IComponentWidget& widget, ECS::Entity& entity );
+        void RenderComponentHeader( IComponentWidget& widget, ECS::Entity& entity, ::Desert::Core::Scene* scene );
 
     private:
         std::weak_ptr<Assets::AssetManager> m_AssetManager;

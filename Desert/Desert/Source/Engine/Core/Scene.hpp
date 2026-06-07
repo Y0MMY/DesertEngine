@@ -111,6 +111,8 @@ namespace Desert::Core
 
         void Attach( ECS::Entity parent, ECS::Entity child );
 
+        void DestroyEntity( ECS::Entity entity );
+
     private:
         void FindMainCamera();
         void OnEntityCreated_Camera();

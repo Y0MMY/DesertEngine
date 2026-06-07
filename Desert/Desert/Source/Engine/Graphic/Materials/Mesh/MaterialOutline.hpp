@@ -7,10 +7,10 @@ namespace Desert::Graphic
 {
     struct UpdateMaterialOutlineInfo
     {
-        std::shared_ptr<Core::Camera> Camera;
-        glm::mat4                     Transform;
-        float                         Width;
-        glm::vec3                     Color;
+        Core::Camera* Camera;
+        glm::mat4     Transform;
+        float         Width;
+        glm::vec3     Color;
     };
 
     class MaterialOutline final : public Material

@@ -11,7 +11,7 @@ namespace Desert::Editor
     {
     }
 
-    void SkyboxComponentWidget::Render( ECS::Entity& entity )
+    void SkyboxComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         const auto assetManager = m_AssetManager.lock();
         auto       skyboxAssets = assetManager->FindAllByType<Assets::SkyboxAsset>();

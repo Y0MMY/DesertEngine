@@ -16,14 +16,14 @@ namespace Desert::Graphic
 
         void Apply( MaterialBackend* backend ) override
         {
-            if ( m_Dirty )
+            if ( IsDirty() )
             {
                 if ( m_Texture )
                 {
                     m_Uniform->SetImage2D( m_Texture );
                 }
                 backend->ApplyTexture2D( this );
-                m_Dirty = false;
+                MarkClean();
             }
         }
 
@@ -39,7 +39,7 @@ namespace Desert::Graphic
         void SetImage( const Image2D* texture )
         {
             m_Texture = texture;
-            m_Dirty   = true;
+            m_DirtyCount = 3;
         }
 
         const auto& GetUniform() const

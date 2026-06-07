@@ -81,9 +81,9 @@ namespace Desert::Core
         entity.AddComponent<ECS::TransformComponent>();
         entity.AddComponent<ECS::RelationshipComponent>();
 
-        m_EntitysMap[entity.GetComponent<ECS::UUIDComponent>().UUID] = m_Entitys.size() - 1;
+        m_EntitysMap[entity.GetComponent<ECS::UUIDComponent>().UUID] = (uint32_t)m_Entitys.size() - 1;
 
-        return entity;
+        return m_Entitys.back();
     }
 
     Desert::ECS::Entity& Scene::CreateEntityWithUUID( const Common::UUID& uuid, const std::string& name )
@@ -97,9 +97,9 @@ namespace Desert::Core
         entity.AddComponent<ECS::TransformComponent>();
         entity.AddComponent<ECS::RelationshipComponent>();
 
-        m_EntitysMap[uuid] = m_Entitys.size() - 1;
+        m_EntitysMap[uuid] = (uint32_t)m_Entitys.size() - 1;
 
-        return entity;
+        return m_Entitys.back();
     }
 
     const std::shared_ptr<Desert::Graphic::Image2D> Scene::GetFinalImage() const
@@ -212,6 +212,51 @@ namespace Desert::Core
 
         childRel.Parent = parent.GetHandle();
         parentRel.Children.push_back( child.GetHandle() );
+    }
+
+    void Scene::DestroyEntity( ECS::Entity entity )
+    {
+        if ( !entity ) return;
+        
+        auto uuid = entity.GetComponent<ECS::UUIDComponent>().UUID;
+        
+        // Destroy children
+        if ( entity.HasComponent<ECS::RelationshipComponent>() )
+        {
+            auto& rel = entity.GetComponent<ECS::RelationshipComponent>();
+            auto childrenCopy = rel.Children; // copy to avoid issues during iteration
+            for ( auto childHandle : childrenCopy )
+            {
+                DestroyEntity( ECS::Entity( childHandle, m_Registry ) );
+            }
+        }
+
+        // Remove from parent
+        if ( entity.HasComponent<ECS::RelationshipComponent>() )
+        {
+            auto& rel = entity.GetComponent<ECS::RelationshipComponent>();
+            if ( rel.Parent != entt::null )
+            {
+                ECS::Entity parent = ECS::Entity( rel.Parent, m_Registry );
+                if ( parent )
+                {
+                    auto& parentRel = parent.GetComponent<ECS::RelationshipComponent>();
+                    auto it = std::find( parentRel.Children.begin(), parentRel.Children.end(), entity.GetHandle() );
+                    if ( it != parentRel.Children.end() )
+                        parentRel.Children.erase( it );
+                }
+            }
+        }
+
+        m_Registry.destroy( entity.GetHandle() );
+
+        auto it = std::find_if( m_Entitys.begin(), m_Entitys.end(), [&]( const ECS::Entity& e ) { return e.GetHandle() == entity.GetHandle(); } );
+        if ( it != m_Entitys.end() )
+        {
+            m_Entitys.erase( it );
+        }
+
+        m_EntitysMap.erase( uuid );
     }
 
 } // namespace Desert::Core

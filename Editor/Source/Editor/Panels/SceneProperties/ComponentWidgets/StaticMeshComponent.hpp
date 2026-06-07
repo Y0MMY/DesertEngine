@@ -16,7 +16,7 @@ namespace Desert::Editor
             return false;
         }
 
-        void Render( ECS::Entity& entity ) override;
+        void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr ) override;
 
     private:
         void        SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle );

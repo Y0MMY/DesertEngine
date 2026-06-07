@@ -14,7 +14,7 @@ namespace Desert::Editor
             return true;
         }
 
-        void Render( ECS::Entity& entity ) override;
+        void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr ) override;
 
     private:
     };
