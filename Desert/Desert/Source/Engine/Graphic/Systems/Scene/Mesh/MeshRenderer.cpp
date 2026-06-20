@@ -18,8 +18,8 @@ namespace Desert::Graphic::System
         if ( !SetupSkinnedGeometryPass() )
             return Common::MakeError( "Failed to setup skinned geometry pass" );
 
-        if ( !SetupOutlinePass() )
-            return Common::MakeError( "Failed to setup outline pass" );
+        if ( !SetupSilhouettePass() )
+            return Common::MakeError( "Failed to setup silhouette pass" );
 
         m_StaticMaterialFallback =
              std::make_unique<Graphic::StaticMaterialPBR>();
@@ -31,8 +31,9 @@ namespace Desert::Graphic::System
     {
         m_StaticPipeline.reset();
         m_SkinnedPipeline.reset();
-        m_OutlinePipeline.reset();
-        m_OutlineMaterial.reset();
+        m_SilhouettePipeline.reset();
+        m_SilhouetteMaterial.reset();
+        m_SilhouetteMaskFramebuffer.reset();
     }
 
     void MeshRenderer::ClearQueues()
@@ -63,10 +64,9 @@ namespace Desert::Graphic::System
                          m_StaticPipeline->GetSpecification(), targetFb,
                          { RenderPassDependency( RenderPhase::DepthPrePass ) } );
 
-        if ( m_OutlineDraw )
-        {
-            // RegisterOutlinePass( builder );
-        }
+        // The silhouette mask is always produced (and cleared) so the Jump Flood outline has a
+        // fresh input every frame. Outline visibility is controlled by JumpFloodOutlineRenderer.
+        RegisterSilhouettePass( builder );
     }
 
     void MeshRenderer::UpdateGlobalUniforms( const Core::Camera*                    camera,
@@ -209,12 +209,12 @@ namespace Desert::Graphic::System
         return true;
     }
 
-    bool MeshRenderer::SetupOutlinePass()
+    bool MeshRenderer::SetupSilhouettePass()
     {
-        m_OutlineShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Outline" );
-        if ( !m_OutlineShader )
+        m_SilhouetteShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Silhouette" );
+        if ( !m_SilhouetteShader )
         {
-            LOG_ERROR( "Failed to load outline shader" );
+            LOG_ERROR( "Failed to load silhouette shader" );
             return false;
         }
 
@@ -222,35 +222,34 @@ namespace Desert::Graphic::System
         if ( !targetFb )
             return false;
 
-        GraphicsPipelineSpecification outlinePipeSpec;
-        outlinePipeSpec.DebugName = "OutlinePipeline";
-        outlinePipeSpec.Layout    = { { Graphic::ShaderDataType::Float3, "a_Position" },
-                                      { Graphic::ShaderDataType::Float3, "a_Normal" },
-                                      { Graphic::ShaderDataType::Float3, "a_Tangent" },
-                                      { Graphic::ShaderDataType::Float3, "a_Bitangent" },
-                                      { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+        // Dedicated single-channel-ish mask target. Selected meshes are drawn white; the rest stays
+        // at the framebuffer clear color (~0.1), which JFA_Init separates with a 0.5 threshold.
+        FramebufferSpecification maskSpec;
+        maskSpec.DebugName = "SilhouetteMask";
+        maskSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
 
-        outlinePipeSpec.DepthWriteEnabled  = false;
-        outlinePipeSpec.DepthTestEnabled   = false;
-        outlinePipeSpec.StencilTestEnabled = true;
-        outlinePipeSpec.StencilFront       = { .FailOp      = StencilOp::Keep,
-                                               .PassOp      = StencilOp::Replace,
-                                               .DepthFailOp = StencilOp::Keep,
-                                               .CompareOp   = CompareOp::NotEqual,
-                                               .CompareMask = 0xFF,
-                                               .WriteMask   = 0xFF,
-                                               .Reference   = 1 };
-        outlinePipeSpec.StencilBack        = outlinePipeSpec.StencilFront;
-        outlinePipeSpec.CullMode           = CullMode::None;
-        outlinePipeSpec.Shader             = m_OutlineShader;
-        outlinePipeSpec.Framebuffer        = targetFb;
-        outlinePipeSpec.PolygonMode        = PrimitivePolygonMode::Wireframe;
-        outlinePipeSpec.LineWidth          = 5.0F;
+        m_SilhouetteMaskFramebuffer = Graphic::Framebuffer::Create( maskSpec );
+        m_SilhouetteMaskFramebuffer->Resize( targetFb->GetFramebufferWidth(), targetFb->GetFramebufferHeight() );
 
-        m_OutlinePipeline = GraphicsPipeline::Create( outlinePipeSpec );
-        m_OutlinePipeline->Invalidate();
+        GraphicsPipelineSpecification spec;
+        spec.DebugName = "SilhouettePipeline";
+        spec.Layout    = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                           { Graphic::ShaderDataType::Float3, "a_Normal" },
+                           { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                           { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                           { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
 
-        m_OutlineMaterial = std::make_unique<MaterialOutline>();
+        spec.DepthTestEnabled   = false;
+        spec.DepthWriteEnabled  = false;
+        spec.StencilTestEnabled = false;
+        spec.CullMode           = CullMode::None;
+        spec.Shader             = m_SilhouetteShader;
+        spec.Framebuffer        = m_SilhouetteMaskFramebuffer;
+
+        m_SilhouettePipeline = GraphicsPipeline::Create( spec );
+        m_SilhouettePipeline->Invalidate();
+
+        m_SilhouetteMaterial = std::make_unique<MaterialSilhouette>();
 
         return true;
     }
@@ -260,44 +259,39 @@ namespace Desert::Graphic::System
         return {};
     }
 
-    void MeshRenderer::RegisterOutlinePass( RenderGraphBuilder& builder )
+    void MeshRenderer::RegisterSilhouettePass( RenderGraphBuilder& builder )
     {
-        auto targetFb = m_TargetFramebuffer.lock();
-        if ( !targetFb )
+        if ( !m_SilhouetteMaskFramebuffer )
             return;
 
-        builder.AddPass( "MeshOutlinePass", RenderPhase::Outline,
+        builder.AddPass( "MeshSilhouettePass", RenderPhase::Outline,
                          [this]()
                          {
-                             auto&      renderer = Renderer::GetInstance();
-                             const auto camera   = m_SceneRenderer->GetMainCamera();
+                             const auto camera = m_SceneRenderer->GetMainCamera();
                              if ( !camera )
                                  return;
 
+                             auto& renderer = Renderer::GetInstance();
+                             m_SilhouetteMaterial->UpdateCamera( camera );
+
                              // ===== Static =====
-                             /* for ( const auto& renderData : m_StaticQueue )
-                              {
-                                  if ( !renderData.Outlined )
-                                      continue;
-
-                                  m_OutlineMaterial->Bind( { camera, renderData.Transform, m_OutlineWidth,
-                              m_OutlineColor } );
-
-                                  renderer.RenderMesh( m_OutlinePipeline, renderData.Mesh,
-                                                       m_OutlineMaterial->GetMaterialExecutor() );
-                              }*/
-
-                             // ===== Skinned =====
-                             /*for ( const auto& renderData : m_SkinnedQueue )
+                             // The camera UB is shared across all draws; only the per-mesh transform
+                             // (pushed by RenderMesh) varies, so a single material instance is safe.
+                             for ( const auto& renderData : m_StaticQueue )
                              {
-                                 m_OutlineMaterial->Bind( { camera, renderData.Transform, m_OutlineWidth,
-                             m_OutlineColor, renderData.BoneMatrices } );
+                                 if ( !renderData.Outlined || !renderData.Mesh )
+                                     continue;
 
-                                 renderer.RenderMesh( m_OutlinePipeline, renderData.Mesh,
-                                                      m_OutlineMaterial->GetMaterialExecutor() );
-                             }*/
+                                 renderer.RenderMesh( m_SilhouettePipeline.get(), renderData.Mesh,
+                                                      renderData.Transform,
+                                                      m_SilhouetteMaterial->GetMaterialExecutor() );
+                             }
+
+                             // NOTE: skinned mesh silhouettes require a skinned variant of the
+                             // Silhouette shader (bone matrices). Deferred until the skinned mesh
+                             // material path is re-enabled.
                          },
-                         m_OutlinePipeline->GetSpecification(), targetFb,
+                         m_SilhouettePipeline->GetSpecification(), m_SilhouetteMaskFramebuffer,
                          { RenderPassDependency( RenderPhase::Geometry ) } );
     }
 

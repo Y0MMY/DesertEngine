@@ -728,7 +728,7 @@ namespace Desert::Editor
         {
             if ( event.m_Handled )
                 break;
-            // panel->OnEvent(event);
+            panel->OnEvent(event);
         }
 #endif
     }

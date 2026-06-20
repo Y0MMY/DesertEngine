@@ -44,11 +44,24 @@ namespace Desert::Graphic::System
         return BOOLSUCCESS;
     }
 
-    void TonemapRenderer::RegisterPasses( RenderGraphBuilder& builder )
+    void TonemapRenderer::Execute()
     {
-        builder.AddPass( "TonemapPass", RenderPhase::PostProcess, [this]() { Render(); },
-                         m_Pipeline ? m_Pipeline->GetSpecification() : GraphicsPipelineSpecification{}, m_Framebuffer,
-                         { RenderPassDependency( RenderPhase::Debug ) } );
+        auto& renderer = Renderer::GetInstance();
+
+        auto renderPass = RenderPass::Create( {
+             .TargetFramebuffer = m_Framebuffer,
+             .DebugName         = "TonemapPass",
+        } );
+
+        renderer.BeginRenderPass( renderPass.get() );
+        Render();
+        renderer.EndRenderPass();
+    }
+
+    void TonemapRenderer::Resize( uint32_t width, uint32_t height )
+    {
+        if ( m_Framebuffer )
+            m_Framebuffer->Resize( width, height );
     }
 
     void TonemapRenderer::Render()

@@ -6,10 +6,11 @@ namespace Desert::Core
 {
     struct SceneSettings
     {
-        // Outline settings
+        // Outline settings (Jump Flood). Width and smoothness are in screen pixels.
         glm::vec3 OutlineColor{ 1.0f, 0.5f, 0.0f }; // Orange by default
-        float     OutlineWidth  = 1.05f;
-        bool      EnableOutline = true;
+        float     OutlineWidth      = 4.0f;
+        float     OutlineSmoothness = 2.0f;
+        bool      EnableOutline     = true;
 
         // Environment settings
         float EnvironmentMapIntensity = 1.0f;

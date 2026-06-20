@@ -3,7 +3,7 @@
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
-#include <Engine/Graphic/Materials/Mesh/MaterialOutline.hpp>
+#include <Engine/Graphic/Materials/Mesh/MaterialSilhouette.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
@@ -44,6 +44,7 @@ namespace Desert::Graphic::System
             glm::mat4                          Transform;
             class Graphic::SkinnedMaterialPBR* Material;
             std::vector<glm::mat4>             BoneMatrices;
+            bool                               Outlined = false;
         };
 
         using RenderSystem::RenderSystem;
@@ -52,21 +53,11 @@ namespace Desert::Graphic::System
         virtual void                  Shutdown() override;
         virtual void                  RegisterPasses( RenderGraphBuilder& builder ) override;
 
-        void ToggleOutline( bool value )
+        // Silhouette mask of the currently outlined meshes (white on the framebuffer clear color).
+        // Consumed by JumpFloodOutlineRenderer to build the outline.
+        std::shared_ptr<Framebuffer> GetSilhouetteMaskFramebuffer() const
         {
-            m_OutlineDraw = value;
-        }
-        void DisableOutline()
-        {
-            m_OutlineDraw = false;
-        }
-        void SetOutlineColor( const glm::vec3& color )
-        {
-            m_OutlineColor = color;
-        }
-        void SetOutlineWidth( float width )
-        {
-            m_OutlineWidth = width;
+            return m_SilhouetteMaskFramebuffer;
         }
 
         void SubmitMesh( const MeshRenderData& data );
@@ -75,11 +66,11 @@ namespace Desert::Graphic::System
     private:
         bool SetupGeometryPass();
         bool SetupSkinnedGeometryPass();
-        bool SetupOutlinePass();
+        bool SetupSilhouettePass();
 
         void DrawStaticMeshes();
         void DrawSkinnedMeshes();
-        void RegisterOutlinePass( RenderGraphBuilder& builder );
+        void RegisterSilhouettePass( RenderGraphBuilder& builder );
 
         ShaderProtocols::PBRTexturesUB PreparePBRTextures() const;
 
@@ -95,17 +86,14 @@ namespace Desert::Graphic::System
         std::shared_ptr<GraphicsPipeline> m_SkinnedPipeline;
         std::shared_ptr<Shader>   m_SkinnedShader;
 
-        // Outline
-        std::shared_ptr<GraphicsPipeline>        m_OutlinePipeline;
-        std::shared_ptr<Shader>          m_OutlineShader;
-        std::unique_ptr<MaterialOutline> m_OutlineMaterial;
+        // Silhouette (mask for the Jump Flood outline)
+        std::shared_ptr<GraphicsPipeline>   m_SilhouettePipeline;
+        std::shared_ptr<Shader>             m_SilhouetteShader;
+        std::unique_ptr<MaterialSilhouette> m_SilhouetteMaterial;
+        std::shared_ptr<Framebuffer>        m_SilhouetteMaskFramebuffer;
 
         std::vector<StaticMeshRenderData>  m_StaticQueue;
         std::vector<SkinnedMeshRenderData> m_SkinnedQueue;
-
-        bool      m_OutlineDraw  = true;
-        glm::vec3 m_OutlineColor = glm::vec3( 1.0f, 0.5f, 0.0f );
-        float     m_OutlineWidth = 0.005f;
 
     private:
         // fallbacks

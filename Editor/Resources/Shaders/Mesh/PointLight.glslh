@@ -12,7 +12,7 @@ struct PointLight {
     float radius;
 };
 
-layout(std140, binding = 3) uniform PointLightsUB
+layout(std140, binding = 6) uniform PointLightsUB
 {
     PointLight lights[MAX_POINT_LIGHT];    
 } pointLights;

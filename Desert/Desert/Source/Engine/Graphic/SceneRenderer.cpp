@@ -8,6 +8,11 @@ namespace Desert::Graphic
 {
     void SceneRenderer::Init()
     {
+        // Init may run more than once (e.g. on scene load). Rebuild from scratch so every system and
+        // its framebuffers are recreated consistently — stale systems hold weak_ptrs to framebuffers
+        // that get recreated here, which would otherwise dangle.
+        m_RenderSystems.clear();
+
         const auto window = EngineContext::GetInstance().GetWindow();
         const auto width  = window ? window->GetWidth() : 1280;
         const auto height = window ? window->GetHeight() : 720;
@@ -22,17 +27,31 @@ namespace Desert::Graphic
         m_TargetFramebuffer = Graphic::Framebuffer::Create( fbSpec );
         m_TargetFramebuffer->Resize( width, height );
 
+        // Scene systems render into the shared target framebuffer; post-process systems form an
+        // explicit chain (Mesh silhouette mask -> Jump Flood outline -> Tonemap).
         RegisterSystem<System::SkyboxRenderer>( "SkyboxSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
         RegisterSystem<System::MeshRenderer>( "MeshSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
-        RegisterSystem<System::TonemapRenderer>( "TonemapSystem", this, m_TargetFramebuffer,
-                                                 m_RenderGraphBuilder );
+        RegisterSystem<System::JumpFloodOutlineRenderer>( "JumpFloodSystem", this, m_TargetFramebuffer,
+                                                          m_RenderGraphBuilder );
 
         if ( !SP_CAST( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
-        if ( !SP_CAST( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->Initialize() )
+        const auto& meshSystem = SP_CAST( System::MeshRenderer, m_RenderSystems["MeshSystem"] );
+        if ( !meshSystem->Initialize() )
             DESERT_VERIFY( false );
 
+        const auto& jumpFloodSystem =
+             SP_CAST( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
+        if ( !jumpFloodSystem->Initialize() )
+            DESERT_VERIFY( false );
+
+        // Feed the silhouette mask (produced by the mesh system) into the Jump Flood outline.
+        jumpFloodSystem->SetMaskFramebuffer( meshSystem->GetSilhouetteMaskFramebuffer() );
+
+        // Tonemap consumes the Jump Flood output (the outlined scene).
+        RegisterSystem<System::TonemapRenderer>( "TonemapSystem", this,
+                                                 jumpFloodSystem->GetSystemFramebuffer(), m_RenderGraphBuilder );
         if ( !SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
@@ -45,15 +64,16 @@ namespace Desert::Graphic
         m_SceneInfo.ActiveCamera = mainCamera.get();
 
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
-        const auto& meshSystem   = UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] );
 
         skyboxSystem->PrepareCamera( m_SceneInfo.ActiveCamera );
 
-        const auto& sceneSettings = scene.GetSettings();
-        meshSystem->SetOutlineColor( sceneSettings.OutlineColor );
-        meshSystem->ToggleOutline( sceneSettings.EnableOutline );
-        meshSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
-        auto& renderer = Renderer::GetInstance();
+        const auto& sceneSettings    = scene.GetSettings();
+        const auto& jumpFloodSystem  = UNIQUE_GET_AS( System::JumpFloodOutlineRenderer,
+                                                     m_RenderSystems["JumpFloodSystem"] );
+        jumpFloodSystem->SetEnabled( sceneSettings.EnableOutline );
+        jumpFloodSystem->SetOutlineColor( sceneSettings.OutlineColor );
+        jumpFloodSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
+        jumpFloodSystem->SetOutlineSmoothness( sceneSettings.OutlineSmoothness );
 
         return BOOLSUCCESS;
     }
@@ -65,6 +85,12 @@ namespace Desert::Graphic
 
         ClearMainFramebuffer();
         ExecuteRenderGraph();
+
+        // Explicit post-process chain (runs after the scene graph has produced the scene color and
+        // the silhouette mask): Jump Flood outline -> Tonemap.
+        UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] )->Execute();
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
+
         CompositeRenderPass();
     }
 
@@ -84,6 +110,15 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
         renderer.ResizeWindowEvent( width, height );
         m_TargetFramebuffer->Resize( width, height );
+
+        // Keep the post-process chain framebuffers in lock-step with the scene target.
+        if ( const auto& maskFb =
+                  UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->GetSilhouetteMaskFramebuffer() )
+            maskFb->Resize( width, height );
+
+        UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] )
+             ->OnResize( width, height );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Resize( width, height );
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting

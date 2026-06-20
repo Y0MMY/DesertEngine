@@ -43,8 +43,8 @@ namespace Desert::Editor
         m_ViewportData.ViewportPos = { ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x,
                                        ImGui::GetWindowPos().y + ImGui::GetWindowContentRegionMin().y };
 
-        m_ViewportData.MousePosition = glm::vec2( mousePos.x - ( viewportPos.x + viewportMin.x ),
-                                                  mousePos.y - ( viewportPos.y + viewportMin.y ) );
+        m_ViewportData.MousePosition = glm::vec2( mousePos.x - viewportMin.x,
+                                                  mousePos.y - viewportMin.y );
         const auto oldSize           = m_ViewportData.Size;
 
         m_ViewportData.Size      = { viewportMax.x - viewportMin.x, viewportMax.y - viewportMin.y };
@@ -193,6 +193,7 @@ namespace Desert::Editor
              static_cast<uint32_t>( m_ViewportData.Size.y ) );
 
         float closestT = std::numeric_limits<float>::max();
+        Common::UUID selectedUUID;
 
         const auto entities = m_Scene->GetAllEntities();
 
@@ -224,16 +225,18 @@ namespace Desert::Editor
 
                 if ( localRay.IntersectsAABB( submesh.BoundingBox, t ) )
                 {
-                    LOG_TRACE( "Picked object: {} distance: {}", submesh.Name, t );
                     if ( t < closestT )
                     {
-                        Core::SelectionManager::SetSelected( uuid );
+                        selectedUUID = uuid;
                         closestT = t;
-
-                        return;
                     }
                 }
             }
+        }
+
+        if ( closestT != std::numeric_limits<float>::max() )
+        {
+             Core::SelectionManager::SetSelected( selectedUUID );
         }
     }
 

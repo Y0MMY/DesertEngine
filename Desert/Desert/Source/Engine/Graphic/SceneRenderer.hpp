@@ -15,6 +15,7 @@
 #include "Systems/Scene/Mesh/MeshRenderer.hpp"
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
 #include "Systems/Scene/PostProcessing/TonemapRenderer.hpp"
+#include "Systems/Scene/PostProcessing/JumpFloodOutlineRenderer.hpp"
 
 #include <Engine/Graphic/IRenderSystem.hpp>
 

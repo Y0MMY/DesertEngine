@@ -4,6 +4,8 @@
 
 #include <ImGui/imgui.h>
 
+#include <Common/Core/Events/Event.hpp>
+
 namespace Desert::Editor
 {
     class IPanel
@@ -14,8 +16,9 @@ namespace Desert::Editor
         {
         }
 
-        virtual ~IPanel()               = default;
-        virtual void       OnUIRender() = 0;
+        virtual void OnEvent( Common::Event& e ) {}
+        virtual ~IPanel()                        = default;
+        virtual void       OnUIRender()          = 0;
         const std::string& GetName() const
         {
             return m_PanelName;
