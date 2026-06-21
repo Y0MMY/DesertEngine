@@ -76,7 +76,7 @@ namespace Desert::Graphic
             return m_TargetFramebuffer;
         }
 
-        void RegisterRenderPass( RenderPhase phase, const std::string& name, std::function<void()> executeFunc,
+        void RegisterRenderPass( RenderPhaseID phase, const std::string& name, std::function<void()> executeFunc,
                                  const GraphicsPipelineSpecification& pipeSpec = {} );
 
         void RegisterExternalPass( std::string&& name, std::function<void()> execute,
@@ -84,7 +84,7 @@ namespace Desert::Graphic
         {
         }
 
-        std::shared_ptr<Framebuffer> GetFramebufferForPhase( RenderPhase phase );
+        std::shared_ptr<Framebuffer> GetFramebufferForPhase( RenderPhaseID phase );
         std::shared_ptr<Texture>     GetTexture( const std::string& name );
 
         void RegisterRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system );

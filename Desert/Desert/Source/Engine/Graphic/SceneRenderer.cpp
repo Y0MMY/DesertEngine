@@ -1,4 +1,5 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/RenderPhaseRegistry.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
@@ -12,6 +13,9 @@ namespace Desert::Graphic
         // its framebuffers are recreated consistently — stale systems hold weak_ptrs to framebuffers
         // that get recreated here, which would otherwise dangle.
         m_RenderSystems.clear();
+
+        // Ensure the phase registry exists before any system registers custom phases or passes.
+        RenderPhaseRegistry::CreateInstance();
 
         const auto window = EngineContext::GetInstance().GetWindow();
         const auto width  = window ? window->GetWidth() : 1280;
@@ -201,6 +205,7 @@ namespace Desert::Graphic
         }
 
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::DepthPrePass, RenderPhase::Geometry );
+        m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::Geometry, RenderPhase::Outline );
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::Geometry, RenderPhase::Lighting );
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::Lighting, RenderPhase::PostProcess );
 

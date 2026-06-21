@@ -17,16 +17,21 @@ namespace Desert::Graphic
         if ( m_SceneTexture && sceneColor )
             m_SceneTexture->SetImage( sceneColor );
 
-        // Update MPROPERTY values — Material::Bind is NOT called here (no MaterialInstance),
-        // so push to UB fields directly via the cached executor.
-        SetOutlineColor( outlineColor );
-        SetOutlineWidth( outlineWidth );
-        SetSmoothness( smoothness );
+        // UBO field reflection is not populated at runtime (VulkanShader::Reflect fills only block
+        // name/size, not individual members), so UploadRegisteredProperties / FindFieldInAnyUB
+        // would always return null and leave u_OutlineWidth = 0 in the shader, triggering the
+        // early-out that suppresses the outline. Write the UBO as a raw blob instead.
+        struct JFAFinalUB
+        {
+            glm::vec4 OutlineColor;
+            float     OutlineWidth;
+            float     Smoothness;
+        };
+        const JFAFinalUB ub{ .OutlineColor = outlineColor,
+                             .OutlineWidth  = outlineWidth,
+                             .Smoothness    = smoothness };
 
-        // Flush dirty TProperty fields to the UB
-        std::unordered_set<UniformBufferProperty*> dirtyUBs;
-        UploadRegisteredProperties( dirtyUBs );
-        for ( auto* ub : dirtyUBs )
-            ub->UpdateFields();
+        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "JFAFinalUB" ) )
+            prop->SetRawData( reinterpret_cast<const std::byte*>( &ub ), sizeof( ub ) );
     }
 } // namespace Desert::Graphic

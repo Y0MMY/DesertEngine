@@ -275,8 +275,6 @@ namespace Desert::Graphic::System
                              m_SilhouetteMaterial->UpdateCamera( camera );
 
                              // ===== Static =====
-                             // The camera UB is shared across all draws; only the per-mesh transform
-                             // (pushed by RenderMesh) varies, so a single material instance is safe.
                              for ( const auto& renderData : m_StaticQueue )
                              {
                                  if ( !renderData.Outlined || !renderData.Mesh )
