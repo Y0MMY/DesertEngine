@@ -9,9 +9,12 @@ namespace Desert::Graphic
 {
     void SceneRenderer::Init()
     {
-        // Init may run more than once (e.g. on scene load). Rebuild from scratch so every system and
-        // its framebuffers are recreated consistently — stale systems hold weak_ptrs to framebuffers
-        // that get recreated here, which would otherwise dangle.
+        // Init may run more than once (e.g. on scene load). Wait for GPU before destroying the old
+        // systems — their materials own descriptor pools that may still be in use by in-flight frames.
+        Renderer::GetInstance().WaitDeviceIdle();
+
+        // Rebuild from scratch so every system and its framebuffers are recreated consistently —
+        // stale systems hold weak_ptrs to framebuffers that get recreated here, which would dangle.
         m_RenderSystems.clear();
 
         // Ensure the phase registry exists before any system registers custom phases or passes.

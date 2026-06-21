@@ -95,7 +95,9 @@ namespace Desert::Graphic
         std::string_view m_ShaderName;
         T                m_Value;
         T                m_Default;
-        bool             m_Dirty = false;
+        // Start dirty so the default value is uploaded to the GPU on the first frame even when
+        // Set() is called with the same value (equality check would skip it).
+        bool             m_Dirty = true;
     };
 
     // Texture property — always marks dirty on Set (no equality check for pointers is meaningful here).

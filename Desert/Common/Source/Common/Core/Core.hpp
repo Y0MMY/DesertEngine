@@ -44,14 +44,20 @@ decltype( auto ) initializeDefaultValue()
 #elif defined( DESERT_PLATFORM_LINUX )
 #include <signal.h>
 #define DESERT_DEBUG_BREAK raise( SIGTRAP )
+#else
+#define DESERT_DEBUG_BREAK __debugbreak()
 #endif
 
 #define DESERT_VERIFY( cond, ... )                                                                                \
-    if ( !( cond ) )                                                                                              \
+    do                                                                                                            \
     {                                                                                                             \
-        Common::Logger::LogError( "Verify failed: {} at {}:{}", #cond, __FILE__, __LINE__ );                      \
-        __debugbreak();                                                                                           \
-    }
+        if ( !( cond ) )                                                                                          \
+        {                                                                                                         \
+            Common::Logger::LogError( "Verify failed: {} at {}:{}", #cond, __FILE__, __LINE__ );                  \
+            DESERT_DEBUG_BREAK;                                                                                   \
+            std::abort();                                                                                         \
+        }                                                                                                         \
+    } while ( false )
 
 #define DESERT_VERIFY_WARN( cond, ... )                                                                           \
     if ( !( cond ) )                                                                                              \

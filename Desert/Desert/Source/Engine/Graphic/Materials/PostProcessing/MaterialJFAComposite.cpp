@@ -1,5 +1,7 @@
 #include "MaterialJFAComposite.hpp"
 
+#include <unordered_set>
+
 namespace Desert::Graphic
 {
     MaterialJFAComposite::MaterialJFAComposite() : Material( "MaterialJFAComposite", "JFA_Final" )
@@ -17,21 +19,13 @@ namespace Desert::Graphic
         if ( m_SceneTexture && sceneColor )
             m_SceneTexture->SetImage( sceneColor );
 
-        // UBO field reflection is not populated at runtime (VulkanShader::Reflect fills only block
-        // name/size, not individual members), so UploadRegisteredProperties / FindFieldInAnyUB
-        // would always return null and leave u_OutlineWidth = 0 in the shader, triggering the
-        // early-out that suppresses the outline. Write the UBO as a raw blob instead.
-        struct JFAFinalUB
-        {
-            glm::vec4 OutlineColor;
-            float     OutlineWidth;
-            float     Smoothness;
-        };
-        const JFAFinalUB ub{ .OutlineColor = outlineColor,
-                             .OutlineWidth  = outlineWidth,
-                             .Smoothness    = smoothness };
+        SetOutlineColor( outlineColor );
+        SetOutlineWidth( outlineWidth );
+        SetSmoothness( smoothness );
 
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "JFAFinalUB" ) )
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &ub ), sizeof( ub ) );
+        std::unordered_set<UniformBufferProperty*> dirtyUBs;
+        UploadRegisteredProperties( dirtyUBs );
+        for ( auto* ub : dirtyUBs )
+            ub->UpdateFields();
     }
 } // namespace Desert::Graphic
