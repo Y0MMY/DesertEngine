@@ -217,15 +217,11 @@ namespace Desert::Graphic
         auto& renderer = Renderer::GetInstance();
         for ( const auto& pass : sortedPasses )
         {
-            auto renderPass = RenderPass::Create( {
-                 .TargetFramebuffer = pass.TargetFramebuffer,
-                 .DebugName         = pass.Name,
-            } );
+            if ( !pass.CachedRenderPass )
+                continue;
 
-            renderer.BeginRenderPass( renderPass.get() );
-
+            renderer.BeginRenderPass( pass.CachedRenderPass.get() );
             pass.ExecuteFunc();
-
             renderer.EndRenderPass();
         }
     }

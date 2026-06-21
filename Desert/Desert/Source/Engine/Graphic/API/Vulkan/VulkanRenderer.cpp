@@ -92,14 +92,19 @@ namespace Desert::Graphic::API::Vulkan
                    .offset = { 0, 0 },
                    .extent = { framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() } } };
 
+        const auto& clearSpec = renderPass->GetSpecification().ClearColor;
         std::vector<VkClearValue> clearValues;
         for ( const auto& attachment : framebuffer->GetSpecification().Attachments.Attachments )
         {
             VkClearValue clearValue{};
-            if ( Graphic::Utils::IsDepthFormat( attachment ) )
-                clearValue.depthStencil = { 1.0f, 0 };
+            if ( Graphic::Utils::IsDepthFormat( attachment.Format ) )
+            {
+                clearValue.depthStencil = { clearSpec.DepthStencil.x, static_cast<uint32_t>( clearSpec.DepthStencil.y ) };
+            }
             else
-                clearValue.color = { { 0.1f, 0.1f, 0.1f, 1.0f } };
+            {
+                clearValue.color = { { clearSpec.Color.r, clearSpec.Color.g, clearSpec.Color.b, clearSpec.Color.a } };
+            }
             clearValues.push_back( clearValue );
         }
 
@@ -334,7 +339,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             attachments[i] = {
                  .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = i, .clearValue = clearValues[i] };
-            if ( Graphic::Utils::IsDepthFormat( framebuffer->GetSpecification().Attachments.Attachments[i] ) )
+            if ( Graphic::Utils::IsDepthFormat( framebuffer->GetSpecification().Attachments.Attachments[i].Format ) )
                 attachments[i].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
             clearRects[i] = {
                  .rect           = { .offset = { 0, 0 },

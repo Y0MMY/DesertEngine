@@ -29,19 +29,37 @@ namespace Desert::Graphic::API::Vulkan
         VkAttachmentReference                depthAttachmentReference = {};
         bool                                 hasDepth                 = false;
 
-        uint32_t i = 0;
-        for ( auto format : m_FramebufferSpecification.Attachments.Attachments )
+        auto toVkLoadOp = []( AttachmentLoad op ) -> VkAttachmentLoadOp
         {
+            switch ( op )
+            {
+                case AttachmentLoad::Load:     return VK_ATTACHMENT_LOAD_OP_LOAD;
+                case AttachmentLoad::DontCare: return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                default:                       return VK_ATTACHMENT_LOAD_OP_CLEAR;
+            }
+        };
+        auto toVkStoreOp = []( AttachmentStore op ) -> VkAttachmentStoreOp
+        {
+            return op == AttachmentStore::DontCare ? VK_ATTACHMENT_STORE_OP_DONT_CARE
+                                                   : VK_ATTACHMENT_STORE_OP_STORE;
+        };
+
+        uint32_t i = 0;
+        for ( const auto& attachment : m_FramebufferSpecification.Attachments.Attachments )
+        {
+            const auto format = attachment.Format;
             if ( Graphic::Utils::IsDepthFormat( format ) )
             {
                 VkAttachmentDescription& depthAttachment = attachmentDescriptions.emplace_back();
                 depthAttachment.format         = GetImageVulkanFormat( format );
                 depthAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
-                depthAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                depthAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                depthAttachment.loadOp         = toVkLoadOp( attachment.LoadOp );
+                depthAttachment.storeOp        = toVkStoreOp( attachment.StoreOp );
                 depthAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
                 depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                depthAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                depthAttachment.initialLayout  = attachment.LoadOp == AttachmentLoad::Load
+                                                     ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                                     : VK_IMAGE_LAYOUT_UNDEFINED;
                 depthAttachment.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
                 depthAttachmentReference.attachment = i;
@@ -53,11 +71,13 @@ namespace Desert::Graphic::API::Vulkan
                 VkAttachmentDescription& colorAttachment = attachmentDescriptions.emplace_back();
                 colorAttachment.format         = GetImageVulkanFormat( format );
                 colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
-                colorAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                colorAttachment.loadOp         = toVkLoadOp( attachment.LoadOp );
+                colorAttachment.storeOp        = toVkStoreOp( attachment.StoreOp );
                 colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
                 colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                colorAttachment.initialLayout  = attachment.LoadOp == AttachmentLoad::Load
+                                                     ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                     : VK_IMAGE_LAYOUT_UNDEFINED;
                 colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
                 colorAttachmentReferences.push_back( { i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } );
@@ -106,8 +126,9 @@ namespace Desert::Graphic::API::Vulkan
         VK_CHECK_RESULT( vkCreateRenderPass( vkDevice, &renderPassInfo, nullptr, &m_RenderPass ) );
 
         std::vector<VkImageView> attachments;
-        for ( auto format : m_FramebufferSpecification.Attachments.Attachments )
+        for ( const auto& attachment : m_FramebufferSpecification.Attachments.Attachments )
         {
+            const auto format = attachment.Format;
             Core::Formats::Image2DSpecification imageSpec = {
                  .Tag        = m_FramebufferSpecification.DebugName + "_attachment",
                  .Width      = m_FramebufferSpecification.Width,

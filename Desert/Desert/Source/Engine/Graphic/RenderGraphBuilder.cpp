@@ -1,4 +1,5 @@
 #include "RenderGraphBuilder.hpp"
+#include "RenderPhase.hpp"
 #include <algorithm>
 #include <stack>
 #include <queue>
@@ -57,7 +58,8 @@ namespace Desert::Graphic
 
         m_PhasePasses[phase].push_back( config );
 
-        LOG_DEBUG( "Added pass '{}' to phase '{}' with {} dependencies", name, "TODO", dependencies.size() );
+        LOG_DEBUG( "Added pass '{}' to phase '{}' with {} dependencies", name, RenderPhaseToString( phase ),
+                   dependencies.size() );
     }
 
     void RenderGraphBuilder::AddPhaseDependency( RenderPhase requiredPhase, RenderPhase dependentPhase )
@@ -79,11 +81,6 @@ namespace Desert::Graphic
             LOG_ERROR( "RenderGraph validation failed!" );
             return false;
         }
-
-        m_PhaseOrder = { RenderPhase::DepthPrePass, RenderPhase::Sky,         RenderPhase::Geometry,
-                         RenderPhase::Outline,      RenderPhase::Decals,      RenderPhase::Lighting,
-                         RenderPhase::Transparency, RenderPhase::PostProcess, RenderPhase::Overlay,
-                         RenderPhase::UI,           RenderPhase::Debug };
 
         TopologicalSort();
 
@@ -112,12 +109,78 @@ namespace Desert::Graphic
 
     void RenderGraphBuilder::TopologicalSort()
     {
-        for ( auto& [phase, passes] : m_PhasePasses )
-        {
-            std::vector<PassConfig> sortedPasses;
+        // Kahn's algorithm on the phase dependency graph.
+        // m_PhaseDependencies[B] = { A, C } means B depends on A and C (A,C must come before B).
 
-            std::sort( passes.begin(), passes.end(), []( const PassConfig& a, const PassConfig& b )
-                       { return a.Dependencies.size() < b.Dependencies.size(); } );
+        // Collect all phases that appear either as a key or as a dependency.
+        std::unordered_map<RenderPhase, int> inDegree;
+        std::unordered_map<RenderPhase, std::vector<RenderPhase>> dependents; // A -> [phases that need A done first]
+
+        for ( const auto& [phase, _] : m_PhasePasses )
+            inDegree.emplace( phase, 0 );
+
+        for ( const auto& [dependent, prereqs] : m_PhaseDependencies )
+        {
+            inDegree.emplace( dependent, 0 );
+            for ( RenderPhase prereq : prereqs )
+            {
+                inDegree.emplace( prereq, 0 );
+                dependents[prereq].push_back( dependent );
+            }
+        }
+
+        for ( const auto& [dependent, prereqs] : m_PhaseDependencies )
+            inDegree[dependent] += static_cast<int>( prereqs.size() );
+
+        // Stable seed order so phases without dependencies appear in declaration order.
+        constexpr RenderPhase kDeclOrder[] = {
+            RenderPhase::DepthPrePass, RenderPhase::Sky,         RenderPhase::Geometry,
+            RenderPhase::Outline,      RenderPhase::Decals,      RenderPhase::Lighting,
+            RenderPhase::Transparency, RenderPhase::PostProcess, RenderPhase::Overlay,
+            RenderPhase::UI,           RenderPhase::Debug
+        };
+
+        std::queue<RenderPhase> ready;
+        for ( RenderPhase p : kDeclOrder )
+        {
+            auto it = inDegree.find( p );
+            if ( it != inDegree.end() && it->second == 0 )
+                ready.push( p );
+        }
+
+        m_PhaseOrder.clear();
+        while ( !ready.empty() )
+        {
+            RenderPhase cur = ready.front();
+            ready.pop();
+            m_PhaseOrder.push_back( cur );
+
+            for ( RenderPhase dep : dependents[cur] )
+            {
+                if ( --inDegree[dep] == 0 )
+                    ready.push( dep );
+            }
+        }
+
+        // Build the flat sorted pass list and cache RenderPass objects.
+        m_SortedPasses.clear();
+        for ( RenderPhase phase : m_PhaseOrder )
+        {
+            auto it = m_PhasePasses.find( phase );
+            if ( it != m_PhasePasses.end() )
+            {
+                for ( auto& pass : it->second )
+                {
+                    if ( pass.TargetFramebuffer && !pass.CachedRenderPass )
+                    {
+                        pass.CachedRenderPass = RenderPass::Create( {
+                             .TargetFramebuffer = pass.TargetFramebuffer,
+                             .DebugName         = pass.Name,
+                        } );
+                    }
+                    m_SortedPasses.push_back( pass );
+                }
+            }
         }
     }
 
@@ -162,21 +225,7 @@ namespace Desert::Graphic
 
     const std::vector<RenderGraphBuilder::PassConfig>& RenderGraphBuilder::GetSortedPasses() const
     {
-        static std::vector<PassConfig> result;
-        result.clear();
-
-        for ( RenderPhase phase : m_PhaseOrder )
-        {
-            if ( auto it = m_PhasePasses.find( phase ); it != m_PhasePasses.end() )
-            {
-                for ( const auto& pass : it->second )
-                {
-                    result.push_back( pass );
-                }
-            }
-        }
-
-        return result;
+        return m_SortedPasses;
     }
 
     void RenderGraphBuilder::Clear()
@@ -184,6 +233,7 @@ namespace Desert::Graphic
         m_Passes.clear();
         m_PhasePasses.clear();
         m_PhaseOrder.clear();
+        m_SortedPasses.clear();
         m_PhaseDependencies.clear();
         m_TextureDependencies.clear();
 

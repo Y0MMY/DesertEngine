@@ -101,7 +101,7 @@ namespace Desert::Graphic
         if ( !resolvedShader )
         {
             LOG_ERROR( "Could not find the shader: {}", shaderName );
-            DESERT_VERIFY( false )
+            DESERT_VERIFY( false );
         }
 
         switch ( RendererAPI::GetAPIType() )

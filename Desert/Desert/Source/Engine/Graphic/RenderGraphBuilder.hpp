@@ -27,9 +27,12 @@ namespace Desert::Graphic
             std::string                       Name;
             RenderPhase                       Phase;
             std::function<void()>             ExecuteFunc;
-            GraphicsPipelineSpecification             PipelineSpec;
+            GraphicsPipelineSpecification     PipelineSpec;
             std::shared_ptr<Framebuffer>      TargetFramebuffer;
             std::vector<RenderPassDependency> Dependencies;
+
+            // Cached once in Build(); reused every frame.
+            std::shared_ptr<RenderPass>       CachedRenderPass;
         };
 
         RenderGraphBuilder();
@@ -70,6 +73,8 @@ namespace Desert::Graphic
 
         std::unordered_map<RenderPhase, std::set<RenderPhase>>               m_PhaseDependencies;
         std::unordered_map<std::string, std::pair<RenderPhase, RenderPhase>> m_TextureDependencies;
+
+        std::vector<PassConfig> m_SortedPasses;
 
         void TopologicalSort();
         bool CheckForCycles() const;
