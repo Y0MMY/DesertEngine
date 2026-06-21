@@ -28,6 +28,15 @@ namespace Desert::Graphic
             return true;
         }
 
+        bool SetRawBytes( const void* data, size_t size )
+        {
+            if ( size > m_Field.Size )
+                return false;
+            memcpy( m_LocalData.Data, data, size );
+            m_DirtyCount = 3;
+            return true;
+        }
+
         template <typename T>
         bool SetArray( const T* data, uint32_t count )
         {

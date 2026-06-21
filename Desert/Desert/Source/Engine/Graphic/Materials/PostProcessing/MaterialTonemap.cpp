@@ -4,11 +4,12 @@ namespace Desert::Graphic
 {
     MaterialTonemap::MaterialTonemap() : Material( "MaterialTonemap", "SceneComposite" )
     {
-        m_TonemapBinding = std::make_unique<MaterialHelper::TonemapBinding>( m_MaterialExecutor.get() );
+        m_GeometryTexture = m_MaterialExecutor->GetTexture2DProperty( "u_GeometryTexture" ).get();
     }
 
     void MaterialTonemap::Bind( const std::shared_ptr<Image2D>& targetImage )
     {
-        m_TonemapBinding->UpdateTexture( targetImage.get() );
+        if ( m_GeometryTexture && targetImage )
+            m_GeometryTexture->SetImage( targetImage.get() );
     }
 } // namespace Desert::Graphic

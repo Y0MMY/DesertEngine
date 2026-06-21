@@ -195,7 +195,10 @@ namespace Desert::Graphic::System
         // scene through unchanged (JFA_Final early-out).
         const float effectiveWidth = m_Enabled ? m_OutlineWidth : 0.0f;
         m_MaterialComposite->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
-                                   sceneColor.get(), { m_OutlineColor, effectiveWidth, m_Smoothness } );
+                                   sceneColor.get(),
+                                   glm::vec4( m_OutlineColor, 1.0f ),
+                                   effectiveWidth,
+                                   m_Smoothness );
         RunQuad( m_Framebuffer, "JFA_Final", m_FinalPipeline.get(), m_MaterialComposite->GetMaterialExecutor() );
     }
 } // namespace Desert::Graphic::System

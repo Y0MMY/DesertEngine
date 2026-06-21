@@ -61,15 +61,15 @@ namespace Desert::Graphic
 
                 auto pbrAsset = static_cast<const Assets::PBRMaterialAsset*>( asset );
 
-                // Set default parameters from asset (only scalar values, not textures)
+                // Override typed TProperty defaults from the asset
                 if ( auto color = pbrAsset->GetAlbedoColor() )
-                    pbrMaterial->SetDefaultParameter( "AlbedoColor", *color, MaterialPropertyType::Vec3 );
+                    pbrMaterial->SetAlbedoColor( *color );
 
                 if ( auto metallic = pbrAsset->GetMetallicFactor() )
-                    pbrMaterial->SetDefaultParameter( "MetallicFactor", *metallic, MaterialPropertyType::Float );
+                    pbrMaterial->SetMetallicValue( *metallic );
 
                 if ( auto roughness = pbrAsset->GetRoughnessFactor() )
-                    pbrMaterial->SetDefaultParameter( "RoughnessFactor", *roughness, MaterialPropertyType::Float );
+                    pbrMaterial->SetRoughnessValue( *roughness );
 
                 return pbrMaterial;
             }
@@ -111,12 +111,12 @@ namespace Desert::Graphic
                 }*/
             }
 
-            // Set scalar values
+            // Per-instance scalar overrides — names must match TProperty shader names
             if ( auto metallic = pbrAsset->GetMetallicFactor() )
-                instance->SetFloat( "MetallicFactor", *metallic );
+                instance->SetFloat( "MetallicValue", *metallic );
 
             if ( auto roughness = pbrAsset->GetRoughnessFactor() )
-                instance->SetFloat( "RoughnessFactor", *roughness );
+                instance->SetFloat( "RoughnessValue", *roughness );
 
             if ( auto color = pbrAsset->GetAlbedoColor() )
                 instance->SetVec3( "AlbedoColor", *color );
@@ -127,15 +127,8 @@ namespace Desert::Graphic
 
     std::shared_ptr<Material> MaterialFactory::CreateDefaultPBRMaterial()
     {
-        auto material = std::make_shared<StaticMaterialPBR>();
-
-        material->SetDefaultParameter( "AlbedoColor", glm::vec3( 0.8f, 0.8f, 0.8f ), MaterialPropertyType::Vec3 );
-        material->SetDefaultParameter( "MetallicFactor", 0.0f, MaterialPropertyType::Float );
-        material->SetDefaultParameter( "RoughnessFactor", 0.5f, MaterialPropertyType::Float );
-        material->SetDefaultParameter( "UseAlbedoTexture", 0, MaterialPropertyType::Int );
-        material->SetDefaultParameter( "UseNormalTexture", 0, MaterialPropertyType::Int );
-
-        return material;
+        // MPROPERTY defaults in StaticMaterialPBR constructor handle initialization.
+        return std::make_shared<StaticMaterialPBR>();
     }
 
     std::shared_ptr<MaterialInstance> MaterialFactory::CreatePrimitiveMaterial( const std::string& name,
@@ -146,9 +139,8 @@ namespace Desert::Graphic
         auto instance    = pbrMaterial->CreateInstance( name );
 
         instance->SetVec3( "AlbedoColor", color );
-        instance->SetFloat( "MetallicFactor", metallic );
-        instance->SetFloat( "RoughnessFactor", roughness );
-        instance->SetInt( "UseAlbedoTexture", 0 );
+        instance->SetFloat( "MetallicValue", metallic );
+        instance->SetFloat( "RoughnessValue", roughness );
 
         return instance;
     }

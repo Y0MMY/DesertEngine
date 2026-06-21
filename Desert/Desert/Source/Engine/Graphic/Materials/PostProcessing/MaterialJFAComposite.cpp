@@ -9,24 +9,24 @@ namespace Desert::Graphic
     }
 
     void MaterialJFAComposite::Bind( const Image2D* jfaSeed, const Image2D* sceneColor,
-                                     const JFACompositeParams& params )
+                                     const glm::vec4& outlineColor, float outlineWidth, float smoothness )
     {
         if ( m_JFATexture && jfaSeed )
-        {
             m_JFATexture->SetImage( jfaSeed );
-        }
+
         if ( m_SceneTexture && sceneColor )
-        {
             m_SceneTexture->SetImage( sceneColor );
-        }
 
-        const JFAFinalUB ub{ .OutlineColor = glm::vec4( params.OutlineColor, 1.0f ),
-                             .OutlineWidth = params.OutlineWidth,
-                             .Smoothness   = params.Smoothness };
+        // Update MPROPERTY values — Material::Bind is NOT called here (no MaterialInstance),
+        // so push to UB fields directly via the cached executor.
+        SetOutlineColor( outlineColor );
+        SetOutlineWidth( outlineWidth );
+        SetSmoothness( smoothness );
 
-        if ( auto prop = m_MaterialExecutor->GetUniformBufferProperty( "JFAFinalUB" ) )
-        {
-            prop->SetRawData( reinterpret_cast<const std::byte*>( &ub ), sizeof( ub ) );
-        }
+        // Flush dirty TProperty fields to the UB
+        std::unordered_set<UniformBufferProperty*> dirtyUBs;
+        UploadRegisteredProperties( dirtyUBs );
+        for ( auto* ub : dirtyUBs )
+            ub->UpdateFields();
     }
 } // namespace Desert::Graphic

@@ -1,7 +1,6 @@
 #include "MaterialSkybox.hpp"
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
-
 #include <Engine/Graphic/ShaderProtocols/Camera.hpp>
 
 namespace Desert::Graphic
@@ -9,9 +8,8 @@ namespace Desert::Graphic
     MaterialSkybox::MaterialSkybox( const std::shared_ptr<Assets::SkyboxAsset>& baseAsset )
          : Material( "MaterialSkybox", "Skybox" ), m_BaseMaterial( baseAsset )
     {
-        m_SkyboxBinding = std::make_unique<MaterialHelper::SkyboxDataBinding>( m_MaterialExecutor.get() );
-
-        m_Environment = Graphic::EnvironmentManager::Create( baseAsset );
+        m_CubeMapTexture = m_MaterialExecutor->GetTextureCubeProperty( "samplerCubeMap" ).get();
+        m_Environment    = Graphic::EnvironmentManager::Create( baseAsset );
     }
 
     void MaterialSkybox::Bind( const UpdateMaterialSkyboxInfo& data )
@@ -21,14 +19,14 @@ namespace Desert::Graphic
         {
             return;
         }
-        ImageCube* image =
-             (ImageCube*)Runtime::ResourceRegistry::GetImageService()->Resolve( m_Environment.RadianceMap );
-        if ( !image )
-        {
-            return;
-        }
 
-        m_SkyboxBinding->UpdateSkybox( image );
+        auto* image = static_cast<ImageCube*>(
+             Runtime::ResourceRegistry::GetImageService()->Resolve( m_Environment.RadianceMap ) );
+        if ( !image )
+            return;
+
+        if ( m_CubeMapTexture )
+            m_CubeMapTexture->SetTexture( image );
 
         static ShaderProtocols::Camera CameraUB;
         CameraUB.View       = data.Camera->GetViewMatrix();
@@ -36,7 +34,7 @@ namespace Desert::Graphic
         CameraUB.CameraPos  = data.Camera->GetPosition();
 
         Get<UniformBufferProperty>( CameraUB.Name )
-             ->SetRawData( (std::byte*)&CameraUB, sizeof( ShaderProtocols::Camera ) );
+             ->SetRawData( reinterpret_cast<std::byte*>( &CameraUB ), sizeof( ShaderProtocols::Camera ) );
     }
 
 } // namespace Desert::Graphic
