@@ -17,6 +17,7 @@ namespace Desert::Editor
         }
 
         virtual void OnEvent( Common::Event& e ) {}
+        virtual void OnPreUpdate()               {}
         virtual ~IPanel()                        = default;
         virtual void       OnUIRender()          = 0;
         const std::string& GetName() const

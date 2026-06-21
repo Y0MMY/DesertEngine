@@ -49,38 +49,7 @@ namespace Desert::Graphic::System
             m_StepMaterials.push_back( std::make_unique<MaterialJFAStep>() );
         }
 
-        BindResources();
-
         return BOOLSUCCESS;
-    }
-
-    void JumpFloodOutlineRenderer::SetMaskFramebuffer( const std::weak_ptr<Framebuffer>& maskFramebuffer )
-    {
-        m_MaskFramebuffer = maskFramebuffer;
-        BindResources();
-    }
-
-    void JumpFloodOutlineRenderer::BindResources()
-    {
-        // Step i always reads seed[i % 2] and runs at a fixed sample distance — bind once.
-        for ( uint32_t i = 0; i < m_StepCount; ++i )
-        {
-            const int stepLength = 1 << ( m_StepCount - 1 - i );
-            m_StepMaterials[i]->Bind( m_SeedFramebuffers[i % 2]->GetColorAttachmentImage().get(), stepLength );
-        }
-
-        // Final reads the last seed buffer (fixed parity) and the scene color.
-        if ( const auto& sceneFramebuffer = m_TargetFramebuffer.lock() )
-        {
-            m_MaterialComposite->SetTextures( m_SeedFramebuffers[m_StepCount % 2]->GetColorAttachmentImage().get(),
-                                              sceneFramebuffer->GetColorAttachmentImage().get() );
-        }
-
-        // Init reads the silhouette mask (if already wired).
-        if ( const auto& maskFramebuffer = m_MaskFramebuffer.lock() )
-        {
-            m_MaterialInit->Bind( maskFramebuffer->GetColorAttachmentImage().get() );
-        }
     }
 
     void JumpFloodOutlineRenderer::Shutdown()
@@ -171,9 +140,6 @@ namespace Desert::Graphic::System
                 m_StepMaterials.push_back( std::make_unique<MaterialJFAStep>() );
             }
         }
-
-        // Framebuffer images were recreated; rebind every material's input textures.
-        BindResources();
     }
 
     void JumpFloodOutlineRenderer::RunQuad( const std::shared_ptr<Framebuffer>& target, const std::string& debugName,
@@ -200,37 +166,36 @@ namespace Desert::Graphic::System
             return;
         }
 
-        // Index of the seed framebuffer holding the most recent result. Step i writes seed[(i+1)%2],
-        // so after m_StepCount steps the result lives in seed[m_StepCount % 2] (a fixed parity).
-        if ( m_Enabled && !m_MaskFramebuffer.expired() )
+        const auto sceneColor = sceneFramebuffer->GetColorAttachmentImage();
+
+        // Index of the seed framebuffer holding the most recent result.
+        int readIndex = 0;
+
+        const auto& maskFramebuffer = m_MaskFramebuffer.lock();
+        if ( m_Enabled && maskFramebuffer )
         {
-            // Init: silhouette mask -> seed[0]. (Input textures were bound once in BindResources.)
+            // Init: silhouette mask -> seed[0].
+            m_MaterialInit->Bind( maskFramebuffer->GetColorAttachmentImage().get() );
             RunQuad( m_SeedFramebuffers[0], "JFA_Init", m_InitPipeline.get(),
                      m_MaterialInit->GetMaterialExecutor() );
 
             // Ping-pong propagation steps with halving sample distance.
-            int readIndex = 0;
             for ( uint32_t i = 0; i < m_StepCount; ++i )
             {
                 const int writeIndex = 1 - readIndex;
+                m_StepMaterials[i]->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
+                                          1 << ( m_StepCount - 1 - i ) );
                 RunQuad( m_SeedFramebuffers[writeIndex], "JFA_Step", m_StepPipeline.get(),
                          m_StepMaterials[i]->GetMaterialExecutor() );
                 readIndex = writeIndex;
             }
         }
 
-        // Final composite -> output framebuffer. Only the outline parameters change per frame; the
-        // input textures stay bound from BindResources. When disabled, width 0 makes the shader pass
-        // the scene through unchanged (JFA_Final early-out).
+        // Final composite -> output framebuffer. When disabled, width 0 makes the shader pass the
+        // scene through unchanged (JFA_Final early-out).
         const float effectiveWidth = m_Enabled ? m_OutlineWidth : 0.0f;
-        if ( m_OutlineColor != m_AppliedColor || effectiveWidth != m_AppliedWidth ||
-             m_Smoothness != m_AppliedSmoothness )
-        {
-            m_MaterialComposite->SetParams( { m_OutlineColor, effectiveWidth, m_Smoothness } );
-            m_AppliedColor      = m_OutlineColor;
-            m_AppliedWidth      = effectiveWidth;
-            m_AppliedSmoothness = m_Smoothness;
-        }
+        m_MaterialComposite->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
+                                   sceneColor.get(), { m_OutlineColor, effectiveWidth, m_Smoothness } );
         RunQuad( m_Framebuffer, "JFA_Final", m_FinalPipeline.get(), m_MaterialComposite->GetMaterialExecutor() );
     }
 } // namespace Desert::Graphic::System

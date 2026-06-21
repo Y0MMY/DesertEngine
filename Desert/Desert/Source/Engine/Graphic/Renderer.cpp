@@ -105,6 +105,11 @@ namespace Desert::Graphic
         s_RendererAPI->ResizeWindowEvent( width, height );
     }
 
+    void Renderer::WaitDeviceIdle()
+    {
+        s_RendererAPI->WaitDeviceIdle();
+    }
+
     std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()
     {
         return s_RendererAPI->GetCompositeFramebuffer();

@@ -25,6 +25,7 @@
 #include "Editor/Panels/FileExplorer/FileExplorerPanel.hpp"
 #include "Editor/Panels/ViewportPanel/ViewportPanel.hpp"
 #include "Editor/Panels/MeshEditor/MeshEditorPanel.hpp"
+#include "Editor/Panels/Logs/LogsPanel.hpp"
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
@@ -117,6 +118,7 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>( "Resources/" ) );
         m_Panels.emplace_back( std::make_unique<Editor::MeshEditorPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
@@ -131,6 +133,12 @@ namespace Desert::Editor
             m_SceneLoadRequested.reset();
             LoadSceneInternal( path );
         }
+
+        // Apply any deferred panel state (e.g. viewport resize) before scene rendering.
+        // Panels defer GPU-side resize from OnUIRender to here so descriptor set pools are
+        // never destroyed while their DS are bound to the recording command buffer.
+        for ( auto& panel : m_Panels )
+            panel->OnPreUpdate();
 
         const auto& beginResult = m_MainScene->BeginScene();
         if ( !beginResult )

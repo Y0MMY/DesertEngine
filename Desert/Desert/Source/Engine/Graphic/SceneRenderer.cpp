@@ -108,6 +108,10 @@ namespace Desert::Graphic
         if ( width == 0 && height == 0 )
             return;
         auto& renderer = Renderer::GetInstance();
+        // Ensure all in-flight GPU work is done before destroying/recreating Vulkan resources
+        // (framebuffers, descriptor pools). Resize can be triggered from UI code while a command
+        // buffer is still recording or submitted frames are executing.
+        renderer.WaitDeviceIdle();
         renderer.ResizeWindowEvent( width, height );
         m_TargetFramebuffer->Resize( width, height );
 
@@ -230,7 +234,7 @@ namespace Desert::Graphic
     {
         auto& renderer = Renderer::GetInstance();
 
-        static auto clearRenderPass = RenderPass::Create( {
+        auto clearRenderPass = RenderPass::Create( {
              .TargetFramebuffer = m_TargetFramebuffer,
              .DebugName         = "ClearTargetFramebuffer",
         } );

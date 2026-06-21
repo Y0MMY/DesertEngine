@@ -48,6 +48,7 @@ namespace Desert::Graphic
                                       const MaterialExecutor* materialExecutor = nullptr ) = 0;
 
         virtual void                         ResizeWindowEvent( uint32_t width, uint32_t height ) = 0;
+        virtual void                         WaitDeviceIdle()                                     = 0;
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const                      = 0;
 
     public:

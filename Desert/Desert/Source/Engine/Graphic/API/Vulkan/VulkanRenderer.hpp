@@ -36,6 +36,7 @@ namespace Desert::Graphic::API::Vulkan
                                       const MaterialExecutor* materialExecutor = nullptr ) override;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
+        virtual void WaitDeviceIdle() override;
 
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const override;
 

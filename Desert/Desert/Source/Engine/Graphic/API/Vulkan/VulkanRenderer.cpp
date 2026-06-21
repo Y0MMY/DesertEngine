@@ -287,6 +287,12 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
     }
+
+    void VulkanRendererAPI::WaitDeviceIdle()
+    {
+        vkDeviceWaitIdle( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                               ->GetVulkanLogicalDevice() );
+    }
     std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
     {
         return m_CompositeFramebuffer.lock();

@@ -13,7 +13,7 @@ namespace Desert::Editor
         explicit ScenePropertiesPanel( const std::shared_ptr<Desert::Core::Scene>&  scene,
                                        const std::shared_ptr<Assets::AssetManager>& assetManager,
                                        const Animation::AnimationLibrary*           animationLibrary )
-             : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetManager( assetManager ),
+             : IPanel( "Details" ), m_Scene( scene ), m_AssetManager( assetManager ),
                m_AnimationLibrary( animationLibrary ), m_MaterialsPanel( std::make_shared<MaterialsPanel>() )
         {
         }

@@ -39,6 +39,7 @@ namespace Desert::Graphic
         void PresentFinalImage();
 
         void ResizeWindowEvent( uint32_t width, uint32_t height );
+        void WaitDeviceIdle();
 
         RendererAPI* GetRendererAPI() const;
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <Engine/Desert.hpp>
 
 #include "Editor/Panels/IPanel.hpp"
@@ -15,6 +17,7 @@ namespace Desert::Editor
     public:
         explicit ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene );
         void OnUIRender() override;
+        void OnPreUpdate() override;
 
         void OnEvent( Common::Event& e ) override;
 
@@ -67,6 +70,11 @@ namespace Desert::Editor
         ViewportData m_ViewportData;
         GizmoType    m_GizmoType    = GizmoType::None;
         bool         m_GizmoHovered = false;
+
+        // Resize is deferred from OnUIRender (within the recording window) to OnPreUpdate
+        // (start of next frame, before any rendering) to avoid destroying descriptor set pools
+        // while they are bound to a recording command buffer.
+        std::optional<glm::vec2> m_PendingViewportSize;
 
         std::shared_ptr<Desert::Core::Scene>  m_Scene;
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;

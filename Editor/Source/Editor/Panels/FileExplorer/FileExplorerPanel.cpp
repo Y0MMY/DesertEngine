@@ -68,7 +68,7 @@ namespace Desert::Editor
     };
 
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath )
-         : IPanel( " FileExplorer" ), m_CurrentPath( rootPath ), m_CurrentDir( nullptr ),
+         : IPanel( "Assets" ), m_CurrentPath( rootPath ), m_CurrentDir( nullptr ),
            m_BaseProjectDir( nullptr ), m_PreviousDirectory( nullptr ), m_GridSize( 120.0f ),
            m_MinGridSize( 40.0f ), m_MaxGridSize( 400.0f ), m_IsInListView( false ), m_IsDragging( false ),
            m_ShowHiddenFiles( false ), m_UpdateNavigationPath( true ), m_Refresh( false )
@@ -93,20 +93,17 @@ namespace Desert::Editor
         m_Delimiter = "/";
 #endif
 
-        // »спользуем переданный путь или добавл€ем Assets
         if ( rootPath.empty() )
         {
-            m_BasePath = "Assets"; // или путь из настроек проекта
+            m_BasePath = "Assets"; 
         }
         else
         {
             m_BasePath = rootPath.string();
         }
 
-        // 1. —оздаем базовую структуру директорий
         std::string baseDirectoryHandle = ProcessDirectory( m_BasePath, nullptr, true );
 
-        // 2. »нициализируем указатели
         if ( m_Directories.find( baseDirectoryHandle ) != m_Directories.end() )
         {
             m_BaseProjectDir = m_Directories[baseDirectoryHandle].get();
@@ -517,12 +514,12 @@ namespace Desert::Editor
                         m_UpdateNavigationPath = false;
                     }
                     {
-                        int secIdx = 0, newPwdLastSecIdx = -1;
-                        int dirIndex = 0;
+                        int newPwdLastSecIdx = -1;
                         ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.1f, 0.2f, 0.7f, 0.0f ) );
 
-                        for ( auto& directory : m_BreadCrumbData )
+                        for ( size_t i = 0; i < m_BreadCrumbData.size(); ++i )
                         {
+                            auto*       directory = m_BreadCrumbData[i];
                             std::string fileName =
                                  std::filesystem::path( directory->AssetPath ).filename().string();
 
@@ -530,8 +527,13 @@ namespace Desert::Editor
                             if ( ImGui::SmallButton( fileName.c_str() ) )
                                 ChangeDirectory( directory );
                             ImGui::PopID();
-
                             ImGui::SameLine();
+
+                            if ( i + 1 < m_BreadCrumbData.size() )
+                            {
+                                ImGui::TextDisabled( ">" );
+                                ImGui::SameLine();
+                            }
                         }
                         ImGui::PopStyleColor();
 
