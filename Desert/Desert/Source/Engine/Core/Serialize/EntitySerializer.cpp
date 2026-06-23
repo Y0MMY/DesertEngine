@@ -153,7 +153,8 @@ namespace Desert::Core::Serialize
         if ( entity.HasComponent<ECS::DirectionLightComponent>() )
         {
             const auto& light = entity.GetComponent<ECS::DirectionLightComponent>();
-            data.DirectionLight = Assets::DirectionLightComponentSer{ .Intensity = light.Intensity };
+            data.DirectionLight =
+                 Assets::DirectionLightComponentSer{ .Color = light.Color, .Intensity = light.Intensity };
         }
 
         if ( entity.HasComponent<ECS::PointLightComponent>() )
@@ -326,6 +327,7 @@ namespace Desert::Core::Serialize
         if ( data.DirectionLight )
         {
             auto& light = entity.AddComponent<ECS::DirectionLightComponent>();
+            light.Color     = data.DirectionLight->Color.value_or( glm::vec3( 1.0f ) );
             light.Intensity = data.DirectionLight->Intensity;
         }
 

@@ -4,9 +4,11 @@
 
 namespace Desert::Graphic::ShaderProtocols
 {
+    // std140-friendly layout (two vec4s, 32 bytes) matching DirectionLightsUB in PBR.glsl.frag.
     struct DirectionLightPayload
     {
-        glm::vec3 Direction;
+        glm::vec4 Direction;      // xyz = normalized direction
+        glm::vec4 ColorIntensity; // rgb = color, a = intensity
     };
 
     struct DirectionLight

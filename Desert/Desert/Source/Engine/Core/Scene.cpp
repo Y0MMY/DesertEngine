@@ -42,7 +42,9 @@ namespace Desert::Core
                  {
                      const glm::vec3& rawDir = transform.Translation;
                      if ( glm::length( rawDir ) > 0.001f )
-                         sceneRendererInfo.DirLights.DirectionLights.push_back( { glm::normalize( rawDir ) } );
+                         sceneRendererInfo.DirLights.DirectionLights.push_back(
+                              { glm::vec4( glm::normalize( rawDir ), 0.0f ),
+                                glm::vec4( light.Color, light.Intensity ) } );
                  } );
         }
 

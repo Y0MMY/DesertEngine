@@ -44,7 +44,9 @@ namespace Desert::Assets
 
     struct DirectionLightComponentSer
     {
-        float Intensity = 1.0f;
+        // optional for backward compatibility: scenes serialized before Color existed simply omit it.
+        std::optional<glm::vec3> Color     = glm::vec3( 1.0f );
+        float                    Intensity = 1.0f;
     };
 
     struct PointLightComponentSer
