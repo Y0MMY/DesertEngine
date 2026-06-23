@@ -32,7 +32,7 @@ namespace Desert::ECS
                 {
                     return;
                 }
-              //  renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset );
+                renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset );
                 break;
             }
         }

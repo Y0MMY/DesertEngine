@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/ShaderResources/ShaderReflectionTypes.hpp>
+#include <Engine/Graphic/Materials/Properties/PropertyDirty.hpp>
 #include <Common/Core/Memory/Buffer.hpp>
 
 namespace Desert::Graphic
@@ -9,7 +10,7 @@ namespace Desert::Graphic
     {
     public:
         FieldProperty( const ShaderResources::ShaderLayout::ShaderFieldLayout& field )
-             : m_Field( field ), m_DirtyCount( 3 )
+             : m_Field( field ), m_DirtyCount( PropertyDirty::DirtyLifetime() )
         {
             m_LocalData.Allocate( field.Size );
         }
@@ -24,7 +25,7 @@ namespace Desert::Graphic
             }
 
             memcpy( m_LocalData.Data, &value, sizeof( T ) );
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
             return true;
         }
 
@@ -33,7 +34,7 @@ namespace Desert::Graphic
             if ( size > m_Field.Size )
                 return false;
             memcpy( m_LocalData.Data, data, size );
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
             return true;
         }
 
@@ -48,7 +49,7 @@ namespace Desert::Graphic
             }
 
             memcpy( m_LocalData.Data, data, sizeof( T ) * count );
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
             return true;
         }
 
@@ -82,11 +83,13 @@ namespace Desert::Graphic
 
         void MarkDirty()
         {
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
         }
         void MarkClean()
         {
-            if ( m_DirtyCount > 0 )
+            // Clean at most once per frame so the dirty window spans frames-in-flight distinct frames,
+            // even when the owning uniform buffer is flushed multiple times within a single frame.
+            if ( PropertyDirty::ConsumeCleanThisFrame( m_LastCleanFrame ) && m_DirtyCount > 0 )
             {
                 m_DirtyCount--;
             }
@@ -110,5 +113,6 @@ namespace Desert::Graphic
         ShaderResources::ShaderLayout::ShaderFieldLayout m_Field;
         Common::Memory::Buffer                           m_LocalData;
         uint32_t                                         m_DirtyCount;
+        uint64_t                                         m_LastCleanFrame = PropertyDirty::kNeverCleaned;
     };
 } // namespace Desert::Graphic

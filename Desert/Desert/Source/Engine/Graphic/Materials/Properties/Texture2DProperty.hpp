@@ -21,8 +21,8 @@ namespace Desert::Graphic
                 if ( m_Texture )
                 {
                     m_Uniform->SetImage2D( m_Texture );
+                    backend->ApplyTexture2D( this );
                 }
-                backend->ApplyTexture2D( this );
                 MarkClean();
             }
         }
@@ -39,7 +39,7 @@ namespace Desert::Graphic
         void SetImage( const Image2D* texture )
         {
             m_Texture = texture;
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
         }
 
         const auto& GetUniform() const

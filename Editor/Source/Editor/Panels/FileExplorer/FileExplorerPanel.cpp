@@ -987,20 +987,19 @@ namespace Desert::Editor
 
         if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceAllowNullID ) )
         {
-            /* ImGui::TextUnformatted(
-                  m_Editor->GetIconFontIcon( ToStdString( m_CurrentDir->Children[dirIndex]->AssetPath ) ) );
+            const std::string& assetPath = m_CurrentDir->Children[dirIndex]->AssetPath;
+            const FileType     fileType  = m_CurrentDir->Children[dirIndex]->Type;
 
-             ImGui::SameLine();
-             m_MovePath           = m_CurrentDir->Children[dirIndex]->AssetPath;
-             String8 resolvedPath = StringUtilities::AbsolutePathToRelativeFileSystemPath(
-                  m_Arena, m_MovePath, m_BasePath, Str8Lit( "//Assets" ) );
+            // Generic payload for all asset files
+            ImGui::SetDragDropPayload( "AssetFile", assetPath.c_str(), assetPath.size() + 1 );
 
-             ImGui::TextUnformatted( (const char*)resolvedPath.str );
+            // Prefab-specific payload so the hierarchy panel can instantiate directly
+            if ( fileType == FileType::Prefab )
+                ImGui::SetDragDropPayload( "PREFAB_FILE", assetPath.c_str(), assetPath.size() + 1 );
 
-             size_t size = sizeof( const char* ) + resolvedPath.size;
-             ImGui::SetDragDropPayload( "AssetFile", resolvedPath.str, size );
-             m_IsDragging = true;
-             ImGui::EndDragDropSource();*/
+            ImGui::TextUnformatted( assetPath.c_str() );
+            m_IsDragging = true;
+            ImGui::EndDragDropSource();
         }
 
         if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )

@@ -5,8 +5,10 @@
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Core::Serialize
@@ -75,8 +77,17 @@ namespace Desert::Core::Serialize
             }
 
             meshSer.MaterialSlots = smc.MaterialSlots;
+            if ( !smc.MaterialSlots.empty() )
+            {
+                meshSer.MaterialPaths = std::vector<std::string>{};
+                for ( auto handle : smc.MaterialSlots )
+                {
+                    auto matAsset = assetManager.FindByHandle<Assets::MaterialAsset>( handle );
+                    meshSer.MaterialPaths->push_back( matAsset ? matAsset->GetMetadata().Filepath.string() : "" );
+                }
+            }
             meshSer.Primitive = smc.Primitive;
-            
+
             if ( smc.RuntimeMesh )
             {
                 const auto& vertices = smc.RuntimeMesh->GetVertices();
@@ -120,6 +131,15 @@ namespace Desert::Core::Serialize
             }
 
             meshSer.MaterialSlots = smc.MaterialSlots;
+            if ( !smc.MaterialSlots.empty() )
+            {
+                meshSer.MaterialPaths = std::vector<std::string>{};
+                for ( auto handle : smc.MaterialSlots )
+                {
+                    auto matAsset = assetManager.FindByHandle<Assets::MaterialAsset>( handle );
+                    meshSer.MaterialPaths->push_back( matAsset ? matAsset->GetMetadata().Filepath.string() : "" );
+                }
+            }
             data.SkinnedMesh = meshSer;
         }
 
@@ -151,12 +171,7 @@ namespace Desert::Core::Serialize
 
             if ( skybox.SkyboxHandle != 0 )
             {
-                auto asset = assetManager.FindByHandle<Assets::MeshAsset>( skybox.SkyboxHandle ); // NOTE: Skybox is often handled as MeshAsset/Texture
-                if ( !asset )
-                {
-                     // Fallback check in other asset types if needed, but let's assume it's stored correctly
-                }
-
+                auto asset = assetManager.FindByHandle<Assets::SkyboxAsset>( skybox.SkyboxHandle );
                 if ( asset )
                     skyboxSer.SkyboxPath = asset->GetMetadata().Filepath.string();
             }
@@ -168,9 +183,14 @@ namespace Desert::Core::Serialize
 
     void EntitySerializer::DeserializeEntity( const Assets::EntityData& data, ECS::Entity entity, const Assets::AssetManager& assetManager )
     {
-        // Tag
+        // Tag — entity is always created with TagComponent; avoid double AddComponent
         if ( data.Tag )
-            entity.AddComponent<ECS::TagComponent>().Tag = *data.Tag;
+        {
+            if ( entity.HasComponent<ECS::TagComponent>() )
+                entity.GetComponent<ECS::TagComponent>().Tag = *data.Tag;
+            else
+                entity.AddComponent<ECS::TagComponent>().Tag = *data.Tag;
+        }
 
         // Transform
         if ( data.Translation || data.Rotation || data.Scale )
@@ -206,7 +226,24 @@ namespace Desert::Core::Serialize
                 }
             }
 
-            smc.MaterialSlots = data.StaticMesh->MaterialSlots;
+            if ( data.StaticMesh->MaterialPaths.has_value() && !data.StaticMesh->MaterialPaths->empty() )
+            {
+                smc.MaterialSlots.clear();
+                for ( const auto& path : *data.StaticMesh->MaterialPaths )
+                {
+                    if ( path.empty() )
+                    {
+                        smc.MaterialSlots.push_back( {} );
+                        continue;
+                    }
+                    auto matAsset = assetManager.FindByPath<Assets::MaterialAsset>( path );
+                    smc.MaterialSlots.push_back( matAsset ? matAsset->GetMetadata().Handle : Assets::AssetHandle{} );
+                }
+            }
+            else
+            {
+                smc.MaterialSlots = data.StaticMesh->MaterialSlots;
+            }
             smc.Primitive = data.StaticMesh->Primitive;
 
             if ( data.StaticMesh->CustomVertices && data.StaticMesh->CustomIndices )
@@ -258,7 +295,24 @@ namespace Desert::Core::Serialize
                 }
             }
 
-            smc.MaterialSlots = data.SkinnedMesh->MaterialSlots;
+            if ( data.SkinnedMesh->MaterialPaths.has_value() && !data.SkinnedMesh->MaterialPaths->empty() )
+            {
+                smc.MaterialSlots.clear();
+                for ( const auto& path : *data.SkinnedMesh->MaterialPaths )
+                {
+                    if ( path.empty() )
+                    {
+                        smc.MaterialSlots.push_back( {} );
+                        continue;
+                    }
+                    auto matAsset = assetManager.FindByPath<Assets::MaterialAsset>( path );
+                    smc.MaterialSlots.push_back( matAsset ? matAsset->GetMetadata().Handle : Assets::AssetHandle{} );
+                }
+            }
+            else
+            {
+                smc.MaterialSlots = data.SkinnedMesh->MaterialSlots;
+            }
         }
 
         // Camera
@@ -291,11 +345,20 @@ namespace Desert::Core::Serialize
             
             if ( data.Skybox->SkyboxPath )
             {
-                 // Assuming Skybox uses Environment asset or similar. 
-                 // For now just store the handle if we can find it
-                 auto asset = assetManager.FindByPath<Assets::MeshAsset>( *data.Skybox->SkyboxPath );
-                 if ( asset )
-                     skybox.SkyboxHandle = asset->GetMetadata().Handle;
+                auto skyboxAsset = assetManager.FindByPath<Assets::SkyboxAsset>( *data.Skybox->SkyboxPath );
+                if ( !skyboxAsset )
+                {
+                    skyboxAsset = const_cast<Assets::AssetManager&>( assetManager ).CreateAsset<Assets::SkyboxAsset>(
+                        Assets::AssetPriority::Medium, *data.Skybox->SkyboxPath );
+                }
+                if ( skyboxAsset )
+                {
+                    if ( !skyboxAsset->IsReadyForUse() )
+                        skyboxAsset->Load();
+                    if ( !Runtime::ResourceRegistry::GetSkyboxService()->Get( skyboxAsset->GetMetadata().Handle ) )
+                        Runtime::ResourceRegistry::GetSkyboxService()->Register( skyboxAsset );
+                    skybox.SkyboxHandle = skyboxAsset->GetMetadata().Handle;
+                }
             }
         }
 

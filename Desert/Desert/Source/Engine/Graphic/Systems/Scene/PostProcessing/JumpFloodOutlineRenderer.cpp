@@ -152,7 +152,7 @@ namespace Desert::Graphic::System
              .DebugName         = debugName,
         } );
 
-        renderer.BeginRenderPass( renderPass.get() );
+        renderer.BeginRenderPass( renderPass.get(), true );
         renderer.SubmitFullscreenQuad( pipeline, executor );
         renderer.EndRenderPass();
     }

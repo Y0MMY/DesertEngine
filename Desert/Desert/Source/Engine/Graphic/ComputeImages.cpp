@@ -4,6 +4,7 @@
 #include "Renderer.hpp"
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Graphic/Image.hpp>
 
 namespace Desert::Graphic
 {
@@ -45,15 +46,20 @@ namespace Desert::Graphic
         const uint32_t workGroupsX = spec.Width / kWorkGroups;
         const uint32_t workGroupsY = spec.Height / kWorkGroups;
         const uint32_t workGroupsZ = 6;
-        
-        // This is still a bit hacky because we don't have a clean way to pass images to DispatchCompute yet
-        // but we are at least using the new Pipeline interface.
-        // TODO: Full refactor of image passing in compute
-        
-        // For now, I'll keep the direct direct execution logic in VulkanPipelineCompute if I didn't remove it yet.
-        // Wait, I DID remove it. I need to implement it in DispatchCompute or a separate ComputeExecutor.
-        
-        return SP_CAST( ImageCube, outputImage );
+
+        auto outputCube = SP_CAST( ImageCube, outputImage );
+
+        auto* inputImage = static_cast<Image2D*>(
+            Runtime::ResourceRegistry::GetImageService()->Resolve( spec.InputHandle ) );
+
+        if ( inputImage && outputCube )
+        {
+            Renderer::GetInstance().ImmediateComputeDispatch(
+                computePipeline.get(), inputImage, outputCube.get(),
+                workGroupsX, workGroupsY, workGroupsZ );
+        }
+
+        return outputCube;
     }
 
     void ComputeImages::ProccessForImageCubeMips( const ComputeImagesSpecification& spec )

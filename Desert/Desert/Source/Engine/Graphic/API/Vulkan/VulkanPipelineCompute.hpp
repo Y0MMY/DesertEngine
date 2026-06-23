@@ -46,11 +46,16 @@ namespace Desert::Graphic::API::Vulkan
         void UpdateDescriptorSet( uint32_t frameIndex, const std::vector<VkWriteDescriptorSet>& writes,
                                   VkDescriptorSet descriptorSet, uint32_t setIndex = 0 );
 
+        VulkanMaterialBackend* GetVulkanMaterialBackend() const
+        {
+            return m_VulkanMaterialBackend.get();
+        }
+
     private:
         ComputePipelineSpecification m_Specification;
-        VkPipeline                   m_ComputePipeline;
-        VkPipelineLayout             m_ComputePipelineLayout;
-        VkPipelineCache              m_PipelineCache;
+        VkPipeline                   m_ComputePipeline       = VK_NULL_HANDLE;
+        VkPipelineLayout             m_ComputePipelineLayout = VK_NULL_HANDLE;
+        VkPipelineCache              m_PipelineCache         = VK_NULL_HANDLE;
 
         std::unique_ptr<VulkanMaterialBackend> m_VulkanMaterialBackend;
 

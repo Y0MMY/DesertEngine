@@ -2,6 +2,8 @@
 
 #include <ImGui/imgui.h>
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
@@ -43,7 +45,16 @@ namespace Desert::Editor
                     bool isSelected = ( skybox.SkyboxHandle == handle );
                     if ( ImGui::Selectable( skyboxName.c_str(), isSelected ) )
                     {
-                        skybox.SkyboxHandle = handle;
+                        if ( handle != skybox.SkyboxHandle )
+                        {
+                            auto& skyboxService = *Runtime::ResourceRegistry::GetSkyboxService();
+                            if ( !skyboxService.Get( handle ) )
+                            {
+                                Graphic::Renderer::GetInstance().WaitDeviceIdle();
+                                skyboxService.Register( meshAsset );
+                            }
+                            skybox.SkyboxHandle = handle;
+                        }
                     }
 
                     if ( isSelected )

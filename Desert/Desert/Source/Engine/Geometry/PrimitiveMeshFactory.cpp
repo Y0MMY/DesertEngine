@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <Engine/Geometry/MeshFactory.hpp>
+#include <Common/Core/Math/AABB.hpp>
 
 namespace Desert::Geometry
 {
@@ -68,8 +69,12 @@ namespace Desert::Geometry
             { 20, 21, 22 }, { 22, 23, 20 }
         };
 
+        Common::Math::AABB cubeAABB;
+        cubeAABB.Min = glm::vec3( -0.5f, -0.5f, -0.5f );
+        cubeAABB.Max = glm::vec3(  0.5f,  0.5f,  0.5f );
+
         std::vector<Submesh> submeshes = {
-            { "Cube", 0, (uint32_t)vertices.size(), 0, (uint32_t)indices.size() * 3, glm::mat4(1.0f), {} }
+            { "Cube", 0, (uint32_t)vertices.size(), 0, (uint32_t)indices.size() * 3, glm::mat4(1.0f), cubeAABB }
         };
 
         return std::make_shared<DynamicMesh>( vertices, indices, submeshes );

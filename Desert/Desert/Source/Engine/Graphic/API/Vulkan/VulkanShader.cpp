@@ -144,6 +144,17 @@ namespace Desert::Graphic::API::Vulkan
             sb.Size = ( type.member_types.empty() || type.array.size() > 0 ) ? 0 : (uint32_t)compiler.get_declared_struct_size( type );
         }
 
+        // Storage Images (e.g. writeonly imageCube / image2D in compute shaders)
+        for ( const auto& resource : resources.storage_images )
+        {
+            uint32_t set     = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+            uint32_t binding = compiler.get_decoration( resource.id, spv::DecorationBinding );
+            auto& si         = m_ReflectionData.ShaderDescriptorSets[set].StorageImage2DSamplers[binding];
+            si.BindingPoint  = binding;
+            si.Name          = resource.name;
+            si.ShaderStage   = (Core::Formats::ShaderStage)( (uint32_t)si.ShaderStage | (uint32_t)stage );
+        }
+
         // Push Constants
         if ( !resources.push_constant_buffers.empty() )
         {

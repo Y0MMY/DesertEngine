@@ -47,7 +47,19 @@ namespace Desert::Graphic
                 }
             }
             m_Buffer->UnmapMemory();
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
+        }
+
+        // A field stays dirty for frames-in-flight frames, so this returns true until every per-frame
+        // buffer copy has received the new data. Used to keep flushing this UB across the whole window.
+        bool HasDirtyFields() const
+        {
+            for ( const auto& field : m_FieldProperties )
+            {
+                if ( field.IsDirty() )
+                    return true;
+            }
+            return false;
         }
 
         void SetRawData( const std::byte* data, size_t size )
@@ -65,7 +77,7 @@ namespace Desert::Graphic
 
             m_Buffer->UnmapMemory();
 
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
         }
 
         const auto& GetUniform() const

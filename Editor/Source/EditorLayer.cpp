@@ -111,7 +111,7 @@ namespace Desert::Editor
 
         m_MainScene->Init();
 #ifdef EBABLE_IMGUI
-        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager,
                                                                                m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );

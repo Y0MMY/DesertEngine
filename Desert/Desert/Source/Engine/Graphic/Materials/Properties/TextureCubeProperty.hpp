@@ -20,8 +20,8 @@ namespace Desert::Graphic
                 if ( m_Texture )
                 {
                     m_Uniform->SetImageCube( m_Texture );
+                    backend->ApplyTextureCube( this );
                 }
-                backend->ApplyTextureCube( this );
                 MarkClean();
             }
         }
@@ -38,7 +38,7 @@ namespace Desert::Graphic
         void SetTexture( const ImageCube* texture )
         {
             m_Texture = texture;
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
         }
 
         const auto& GetUniform() const

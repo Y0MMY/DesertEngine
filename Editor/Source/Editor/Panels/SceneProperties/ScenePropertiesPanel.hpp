@@ -28,5 +28,6 @@ namespace Desert::Editor
         const std::shared_ptr<MaterialsPanel>       m_MaterialsPanel;
         const Animation::AnimationLibrary*          m_AnimationLibrary;
         bool                                        m_DebugMode = false;
+        std::string                                 m_PrefabSavePath = "//Assets/Prefabs/";
     };
 } // namespace Desert::Editor

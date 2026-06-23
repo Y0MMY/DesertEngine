@@ -4,6 +4,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 
 #include <limits>
+#include <cstring>
 #include <Engine/ShaderResources/API/Vulkan/VulkanUniformBuffer.hpp>
 #include <Engine/ShaderResources/API/Vulkan/VulkanUniformImage2D.hpp>
 #include <Engine/ShaderResources/API/Vulkan/VulkanUniformImageCube.hpp>
@@ -30,9 +31,21 @@ namespace Desert::Graphic::API::Vulkan
         VkBufferCreateInfo      bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                                .size  = 65536,
                                                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT };
-        VmaAllocationCreateInfo allocInfo  = { .usage = VMA_MEMORY_USAGE_GPU_ONLY };
+        // Host-visible + zero-initialized. Every uniform/storage binding starts out pointing at this
+        // dummy buffer (see InitializeWithFallbacks). If it held uninitialized GPU memory, any binding
+        // sampled before its real resource is bound — or one that is never bound — would read garbage,
+        // which the lighting blows up into white/NaN (or near-zero black). Defined zeros make those
+        // cases render as a stable black instead of flickering garbage.
+        VmaAllocationCreateInfo allocInfo  = { .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                                               .usage = VMA_MEMORY_USAGE_CPU_TO_GPU };
 
-        VK_CHECK_RESULT( vmaCreateBuffer( allocator, &bufferInfo, &allocInfo, &m_DummyBuffer, &m_DummyAllocation, nullptr ) );
+        VmaAllocationInfo dummyAllocInfo{};
+        VK_CHECK_RESULT( vmaCreateBuffer( allocator, &bufferInfo, &allocInfo, &m_DummyBuffer, &m_DummyAllocation, &dummyAllocInfo ) );
+
+        if ( dummyAllocInfo.pMappedData )
+        {
+            std::memset( dummyAllocInfo.pMappedData, 0, bufferInfo.size );
+        }
     }
 
     VulkanMaterialBackend::~VulkanMaterialBackend()
@@ -171,7 +184,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             if ( auto vulkanBuffer = sp_cast<ShaderResources::API::Vulkan::VulkanUniformBuffer>( bufferInfo ) )
             {
-                auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
+                auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo( frameIndex );
                 auto  wds = DescriptorSetBuilder::GetUniformWDS( this, frameIndex, 0,
                                                                  vulkanBuffer->GetBinding(), 1U, &descriptorBufferInfo );
 
@@ -322,7 +335,9 @@ namespace Desert::Graphic::API::Vulkan
                 
                 // Track infos to keep them alive until vkUpdateDescriptorSets
                 std::vector<VkDescriptorImageInfo> imageInfos;
-                imageInfos.reserve(descriptorSet.Image2DSamplers.size() + descriptorSet.ImageCubeSamplers.size());
+                imageInfos.reserve( descriptorSet.Image2DSamplers.size() +
+                                    descriptorSet.ImageCubeSamplers.size() +
+                                    descriptorSet.StorageImage2DSamplers.size() );
 
                 std::vector<VkDescriptorBufferInfo> bufferInfos;
                 bufferInfos.reserve(descriptorSet.UniformBuffers.size() + descriptorSet.StorageBuffers.size());
@@ -372,7 +387,24 @@ namespace Desert::Graphic::API::Vulkan
                                                                             &imageInfos.back() ));
                     }
                 }
-                
+
+                // STORAGE IMAGES — init with dedicated storage fallback (has VK_IMAGE_USAGE_STORAGE_BIT)
+                for ( const auto& [binding, _] : descriptorSet.StorageImage2DSamplers )
+                {
+                    auto fallbackImage =
+                         FallbackTextures::Get().GetFallbackStorageImage2D( Core::Formats::ImageFormat::RGBA32F );
+
+                    if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
+                    {
+                        VkDescriptorImageInfo storageInfo = { VK_NULL_HANDLE,
+                                                              vulkanImage->GetResource().ImageView,
+                                                              VK_IMAGE_LAYOUT_GENERAL };
+                        imageInfos.push_back( storageInfo );
+                        writes.push_back( DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding, 1,
+                                                                               &imageInfos.back() ) );
+                    }
+                }
+
                 UpdateDescriptorSets( writes, true );
             }
         }

@@ -140,10 +140,29 @@ namespace Desert::ECS
                          bool isSelected = false;
                          if ( auto selected = Editor::Core::SelectionManager::GetSelected() )
                          {
-                             if ( registry.has<UUIDComponent>( entity ) )
+                             // Check this entity itself
+                             if ( registry.has<UUIDComponent>( entity ) &&
+                                  registry.get<UUIDComponent>( entity ).UUID == *selected )
                              {
-                                 if ( registry.get<UUIDComponent>( entity ).UUID == *selected )
-                                     isSelected = true;
+                                 isSelected = true;
+                             }
+                             else
+                             {
+                                 // Walk ancestor chain — selecting a prefab root outlines all its mesh children
+                                 entt::entity ancestor = entity;
+                                 while ( registry.has<RelationshipComponent>( ancestor ) )
+                                 {
+                                     const auto& rel = registry.get<RelationshipComponent>( ancestor );
+                                     if ( rel.Parent == entt::null )
+                                         break;
+                                     ancestor = rel.Parent;
+                                     if ( registry.has<UUIDComponent>( ancestor ) &&
+                                          registry.get<UUIDComponent>( ancestor ).UUID == *selected )
+                                     {
+                                         isSelected = true;
+                                         break;
+                                     }
+                                 }
                              }
                          }
 

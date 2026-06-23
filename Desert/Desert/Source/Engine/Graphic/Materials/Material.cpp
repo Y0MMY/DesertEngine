@@ -120,9 +120,17 @@ namespace Desert::Graphic
         // 2. MaterialInstance overrides on top
         ApplyInstanceOverrides( instance, dirtyUBs );
 
-        // 3. Flush all touched UBs: write dirty fields into the GPU buffer
-        for ( auto* ub : dirtyUBs )
-            ub->UpdateFields();
+        // 3. Flush every UB that still has dirty fields. A field stays dirty for frames-in-flight
+        //    frames, so this writes the new data into EACH per-frame-in-flight buffer copy (not just
+        //    the copy for the frame it first changed on). Flushing only the UBs "touched" this frame
+        //    would leave the other copies at their initial zero contents, so any frame presenting those
+        //    indices would render the mesh black/garbage — the source of the per-frame flicker.
+        for ( const auto& [ubName, idx] : m_MaterialExecutor->GetUniformBufferProperties() )
+        {
+            auto ubProp = m_MaterialExecutor->GetUniformBufferProperty( ubName );
+            if ( ubProp && ubProp->HasDirtyFields() )
+                ubProp->UpdateFields();
+        }
 
         OnBind( const_cast<MaterialInstance*>( instance ) );
     }

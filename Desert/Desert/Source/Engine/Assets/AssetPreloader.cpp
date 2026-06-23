@@ -108,6 +108,8 @@ namespace Desert::Assets
         {
             for ( const auto& [handle, textureAsset] : manager->FindAllByType<Assets::TextureAsset>() )
             {
+                if ( !textureAsset->IsReadyForUse() )
+                    textureAsset->Load();
                 Runtime::ResourceRegistry::GetTextureService()->Register( textureAsset );
             }
 
@@ -118,6 +120,8 @@ namespace Desert::Assets
 
             for ( const auto& [handle, materialAsset] : manager->FindAllByType<Assets::MaterialAsset>() )
             {
+                if ( !materialAsset->IsReadyForUse() )
+                    materialAsset->Load();
                 Runtime::ResourceRegistry::GetMaterialService()->Register( materialAsset );
             }
         }

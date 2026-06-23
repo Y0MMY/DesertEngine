@@ -5,6 +5,7 @@
 #include <Engine/Graphic/RenderPass.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Geometry/Mesh.hpp>
+#include <Engine/Graphic/Image.hpp>
 
 namespace Desert::Graphic
 {
@@ -43,9 +44,19 @@ namespace Desert::Graphic
         /**
          * @brief Dispatches a compute shader.
          */
-        virtual void DispatchCompute( const ComputePipeline* pipeline, 
+        virtual void DispatchCompute( const ComputePipeline* pipeline,
                                       uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ,
                                       const MaterialExecutor* materialExecutor = nullptr ) = 0;
+
+        /**
+         * @brief One-shot compute dispatch outside of a render frame (e.g. environment map generation).
+         *        Allocates a dedicated command buffer, transitions images, dispatches, then flushes synchronously.
+         */
+        virtual void ImmediateComputeDispatch( const ComputePipeline* pipeline,
+                                               Image2D*   inputImage,
+                                               ImageCube* outputImage,
+                                               uint32_t groupCountX, uint32_t groupCountY,
+                                               uint32_t groupCountZ ) = 0;
 
         virtual void                         ResizeWindowEvent( uint32_t width, uint32_t height ) = 0;
         virtual void                         WaitDeviceIdle()                                     = 0;

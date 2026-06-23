@@ -85,6 +85,14 @@ namespace Desert::Graphic
         s_RendererAPI->DispatchCompute( pipeline, groupCountX, groupCountY, groupCountZ, materialExecutor );
     }
 
+    void Renderer::ImmediateComputeDispatch( const ComputePipeline* pipeline,
+                                              Image2D* inputImage, ImageCube* outputImage,
+                                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
+    {
+        s_RendererAPI->ImmediateComputeDispatch( pipeline, inputImage, outputImage,
+                                                  groupCountX, groupCountY, groupCountZ );
+    }
+
     void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
     {
         s_RendererAPI->BeginRenderPass( renderPass, clearFrame );

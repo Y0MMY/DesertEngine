@@ -5,6 +5,8 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 
+#include <vector>
+
 namespace Desert::ShaderResources::API::Vulkan
 {
     class VulkanUniformBuffer : public UniformBuffer
@@ -18,9 +20,9 @@ namespace Desert::ShaderResources::API::Vulkan
         virtual uint8_t* MapMemory() override;
         virtual void     UnmapMemory() override;
 
-        const VkDescriptorBufferInfo& GetDescriptorBufferInfo() const
+        const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
-            return m_DescriptorInfo;
+            return m_DescriptorInfos[frameIndex];
         }
         virtual const void* GetData() const override
         {
@@ -32,10 +34,9 @@ namespace Desert::ShaderResources::API::Vulkan
         void RT_Invalidate();
 
     private:
-        VmaAllocation          m_MemoryAlloc = nullptr;
-        VkBuffer               m_Buffer;
-        VkDescriptorBufferInfo m_DescriptorInfo{};
-
-        uint8_t* m_MappedMemmory = nullptr;
+        std::vector<VmaAllocation>          m_MemoryAllocs;
+        std::vector<VkBuffer>               m_Buffers;
+        std::vector<VkDescriptorBufferInfo> m_DescriptorInfos;
+        std::vector<uint8_t*>               m_MappedMemories;
     };
 } // namespace Desert::ShaderResources::API::Vulkan

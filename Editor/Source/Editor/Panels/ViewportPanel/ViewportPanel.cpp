@@ -209,6 +209,7 @@ namespace Desert::Editor
         Common::UUID selectedUUID;
 
         const auto entities = m_Scene->GetAllEntities();
+        auto&      registry = m_Scene->GetRegistry();
 
         std::vector<std::pair<Common::UUID, std::pair<glm::mat4, Desert::Mesh*>>> allMeshes;
 
@@ -223,7 +224,7 @@ namespace Desert::Editor
                 }
 
                 allMeshes.push_back( { entity.GetComponent<ECS::UUIDComponent>().UUID,
-                                       { entity.GetComponent<ECS::TransformComponent>().GetTransform(), mesh } } );
+                                       { entity.GetWorldTransform(), mesh } } );
             }
         }
 
@@ -248,6 +249,32 @@ namespace Desert::Editor
 
         if ( closestT != std::numeric_limits<float>::max() )
         {
+            // If the hit entity is a child of a prefab, select the prefab root so the
+            // entire prefab gets outlined instead of just one submesh.
+            auto hitEntityRef = m_Scene->FindEntityByID( selectedUUID );
+            if ( hitEntityRef )
+            {
+                const ECS::Entity& hitEntity = hitEntityRef->get();
+                if ( !hitEntity.HasComponent<ECS::PrefabComponent>() )
+                {
+                    entt::entity current = hitEntity.GetHandle();
+
+                    while ( registry.has<ECS::RelationshipComponent>( current ) )
+                    {
+                        const auto& rel = registry.get<ECS::RelationshipComponent>( current );
+                        if ( rel.Parent == entt::null )
+                            break;
+                        current = rel.Parent;
+                        if ( registry.has<ECS::PrefabComponent>( current ) &&
+                             registry.has<ECS::UUIDComponent>( current ) )
+                        {
+                            selectedUUID = registry.get<ECS::UUIDComponent>( current ).UUID;
+                            break;
+                        }
+                    }
+                }
+            }
+
             Core::SelectionManager::SetSelected( selectedUUID );
         }
     }
@@ -306,7 +333,9 @@ namespace Desert::Editor
 
     Desert::Mesh* ViewportPanel::GetMeshComponent( const ECS::StaticMeshComponent& component )
     {
-        return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
+        if ( component.MeshHandle )
+            return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
+        return component.RuntimeMesh ? component.RuntimeMesh.get() : nullptr;
     }
 
 } // namespace Desert::Editor

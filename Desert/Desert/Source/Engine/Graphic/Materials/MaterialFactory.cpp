@@ -71,6 +71,28 @@ namespace Desert::Graphic
                 if ( auto roughness = pbrAsset->GetRoughnessFactor() )
                     pbrMaterial->SetRoughnessValue( *roughness );
 
+                // Resolve and upload textures from TextureService so all instances inherit them
+                auto resolveImage = []( Assets::AssetHandle handle ) -> Graphic::Image2D*
+                {
+                    auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( handle );
+                    if ( !tex )
+                        return nullptr;
+                    return static_cast<Graphic::Image2D*>(
+                        Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+                };
+
+                if ( auto h = pbrAsset->GetTextureHandle( Assets::TextureAsset::Type::Albedo ) )
+                {
+                    if ( auto* img = resolveImage( *h ) )
+                        pbrMaterial->SetAlbedoTexture( img );
+                }
+
+                if ( auto h = pbrAsset->GetTextureHandle( Assets::TextureAsset::Type::Normal ) )
+                {
+                    if ( auto* img = resolveImage( *h ) )
+                        pbrMaterial->SetNormalTexture( img );
+                }
+
                 return pbrMaterial;
             }
 

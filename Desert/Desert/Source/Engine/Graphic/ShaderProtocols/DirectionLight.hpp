@@ -11,7 +11,7 @@ namespace Desert::Graphic::ShaderProtocols
 
     struct DirectionLight
     {
-        inline const static std::string Name = "DirectionLightUB";
+        inline const static std::string Name = "DirectionLightsUB";
 
         std::vector<DirectionLightPayload> DirectionLights;
     };

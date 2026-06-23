@@ -39,7 +39,11 @@ namespace Desert::Core
 
             dirLightGroup.each(
                  [&]( const auto& light, const auto& transform )
-                 { sceneRendererInfo.DirLights.DirectionLights.push_back( { transform.Translation } ); } );
+                 {
+                     const glm::vec3& rawDir = transform.Translation;
+                     if ( glm::length( rawDir ) > 0.001f )
+                         sceneRendererInfo.DirLights.DirectionLights.push_back( { glm::normalize( rawDir ) } );
+                 } );
         }
 
         // TODO: system

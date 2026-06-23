@@ -24,6 +24,7 @@ namespace Desert::Assets
     {
         std::optional<std::string>                  MeshPath;
         std::vector<AssetHandle>                    MaterialSlots;
+        std::optional<std::vector<std::string>>     MaterialPaths;
         std::optional<Geometry::PrimitiveType>      Primitive;
         std::optional<std::vector<VertexSer>>       CustomVertices;
         std::optional<std::vector<uint32_t>>        CustomIndices;
@@ -31,8 +32,9 @@ namespace Desert::Assets
 
     struct SkinnedMeshComponentSer
     {
-        std::optional<std::string> MeshPath;
-        std::vector<AssetHandle>   MaterialSlots;
+        std::optional<std::string>              MeshPath;
+        std::vector<AssetHandle>                MaterialSlots;
+        std::optional<std::vector<std::string>> MaterialPaths;
     };
 
     struct CameraComponentSer

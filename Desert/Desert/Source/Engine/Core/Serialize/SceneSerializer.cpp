@@ -71,52 +71,94 @@ namespace Desert::Core
 
         LOG_INFO( "Loading scene: {0}", sceneData->SceneName );
 
-        std::unordered_map<Common::UUID, ECS::Entity> entityMap;
+        // Split records: prefab-root entries are instantiated directly from their file;
+        // normal entries follow the standard create-then-deserialize path.
+        std::vector<const Assets::EntityData*> normalData;
+        std::vector<const Assets::EntityData*> prefabData;
 
-        // 1. Create all entities
         for ( const auto& entityData : sceneData->Entities )
         {
-            Common::UUID id = entityData.id.value_or( Common::UUID() );
-            ECS::Entity entity = m_Scene->CreateEntityWithUUID( id, entityData.Tag.value_or( "Entity" ) );
-            entityMap.insert({id, entity});
+            if ( entityData.PrefabPath.has_value() )
+                prefabData.push_back( &entityData );
+            else
+                normalData.push_back( &entityData );
         }
 
-        // 2. Restore components and hierarchy
-        for ( const auto& entityData : sceneData->Entities )
+        std::unordered_map<Common::UUID, ECS::Entity> entityMap;
+
+        // Pass 1 — create normal entities
+        for ( const auto* entityData : normalData )
         {
-            Common::UUID id = entityData.id.value_or( Common::UUID{} );
-            auto it = entityMap.find(id);
-            if (it == entityMap.end()) continue;
+            Common::UUID id     = entityData->id.value_or( Common::UUID() );
+            ECS::Entity  entity = m_Scene->CreateEntityWithUUID( id, entityData->Tag.value_or( "Entity" ) );
+            entityMap.insert( { id, entity } );
+        }
+
+        // Pass 2 — deserialize normal entities and wire up hierarchy
+        for ( const auto* entityData : normalData )
+        {
+            Common::UUID id = entityData->id.value_or( Common::UUID{} );
+            auto         it = entityMap.find( id );
+            if ( it == entityMap.end() ) continue;
 
             ECS::Entity entity = it->second;
-            Serialize::EntitySerializer::DeserializeEntity( entityData, entity, *m_AssetManager );
+            Serialize::EntitySerializer::DeserializeEntity( *entityData, entity, *m_AssetManager );
 
-            if ( entityData.parent.has_value() && *entityData.parent != Common::UUID{} )
+            if ( entityData->parent.has_value() && *entityData->parent != Common::UUID{} )
             {
-                auto parentIt = entityMap.find(*entityData.parent);
+                auto parentIt = entityMap.find( *entityData->parent );
                 if ( parentIt != entityMap.end() )
-                {
                     m_Scene->Attach( parentIt->second, entity );
-                }
+            }
+        }
+
+        // Pass 3 — instantiate prefab roots and apply their saved transforms
+        for ( const auto* entityData : prefabData )
+        {
+            auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( *entityData->PrefabPath );
+            if ( !prefabAsset )
+            {
+                prefabAsset = m_AssetManager->CreateAsset<Assets::PrefabAsset>(
+                    Assets::AssetPriority::High, *entityData->PrefabPath );
             }
 
-            if ( entityData.PrefabPath.has_value() )
+            if ( !prefabAsset )
             {
-                 auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( *entityData.PrefabPath );
-                 if ( !prefabAsset )
-                 {
-                     prefabAsset = m_AssetManager->CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High, *entityData.PrefabPath );
-                 }
+                LOG_ERROR( "SceneSerializer: could not load prefab '{0}'", *entityData->PrefabPath );
+                continue;
+            }
 
-                 if ( prefabAsset )
-                 {
-                     std::unordered_set<Common::UUID> stack;
-                     ECS::Entity prefabRoot = Runtime::Factory::PrefabFactory::Instantiate( *prefabAsset, *m_Scene, *m_AssetManager, stack );
-                     if ( prefabRoot )
-                     {
-                         m_Scene->Attach( entity, prefabRoot );
-                     }
-                 }
+            if ( !prefabAsset->IsReadyForUse() )
+                prefabAsset->Load();
+
+            std::unordered_set<Common::UUID> stack;
+            ECS::Entity prefabRoot = Runtime::Factory::PrefabFactory::Instantiate(
+                *prefabAsset, *m_Scene, *m_AssetManager, stack );
+
+            if ( !prefabRoot )
+                continue;
+
+            // Apply the transform that was saved in the scene for this prefab root
+            if ( entityData->Translation || entityData->Rotation || entityData->Scale )
+            {
+                auto& tc = prefabRoot.HasComponent<ECS::TransformComponent>()
+                    ? prefabRoot.GetComponent<ECS::TransformComponent>()
+                    : prefabRoot.AddComponent<ECS::TransformComponent>();
+                if ( entityData->Translation ) tc.Translation = *entityData->Translation;
+                if ( entityData->Rotation )    tc.Rotation    = *entityData->Rotation;
+                if ( entityData->Scale )       tc.Scale       = *entityData->Scale;
+            }
+
+            // Register in map under the original saved UUID so parent links resolve
+            Common::UUID savedID = entityData->id.value_or( Common::UUID{} );
+            entityMap[savedID]   = prefabRoot;
+
+            // Attach to parent if one exists (e.g. prefab nested under a regular entity)
+            if ( entityData->parent.has_value() && *entityData->parent != Common::UUID{} )
+            {
+                auto parentIt = entityMap.find( *entityData->parent );
+                if ( parentIt != entityMap.end() )
+                    m_Scene->Attach( parentIt->second, prefabRoot );
             }
         }
     }

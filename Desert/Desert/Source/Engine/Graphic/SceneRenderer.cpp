@@ -88,7 +88,7 @@ namespace Desert::Graphic
     void SceneRenderer::OnUpdate( const UpdateInfo& sceneRenderInfo )
     {
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
-        // m_DirectionLights        = sceneRenderInfo.DirLights;
+        m_DirectionLights        = sceneRenderInfo.DirLights;
 
         ClearMainFramebuffer();
         ExecuteRenderGraph();
@@ -208,6 +208,7 @@ namespace Desert::Graphic
         }
 
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::DepthPrePass, RenderPhase::Geometry );
+        m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::Sky, RenderPhase::Geometry );
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::Geometry, RenderPhase::Outline );
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::Geometry, RenderPhase::Lighting );
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::Lighting, RenderPhase::PostProcess );
@@ -223,15 +224,34 @@ namespace Desert::Graphic
         const auto& sortedPasses = m_RenderGraphBuilder.GetSortedPasses();
 
         auto& renderer = Renderer::GetInstance();
+
+        // Consecutive passes that share the same target framebuffer are merged into a single
+        // vkCmdBeginRenderPass/EndRenderPass pair.  The first pass in each group issues a
+        // CLEAR begin; subsequent passes in the same group just call ExecuteFunc() inside the
+        // already-open render pass.  This lets the skybox draw first and the geometry draw on
+        // top without either pass clearing the other's output.
+        std::shared_ptr<Framebuffer> currentFb;
+
         for ( const auto& pass : sortedPasses )
         {
             if ( !pass.CachedRenderPass )
                 continue;
 
-            renderer.BeginRenderPass( pass.CachedRenderPass.get() );
+            const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
+
+            if ( passFb != currentFb )
+            {
+                if ( currentFb )
+                    renderer.EndRenderPass();
+                renderer.BeginRenderPass( pass.CachedRenderPass.get(), true );
+                currentFb = passFb;
+            }
+
             pass.ExecuteFunc();
-            renderer.EndRenderPass();
         }
+
+        if ( currentFb )
+            renderer.EndRenderPass();
     }
 
     void SceneRenderer::ClearMainFramebuffer()

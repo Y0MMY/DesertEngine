@@ -31,9 +31,15 @@ namespace Desert::Graphic::API::Vulkan
         virtual void SubmitFullscreenQuad( const GraphicsPipeline*         pipeline,
                                            const MaterialExecutor* materialExecutor ) override;
 
-        virtual void DispatchCompute( const ComputePipeline* pipeline, 
+        virtual void DispatchCompute( const ComputePipeline* pipeline,
                                       uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ,
                                       const MaterialExecutor* materialExecutor = nullptr ) override;
+
+        virtual void ImmediateComputeDispatch( const ComputePipeline* pipeline,
+                                               Image2D*   inputImage,
+                                               ImageCube* outputImage,
+                                               uint32_t groupCountX, uint32_t groupCountY,
+                                               uint32_t groupCountZ ) override;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
         virtual void WaitDeviceIdle() override;

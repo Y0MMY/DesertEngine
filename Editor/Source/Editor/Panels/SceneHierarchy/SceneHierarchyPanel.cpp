@@ -1,10 +1,12 @@
 #include "SceneHierarchyPanel.hpp"
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/EditorResources.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 
 #include <ImGui/imgui_internal.h>
 
@@ -54,6 +56,8 @@ namespace Desert::Editor
         if ( !hasChildren )
             nodeFlags |= ImGuiTreeNodeFlags_Leaf;
 
+        const bool isPrefab = entity.HasComponent<ECS::PrefabComponent>();
+
         const char* icon = ICON_MDI_CUBE_OUTLINE;
         if ( entity.HasComponent<ECS::CameraComponent>() )
             icon = ICON_MDI_CAMERA;
@@ -62,12 +66,19 @@ namespace Desert::Editor
             icon = ICON_MDI_LIGHTBULB;
         else if ( entity.HasComponent<ECS::SkyboxComponent>() )
             icon = ICON_MDI_EARTH;
+        else if ( isPrefab )
+            icon = ICON_MDI_PACKAGE_VARIANT;
 
         // Column 0: icon tree node + name
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex( 0 );
 
-        ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetIconColor() );
+        // Prefab root entities get a distinctive teal tint
+        const ImVec4 iconColor = isPrefab
+            ? ImVec4( 0.3f, 0.9f, 0.8f, 1.0f )
+            : ThemeManager::GetIconColor();
+
+        ImGui::PushStyleColor( ImGuiCol_Text, iconColor );
         bool nodeOpen = ImGui::TreeNodeEx( (void*)(uint64_t)entity.GetHandle(), nodeFlags, "%s", icon );
         ImGui::PopStyleColor();
 
@@ -94,7 +105,19 @@ namespace Desert::Editor
         }
 
         ImGui::SameLine();
-        ImGui::TextUnformatted( name.c_str() );
+        // Prefab name gets the same teal tint; suffix tag is subtle
+        if ( isPrefab )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Text, iconColor );
+            ImGui::TextUnformatted( name.c_str() );
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::TextDisabled( "[Prefab]" );
+        }
+        else
+        {
+            ImGui::TextUnformatted( name.c_str() );
+        }
 
         bool deleteEntity = false;
         if ( ImGui::BeginPopupContextItem( uuidStr.c_str() ) )
@@ -108,8 +131,15 @@ namespace Desert::Editor
                 auto child = m_Scene->CreateNewEntity( "Child Entity" );
                 m_Scene->Attach( entity, child );
             }
+
+            ImGui::Separator();
+            if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )
+                ImGui::OpenPopup( "InstantiatePrefabPopup" );
+
             ImGui::EndPopup();
         }
+
+        DrawInstantiatePrefabPopup();
 
         // Column 1: type label
         ImGui::TableSetColumnIndex( 1 );
@@ -280,8 +310,13 @@ namespace Desert::Editor
         {
             ImGui::Separator();
             AddEntity( m_Scene );
+            ImGui::Separator();
+            if ( ImGui::MenuItem( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )
+                ImGui::OpenPopup( "InstantiatePrefabPopup" );
             ImGui::EndPopup();
         }
+
+        DrawInstantiatePrefabPopup();
 
         // Entity table
         {
@@ -321,8 +356,73 @@ namespace Desert::Editor
                         // Unparent to root — TODO: implement Scene::Detach
                     }
                 }
+
+                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "PREFAB_FILE" ) )
+                {
+                    std::string path( static_cast<const char*>( payload->Data ),
+                                      static_cast<size_t>( payload->DataSize ) - 1 );
+                    if ( m_AssetManager )
+                    {
+                        auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( path );
+                        if ( !prefabAsset )
+                        {
+                            prefabAsset = const_cast<Assets::AssetManager&>( *m_AssetManager )
+                                .CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High, path );
+                        }
+                        if ( prefabAsset )
+                        {
+                            if ( !prefabAsset->IsReadyForUse() )
+                                prefabAsset->Load();
+                            prefabAsset->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                        }
+                    }
+                }
+
                 ImGui::EndDragDropTarget();
             }
+        }
+    }
+
+    void SceneHierarchyPanel::DrawInstantiatePrefabPopup()
+    {
+        if ( ImGui::BeginPopupModal( "InstantiatePrefabPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        {
+            ImGui::TextUnformatted( "Prefab path (.lprefab):" );
+            ImGui::SetNextItemWidth( 420.0f );
+            Utils::ImGuiUtilities::InputText( m_PrefabInstantiatePath, "##PrefabInstPath" );
+
+            ImGui::Spacing();
+
+            if ( ImGui::Button( "Instantiate", ImVec2( 130, 0 ) ) && !m_PrefabInstantiatePath.empty() )
+            {
+                if ( m_AssetManager )
+                {
+                    auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( m_PrefabInstantiatePath );
+                    if ( !prefabAsset )
+                    {
+                        prefabAsset = const_cast<Assets::AssetManager&>( *m_AssetManager )
+                            .CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High,
+                                                               m_PrefabInstantiatePath );
+                    }
+                    if ( prefabAsset )
+                    {
+                        if ( !prefabAsset->IsReadyForUse() )
+                            prefabAsset->Load();
+                        prefabAsset->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                    }
+                    else
+                    {
+                        LOG_ERROR( "Could not load prefab: {0}", m_PrefabInstantiatePath );
+                    }
+                }
+                ImGui::CloseCurrentPopup();
+            }
+
+            ImGui::SameLine();
+            if ( ImGui::Button( "Cancel", ImVec2( 90, 0 ) ) )
+                ImGui::CloseCurrentPopup();
+
+            ImGui::EndPopup();
         }
     }
 

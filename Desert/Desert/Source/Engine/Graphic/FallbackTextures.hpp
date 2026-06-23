@@ -12,6 +12,8 @@ namespace Desert::Graphic
         GetFallbackTexture2D( Core::Formats::ImageFormat format ) const = 0;
         virtual const std::shared_ptr<ImageCube>&
         GetFallbackTextureCube( Core::Formats::ImageFormat format ) const = 0;
+        virtual const std::shared_ptr<Image2D>&
+        GetFallbackStorageImage2D( Core::Formats::ImageFormat format ) const = 0;
 
     public:
         FallbackTextures( const FallbackTextures& )            = delete;

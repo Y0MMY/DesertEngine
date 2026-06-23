@@ -18,5 +18,6 @@ namespace Desert::Editor
 
     private:
         const Assets::AssetManager* m_AssetManager;
+        std::string                 m_SelectPathBuf;
     };
 } // namespace Desert::Editor
