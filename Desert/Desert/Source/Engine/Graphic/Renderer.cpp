@@ -7,6 +7,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 
+#include <Engine/Reflection/ReflectionRegistry.hpp>
+
 namespace Desert::Graphic
 {
     static RendererAPI* s_RendererAPI = nullptr;
@@ -30,6 +32,12 @@ namespace Desert::Graphic
 
     Common::BoolResultStr Renderer::Init()
     {
+        // Pull in the generated reflection TU (static lib would otherwise strip it) so all
+        // REFLECT()-annotated types are registered before any editor / shader-upload use.
+        Reflection::ForceLinkGeneratedReflection();
+        LOG_INFO( "[Reflection] {} reflected type(s) registered",
+                  Reflection::ReflectionRegistry::Get().All().size() );
+
         const auto& init = InitGraphicAPI();
         if ( !init )
         {
@@ -85,6 +93,14 @@ namespace Desert::Graphic
         s_RendererAPI->DispatchCompute( pipeline, groupCountX, groupCountY, groupCountZ, materialExecutor );
     }
 
+    void Renderer::ImmediateComputeDispatch( const ComputePipeline* pipeline,
+                                              Image2D* inputImage, ImageCube* outputImage,
+                                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
+    {
+        s_RendererAPI->ImmediateComputeDispatch( pipeline, inputImage, outputImage,
+                                                  groupCountX, groupCountY, groupCountZ );
+    }
+
     void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
     {
         s_RendererAPI->BeginRenderPass( renderPass, clearFrame );
@@ -103,6 +119,11 @@ namespace Desert::Graphic
     void Renderer::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
         s_RendererAPI->ResizeWindowEvent( width, height );
+    }
+
+    void Renderer::WaitDeviceIdle()
+    {
+        s_RendererAPI->WaitDeviceIdle();
     }
 
     std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()

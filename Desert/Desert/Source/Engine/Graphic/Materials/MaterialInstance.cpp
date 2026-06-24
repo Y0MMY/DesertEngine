@@ -7,9 +7,6 @@ namespace Desert::Graphic
          : m_ParentMaterial( parentMaterial ), m_Name( name )
     {
         DESERT_VERIFY( parentMaterial, "Parent material cannot be null" );
-
-        // Copy default properties from parent material
-        m_Properties.CopyFrom( parentMaterial->GetDefaultProperties() );
     }
 
     float MaterialInstance::GetFloat( const std::string& name, float defaultValue ) const
@@ -182,19 +179,7 @@ namespace Desert::Graphic
             return;
 
         if ( m_ParentMaterial )
-        {
-            // Validation: Check if all shader properties are initialized in this instance
-            const auto& shaderProperties = m_ParentMaterial->GetPropertyNames();
-            for ( const auto& name : shaderProperties )
-            {
-                if ( !m_Properties.HasProperty( name ) )
-                {
-                    LOG_WARN( "MaterialInstance [{0}]: Property '{1}' required by shader is NOT initialized in code.", m_Name, name );
-                }
-            }
-
             m_ParentMaterial->Bind( this );
-        }
 
         m_bNeedsApply = false;
     }
@@ -209,10 +194,6 @@ namespace Desert::Graphic
         auto parent = m_ParentInstance.lock();
         if ( parent )
             return parent->ResolveProperty( name );
-
-        // Check parent material defaults
-        if ( m_ParentMaterial && m_ParentMaterial->GetDefaultProperties().HasProperty( name ) )
-            return m_ParentMaterial->GetDefaultProperties().GetProperty( name );
 
         return float( 0.0f );
     }

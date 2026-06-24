@@ -1,21 +1,22 @@
 #include "EntitySerializer.hpp"
+#include "ComponentRegistry.hpp"
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/AssetManager.hpp>
-#include <Engine/Assets/Mesh/MeshAsset.hpp>
-#include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
-#include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
-#include <Engine/Assets/MaterialAsset.hpp>
-#include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
-#include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Core::Serialize
 {
+    // EntitySerializer is now a thin orchestrator:
+    //   - "meta" (id / parent / tag / transform / prefab link) is structural and consumed directly by the
+    //     scene & prefab loaders, so it stays here.
+    //   - every actual component is (de)serialized generically through the ComponentRegistry, so adding a
+    //     component (or a field to a reflected component) no longer touches this file.
+
     Assets::EntityData EntitySerializer::SerializeEntity( ECS::Entity entity, const Assets::AssetManager& assetManager )
     {
         Assets::EntityData data;
-        
-        // Basic Info
+
+        // ---- Meta ----
         if ( entity.HasComponent<ECS::UUIDComponent>() )
             data.id = entity.GetComponent<ECS::UUIDComponent>().UUID;
         else
@@ -28,9 +29,7 @@ namespace Desert::Core::Serialize
             {
                 ECS::Entity parentEntity{ parentHandle, *entity.GetRegistry() };
                 if ( parentEntity.HasComponent<ECS::UUIDComponent>() )
-                {
                     data.parent = parentEntity.GetComponent<ECS::UUIDComponent>().UUID;
-                }
             }
         }
 
@@ -44,123 +43,23 @@ namespace Desert::Core::Serialize
             {
                 auto asset = assetManager.FindByHandle<Assets::PrefabAsset>( handle );
                 if ( asset )
-                {
                     data.PrefabPath = asset->GetMetadata().Filepath.string();
-                }
             }
         }
 
-        // Transform
         if ( entity.HasComponent<ECS::TransformComponent>() )
         {
-            const auto& tc = entity.GetComponent<ECS::TransformComponent>();
+            const auto& tc  = entity.GetComponent<ECS::TransformComponent>();
             data.Translation = tc.Translation;
-            data.Rotation = tc.Rotation;
-            data.Scale = tc.Scale;
+            data.Rotation    = tc.Rotation;
+            data.Scale       = tc.Scale;
         }
 
-        // Static Mesh
-        if ( entity.HasComponent<ECS::StaticMeshComponent>() )
+        // ---- Components (generic, registry-driven) ----
+        for ( const auto& serializer : ComponentRegistry::Get().All() )
         {
-            const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
-            Assets::StaticMeshComponentSer meshSer;
-            
-            if ( smc.MeshHandle )
-            {
-                auto asset = assetManager.FindByHandle<Assets::MeshAsset>( smc.MeshHandle );
-                if ( asset )
-                {
-                    meshSer.MeshPath = asset->GetMetadata().Filepath.string();
-                }
-            }
-
-            meshSer.MaterialSlots = smc.MaterialSlots;
-            meshSer.Primitive = smc.Primitive;
-            
-            if ( smc.RuntimeMesh )
-            {
-                const auto& vertices = smc.RuntimeMesh->GetVertices();
-                const auto& indices  = smc.RuntimeMesh->GetIndices();
-                
-                std::vector<Assets::VertexSer> customVertices;
-                for ( const auto& v : vertices )
-                {
-                    customVertices.push_back( { .Position = v.Position,
-                                                .Normal   = v.Normal,
-                                                .TexCoord = v.TexCoord } );
-                }
-                meshSer.CustomVertices = customVertices;
-
-                std::vector<uint32_t> flattenedIndices;
-                for ( const auto& i : indices )
-                {
-                    flattenedIndices.push_back( i.V1 );
-                    flattenedIndices.push_back( i.V2 );
-                    flattenedIndices.push_back( i.V3 );
-                }
-                meshSer.CustomIndices = flattenedIndices;
-            }
-
-            data.StaticMesh = meshSer;
-        }
-
-        // Skinned Mesh
-        if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
-        {
-            const auto& smc = entity.GetComponent<ECS::SkinnedMeshComponent>();
-            Assets::SkinnedMeshComponentSer meshSer;
-            
-            if ( smc.MeshHandle )
-            {
-                auto asset = assetManager.FindByHandle<Assets::MeshAsset>( smc.MeshHandle );
-                if ( asset )
-                {
-                    meshSer.MeshPath = asset->GetMetadata().Filepath.string();
-                }
-            }
-
-            meshSer.MaterialSlots = smc.MaterialSlots;
-            data.SkinnedMesh = meshSer;
-        }
-
-        // Camera
-        if ( entity.HasComponent<ECS::CameraComponent>() )
-        {
-            data.Camera = Assets::CameraComponentSer{ .IsMainCamera = entity.GetComponent<ECS::CameraComponent>().IsMainCamera };
-        }
-
-        // Lights
-        if ( entity.HasComponent<ECS::DirectionLightComponent>() )
-        {
-            const auto& light = entity.GetComponent<ECS::DirectionLightComponent>();
-            data.DirectionLight = Assets::DirectionLightComponentSer{ .Intensity = light.Intensity };
-        }
-
-        if ( entity.HasComponent<ECS::PointLightComponent>() )
-        {
-            const auto& light = entity.GetComponent<ECS::PointLightComponent>();
-            data.PointLight = Assets::PointLightComponentSer{ .Color = light.Color, .Intensity = light.Intensity, .Radius = light.Radius };
-        }
-
-        // Skybox
-        if ( entity.HasComponent<ECS::SkyboxComponent>() )
-        {
-            const auto& skybox = entity.GetComponent<ECS::SkyboxComponent>();
-            Assets::SkyboxComponentSer skyboxSer;
-            skyboxSer.Intensity = skybox.Intensity;
-
-            if ( skybox.SkyboxHandle != 0 )
-            {
-                auto asset = assetManager.FindByHandle<Assets::MeshAsset>( skybox.SkyboxHandle ); // NOTE: Skybox is often handled as MeshAsset/Texture
-                if ( !asset )
-                {
-                     // Fallback check in other asset types if needed, but let's assume it's stored correctly
-                }
-
-                if ( asset )
-                    skyboxSer.SkyboxPath = asset->GetMetadata().Filepath.string();
-            }
-            data.Skybox = skyboxSer;
+            if ( serializer.Has( entity ) )
+                data.Components[serializer.Key] = serializer.Serialize( entity, assetManager );
         }
 
         return data;
@@ -168,144 +67,40 @@ namespace Desert::Core::Serialize
 
     void EntitySerializer::DeserializeEntity( const Assets::EntityData& data, ECS::Entity entity, const Assets::AssetManager& assetManager )
     {
-        // Tag
+        // ---- Meta ----
+        // Tag — entity is always created with TagComponent; avoid double AddComponent
         if ( data.Tag )
-            entity.AddComponent<ECS::TagComponent>().Tag = *data.Tag;
+        {
+            if ( entity.HasComponent<ECS::TagComponent>() )
+                entity.GetComponent<ECS::TagComponent>().Tag = *data.Tag;
+            else
+                entity.AddComponent<ECS::TagComponent>().Tag = *data.Tag;
+        }
 
-        // Transform
         if ( data.Translation || data.Rotation || data.Scale )
         {
             auto& tc = entity.GetComponent<ECS::TransformComponent>();
             if ( data.Translation ) tc.Translation = *data.Translation;
-            if ( data.Rotation )    tc.Rotation = *data.Rotation;
-            if ( data.Scale )       tc.Scale = *data.Scale;
+            if ( data.Rotation )    tc.Rotation    = *data.Rotation;
+            if ( data.Scale )       tc.Scale       = *data.Scale;
         }
 
-        // Static Mesh
-        if ( data.StaticMesh )
+        // ---- Components (generic, registry-driven) ----
+        // ExtraFields holds component payloads keyed by registry key — for both new saves and legacy
+        // files where the same keys lived directly at the entity's top level.
+        for ( const auto& serializer : ComponentRegistry::Get().All() )
         {
-            auto& smc = entity.AddComponent<ECS::StaticMeshComponent>();
-            
-            if ( data.StaticMesh->MeshPath )
-            {
-                auto asset = assetManager.FindByPath<Assets::MeshAsset>( *data.StaticMesh->MeshPath );
-                if ( !asset )
-                {
-                    auto newAsset = const_cast<Assets::AssetManager&>(assetManager).CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, *data.StaticMesh->MeshPath );
-                    if ( newAsset )
-                    {
-                        Runtime::ResourceRegistry::GetMeshService()->Register( newAsset );
-                        newAsset->Load();
-                        asset = newAsset;
-                    }
-                }
-
-                if ( asset )
-                {
-                    smc.MeshHandle = asset->GetMetadata().Handle;
-                }
-            }
-
-            smc.MaterialSlots = data.StaticMesh->MaterialSlots;
-            smc.Primitive = data.StaticMesh->Primitive;
-
-            if ( data.StaticMesh->CustomVertices && data.StaticMesh->CustomIndices )
-            {
-                std::vector<Vertex> vertices;
-                for ( const auto& vs : *data.StaticMesh->CustomVertices )
-                {
-                    Vertex v;
-                    v.Position = vs.Position;
-                    v.Normal   = vs.Normal;
-                    v.TexCoord = vs.TexCoord;
-                    vertices.push_back( v );
-                }
-
-                std::vector<Index> indices;
-                const auto& rawIndices = *data.StaticMesh->CustomIndices;
-                for ( size_t i = 0; i + 2 < rawIndices.size(); i += 3 )
-                {
-                    indices.push_back( { rawIndices[i], rawIndices[i+1], rawIndices[i+2] } );
-                }
-
-                smc.RuntimeMesh = std::make_shared<DynamicMesh>( vertices, indices, std::vector<Submesh>{} );
-                smc.RuntimeMesh->Invalidate();
-            }
+            auto found = data.Components.get( serializer.Key );
+            if ( found.has_value() )
+                serializer.Deserialize( entity, found.value(), assetManager );
         }
 
-        // Skinned Mesh
-        if ( data.SkinnedMesh )
-        {
-            auto& smc = entity.AddComponent<ECS::SkinnedMeshComponent>();
-            
-            if ( data.SkinnedMesh->MeshPath )
-            {
-                auto asset = assetManager.FindByPath<Assets::MeshAsset>( *data.SkinnedMesh->MeshPath );
-                if ( !asset )
-                {
-                    auto newAsset = const_cast<Assets::AssetManager&>(assetManager).CreateAsset<Assets::SkinnedMeshAsset>( Assets::AssetPriority::High, *data.SkinnedMesh->MeshPath );
-                    if ( newAsset )
-                    {
-                        Runtime::ResourceRegistry::GetMeshService()->Register( newAsset );
-                        newAsset->Load();
-                        asset = newAsset;
-                    }
-                }
-
-                if ( asset )
-                {
-                    smc.MeshHandle = asset->GetMetadata().Handle;
-                }
-            }
-
-            smc.MaterialSlots = data.SkinnedMesh->MaterialSlots;
-        }
-
-        // Camera
-        if ( data.Camera )
-        {
-            auto& cam = entity.AddComponent<ECS::CameraComponent>();
-            cam.IsMainCamera = data.Camera->IsMainCamera;
-        }
-
-        // Lights
-        if ( data.DirectionLight )
-        {
-            auto& light = entity.AddComponent<ECS::DirectionLightComponent>();
-            light.Intensity = data.DirectionLight->Intensity;
-        }
-
-        if ( data.PointLight )
-        {
-            auto& light = entity.AddComponent<ECS::PointLightComponent>();
-            light.Color = data.PointLight->Color;
-            light.Intensity = data.PointLight->Intensity;
-            light.Radius = data.PointLight->Radius;
-        }
-
-        // Skybox
-        if ( data.Skybox )
-        {
-            auto& skybox = entity.AddComponent<ECS::SkyboxComponent>();
-            skybox.Intensity = data.Skybox->Intensity;
-            
-            if ( data.Skybox->SkyboxPath )
-            {
-                 // Assuming Skybox uses Environment asset or similar. 
-                 // For now just store the handle if we can find it
-                 auto asset = assetManager.FindByPath<Assets::MeshAsset>( *data.Skybox->SkyboxPath );
-                 if ( asset )
-                     skybox.SkyboxHandle = asset->GetMetadata().Handle;
-            }
-        }
-
+        // ---- Prefab link (meta) ----
         if ( data.PrefabPath )
         {
             auto asset = assetManager.FindByPath<Assets::PrefabAsset>( *data.PrefabPath );
             if ( asset )
-            {
                 entity.AddComponent<ECS::PrefabComponent>().Prefab = asset->GetMetadata().Handle;
-            }
         }
     }
 } // namespace Desert::Core::Serialize

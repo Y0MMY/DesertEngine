@@ -46,9 +46,11 @@ namespace Desert::Graphic
         }
 
         // NOTE:temporary solution! in the future it is worth getting when parsing
-        void PushConstant( const void* buffer, const uint32_t bufferSize )
+        // offset lets a caller place several sub-blocks in one push-constant range (e.g. the
+        // per-submesh transform at offset 0 and per-object material params after it).
+        void PushConstant( const void* buffer, const uint32_t bufferSize, const uint32_t offset = 0 )
         {
-            m_PushConstantBuffer.Write( buffer, bufferSize );
+            m_PushConstantBuffer.Write( buffer, bufferSize, offset );
         }
 
         std::shared_ptr<UniformBufferProperty> GetUniformBufferProperty( const std::string& name ) const;

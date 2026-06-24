@@ -7,6 +7,8 @@
 #include "ComponentWidgets/StaticMeshComponent.hpp"
 #include "ComponentWidgets/SkyboxComponent.hpp"
 #include "ComponentWidgets/PointLightComponent.hpp"
+#include "ComponentWidgets/DirectionalLightComponentWidget.hpp"
+#include "ComponentWidgets/CameraComponentWidget.hpp"
 #include "ComponentWidgets/AnimationComponentWidget.hpp"
 #include "ComponentWidgets/SkinnedMeshComponentWidget.hpp"
 
@@ -39,7 +41,9 @@ namespace Desert::Editor
              } );
         RegisterComponent( [this]() { return std::make_unique<SkyboxComponentWidget>( m_AssetManager ); } );
         RegisterComponent( [this]() { return std::make_unique<SkinnedMeshComponentWidget>( m_AssetManager ); } );
-        RegisterComponent( [this]() { return std::make_unique<PointLightComponentWidget>(); } );
+        RegisterComponent( []() { return std::make_unique<PointLightComponentWidget>(); } );
+        RegisterComponent( []() { return std::make_unique<DirectionalLightComponentWidget>(); } );
+        RegisterComponent( []() { return std::make_unique<CameraComponentWidget>(); } );
     }
 
     void ComponentEditor::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )

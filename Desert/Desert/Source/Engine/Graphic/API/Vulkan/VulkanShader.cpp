@@ -97,7 +97,26 @@ namespace Desert::Graphic::API::Vulkan
             auto& ub = m_ReflectionData.ShaderDescriptorSets[set].UniformBuffers[binding];
             ub.BindingPoint = binding; ub.Name = resource.name;
             ub.ShaderStage = (Core::Formats::ShaderStage)((uint32_t)ub.ShaderStage | (uint32_t)stage);
-            ub.Size = (uint32_t)compiler.get_declared_struct_size( compiler.get_type( resource.base_type_id ) );
+
+            const auto& structType = compiler.get_type( resource.base_type_id );
+            ub.Size = (uint32_t)compiler.get_declared_struct_size( structType );
+
+            // Populate fields once; multi-stage shaders call Reflect() per stage, avoid duplicates.
+            if ( ub.Fields.empty() )
+            {
+                for ( uint32_t i = 0; i < (uint32_t)structType.member_types.size(); ++i )
+                {
+                    ShaderResources::ShaderLayout::ShaderFieldLayout field;
+                    field.Name   = compiler.get_member_name( resource.base_type_id, i );
+                    field.Offset = compiler.type_struct_member_offset( structType, i );
+                    field.Size   = (uint32_t)compiler.get_declared_struct_member_size( structType, i );
+
+                    const auto& memberType = compiler.get_type( structType.member_types[i] );
+                    field.ArraySize = memberType.array.empty() ? 1u : memberType.array[0];
+
+                    ub.Fields.push_back( std::move( field ) );
+                }
+            }
         }
 
         // Samplers
@@ -123,6 +142,17 @@ namespace Desert::Graphic::API::Vulkan
             sb.BindingPoint = binding; sb.Name = resource.name; sb.ShaderStage = (Core::Formats::ShaderStage)((uint32_t)sb.ShaderStage | (uint32_t)stage);
             auto& type = compiler.get_type( resource.base_type_id );
             sb.Size = ( type.member_types.empty() || type.array.size() > 0 ) ? 0 : (uint32_t)compiler.get_declared_struct_size( type );
+        }
+
+        // Storage Images (e.g. writeonly imageCube / image2D in compute shaders)
+        for ( const auto& resource : resources.storage_images )
+        {
+            uint32_t set     = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
+            uint32_t binding = compiler.get_decoration( resource.id, spv::DecorationBinding );
+            auto& si         = m_ReflectionData.ShaderDescriptorSets[set].StorageImage2DSamplers[binding];
+            si.BindingPoint  = binding;
+            si.Name          = resource.name;
+            si.ShaderStage   = (Core::Formats::ShaderStage)( (uint32_t)si.ShaderStage | (uint32_t)stage );
         }
 
         // Push Constants

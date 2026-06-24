@@ -2,8 +2,6 @@
 
 #include <Engine/Graphic/Materials/Material.hpp>
 
-#include <Engine/Graphic/Materials/MaterialBindings/Tonemap/Tonemap.hpp>
-
 namespace Desert::Graphic
 {
     class MaterialTonemap final : public Material
@@ -11,10 +9,9 @@ namespace Desert::Graphic
     public:
         explicit MaterialTonemap();
 
-        // Parameter updates
         void Bind( const std::shared_ptr<Image2D>& targetImage );
 
     private:
-        std::unique_ptr<MaterialHelper::TonemapBinding> m_TonemapBinding;
+        Texture2DProperty* m_GeometryTexture = nullptr;
     };
 } // namespace Desert::Graphic

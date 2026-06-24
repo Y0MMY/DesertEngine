@@ -5,8 +5,13 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 
+#include <vector>
+
 namespace Desert::ShaderResources::API::Vulkan
 {
+    // Per-frame-in-flight storage buffer. Like VulkanUniformBuffer, it keeps one persistently-mapped
+    // buffer per frame in flight so the CPU can write next frame's data while the GPU reads the current
+    // one without a race (single-buffering here caused exactly the flicker we fixed for uniform buffers).
     class VulkanStorageBuffer : public StorageBuffer
     {
     public:
@@ -27,9 +32,9 @@ namespace Desert::ShaderResources::API::Vulkan
             return m_Size;
         }
 
-        const VkDescriptorBufferInfo& GetDescriptorBufferInfo() const
+        const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
-            return m_DescriptorInfo;
+            return m_DescriptorInfos[frameIndex];
         }
 
         virtual const void* GetData() const override
@@ -42,13 +47,15 @@ namespace Desert::ShaderResources::API::Vulkan
         void RT_Invalidate();
 
     private:
-        VmaAllocation          m_MemoryAlloc = nullptr;
-        VkBuffer               m_Buffer;
-        VkDescriptorBufferInfo m_DescriptorInfo{};
-        uint32_t               m_Size    = 0;
-        uint32_t               m_Binding = 0;
-        const std::string      m_BufferName;
+        std::vector<VmaAllocation>          m_MemoryAllocs;
+        std::vector<VkBuffer>               m_Buffers;
+        std::vector<VkDescriptorBufferInfo> m_DescriptorInfos;
+        std::vector<uint8_t*>               m_MappedMemories;
 
-        Common::Memory::Buffer m_LocalStorage;
+        uint32_t          m_Size    = 0;
+        uint32_t          m_Binding = 0;
+        const std::string m_BufferName;
+
+        Common::Memory::Buffer m_LocalStorage; // CPU shadow copy (for GetData)
     };
 } // namespace Desert::ShaderResources::API::Vulkan

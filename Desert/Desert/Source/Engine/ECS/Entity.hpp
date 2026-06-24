@@ -55,6 +55,8 @@ namespace Desert::ECS
             return m_Registry;
         }
 
+        glm::mat4 GetWorldTransform() const;
+
     private:
         entt::entity    m_Handle;
         entt::registry* m_Registry;

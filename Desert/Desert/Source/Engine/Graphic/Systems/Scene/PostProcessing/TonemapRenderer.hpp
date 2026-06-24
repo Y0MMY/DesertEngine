@@ -17,7 +17,16 @@ namespace Desert::Graphic::System
         virtual Common::BoolResultStr Initialize() override;
         virtual void               Shutdown() override {};
 
-        void RegisterPasses( RenderGraphBuilder& builder ) override;
+        // Tonemap runs as part of the explicit post-process chain (after the Jump Flood outline),
+        // not through the render graph.
+        void RegisterPasses( RenderGraphBuilder& builder ) override
+        {
+        }
+
+        // Reads the configured source framebuffer and writes the tonemapped final image.
+        void Execute();
+
+        void Resize( uint32_t width, uint32_t height );
 
     private:
         void Render();

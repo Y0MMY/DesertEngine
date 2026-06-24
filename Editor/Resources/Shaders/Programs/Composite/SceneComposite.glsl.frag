@@ -20,7 +20,7 @@ void main()
 	float mappedLuminance = (luminance * (1.0 + luminance / (pureWhite * pureWhite))) / (1.0 + luminance);
 
 	// Scale color by ratio of average luminances.
-	vec3 mappedColor = (mappedLuminance / luminance) * color;
+	vec3 mappedColor = (mappedLuminance / (luminance + 0.0001)) * color;
 
 	// Gamma correction.
 	oColor = vec4(pow(mappedColor, vec3(1.0 / gamma)), 1.0);

@@ -4,12 +4,15 @@
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
+#include <cstring>
+
 namespace Desert::ShaderResources::API::Vulkan
 {
-
-    VulkanStorageBuffer::VulkanStorageBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding ) //TODO: ctr params: StorageBuffer
+    VulkanStorageBuffer::VulkanStorageBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding )
          : m_Size( size ), m_Binding( binding ), m_BufferName( bufferName )
     {
+        if ( m_Size == 0 )
+            m_Size = 1; // Vulkan requires size > 0; grows on first SetData.
         RT_Invalidate();
     }
 
@@ -20,97 +23,101 @@ namespace Desert::ShaderResources::API::Vulkan
 
     void VulkanStorageBuffer::Release()
     {
-        if ( !m_MemoryAlloc )
+        if ( m_Buffers.empty() )
             return;
 
-        SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext, EngineContext::GetInstance().GetRendererContext() )
-             ->GetVulkanAllocator()
-             ->RT_DestroyBuffer( m_Buffer, m_MemoryAlloc );
-        m_Buffer      = nullptr;
-        m_MemoryAlloc = nullptr;
-        m_LocalStorage.Release();
+        auto allocator = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
+                                  EngineContext::GetInstance().GetRendererContext() )
+                              ->GetVulkanAllocator()
+                              .get();
+
+        for ( uint32_t i = 0; i < static_cast<uint32_t>( m_Buffers.size() ); ++i )
+        {
+            if ( m_MappedMemories[i] )
+            {
+                allocator->UnmapMemory( m_MemoryAllocs[i] );
+                m_MappedMemories[i] = nullptr;
+            }
+            if ( m_MemoryAllocs[i] )
+            {
+                // Deferred destroy: in-flight frames may still reference the old buffer.
+                allocator->RT_DestroyBuffer( m_Buffers[i], m_MemoryAllocs[i] );
+                m_Buffers[i]      = VK_NULL_HANDLE;
+                m_MemoryAllocs[i] = nullptr;
+            }
+        }
+
+        m_Buffers.clear();
+        m_MemoryAllocs.clear();
+        m_DescriptorInfos.clear();
+        m_MappedMemories.clear();
     }
 
     void VulkanStorageBuffer::RT_Invalidate()
     {
         Release();
 
-        VkMemoryAllocateInfo allocInfo = {};
-        allocInfo.sType                = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.pNext                = nullptr;
-        allocInfo.allocationSize       = 0;
-        allocInfo.memoryTypeIndex      = 0;
+        const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
 
-        VkBufferCreateInfo bufferInfo = {};
-        bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.usage              = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        bufferInfo.size               = m_Size;
+        m_Buffers.resize( framesInFlight, VK_NULL_HANDLE );
+        m_MemoryAllocs.resize( framesInFlight, nullptr );
+        m_DescriptorInfos.resize( framesInFlight );
+        m_MappedMemories.resize( framesInFlight, nullptr );
 
-        const auto allocatedBuffer = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
-                                              EngineContext::GetInstance().GetRendererContext() )
-                                          ->GetVulkanAllocator()
-                                          ->RT_AllocateBuffer( std::format( "{}-StorageBuffer", m_BufferName ),
-                                                               bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffer );
+        auto vulkanContext = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
+                                      EngineContext::GetInstance().GetRendererContext() );
 
-        if ( !allocatedBuffer.IsSuccess() )
+        for ( uint32_t i = 0; i < framesInFlight; ++i )
         {
-            return;
+            VkBufferCreateInfo bufferInfo = {};
+            bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bufferInfo.usage              = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+            bufferInfo.size               = m_Size;
+
+            const auto allocatedBuffer = vulkanContext->GetVulkanAllocator()->RT_AllocateBuffer(
+                 std::format( "{}-StorageBuffer-Frame{}", m_BufferName, i ), bufferInfo,
+                 VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffers[i] );
+
+            if ( !allocatedBuffer.IsSuccess() )
+                continue;
+
+            m_MemoryAllocs[i] = allocatedBuffer.GetValue();
+
+            m_DescriptorInfos[i].buffer = m_Buffers[i];
+            m_DescriptorInfos[i].offset = 0;
+            m_DescriptorInfos[i].range  = m_Size;
+
+            m_MappedMemories[i] = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
         }
-        m_MemoryAlloc = allocatedBuffer.GetValue();
-
-        m_DescriptorInfo.buffer = m_Buffer;
-        m_DescriptorInfo.offset = 0;
-        m_DescriptorInfo.range  = m_Size;
-    }
-
-    static uint64_t Align( uint64_t value, uint64_t alignment )
-    {
-        return ( value + alignment - 1 ) & ~( alignment - 1 );
     }
 
     void VulkanStorageBuffer::SetData( const void* data, uint32_t size, uint32_t offset )
     {
-
-        const auto& caps = EngineContext::GetInstance().GetCapabilities();
-
-        DESERT_VERIFY( offset % caps.StorageBufferAlignment == 0,
-                       "StorageBuffer '{}' offset {} is not aligned to {}", m_BufferName, offset,
-                       caps.StorageBufferAlignment );
-
-        DESERT_VERIFY( size + offset <= caps.MaxStorageBufferSize, "StorageBuffer '{}' write exceeds device limit",
-                       m_BufferName );
-
+        // Grow (recreating all per-frame buffers) when the write exceeds the current capacity.
         if ( size + offset > m_Size )
         {
-            m_Size = Align( size + offset, caps.StorageBufferAlignment );
+            m_Size = size + offset;
             RT_Invalidate();
         }
 
-        if ( !m_LocalStorage.Data || m_LocalStorage.Size < size + offset )
-        {
+        if ( !m_LocalStorage.Data || m_LocalStorage.GetAllocatedSize() < size + offset )
             m_LocalStorage.Allocate( m_Size );
-        }
+        std::memcpy( static_cast<uint8_t*>( m_LocalStorage.Data ) + offset, data, size );
 
-        memcpy( (uint8_t*)m_LocalStorage.Data + offset, data, size );
-
-        uint8_t* mapped = MapMemory();
-        memcpy( mapped + offset, data, size );
-        UnmapMemory();
+        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        if ( frameIndex < m_MappedMemories.size() && m_MappedMemories[frameIndex] )
+            std::memcpy( m_MappedMemories[frameIndex] + offset, data, size );
     }
 
     uint8_t* VulkanStorageBuffer::MapMemory()
     {
-        return SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
-                        EngineContext::GetInstance().GetRendererContext() )
-             ->GetVulkanAllocator()
-             ->MapMemory( m_MemoryAlloc );
+        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        return frameIndex < m_MappedMemories.size() ? m_MappedMemories[frameIndex] : nullptr;
     }
 
     void VulkanStorageBuffer::UnmapMemory()
     {
-        SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext, EngineContext::GetInstance().GetRendererContext() )
-             ->GetVulkanAllocator()
-             ->UnmapMemory( m_MemoryAlloc );
+        // Persistently mapped until Release(); intentionally a no-op.
     }
 
 } // namespace Desert::ShaderResources::API::Vulkan

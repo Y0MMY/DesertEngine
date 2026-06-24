@@ -2,33 +2,33 @@
 
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialData.hpp>
 
 #include <Engine/Geometry/Mesh.hpp>
 
 namespace Desert::Assets
 {
+    // PBR material asset backed entirely by the reflected PBRMaterialData (see PBRMaterialData.hpp).
+    // Load/Save are automated via reflect-cpp — there is no per-parameter (de)serialization code.
     class PBRMaterialAsset final : public MaterialAsset
     {
     public:
-        struct TextureSlot
-        {
-            AssetHandle TextureHandle;
-            glm::vec4   DefaultColor = glm::vec4( 1.0f );
-            bool        IsValid() const
-            {
-                return TextureHandle != 0;
-            }
-        };
-
         PBRMaterialAsset( AssetPriority priority, const Common::Filepath& filepath );
 
         Common::BoolResultStr Load() override;
         Common::BoolResultStr Unload() override;
 
+        // Serialize the reflected data back to a .lmat (JSON via reflect-cpp).
+        std::string Save() const;
+
         bool IsReadyForUse() const
         {
             return m_ReadyForUse;
         }
+
+        // Canonical reflected data — single source of truth for editor UI, serialization and shader upload.
+        PBRMaterialData&       Data()       { return m_Data; }
+        const PBRMaterialData& Data() const { return m_Data; }
 
         std::optional<Assets::AssetHandle> GetTextureHandle( TextureAsset::Type type ) const;
 
@@ -50,59 +50,22 @@ namespace Desert::Assets
             return m_MaterialUUID;
         }
 
-        std::optional<glm::vec3> GetAlbedoColor() const
-        {
-            return m_Parameters.AlbedoColor;
-        }
-
-        std::optional<glm::vec3> GetEmissiveColor() const
-        {
-            return m_Parameters.EmissiveColor;
-        }
-
-        std::optional<float> GetMetallicFactor() const
-        {
-            return m_Parameters.MetallicFactor;
-        }
-
-        std::optional<float> GetRoughnessFactor() const
-        {
-            return m_Parameters.RoughnessFactor;
-        }
-
-        std::optional<float> GetAOStrength() const
-        {
-            return m_Parameters.AOStrength;
-        }
-
-        std::optional<float> GetEmissiveIntensity() const
-        {
-            return m_Parameters.EmissiveIntensity;
-        }
+        // Convenience accessors (forward to the reflected data) kept for existing consumers such as
+        // MaterialFactory. New code should prefer Data().
+        std::optional<glm::vec3> GetAlbedoColor() const    { return glm::vec3( m_Data.AlbedoColor ); }
+        std::optional<glm::vec3> GetEmissiveColor() const  { return glm::vec3( m_Data.EmissiveColor ); }
+        std::optional<float>     GetMetallicFactor() const { return m_Data.MetallicFactor; }
+        std::optional<float>     GetRoughnessFactor() const{ return m_Data.RoughnessFactor; }
+        std::optional<float>     GetAOStrength() const     { return m_Data.AOStrength; }
+        std::optional<float>     GetEmissiveIntensity() const { return m_Data.EmissiveIntensity; }
 
     private:
-        bool m_ReadyForUse = false;
+        // Maps a texture-slot enum to the matching handle field in the reflected data.
+        const Assets::AssetHandle* HandleForType( TextureAsset::Type type ) const;
+        Assets::AssetHandle*       HandleForType( TextureAsset::Type type );
 
-        std::array<TextureSlot, static_cast<size_t>( 6U )> m_TextureSlots;
-
-        Common::UUID m_MaterialUUID;
-
-        struct PBRParameters
-        {
-            glm::vec3 AlbedoColor       = glm::vec3( 1.0f );
-            glm::vec3 EmissiveColor     = glm::vec3( 0.0f );
-            float     MetallicFactor    = 0.0f;
-            float     RoughnessFactor   = 0.5f;
-            float     AOStrength        = 1.0f;
-            float     EmissiveIntensity = 1.0f;
-
-            // Flags to track which parameters are explicitly set
-            bool bHasAlbedoColor       = false;
-            bool bHasMetallicFactor    = false;
-            bool bHasRoughnessFactor   = false;
-            bool bHasEmissiveColor     = false;
-            bool bHasEmissiveIntensity = false;
-            bool bHasAOStrength        = false;
-        } m_Parameters;
+        bool            m_ReadyForUse = false;
+        Common::UUID    m_MaterialUUID;
+        PBRMaterialData m_Data;
     };
 } // namespace Desert::Assets

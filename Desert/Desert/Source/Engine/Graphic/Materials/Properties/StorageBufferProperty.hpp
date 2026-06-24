@@ -30,7 +30,7 @@ namespace Desert::Graphic
         void SetRawData( const void* data, uint32_t size )
         {
             m_Buffer->SetData( data, size );
-            m_DirtyCount = 3;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
         }
 
         const auto& GetStorageBuffer() const

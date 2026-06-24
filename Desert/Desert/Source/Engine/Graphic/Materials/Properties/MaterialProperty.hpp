@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/MaterialBackend.hpp>
+#include <Engine/Graphic/Materials/Properties/PropertyDirty.hpp>
 
 namespace Desert::Graphic
 {
@@ -15,12 +16,25 @@ namespace Desert::Graphic
         {
             return m_DirtyCount > 0;
         }
+
+        // Decrement at most once per rendered frame. A material can be bound many times in a single
+        // frame (one shared material drawing N objects) and ApplyX()/Apply() both request a clean —
+        // without this guard the dirty window would drain far faster than the frames-in-flight count,
+        // leaving some per-frame descriptor set still pointing at the uninitialized dummy buffer.
         void MarkClean()
         {
-            if ( m_DirtyCount > 0 ) m_DirtyCount--;
+            if ( PropertyDirty::ConsumeCleanThisFrame( m_LastCleanFrame ) && m_DirtyCount > 0 )
+                m_DirtyCount--;
+        }
+
+        void MarkDirty()
+        {
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
         }
 
     protected:
-        uint32_t m_DirtyCount = 3;
+        // Stay dirty long enough to update every per-frame-in-flight descriptor set exactly once.
+        uint32_t m_DirtyCount     = PropertyDirty::DirtyLifetime();
+        uint64_t m_LastCleanFrame = PropertyDirty::kNeverCleaned;
     };
 } // namespace Desert::Graphic

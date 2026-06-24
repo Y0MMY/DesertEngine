@@ -78,7 +78,12 @@ namespace Desert::Assets
         };
 
         traverse( rootEntity );
-        
+
+        // Root entity's own PrefabComponent points to this very file — strip it from the
+        // serialized data so that re-instantiating doesn't recurse into itself.
+        if ( !m_EntityData.empty() )
+            m_EntityData[0].PrefabPath = std::nullopt;
+
         m_IsLoaded = true;
     }
 
@@ -135,6 +140,13 @@ namespace Desert::Assets
             {
                 rootEntity.AddComponent<ECS::TransformComponent>().Translation = *position;
             }
+        }
+
+        // Ensure the root entity is tagged as a prefab instance
+        if ( rootEntity && m_Metadata.Handle )
+        {
+            if ( !rootEntity.HasComponent<ECS::PrefabComponent>() )
+                rootEntity.AddComponent<ECS::PrefabComponent>().Prefab = m_Metadata.Handle;
         }
 
         return rootEntity;

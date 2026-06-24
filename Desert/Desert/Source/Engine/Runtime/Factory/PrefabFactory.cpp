@@ -22,24 +22,25 @@ namespace Desert::Runtime::Factory
 
         stack.insert( prefabID );
 
-        std::unordered_map<Common::UUID, ECS::Entity> entityMap;
+        std::unordered_map<Common::UUID, ECS::Entity> entityMap; // original prefab UUID → new entity
         ECS::Entity rootEntity = {};
 
-        // 1. Create all entities first
+        // 1. Create all entities with FRESH UUIDs to avoid collisions when multiple instances exist
         for ( const auto& data : prefab.GetEntities() )
         {
-            ECS::Entity e = scene.CreateNewEntity( data.Tag.value_or( "PrefabEntity" ) );
-            Common::UUID id = data.id.value_or( Common::UUID{} );
-            entityMap[id] = e;
-            
+            Common::UUID originalID = data.id.value_or( Common::UUID{} );
+            Common::UUID freshID;   // default-constructed generates a new random UUID
+            ECS::Entity e = scene.CreateEntityWithUUID( freshID, data.Tag.value_or( "PrefabEntity" ) );
+            entityMap[originalID] = e;
+
             if ( !rootEntity ) rootEntity = e;
         }
 
         // 2. Apply components and setup hierarchy
         for ( const auto& data : prefab.GetEntities() )
         {
-            Common::UUID id = data.id.value_or( Common::UUID{} );
-            ECS::Entity e = entityMap[id];
+            Common::UUID originalID = data.id.value_or( Common::UUID{} );
+            ECS::Entity e = entityMap[originalID];
 
             if ( data.PrefabPath.has_value() )
             {
@@ -55,11 +56,17 @@ namespace Desert::Runtime::Factory
 
             if ( data.parent.has_value() && *data.parent != Common::UUID{} )
             {
+                // parent lookup uses original prefab UUIDs as keys
                 if ( entityMap.contains( *data.parent ) )
-                {
                     scene.Attach( entityMap[*data.parent], e );
-                }
             }
+        }
+
+        // Ensure the root entity is tagged as a prefab instance
+        if ( rootEntity && prefabID )
+        {
+            if ( !rootEntity.HasComponent<ECS::PrefabComponent>() )
+                rootEntity.AddComponent<ECS::PrefabComponent>().Prefab = prefabID;
         }
 
         stack.erase( prefabID );

@@ -68,7 +68,7 @@ namespace Desert::Editor
     };
 
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath )
-         : IPanel( " FileExplorer" ), m_CurrentPath( rootPath ), m_CurrentDir( nullptr ),
+         : IPanel( "Assets" ), m_CurrentPath( rootPath ), m_CurrentDir( nullptr ),
            m_BaseProjectDir( nullptr ), m_PreviousDirectory( nullptr ), m_GridSize( 120.0f ),
            m_MinGridSize( 40.0f ), m_MaxGridSize( 400.0f ), m_IsInListView( false ), m_IsDragging( false ),
            m_ShowHiddenFiles( false ), m_UpdateNavigationPath( true ), m_Refresh( false )
@@ -93,20 +93,17 @@ namespace Desert::Editor
         m_Delimiter = "/";
 #endif
 
-        // »спользуем переданный путь или добавл€ем Assets
         if ( rootPath.empty() )
         {
-            m_BasePath = "Assets"; // или путь из настроек проекта
+            m_BasePath = "Assets"; 
         }
         else
         {
             m_BasePath = rootPath.string();
         }
 
-        // 1. —оздаем базовую структуру директорий
         std::string baseDirectoryHandle = ProcessDirectory( m_BasePath, nullptr, true );
 
-        // 2. »нициализируем указатели
         if ( m_Directories.find( baseDirectoryHandle ) != m_Directories.end() )
         {
             m_BaseProjectDir = m_Directories[baseDirectoryHandle].get();
@@ -517,12 +514,12 @@ namespace Desert::Editor
                         m_UpdateNavigationPath = false;
                     }
                     {
-                        int secIdx = 0, newPwdLastSecIdx = -1;
-                        int dirIndex = 0;
+                        int newPwdLastSecIdx = -1;
                         ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.1f, 0.2f, 0.7f, 0.0f ) );
 
-                        for ( auto& directory : m_BreadCrumbData )
+                        for ( size_t i = 0; i < m_BreadCrumbData.size(); ++i )
                         {
+                            auto*       directory = m_BreadCrumbData[i];
                             std::string fileName =
                                  std::filesystem::path( directory->AssetPath ).filename().string();
 
@@ -530,8 +527,13 @@ namespace Desert::Editor
                             if ( ImGui::SmallButton( fileName.c_str() ) )
                                 ChangeDirectory( directory );
                             ImGui::PopID();
-
                             ImGui::SameLine();
+
+                            if ( i + 1 < m_BreadCrumbData.size() )
+                            {
+                                ImGui::TextDisabled( ">" );
+                                ImGui::SameLine();
+                            }
                         }
                         ImGui::PopStyleColor();
 
@@ -985,20 +987,24 @@ namespace Desert::Editor
 
         if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceAllowNullID ) )
         {
-            /* ImGui::TextUnformatted(
-                  m_Editor->GetIconFontIcon( ToStdString( m_CurrentDir->Children[dirIndex]->AssetPath ) ) );
+            const std::string& assetPath = m_CurrentDir->Children[dirIndex]->AssetPath;
+            const FileType     fileType  = m_CurrentDir->Children[dirIndex]->Type;
 
-             ImGui::SameLine();
-             m_MovePath           = m_CurrentDir->Children[dirIndex]->AssetPath;
-             String8 resolvedPath = StringUtilities::AbsolutePathToRelativeFileSystemPath(
-                  m_Arena, m_MovePath, m_BasePath, Str8Lit( "//Assets" ) );
+            // Generic payload for all asset files
+            ImGui::SetDragDropPayload( "AssetFile", assetPath.c_str(), assetPath.size() + 1 );
 
-             ImGui::TextUnformatted( (const char*)resolvedPath.str );
+            // Type-specific payloads so target widgets (material texture slots, material slots, prefab
+            // instantiation) can accept exactly what they expect. Payload data is the asset path.
+            if ( fileType == FileType::Prefab )
+                ImGui::SetDragDropPayload( "PREFAB_FILE", assetPath.c_str(), assetPath.size() + 1 );
+            else if ( fileType == FileType::Texture )
+                ImGui::SetDragDropPayload( "TEXTURE_ASSET", assetPath.c_str(), assetPath.size() + 1 );
+            else if ( fileType == FileType::Material )
+                ImGui::SetDragDropPayload( "MATERIAL_ASSET", assetPath.c_str(), assetPath.size() + 1 );
 
-             size_t size = sizeof( const char* ) + resolvedPath.size;
-             ImGui::SetDragDropPayload( "AssetFile", resolvedPath.str, size );
-             m_IsDragging = true;
-             ImGui::EndDragDropSource();*/
+            ImGui::TextUnformatted( assetPath.c_str() );
+            m_IsDragging = true;
+            ImGui::EndDragDropSource();
         }
 
         if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )

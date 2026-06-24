@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace Desert::Core::Formats
 {
     enum class ShaderStage

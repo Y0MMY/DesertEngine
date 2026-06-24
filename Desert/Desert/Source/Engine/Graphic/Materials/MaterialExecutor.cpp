@@ -16,6 +16,9 @@ namespace Desert::Graphic
            m_Shader( shader )
     {
         m_PushConstantBuffer.Allocate( kMaxPushConstantsSize );
+        // Zero so any push-constant bytes the shader declares but a draw doesn't explicitly write
+        // (we push the full reflected range size) are defined rather than garbage.
+        m_PushConstantBuffer.ZeroInitialize();
         InitializeProperties();
 
         m_MaterialBackend->InitializeDefaults();
@@ -101,7 +104,7 @@ namespace Desert::Graphic
         if ( !resolvedShader )
         {
             LOG_ERROR( "Could not find the shader: {}", shaderName );
-            DESERT_VERIFY( false )
+            DESERT_VERIFY( false );
         }
 
         switch ( RendererAPI::GetAPIType() )

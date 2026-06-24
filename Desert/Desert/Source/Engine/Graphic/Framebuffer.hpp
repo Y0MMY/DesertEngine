@@ -10,19 +10,42 @@ namespace Desert::Graphic
 {
     enum class AttachmentLoad : uint8_t
     {
-        Clear = 0,
-        Load  = 1
+        Clear    = 0,
+        Load     = 1,
+        DontCare = 2
+    };
+
+    enum class AttachmentStore : uint8_t
+    {
+        Store    = 0,
+        DontCare = 1
+    };
+
+    struct FramebufferAttachment
+    {
+        Core::Formats::ImageFormat Format  = Core::Formats::ImageFormat::RGBA8F;
+        AttachmentLoad             LoadOp  = AttachmentLoad::Clear;
+        AttachmentStore            StoreOp = AttachmentStore::Store;
+
+        FramebufferAttachment() = default;
+        FramebufferAttachment( Core::Formats::ImageFormat format,
+                               AttachmentLoad             load  = AttachmentLoad::Clear,
+                               AttachmentStore            store = AttachmentStore::Store )
+             : Format( format ), LoadOp( load ), StoreOp( store )
+        {
+        }
     };
 
     struct FramebufferAttachmentSpecification
     {
         FramebufferAttachmentSpecification() = default;
-        FramebufferAttachmentSpecification( const std::initializer_list<Core::Formats::ImageFormat>& attachments )
-             : Attachments( attachments )
+        FramebufferAttachmentSpecification( const std::initializer_list<Core::Formats::ImageFormat>& formats )
         {
+            for ( auto f : formats )
+                Attachments.emplace_back( f );
         }
 
-        std::vector<Core::Formats::ImageFormat> Attachments;
+        std::vector<FramebufferAttachment> Attachments;
     };
 
     class Framebuffer;

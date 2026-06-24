@@ -10,10 +10,11 @@ namespace Desert::Graphic
 {
     struct RenderPassDependency
     {
-        RenderPhase RequiredPhase;
-        std::string RequiredTexture;
+        RenderPhaseID RequiredPhase;
+        std::string   RequiredTexture;
 
-        RenderPassDependency( RenderPhase phase = RenderPhase::None, const std::string& texture = "" )
+        RenderPassDependency( RenderPhaseID phase   = RenderPhase::None,
+                              const std::string& texture = "" )
              : RequiredPhase( phase ), RequiredTexture( texture )
         {
         }
@@ -25,31 +26,36 @@ namespace Desert::Graphic
         struct PassConfig
         {
             std::string                       Name;
-            RenderPhase                       Phase;
+            RenderPhaseID                     Phase;
             std::function<void()>             ExecuteFunc;
-            GraphicsPipelineSpecification             PipelineSpec;
+            GraphicsPipelineSpecification     PipelineSpec;
             std::shared_ptr<Framebuffer>      TargetFramebuffer;
             std::vector<RenderPassDependency> Dependencies;
+
+            // Cached once in Build(); reused every frame.
+            std::shared_ptr<RenderPass>       CachedRenderPass;
         };
 
         RenderGraphBuilder();
         ~RenderGraphBuilder();
 
         void AddPass( const PassConfig& config );
-        void AddPass( const std::string& name, RenderPhase phase, std::function<void()> executeFunc,
-                      const GraphicsPipelineSpecification&             pipelineSpec      = {},
+        void AddPass( const std::string& name, RenderPhaseID phase,
+                      std::function<void()>                    executeFunc,
+                      const GraphicsPipelineSpecification&     pipelineSpec      = {},
                       std::shared_ptr<Framebuffer>             targetFramebuffer = nullptr,
                       const std::vector<RenderPassDependency>& dependencies      = {} );
 
-        void AddPhaseDependency( RenderPhase requiredPhase, RenderPhase dependentPhase );
-        void AddTextureDependency( const std::string& textureName, RenderPhase producerPhase,
-                                   RenderPhase consumerPhase );
+        void AddPhaseDependency( RenderPhaseID requiredPhase, RenderPhaseID dependentPhase );
+        void AddTextureDependency( const std::string& textureName,
+                                   RenderPhaseID producerPhase,
+                                   RenderPhaseID consumerPhase );
 
         bool Build();
         void Clear();
 
-        const std::vector<PassConfig>&  GetSortedPasses() const;
-        const std::vector<RenderPhase>& GetPhaseOrder() const
+        const std::vector<PassConfig>&    GetSortedPasses() const;
+        const std::vector<RenderPhaseID>& GetPhaseOrder() const
         {
             return m_PhaseOrder;
         }
@@ -59,17 +65,19 @@ namespace Desert::Graphic
     private:
         struct InternalPassData
         {
-            PassConfig            Config;
-            size_t                ExecutionOrder;
-            std::set<RenderPhase> RequiredPhases;
+            PassConfig               Config;
+            size_t                   ExecutionOrder;
+            std::set<RenderPhaseID>  RequiredPhases;
         };
 
-        std::vector<InternalPassData>                            m_Passes;
-        std::vector<RenderPhase>                                 m_PhaseOrder;
-        std::unordered_map<RenderPhase, std::vector<PassConfig>> m_PhasePasses;
+        std::vector<InternalPassData>                                m_Passes;
+        std::vector<RenderPhaseID>                                   m_PhaseOrder;
+        std::unordered_map<RenderPhaseID, std::vector<PassConfig>>   m_PhasePasses;
 
-        std::unordered_map<RenderPhase, std::set<RenderPhase>>               m_PhaseDependencies;
-        std::unordered_map<std::string, std::pair<RenderPhase, RenderPhase>> m_TextureDependencies;
+        std::unordered_map<RenderPhaseID, std::set<RenderPhaseID>>                    m_PhaseDependencies;
+        std::unordered_map<std::string, std::pair<RenderPhaseID, RenderPhaseID>>      m_TextureDependencies;
+
+        std::vector<PassConfig> m_SortedPasses;
 
         void TopologicalSort();
         bool CheckForCycles() const;

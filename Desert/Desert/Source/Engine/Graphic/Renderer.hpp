@@ -10,10 +10,10 @@
 #include <Engine/Geometry/Mesh.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
+#include <Engine/Graphic/Image.hpp>
 
 namespace Desert::Graphic
 {
-    struct PBRTextures;
     class RendererAPI;
 
     class Renderer : public Common::Singleton<Renderer>
@@ -24,7 +24,7 @@ namespace Desert::Graphic
 
         [[nodiscard]] Common::BoolResultStr BeginFrame();
         [[nodiscard]] Common::BoolResultStr EndFrame();
-        void BeginRenderPass( const RenderPass* renderPass, bool clearFrame = false );
+        void BeginRenderPass( const RenderPass* renderPass, bool clearFrame = true );
         void BeginSwapChainRenderPass();
         void EndRenderPass();
         void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
@@ -35,10 +35,15 @@ namespace Desert::Graphic
         void DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
                               uint32_t groupCountZ, const MaterialExecutor* materialExecutor = nullptr );
 
+        void ImmediateComputeDispatch( const ComputePipeline* pipeline,
+                                       Image2D* inputImage, ImageCube* outputImage,
+                                       uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ );
+
         void PrepareNextFrame();
         void PresentFinalImage();
 
         void ResizeWindowEvent( uint32_t width, uint32_t height );
+        void WaitDeviceIdle();
 
         RendererAPI* GetRendererAPI() const;
 

@@ -80,60 +80,59 @@ namespace Desert::Core
         const glm::vec2& MousePosition{ Input::Mouse::Get().GetMouseX(), Input::Mouse::Get().GetMouseY() };
         const glm::vec2  MouseDelta = ( MousePosition - m_InitialMousePosition ) * 0.002f;
 
-        if ( Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right ) )
+        const bool mousePressed = Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right );
+
+        if ( mousePressed )
         {
             const float YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
             const float cameraSpeed   = 0.0002f * timestep.GetMilliseconds();
             const float rotationSpeed = 0.133f * timestep.GetMilliseconds();
 
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::S ) )
-            {
                 m_LocationDelta -= cameraSpeed * m_Direction;
-            }
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::W ) )
-            {
                 m_LocationDelta += cameraSpeed * m_Direction;
-            }
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::A ) )
-            {
                 m_LocationDelta -= cameraSpeed * m_RightDirection;
-            }
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::D ) )
-            {
                 m_LocationDelta += cameraSpeed * m_RightDirection;
-            }
-
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::Q ) )
-            {
                 m_LocationDelta -= cameraSpeed * glm::vec3{ 0.f, YAWSign, 0.f };
-            }
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::E ) )
-            {
                 m_LocationDelta += cameraSpeed * glm::vec3{ 0.f, YAWSign, 0.f };
-            }
 
             constexpr float maxRate = 0.12f;
-            m_YawDelta += glm::clamp( YAWSign * MouseDelta.x * rotationSpeed, -maxRate, maxRate );
+            m_YawDelta   += glm::clamp( YAWSign * MouseDelta.x * rotationSpeed, -maxRate, maxRate );
             m_PitchDelta += glm::clamp( MouseDelta.y * rotationSpeed, -maxRate, maxRate );
+        }
 
+        m_InitialMousePosition = MousePosition;
+
+        // Accumulate all deltas first so GetOrientation() sees a consistent state below.
+        m_Position += m_LocationDelta;
+        m_Yaw      += m_YawDelta;
+        m_Pitch    += m_PitchDelta;
+
+        // Clamp pitch BEFORE computing the view matrix — exceeding ±90° makes the
+        // lookAt target parallel to the up vector, producing a degenerate matrix that
+        // collapses all vertices to the same clip position and makes objects disappear.
+        static constexpr float kMaxPitch = glm::radians( 89.0f );
+        m_Pitch = glm::clamp( m_Pitch, -kMaxPitch, kMaxPitch );
+
+        // Rebuild focal point from the now-correct (clamped) forward direction.
+        if ( mousePressed )
+        {
             const float distance = glm::distance( m_FocalPoint, m_Position );
             m_FocalPoint         = m_Position + GetForwardDirection() * distance;
             m_Distance           = distance;
-
-            static constexpr float MaxPitch = glm::radians( 89.0f );
-            static constexpr float MinPitch = -MaxPitch;
-            m_Pitch                         = glm::clamp( m_Pitch, MinPitch, MaxPitch );
         }
-        m_InitialMousePosition = MousePosition;
-        m_Position += m_LocationDelta;
-        m_Yaw += m_YawDelta;
-        m_Pitch += m_PitchDelta;
+
         UpdateCameraView();
     }
 
     glm::quat Camera::GetOrientation() const
     {
-        return glm::quat( glm::vec3( -m_Pitch - m_PitchDelta, -m_Yaw - m_YawDelta, 0.0f ) );
+        return glm::quat( glm::vec3( -m_Pitch, -m_Yaw, 0.0f ) );
     }
 
     glm::vec3 Camera::GetUpDirection() const

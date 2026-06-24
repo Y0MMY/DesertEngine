@@ -13,7 +13,7 @@ namespace Desert::Editor
         explicit ScenePropertiesPanel( const std::shared_ptr<Desert::Core::Scene>&  scene,
                                        const std::shared_ptr<Assets::AssetManager>& assetManager,
                                        const Animation::AnimationLibrary*           animationLibrary )
-             : IPanel( "Scene Properties" ), m_Scene( scene ), m_AssetManager( assetManager ),
+             : IPanel( "Details" ), m_Scene( scene ), m_AssetManager( assetManager ),
                m_AnimationLibrary( animationLibrary ), m_MaterialsPanel( std::make_shared<MaterialsPanel>() )
         {
         }
@@ -28,5 +28,6 @@ namespace Desert::Editor
         const std::shared_ptr<MaterialsPanel>       m_MaterialsPanel;
         const Animation::AnimationLibrary*          m_AnimationLibrary;
         bool                                        m_DebugMode = false;
+        std::string                                 m_PrefabSavePath = "//Assets/Prefabs/";
     };
 } // namespace Desert::Editor

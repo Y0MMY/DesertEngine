@@ -2,6 +2,11 @@
 
 #include <Engine/Core/Formats/Shader.hpp>
 
+#include <cstdint>
+#include <string>
+#include <vector>
+#include <optional>
+
 // TODO: move to Uniforms global dir
 namespace Desert::ShaderResources::ShaderLayout
 {

@@ -15,6 +15,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             CreateFallbackTexture2D( format );
             CreateFallbackTextureCube( format );
+            CreateFallbackStorageImage2D( format );
         }
     }
 
@@ -22,6 +23,12 @@ namespace Desert::Graphic::API::Vulkan
     VulkanFallbackTextures::GetFallbackTexture2D( Core::Formats::ImageFormat format ) const
     {
         return m_FallbackTextures2D.at( format );
+    }
+
+    const std::shared_ptr<Image2D>&
+    VulkanFallbackTextures::GetFallbackStorageImage2D( Core::Formats::ImageFormat format ) const
+    {
+        return m_FallbackStorageImages2D.at( format );
     }
 
     const std::shared_ptr<ImageCube>&
@@ -98,6 +105,38 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
+    void VulkanFallbackTextures::CreateFallbackStorageImage2D( Core::Formats::ImageFormat format )
+    {
+        Core::Formats::Image2DSpecification spec = {
+             .Tag        = "VulkanFallbackStorageImage-2D",
+             .Width      = 1,
+             .Height     = 1,
+             .Format     = format,
+             .Mips       = 1,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::ImageProperties::Storage,
+        };
+
+        switch ( format )
+        {
+            case Core::Formats::ImageFormat::RGBA8F:
+            case Core::Formats::ImageFormat::BGRA8F:
+                spec.Data = std::vector<unsigned char>{ 0, 0, 0, 255 };
+                break;
+            case Core::Formats::ImageFormat::RGBA32F:
+                spec.Data = std::vector<float>{ 0.0f, 0.0f, 0.0f, 1.0f };
+                break;
+            default:
+                return;
+        }
+
+        auto texture = std::make_shared<VulkanImage2D>( spec );
+        if ( texture->RT_Invalidate().IsSuccess() )
+        {
+            m_FallbackStorageImages2D[format] = texture;
+        }
+    }
+
     Common::BoolResultStr VulkanFallbackTextures::Release()
     {
         for ( auto& texture2D : m_FallbackTextures2D )
@@ -110,6 +149,12 @@ namespace Desert::Graphic::API::Vulkan
         {
             textureCube.second->Release();
             textureCube.second.reset();
+        }
+
+        for ( auto& storageImage : m_FallbackStorageImages2D )
+        {
+            storageImage.second->Release();
+            storageImage.second.reset();
         }
 
         return BOOLSUCCESS;

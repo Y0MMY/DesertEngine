@@ -4,6 +4,11 @@
 
 namespace Desert::Graphic::API::Vulkan
 {
+    // Must be >= the swapchain image count (set later by VulkanSwapChain).
+    // CommandBufferAllocator is created before the swapchain exists, so we can't
+    // read FrameManager here — allocate for the maximum supported in-flight count.
+    static constexpr uint32_t k_MaxCommandPoolFrames = 3U;
+
     class CommandBufferAllocator : public Common::Singleton<CommandBufferAllocator>
     {
     public:

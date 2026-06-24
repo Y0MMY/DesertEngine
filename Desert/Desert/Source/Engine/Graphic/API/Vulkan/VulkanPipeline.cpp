@@ -368,7 +368,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         const auto& attachments = m_Specification.Framebuffer->GetSpecification().Attachments.Attachments;
         return std::any_of( attachments.begin(), attachments.end(),
-                            []( const auto& attachment ) { return Graphic::Utils::IsDepthFormat( attachment ); } );
+                            []( const auto& att ) { return Graphic::Utils::IsDepthFormat( att.Format ); } );
     }
 
     VkStencilOpState VulkanPipeline::ConvertStencilOpState( const StencilOpState& state )

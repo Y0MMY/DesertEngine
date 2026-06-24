@@ -43,8 +43,7 @@ namespace Desert::Editor
         m_ViewportData.ViewportPos = { ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x,
                                        ImGui::GetWindowPos().y + ImGui::GetWindowContentRegionMin().y };
 
-        m_ViewportData.MousePosition = glm::vec2( mousePos.x - ( viewportPos.x + viewportMin.x ),
-                                                  mousePos.y - ( viewportPos.y + viewportMin.y ) );
+        m_ViewportData.MousePosition = glm::vec2( mousePos.x - viewportMin.x, mousePos.y - viewportMin.y );
         const auto oldSize           = m_ViewportData.Size;
 
         m_ViewportData.Size      = { viewportMax.x - viewportMin.x, viewportMax.y - viewportMin.y };
@@ -52,7 +51,10 @@ namespace Desert::Editor
 
         if ( oldSize != m_ViewportData.Size )
         {
-            m_Scene->Resize( m_ViewportData.Size.x, m_ViewportData.Size.y );
+            // Store the new size and apply it in OnPreUpdate() next frame, before any recording
+            // starts. Calling Scene::Resize() here (inside OnImGuiRender) destroys descriptor set
+            // pools while their DS are still bound to the recording command buffer.
+            m_PendingViewportSize = m_ViewportData.Size;
             mainCamera->UpdateProjectionMatrix( m_ViewportData.Size.x,
                                                 m_ViewportData.Size.y ); // TODO: Move to scene
         }
@@ -73,6 +75,15 @@ namespace Desert::Editor
                                       m_ViewportData.ViewportPos.y );
     }
 
+    void ViewportPanel::OnPreUpdate()
+    {
+        if ( m_PendingViewportSize.has_value() )
+        {
+            m_Scene->Resize( (uint32_t)m_PendingViewportSize->x, (uint32_t)m_PendingViewportSize->y );
+            m_PendingViewportSize.reset();
+        }
+    }
+
     void ViewportPanel::RenderGizmo()
     {
         ImGuizmo::BeginFrame();
@@ -88,10 +99,10 @@ namespace Desert::Editor
         const auto& selectedEntityOpt = m_Scene->FindEntityByID( *selected );
         if ( !selectedEntityOpt )
             return;
-            
-        auto& selectedEntity = selectedEntityOpt->get();
+
+        auto& selectedEntity     = selectedEntityOpt->get();
         auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
-        auto  modelMatrix = transformComponent.GetTransform();
+        auto  modelMatrix        = transformComponent.GetTransform();
 
         float rw = static_cast<float>( ImGui::GetWindowWidth() );
         float rh = static_cast<float>( ImGui::GetWindowHeight() );
@@ -111,14 +122,14 @@ namespace Desert::Editor
             auto& selection = meshEditor->GetSelection();
             if ( !selection.VertexIndices.empty() )
             {
-                auto mesh = meshEditor->GetActiveMesh();
+                auto      mesh        = meshEditor->GetActiveMesh();
                 glm::vec3 localCenter = selection.GetCenter( *mesh );
                 glm::vec3 worldCenter = glm::vec3( modelMatrix * glm::vec4( localCenter, 1.0f ) );
-                
+
                 glm::mat4 gizmoTransform = glm::translate( glm::mat4( 1.0f ), worldCenter );
 
-                if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], 
-                                           ImGuizmo::TRANSLATE, ImGuizmo::WORLD, &gizmoTransform[0][0] ) )
+                if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], ImGuizmo::TRANSLATE, ImGuizmo::WORLD,
+                                           &gizmoTransform[0][0] ) )
                 {
                     glm::vec3 newWorldCenter, scale, skew;
                     glm::quat rotation;
@@ -126,7 +137,8 @@ namespace Desert::Editor
                     glm::decompose( gizmoTransform, scale, rotation, newWorldCenter, skew, perspective );
 
                     glm::vec3 deltaWorld = newWorldCenter - worldCenter;
-                    glm::vec3 deltaLocal = glm::vec3( glm::inverse( modelMatrix ) * glm::vec4( deltaWorld, 0.0f ) );
+                    glm::vec3 deltaLocal =
+                         glm::vec3( glm::inverse( modelMatrix ) * glm::vec4( deltaWorld, 0.0f ) );
 
                     auto& vertices = mesh->GetVertices();
                     for ( auto idx : selection.VertexIndices )
@@ -136,15 +148,16 @@ namespace Desert::Editor
 
                     mesh->Update( vertices, mesh->GetIndices() );
                 }
-                
-                if ( ImGuizmo::IsOver() ) m_GizmoHovered = true;
+
+                if ( ImGuizmo::IsOver() )
+                    m_GizmoHovered = true;
                 return; // Don't draw object gizmo if vertex gizmo is active
             }
         }
 
         // --- STANDARD OBJECT GIZMO ---
-        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0],
-                                  static_cast<ImGuizmo::OPERATION>( m_GizmoType ), ImGuizmo::WORLD, &modelMatrix[0][0] ) )
+        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( m_GizmoType ),
+                                   ImGuizmo::WORLD, &modelMatrix[0][0] ) )
         {
             if ( ImGuizmo::IsOver() )
             {
@@ -192,9 +205,11 @@ namespace Desert::Editor
              mainCamera->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
              static_cast<uint32_t>( m_ViewportData.Size.y ) );
 
-        float closestT = std::numeric_limits<float>::max();
+        float        closestT = std::numeric_limits<float>::max();
+        Common::UUID selectedUUID;
 
         const auto entities = m_Scene->GetAllEntities();
+        auto&      registry = m_Scene->GetRegistry();
 
         std::vector<std::pair<Common::UUID, std::pair<glm::mat4, Desert::Mesh*>>> allMeshes;
 
@@ -209,7 +224,7 @@ namespace Desert::Editor
                 }
 
                 allMeshes.push_back( { entity.GetComponent<ECS::UUIDComponent>().UUID,
-                                       { entity.GetComponent<ECS::TransformComponent>().GetTransform(), mesh } } );
+                                       { entity.GetWorldTransform(), mesh } } );
             }
         }
 
@@ -217,23 +232,50 @@ namespace Desert::Editor
         {
             const auto& [transform, mesh] = meshData;
             float t                       = 0.0f;
+            auto  localRay                = ray.ToLocalSpace( transform );
 
             for ( const auto& submesh : mesh->GetSubmeshes() )
             {
-                auto localRay = ray.ToLocalSpace( transform );
-
                 if ( localRay.IntersectsAABB( submesh.BoundingBox, t ) )
                 {
-                    LOG_TRACE( "Picked object: {} distance: {}", submesh.Name, t );
                     if ( t < closestT )
                     {
-                        Core::SelectionManager::SetSelected( uuid );
-                        closestT = t;
-
-                        return;
+                        selectedUUID = uuid;
+                        closestT     = t;
                     }
                 }
             }
+        }
+
+        if ( closestT != std::numeric_limits<float>::max() )
+        {
+            // If the hit entity is a child of a prefab, select the prefab root so the
+            // entire prefab gets outlined instead of just one submesh.
+            auto hitEntityRef = m_Scene->FindEntityByID( selectedUUID );
+            if ( hitEntityRef )
+            {
+                const ECS::Entity& hitEntity = hitEntityRef->get();
+                if ( !hitEntity.HasComponent<ECS::PrefabComponent>() )
+                {
+                    entt::entity current = hitEntity.GetHandle();
+
+                    while ( registry.has<ECS::RelationshipComponent>( current ) )
+                    {
+                        const auto& rel = registry.get<ECS::RelationshipComponent>( current );
+                        if ( rel.Parent == entt::null )
+                            break;
+                        current = rel.Parent;
+                        if ( registry.has<ECS::PrefabComponent>( current ) &&
+                             registry.has<ECS::UUIDComponent>( current ) )
+                        {
+                            selectedUUID = registry.get<ECS::UUIDComponent>( current ).UUID;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            Core::SelectionManager::SetSelected( selectedUUID );
         }
     }
 
@@ -291,7 +333,9 @@ namespace Desert::Editor
 
     Desert::Mesh* ViewportPanel::GetMeshComponent( const ECS::StaticMeshComponent& component )
     {
-        return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
+        if ( component.MeshHandle )
+            return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
+        return component.RuntimeMesh ? component.RuntimeMesh.get() : nullptr;
     }
 
 } // namespace Desert::Editor

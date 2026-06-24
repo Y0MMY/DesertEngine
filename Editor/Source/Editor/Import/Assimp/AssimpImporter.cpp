@@ -1,5 +1,7 @@
 #include "AssimpImporter.hpp"
 
+#include <limits>
+
 #include <assimp/Importer.hpp>
 #include <assimp/LogStream.hpp>
 #include <assimp/DefaultLogger.hpp>
@@ -432,6 +434,25 @@ namespace Desert::Editor
                 meshData.Indices.push_back( { face.mIndices[0], face.mIndices[1], face.mIndices[2] } );
             }
 
+            // ============================
+            // BOUNDING BOX
+            // ============================
+
+            if ( mesh->mNumVertices > 0 )
+            {
+                glm::vec3 aabbMin( std::numeric_limits<float>::max() );
+                glm::vec3 aabbMax( -std::numeric_limits<float>::max() );
+
+                for ( uint32_t i = 0; i < mesh->mNumVertices; ++i )
+                {
+                    const glm::vec3 pos = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
+                    aabbMin             = glm::min( aabbMin, pos );
+                    aabbMax             = glm::max( aabbMax, pos );
+                }
+
+                submesh.BoundingBox = { aabbMin, aabbMax };
+            }
+
             meshData.Submeshes.push_back( submesh );
         }
 
@@ -457,7 +478,7 @@ namespace Desert::Editor
             result.Skeleton = skeletonData;
 
         // ============================
-        // ANIMATIONS (без изменений)
+        // ANIMATIONS (пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
         // ============================
 
         for ( uint32_t i = 0; i < scene->mNumAnimations; ++i )

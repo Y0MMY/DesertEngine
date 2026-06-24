@@ -28,6 +28,10 @@ group "ThirdParty"
 include "ThirdParty/"
 group ""
 
+group "Tools"
+include "Tools/DesertHeaderTool/"
+group ""
+
 include "Desert/"
 include "Editor/"
 

@@ -2,11 +2,20 @@
 
 #include <spdlog/spdlog.h>
 
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+
 namespace Common::Logger
 {
     inline void LogInit()
     {
-        spdlog::set_pattern( "%^[%T][Desert]: %v%$" );
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("engine_log.txt", true);
+        
+        spdlog::set_default_logger(std::make_shared<spdlog::logger>("desert", spdlog::sinks_init_list{console_sink, file_sink}));
+        spdlog::set_pattern( "%^[%T][%l][Desert]: %v%$" );
+        spdlog::set_level( spdlog::level::trace );
+        spdlog::flush_on( spdlog::level::trace );
     }
 
     template <typename... Args>

@@ -9,6 +9,9 @@
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanMaterialBackend.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
+#include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/EngineContext.hpp>
@@ -86,20 +89,26 @@ namespace Desert::Graphic::API::Vulkan
 
         VkRenderPassBeginInfo renderPassInfo = {
              .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-             .renderPass  = vulkanFramebuffer->GetVKRenderPass(),
+             .renderPass  = clearFrame ? vulkanFramebuffer->GetVKRenderPass()
+                                       : vulkanFramebuffer->GetVKRenderPassLoad(),
              .framebuffer = vulkanFramebuffer->GetVKFramebuffer(),
              .renderArea  = {
                    .offset = { 0, 0 },
                    .extent = { framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() } } };
 
+        const auto& clearSpec = renderPass->GetSpecification().ClearColor;
         std::vector<VkClearValue> clearValues;
         for ( const auto& attachment : framebuffer->GetSpecification().Attachments.Attachments )
         {
             VkClearValue clearValue{};
-            if ( Graphic::Utils::IsDepthFormat( attachment ) )
-                clearValue.depthStencil = { 1.0f, 0 };
+            if ( Graphic::Utils::IsDepthFormat( attachment.Format ) )
+            {
+                clearValue.depthStencil = { clearSpec.DepthStencil.x, static_cast<uint32_t>( clearSpec.DepthStencil.y ) };
+            }
             else
-                clearValue.color = { { 0.1f, 0.1f, 0.1f, 1.0f } };
+            {
+                clearValue.color = { { clearSpec.Color.r, clearSpec.Color.g, clearSpec.Color.b, clearSpec.Color.a } };
+            }
             clearValues.push_back( clearValue );
         }
 
@@ -145,7 +154,28 @@ namespace Desert::Graphic::API::Vulkan
     Common::BoolResultStr VulkanRendererAPI::EndRenderPass()
     {
         if ( m_CurrentCommandBuffer )
+        {
             vkCmdEndRenderPass( m_CurrentCommandBuffer );
+
+            // The implicit final subpass dependency uses dstStageMask=BOTTOM_OF_PIPE and
+            // dstAccessMask=0, which makes color writes *available* (flushed from the
+            // attachment cache) but NOT *visible* to subsequent fragment-shader texture reads.
+            // Without this barrier the shader texture cache (L1) is never invalidated, so the
+            // next pass — or the matching pass in the next frame — samples stale data, producing
+            // every-other-frame flickering with 2+ frames in flight.
+            VkMemoryBarrier memBarrier = {
+                .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            };
+            vkCmdPipelineBarrier( m_CurrentCommandBuffer,
+                                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  0,
+                                  1, &memBarrier,
+                                  0, nullptr,
+                                  0, nullptr );
+        }
         return BOOLSUCCESS;
     }
 
@@ -284,8 +314,63 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDispatch( m_CurrentCommandBuffer, groupCountX, groupCountY, groupCountZ );
     }
 
+    void VulkanRendererAPI::ImmediateComputeDispatch( const ComputePipeline* pipeline,
+                                                      Image2D*   inputImage,
+                                                      ImageCube* outputImage,
+                                                      uint32_t groupCountX, uint32_t groupCountY,
+                                                      uint32_t groupCountZ )
+    {
+        auto vkPipeline = static_cast<const VulkanPipelineCompute*>( pipeline );
+        auto vkInput    = dynamic_cast<IVulkanImage*>( inputImage );
+        auto vkOutput   = dynamic_cast<IVulkanImage*>( outputImage );
+
+        if ( !vkPipeline || !vkInput || !vkOutput )
+            return;
+
+        auto* backend = vkPipeline->GetVulkanMaterialBackend();
+        if ( !backend )
+            return;
+
+        auto cmdResult = CommandBufferAllocator::GetInstance().RT_GetCommandBufferCompute( true );
+        if ( !cmdResult.IsSuccess() )
+            return;
+        VkCommandBuffer cmd = cmdResult.GetValue();
+
+        // Transition output cubemap to GENERAL so compute can write to it
+        vkOutput->TransitionLayout( cmd, VK_IMAGE_LAYOUT_GENERAL );
+
+        // Update descriptor set 0 with the real input sampler and output storage image
+        const auto& inRes  = vkInput->GetResource();
+        const auto& outRes = vkOutput->GetResource();
+
+        VkDescriptorImageInfo samplerInfo = { inRes.Sampler, inRes.ImageView,
+                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkDescriptorImageInfo storageInfo = { VK_NULL_HANDLE, outRes.ImageView, VK_IMAGE_LAYOUT_GENERAL };
+
+        auto wds0 = DescriptorSetBuilder::GetSampler2DWDS( backend, 0, 0, 0, 1, &samplerInfo );
+        auto wds1 = DescriptorSetBuilder::GetStorageWDS( backend, 0, 0, 1, 1, &storageInfo );
+        backend->UpdateDescriptorSets( { wds0, wds1 } );
+
+        // Bind and dispatch
+        vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vkPipeline->GetVkPipeline() );
+        backend->BindDescriptorSets( cmd, vkPipeline->GetVkPipelineLayout(),
+                                     VK_PIPELINE_BIND_POINT_COMPUTE, 0 );
+        vkCmdDispatch( cmd, groupCountX, groupCountY, groupCountZ );
+
+        // Transition output to SHADER_READ_ONLY so it can be sampled by the skybox shader
+        vkOutput->TransitionLayout( cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferCompute( cmd );
+    }
+
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
+    }
+
+    void VulkanRendererAPI::WaitDeviceIdle()
+    {
+        vkDeviceWaitIdle( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                               ->GetVulkanLogicalDevice() );
     }
     std::shared_ptr<Framebuffer> VulkanRendererAPI::GetCompositeFramebuffer() const
     {
@@ -328,7 +413,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             attachments[i] = {
                  .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = i, .clearValue = clearValues[i] };
-            if ( Graphic::Utils::IsDepthFormat( framebuffer->GetSpecification().Attachments.Attachments[i] ) )
+            if ( Graphic::Utils::IsDepthFormat( framebuffer->GetSpecification().Attachments.Attachments[i].Format ) )
                 attachments[i].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
             clearRects[i] = {
                  .rect           = { .offset = { 0, 0 },

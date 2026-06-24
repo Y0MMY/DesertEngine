@@ -39,10 +39,10 @@ namespace Desert::ECS
                      }
 
                      Graphic::ShaderProtocols::PointLightPayload light{};
-                     light.Color     = pointlight.Color;
-                     light.Intensity = pointlight.Intensity;
+                     light.Color     = pointlight.Data.Color;
+                     light.Intensity = pointlight.Data.Intensity;
                      light.Position  = glm::vec3(worldTransform[3]); // Extract translation from world matrix
-                     light.Radius    = pointlight.Radius;
+                     light.Radius    = pointlight.Data.Radius;
 
                      renderCommandBuffer.Emplace<Graphic::Render::PointLightCommand>( light );
                  } );

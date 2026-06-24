@@ -39,6 +39,14 @@ namespace Desert::Graphic::API::Vulkan
             return m_RenderPass;
         }
 
+        // Returns a render pass with LOAD_OP_LOAD for all attachments.
+        // Used by render-graph passes that accumulate into the framebuffer
+        // without clearing the previous pass's output.
+        const auto GetVKRenderPassLoad() const
+        {
+            return m_RenderPassLoad;
+        }
+
         uint32_t GetColorAttachmentCount() const override
         {
             return (uint32_t)(m_ColorAttachments.size() + m_ExternalColorAttachments.size());
@@ -94,8 +102,9 @@ namespace Desert::Graphic::API::Vulkan
 
         FramebufferSpecification m_FramebufferSpecification;
 
-        VkFramebuffer m_Framebuffer = VK_NULL_HANDLE;
-        VkRenderPass  m_RenderPass  = VK_NULL_HANDLE;
+        VkFramebuffer m_Framebuffer    = VK_NULL_HANDLE;
+        VkRenderPass  m_RenderPass     = VK_NULL_HANDLE;
+        VkRenderPass  m_RenderPassLoad = VK_NULL_HANDLE;
 
         uint32_t m_Width  = 0;
         uint32_t m_Height = 0;

@@ -40,7 +40,7 @@ namespace Desert::Graphic::API::Vulkan
 
     CommandBufferAllocator::CommandBufferAllocator( const std::shared_ptr<VulkanLogicalDevice>& device )
     {
-        const uint32_t frames = 3U; // TODO
+        const uint32_t frames = k_MaxCommandPoolFrames;
 
         // Graphic
         {
