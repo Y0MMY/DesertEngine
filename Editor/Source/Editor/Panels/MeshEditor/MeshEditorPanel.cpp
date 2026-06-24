@@ -757,7 +757,7 @@ void MeshEditorPanel::InitPreviewScene()
 
     // Camera
     m_PreviewCamera = m_PreviewScene->CreateNewEntity( "PreviewCamera" );
-    m_PreviewCamera.AddComponent<ECS::CameraComponent>().IsMainCamera = true;
+    m_PreviewCamera.AddComponent<ECS::CameraComponent>().Data.IsMainCamera = true;
 
     // Light
     auto light = m_PreviewScene->CreateNewEntity( "PreviewLight" );

@@ -72,8 +72,6 @@ namespace Desert::Graphic::System
         void DrawSkinnedMeshes();
         void RegisterSilhouettePass( RenderGraphBuilder& builder );
 
-        ShaderProtocols::PBRTexturesUB PreparePBRTextures() const;
-
         void UpdateGlobalUniforms( const Core::Camera* camera, const ShaderProtocols::PointLight& pointLights,
                                    const ShaderProtocols::DirectionLight& dirLights );
 

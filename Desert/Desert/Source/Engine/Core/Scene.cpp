@@ -44,7 +44,7 @@ namespace Desert::Core
                      if ( glm::length( rawDir ) > 0.001f )
                          sceneRendererInfo.DirLights.DirectionLights.push_back(
                               { glm::vec4( glm::normalize( rawDir ), 0.0f ),
-                                glm::vec4( light.Color, light.Intensity ) } );
+                                glm::vec4( light.Data.Color, light.Data.Intensity ) } );
                  } );
         }
 
@@ -164,7 +164,7 @@ namespace Desert::Core
         {
             auto& cameraComponent = cameraView.get<ECS::CameraComponent>( entity );
 
-            if ( cameraComponent.IsMainCamera )
+            if ( cameraComponent.Data.IsMainCamera )
             {
                 // TODO: Get from scene config
                 const glm::mat4 projection =
@@ -182,7 +182,7 @@ namespace Desert::Core
             auto& cameraComponent = cameraView.get<ECS::CameraComponent>( entity );
             m_MainCamera          = cameraComponent.Camera;
 
-            cameraComponent.IsMainCamera = true;
+            cameraComponent.Data.IsMainCamera = true;
         }
     }
 

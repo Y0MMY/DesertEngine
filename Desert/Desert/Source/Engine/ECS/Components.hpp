@@ -1,5 +1,7 @@
 #pragma once
 
+#include <entt/entt.hpp>
+
 #include <Common/Core/UUID.hpp>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -17,6 +19,8 @@
 
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/Animation/FSM/AnimationStateMachine.hpp>
+
+#include <Engine/Reflection/ReflectionMacros.hpp>
 
 namespace Desert
 {
@@ -36,10 +40,21 @@ namespace Desert::ECS
         Common::UUID UUID;
     };
 
+    // "Reflected render-data block": editable, reflected fields the editor draws and the renderer maps
+    // to its GPU representation. This is the general concept — a surface Material (PBRMaterialData) is
+    // just ONE specialization; camera and lights are others. NOT a material, hence the member is `Data`.
+    struct CameraData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Main Camera" ), Category( "Camera" ) )
+        bool IsMainCamera = true;
+    };
+
     struct CameraComponent
     {
         std::shared_ptr<Core::Camera> Camera;
-        bool                          IsMainCamera = true;
+        CameraData                    Data;
     };
 
     struct VisibilityComponent
@@ -102,20 +117,54 @@ namespace Desert::ECS
         }
     };
 
+    struct DirectionalLightData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color )
+        glm::vec3 Color = glm::vec3( 1.0f );
+
+        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
+        float Intensity = 1.0f;
+    };
+
     struct DirectionLightComponent
     {
-        glm::vec3 Color     = glm::vec3( 1.0f );
-        float     Intensity = 1.0f;
+        DirectionalLightData Data;
+    };
+
+    // Distance falloff model for a point light. Reflected enum — drives a combo in the editor and
+    // round-trips through reflected serialization. (Consumed by the lighting upload path later.)
+    enum class LightFalloff
+    {
+        Linear,
+        Quadratic,
+        InverseSquare
+    };
+
+    struct PointLightData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color )
+        glm::vec3 Color = glm::vec3( 1.0f );
+
+        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
+        float Intensity = 1.0f;
+
+        PROPERTY( DisplayName( "Radius" ), Category( "Light" ), Range( 0.0f, 100.0f ) )
+        float Radius = 10.0f;
+
+        PROPERTY( DisplayName( "Falloff" ), Category( "Light" ) )
+        LightFalloff Falloff = LightFalloff::Quadratic;
+
+        PROPERTY( DisplayName( "Show Radius" ), Category( "Light" ) )
+        bool ShowRadius = false;
     };
 
     struct PointLightComponent
     {
-        glm::vec3 Color;
-        glm::vec3 Position;
-        float     Intensity;
-        float     Radius;
-
-        bool ShowRadius;
+        PointLightData Data;
     };
 
     struct SkyboxComponent

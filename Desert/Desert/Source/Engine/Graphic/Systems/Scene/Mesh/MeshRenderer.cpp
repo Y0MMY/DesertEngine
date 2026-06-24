@@ -2,9 +2,73 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
+#include <Engine/Reflection/ReflectionRegistry.hpp>
+
+#include <variant>
 
 namespace Desert::Graphic::System
 {
+    namespace
+    {
+        // Per-instance material override (MaterialPropertyBlock-style): start from the material's
+        // reflected data and apply any overridden instance properties on top — generically, by name,
+        // through reflection. Each drawn object thus gets its own effective material in the SSBO.
+        PBRPushMaterial BuildEffectiveMaterial( StaticMaterialPBR* material, MaterialInstance* instance )
+        {
+            Assets::PBRMaterialData data = material->Data();
+
+            const auto* type = Reflection::ReflectionRegistry::Get().Find( "PBRMaterialData" );
+            if ( instance && type )
+            {
+                for ( const auto& [name, prop] : instance->GetPropertySet().GetProperties() )
+                {
+                    if ( !prop.bIsOverridden )
+                        continue;
+
+                    const Reflection::FieldInfo* field = nullptr;
+                    for ( const auto& f : type->Fields )
+                        if ( f.Name == name ) { field = &f; break; }
+                    if ( !field )
+                        continue;
+
+                    void*       dst = static_cast<char*>( static_cast<void*>( &data ) ) + field->Offset;
+                    const auto& v   = prop.Value;
+                    using Reflection::FieldType;
+
+                    switch ( field->Type )
+                    {
+                        case FieldType::Float:
+                            if ( auto* f = std::get_if<float>( &v ) ) *static_cast<float*>( dst ) = *f;
+                            break;
+                        case FieldType::Int:
+                            if ( auto* i = std::get_if<int>( &v ) ) *static_cast<int*>( dst ) = *i;
+                            break;
+                        case FieldType::Bool:
+                            if ( auto* b = std::get_if<bool>( &v ) ) *static_cast<bool*>( dst ) = *b;
+                            break;
+                        case FieldType::Vec3:
+                            if ( auto* v3 = std::get_if<glm::vec3>( &v ) ) *static_cast<glm::vec3*>( dst ) = *v3;
+                            else if ( auto* v4 = std::get_if<glm::vec4>( &v ) )
+                                *static_cast<glm::vec3*>( dst ) = glm::vec3( *v4 );
+                            break;
+                        case FieldType::Vec4:
+                            if ( auto* v4 = std::get_if<glm::vec4>( &v ) ) *static_cast<glm::vec4*>( dst ) = *v4;
+                            else if ( auto* v3 = std::get_if<glm::vec3>( &v ) )
+                            {
+                                auto* d = static_cast<glm::vec4*>( dst );
+                                *d      = glm::vec4( *v3, d->w );
+                            }
+                            break;
+                        default:
+                            break; // AssetHandle/textures are per-material descriptors, not SSBO data.
+                    }
+                }
+            }
+
+            return BuildPBRPushMaterial( data );
+        }
+    } // namespace
 
     Common::BoolResultStr MeshRenderer::Initialize()
     {
@@ -90,30 +154,54 @@ namespace Desert::Graphic::System
         const auto& pointLights = m_SceneRenderer->GetPointLights();
         const auto& dirLights   = m_SceneRenderer->GetDirectionLights();
 
+        // Group draws by material so each material's per-object data fills ONE storage buffer, indexed
+        // per draw (GPU-scene style). Objects of the same material that wrote a shared buffer per-draw
+        // would otherwise collapse to the last writer.
+        std::vector<std::pair<StaticMaterialPBR*, std::vector<const StaticMeshRenderData*>>> groups;
+        const auto groupFor = [&]( StaticMaterialPBR* mat ) -> std::vector<const StaticMeshRenderData*>&
+        {
+            for ( auto& [m, v] : groups )
+                if ( m == mat )
+                    return v;
+            groups.emplace_back( mat, std::vector<const StaticMeshRenderData*>{} );
+            return groups.back().second;
+        };
+
         for ( const auto& data : m_StaticQueue )
         {
-            if ( !data.Mesh || data.MaterialSlots.empty() )
+            if ( !data.Mesh || data.MaterialSlots.empty() || !data.MaterialSlots[0] )
                 continue;
+            if ( auto* mat = static_cast<StaticMaterialPBR*>( data.MaterialSlots[0]->GetParentMaterial() ) )
+                groupFor( mat ).push_back( &data );
+        }
 
-            // We use the first material slot for now, as the current renderer doesn't support submeshes with different materials yet
-            MaterialInstance* inst = data.MaterialSlots[0];
-            if ( !inst )
-                continue;
+        for ( auto& [mat, objects] : groups )
+        {
+            // Fill this material's per-object storage buffer (one GpuMaterial per drawn object).
+            std::vector<PBRPushMaterial> gpuMaterials;
+            gpuMaterials.reserve( objects.size() );
+            for ( const auto* obj : objects )
+                gpuMaterials.push_back( BuildEffectiveMaterial( mat, obj->MaterialSlots[0] ) );
 
-            Material* parentMaterial = inst->GetParentMaterial();
+            if ( auto* sb = mat->Get<StorageBufferProperty>( "Materials" ) )
+                sb->SetRawData( gpuMaterials.data(),
+                                static_cast<uint32_t>( gpuMaterials.size() * sizeof( PBRPushMaterial ) ) );
 
-            // Update scene data on the specific instance using static PBR helpers
-            StaticMaterialPBR::UpdateCamera( inst, camera );
-            StaticMaterialPBR::UpdateLights( inst, pointLights, dirLights );
+            for ( uint32_t i = 0; i < static_cast<uint32_t>( objects.size() ); ++i )
+            {
+                const auto*       obj  = objects[i];
+                MaterialInstance* inst = obj->MaterialSlots[0];
 
-            // Update object data on the specific instance
-            StaticMaterialPBR::UpdateTransform( inst, data.Transform );
+                StaticMaterialPBR::UpdateCamera( inst, camera );
+                StaticMaterialPBR::UpdateLights( inst, pointLights, dirLights );
+                StaticMaterialPBR::UpdateTransform( inst, obj->Transform );
 
-            // Bind the material instance.
-            parentMaterial->Bind( inst );
+                mat->SetMaterialIndex( i );
+                mat->Bind( inst );
 
-            renderer.RenderMesh( m_StaticPipeline.get(), data.Mesh, data.Transform,
-                                 parentMaterial->GetMaterialExecutor() );
+                renderer.RenderMesh( m_StaticPipeline.get(), obj->Mesh, obj->Transform,
+                                     mat->GetMaterialExecutor() );
+            }
         }
     }
 
@@ -124,20 +212,18 @@ namespace Desert::Graphic::System
 
         auto&       renderer    = Renderer::GetInstance();
         const auto  camera      = m_SceneRenderer->GetMainCamera();
-        const auto  textures    = PreparePBRTextures();
         const auto& pointLights = m_SceneRenderer->GetPointLights();
 
         for ( const auto& data : m_SkinnedQueue )
         {
             // For now, we assume the first material instance is the PBR one
             MaterialInstance* inst = (MaterialInstance*)data.Material;
-            
+
             data.Material->Bind( { .instance        = inst,
                                    .MainCamera      = camera,
                                    .MeshTransform   = data.Transform,
                                    .DirectionLights = m_SceneRenderer->GetDirectionLights(),
                                    .PointLights     = pointLights,
-                                   .PBREnvTextures  = textures,
                                    .SkinnedUB       = { .BoneMatrices = data.BoneMatrices } } );
 
             renderer.RenderMesh( m_SkinnedPipeline.get(), data.Mesh, data.Transform,
@@ -252,11 +338,6 @@ namespace Desert::Graphic::System
         m_SilhouetteMaterial = std::make_unique<MaterialSilhouette>();
 
         return true;
-    }
-
-    ShaderProtocols::PBRTexturesUB MeshRenderer::PreparePBRTextures() const
-    {
-        return {};
     }
 
     void MeshRenderer::RegisterSilhouettePass( RenderGraphBuilder& builder )

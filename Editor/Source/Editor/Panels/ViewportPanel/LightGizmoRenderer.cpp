@@ -35,7 +35,7 @@ namespace Desert::Editor
                 continue;
             }
 
-            auto& light     = entity.GetComponent<ECS::PointLightComponent>();
+            auto& light     = entity.GetComponent<ECS::PointLightComponent>().Data;
             auto& transform = entity.GetComponent<ECS::TransformComponent>();
             auto& uuid      = entity.GetComponent<ECS::UUIDComponent>().UUID;
 

@@ -7,6 +7,8 @@
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 
+#include <Engine/Reflection/ReflectionRegistry.hpp>
+
 namespace Desert::Graphic
 {
     static RendererAPI* s_RendererAPI = nullptr;
@@ -30,6 +32,12 @@ namespace Desert::Graphic
 
     Common::BoolResultStr Renderer::Init()
     {
+        // Pull in the generated reflection TU (static lib would otherwise strip it) so all
+        // REFLECT()-annotated types are registered before any editor / shader-upload use.
+        Reflection::ForceLinkGeneratedReflection();
+        LOG_INFO( "[Reflection] {} reflected type(s) registered",
+                  Reflection::ReflectionRegistry::Get().All().size() );
+
         const auto& init = InitGraphicAPI();
         if ( !init )
         {

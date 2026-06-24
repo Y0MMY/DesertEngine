@@ -8,8 +8,8 @@
 namespace Desert::Graphic
 {
 
-    MaterialPBRBase::MaterialPBRBase( std::string&& debugName, std::string&& shaderName, const PBRMaterialData& data )
-         : Material( std::move( debugName ), std::move( shaderName ) ), m_RuntimeData( data )
+    MaterialPBRBase::MaterialPBRBase( std::string&& debugName, std::string&& shaderName )
+         : Material( std::move( debugName ), std::move( shaderName ) )
     {
     }
 
@@ -66,15 +66,6 @@ namespace Desert::Graphic
 
         instance->GetParentMaterial()->Get<UniformBufferProperty>( LightsMetadataUB.Name )
              ->SetRawData( (std::byte*)&LightsMetadataUB, sizeof( LightsMetadataUB ) );
-    }
-
-    void MaterialPBRBase::UpdatePBRTextures( MaterialInstance* instance, const ShaderProtocols::PBRTexturesUB& textures )
-    {
-    }
-
-    void MaterialPBRBase::UpdatePBRMaterial( MaterialInstance*                          instance,
-                                             const ShaderProtocols::PBRMeshMaterialsUB& meshUB )
-    {
     }
 
 } // namespace Desert::Graphic

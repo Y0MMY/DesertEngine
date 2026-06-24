@@ -5,6 +5,14 @@ project "Desert"
     pchsource "Source/pch.cpp"
     forceincludes { "pch.hpp" }
 
+    -- Reflection codegen (UHT-style): run DesertHeaderTool before compiling so
+    -- Source/Engine/Generated/Reflection.gen.cpp is regenerated from REFLECT()/PROPERTY()
+    -- annotations. The generated file is picked up by the Source/Engine/**.cpp glob below.
+    dependson { "DesertHeaderTool" }
+    prebuildcommands {
+        '"%{wks.location}/build/Bin/%{cfg.buildcfg}/DesertHeaderTool.exe" "%{wks.location}/Desert/Desert/Source" "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp" "Engine"'
+    }
+
     files { 
         "Source/pch.cpp",
         "Source/pch.hpp",

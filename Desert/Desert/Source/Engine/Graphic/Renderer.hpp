@@ -14,7 +14,6 @@
 
 namespace Desert::Graphic
 {
-    struct PBRTextures;
     class RendererAPI;
 
     class Renderer : public Common::Singleton<Renderer>

@@ -28,6 +28,12 @@ namespace Desert::Graphic
 
         virtual void Bind( const MaterialInstance* instance );
 
+        // Public for editor introspection (PropertyEditorBuilder reads reflected properties to build UI).
+        const std::vector<IProperty*>& GetRegisteredProperties() const
+        {
+            return m_RegisteredProperties;
+        }
+
         template <typename T>
         T* Get( const std::string& name ) const
         {
@@ -75,11 +81,6 @@ namespace Desert::Graphic
 
     protected:
         void RegisterProperty( IProperty* prop ) override;
-
-        const std::vector<IProperty*>& GetRegisteredProperties() const
-        {
-            return m_RegisteredProperties;
-        }
 
         virtual void OnBind( MaterialInstance* instance )
         {

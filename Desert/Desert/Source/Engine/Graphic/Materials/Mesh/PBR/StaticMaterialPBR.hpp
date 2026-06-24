@@ -1,16 +1,17 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Graphic/Materials/Properties/TProperty.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialData.hpp>
 
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/DirectionLight.hpp>
-#include <Engine/Graphic/ShaderProtocols/PBRTextures.hpp>
-#include <Engine/Graphic/ShaderProtocols/PBRMeshMaterials.hpp>
 
 namespace Desert::Graphic
 {
+    // Runtime PBR material. Its parameters live entirely in the reflected PBRMaterialData (no per-
+    // parameter members or setters): MaterialFactory copies the data from the material asset, the
+    // editor edits it via reflection, and the shader receives it automatically (see Bind()).
     class StaticMaterialPBR : public Material
     {
     public:
@@ -19,29 +20,13 @@ namespace Desert::Graphic
 
         void Bind( const MaterialInstance* instance ) override;
 
-        // Typed PBR properties — auto-registered at construction; available to editor via GetRegisteredProperties()
-        MPROPERTY( glm::vec3, AlbedoColor,      "AlbedoColor",      glm::vec3( 1.0f ) )
-        MPROPERTY( float,     AlbedoBlend,       "AlbedoBlend",      1.0f )
-        MPROPERTY( float,     MetallicValue,     "MetallicValue",    0.0f )
-        MPROPERTY( float,     MetallicBlend,     "MetallicBlend",    1.0f )
-        MPROPERTY( float,     RoughnessValue,    "RoughnessValue",   0.5f )
-        MPROPERTY( float,     RoughnessBlend,    "RoughnessBlend",   1.0f )
-        MPROPERTY( glm::vec3, EmissionColor,     "EmissionColor",    glm::vec3( 0.0f ) )
-        MPROPERTY( float,     EmissionStrength,  "EmissionStrength", 1.0f )
-        MPROPERTY( float,     AOValue,           "AOValue",          1.0f )
+        Assets::PBRMaterialData&       Data()       { return m_Data; }
+        const Assets::PBRMaterialData& Data() const { return m_Data; }
 
-        MTEXTURE_PROPERTY( AlbedoTexture, "u_AlbedoTexture" )
-        MTEXTURE_PROPERTY( NormalTexture, "u_NormalTexture" )
+        // Index into this material's per-object Materials[] storage buffer for the next Bind/draw.
+        void SetMaterialIndex( uint32_t index ) { m_MaterialIndex = index; }
 
-        // Static helpers — write per-instance overrides into a MaterialInstance
-        static void SetAlbedo( MaterialInstance* instance, const Image2D* texture,
-                               const glm::vec3& color = glm::vec3( 1.0f ) );
-        static void SetNormalMap( MaterialInstance* instance, const Image2D* texture );
-        static void SetMetallic( MaterialInstance* instance, float value, const Image2D* texture = nullptr );
-        static void SetRoughness( MaterialInstance* instance, float value, const Image2D* texture = nullptr );
-        static void SetAmbientOcclusion( MaterialInstance* instance, const Image2D* texture );
-        static void SetEmissive( MaterialInstance* instance, const Image2D* texture, float intensity = 1.0f );
-
+        // Per-frame scene data written into the shared executor uniform buffers (not per-parameter).
         static void UpdateTransform( MaterialInstance* instance, const glm::mat4& transform );
         static void UpdateCamera( MaterialInstance* instance, const Core::Camera* camera );
         static void UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
@@ -49,5 +34,9 @@ namespace Desert::Graphic
 
     protected:
         void OnBind( MaterialInstance* instance ) override;
+
+    private:
+        Assets::PBRMaterialData m_Data;
+        uint32_t                m_MaterialIndex = 0;
     };
 } // namespace Desert::Graphic

@@ -3,7 +3,17 @@
 #include <Engine/Graphic/Texture.hpp>
 #include <ImGui/imgui.h>
 #include <Common/Utilities/FileSystem.hpp>
+#include <Common/Core/Constants.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
+
+#include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Graphic/Materials/MaterialFactory.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/Material/MaterialService.hpp>
 
 #include <glm/gtc/type_ptr.hpp>
 
@@ -24,344 +34,162 @@ namespace Desert::Editor
         RenderMaterialProperties( materialComp );
     }
 
-    static void RenderTextureField( const std::unique_ptr<Editor::UI::UIHelper>& helperUI,
-                                    const std::string& fieldName, auto& property, bool flipImage = false )
+    size_t MaterialComponentWidget::GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const
     {
-        auto& value = property.get();
-
-        ImGui::Columns( 2 );
-        ImGui::SetColumnWidth( 0, 150.0f );
-
-        ImGui::TextUnformatted( fieldName.c_str() );
-        ImGui::NextColumn();
-
-        auto displayImage2D = [&]( const Desert::Graphic::Image2DRef& image, const char* hoverText = "Texture" )
+        if ( meshComp.MeshHandle )
         {
-            if ( image )
+            if ( auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( meshComp.MeshHandle ) )
             {
-                helperUI->Image( image, ImVec2( 128, 128 ) );
-
-                if ( ImGui::IsItemHovered() )
-                {
-                    ImGui::BeginTooltip();
-                    ImGui::Text( "%s", hoverText );
-                    ImGui::Text( "Size: %dx%d", image->GetWidth(), image->GetHeight() );
-                    ImGui::EndTooltip();
-                }
-                return true;
-            }
-            return false;
-        };
-
-        auto displayPlaceholder = [&]( const char* text ) { ImGui::Button( text, ImVec2( 128, 128 ) ); };
-
-        auto handleDragDrop = [&]( const char* payloadType, auto&& dropHandler )
-        {
-            if ( ImGui::BeginDragDropTarget() )
-            {
-                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( payloadType ) )
-                {
-                    dropHandler( payload );
-                }
-                ImGui::EndDragDropTarget();
-            }
-        };
-
-        //// Handle Texture2D
-        // if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Texture2DRef> )
-        //{
-        //     if ( value )
-        //     {
-        //         auto image = value->GetImage2D();
-        //         if ( !displayImage2D( image, "Texture2D" ) )
-        //         {
-        //             displayPlaceholder( "Invalid Texture" );
-        //         }
-        //     }
-        //     else
-        //     {
-        //         displayPlaceholder( "Drop Texture Here" );
-        //     }
-
-        //    handleDragDrop( "TEXTURE_ASSET",
-        //                    [&]( const ImGuiPayload* payload )
-        //                    {
-        //                        // Handle texture drop
-        //                    } );
-        //}
-        //// Handle TextureCube
-        // else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::TextureCubeRef> )
-        //{
-        //     if ( value )
-        //     {
-        //         auto image = value->GetImageCube();
-        //         if ( image )
-        //         {
-        //             displayPlaceholder( "Cubemap" );
-
-        //            if ( ImGui::IsItemHovered() )
-        //            {
-        //                ImGui::BeginTooltip();
-        //                ImGui::Text( "Cubemap Texture" );
-        //                ImGui::Text( "Size: %dx%d", image->GetWidth(), image->GetHeight() );
-        //                ImGui::EndTooltip();
-        //            }
-        //        }
-        //    }
-        //    else
-        //    {
-        //        displayPlaceholder( "Drop Cubemap Here" );
-        //    }
-
-        //    handleDragDrop( "CUBEMAP_ASSET",
-        //                    [&]( const ImGuiPayload* payload )
-        //                    {
-        //                        // Handle cubemap drop
-        //                    } );
-        //}
-        // Handle Image2D
-        if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Image2DRef> )
-        {
-            if ( !displayImage2D( value, "Image2D" ) )
-            {
-                displayPlaceholder( "No Image" );
+                const size_t count = meshAsset->GetMaterialHandles().size();
+                if ( count > 0 )
+                    return count;
             }
         }
-        // Handle ImageCube
-        else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::ImageCubeRef> )
-        {
-            if ( value )
-            {
-                displayPlaceholder( "Cubemap" );
-
-                if ( ImGui::IsItemHovered() )
-                {
-                    ImGui::BeginTooltip();
-                    ImGui::Text( "Cubemap Image" );
-                    ImGui::Text( "Size: %dx%d", value->GetWidth(), value->GetHeight() );
-                    ImGui::EndTooltip();
-                }
-            }
-            else
-            {
-                displayPlaceholder( "No Cubemap" );
-            }
-        }
-
-        ImGui::NextColumn();
-        ImGui::Columns( 1 );
+        return 1; // single implicit slot when the mesh exposes none (e.g. primitives)
     }
 
-    static void RenderField( const std::unique_ptr<Editor::UI::UIHelper>& helperUI, const std::string& fieldName,
-                             auto& property )
+    Assets::AssetHandle MaterialComponentWidget::CreateAndRegisterMaterial()
     {
-        /*auto& value = property.get();
+        if ( !m_AssetManager )
+            return {};
 
-        Utils::ImGuiUtilities::PropertyFlag flags = Utils::ImGuiUtilities::PropertyFlag::None;
+        // Unique on-disk name so each created slot is an independent, persisted asset.
+        const std::string name = "Material_" + std::to_string( static_cast<uint64_t>( Common::UUID() ) ) +
+                                 Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const Common::Filepath path = Common::Constants::Path::MATERIAL_PATH / name;
 
-        if ( property.template has_attribute<ColorAttribute>() )
-        {
-            flags = ( Utils::ImGuiUtilities::PropertyFlag )(
-                 (int)flags | (int)Utils::ImGuiUtilities::PropertyFlag::ColorProperty );
-        }
+        auto asset = const_cast<Assets::AssetManager&>( *m_AssetManager )
+                          .CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, path );
+        if ( !asset )
+            return {};
 
-        if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Texture2DRef> ||
-                       std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::TextureCubeRef> ||
-                       std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::Image2DRef> ||
-                       std::is_same_v<std::decay_t<decltype( value )>, Desert::Graphic::ImageCubeRef> )
-        {
-            RenderTextureField( helperUI, fieldName, property );
+        Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath, asset->Save() );
+        Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
+        return asset->GetMetadata().Handle;
+    }
+
+    void MaterialComponentWidget::AssignMaterialFromPath( ECS::StaticMeshComponent& meshComp, size_t slot,
+                                                          const std::string& assetPath )
+    {
+        if ( !m_AssetManager )
             return;
-        }
 
-        if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, float> )
-        {
-            float minVal = -FLT_MAX;
-            float maxVal = FLT_MAX;
-            float step   = 0.01f;
+        auto asset = m_AssetManager->FindByPath<Assets::PBRMaterialAsset>( assetPath );
+        if ( !asset )
+            asset = const_cast<Assets::AssetManager&>( *m_AssetManager )
+                         .CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, assetPath );
+        if ( !asset )
+            return;
 
-            if ( auto range_attr = property.template get_attribute<RangeAttribute>() )
-            {
-                minVal = range_attr->min_value;
-                maxVal = range_attr->max_value;
-                step   = range_attr->step;
-            }
+        const auto handle = asset->GetMetadata().Handle;
+        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
+            Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
 
-            flags = ( Utils::ImGuiUtilities::PropertyFlag )( (int)flags |
-                                                             (int)Utils::ImGuiUtilities::PropertyFlag::DragValue );
-            Utils::ImGuiUtilities::Property( fieldName.c_str(), value, minVal, maxVal, 0.01f, flags );
-        }
-        else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, glm::vec3> )
-        {
-            Utils::ImGuiUtilities::Property( fieldName.c_str(), value, -FLT_MAX, FLT_MAX, false, flags );
-        }
-        else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, glm::vec4> )
-        {
-            Utils::ImGuiUtilities::Property( fieldName.c_str(), *(glm::vec3*)&value, -FLT_MAX, FLT_MAX, true,
-                                             flags );
-        }
-        else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, int> )
-        {
-            Utils::ImGuiUtilities::Property( fieldName.c_str(), *(uint32_t*)&value, flags );
-        }
-        else if constexpr ( std::is_same_v<std::decay_t<decltype( value )>, bool> )
-        {
-            Utils::ImGuiUtilities::Property( fieldName.c_str(), value, flags );
-        }
+        if ( slot < meshComp.MaterialSlots.size() )
+            meshComp.MaterialSlots[slot] = handle;
         else
-        {
-            ImGui::Columns( 2 );
-            ImGui::SetColumnWidth( 0, 150.0f );
+            meshComp.MaterialSlots.push_back( handle );
 
-            ImGui::TextUnformatted( fieldName.c_str() );
-            ImGui::NextColumn();
-            ImGui::TextDisabled( "Unsupported type" );
-            ImGui::NextColumn();
-            ImGui::Columns( 1 );
-        }*/
+        // Force MeshECSSystem to rebuild the runtime instances (it only rebuilds on slot-count change,
+        // so an in-place handle swap needs an explicit reset).
+        meshComp.RuntimeMaterialInstances.clear();
     }
 
-    void MaterialComponentWidget::RenderMaterialProperties( ECS::StaticMeshComponent& materialComp )
+    void MaterialComponentWidget::RenderMaterialProperties( ECS::StaticMeshComponent& meshComp )
     {
         Utils::ImGuiUtilities::PushID();
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
-        if ( ImGui::TreeNodeEx( "Materials", ImGuiTreeNodeFlags_Framed ) )
+        if ( ImGui::TreeNodeEx( "Materials", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen ) )
         {
-            auto material = materialComp.MaterialSlots;
-            int  matIndex = 0;
+            const size_t submeshCount = GetSubmeshCount( meshComp );
 
+            if ( meshComp.MaterialSlots.empty() )
             {
-                if ( !material.empty() )
-                {
-                    ImGui::TextUnformatted( "Empty Material" );
-                    if ( ImGui::Button( "Add Material", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
-                    {
-                        // Implementation for adding new material
-                        // materialComp.Material = MaterialFactory::CreateDefaultMaterial();
-                    }
-                    ImGui::TreePop();
-                    ImGui::PopStyleVar();
-                    Utils::ImGuiUtilities::PopID();
-                    return;
-                }
-
-                std::string matName;
-                if ( matName.empty() )
-                {
-                    matName = "Material " + std::to_string( matIndex );
-                }
-
-                ImGui::Indent();
-
-                static bool        materialNameUpdated = false;
-                static std::string renamedMaterialName;
-
-                if ( materialNameUpdated )
-                {
-                    if ( matName == renamedMaterialName )
-                    {
-                        materialNameUpdated = false;
-                        ImGui::SetNextItemOpen( true );
-                    }
-                }
-
-                if ( ImGui::TreeNodeEx( (void*)(intptr_t)material[0], ImGuiTreeNodeFlags_Framed,
-                                        matName.c_str() ) )
-                {
-                    ImGui::Indent();
-                    ImGui::PushID( (int)(uintptr_t)material[0] );
-
-                    // Material name editing
-                    if ( Utils::ImGuiUtilities::InputText( matName, "##materialName" ) )
-                    {
-                        materialNameUpdated = true;
-                        renamedMaterialName = matName;
-                        // material->SetName( matName ); // Uncomment if material has SetName method
-                    }
-
-                    // Save to file button
-                    if ( ImGui::Button( "Save to file", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
-                    {
-                        // Implementation for saving material to file
-                    }
-
-                    // Render flags section
-                    ImGui::Columns( 2 );
-                    ImGui::Separator();
-
-                    // Example render flags - you'll need to adapt these to your material system
-                    bool twoSided     = false; // material->GetFlag( Desert::Graphic::Material::TWOSIDED );
-                    bool depthTested  = true;  // material->GetFlag( Desert::Graphic::Material::DEPTHTEST );
-                    bool alphaBlended = false; // material->GetFlag( Desert::Graphic::Material::ALPHABLEND );
-                    bool castShadows  = true;  // !material->GetFlag( Desert::Graphic::Material::NOSHADOW );
-
-                    ImGui::AlignTextToFramePadding();
-
-                    if ( Utils::ImGuiUtilities::Property( "Alpha Blended", alphaBlended ) )
-                    {
-                        // material->SetFlag( Desert::Graphic::Material::ALPHABLEND, alphaBlended );
-                    }
-
-                    if ( Utils::ImGuiUtilities::Property( "Two Sided", twoSided ) )
-                    {
-                        // material->SetFlag( Desert::Graphic::Material::TWOSIDED, twoSided );
-                    }
-
-                    if ( Utils::ImGuiUtilities::Property( "Depth Tested", depthTested ) )
-                    {
-                        // material->SetFlag( Desert::Graphic::Material::DEPTHTEST, depthTested );
-                    }
-
-                    if ( Utils::ImGuiUtilities::Property( "Cast Shadows", castShadows ) )
-                    {
-                        // material->SetFlag( Desert::Graphic::Material::NOSHADOW, !castShadows );
-                    }
-
-                    ImGui::Columns( 1 );
-
-                    //// Render material properties dynamically
-                    // material->VisitUniformFields(
-                    //      [this]( const auto& uniformName, const auto& field_name, auto& property )
-                    //      {
-                    //          // Group texture properties together
-                    //          if constexpr ( std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                        Desert::Graphic::Texture2DRef> ||
-                    //                         std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                        Desert::Graphic::TextureCubeRef> ||
-                    //                         std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                        Desert::Graphic::Image2DRef> ||
-                    //                         std::is_same_v<std::decay_t<decltype( property.get() )>,
-                    //                                        Desert::Graphic::ImageCubeRef> )
-                    //          {
-                    //              if ( ImGui::TreeNodeEx( property.GetDisplayName().c_str(),
-                    //                                      ImGuiTreeNodeFlags_Framed ) )
-                    //              {
-                    //                  RenderField( m_UIHelper, property.GetDisplayName(), property );
-                    //                  ImGui::TreePop();
-                    //              }
-                    //          }
-                    //          else
-                    //          {
-                    //              RenderField( m_UIHelper, property.GetDisplayName(), property );
-                    //          }
-                    //      } );
-
-                    ImGui::Unindent();
-                    ImGui::TreePop();
-                    ImGui::PopID();
-                }
-                ImGui::Unindent();
-
-                matIndex++;
+                ImGui::TextDisabled( "No material slots" );
             }
 
-            // Add new material button
-            if ( ImGui::Button( "Add Material", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+            // Create-material affordance: fill missing slots up to the mesh's submesh count with fresh,
+            // editable material assets. Also a drop target for dragging a .demat from the File Explorer.
+            if ( meshComp.MaterialSlots.size() < submeshCount )
             {
-                // Implementation for adding new material
-                // auto newMaterial = MaterialFactory::CreateDefaultMaterial();
-                // materialComp.AddMaterial( newMaterial );
+                const std::string addLabel =
+                     "Add Material (" + std::to_string( submeshCount - meshComp.MaterialSlots.size() ) + ")";
+                if ( ImGui::Button( addLabel.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                {
+                    while ( meshComp.MaterialSlots.size() < submeshCount )
+                        meshComp.MaterialSlots.push_back( CreateAndRegisterMaterial() );
+                    meshComp.RuntimeMaterialInstances.clear();
+                }
+                if ( ImGui::BeginDragDropTarget() )
+                {
+                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( "MATERIAL_ASSET" ) )
+                    {
+                        const std::string path( static_cast<const char*>( p->Data ),
+                                                p->DataSize > 0 ? p->DataSize - 1 : 0 );
+                        AssignMaterialFromPath( meshComp, meshComp.MaterialSlots.size(), path );
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+            }
+
+            for ( size_t i = 0; i < meshComp.MaterialSlots.size(); ++i )
+            {
+                ImGui::PushID( static_cast<int>( i ) );
+
+                const auto  handle = meshComp.MaterialSlots[i];
+                const auto  asset  = m_AssetManager
+                                         ? m_AssetManager->FindByHandle<Assets::PBRMaterialAsset>( handle )
+                                         : nullptr;
+
+                const std::string title = "Element " + std::to_string( i );
+                const bool        nodeOpen = ImGui::TreeNodeEx(
+                    title.c_str(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen );
+
+                // Drop an existing material asset onto this slot to assign it.
+                if ( ImGui::BeginDragDropTarget() )
+                {
+                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( "MATERIAL_ASSET" ) )
+                    {
+                        const std::string path( static_cast<const char*>( p->Data ),
+                                                p->DataSize > 0 ? p->DataSize - 1 : 0 );
+                        AssignMaterialFromPath( meshComp, i, path );
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
+                if ( nodeOpen )
+                {
+                    if ( asset )
+                    {
+                        // Fully reflection-driven: the entire property UI is built from PBRMaterialData's
+                        // PROPERTY() metadata — no per-parameter editor code here.
+                        const bool changed =
+                             PropertyEditorBuilder::Draw( &asset->Data(), "PBRMaterialData", m_AssetManager );
+
+                        // Live edit -> viewport: push the edited asset data into the runtime material
+                        // (one StaticMaterialPBR per asset handle, shared by all meshes using it).
+                        if ( changed )
+                        {
+                            if ( auto* runtime = Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
+                                Graphic::MaterialFactory::ApplyPBRAsset(
+                                     *static_cast<Graphic::StaticMaterialPBR*>( runtime ), *asset );
+                        }
+
+                        if ( ImGui::Button( "Save", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                        {
+                            Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath,
+                                                                           asset->Save() );
+                        }
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled( "Unassigned material slot" );
+                    }
+                    ImGui::TreePop();
+                }
+
+                ImGui::PopID();
             }
 
             ImGui::TreePop();

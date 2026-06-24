@@ -993,9 +993,14 @@ namespace Desert::Editor
             // Generic payload for all asset files
             ImGui::SetDragDropPayload( "AssetFile", assetPath.c_str(), assetPath.size() + 1 );
 
-            // Prefab-specific payload so the hierarchy panel can instantiate directly
+            // Type-specific payloads so target widgets (material texture slots, material slots, prefab
+            // instantiation) can accept exactly what they expect. Payload data is the asset path.
             if ( fileType == FileType::Prefab )
                 ImGui::SetDragDropPayload( "PREFAB_FILE", assetPath.c_str(), assetPath.size() + 1 );
+            else if ( fileType == FileType::Texture )
+                ImGui::SetDragDropPayload( "TEXTURE_ASSET", assetPath.c_str(), assetPath.size() + 1 );
+            else if ( fileType == FileType::Material )
+                ImGui::SetDragDropPayload( "MATERIAL_ASSET", assetPath.c_str(), assetPath.size() + 1 );
 
             ImGui::TextUnformatted( assetPath.c_str() );
             m_IsDragging = true;

@@ -6,6 +6,9 @@
 #include <Engine/Core/Serialize/GLMReflect.hpp>
 #include <Engine/Core/Serialize/CustomReflect.hpp>
 
+#include <rflcpp/rfl/Generic.hpp>
+#include <rflcpp/rfl/ExtraFields.hpp>
+
 #include <optional>
 #include <vector>
 #include <string>
@@ -37,24 +40,9 @@ namespace Desert::Assets
         std::optional<std::vector<std::string>> MaterialPaths;
     };
 
-    struct CameraComponentSer
-    {
-        bool IsMainCamera = false;
-    };
-
-    struct DirectionLightComponentSer
-    {
-        // optional for backward compatibility: scenes serialized before Color existed simply omit it.
-        std::optional<glm::vec3> Color     = glm::vec3( 1.0f );
-        float                    Intensity = 1.0f;
-    };
-
-    struct PointLightComponentSer
-    {
-        glm::vec3 Color     = glm::vec3( 1.0f );
-        float     Intensity = 1.0f;
-        float     Radius    = 10.0f;
-    };
+    // NOTE: camera/light payloads are no longer mirrored here — they serialize generically through the
+    // reflection registry (ComponentRegistry + ReflectionSerializer). The structs below remain only for
+    // the asset-bearing components whose handlers map asset handles <-> file paths.
 
     struct SkyboxComponentSer
     {
@@ -70,19 +58,18 @@ namespace Desert::Assets
         std::optional<std::string> PrefabPath;
 
         std::optional<std::string> Tag;
-        
+
         // Transform
         std::optional<glm::vec3>   Translation;
         std::optional<glm::vec3>   Rotation;
         std::optional<glm::vec3>   Scale;
 
-        // Components
-        std::optional<StaticMeshComponentSer>  StaticMesh;
-        std::optional<SkinnedMeshComponentSer> SkinnedMesh;
-        std::optional<CameraComponentSer>      Camera;
-        std::optional<DirectionLightComponentSer> DirectionLight;
-        std::optional<PointLightComponentSer>     PointLight;
-        std::optional<SkyboxComponentSer>         Skybox;
+        // Component payloads keyed by ComponentRegistry key (e.g. "StaticMesh", "DirectionLight").
+        // ExtraFields spreads these at the entity's top level on write and captures top-level component
+        // keys on read — so the on-disk shape matches the original per-component layout (full back/forward
+        // compatibility). Reflected blocks are filled by ReflectionSerializer; asset-bearing ones by
+        // custom handlers in ComponentRegistry.
+        rfl::ExtraFields<rfl::Generic> Components;
     };
 
     struct PrefabData
