@@ -8,7 +8,8 @@ float DistributionGGX(float cosLh, float roughness)
 	float alpha   = roughness * roughness;
 	float alphaSq = alpha * alpha;
 
-	float denom = (cosLh * cosLh) * (alphaSq - 1.0) + 1.0;
+	// Guard against degenerate denom when roughness and cosLh are both near zero.
+	float denom = max((cosLh * cosLh) * (alphaSq - 1.0) + 1.0, 1e-6);
 	return alphaSq / (PI * denom * denom);
 }
 
@@ -30,6 +31,15 @@ float GeometrySchlickGGX(float cosLi, float cosLo, float roughness)
 	float r = roughness + 1.0;
 	float k = (r * r) / 8.0; // Epic suggests using this roughness remapping for analytic lights.
 	return gaSchlickG1(cosLi, k) * gaSchlickG1(cosLo, k);
+}
+
+// Computes G/(4*NdotL*NdotV) analytically as 1/(4*(NdotL*(1-k)+k)*(NdotV*(1-k)+k)).
+// This form is always bounded — no divide-by-near-zero when cosLi or cosLo approach 0.
+float VisibilitySmith(float cosLi, float cosLo, float roughness)
+{
+	float r = roughness + 1.0;
+	float k = (r * r) / 8.0;
+	return 0.25 / max( (cosLi * (1.0 - k) + k) * (cosLo * (1.0 - k) + k), 1e-6 );
 }
 
 vec3 fresnelSchlick(vec3 F0, float cosTheta)

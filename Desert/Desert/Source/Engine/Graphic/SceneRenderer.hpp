@@ -16,6 +16,11 @@
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
 #include "Systems/Scene/PostProcessing/TonemapRenderer.hpp"
 #include "Systems/Scene/PostProcessing/JumpFloodOutlineRenderer.hpp"
+#include "Systems/Scene/PostProcessing/FXAARenderer.hpp"
+#include "Systems/Scene/PostProcessing/BloomRenderer.hpp"
+#include "Systems/Scene/PostProcessing/AutoExposureRenderer.hpp"
+
+#include <Engine/Core/SceneSettings.hpp>
 
 #include <Engine/Graphic/IRenderSystem.hpp>
 
@@ -112,6 +117,10 @@ namespace Desert::Graphic
 
         ShaderProtocols::DirectionLight m_DirectionLights;
         ShaderProtocols::PointLight     m_PointLight;
+
+        // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
+        Core::AntiAliasingMode m_AAMode      = Core::AntiAliasingMode::FXAA;
+        bool                   m_BloomEnabled = false;
 
     private:
         std::shared_ptr<Framebuffer>                                    m_TargetFramebuffer;

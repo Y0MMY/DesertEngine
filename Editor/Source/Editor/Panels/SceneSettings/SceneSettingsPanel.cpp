@@ -1,0 +1,105 @@
+#include "SceneSettingsPanel.hpp"
+
+#include <Engine/Core/Scene.hpp>
+#include <Engine/Core/SceneSettings.hpp>
+
+#include <ImGui/imgui.h>
+#include <glm/gtc/type_ptr.hpp>
+
+namespace Desert::Editor
+{
+    namespace ImGui = ::ImGui;
+
+    namespace
+    {
+        // Marks a group whose backing render feature isn't implemented yet, so the disabled controls
+        // below read as "intentionally inert" rather than "broken".
+        void NotImplementedNote( const char* feature )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.85f, 0.65f, 0.25f, 1.0f ) );
+            ImGui::Text( "%s not implemented yet", feature );
+            ImGui::PopStyleColor();
+        }
+    } // namespace
+
+    SceneSettingsPanel::SceneSettingsPanel( std::shared_ptr<::Desert::Core::Scene> scene )
+         : IPanel( "Scene Settings" ), m_Scene( std::move( scene ) )
+    {
+    }
+
+    void SceneSettingsPanel::OnUIRender()
+    {
+        if ( !m_Scene )
+        {
+            ImGui::TextDisabled( "No active scene" );
+            return;
+        }
+
+        Core::SceneSettings& s = m_Scene->GetSettings();
+
+        if ( ImGui::CollapsingHeader( "Outline", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::Checkbox( "Enable Outline", &s.EnableOutline );
+            ImGui::ColorEdit3( "Color", glm::value_ptr( s.OutlineColor ) );
+            ImGui::SliderFloat( "Width (px)", &s.OutlineWidth, 0.0f, 20.0f );
+            ImGui::SliderFloat( "Smoothness", &s.OutlineSmoothness, 0.0f, 10.0f );
+        }
+
+        if ( ImGui::CollapsingHeader( "Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            const char* items[] = { "None", "FXAA", "SMAA" };
+            int         current = static_cast<int>( s.AA );
+            if ( ImGui::Combo( "Mode", &current, items, IM_ARRAYSIZE( items ) ) )
+                s.AA = static_cast<Core::AntiAliasingMode>( current );
+            ImGui::TextDisabled( "SMAA wiring is WIP; TAA/DLSS need motion vectors (deferred)." );
+        }
+
+        if ( ImGui::CollapsingHeader( "Post-Processing", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            // Live — consumed by the tonemap pass.
+            ImGui::Checkbox( "Auto Exposure (eye adaptation)", &s.AutoExposure );
+            ImGui::BeginDisabled( !s.AutoExposure );
+            ImGui::SliderFloat( "Exposure Key", &s.AutoExposureKey, 0.01f, 1.0f );
+            ImGui::SliderFloat( "Adapt Speed", &s.AutoExposureSpeed, 0.1f, 10.0f );
+            ImGui::SliderFloat( "Min Luma", &s.AutoExposureMin, 0.001f, 1.0f, "%.3f" );
+            ImGui::SliderFloat( "Max Luma", &s.AutoExposureMax, 1.0f, 32.0f );
+            ImGui::EndDisabled();
+
+            ImGui::BeginDisabled( s.AutoExposure );
+            ImGui::SliderFloat( "Exposure (manual)", &s.Exposure, 0.0f, 5.0f );
+            ImGui::EndDisabled();
+            ImGui::SliderFloat( "Gamma", &s.Gamma, 1.0f, 3.0f );
+
+            ImGui::Spacing();
+            ImGui::Checkbox( "Bloom", &s.EnableBloom );
+            ImGui::SliderFloat( "Bloom Threshold", &s.BloomThreshold, 0.0f, 5.0f );
+            ImGui::SliderFloat( "Bloom Intensity", &s.BloomIntensity, 0.0f, 3.0f );
+        }
+
+        // The settings below have no renderer backing yet (no shadow / IBL-intensity / debug-viz systems).
+        // Shown disabled so they read honestly rather than appearing to do nothing.
+        if ( ImGui::CollapsingHeader( "Environment" ) )
+        {
+            NotImplementedNote( "shadows & environment intensity" );
+            ImGui::BeginDisabled();
+            ImGui::SliderFloat( "Env Map Intensity", &s.EnvironmentMapIntensity, 0.0f, 5.0f );
+            ImGui::SliderFloat( "Skybox LOD", &s.SkyboxLOD, 0.0f, 10.0f );
+            ImGui::Checkbox( "Shadows", &s.EnableShadows );
+            ImGui::SliderFloat( "Shadow Bias", &s.ShadowBias, 0.0f, 0.05f, "%.4f" );
+            ImGui::EndDisabled();
+        }
+
+        if ( ImGui::CollapsingHeader( "Debug" ) )
+        {
+            // Live — selects the line-polygon mesh pipeline.
+            ImGui::Checkbox( "Wireframe", &s.WireframeMode );
+
+            ImGui::Spacing();
+            NotImplementedNote( "bounding-box / normals visualization" );
+            ImGui::BeginDisabled();
+            ImGui::Checkbox( "Show Bounding Boxes", &s.ShowBoundingBoxes );
+            ImGui::Checkbox( "Show Normals", &s.ShowNormals );
+            ImGui::EndDisabled();
+        }
+    }
+} // namespace Desert::Editor

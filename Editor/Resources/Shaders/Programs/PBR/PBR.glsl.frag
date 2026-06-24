@@ -19,21 +19,32 @@ const vec3 Fdielectric = vec3(0.04);
 
 layout(location = 0) out vec4 oColor;
 
-layout(binding = 2) uniform PBRMaterialPropertiesUB {
-	vec3	  AlbedoColor;
-    float     AlbedoBlend;
-    float     MetallicValue;
-    float     MetallicBlend;
-    float     RoughnessValue;
-    float     RoughnessBlend;
-    vec3	  EmissionColor;
-    float     EmissionStrength;
-    float     AOValue;
-} pbr;
+// Shared push-constant block. Must be byte-for-byte identical to the one in Static.glsl.vert /
+// Skinned.glsl.vert. Per-object material data lives in the Materials[] storage buffer (GPU-scene
+// style); the push constant only carries the per-object index into it.
+layout( push_constant ) uniform PushConstants
+{
+	mat4 Transform;     // offset 0   (vertex)
+	uint MaterialIndex; // offset 64  index into Materials[]
+} pc;
+
+// One entry per drawn object (std430). Filled on the CPU each frame (per-object / per-instance).
+struct GpuMaterial
+{
+	vec4 AlbedoAO;           // rgb = albedo, a = ambient occlusion
+	vec4 MetalRoughEmission; // x = metallic, y = roughness, z = emission strength
+	vec4 EmissionColor;      // rgb = emission color
+};
+
+layout( std430, binding = 2 ) readonly buffer Materials
+{
+	GpuMaterial materials[];
+};
 
 struct DirectionLight
 {
-	vec3 Direction;
+	vec4 Direction;      // xyz = normalized direction
+	vec4 ColorIntensity; // rgb = color, a = intensity
 };
 
 layout(binding = 3) uniform DirectionLightsUB {
@@ -62,8 +73,9 @@ vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec
 
 	for(uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
 	{
-		vec3 Li = -directionLights.directionLights.Direction;
-		vec3 Lradiance = vec3(1.0, 1.0, 1.0);
+		vec3 Li = -directionLights.directionLights.Direction.xyz;
+		vec3 Lradiance = directionLights.directionLights.ColorIntensity.rgb
+		               * directionLights.directionLights.ColorIntensity.a;
 		vec3 Lh = normalize(Li + view);
 
 		float cosLi = max(0.0, dot(N, Li));
@@ -73,13 +85,13 @@ vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec
 		vec3 F  = fresnelSchlick(F0, max(0.0, dot(Lh, view)));
 		// Calculate normal distribution for specular BRDF.
 		float D = DistributionGGX(cosLh, roughness);
-		// Calculate geometric attenuation for specular BRDF.
-		float G = GeometrySchlickGGX(cosLi, cosLo, roughness);
+		// Visibility = G/(4*NdotL*NdotV) computed analytically to avoid 0/0 at grazing angles.
+		float Vis = VisibilitySmith(cosLi, cosLo, roughness);
 
 		vec3 kd = (1.0 - F) * (1.0 - metalness);
 		vec3 diffuseBRDF = kd * albedo;
 
-		vec3 specularBRDF  = (F * D * G) / max(Epsilon, 4.0 * cosLi * cosLo);
+		vec3 specularBRDF = F * D * Vis;
 
 		color += (diffuseBRDF + specularBRDF) * Lradiance * cosLi;
 	}
@@ -94,7 +106,8 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 
 	float cosLo = max(0.0, dot(N, view));
 
-	vec3 Lr = 2.0 * cosLo * N - view;
+	// reflect(-view, N) = 2*dot(N,view)*N - view (unclamped, correct specular reflection)
+	vec3 Lr = reflect(-view, N);
 
 	// Calculate Fresnel term for ambient lighting.
 	// Since we use pre-filtered cubemap(s) and irradiance is coming from many directions
@@ -123,19 +136,28 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 
 void main() {
 
-	m_Params.AlbedoColor = pbr.AlbedoColor * pbr.AlbedoBlend;
+	GpuMaterial mat = materials[pc.MaterialIndex];
+
+	m_Params.AlbedoColor = mat.AlbedoAO.rgb;
 	m_Params.AlbedoColor *= texture(u_AlbedoTexture, inVertex.Texcoord).rgb;
-	m_Params.Normal =  normalize(inVertex.Normal);
+
+	// Default: use the world-space normal from the vertex shader directly.
+	m_Params.Normal = normalize(inVertex.Normal);
 
 	const ivec2 textureSize = textureSize(u_NormalTexture, 0);
-	if(textureSize.x > 1 && textureSize.y > 1) // not fallback (TODO. bad way)
+	if(textureSize.x > 1 && textureSize.y > 1) // real normal map — not the 1x1 fallback
 	{
-		m_Params.Normal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
+		// Transform tangent-space normal to world space via TBN.
+		vec3 tangentNormal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
+		m_Params.Normal = normalize(inVertex.TBN * tangentNormal);
 	}
-	m_Params.Normal = normalize(inVertex.TBN * m_Params.Normal);
+	// Without a normal map the TBN transform is intentionally skipped:
+	// inVertex.Normal is already in world space and needs no further transformation.
 
-	const float metalness = pbr.MetallicValue * pbr.MetallicBlend;
-	const float roughness  = pbr.RoughnessValue * pbr.RoughnessBlend;
+	const float metalness = mat.MetalRoughEmission.x;
+	// Clamp to a minimum roughness so the GGX NDF stays finite even for mirror-smooth materials.
+	const float roughness = max(mat.MetalRoughEmission.y, 0.04);
+	const float ao        = mat.AlbedoAO.a;
 
 	const vec3 view = normalize(inVertex.CameraPosition - inVertex.WorldPosition);
 
@@ -153,5 +175,8 @@ void main() {
                                         roughness, m_Params.AlbedoColor);
 	}
 
-    oColor = vec4( pointLight, 1.0);
+    // Ambient occlusion attenuates only the ambient (IBL) term; emission is added unlit.
+    vec3 emission = mat.EmissionColor.rgb * mat.MetalRoughEmission.z;
+
+    oColor = vec4( light + ibl * ao + pointLight + emission, 1.0);
 }

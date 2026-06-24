@@ -8,6 +8,26 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
+    namespace
+    {
+        // Projects a world point to viewport-local screen coords, returning false when the point is
+        // behind the camera (clip w <= 0). WorldToScreenSpace divides by w unconditionally, so behind
+        // points flip to mirrored on-screen positions — that produced both the ghost bulb icon when
+        // turning 180 degrees and the radius circle lines streaking across the whole screen.
+        bool ProjectToScreen( const glm::vec3& world, const glm::mat4& mvp, float width, float height,
+                              glm::vec2& outScreen )
+        {
+            const glm::vec4 clip = mvp * glm::vec4( world, 1.0f );
+            if ( clip.w <= 1e-4f )
+                return false;
+
+            const glm::vec3 ndc = glm::vec3( clip ) / clip.w;
+            outScreen.x = ( ndc.x * 0.5f + 0.5f ) * width;
+            outScreen.y = ( 1.0f - ( ndc.y * 0.5f + 0.5f ) ) * height;
+            return true;
+        }
+    } // namespace
+
     LightGizmoRenderer::LightGizmoRenderer( const std::shared_ptr<Desert::Core::Scene>& scene ) : m_Scene( scene )
     {
     }
@@ -41,8 +61,9 @@ namespace Desert::Editor
 
             const auto mvp = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 
-            glm::vec2 screenPos =
-                 Common::Math::SpaceTransformer::WorldToScreenSpace( transform.Translation, mvp, width, height );
+            glm::vec2 screenPos;
+            if ( !ProjectToScreen( transform.Translation, mvp, width, height, screenPos ) )
+                continue; // light is behind the camera — skip its icon, radius and tooltip entirely
 
             float absoluteX = windowPos.x + screenPos.x;
             float absoluteY = windowPos.y + screenPos.y;
@@ -106,30 +127,26 @@ namespace Desert::Editor
                                                     const glm::mat4& mvp, float width, float height, float windowX,
                                                     float windowY, ImU32 color )
     {
-        std::vector<ImVec2> screenPoints;
+        std::vector<ImVec2> screenPoints( segments + 1 );
+        std::vector<bool>   valid( segments + 1, false );
 
         for ( int i = 0; i <= segments; ++i )
         {
             float     angle = 2.0f * glm::pi<float>() * i / segments;
             glm::vec3 point = center + radius * ( cos( angle ) * axis1 + sin( angle ) * axis2 );
 
-            glm::vec2 screenPoint =
-                 Common::Math::SpaceTransformer::WorldToScreenSpace( point, mvp, width, height );
-
-            float absoluteX = windowX + screenPoint.x;
-            float absoluteY = windowY + screenPoint.y;
-
-            screenPoints.push_back( ImVec2( absoluteX, absoluteY ) );
+            glm::vec2 screenPoint;
+            valid[i] = ProjectToScreen( point, mvp, width, height, screenPoint );
+            if ( valid[i] )
+                screenPoints[i] = ImVec2( windowX + screenPoint.x, windowY + screenPoint.y );
         }
 
-        for ( size_t i = 1; i < screenPoints.size(); ++i )
+        // Only connect neighbouring points that are BOTH in front of the camera — otherwise a segment
+        // crossing behind the near plane would draw a line streaking across the whole viewport.
+        for ( int i = 1; i <= segments; ++i )
         {
-            drawList->AddLine( screenPoints[i - 1], screenPoints[i], color, 0.1f );
-        }
-
-        if ( screenPoints.size() > 1 )
-        {
-            drawList->AddLine( screenPoints.back(), screenPoints.front(), color, 0.1f );
+            if ( valid[i - 1] && valid[i] )
+                drawList->AddLine( screenPoints[i - 1], screenPoints[i], color, 1.5f );
         }
     }
 

@@ -261,10 +261,12 @@ void MeshEditorPanel::DrawToolbar()
         CommitMeshEdit();
     }
 
-    // Far-right actions
-    const float rightStart = ImGui::GetWindowWidth() - 130.f;
-    if ( rightStart > ImGui::GetCursorPosX() )
-        ImGui::SetCursorPosX( rightStart );
+    // Mesh-wide actions — left-aligned (no absolute positioning, so they never clip or overlap).
+    ImGui::SameLine( 0, 14 );
+    ImGui::PushStyleColor( ImGuiCol_Separator, { 0.35f, 0.35f, 0.38f, 1.f } );
+    ImGui::SeparatorEx( ImGuiSeparatorFlags_Vertical );
+    ImGui::PopStyleColor();
+    ImGui::SameLine( 0, 14 );
 
     if ( ActionButton( ICON_MDI_LAYERS_OUTLINE, "Flatten", "Merge all submeshes into one",
                        { 0.20f, 0.32f, 0.48f, 1.f } ) )
@@ -274,7 +276,7 @@ void MeshEditorPanel::DrawToolbar()
         CommitMeshEdit();
     }
     ImGui::SameLine( 0, 6 );
-    if ( ActionButton( ICON_MDI_UPLOAD, "GPU", "Upload mesh changes to GPU now",
+    if ( ActionButton( ICON_MDI_UPLOAD, "Upload", "Upload mesh changes to GPU now",
                        { 0.20f, 0.45f, 0.28f, 1.f } ) )
     {
         CommitMeshEdit();
@@ -457,11 +459,19 @@ void MeshEditorPanel::DrawPropertiesPanel()
         ImGui::DragFloat2( "##UV", glm::value_ptr( v.TexCoord ), 0.001f );
         ImGui::PopID();
 
-        if ( v.Position != prevPos || v.Normal != prevN || v.TexCoord != prevUV )
+        const glm::vec3 posDelta = v.Position - prevPos;
+        if ( posDelta != glm::vec3( 0.f ) )
+        {
+            // Move coincident twins together (selection is this single vertex).
+            v.Position = prevPos;
+            MoveSelectedVerticesLocal( posDelta );
+        }
+        if ( v.Normal != prevN || v.TexCoord != prevUV )
         {
             if ( m_AutoRecalcNormals )
                 RecalcNormals();
             m_Mesh->Update( verts, m_Mesh->GetIndices() );
+            m_PreviewDirty = true;
         }
     }
     else
@@ -481,12 +491,7 @@ void MeshEditorPanel::DrawPropertiesPanel()
         ImGui::SetNextItemWidth( -1 );
         if ( ImGui::Button( ICON_MDI_CHECK "  Apply Offset" ) )
         {
-            for ( size_t i : m_Selection.VertexIndices )
-                if ( i < verts.size() )
-                    verts[i].Position += bulkOffset;
-
-            if ( m_AutoRecalcNormals ) RecalcNormals();
-            m_Mesh->Update( verts, m_Mesh->GetIndices() );
+            MoveSelectedVerticesLocal( bulkOffset );
             bulkOffset = {};
         }
         if ( ImGui::IsItemHovered() ) ImGui::SetTooltip( "Apply offset to all selected vertices" );
@@ -541,71 +546,98 @@ void MeshEditorPanel::DrawPreviewViewport()
 {
     if ( !m_PreviewScene ) InitPreviewScene();
 
-    // Update camera position from orbit state
-    UpdatePreviewCamera();
-
-    // Render preview
     const ImVec2 avail = ImGui::GetContentRegionAvail();
-    if ( avail.x > 1.f && avail.y > 1.f )
+    if ( avail.x <= 1.f || avail.y <= 1.f )
+        return;
+
+    // Mirror the edited entity's transform onto the preview so what you see (and edit) matches the scene.
+    if ( m_TargetEntity && m_TargetEntity.HasComponent<ECS::TransformComponent>() && m_PreviewEntity &&
+         m_PreviewEntity.HasComponent<ECS::TransformComponent>() )
     {
-        m_PreviewScene->Resize( (uint32_t)avail.x, (uint32_t)avail.y );
+        const auto& ttc = m_TargetEntity.GetComponent<ECS::TransformComponent>();
+        auto&       ptc = m_PreviewEntity.GetComponent<ECS::TransformComponent>();
+        if ( ptc.Translation != ttc.Translation || ptc.Rotation != ttc.Rotation || ptc.Scale != ttc.Scale )
+        {
+            ptc.Translation = ttc.Translation;
+            ptc.Rotation    = ttc.Rotation;
+            ptc.Scale       = ttc.Scale;
+            m_PreviewDirty  = true;
+        }
+    }
+
+    // Resize only on actual change (recreating framebuffers every frame was part of the FPS hit).
+    const uint32_t w = (uint32_t)avail.x, h = (uint32_t)avail.y;
+    if ( w != m_LastPreviewW || h != m_LastPreviewH )
+    {
+        m_PreviewScene->Resize( w, h );
+        m_LastPreviewW = w;
+        m_LastPreviewH = h;
+        m_PreviewDirty = true;
+    }
+
+    // Render ON DEMAND: only re-run the full scene render when something visible changed. Otherwise the
+    // previously rendered framebuffer image is simply blitted again (this is the main FPS fix).
+    if ( m_PreviewDirty )
+    {
         m_PreviewScene->BeginScene();
         m_PreviewScene->OnUpdate( Common::Timestep( 0.016f ) );
         m_PreviewScene->EndScene();
-
-        auto finalImage = m_PreviewScene->GetFinalImage();
-        const ImVec2 imagePos = ImGui::GetCursorScreenPos();
-        m_UIHelper->Image( finalImage, avail );
-
-        // Store viewport rect for gizmo
-        m_ViewportX = imagePos.x;
-        m_ViewportY = imagePos.y;
-        m_ViewportW = avail.x;
-        m_ViewportH = avail.y;
-
-        // ── Orbit drag ────────────────────────────────────────────────────────
-        if ( ImGui::IsItemHovered() )
-        {
-            // Middle-button or right-button orbit
-            if ( ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
-            {
-                m_OrbitDragging  = true;
-                m_LastMousePos   = { ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y };
-            }
-            // Scroll to zoom
-            const float scrollY = ImGui::GetIO().MouseWheel;
-            if ( scrollY != 0.f )
-            {
-                m_CamDistance = std::max( 0.1f, m_CamDistance - scrollY * m_CamDistance * 0.1f );
-                UpdatePreviewCamera();
-            }
-        }
-
-        if ( m_OrbitDragging )
-        {
-            if ( ImGui::IsMouseDown( ImGuiMouseButton_Right ) )
-            {
-                const ImVec2 delta = ImGui::GetIO().MouseDelta;
-                m_CamYaw   -= delta.x * 0.005f;
-                m_CamPitch  = std::clamp( m_CamPitch - delta.y * 0.005f, -1.5f, 1.5f );
-            }
-            else
-            {
-                m_OrbitDragging = false;
-            }
-        }
-
-        // ── Overlay: camera reset ─────────────────────────────────────────────
-        const ImVec2 overlayPos = { imagePos.x + avail.x - 80.f, imagePos.y + 8.f };
-        ImGui::SetCursorScreenPos( overlayPos );
-        ImGui::PushStyleColor( ImGuiCol_Button, { 0.15f, 0.15f, 0.18f, 0.80f } );
-        if ( ImGui::Button( ICON_MDI_HOME "  Reset##cam", { 72.f, 22.f } ) )
-            ResetCamera();
-        ImGui::PopStyleColor();
-
-        // ── Gizmo (Move tool) ─────────────────────────────────────────────────
-        DrawGizmo();
+        m_PreviewDirty = false;
     }
+
+    auto         finalImage = m_PreviewScene->GetFinalImage();
+    const ImVec2 imagePos   = ImGui::GetCursorScreenPos();
+    m_UIHelper->Image( finalImage, avail );
+
+    m_ViewportX = imagePos.x;
+    m_ViewportY = imagePos.y;
+    m_ViewportW = avail.x;
+    m_ViewportH = avail.y;
+
+    // ── Orbit + zoom (each marks the preview dirty so it re-renders that frame) ──
+    if ( ImGui::IsItemHovered() )
+    {
+        if ( ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
+            m_OrbitDragging = true;
+
+        const float scrollY = ImGui::GetIO().MouseWheel;
+        if ( scrollY != 0.f )
+        {
+            m_CamDistance = std::max( 0.1f, m_CamDistance - scrollY * m_CamDistance * 0.1f );
+            UpdatePreviewCamera();
+            m_PreviewDirty = true;
+        }
+    }
+
+    if ( m_OrbitDragging )
+    {
+        if ( ImGui::IsMouseDown( ImGuiMouseButton_Right ) )
+        {
+            const ImVec2 delta = ImGui::GetIO().MouseDelta;
+            if ( delta.x != 0.f || delta.y != 0.f )
+            {
+                m_CamYaw -= delta.x * 0.005f;
+                m_CamPitch = std::clamp( m_CamPitch - delta.y * 0.005f, -1.5f, 1.5f );
+                UpdatePreviewCamera();
+                m_PreviewDirty = true;
+            }
+        }
+        else
+        {
+            m_OrbitDragging = false;
+        }
+    }
+
+    // ── Overlay: camera reset ──
+    const ImVec2 overlayPos = { imagePos.x + avail.x - 80.f, imagePos.y + 8.f };
+    ImGui::SetCursorScreenPos( overlayPos );
+    ImGui::PushStyleColor( ImGuiCol_Button, { 0.15f, 0.15f, 0.18f, 0.80f } );
+    if ( ImGui::Button( ICON_MDI_HOME "  Reset##cam", { 72.f, 22.f } ) )
+        ResetCamera();
+    ImGui::PopStyleColor();
+
+    // ── Gizmo (Move tool) ──
+    DrawGizmo();
 }
 
 // ─── Gizmo ───────────────────────────────────────────────────────────────────
@@ -622,31 +654,29 @@ void MeshEditorPanel::DrawGizmo()
     ImGuizmo::SetRect( m_ViewportX, m_ViewportY, m_ViewportW, m_ViewportH );
     ImGuizmo::SetOrthographic( false );
 
-    const glm::mat4 view = mainCamera->GetViewMatrix();
-    const glm::mat4 proj = mainCamera->GetProjectionMatrix();
+    const glm::mat4 view  = mainCamera->GetViewMatrix();
+    const glm::mat4 proj  = mainCamera->GetProjectionMatrix();
+    const glm::mat4 model = GetTargetModelMatrix();
 
-    glm::vec3 center     = m_Selection.GetCenter( *m_Mesh );
-    glm::mat4 gizmoWorld = glm::translate( glm::mat4( 1.f ), center );
+    // Gizmo sits at the selection centroid in WORLD space (local centroid pushed through the entity
+    // transform), so it lines up with the transformed mesh shown in the preview.
+    const glm::vec3 localCenter = m_Selection.GetCenter( *m_Mesh );
+    const glm::vec3 worldCenter = glm::vec3( model * glm::vec4( localCenter, 1.f ) );
+    glm::mat4       gizmoWorld  = glm::translate( glm::mat4( 1.f ), worldCenter );
 
     if ( ImGuizmo::Manipulate( glm::value_ptr( view ), glm::value_ptr( proj ),
                                ImGuizmo::TRANSLATE, ImGuizmo::WORLD,
                                glm::value_ptr( gizmoWorld ) ) )
     {
-        glm::vec3 newCenter, scale, skew;
+        glm::vec3 newWorldCenter, scale, skew;
         glm::quat rot;
         glm::vec4 persp;
-        glm::decompose( gizmoWorld, scale, rot, newCenter, skew, persp );
+        glm::decompose( gizmoWorld, scale, rot, newWorldCenter, skew, persp );
 
-        const glm::vec3 delta = newCenter - center;
-        auto& verts = m_Mesh->GetVertices();
-        for ( size_t idx : m_Selection.VertexIndices )
-            if ( idx < verts.size() )
-                verts[idx].Position += delta;
-
-        if ( m_AutoRecalcNormals )
-            RecalcNormals();
-
-        m_Mesh->Update( verts, m_Mesh->GetIndices() );
+        // World delta back into mesh-local space, then move the selection (coincident-aware).
+        const glm::vec3 deltaWorld = newWorldCenter - worldCenter;
+        const glm::vec3 deltaLocal = glm::vec3( glm::inverse( model ) * glm::vec4( deltaWorld, 0.f ) );
+        MoveSelectedVerticesLocal( deltaLocal );
     }
 }
 
@@ -657,6 +687,7 @@ void MeshEditorPanel::CommitMeshEdit()
     // Keep preview entity in sync
     if ( m_PreviewEntity && m_PreviewEntity.HasComponent<ECS::StaticMeshComponent>() )
         m_PreviewEntity.GetComponent<ECS::StaticMeshComponent>().RuntimeMesh = m_Mesh;
+    m_PreviewDirty = true;
 }
 
 void MeshEditorPanel::RecalcNormals()
@@ -748,6 +779,48 @@ void MeshEditorPanel::ClearSelection()
     m_Selection.VertexIndices.clear();
 }
 
+glm::mat4 MeshEditorPanel::GetTargetModelMatrix() const
+{
+    if ( m_TargetEntity && m_TargetEntity.HasComponent<ECS::TransformComponent>() )
+        return m_TargetEntity.GetComponent<ECS::TransformComponent>().GetTransform();
+    return glm::mat4( 1.f );
+}
+
+void MeshEditorPanel::MoveSelectedVerticesLocal( const glm::vec3& deltaLocal )
+{
+    if ( !m_Mesh || m_Selection.VertexIndices.empty() || deltaLocal == glm::vec3( 0.f ) )
+        return;
+
+    auto& verts = m_Mesh->GetVertices();
+
+    // Snapshot the selected positions first; then move EVERY vertex coincident with one of them. Meshes
+    // imported/generated with per-face splitting have several vertices at the same position (distinct
+    // normals/UVs) — moving only the selected index would tear a seam open ("gap").
+    std::vector<glm::vec3> selPositions;
+    selPositions.reserve( m_Selection.VertexIndices.size() );
+    for ( size_t idx : m_Selection.VertexIndices )
+        if ( idx < verts.size() )
+            selPositions.push_back( verts[idx].Position );
+
+    constexpr float eps = 1e-5f;
+    for ( auto& v : verts )
+    {
+        for ( const auto& sp : selPositions )
+        {
+            if ( glm::distance( v.Position, sp ) <= eps )
+            {
+                v.Position += deltaLocal;
+                break;
+            }
+        }
+    }
+
+    if ( m_AutoRecalcNormals )
+        RecalcNormals();
+    m_Mesh->Update( verts, m_Mesh->GetIndices() );
+    m_PreviewDirty = true;
+}
+
 // ─── Preview scene ────────────────────────────────────────────────────────────
 void MeshEditorPanel::InitPreviewScene()
 {
@@ -792,24 +865,28 @@ float MeshEditorPanel::ComputeOrbitDistance() const
     if ( !m_Mesh || m_Mesh->GetVertices().empty() )
         return 5.f;
 
-    glm::vec3 mn{ 1e9f }, mx{ -1e9f };
+    const glm::mat4 model = GetTargetModelMatrix();
+    glm::vec3       mn{ 1e9f }, mx{ -1e9f };
     for ( const auto& v : m_Mesh->GetVertices() )
     {
-        mn = glm::min( mn, v.Position );
-        mx = glm::max( mx, v.Position );
+        const glm::vec3 p = glm::vec3( model * glm::vec4( v.Position, 1.f ) );
+        mn = glm::min( mn, p );
+        mx = glm::max( mx, p );
     }
-    return glm::length( mx - mn ) * 1.4f;
+    return std::max( 0.5f, glm::length( mx - mn ) * 1.4f );
 }
 
 void MeshEditorPanel::ResetCamera()
 {
     if ( m_Mesh && !m_Mesh->GetVertices().empty() )
     {
-        glm::vec3 mn{ 1e9f }, mx{ -1e9f };
+        const glm::mat4 model = GetTargetModelMatrix();
+        glm::vec3       mn{ 1e9f }, mx{ -1e9f };
         for ( const auto& v : m_Mesh->GetVertices() )
         {
-            mn = glm::min( mn, v.Position );
-            mx = glm::max( mx, v.Position );
+            const glm::vec3 p = glm::vec3( model * glm::vec4( v.Position, 1.f ) );
+            mn = glm::min( mn, p );
+            mx = glm::max( mx, p );
         }
         m_CamTarget   = ( mn + mx ) * 0.5f;
         m_CamDistance = ComputeOrbitDistance();
@@ -822,6 +899,7 @@ void MeshEditorPanel::ResetCamera()
     m_CamYaw   = 0.5f;
     m_CamPitch = 0.35f;
     UpdatePreviewCamera();
+    m_PreviewDirty = true;
 }
 
 // ─── SetTarget / ClearTarget ─────────────────────────────────────────────────

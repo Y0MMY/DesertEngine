@@ -15,6 +15,7 @@
 #include "Editor/Core/ThemeManager.hpp"
 #include "Editor/Core/ImGuiUtilities.hpp"
 #include <ImGui/imgui_internal.h>
+#include <ImGuizmo.h>
 #include "Editor/Import/ImportManager.hpp"
 #include "Editor/Builtin/BuiltinMeshRegistry.hpp"
 
@@ -25,6 +26,7 @@
 #include "Editor/Panels/FileExplorer/FileExplorerPanel.hpp"
 #include "Editor/Panels/ViewportPanel/ViewportPanel.hpp"
 #include "Editor/Panels/MeshEditor/MeshEditorPanel.hpp"
+#include "Editor/Panels/SceneSettings/SceneSettingsPanel.hpp"
 #include "Editor/Panels/Logs/LogsPanel.hpp"
 
 // 4. Misc
@@ -118,6 +120,7 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>( "Resources/" ) );
         m_Panels.emplace_back( std::make_unique<Editor::MeshEditorPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
 #endif // EBABLE_IMGUI
 
@@ -164,6 +167,10 @@ namespace Desert::Editor
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer->Begin();
 #endif
+
+        // ImGuizmo is a single global per-frame state — begin it ONCE here, before any panel issues a
+        // Manipulate(). Both the viewport's object gizmo and the Mesh Editor's vertex gizmo rely on this.
+        ImGuizmo::BeginFrame();
 
         static bool               dockspaceOpen  = true;
         static bool               opt_fullscreen = true;

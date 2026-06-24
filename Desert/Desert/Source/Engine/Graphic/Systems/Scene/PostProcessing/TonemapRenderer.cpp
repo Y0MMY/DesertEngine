@@ -74,8 +74,21 @@ namespace Desert::Graphic::System
             return;
         }
 
+        // The bloom / auto-exposure framebuffers always exist once created; when disabled their values
+        // (intensity 0 / auto flag off) make the contents ignored, but the descriptors stay validly bound.
+        std::shared_ptr<Image2D> bloomImage;
+        if ( const auto& bloomFb = m_BloomFramebuffer.lock() )
+            bloomImage = bloomFb->GetColorAttachmentImage();
+
+        std::shared_ptr<Image2D> avgLuminance;
+        if ( const auto& aeFb = m_AutoExposureFramebuffer.lock() )
+            avgLuminance = aeFb->GetColorAttachmentImage();
+
+        MaterialTonemap::Params params{ m_Exposure, m_Gamma, m_BloomIntensity, m_ExposureKey,
+                                        m_AutoExposureEnabled };
+
         auto& renderer = Renderer::GetInstance();
-        m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage() );
+        m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage(), bloomImage, avgLuminance, params );
         renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_MaterialTonemap->GetMaterialExecutor() );
     }
 } // namespace Desert::Graphic::System

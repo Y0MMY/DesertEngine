@@ -3,14 +3,19 @@
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Graphic/Texture.hpp>
+#include <Engine/Graphic/Image.hpp>
 
 #include <Editor/Core/CommandHistory.hpp>
+#include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
 #include <ImGui/imgui.h>
 
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -24,6 +29,41 @@ namespace Desert::Editor
         void* FieldPtr( void* object, const FieldInfo& f )
         {
             return static_cast<char*>( object ) + f.Offset;
+        }
+
+        // Resolves a texture asset handle to its runtime image for a thumbnail preview. Returns a
+        // NON-owning shared_ptr (the image is owned by the image service); UICacheTexture keys its ImGui
+        // descriptors by VkImageView, so wrapping the same image each frame is safe (no leak).
+        std::shared_ptr<Graphic::Image2D> ResolveTextureImage( uint64_t handle )
+        {
+            if ( handle == 0 )
+                return nullptr;
+            auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( handle ) );
+            if ( !tex )
+                return nullptr;
+            auto* img = static_cast<Graphic::Image2D*>(
+                 Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+            if ( !img )
+                return nullptr;
+            return std::shared_ptr<Graphic::Image2D>( img, []( Graphic::Image2D* ) {} );
+        }
+
+        // Resolves a dropped texture path to a registered texture handle. The File Explorer emits SOURCE
+        // paths (Resources/Textures/foo.png), but textures are registered from Cooked/Textures/ with a
+        // different dir/extension — so an exact FindByPath misses. Fall back to matching by filename stem.
+        Assets::AssetHandle ResolveDroppedTexture( const Assets::AssetManager& mgr, const std::string& droppedPath )
+        {
+            if ( auto tex = mgr.FindByPath<Assets::TextureAsset>( droppedPath ) )
+                return tex->GetMetadata().Handle;
+
+            const std::string stem = std::filesystem::path( droppedPath ).stem().string();
+            for ( const auto& [handle, tex] :
+                  const_cast<Assets::AssetManager&>( mgr ).FindAllByType<Assets::TextureAsset>() )
+            {
+                if ( tex && std::filesystem::path( tex->GetMetadata().Filepath ).stem().string() == stem )
+                    return tex->GetMetadata().Handle;
+            }
+            return Assets::AssetHandle{};
         }
 
         // Enums carry any integral underlying type — read/write exactly Size bytes.
@@ -51,7 +91,7 @@ namespace Desert::Editor
     } // namespace
 
     bool PropertyEditorBuilder::DrawField( void* object, const FieldInfo& field,
-                                           const Assets::AssetManager* assetMgr )
+                                           const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper )
     {
         if ( field.Meta.Hidden )
             return false;
@@ -70,7 +110,7 @@ namespace Desert::Editor
                 {
                     for ( const auto& sub : field.StructType->Fields )
                     {
-                        if ( DrawField( p, sub, assetMgr ) )
+                        if ( DrawField( p, sub, assetMgr, uiHelper ) )
                             changed = true;
                     }
                     ImGui::TreePop();
@@ -185,6 +225,17 @@ namespace Desert::Editor
 
                 ImGui::Button( display.c_str(), ImVec2( -1.0f, 0.0f ) );
 
+                // Hover thumbnail preview of the bound texture.
+                if ( uiHelper && *handle != 0 && ImGui::IsItemHovered() )
+                {
+                    if ( auto img = ResolveTextureImage( *handle ) )
+                    {
+                        ImGui::BeginTooltip();
+                        uiHelper->Image( img, ImVec2( 128.0f, 128.0f ) );
+                        ImGui::EndTooltip();
+                    }
+                }
+
                 if ( ImGui::BeginDragDropTarget() )
                 {
                     if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "TEXTURE_ASSET" ) )
@@ -193,9 +244,10 @@ namespace Desert::Editor
                                                 payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
                         if ( assetMgr )
                         {
-                            if ( auto tex = assetMgr->FindByPath<Assets::TextureAsset>( path ) )
+                            const auto resolved = ResolveDroppedTexture( *assetMgr, path );
+                            if ( static_cast<uint64_t>( resolved ) != 0 )
                             {
-                                *handle = static_cast<uint64_t>( tex->GetMetadata().Handle );
+                                *handle = static_cast<uint64_t>( resolved );
                                 changed = true;
                             }
                         }
@@ -282,7 +334,8 @@ namespace Desert::Editor
         return changed && !field.Meta.ReadOnly;
     }
 
-    bool PropertyEditorBuilder::Draw( void* object, const TypeInfo& type, const Assets::AssetManager* assetMgr )
+    bool PropertyEditorBuilder::Draw( void* object, const TypeInfo& type, const Assets::AssetManager* assetMgr,
+                                      UI::UIHelper* uiHelper )
     {
         if ( !object )
             return false;
@@ -329,7 +382,7 @@ namespace Desert::Editor
             {
                 for ( const auto* field : fields )
                 {
-                    if ( DrawField( object, *field, assetMgr ) )
+                    if ( DrawField( object, *field, assetMgr, uiHelper ) )
                         anyChanged = true;
                 }
             }
@@ -339,7 +392,7 @@ namespace Desert::Editor
     }
 
     bool PropertyEditorBuilder::Draw( void* object, const std::string& typeName,
-                                      const Assets::AssetManager* assetMgr )
+                                      const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper )
     {
         const TypeInfo* type = ReflectionRegistry::Get().Find( typeName );
         if ( !type )
@@ -347,6 +400,6 @@ namespace Desert::Editor
             ImGui::TextDisabled( "<type '%s' not reflected>", typeName.c_str() );
             return false;
         }
-        return Draw( object, *type, assetMgr );
+        return Draw( object, *type, assetMgr, uiHelper );
     }
 } // namespace Desert::Editor

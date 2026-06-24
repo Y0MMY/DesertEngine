@@ -63,6 +63,12 @@ namespace Desert::Graphic::System
         void SubmitMesh( const MeshRenderData& data );
         void ClearQueues();
 
+        // Debug wireframe toggle (SceneSettings.WireframeMode) — selects the line-polygon pipeline.
+        void SetWireframe( bool enabled )
+        {
+            m_Wireframe = enabled;
+        }
+
     private:
         bool SetupGeometryPass();
         bool SetupSkinnedGeometryPass();
@@ -78,6 +84,8 @@ namespace Desert::Graphic::System
     private:
         // Static
         std::shared_ptr<GraphicsPipeline> m_StaticPipeline;
+        std::shared_ptr<GraphicsPipeline> m_StaticWireframePipeline; // same spec, PolygonMode::Wireframe
+        bool                              m_Wireframe = false;
         std::shared_ptr<Shader>   m_GeometryShader;
 
         // Skinned

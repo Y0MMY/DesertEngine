@@ -94,6 +94,7 @@ namespace Desert::Graphic::System
     void MeshRenderer::Shutdown()
     {
         m_StaticPipeline.reset();
+        m_StaticWireframePipeline.reset();
         m_SkinnedPipeline.reset();
         m_SilhouettePipeline.reset();
         m_SilhouetteMaterial.reset();
@@ -199,8 +200,9 @@ namespace Desert::Graphic::System
                 mat->SetMaterialIndex( i );
                 mat->Bind( inst );
 
-                renderer.RenderMesh( m_StaticPipeline.get(), obj->Mesh, obj->Transform,
-                                     mat->GetMaterialExecutor() );
+                auto* pipeline = ( m_Wireframe && m_StaticWireframePipeline ) ? m_StaticWireframePipeline.get()
+                                                                              : m_StaticPipeline.get();
+                renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor() );
             }
         }
     }
@@ -258,6 +260,13 @@ namespace Desert::Graphic::System
 
         m_StaticPipeline = GraphicsPipeline::Create( spec );
         m_StaticPipeline->Invalidate();
+
+        // Wireframe variant — identical spec, line polygon mode (device feature fillModeNonSolid is on).
+        // Selected per-frame by the SceneSettings debug toggle; shares the same framebuffer/render pass.
+        spec.DebugName   = "StaticMeshWireframe";
+        spec.PolygonMode = PrimitivePolygonMode::Wireframe;
+        m_StaticWireframePipeline = GraphicsPipeline::Create( spec );
+        m_StaticWireframePipeline->Invalidate();
 
         return true;
     }

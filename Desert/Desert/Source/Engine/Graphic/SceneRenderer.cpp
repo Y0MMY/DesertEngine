@@ -59,7 +59,29 @@ namespace Desert::Graphic
         // Tonemap consumes the Jump Flood output (the outlined scene).
         RegisterSystem<System::TonemapRenderer>( "TonemapSystem", this,
                                                  jumpFloodSystem->GetSystemFramebuffer(), m_RenderGraphBuilder );
-        if ( !SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Initialize() )
+        const auto& tonemapSystem = SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
+        if ( !tonemapSystem->Initialize() )
+            DESERT_VERIFY( false );
+
+        // Bloom reads the HDR scene color and produces a blurred bright buffer that tonemap adds in.
+        RegisterSystem<System::BloomRenderer>( "BloomSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
+        const auto& bloomSystem = SP_CAST( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
+        if ( !bloomSystem->Initialize() )
+            DESERT_VERIFY( false );
+        tonemapSystem->SetBloomFramebuffer( bloomSystem->GetSystemFramebuffer() );
+
+        // Auto-exposure measures the HDR scene luminance into a 1x1 buffer that tonemap reads.
+        RegisterSystem<System::AutoExposureRenderer>( "AutoExposureSystem", this, m_TargetFramebuffer,
+                                                      m_RenderGraphBuilder );
+        const auto& autoExposureSystem = SP_CAST( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
+        if ( !autoExposureSystem->Initialize() )
+            DESERT_VERIFY( false );
+        tonemapSystem->SetAutoExposureFramebuffer( autoExposureSystem->GetAdaptedLuminanceFramebuffer() );
+
+        // FXAA consumes the tonemapped image (LDR). It only runs when SceneSettings.AA == FXAA.
+        RegisterSystem<System::FXAARenderer>( "FXAASystem", this, tonemapSystem->GetSystemFramebuffer(),
+                                              m_RenderGraphBuilder );
+        if ( !SP_CAST( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
         RebuildRenderGraph();
@@ -82,6 +104,26 @@ namespace Desert::Graphic
         jumpFloodSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
         jumpFloodSystem->SetOutlineSmoothness( sceneSettings.OutlineSmoothness );
 
+        m_AAMode = sceneSettings.AA;
+
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetParams( sceneSettings.Exposure, sceneSettings.Gamma );
+
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SetWireframe( sceneSettings.WireframeMode );
+
+        m_BloomEnabled = sceneSettings.EnableBloom;
+        UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )
+             ->SetThreshold( sceneSettings.BloomThreshold );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetBloomIntensity( sceneSettings.EnableBloom ? sceneSettings.BloomIntensity : 0.0f );
+
+        UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] )
+             ->SetParams( sceneSettings.AutoExposureSpeed, sceneSettings.AutoExposureMin,
+                          sceneSettings.AutoExposureMax );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetAutoExposure( sceneSettings.AutoExposure, sceneSettings.AutoExposureKey );
+
         return BOOLSUCCESS;
     }
 
@@ -96,7 +138,24 @@ namespace Desert::Graphic
         // Explicit post-process chain (runs after the scene graph has produced the scene color and
         // the silhouette mask): Jump Flood outline -> Tonemap.
         UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] )->Execute();
+
+        // Eye adaptation: measure scene luminance into the 1x1 buffer, then point tonemap at the latest
+        // (the ping-pong target alternates each frame, so the reference must be refreshed here).
+        {
+            const auto& autoExp = UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
+            autoExp->Execute();
+            UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+                 ->SetAutoExposureFramebuffer( autoExp->GetAdaptedLuminanceFramebuffer() );
+        }
+
+        // Bloom (HDR scene color -> blurred bright) runs before tonemap, which adds it in.
+        if ( m_BloomEnabled )
+            UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )->Execute();
+
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
+
+        if ( m_AAMode == Core::AntiAliasingMode::FXAA )
+            UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Execute();
 
         CompositeRenderPass();
     }
@@ -130,6 +189,8 @@ namespace Desert::Graphic
         UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] )
              ->OnResize( width, height );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Resize( width, height );
+        UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Resize( width, height );
+        UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )->Resize( width, height );
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
@@ -176,7 +237,11 @@ namespace Desert::Graphic
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage()
     {
-        return SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+        // FXAA writes its own framebuffer downstream of tonemap; otherwise the tonemap output IS final.
+        const char* finalSystem =
+             ( m_AAMode == Core::AntiAliasingMode::FXAA ) ? "FXAASystem" : "TonemapSystem";
+
+        return std::static_pointer_cast<System::RenderSystem>( m_RenderSystems[finalSystem] )
              ->GetSystemFramebuffer()
              ->GetColorAttachmentImage();
     }

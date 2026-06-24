@@ -86,8 +86,7 @@ namespace Desert::Editor
 
     void ViewportPanel::RenderGizmo()
     {
-        ImGuizmo::BeginFrame();
-
+        // NOTE: ImGuizmo::BeginFrame() is issued once per frame by EditorLayer, before any panel runs.
         const auto& mainCamera = m_Scene->GetMainCamera().lock();
         if ( !mainCamera )
             return;
@@ -100,7 +99,14 @@ namespace Desert::Editor
         if ( !selectedEntityOpt )
             return;
 
-        auto& selectedEntity     = selectedEntityOpt->get();
+        auto& selectedEntity = selectedEntityOpt->get();
+
+        // If the Mesh Editor is open and editing this entity, vertex editing owns the (global) ImGuizmo
+        // interaction — drawing the object gizmo here would steal the drag and move the whole object.
+        if ( auto* meshEditor = MeshEditorPanel::GetInstance();
+             meshEditor && meshEditor->IsActivelyEditing( selectedEntity ) )
+            return;
+
         auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
         auto  modelMatrix        = transformComponent.GetTransform();
 
@@ -114,46 +120,8 @@ namespace Desert::Editor
         const auto& view = mainCamera->GetViewMatrix();
         const auto& proj = mainCamera->GetProjectionMatrix();
 
-        // --- MESH EDITOR OVERRIDE ---
-        // If Mesh Editor is active and target matches selection, draw vertex gizmos
-        auto* meshEditor = MeshEditorPanel::GetInstance();
-        if ( meshEditor && meshEditor->GetTargetEntity() == selectedEntity && meshEditor->GetActiveMesh() )
-        {
-            auto& selection = meshEditor->GetSelection();
-            if ( !selection.VertexIndices.empty() )
-            {
-                auto      mesh        = meshEditor->GetActiveMesh();
-                glm::vec3 localCenter = selection.GetCenter( *mesh );
-                glm::vec3 worldCenter = glm::vec3( modelMatrix * glm::vec4( localCenter, 1.0f ) );
-
-                glm::mat4 gizmoTransform = glm::translate( glm::mat4( 1.0f ), worldCenter );
-
-                if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], ImGuizmo::TRANSLATE, ImGuizmo::WORLD,
-                                           &gizmoTransform[0][0] ) )
-                {
-                    glm::vec3 newWorldCenter, scale, skew;
-                    glm::quat rotation;
-                    glm::vec4 perspective;
-                    glm::decompose( gizmoTransform, scale, rotation, newWorldCenter, skew, perspective );
-
-                    glm::vec3 deltaWorld = newWorldCenter - worldCenter;
-                    glm::vec3 deltaLocal =
-                         glm::vec3( glm::inverse( modelMatrix ) * glm::vec4( deltaWorld, 0.0f ) );
-
-                    auto& vertices = mesh->GetVertices();
-                    for ( auto idx : selection.VertexIndices )
-                    {
-                        vertices[idx].Position += deltaLocal;
-                    }
-
-                    mesh->Update( vertices, mesh->GetIndices() );
-                }
-
-                if ( ImGuizmo::IsOver() )
-                    m_GizmoHovered = true;
-                return; // Don't draw object gizmo if vertex gizmo is active
-            }
-        }
+        // Vertex-level editing now lives entirely in the Mesh Editor panel's own viewport; the main
+        // viewport only manipulates whole objects.
 
         // --- STANDARD OBJECT GIZMO ---
         if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( m_GizmoType ),

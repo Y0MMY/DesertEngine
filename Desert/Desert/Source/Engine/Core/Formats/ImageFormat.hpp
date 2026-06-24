@@ -1,5 +1,8 @@
 #pragma once
 
+#include <variant>
+#include <optional>
+
 namespace Desert::Core::Formats
 {
     enum class Image2DUsage
