@@ -104,6 +104,20 @@ namespace Desert::Platform::Windows
                                 }
                             } );
 
+        glfwSetDropCallback( m_GLFWWindow,
+                             []( GLFWwindow* window, int count, const char** paths )
+                             {
+                                 auto& data = *( (WindowData*)glfwGetWindowUserPointer( window ) );
+
+                                 std::vector<std::string> dropped;
+                                 dropped.reserve( count );
+                                 for ( int i = 0; i < count; ++i )
+                                     dropped.emplace_back( paths[i] );
+
+                                 Common::EventWindowFileDrop event( std::move( dropped ) );
+                                 data.EventCallback( event );
+                             } );
+
         glfwSetMouseButtonCallback( m_GLFWWindow,
                                     []( GLFWwindow* window, int button, int action, int mods )
                                     {

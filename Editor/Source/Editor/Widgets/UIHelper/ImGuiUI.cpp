@@ -21,4 +21,20 @@ namespace Desert::Editor::UI
 
         ::ImGui::Image( (ImTextureID)id, size, uv0, uv1, tint_col, border_col );
     }
+
+    bool UIHelper::ImageButton( const char* strId, const std::shared_ptr<Graphic::Image2D>& image,
+                                const ImVec2& size )
+    {
+        if ( !image || size.x <= 0.0f || size.y <= 0.0f )
+            return false;
+
+        const auto* id = m_CacherTexture->AddTextureCache( image );
+
+        // Borderless thumbnail button (no frame padding, transparent bg) that's still a real, draggable item.
+        ::ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
+        const bool clicked = ::ImGui::ImageButton( strId, (ImTextureID)id, size, ImVec2( 0, 0 ),
+                                                   ImVec2( 1, 1 ), ImVec4( 0, 0, 0, 0 ) );
+        ::ImGui::PopStyleVar();
+        return clicked;
+    }
 } // namespace Desert::Editor::UI

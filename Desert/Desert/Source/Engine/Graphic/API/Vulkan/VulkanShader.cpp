@@ -160,13 +160,19 @@ namespace Desert::Graphic::API::Vulkan
         {
             const auto& res = resources.push_constant_buffers[0];
             auto& type = compiler.get_type( res.base_type_id );
+            const uint32_t declaredSize = (uint32_t)compiler.get_declared_struct_size( type );
             if ( !m_ReflectionData.PushConstantRanges ) {
                 ShaderResources::ShaderLayout::PushConstantRange range;
-                range.Offset = 0; range.Size = (uint32_t)compiler.get_declared_struct_size( type );
+                range.Offset = 0; range.Size = declaredSize;
                 range.Name = res.name; range.ShaderStage = stage;
                 m_ReflectionData.PushConstantRanges = range;
             } else {
                 m_ReflectionData.PushConstantRanges->ShaderStage = (Core::Formats::ShaderStage)((uint32_t)m_ReflectionData.PushConstantRanges->ShaderStage | (uint32_t)stage);
+                // Different stages may declare the same push-constant block but glslang strips members
+                // a stage doesn't use, so each reports a different declared size. The pipeline-layout
+                // range must span the largest, or a stage's access lands outside the range.
+                if ( declaredSize > m_ReflectionData.PushConstantRanges->Size )
+                    m_ReflectionData.PushConstantRanges->Size = declaredSize;
             }
         }
     }

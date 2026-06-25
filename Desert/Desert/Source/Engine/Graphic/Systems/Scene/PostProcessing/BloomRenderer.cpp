@@ -2,12 +2,42 @@
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <glm/glm.hpp>
+#include <algorithm>
+
 namespace Desert::Graphic::System
 {
     namespace
     {
         constexpr Core::Formats::ImageFormat kBloomFormat = Core::Formats::ImageFormat::RGBA32F;
-    }
+        constexpr uint32_t                   kGroupSize   = 16; // must match local_size_* in the shaders
+
+        // Push-constant blocks — must match BloomDownsample/BloomUpsample.glsl.comp exactly.
+        struct DownsamplePush
+        {
+            glm::vec2 SrcTexelSize;
+            int32_t   SrcMip;
+            int32_t   FirstPass;
+            float     Threshold;
+        };
+
+        struct UpsamplePush
+        {
+            glm::vec2 SrcTexelSize;
+            int32_t   SrcMip;
+            float     FilterRadius;
+        };
+
+        inline uint32_t MipSize( uint32_t base, uint32_t mip )
+        {
+            return std::max( 1u, base >> mip );
+        }
+
+        inline uint32_t GroupCount( uint32_t dim )
+        {
+            return ( dim + kGroupSize - 1 ) / kGroupSize;
+        }
+    } // namespace
 
     Common::BoolResultStr BloomRenderer::Initialize()
     {
@@ -15,141 +45,132 @@ namespace Desert::Graphic::System
         if ( !target )
             return Common::MakeError( "BloomRenderer: target framebuffer is not available" );
 
-        if ( !CreateFramebuffers( target->GetFramebufferWidth(), target->GetFramebufferHeight() ) )
-            return Common::MakeError( "BloomRenderer: failed to create framebuffers" );
+        if ( !CreateImage( target->GetFramebufferWidth(), target->GetFramebufferHeight() ) )
+            return Common::MakeError( "BloomRenderer: failed to create bloom image" );
 
         if ( !CreatePipelines() )
-            return Common::MakeError( "BloomRenderer: failed to create pipelines" );
-
-        m_MaterialBright = std::make_unique<MaterialBloomBright>();
-        m_BlurMaterials.clear();
-        for ( int i = 0; i < kIterations * 2; ++i )
-            m_BlurMaterials.push_back( std::make_unique<MaterialBloomBlur>() );
+            return Common::MakeError( "BloomRenderer: failed to create compute pipelines" );
 
         return BOOLSUCCESS;
     }
 
     void BloomRenderer::Shutdown()
     {
-        m_BrightPipeline.reset();
-        m_BlurPipeline.reset();
-        m_MaterialBright.reset();
-        m_BlurMaterials.clear();
-        m_BrightFB.reset();
-        m_BlurTemp.reset();
+        m_DownsamplePipeline.reset();
+        m_UpsamplePipeline.reset();
+        m_BloomImage.reset();
     }
 
-    bool BloomRenderer::CreateFramebuffers( uint32_t width, uint32_t height )
+    bool BloomRenderer::CreateImage( uint32_t width, uint32_t height )
     {
-        const auto make = [&]( const std::string& name )
-        {
-            FramebufferSpecification spec;
-            spec.DebugName = name;
-            spec.Attachments.Attachments.push_back( kBloomFormat );
+        // Half-resolution chain (mip 0 = scene / 2), capped so the smallest mip stays usable.
+        const uint32_t bw = std::max( 1u, width / 2 );
+        const uint32_t bh = std::max( 1u, height / 2 );
+        m_MipLevels       = std::min( kMaxBloomMips, Utils::CalculateMipCount( bw, bh ) );
 
-            auto framebuffer = Graphic::Framebuffer::Create( spec );
-            framebuffer->Resize( width, height );
-            return framebuffer;
+        Core::Formats::Image2DSpecification spec = {
+             .Tag        = "BloomChain",
+             .Width      = bw,
+             .Height     = bh,
+             .Format     = kBloomFormat,
+             .Mips       = m_MipLevels,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
         };
 
-        m_BrightFB    = make( "Bloom_Bright" );
-        m_BlurTemp    = make( "Bloom_BlurA" );
-        m_Framebuffer = make( "Bloom_Output" );
-
-        return m_BrightFB && m_BlurTemp && m_Framebuffer;
+        m_BloomImage = Image2D::Create( spec, nullptr );
+        return m_BloomImage != nullptr;
     }
 
     bool BloomRenderer::CreatePipelines()
     {
         const auto shaderService = Runtime::ResourceRegistry::GetShaderService();
 
-        const auto makePipeline = [&]( const std::string& shaderName, const std::shared_ptr<Framebuffer>& fb,
-                                       const std::string& debugName ) -> std::shared_ptr<GraphicsPipeline>
+        const auto make = [&]( const std::string& shaderName ) -> std::shared_ptr<ComputePipeline>
         {
             const auto shader = shaderService->GetByName( shaderName );
             if ( !shader )
             {
-                LOG_ERROR( "BloomRenderer: missing shader '{}'", shaderName );
+                LOG_ERROR( "BloomRenderer: missing compute shader '{}'", shaderName );
                 return nullptr;
             }
-
-            GraphicsPipelineSpecification spec;
-            spec.DebugName         = debugName;
-            spec.Shader            = shader;
-            spec.Framebuffer       = fb;
-            spec.DepthTestEnabled  = false;
-            spec.DepthWriteEnabled = false;
-            spec.CullMode          = CullMode::None;
-
-            auto pipeline = GraphicsPipeline::Create( spec );
+            auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = shaderName } );
             pipeline->Invalidate();
             return pipeline;
         };
 
-        m_BrightPipeline = makePipeline( "BloomBright", m_BrightFB, "BloomBrightPipeline" );
-        m_BlurPipeline   = makePipeline( "BloomBlur", m_BlurTemp, "BloomBlurPipeline" );
+        m_DownsamplePipeline = make( "BloomDownsample" );
+        m_UpsamplePipeline   = make( "BloomUpsample" );
 
-        return m_BrightPipeline && m_BlurPipeline;
+        return m_DownsamplePipeline && m_UpsamplePipeline;
     }
 
     void BloomRenderer::Resize( uint32_t width, uint32_t height )
     {
         if ( width == 0 || height == 0 )
             return;
-
-        if ( m_BrightFB )
-            m_BrightFB->Resize( width, height );
-        if ( m_BlurTemp )
-            m_BlurTemp->Resize( width, height );
-        if ( m_Framebuffer )
-            m_Framebuffer->Resize( width, height );
-    }
-
-    void BloomRenderer::RunQuad( const std::shared_ptr<Framebuffer>& target, const std::string& debugName,
-                                 const GraphicsPipeline* pipeline, const MaterialExecutor* executor )
-    {
-        auto& renderer = Renderer::GetInstance();
-
-        auto renderPass = RenderPass::Create( {
-             .TargetFramebuffer = target,
-             .DebugName         = debugName,
-        } );
-
-        renderer.BeginRenderPass( renderPass.get(), true );
-        renderer.SubmitFullscreenQuad( pipeline, executor );
-        renderer.EndRenderPass();
+        // Image2D has no in-place resize; recreate the chain (SceneRenderer::Resize already idled the GPU).
+        CreateImage( width, height );
     }
 
     void BloomRenderer::Execute()
     {
         const auto& scene = m_TargetFramebuffer.lock();
-        if ( !scene )
-        {
-            LOG_ERROR( "BloomRenderer::Execute: scene framebuffer is unavailable" );
+        if ( !scene || !m_BloomImage || !m_DownsamplePipeline || !m_UpsamplePipeline )
             return;
-        }
 
-        // Bright-pass: scene HDR -> bright (threshold extract; emissive objects exceed it and glow).
-        m_MaterialBright->Bind( scene->GetColorAttachmentImage().get(), m_Threshold );
-        RunQuad( m_BrightFB, "BloomBright", m_BrightPipeline.get(), m_MaterialBright->GetMaterialExecutor() );
+        Image2D* sceneColor = scene->GetColorAttachmentImage().get();
+        Image2D* bloom      = m_BloomImage.get();
+        if ( !sceneColor )
+            return;
 
-        // Separable blur, ping-ponging bright -> temp (H) -> output (V), repeated.
-        Image2D* src       = m_BrightFB->GetColorAttachmentImage().get();
-        int      materialIx = 0;
-        for ( int iter = 0; iter < kIterations; ++iter )
+        const uint32_t sceneW = scene->GetFramebufferWidth();
+        const uint32_t sceneH = scene->GetFramebufferHeight();
+        const uint32_t bw     = m_BloomImage->GetWidth();
+        const uint32_t bh     = m_BloomImage->GetHeight();
+
+        auto& renderer = Renderer::GetInstance();
+
+        // Keep the whole chain in GENERAL; the renderer inserts a graphics->compute barrier here and a
+        // compute->compute|fragment barrier after each dispatch.
+        renderer.ComputeImageBeginWrite( bloom );
+
+        // --- Downsample: scene -> mip0 (Karis + threshold), then mip(i-1) -> mip(i). ---
+        for ( uint32_t i = 0; i < m_MipLevels; ++i )
         {
-            m_BlurMaterials[materialIx]->Bind( src, glm::vec2( kSpread, 0.0f ) );
-            RunQuad( m_BlurTemp, "BloomBlurH", m_BlurPipeline.get(),
-                     m_BlurMaterials[materialIx]->GetMaterialExecutor() );
-            ++materialIx;
+            const bool     first  = ( i == 0 );
+            Image2D*       src    = first ? sceneColor : bloom;
+            const uint32_t srcMip = first ? 0u : i - 1;
+            const uint32_t srcW   = first ? sceneW : MipSize( bw, i - 1 );
+            const uint32_t srcH   = first ? sceneH : MipSize( bh, i - 1 );
 
-            m_BlurMaterials[materialIx]->Bind( m_BlurTemp->GetColorAttachmentImage().get(),
-                                               glm::vec2( 0.0f, kSpread ) );
-            RunQuad( m_Framebuffer, "BloomBlurV", m_BlurPipeline.get(),
-                     m_BlurMaterials[materialIx]->GetMaterialExecutor() );
-            ++materialIx;
+            DownsamplePush push{ glm::vec2( 1.0f / static_cast<float>( srcW ), 1.0f / static_cast<float>( srcH ) ),
+                                 static_cast<int32_t>( srcMip ), first ? 1 : 0, m_Threshold };
 
-            src = m_Framebuffer->GetColorAttachmentImage().get();
+            m_DownsamplePipeline->SetInput( 0, src );
+            m_DownsamplePipeline->SetOutput( 1, bloom, i );
+            m_DownsamplePipeline->SetPushConstants( &push, sizeof( push ) );
+            renderer.DispatchComputeInFrame( m_DownsamplePipeline.get(), GroupCount( MipSize( bw, i ) ),
+                                             GroupCount( MipSize( bh, i ) ), 1 );
         }
+
+        // --- Upsample (additive): mip(i) -> mip(i-1), walking back to mip0. ---
+        for ( uint32_t i = m_MipLevels - 1; i >= 1; --i )
+        {
+            const uint32_t srcW = MipSize( bw, i );
+            const uint32_t srcH = MipSize( bh, i );
+
+            UpsamplePush push{ glm::vec2( 1.0f / static_cast<float>( srcW ), 1.0f / static_cast<float>( srcH ) ),
+                               static_cast<int32_t>( i ), kFilterRadius };
+
+            m_UpsamplePipeline->SetInput( 0, bloom );
+            m_UpsamplePipeline->SetOutput( 1, bloom, i - 1 );
+            m_UpsamplePipeline->SetPushConstants( &push, sizeof( push ) );
+            renderer.DispatchComputeInFrame( m_UpsamplePipeline.get(), GroupCount( MipSize( bw, i - 1 ) ),
+                                             GroupCount( MipSize( bh, i - 1 ) ), 1 );
+        }
+
+        // Back to SHADER_READ_ONLY so tonemap can sample mip 0.
+        renderer.ComputeImageEndWrite( bloom );
     }
 } // namespace Desert::Graphic::System

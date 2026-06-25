@@ -9,6 +9,7 @@
 
 #include <Editor/Core/CommandHistory.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
+#include <Editor/Import/TextureDnD.hpp>
 
 #include <ImGui/imgui.h>
 
@@ -48,23 +49,7 @@ namespace Desert::Editor
             return std::shared_ptr<Graphic::Image2D>( img, []( Graphic::Image2D* ) {} );
         }
 
-        // Resolves a dropped texture path to a registered texture handle. The File Explorer emits SOURCE
-        // paths (Resources/Textures/foo.png), but textures are registered from Cooked/Textures/ with a
-        // different dir/extension — so an exact FindByPath misses. Fall back to matching by filename stem.
-        Assets::AssetHandle ResolveDroppedTexture( const Assets::AssetManager& mgr, const std::string& droppedPath )
-        {
-            if ( auto tex = mgr.FindByPath<Assets::TextureAsset>( droppedPath ) )
-                return tex->GetMetadata().Handle;
-
-            const std::string stem = std::filesystem::path( droppedPath ).stem().string();
-            for ( const auto& [handle, tex] :
-                  const_cast<Assets::AssetManager&>( mgr ).FindAllByType<Assets::TextureAsset>() )
-            {
-                if ( tex && std::filesystem::path( tex->GetMetadata().Filepath ).stem().string() == stem )
-                    return tex->GetMetadata().Handle;
-            }
-            return Assets::AssetHandle{};
-        }
+        // (texture drop resolution moved to Editor::TextureDnD::ResolveOrImport — import-on-demand)
 
         // Enums carry any integral underlying type — read/write exactly Size bytes.
         int64_t ReadEnum( const void* p, std::size_t size )
@@ -212,14 +197,20 @@ namespace Desert::Editor
                 // later visual pass (resolving handle -> Image2D needs runtime verification).
                 uint64_t* handle = static_cast<uint64_t*>( p );
 
+                // Always show the texture's filename (consistent); a bound-but-unresolvable handle reads
+                // "(missing)", never a raw "Asset #N".
                 std::string display = "None";
                 if ( *handle != 0 )
                 {
-                    display = "Asset #" + std::to_string( *handle );
+                    display = "(missing)";
                     if ( assetMgr )
                     {
                         if ( auto tex = assetMgr->FindByHandle<Assets::TextureAsset>( Common::UUID( *handle ) ) )
-                            display = std::filesystem::path( tex->GetMetadata().Filepath ).filename().string();
+                        {
+                            const auto& src = tex->GetSourcePath();
+                            const auto& path = !src.empty() ? src : tex->GetMetadata().Filepath.string();
+                            display          = std::filesystem::path( path ).filename().string();
+                        }
                     }
                 }
 
@@ -244,7 +235,10 @@ namespace Desert::Editor
                                                 payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
                         if ( assetMgr )
                         {
-                            const auto resolved = ResolveDroppedTexture( *assetMgr, path );
+                            // Resolve to a registered texture, importing+cooking on demand if the dropped
+                            // source isn't registered yet (so any texture under Resources/ just works).
+                            const auto resolved = TextureDnD::ResolveOrImport(
+                                 const_cast<Assets::AssetManager&>( *assetMgr ), path );
                             if ( static_cast<uint64_t>( resolved ) != 0 )
                             {
                                 *handle = static_cast<uint64_t>( resolved );

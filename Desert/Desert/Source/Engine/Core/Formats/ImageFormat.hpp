@@ -2,6 +2,9 @@
 
 #include <variant>
 #include <optional>
+#include <vector>
+#include <string>
+#include <cstdint>
 
 namespace Desert::Core::Formats
 {

@@ -1,5 +1,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+
+#include <algorithm>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanFramebuffer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanPipeline.hpp>
@@ -224,12 +226,18 @@ namespace Desert::Graphic::API::Vulkan
 
             const auto&   pcBuffer     = materialExecutor->GetPushConstantBuffer();
             VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
-            if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
+            if ( vulkanShader->GetShaderPushConstant().has_value() )
             {
+                // Push the full reflected range so sub-blocks the caller wrote past the transform
+                // (e.g. per-object PBR material params at offset sizeof(mat4)) are included. The
+                // push buffer is zero-initialized, so any unwritten declared bytes are defined.
                 auto pcInfo = vulkanShader->GetShaderPushConstant().value();
-                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
-                                    (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size,
-                                    pcBuffer.Data );
+                if ( pcInfo.Size > 0 )
+                {
+                    vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                        (VkShaderStageFlags)pcInfo.ShaderStage, 0, pcInfo.Size,
+                                        pcBuffer.Data );
+                }
             }
 
             if ( mesh->GetIndexBuffer() )
@@ -291,76 +299,94 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDraw( m_CurrentCommandBuffer, 6, 1, 0, 0 );
     }
 
-    void VulkanRendererAPI::DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX,
-                                             uint32_t groupCountY, uint32_t groupCountZ,
-                                             const MaterialExecutor* materialExecutor )
+    void VulkanRendererAPI::SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount,
+                                         float lineWidth, const MaterialExecutor* materialExecutor )
     {
-        if ( !m_CurrentCommandBuffer )
+        if ( !m_CurrentCommandBuffer || vertexCount == 0 )
             return;
-        const auto vulkanPipeline = static_cast<const VulkanPipelineCompute*>( pipeline );
-        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+        const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
+        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                            vulkanPipeline->GetVkPipeline() );
 
-        // Bind Descriptor Sets
         if ( materialExecutor )
         {
             materialExecutor->Apply();
             auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
+            if ( !vkBackend->HasDescriptorSets() )
+            {
+                LOG_WARN( "VulkanRendererAPI::SubmitLines: MaterialExecutor has no valid descriptor sets!" );
+                return;
+            }
             uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
             vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
-                                           VK_PIPELINE_BIND_POINT_COMPUTE, frameIndex );
+                                           VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
         }
 
-        vkCmdDispatch( m_CurrentCommandBuffer, groupCountX, groupCountY, groupCountZ );
+        // The graphics pipeline enables VK_DYNAMIC_STATE_LINE_WIDTH, so it must be set before drawing.
+        // Widths > 1 require the wideLines device feature (enabled when supported); clamp to a safe range.
+        vkCmdSetLineWidth( m_CurrentCommandBuffer, std::clamp( lineWidth, 1.0f, 10.0f ) );
+
+        // Vertexless: the DebugLine vertex shader pulls each endpoint from the Lines storage buffer by
+        // gl_VertexIndex. Lines topology -> every 2 vertices form one segment.
+        vkCmdDraw( m_CurrentCommandBuffer, vertexCount, 1, 0, 0 );
     }
 
-    void VulkanRendererAPI::ImmediateComputeDispatch( const ComputePipeline* pipeline,
-                                                      Image2D*   inputImage,
-                                                      ImageCube* outputImage,
-                                                      uint32_t groupCountX, uint32_t groupCountY,
-                                                      uint32_t groupCountZ )
+    void VulkanRendererAPI::DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                                    uint32_t groupCountY, uint32_t groupCountZ )
     {
-        auto vkPipeline = static_cast<const VulkanPipelineCompute*>( pipeline );
-        auto vkInput    = dynamic_cast<IVulkanImage*>( inputImage );
-        auto vkOutput   = dynamic_cast<IVulkanImage*>( outputImage );
-
-        if ( !vkPipeline || !vkInput || !vkOutput )
+        if ( !m_CurrentCommandBuffer || !pipeline )
             return;
 
-        auto* backend = vkPipeline->GetVulkanMaterialBackend();
-        if ( !backend )
+        // Records bind + a fresh ring descriptor set + dispatch (no layout transitions, no submit).
+        const_cast<VulkanPipelineCompute*>( static_cast<const VulkanPipelineCompute*>( pipeline ) )
+             ->RecordInFrame( m_CurrentCommandBuffer, groupCountX, groupCountY, groupCountZ );
+
+        // Make this dispatch's storage writes available + visible to the next dispatch's sampler/storage
+        // reads-and-writes (e.g. a histogram clear before atomic accumulation) and to a later fragment
+        // sample (e.g. tonemap reading the bloom result).
+        VkMemoryBarrier barrier{ .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                                 .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                                 .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT };
+        vkCmdPipelineBarrier( m_CurrentCommandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+                              1, &barrier, 0, nullptr, 0, nullptr );
+    }
+
+    void VulkanRendererAPI::ComputeImageBeginWrite( Image2D* image )
+    {
+        if ( !m_CurrentCommandBuffer )
+            return;
+        auto* vkImage = dynamic_cast<VulkanImage2D*>( image );
+        if ( !vkImage )
             return;
 
-        auto cmdResult = CommandBufferAllocator::GetInstance().RT_GetCommandBufferCompute( true );
-        if ( !cmdResult.IsSuccess() )
+        // Make prior graphics writes (the scene color attachment, and any other sampled inputs produced
+        // by earlier fragment passes) available + visible to the upcoming compute reads.
+        VkMemoryBarrier barrier{ .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                                 .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                                 .dstAccessMask = VK_ACCESS_SHADER_READ_BIT };
+        vkCmdPipelineBarrier( m_CurrentCommandBuffer,
+                              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr );
+
+        // Transition the target to GENERAL for storage writes (its last use was a fragment sample).
+        vkImage->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_GENERAL,
+                                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                   VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT );
+    }
+
+    void VulkanRendererAPI::ComputeImageEndWrite( Image2D* image )
+    {
+        if ( !m_CurrentCommandBuffer )
             return;
-        VkCommandBuffer cmd = cmdResult.GetValue();
+        auto* vkImage = dynamic_cast<VulkanImage2D*>( image );
+        if ( !vkImage )
+            return;
 
-        // Transition output cubemap to GENERAL so compute can write to it
-        vkOutput->TransitionLayout( cmd, VK_IMAGE_LAYOUT_GENERAL );
-
-        // Update descriptor set 0 with the real input sampler and output storage image
-        const auto& inRes  = vkInput->GetResource();
-        const auto& outRes = vkOutput->GetResource();
-
-        VkDescriptorImageInfo samplerInfo = { inRes.Sampler, inRes.ImageView,
-                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkDescriptorImageInfo storageInfo = { VK_NULL_HANDLE, outRes.ImageView, VK_IMAGE_LAYOUT_GENERAL };
-
-        auto wds0 = DescriptorSetBuilder::GetSampler2DWDS( backend, 0, 0, 0, 1, &samplerInfo );
-        auto wds1 = DescriptorSetBuilder::GetStorageWDS( backend, 0, 0, 1, 1, &storageInfo );
-        backend->UpdateDescriptorSets( { wds0, wds1 } );
-
-        // Bind and dispatch
-        vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vkPipeline->GetVkPipeline() );
-        backend->BindDescriptorSets( cmd, vkPipeline->GetVkPipelineLayout(),
-                                     VK_PIPELINE_BIND_POINT_COMPUTE, 0 );
-        vkCmdDispatch( cmd, groupCountX, groupCountY, groupCountZ );
-
-        // Transition output to SHADER_READ_ONLY so it can be sampled by the skybox shader
-        vkOutput->TransitionLayout( cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-
-        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferCompute( cmd );
+        // Back to SHADER_READ_ONLY so the fragment stage (tonemap) can sample the bloom result.
+        vkImage->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                   VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT );
     }
 
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )

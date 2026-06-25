@@ -24,6 +24,8 @@ namespace Desert::Editor
             return "DirectionalLight";
         if ( entity.HasComponent<ECS::PointLightComponent>() )
             return "PointLight";
+        if ( entity.HasComponent<ECS::SpotLightComponent>() )
+            return "SpotLight";
         if ( entity.HasComponent<ECS::SkyboxComponent>() )
             return "SkyboxActor";
         if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
@@ -61,6 +63,8 @@ namespace Desert::Editor
         const char* icon = ICON_MDI_CUBE_OUTLINE;
         if ( entity.HasComponent<ECS::CameraComponent>() )
             icon = ICON_MDI_CAMERA;
+        else if ( entity.HasComponent<ECS::SpotLightComponent>() )
+            icon = ICON_MDI_SPOTLIGHT;
         else if ( entity.HasComponent<ECS::DirectionLightComponent>() ||
                   entity.HasComponent<ECS::PointLightComponent>() )
             icon = ICON_MDI_LIGHTBULB;
@@ -195,7 +199,8 @@ namespace Desert::Editor
                     }
                     if ( ImGui::Selectable( "Spot Light" ) )
                     {
-                        scene->CreateNewEntity( "Spot Light" );
+                        auto entity = scene->CreateNewEntity( "Spot Light" );
+                        entity.AddComponent<ECS::SpotLightComponent>();
                     }
                     ImGui::EndMenu();
                 }

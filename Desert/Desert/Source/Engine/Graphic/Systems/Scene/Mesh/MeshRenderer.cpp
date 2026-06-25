@@ -168,6 +168,7 @@ namespace Desert::Graphic::System
             return;
 
         const auto& pointLights = m_SceneRenderer->GetPointLights();
+        const auto& spotLights  = m_SceneRenderer->GetSpotLights();
         const auto& dirLights   = m_SceneRenderer->GetDirectionLights();
 
         // Resolve the active IBL environment cubemaps once (diffuse irradiance + prefiltered specular)
@@ -229,14 +230,15 @@ namespace Desert::Graphic::System
                 MaterialInstance* inst = obj->MaterialSlots[0];
 
                 StaticMaterialPBR::UpdateCamera( inst, camera );
-                StaticMaterialPBR::UpdateLights( inst, pointLights, dirLights );
+                StaticMaterialPBR::UpdateLights( inst, pointLights, spotLights, dirLights );
                 StaticMaterialPBR::UpdateTransform( inst, obj->Transform );
                 Image2D* cascadeMaps[kNumCascades];
                 for ( uint32_t c = 0; c < kNumCascades; ++c )
                     cascadeMaps[c] =
                          m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
                 StaticMaterialPBR::UpdateShadow( inst, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
-                                                 m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals );
+                                                 m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals,
+                                                 m_CascadeWorldPerTexel, m_LightingDebug );
                 StaticMaterialPBR::UpdateEnvironment( inst, iblIrradiance, iblPrefiltered, iblBrdfLut );
 
                 mat->SetMaterialIndex( i );
@@ -257,6 +259,7 @@ namespace Desert::Graphic::System
         auto&       renderer    = Renderer::GetInstance();
         const auto  camera      = m_SceneRenderer->GetMainCamera();
         const auto& pointLights = m_SceneRenderer->GetPointLights();
+        const auto& spotLights  = m_SceneRenderer->GetSpotLights();
 
         for ( const auto& data : m_SkinnedQueue )
         {
@@ -268,6 +271,7 @@ namespace Desert::Graphic::System
                                    .MeshTransform   = data.Transform,
                                    .DirectionLights = m_SceneRenderer->GetDirectionLights(),
                                    .PointLights     = pointLights,
+                                   .SpotLights      = spotLights,
                                    .SkinnedUB       = { .BoneMatrices = data.BoneMatrices } } );
 
             renderer.RenderMesh( m_SkinnedPipeline.get(), data.Mesh, data.Transform,
@@ -400,8 +404,6 @@ namespace Desert::Graphic::System
             return false;
         }
 
-        constexpr uint32_t kShadowMapSize = 2048;
-
         // One R32F (in RGBA32F) light-space depth map + depth attachment PER CASCADE. Each cascade also
         // gets its own MaterialShadow so the 4 shadow passes don't alias a single shared light-matrix UBO
         // (all draws recorded into one command buffer would otherwise see the last cascade's matrix).
@@ -522,8 +524,22 @@ namespace Desert::Graphic::System
                  glm::abs( lightDir.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 );
             // Push the light eye back by 2*radius so casters between the light and the slice still cast.
             const glm::mat4 view = glm::lookAt( center - lightDir * ( radius * 2.0f ), center, up );
-            const glm::mat4 proj = glm::orthoRH_ZO( -radius, radius, -radius, radius, 0.1f, radius * 4.0f );
+            glm::mat4       proj = glm::orthoRH_ZO( -radius, radius, -radius, radius, 0.1f, radius * 4.0f );
+
+            // Texel-snap stabilization: round the cascade's origin to whole shadow-map texels in light
+            // space so the sampling grid doesn't crawl/shimmer as the camera moves. (Microsoft CSM trick.)
+            glm::mat4       vp          = proj * view;
+            const float     halfRes     = static_cast<float>( kShadowMapSize ) * 0.5f;
+            glm::vec4       originShadow = vp * glm::vec4( 0.0f, 0.0f, 0.0f, 1.0f );
+            originShadow *= halfRes;
+            glm::vec2       rounded( std::round( originShadow.x ), std::round( originShadow.y ) );
+            glm::vec2       offset = ( rounded - glm::vec2( originShadow ) ) / halfRes;
+            proj[3][0] += offset.x;
+            proj[3][1] += offset.y;
             m_CascadeVP[c] = proj * view;
+
+            // World size of one texel for this cascade (drives the PBR normal-offset / bias).
+            m_CascadeWorldPerTexel[c] = ( 2.0f * radius ) / static_cast<float>( kShadowMapSize );
 
             lastFar = splitFar[c];
         }

@@ -6,7 +6,9 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
 namespace Desert::Graphic
@@ -99,18 +101,20 @@ namespace Desert::Graphic
         s_RendererAPI->SubmitLines( pipeline, vertexCount, lineWidth, materialExecutor );
     }
 
-    void Renderer::DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
-                                    uint32_t groupCountZ, const MaterialExecutor* materialExecutor )
+    void Renderer::DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                           uint32_t groupCountY, uint32_t groupCountZ )
     {
-        s_RendererAPI->DispatchCompute( pipeline, groupCountX, groupCountY, groupCountZ, materialExecutor );
+        s_RendererAPI->DispatchComputeInFrame( pipeline, groupCountX, groupCountY, groupCountZ );
     }
 
-    void Renderer::ImmediateComputeDispatch( const ComputePipeline* pipeline,
-                                              Image2D* inputImage, ImageCube* outputImage,
-                                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
+    void Renderer::ComputeImageBeginWrite( Image2D* image )
     {
-        s_RendererAPI->ImmediateComputeDispatch( pipeline, inputImage, outputImage,
-                                                  groupCountX, groupCountY, groupCountZ );
+        s_RendererAPI->ComputeImageBeginWrite( image );
+    }
+
+    void Renderer::ComputeImageEndWrite( Image2D* image )
+    {
+        s_RendererAPI->ComputeImageEndWrite( image );
     }
 
     void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
@@ -138,6 +142,19 @@ namespace Desert::Graphic
         s_RendererAPI->WaitDeviceIdle();
     }
 
+    void Renderer::RecreateImageSamplers()
+    {
+        // Idle first: we destroy/recreate VkSamplers that in-flight frames may still reference.
+        WaitDeviceIdle();
+        auto* imageService = Runtime::ResourceRegistry::GetImageService();
+        for ( const auto& image : imageService->All() )
+        {
+            if ( auto* vulkanImage = dynamic_cast<API::Vulkan::IVulkanImage*>( image.get() ) )
+                vulkanImage->RecreateSampler();
+        }
+        // Next frame, MaterialExecutor::Apply rebinds the new samplers into descriptor sets.
+    }
+
     std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()
     {
         return s_RendererAPI->GetCompositeFramebuffer();
@@ -149,7 +166,7 @@ namespace Desert::Graphic
         s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor );
     }
 
-    const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const
+    const std::shared_ptr<Desert::Graphic::Texture2D>& Renderer::GetBRDFTexture() const
     {
         return m_BRDFTexture;
     }

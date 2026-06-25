@@ -155,6 +155,11 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Radius" ), Category( "Light" ), Range( 0.0f, 100.0f ) )
         float Radius = 10.0f;
 
+        // Inner radius where attenuation == 1 (a small emitter "source size"); falloff runs from here to
+        // Radius. 0 = point source.
+        PROPERTY( DisplayName( "Min Radius" ), Category( "Light" ), Range( 0.0f, 100.0f ) )
+        float MinRadius = 0.0f;
+
         PROPERTY( DisplayName( "Falloff" ), Category( "Light" ) )
         LightFalloff Falloff = LightFalloff::Quadratic;
 
@@ -165,6 +170,39 @@ namespace Desert::ECS
     struct PointLightComponent
     {
         PointLightData Data;
+    };
+
+    // Spot light: a cone of light from the entity's position (transform translation) aimed along the
+    // entity's forward (transform rotation). Inner/Outer cone angles (degrees) give a soft edge.
+    struct SpotLightData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color )
+        glm::vec3 Color = glm::vec3( 1.0f );
+
+        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
+        float Intensity = 1.0f;
+
+        PROPERTY( DisplayName( "Range" ), Category( "Light" ), Range( 0.0f, 100.0f ) )
+        float Range = 15.0f;
+
+        PROPERTY( DisplayName( "Inner Cone" ), Category( "Light" ), Range( 0.0f, 89.0f ) )
+        float InnerConeAngle = 20.0f; // degrees — full intensity inside this half-angle
+
+        PROPERTY( DisplayName( "Outer Cone" ), Category( "Light" ), Range( 0.0f, 90.0f ) )
+        float OuterConeAngle = 30.0f; // degrees — zero intensity outside this half-angle
+
+        PROPERTY( DisplayName( "Falloff" ), Category( "Light" ) )
+        LightFalloff Falloff = LightFalloff::Quadratic;
+
+        PROPERTY( DisplayName( "Show Cone" ), Category( "Light" ) )
+        bool ShowCone = false;
+    };
+
+    struct SpotLightComponent
+    {
+        SpotLightData Data;
     };
 
     struct SkyboxComponent

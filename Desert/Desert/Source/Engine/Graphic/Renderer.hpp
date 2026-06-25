@@ -36,12 +36,14 @@ namespace Desert::Graphic
         void SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
                           const MaterialExecutor* materialExecutor );
 
-        void DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
-                              uint32_t groupCountZ, const MaterialExecutor* materialExecutor = nullptr );
+        // In-frame compute dispatch (records into the frame command buffer outside any render pass,
+        // inserts a trailing compute->shader barrier). The compute mip-chain bloom is built on this.
+        void DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                     uint32_t groupCountY, uint32_t groupCountZ );
 
-        void ImmediateComputeDispatch( const ComputePipeline* pipeline,
-                                       Image2D* inputImage, ImageCube* outputImage,
-                                       uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ );
+        // Layout helpers for compute storage targets used in the frame command buffer (see RendererAPI).
+        void ComputeImageBeginWrite( Image2D* image );
+        void ComputeImageEndWrite( Image2D* image );
 
         void PrepareNextFrame();
         void PresentFinalImage();
@@ -49,9 +51,12 @@ namespace Desert::Graphic
         void ResizeWindowEvent( uint32_t width, uint32_t height );
         void WaitDeviceIdle();
 
+        // Recreate every registered image's sampler from the current RenderConfig filter (live filter swap).
+        void RecreateImageSamplers();
+
         RendererAPI* GetRendererAPI() const;
 
-        const std::shared_ptr<Graphic::Texture2D> GetBRDFTexture() const;
+        const std::shared_ptr<Graphic::Texture2D>& GetBRDFTexture() const;
 
         std::shared_ptr<Framebuffer> GetCompositeFramebuffer();
         uint32_t                     GetCurrentFrameIndex();

@@ -108,7 +108,27 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::PushID();
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
-        if ( ImGui::TreeNodeEx( "Materials", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen ) )
+        const bool materialsOpen =
+             ImGui::TreeNodeEx( "Materials", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen );
+
+        // Drop a .mat onto the Materials header (works open or collapsed): create slots up to the submesh
+        // count if there are none, then assign the dropped material to EVERY slot.
+        if ( ImGui::BeginDragDropTarget() )
+        {
+            if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( "MATERIAL_ASSET" ) )
+            {
+                const std::string path( static_cast<const char*>( p->Data ),
+                                        p->DataSize > 0 ? p->DataSize - 1 : 0 );
+                const size_t      count = GetSubmeshCount( meshComp );
+                while ( meshComp.MaterialSlots.size() < count )
+                    meshComp.MaterialSlots.push_back( Common::UUID::Null() );
+                for ( size_t s = 0; s < meshComp.MaterialSlots.size(); ++s )
+                    AssignMaterialFromPath( meshComp, s, path );
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        if ( materialsOpen )
         {
             const size_t submeshCount = GetSubmeshCount( meshComp );
 

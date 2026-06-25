@@ -4,6 +4,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Core/EngineContext.hpp>
+#include <Engine/Graphic/RenderConfig.hpp>
 
 #include <Common/Utilities/String.hpp>
 
@@ -20,19 +21,38 @@ namespace Desert::Graphic::API::Vulkan
 
         static void CreateSampler( VkDevice device, VkSampler& outSampler )
         {
+            // Global filter selected in Scene Settings (pushed into RenderConfig by SceneRenderer):
+            // Nearest | Bilinear (linear, nearest mip) | Trilinear (linear, linear mip) | Anisotropic.
+            using FM            = Graphic::TextureFilterMode;
+            const int  mode     = Graphic::RenderConfig::TextureFilter.load();
+            const bool nearest  = mode == static_cast<int>( FM::Nearest );
+            const bool linearMip = mode == static_cast<int>( FM::Trilinear ) || mode == static_cast<int>( FM::Anisotropic );
+
+            const VkFilter            filter  = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+            const VkSamplerMipmapMode mipMode = linearMip ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+            // Anisotropy: only when requested AND the device supports it (MaxAnisotropy > 1 = supported).
+            const float deviceMaxAniso = Graphic::RenderConfig::MaxAnisotropy.load();
+            const bool  useAniso       = mode == static_cast<int>( FM::Anisotropic ) && deviceMaxAniso > 1.0f;
+            // User-selected level (4/8/16x), clamped to what the device supports.
+            const float requestedAniso = static_cast<float>( Graphic::RenderConfig::AnisotropyLevel.load() );
+            const float maxAniso =
+                 useAniso ? ( requestedAniso < deviceMaxAniso ? requestedAniso : deviceMaxAniso ) : 1.0f;
+
             VkSamplerCreateInfo info = {
-                 .sType         = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-                 .magFilter     = VK_FILTER_LINEAR,
-                 .minFilter     = VK_FILTER_LINEAR,
-                 .mipmapMode    = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-                 .addressModeU  = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                 .addressModeV  = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                 .addressModeW  = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                 .mipLodBias    = 0.0f,
-                 .maxAnisotropy = 1.0f,
-                 .minLod        = 0.0f,
-                 .maxLod        = 100.0f,
-                 .borderColor   = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE };
+                 .sType            = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                 .magFilter        = filter,
+                 .minFilter        = filter,
+                 .mipmapMode       = mipMode,
+                 .addressModeU     = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                 .addressModeV     = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                 .addressModeW     = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                 .mipLodBias       = 0.0f,
+                 .anisotropyEnable = useAniso ? VK_TRUE : VK_FALSE,
+                 .maxAnisotropy    = maxAniso,
+                 .minLod           = 0.0f,
+                 .maxLod           = 100.0f,
+                 .borderColor      = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE };
 
             VK_CHECK_RESULT( vkCreateSampler( device, &info, nullptr, &outSampler ) );
         }
@@ -193,8 +213,23 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanImage2D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )
     {
-        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format, 
+        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format,
                                                                m_Resource.Layout, newLayout, 1, mip == 0 ? m_Resource.MipLevels : 1 );
+        m_Resource.Layout = newLayout;
+    }
+
+    void VulkanImage2D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout,
+                                          VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                                          VkAccessFlags srcAccess, VkAccessFlags dstAccess )
+    {
+        VkImageSubresourceRange range{ .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                       .baseMipLevel   = 0,
+                                       .levelCount     = m_Resource.MipLevels,
+                                       .baseArrayLayer = 0,
+                                       .layerCount     = 1 };
+        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, srcAccess, dstAccess,
+                                                               m_Resource.Layout, newLayout, srcStage,
+                                                               dstStage, range );
         m_Resource.Layout = newLayout;
     }
 
@@ -276,5 +311,20 @@ namespace Desert::Graphic::API::Vulkan
 
     VkImageView VulkanImageCube::GetMipView( uint32_t level ) const { return m_MipViews[level]; }
     Core::Formats::ImagePixelData VulkanImageCube::GetImagePixels() { return {}; }
+
+    // --- Live sampler recreation (texture-filter setting change) ---
+
+    static void RecreateSamplerImpl( VulkanImageResource& res )
+    {
+        auto vkDevice =
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
+        if ( res.Sampler )
+            vkDestroySampler( vkDevice, res.Sampler, nullptr );
+        res.Sampler = VK_NULL_HANDLE;
+        Utils::CreateSampler( vkDevice, res.Sampler ); // reads RenderConfig::TextureFilter
+    }
+
+    void VulkanImage2D::RecreateSampler() { RecreateSamplerImpl( m_Resource ); }
+    void VulkanImageCube::RecreateSampler() { RecreateSamplerImpl( m_Resource ); }
 
 } // namespace Desert::Graphic::API::Vulkan

@@ -23,6 +23,16 @@ namespace Desert::Core
         Cascades,
     };
 
+    // Global texture sampler filter (applies to all sampled images; live — recreates samplers on change).
+    // Must match Graphic::TextureFilterMode.
+    enum class TextureFilter : int
+    {
+        Nearest     = 0,
+        Bilinear    = 1,
+        Trilinear   = 2,
+        Anisotropic = 3,
+    };
+
     struct SceneSettings
     {
         // Outline settings (Jump Flood). Width and smoothness are in screen pixels.
@@ -63,12 +73,20 @@ namespace Desert::Core
         float BloomThreshold = 2.0f;
         float BloomIntensity = 0.8f;
 
+        // Textures
+        TextureFilter TextureFilterMode = TextureFilter::Trilinear;
+        int           Anisotropy        = 8; // 1/2/4/8/16x — used only in Anisotropic filter mode
+
         // Debug visualization
+        bool      ShowGrid             = true; // infinite editor scene grid
         bool      ShowBoundingBoxes    = false;
         glm::vec3 BoundingBoxColor     = glm::vec3( 0.25f, 0.95f, 0.35f );
         float     BoundingBoxLineWidth = 1.5f;
         bool      ShowNormals          = false;
         bool      WireframeMode        = false;
+        // Lighting debug: tint surfaces by which light(s) reach them (a distinct color per source,
+        // brightness = light strength); albedo/IBL/emission ignored, unlit areas read black.
+        bool      LightingDebug        = false;
 
         // Other scene-wide settings
         float Gravity         = 9.81f; // For physics simulation

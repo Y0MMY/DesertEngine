@@ -39,6 +39,7 @@ namespace Desert::Editor
             return;
 
         RenderPointLights( camera, width, height, xpos, ypos );
+        RenderSpotLights( camera, width, height, xpos, ypos );
     }
 
     void LightGizmoRenderer::RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
@@ -95,6 +96,103 @@ namespace Desert::Editor
                           .c_str() );
                 ImGui::PopStyleColor( 2 );
             }
+        }
+    }
+
+    void LightGizmoRenderer::RenderSpotLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
+                                               float height, float xpos, float ypos )
+    {
+        auto entities = m_Scene->GetAllEntities();
+
+        ImVec2 windowPos = ImGui::GetWindowPos();
+
+        for ( auto entity : entities )
+        {
+            if ( !entity.HasComponent<ECS::SpotLightComponent>() )
+                continue;
+
+            auto& light     = entity.GetComponent<ECS::SpotLightComponent>().Data;
+            auto& transform = entity.GetComponent<ECS::TransformComponent>();
+
+            const auto mvp = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+
+            glm::vec2 screenPos;
+            if ( !ProjectToScreen( transform.Translation, mvp, width, height, screenPos ) )
+                continue;
+
+            const float absoluteX = windowPos.x + screenPos.x;
+            const float absoluteY = windowPos.y + screenPos.y;
+
+            const char* icon     = ICON_MDI_SPOTLIGHT;
+            ImVec2      iconSize  = ImGui::CalcTextSize( icon );
+            ImDrawList* drawList  = ImGui::GetWindowDrawList();
+
+            drawList->AddText( ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
+                               ImColor( ImVec4( 1.0f, 0.9f, 0.5f, 1.0f ) ), icon );
+
+            // Forward = entity's -Z in world space (matches the SpotLightECSSystem direction).
+            const glm::mat4 world   = transform.GetTransform();
+            const glm::vec3 forward = glm::normalize( -glm::vec3( world[2] ) );
+
+            if ( light.ShowCone )
+                DrawSpotCone( camera, transform.Translation, forward, light.OuterConeAngle, light.Range, width,
+                              height, windowPos.x, windowPos.y );
+
+            ImVec2 mousePos = ImGui::GetMousePos();
+            if ( mousePos.x >= absoluteX - iconSize.x * 0.5f && mousePos.x <= absoluteX + iconSize.x * 0.5f &&
+                 mousePos.y >= absoluteY - iconSize.y * 0.5f && mousePos.y <= absoluteY + iconSize.y * 0.5f )
+            {
+                ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
+                ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
+                Utils::ImGuiUtilities::Tooltip(
+                     std::format( "Spot Light\nIntensity: {}\nRange: {}\nCone: {} / {}\nPosition: ({}, {}, {})",
+                                  light.Intensity, light.Range, light.InnerConeAngle, light.OuterConeAngle,
+                                  transform.Translation.x, transform.Translation.y, transform.Translation.z )
+                          .c_str() );
+                ImGui::PopStyleColor( 2 );
+            }
+        }
+    }
+
+    void LightGizmoRenderer::DrawSpotCone( const std::shared_ptr<Desert::Core::Camera>& camera,
+                                           const glm::vec3& apex, const glm::vec3& dir, float outerAngleDeg,
+                                           float range, float width, float height, float windowX, float windowY )
+    {
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        const auto  mvp      = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+        const ImU32 color    = ImColor( 1.0f, 0.9f, 0.5f, 0.85f );
+
+        // Build an orthonormal basis around the cone axis.
+        glm::vec3 up = ( glm::abs( dir.y ) > 0.99f ) ? glm::vec3( 1.0f, 0.0f, 0.0f ) : glm::vec3( 0.0f, 1.0f, 0.0f );
+        glm::vec3 right = glm::normalize( glm::cross( dir, up ) );
+        up             = glm::normalize( glm::cross( right, dir ) );
+
+        const float  outer       = glm::radians( outerAngleDeg );
+        const float  capRadius   = range * glm::tan( outer );
+        const glm::vec3 capCenter = apex + dir * range;
+
+        const int    segments = 48;
+        glm::vec2    prev;
+        bool         prevValid = false;
+        glm::vec2    apexS;
+        const bool   apexValid = ProjectToScreen( apex, mvp, width, height, apexS );
+
+        for ( int i = 0; i <= segments; ++i )
+        {
+            const float a   = 2.0f * glm::pi<float>() * i / segments;
+            glm::vec3   p   = capCenter + capRadius * ( glm::cos( a ) * right + glm::sin( a ) * up );
+            glm::vec2   s;
+            const bool  ok  = ProjectToScreen( p, mvp, width, height, s );
+            const ImVec2 sp = ImVec2( windowX + s.x, windowY + s.y );
+
+            if ( ok && prevValid )
+                drawList->AddLine( ImVec2( windowX + prev.x, windowY + prev.y ), sp, color, 1.5f );
+            // A few rib lines from the apex to the cap edge.
+            if ( ok && apexValid && ( i % 12 == 0 ) )
+                drawList->AddLine( ImVec2( windowX + apexS.x, windowY + apexS.y ), sp, color, 1.5f );
+
+            prev      = s;
+            prevValid = ok;
         }
     }
 

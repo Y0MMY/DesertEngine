@@ -46,21 +46,21 @@ namespace Desert::Graphic
                                   const MaterialExecutor* materialExecutor )                            = 0;
 
         /**
-         * @brief Dispatches a compute shader.
+         * @brief Records a compute dispatch into the current frame command buffer (outside any render
+         *        pass), then inserts a compute-write -> shader-read barrier so the next dispatch or a
+         *        later fragment sample sees the result. The pipeline's bound inputs/outputs/push-constants
+         *        are consumed (see ComputePipeline::SetInput/SetOutput/SetPushConstants). The caller owns
+         *        image layout transitions (see ComputeImageBeginWrite / ComputeImageEndWrite).
          */
-        virtual void DispatchCompute( const ComputePipeline* pipeline,
-                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ,
-                                      const MaterialExecutor* materialExecutor = nullptr ) = 0;
+        virtual void DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                             uint32_t groupCountY, uint32_t groupCountZ ) = 0;
 
-        /**
-         * @brief One-shot compute dispatch outside of a render frame (e.g. environment map generation).
-         *        Allocates a dedicated command buffer, transitions images, dispatches, then flushes synchronously.
-         */
-        virtual void ImmediateComputeDispatch( const ComputePipeline* pipeline,
-                                               Image2D*   inputImage,
-                                               ImageCube* outputImage,
-                                               uint32_t groupCountX, uint32_t groupCountY,
-                                               uint32_t groupCountZ ) = 0;
+        // Transition a storage image to GENERAL for compute writes in the current frame command buffer,
+        // making prior graphics (color/shader) writes visible to compute. Pair with ComputeImageEndWrite.
+        virtual void ComputeImageBeginWrite( Image2D* image ) = 0;
+        // Transition the storage image back to SHADER_READ_ONLY for later sampling (e.g. tonemap),
+        // making the compute writes visible to the fragment stage.
+        virtual void ComputeImageEndWrite( Image2D* image ) = 0;
 
         virtual void                         ResizeWindowEvent( uint32_t width, uint32_t height ) = 0;
         virtual void                         WaitDeviceIdle()                                     = 0;

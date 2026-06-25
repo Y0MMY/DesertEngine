@@ -6,6 +6,8 @@
 
 #include <Engine/Assets/Serialization/Texture.hpp>
 
+#include <Common/Utilities/FileSystem.hpp>
+
 #include <stb_image/stb_image.h>
 
 namespace Desert::Editor
@@ -50,6 +52,11 @@ namespace Desert::Editor
         return result;
     }
 
+    std::filesystem::path TextureImporter::CookedMetaPath( const std::filesystem::path& source )
+    {
+        return BuildCookedPath( source, ".tex" );
+    }
+
     Common::UUID TextureImporter::Import( const std::filesystem::path& path )
     {
         auto abs = std::filesystem::weakly_canonical( path ).string();
@@ -59,7 +66,30 @@ namespace Desert::Editor
             return m_Cache[abs];
         }
 
-        Common::UUID handle{};
+        const auto meta = BuildCookedPath( path, ".tex" );
+
+        // Stable handles: if this texture was cooked before, reuse the handle stored in the existing .tex
+        // (so material/scene references survive re-cooks). If the .tex is also up-to-date, skip rewriting.
+        Common::UUID    handle{};
+        std::error_code ec;
+        if ( std::filesystem::exists( meta, ec ) )
+        {
+            const auto existing = rfl::json::read<Assets::Serialization::TextureAssetData>(
+                 Common::Utils::FileSystem::ReadFileContent( meta ) );
+            if ( existing.has_value() )
+            {
+                handle = existing->Handle;
+
+                std::error_code ec2;
+                const auto      metaT = std::filesystem::last_write_time( meta, ec2 );
+                const auto      srcT  = std::filesystem::last_write_time( path, ec2 );
+                if ( !ec2 && metaT >= srcT )
+                {
+                    m_Cache[abs] = handle; // up-to-date — keep the existing cooked metadata as-is
+                    return handle;
+                }
+            }
+        }
 
         Assets::Serialization::TextureAssetData data;
         data.Handle     = handle;
@@ -78,7 +108,6 @@ namespace Desert::Editor
 
         stbi_image_free( pixels );
 
-        auto meta = BuildCookedPath( path, ".tex" );
         WriteJsonToFile( data, meta );
 
         m_Cache[abs] = handle;

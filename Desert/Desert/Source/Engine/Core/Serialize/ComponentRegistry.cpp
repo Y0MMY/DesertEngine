@@ -320,6 +320,8 @@ namespace Desert::Core::Serialize
              "DirectionLight", "DirectionalLightData", &ECS::DirectionLightComponent::Data ) );
         Register( MakeReflected<ECS::PointLightComponent, ECS::PointLightData>(
              "PointLight", "PointLightData", &ECS::PointLightComponent::Data ) );
+        Register( MakeReflected<ECS::SpotLightComponent, ECS::SpotLightData>(
+             "SpotLight", "SpotLightData", &ECS::SpotLightComponent::Data ) );
 
         // ---- Skybox (asset-bearing) ----
         {

@@ -294,12 +294,20 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t colorAttachmentCount =
              m_Specification.Framebuffer ? m_Specification.Framebuffer->GetColorAttachmentCount() : 1;
 
+        const VkBool32 blend = m_Specification.BlendEnable ? VK_TRUE : VK_FALSE;
+
         m_ColorBlendAttachments.resize( colorAttachmentCount );
         for ( auto& attachment : m_ColorBlendAttachments )
         {
-            attachment = { .blendEnable    = VK_FALSE,
-                           .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT };
+            attachment = { .blendEnable         = blend,
+                           .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+                           .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                           .colorBlendOp        = VK_BLEND_OP_ADD,
+                           .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+                           .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                           .alphaBlendOp        = VK_BLEND_OP_ADD,
+                           .colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                                  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT };
         }
 
         m_ColorBlending = VkPipelineColorBlendStateCreateInfo{

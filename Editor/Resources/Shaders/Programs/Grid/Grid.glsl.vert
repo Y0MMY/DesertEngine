@@ -1,40 +1,41 @@
-// https://github.com/PacktPublishing/3D-Graphics-Rendering-Cookbook/blob/35bb8b717d6fb52ced60509be1bd4b99ad6d9a01/data/shaders/chapter05/GL01_grid.frag
 #version 450
 
-#include "Common/CameraUB.glslh"
+// Infinite ground-plane grid. A fullscreen quad emits a world-space ray per pixel (near->far,
+// reconstructed via the inverse view-projection); the fragment shader intersects it with the y=0 plane.
 
-layout (location=0) out vec2 uv;
-layout (location=1) out vec2 out_camPos;
+layout(binding = 0) uniform GridUB
+{
+    mat4 Projection;
+    mat4 View;
+    mat4 InvProjection;
+    mat4 InvView;
+    vec4 CameraPos; // xyz
+    vec4 ThinColor;
+    vec4 ThickColor;
+    vec4 Params; // x = base cell size (m), y = fade start, z = fade end
+} u;
 
-const vec3 pos[4] = vec3[4](
-	vec3(-1.0, 0.0, -1.0),
-	vec3( 1.0, 0.0, -1.0),
-	vec3( 1.0, 0.0,  1.0),
-	vec3(-1.0, 0.0,  1.0)
-);
+layout(location = 0) out vec3 v_Near;
+layout(location = 1) out vec3 v_Far;
 
-const int indices[6] = int[6](
-	0, 1, 2, 2, 3, 0
-);
-
-const float gridYOffset = -1.5;
+vec3 Unproject( vec2 ndc, float z )
+{
+    vec4 p = u.InvView * u.InvProjection * vec4( ndc, z, 1.0 );
+    return p.xyz / p.w;
+}
 
 void main()
 {
-	float gridSize = 100.0;
+    // Two triangles covering NDC. Drawn via Renderer::SubmitFullscreenQuad (vkCmdDraw(6)).
+    const vec2 verts[6] = vec2[6](
+        vec2( -1.0, -1.0 ), vec2( 1.0, -1.0 ), vec2( 1.0, 1.0 ),
+        vec2( 1.0, 1.0 ), vec2( -1.0, 1.0 ), vec2( -1.0, -1.0 ) );
 
-	mat4 MVP = cameraUB.Projection * cameraUB.View;
+    vec2 ndc = verts[gl_VertexIndex];
 
-	int idx = indices[gl_VertexIndex];
-	vec3 position = pos[idx] * gridSize;
-	
-	position.x += cameraUB.CameraPos.x;
-	position.z += cameraUB.CameraPos.z;
+    // OpenGL-style clip depth ([-1,1]) — matches the engine's perspective convention.
+    v_Near = Unproject( ndc, -1.0 );
+    v_Far  = Unproject( ndc, 1.0 );
 
-	out_camPos = cameraUB.CameraPos.xz;
-
-	position.y += gridYOffset;
-
-	gl_Position = MVP * vec4(position, 1.0);
-	uv = position.xz;
+    gl_Position = vec4( ndc, 0.0, 1.0 );
 }

@@ -3,16 +3,17 @@
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
-
-#include <Engine/Graphic/Materials/PostProcessing/MaterialBloom.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/Pipeline.hpp>
 
 #include <memory>
-#include <vector>
 
 namespace Desert::Graphic::System
 {
-    // Bloom: bright-pass on the HDR scene color, then a few separable-Gaussian blur passes. The result
-    // (GetSystemFramebuffer()) is added back during tonemapping. Part of the explicit post-process chain.
+    // Bloom via a compute mip-chain (Call of Duty / Jimenez): progressive 13-tap downsample of the HDR
+    // scene color (with a Karis average + bright-pass on the first mip), then a tent-filtered additive
+    // upsample back to mip 0. The mip-0 result (GetBloomImage()) is added in during tonemapping. Runs as
+    // part of the explicit post-process chain, outside any render pass (compute dispatches only).
     class BloomRenderer final : public RenderSystem
     {
     public:
@@ -33,23 +34,25 @@ namespace Desert::Graphic::System
             m_Threshold = threshold;
         }
 
+        // The mip-0 bloom result, sampled by the tonemap pass. Recreated on resize.
+        const std::shared_ptr<Image2D>& GetBloomImage() const
+        {
+            return m_BloomImage;
+        }
+
     private:
-        bool CreateFramebuffers( uint32_t width, uint32_t height );
+        bool CreateImage( uint32_t width, uint32_t height );
         bool CreatePipelines();
-        void RunQuad( const std::shared_ptr<Framebuffer>& target, const std::string& debugName,
-                      const GraphicsPipeline* pipeline, const MaterialExecutor* executor );
 
-        static constexpr int   kIterations = 2;   // H+V blur iterations
-        static constexpr float kSpread     = 2.0f; // texels per tap step
+        // Half-resolution chain; capped so the smallest mip stays a sane size.
+        static constexpr uint32_t kMaxBloomMips = 6;
+        static constexpr float    kFilterRadius = 1.0f; // tent radius (source texels) for upsampling
 
-        std::shared_ptr<Framebuffer>      m_BrightFB;
-        std::shared_ptr<Framebuffer>      m_BlurTemp; // ping-pong A; m_Framebuffer (base) is B / output
-        std::shared_ptr<GraphicsPipeline> m_BrightPipeline;
-        std::shared_ptr<GraphicsPipeline> m_BlurPipeline;
+        std::shared_ptr<Image2D>          m_BloomImage;
+        std::shared_ptr<ComputePipeline>  m_DownsamplePipeline;
+        std::shared_ptr<ComputePipeline>  m_UpsamplePipeline;
 
-        std::unique_ptr<MaterialBloomBright>            m_MaterialBright;
-        std::vector<std::unique_ptr<MaterialBloomBlur>> m_BlurMaterials; // 2 * kIterations instances
-
-        float m_Threshold = 1.0f;
+        uint32_t m_MipLevels = 1;
+        float    m_Threshold = 1.0f;
     };
 } // namespace Desert::Graphic::System

@@ -16,6 +16,12 @@ namespace Desert::Editor
             return s_IconFont;
         }
 
+        // Large standalone MDI icon font for asset-thumbnail grid cells.
+        static ImFont* GetBigIconFont()
+        {
+            return s_BigIconFont ? s_BigIconFont : s_IconFont;
+        }
+
         static bool IsInitialized()
         {
             return s_Initialized;
@@ -43,6 +49,7 @@ namespace Desert::Editor
         static ImFont* s_BoldFont;
         static ImFont* s_ExtraBoldFont;
         static ImFont* s_IconFont;
+        static ImFont* s_BigIconFont;
     };
 
 } // namespace Desert::Editor

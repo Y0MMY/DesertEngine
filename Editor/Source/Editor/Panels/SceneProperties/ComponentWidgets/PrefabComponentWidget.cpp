@@ -110,7 +110,7 @@ namespace Desert::Editor
         }
 
         if ( ImGui::Button( ICON_MDI_CLOSE " Clear" ) )
-            prefab.Prefab = Assets::AssetHandle{};
+            prefab.Prefab = Common::UUID::Null();
 
         // ── Debug ─────────────────────────────────────────────────────────
         if ( ImGui::TreeNodeEx( "Debug", ImGuiTreeNodeFlags_Framed ) )

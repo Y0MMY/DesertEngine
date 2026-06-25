@@ -26,6 +26,36 @@ float CalculateAttenuation(float distance, float radius)
     return attenuation * smoothFactor;
 }
 
+// Distance attenuation with a selectable falloff model. Matches ECS::LightFalloff:
+//   0 = Linear, 1 = Quadratic (default), 2 = InverseSquare (physical 1/d^2, windowed).
+// Full intensity within minRadius; smoothly reaches exactly 0 at radius (no hard edge / no leak past it).
+float LightFalloffFactor(float dist, float minRadius, float radius, int falloff)
+{
+    if (radius <= 0.0)      return 0.0;
+    if (dist <= minRadius)  return 1.0;
+    if (dist >= radius)     return 0.0;
+
+    float band = max(radius - minRadius, 1e-4);
+    float t    = clamp((dist - minRadius) / band, 0.0, 1.0); // 0 at minRadius -> 1 at radius
+
+    float curve;
+    if (falloff == 0)
+    {
+        curve = 1.0 - t;                           // Linear
+    }
+    else if (falloff == 2)
+    {
+        float d   = max(dist, 1e-3);
+        float ref = max(minRadius, 0.05);
+        curve = (ref * ref) / (d * d) * (1.0 - t); // Inverse-square, windowed to 0 at radius
+    }
+    else
+    {
+        curve = (1.0 - t) * (1.0 - t);             // Quadratic
+    }
+    return clamp(curve, 0.0, 1.0);
+}
+
 float GeometrySchlickGGX(float cosLi, float cosLo, float roughness)
 {
 	float r = roughness + 1.0;

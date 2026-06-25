@@ -1,84 +1,81 @@
 #version 450
 
-layout (location=0) in vec2 uv;
-layout (location=1) in vec2 camPos;
+// Infinite grid (Marco Giordano / "3D Graphics Rendering Cookbook" style): ray-march the per-pixel
+// world ray onto y=0, draw an analytic, derivative-based multi-scale grid (distance LOD), highlight the
+// X/Z axes, fade to the horizon, and write gl_FragDepth so opaque geometry occludes it.
+
+layout(binding = 0) uniform GridUB
+{
+    mat4 Projection;
+    mat4 View;
+    mat4 InvProjection;
+    mat4 InvView;
+    vec4 CameraPos; // xyz
+    vec4 ThinColor;
+    vec4 ThickColor;
+    vec4 Params; // x = base cell size (m), y = fade start, z = fade end
+} u;
+
+layout(location = 0) in vec3 v_Near;
+layout(location = 1) in vec3 v_Far;
 layout(location = 0) out vec4 o_Color;
 
-const float gridSize = 100.0;
+float log10( float x ) { return log( x ) / log( 10.0 ); }
+float satf( float x ) { return clamp( x, 0.0, 1.0 ); }
+vec2  satv( vec2 v ) { return clamp( v, vec2( 0.0 ), vec2( 1.0 ) ); }
+float max2( vec2 v ) { return max( v.x, v.y ); }
 
-// size of one cell
-float gridCellSize = 0.025;
-
-// color of thin lines
-vec4 gridColorThin = vec4(0.15, 0.15, 0.2, 1.0);
-
-// color of thick lines (every tenth line)
-vec4 gridColorThick = vec4(0.05, 0.05, 0.1, 1.0);
-
-// minimum number of pixels between cell lines before LOD switch should occur. 
-const float gridMinPixelsBetweenCells = 2.0;
-
-float log10(float x)
+vec4 Grid( vec2 P, float baseCell )
 {
-	return log(x) / log(10.0);
+    vec2  dudv = vec2( length( vec2( dFdx( P.x ), dFdy( P.x ) ) ), length( vec2( dFdx( P.y ), dFdy( P.y ) ) ) );
+    float lod      = max( 0.0, log10( ( length( dudv ) * 2.0 ) / baseCell ) + 1.0 );
+    float lodFade  = fract( lod );
+    float l0       = baseCell * pow( 10.0, floor( lod ) );
+    float l1       = l0 * 10.0;
+    float l2       = l1 * 10.0;
+
+    dudv *= 4.0;
+    P += dudv * 0.5;
+
+    float a0 = max2( vec2( 1.0 ) - abs( satv( mod( P, l0 ) / dudv ) * 2.0 - vec2( 1.0 ) ) );
+    float a1 = max2( vec2( 1.0 ) - abs( satv( mod( P, l1 ) / dudv ) * 2.0 - vec2( 1.0 ) ) );
+    float a2 = max2( vec2( 1.0 ) - abs( satv( mod( P, l2 ) / dudv ) * 2.0 - vec2( 1.0 ) ) );
+
+    vec4 c = a2 > 0.0 ? u.ThickColor : a1 > 0.0 ? mix( u.ThickColor, u.ThinColor, lodFade ) : u.ThinColor;
+    c.a *= ( a2 > 0.0 ? a2 : a1 > 0.0 ? a1 : a0 * ( 1.0 - lodFade ) );
+    return c;
 }
 
-float satf(float x)
+float DepthOf( vec3 worldPos )
 {
-	return clamp(x, 0.0, 1.0);
-}
-
-vec2 satv(vec2 x)
-{
-	return clamp(x, vec2(0.0), vec2(1.0));
-}
-
-float max2(vec2 v)
-{
-	return max(v.x, v.y);
-}
-
-vec4 gridColor(vec2 uv, vec2 camPos)
-{
-	vec2 dudv = vec2(
-		length(vec2(dFdx(uv.x), dFdy(uv.x))),
-		length(vec2(dFdx(uv.y), dFdy(uv.y)))
-	);
-
-	float lodLevel = max(0.0, log10((length(dudv) * gridMinPixelsBetweenCells) / gridCellSize) + 1.0);
-	float lodFade = fract(lodLevel);
-
-	// cell sizes for lod0, lod1 and lod2
-	float lod0 = gridCellSize * pow(10.0, floor(lodLevel));
-	float lod1 = lod0 * 10.0;
-	float lod2 = lod1 * 10.0;
-
-	// each anti-aliased line covers up to 4 pixels
-	dudv *= 4.0;
-
-	// Update grid coordinates for subsequent alpha calculations (centers each anti-aliased line)
-  	uv += dudv / 2.0F;
-
-	// calculate absolute distances to cell line centers for each lod and pick max X/Y to get coverage alpha value
-	float lod0a = max2( vec2(1.0) - abs(satv(mod(uv, lod0) / dudv) * 2.0 - vec2(1.0)) );
-	float lod1a = max2( vec2(1.0) - abs(satv(mod(uv, lod1) / dudv) * 2.0 - vec2(1.0)) );
-	float lod2a = max2( vec2(1.0) - abs(satv(mod(uv, lod2) / dudv) * 2.0 - vec2(1.0)) );
-
-	uv -= camPos;
-
-	// blend between falloff colors to handle LOD transition
-	vec4 c = lod2a > 0.0 ? gridColorThick : lod1a > 0.0 ? mix(gridColorThick, gridColorThin, lodFade) : gridColorThin;
-
-	// calculate opacity falloff based on distance to grid extents
-	float opacityFalloff = (1.0 - satf(length(uv) / gridSize));
-
-	// blend between LOD level alphas and scale with opacity falloff
-	c.a *= (lod2a > 0.0 ? lod2a : lod1a > 0.0 ? lod1a : (lod0a * (1.0-lodFade))) * opacityFalloff;
-
-	return c;
+    vec4 clip = u.Projection * u.View * vec4( worldPos, 1.0 );
+    return ( clip.z / clip.w ) * 0.5 + 0.5; // GL clip [-1,1] -> Vulkan depth [0,1]
 }
 
 void main()
 {
-	o_Color = gridColor(uv, camPos);
+    // Intersect the world ray with the y=0 plane.
+    float t = -v_Near.y / ( v_Far.y - v_Near.y );
+    if ( t <= 0.0 )
+        discard; // plane is behind the camera / ray parallel
+
+    vec3 P = v_Near + t * ( v_Far - v_Near );
+
+    vec4 col = Grid( P.xz, u.Params.x );
+
+    // Axis highlight (X = red, Z = blue) ~one cell wide.
+    vec2 axisW = vec2( length( vec2( dFdx( P.x ), dFdy( P.x ) ) ), length( vec2( dFdx( P.z ), dFdy( P.z ) ) ) ) * 2.0;
+    if ( abs( P.z ) < axisW.y )
+        col.rgb = mix( col.rgb, vec3( 0.90, 0.25, 0.25 ), 0.85 );
+    if ( abs( P.x ) < axisW.x )
+        col.rgb = mix( col.rgb, vec3( 0.25, 0.45, 0.95 ), 0.85 );
+
+    // Fade with distance from the camera (soft horizon).
+    float dist = length( P.xz - u.CameraPos.xz );
+    col.a *= 1.0 - satf( ( dist - u.Params.y ) / max( u.Params.z - u.Params.y, 1e-3 ) );
+    if ( col.a <= 0.001 )
+        discard;
+
+    gl_FragDepth = DepthOf( P );
+    o_Color      = col;
 }

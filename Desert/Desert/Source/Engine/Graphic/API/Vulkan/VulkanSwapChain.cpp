@@ -58,8 +58,13 @@ namespace Desert::Graphic::API::Vulkan
         VkSurfaceCapabilitiesKHR surfCaps;
         VK_CHECK_RESULT( vkGetPhysicalDeviceSurfaceCapabilitiesKHR( pDevice, m_Surface, &surfCaps ) );
 
+        // maxImageCount == 0 means "no upper limit". Passing hi < lo to std::clamp is undefined
+        // behaviour, so substitute the desired count as the ceiling in that case.
+        const uint32_t desiredImageCount = surfCaps.minImageCount + 1;
+        const uint32_t maxImageCount =
+             surfCaps.maxImageCount > 0 ? surfCaps.maxImageCount : desiredImageCount;
         uint32_t numberOfSwapChainImages =
-             std::clamp( surfCaps.minImageCount + 1, surfCaps.minImageCount, surfCaps.maxImageCount );
+             std::clamp( desiredImageCount, surfCaps.minImageCount, maxImageCount );
 
         VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 

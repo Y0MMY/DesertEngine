@@ -26,6 +26,8 @@ namespace Desert::Editor
                 return "DirectionalLightComponent";
             if ( entity.HasComponent<ECS::PointLightComponent>() )
                 return "PointLightComponent";
+            if ( entity.HasComponent<ECS::SpotLightComponent>() )
+                return "SpotLightComponent";
             if ( entity.HasComponent<ECS::SkyboxComponent>() )
                 return "SkyboxComponent";
             if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
@@ -39,6 +41,8 @@ namespace Desert::Editor
         {
             if ( entity.HasComponent<ECS::CameraComponent>() )
                 return ICON_MDI_CAMERA;
+            if ( entity.HasComponent<ECS::SpotLightComponent>() )
+                return ICON_MDI_SPOTLIGHT;
             if ( entity.HasComponent<ECS::DirectionLightComponent>() ||
                  entity.HasComponent<ECS::PointLightComponent>() )
                 return ICON_MDI_LIGHTBULB;

@@ -4,6 +4,8 @@
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
+#include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
+#include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Core/Scene.hpp>
@@ -14,6 +16,7 @@
 
 #include "Systems/Scene/Mesh/MeshRenderer.hpp"
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
+#include "Systems/Scene/Grid/GridRenderer.hpp"
 #include "Systems/Scene/PostProcessing/TonemapRenderer.hpp"
 #include "Systems/Scene/PostProcessing/JumpFloodOutlineRenderer.hpp"
 #include "Systems/Scene/PostProcessing/FXAARenderer.hpp"
@@ -85,7 +88,7 @@ namespace Desert::Graphic
         uint32_t                 GetShadowCascadeCount();
 
         const std::shared_ptr<Image2D>     GetFinalImage();
-        const std::shared_ptr<Framebuffer> GetTargetFramebuffer() const
+        const std::shared_ptr<Framebuffer>& GetTargetFramebuffer() const
         {
             return m_TargetFramebuffer;
         }
@@ -113,6 +116,13 @@ namespace Desert::Graphic
             return m_PointLight;
         }
 
+        void AddSpotLight( ShaderProtocols::SpotLightPayload&& spotLight );
+
+        const auto& GetSpotLights() const
+        {
+            return m_SpotLight;
+        }
+
     private:
         void ClearMainFramebuffer();
         void CompositeRenderPass();
@@ -126,6 +136,7 @@ namespace Desert::Graphic
 
         ShaderProtocols::DirectionLight m_DirectionLights;
         ShaderProtocols::PointLight     m_PointLight;
+        ShaderProtocols::SpotLight      m_SpotLight;
 
         // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
         Core::AntiAliasingMode m_AAMode      = Core::AntiAliasingMode::FXAA;

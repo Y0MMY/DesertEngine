@@ -7,6 +7,7 @@ namespace Desert::Editor
     ImFont* EditorResources::s_RegularFont = nullptr;
     ImFont* EditorResources::s_ExtraBoldFont = nullptr;
     ImFont* EditorResources::s_BoldFont    = nullptr;
+    ImFont* EditorResources::s_BigIconFont = nullptr;
 
     bool EditorResources::Initialize( const std::string& fontAwesomePath )
     {
@@ -49,6 +50,14 @@ namespace Desert::Editor
 
 
         s_IconFont = io.Fonts->AddFontFromFileTTF( fontAwesomePath.c_str(), 16.0f, &iconsConfig, iconsRanges );
+
+        // Large, standalone (non-merged) MDI font for big asset-grid icons.
+        ImFontConfig bigIconConfig;
+        bigIconConfig.MergeMode       = false;
+        bigIconConfig.PixelSnapH      = true;
+        bigIconConfig.OversampleH     = bigIconConfig.OversampleV = 1;
+        bigIconConfig.GlyphMinAdvanceX                            = 48.0f;
+        s_BigIconFont = io.Fonts->AddFontFromFileTTF( fontAwesomePath.c_str(), 48.0f, &bigIconConfig, iconsRanges );
 
         s_Initialized = ( s_IconFont != nullptr );
         return s_Initialized;

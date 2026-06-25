@@ -27,6 +27,13 @@ namespace Desert::Assets
 
         m_Handle        = dataReflected->Handle;
         m_SourcePath    = dataReflected->SourcePath;
+
+        // Keep the asset metadata handle in lock-step with the cooked .tex handle. TextureService::Register
+        // keys runtime textures by GetHandle() (this m_Handle), while editor/material code looks textures
+        // up by GetMetadata().Handle — if they diverge, every handle-based resolve (drag-drop assignment,
+        // thumbnails, material binding) misses. Syncing here makes all of those agree.
+        m_Metadata.Handle = dataReflected->Handle;
+
         m_IsReadyForUse = true;
         return BOOLSUCCESS;
     }

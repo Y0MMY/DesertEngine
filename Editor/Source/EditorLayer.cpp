@@ -34,6 +34,7 @@
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
+#include <Engine/ECS/System/SpotLightSystem.hpp>
 #include <Engine/ECS/System/AnimationECSSystem.hpp>
 
 namespace Desert::Editor
@@ -46,8 +47,9 @@ namespace Desert::Editor
     {
         m_AssetManager = std::make_shared<Assets::AssetManager>();
 
-        static ImportManager importManager;
-        importManager.ImportAllFromDirectory( "Resources/Mesh/" ); // TEMP path
+        m_ImportManager = std::make_unique<ImportManager>();
+        // Cook only what's missing/stale (skips the expensive Assimp re-parse on every launch).
+        m_ImportManager->ImportAllFromDirectory( "Resources/Mesh/" ); // TEMP path
 
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
@@ -99,6 +101,7 @@ namespace Desert::Editor
         m_MainScene->AddSystem<ECS::MeshECSSystem>();
         m_MainScene->AddSystem<ECS::SkyboxECSSystem>();
         m_MainScene->AddSystem<ECS::PointLightECSSystem>();
+        m_MainScene->AddSystem<ECS::SpotLightECSSystem>();
         m_MainScene->AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
 
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
@@ -118,7 +121,11 @@ namespace Desert::Editor
                                                                                m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene ) );
-        m_Panels.emplace_back( std::make_unique<Editor::FileExplorerPanel>( "Resources/" ) );
+        {
+            auto fileExplorer   = std::make_unique<Editor::FileExplorerPanel>( "Resources/", m_AssetManager.get() );
+            m_FileExplorerPanel = fileExplorer.get();
+            m_Panels.emplace_back( std::move( fileExplorer ) );
+        }
         m_Panels.emplace_back( std::make_unique<Editor::MeshEditorPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
@@ -325,11 +332,46 @@ namespace Desert::Editor
 
         ImGui::Separator();
 
+        if ( ImGui::MenuItem( "Rebuild Cooked Assets" ) )
+        {
+            RebuildCookedAssets();
+        }
+
+        ImGui::Separator();
+
         if ( ImGui::MenuItem( "Exit" ) )
         {
         }
 
         ImGui::EndMenu();
+    }
+
+    void EditorLayer::RebuildCookedAssets()
+    {
+        // Idle first: re-registering rebuilds GPU textures/materials.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        if ( m_ImportManager )
+            m_ImportManager->ImportAllFromDirectory( "Resources/Mesh/", /*force=*/true );
+
+        if ( m_AssetPreloader )
+            m_AssetPreloader->ReloadCooked();
+
+        // Drop cached per-entity material instances so MeshECSSystem rebuilds them from the freshly
+        // re-registered runtime materials (which now reference the reloaded texture images).
+        if ( m_MainScene )
+        {
+            auto& reg = m_MainScene->GetRegistry();
+            reg.view<ECS::StaticMeshComponent>().each( []( auto, ECS::StaticMeshComponent& c )
+                                                       { c.RuntimeMaterialInstances.clear(); } );
+            reg.view<ECS::SkinnedMeshComponent>().each( []( auto, ECS::SkinnedMeshComponent& c )
+                                                        { c.RuntimeMaterialInstances.clear(); } );
+        }
+
+        if ( m_FileExplorerPanel )
+            m_FileExplorerPanel->QueueRefresh();
+
+        LOG_INFO( "[Editor] Rebuilt cooked assets" );
     }
 
     void EditorLayer::DrawStyleSubmenu()

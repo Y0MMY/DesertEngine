@@ -5,6 +5,8 @@
 #include "IAssetImporter.hpp"
 #include "TextureImporter.hpp"
 
+#include <Engine/Assets/AssetManager.hpp>
+
 namespace Desert::Editor
 {
     class ImportManager
@@ -12,9 +14,16 @@ namespace Desert::Editor
     public:
         ImportManager();
 
-        void         Import( const std::filesystem::path& path );
-        void         ImportAllFromDirectory( const std::filesystem::path& root );
+        // force = re-cook even if an up-to-date cooked output already exists (Rebuild Cooked Assets).
+        void         Import( const std::filesystem::path& path, bool force = false );
+        void         ImportAllFromDirectory( const std::filesystem::path& root, bool force = false );
         Common::UUID ImportTexture( const std::filesystem::path& path );
+
+        // Cook a source texture into Cooked/Textures/*.tex, create+register a TextureAsset, and return its
+        // handle (the same handle TextureService keys by). Returns a zero handle on failure. Drives the
+        // import-on-demand drag-drop path (see Editor::TextureDnD).
+        Assets::AssetHandle ImportAndRegisterTexture( Assets::AssetManager&         mgr,
+                                                      const std::filesystem::path& source );
 
     private:
         void CreateAssetsFromImport( const ImportResult& result, const std::filesystem::path& sourcePath );

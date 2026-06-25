@@ -74,15 +74,11 @@ namespace Desert::Graphic::System
             return;
         }
 
-        // The bloom / auto-exposure framebuffers always exist once created; when disabled their values
+        // The bloom image / auto-exposure framebuffer always exist once created; when disabled their values
         // (intensity 0 / auto flag off) make the contents ignored, but the descriptors stay validly bound.
-        std::shared_ptr<Image2D> bloomImage;
-        if ( const auto& bloomFb = m_BloomFramebuffer.lock() )
-            bloomImage = bloomFb->GetColorAttachmentImage();
+        std::shared_ptr<Image2D> bloomImage = m_BloomImage.lock();
 
-        std::shared_ptr<Image2D> avgLuminance;
-        if ( const auto& aeFb = m_AutoExposureFramebuffer.lock() )
-            avgLuminance = aeFb->GetColorAttachmentImage();
+        std::shared_ptr<Image2D> avgLuminance = m_AutoExposureImage.lock();
 
         MaterialTonemap::Params params{ m_Exposure, m_Gamma, m_BloomIntensity, m_ExposureKey,
                                         m_AutoExposureEnabled };

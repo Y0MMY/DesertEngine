@@ -17,11 +17,11 @@ namespace Desert::ShaderResources
             return {};
         }
 
-    private:
+        // Allocate a storage buffer of an explicit size. Public so systems (e.g. the auto-exposure
+        // histogram) can create one directly — the reflection-driven path in ShaderResourcesManager
+        // hardcodes a 36-byte size and is only suitable for shader-declared buffers.
         static std::shared_ptr<StorageBuffer> Create( const std::string_view debugName, uint32_t size,
                                                       uint32_t binding );
-
-        friend class ShaderResourcesManager;
     };
 
 } // namespace Desert::ShaderResources

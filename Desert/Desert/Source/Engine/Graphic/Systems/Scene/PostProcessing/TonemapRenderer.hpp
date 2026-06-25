@@ -35,22 +35,23 @@ namespace Desert::Graphic::System
             m_Gamma    = gamma;
         }
 
-        // The bloom result framebuffer (set once after the bloom system is created) and its strength
-        // (0 disables bloom). Tonemap samples it and adds it to the scene before tonemapping.
-        void SetBloomFramebuffer( const std::shared_ptr<Framebuffer>& bloom )
+        // The bloom result image (mip-0 of the compute bloom chain) and its strength (0 disables bloom).
+        // Tonemap samples it and adds it to the scene before tonemapping. Recreated on resize, so it is
+        // re-set by SceneRenderer after a resize.
+        void SetBloomImage( const std::shared_ptr<Image2D>& bloom )
         {
-            m_BloomFramebuffer = bloom;
+            m_BloomImage = bloom;
         }
         void SetBloomIntensity( float intensity )
         {
             m_BloomIntensity = intensity;
         }
 
-        // Auto-exposure (eye adaptation): the 1x1 adapted-luminance buffer + key, set per-frame. When
+        // Auto-exposure (eye adaptation): the 1x1 adapted-luminance image + key, set per-frame. When
         // disabled, the manual Exposure is used instead.
-        void SetAutoExposureFramebuffer( const std::shared_ptr<Framebuffer>& fb )
+        void SetAutoExposureImage( const std::shared_ptr<Image2D>& image )
         {
-            m_AutoExposureFramebuffer = fb;
+            m_AutoExposureImage = image;
         }
         void SetAutoExposure( bool enabled, float key )
         {
@@ -69,11 +70,11 @@ namespace Desert::Graphic::System
         float m_Exposure = 1.0f;
         float m_Gamma    = 2.2f;
 
-        std::weak_ptr<Framebuffer> m_BloomFramebuffer;
-        float                      m_BloomIntensity = 0.0f;
+        std::weak_ptr<Image2D> m_BloomImage;
+        float                  m_BloomIntensity = 0.0f;
 
-        std::weak_ptr<Framebuffer> m_AutoExposureFramebuffer;
-        bool                       m_AutoExposureEnabled = false;
+        std::weak_ptr<Image2D> m_AutoExposureImage;
+        bool                   m_AutoExposureEnabled = false;
         float                      m_ExposureKey         = 0.18f;
     };
 } // namespace Desert::Graphic::System

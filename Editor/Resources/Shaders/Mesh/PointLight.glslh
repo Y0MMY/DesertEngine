@@ -3,52 +3,75 @@
 
 #include "PBRFunctions.glslh"
 
-#define MAX_POINT_LIGHT 4
-
+// std430 layout — must match ShaderProtocols::PointLightPayload (48 bytes).
 struct PointLight {
-    vec3 color;
+    vec3  color;
     float intensity;
-    vec3 position;
+    vec3  position;
     float radius;
+    float minRadius;
+    int   falloff;     // LightFalloff: 0=Linear, 1=Quadratic, 2=InverseSquare
+    vec2  _pad;
 };
 
-layout(std140, binding = 6) uniform PointLightsUB
+// Unbounded storage buffer — no MAX_POINT_LIGHT cap. Count comes from LightsMetadata.PointLightCount.
+layout(std430, binding = 6) readonly buffer PointLightsUB
 {
-    PointLight lights[MAX_POINT_LIGHT];    
-} pointLights;
+    PointLight pointLights[];
+};
+
+// Stable, distinct debug color per light index (for the "color per source" lighting debug view).
+vec3 LightDebugColor(uint i)
+{
+    // Golden-ratio hue stepping -> visually distinct, deterministic colors.
+    float h = fract(float(i) * 0.61803398875);
+    vec3  c = abs(fract(h + vec3(0.0, 1.0/3.0, 2.0/3.0)) * 6.0 - 3.0) - 1.0;
+    return clamp(c, 0.0, 1.0);
+}
 
 vec3 CalculatePointLight(PointLight light, vec3 worldPosition, vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albedo)
 {
     vec3 L = light.position - worldPosition;
     float distance = length(L);
-    
+
     L = normalize(L);
-    
+
     vec3 H = normalize(view + L);
-    
+
     float cosLi = max(dot(N, L), 0.0);
     float cosLh = max(dot(N, H), 0.0);
     float cosLo = max(dot(N, view), 0.0);
-    
+
     if (cosLi <= 0.0) {
         return vec3(0.0);
     }
-    
-    float attenuation = CalculateAttenuation(distance, light.radius);
+
+    float attenuation = LightFalloffFactor(distance, light.minRadius, light.radius, light.falloff);
     vec3 radiance = light.color * light.intensity * attenuation;
-    
+
     float D = DistributionGGX(cosLh, roughness);
     float Vis = VisibilitySmith(cosLi, cosLo, roughness);
     vec3 F = fresnelSchlick(F0, max(dot(H, view), 0.0));
 
     vec3 specular = D * Vis * F;
-    
+
     vec3 kd = (1.0 - F) * (1.0 - metalness);
     vec3 diffuse = kd * albedo / PI;
-    
+
     vec3 Lo = (diffuse + specular) * radiance * cosLi;
-    
+
     return Lo;
+}
+
+// Scalar "how much this point light lands here" (color-agnostic) for the lighting debug view.
+float PointLightContribution(PointLight light, vec3 worldPosition, vec3 N)
+{
+    vec3  L    = light.position - worldPosition;
+    float dist = length(L);
+    float cosLi = max(dot(N, normalize(L)), 0.0);
+    if (cosLi <= 0.0) return 0.0;
+    float attenuation = LightFalloffFactor(dist, light.minRadius, light.radius, light.falloff);
+    return attenuation * cosLi * light.intensity;
 }
 
 #endif // POINTLIGHT_GLSLH

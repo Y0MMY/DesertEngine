@@ -8,6 +8,9 @@
 
 namespace Desert::Editor
 {
+    class ImportManager;
+    class FileExplorerPanel;
+
     class EditorLayer : public Common::Layer
     {
     public:
@@ -55,6 +58,9 @@ namespace Desert::Editor
         void LoadScene( const Common::Filepath& path );
         void LoadSceneInternal( const Common::Filepath& path );
 
+        // Force re-cook of Cooked/ from sources, re-register cooked assets, refresh the asset panel.
+        void RebuildCookedAssets();
+
     private:
         enum class EditorState
         {
@@ -69,7 +75,10 @@ namespace Desert::Editor
 
         std::shared_ptr<Assets::AssetManager>        m_AssetManager;
         std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
+        std::unique_ptr<ImportManager>               m_ImportManager;
         std::unique_ptr<Animation::AnimationLibrary> m_AnimationLibrary;
+
+        FileExplorerPanel* m_FileExplorerPanel = nullptr; // non-owning (lives in m_Panels)
 
         std::shared_ptr<Desert::Core::Scene> m_MainScene;
 

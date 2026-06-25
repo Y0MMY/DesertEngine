@@ -51,8 +51,9 @@ namespace Desert::Graphic::System
 
         using RenderSystem::RenderSystem;
 
-        // Cascaded shadow maps: number of directional-shadow cascades (frustum splits).
-        static constexpr uint32_t kNumCascades = 4;
+        // Cascaded shadow maps: number of directional-shadow cascades (frustum splits) + per-map resolution.
+        static constexpr uint32_t kNumCascades   = 4;
+        static constexpr uint32_t kShadowMapSize = 2048;
 
         virtual Common::BoolResultStr Initialize() override;
         virtual void                  Shutdown() override;
@@ -60,7 +61,7 @@ namespace Desert::Graphic::System
 
         // Silhouette mask of the currently outlined meshes (white on the framebuffer clear color).
         // Consumed by JumpFloodOutlineRenderer to build the outline.
-        std::shared_ptr<Framebuffer> GetSilhouetteMaskFramebuffer() const
+        const std::shared_ptr<Framebuffer>& GetSilhouetteMaskFramebuffer() const
         {
             return m_SilhouetteMaskFramebuffer;
         }
@@ -100,12 +101,13 @@ namespace Desert::Graphic::System
 
         // Debug visualizations (Scene Settings -> Debug): per-pixel normals (PBR shader) + AABB wireframes.
         void SetDebugView( bool showNormals, bool showBoundingBoxes, const glm::vec3& bbColor,
-                           float bbLineWidth )
+                           float bbLineWidth, bool lightingDebug = false )
         {
             m_ShowNormals          = showNormals;
             m_ShowBoundingBoxes    = showBoundingBoxes;
             m_BoundingBoxColor     = bbColor;
             m_BoundingBoxLineWidth = bbLineWidth;
+            m_LightingDebug        = lightingDebug;
         }
 
     private:
@@ -149,6 +151,9 @@ namespace Desert::Graphic::System
         std::unique_ptr<MaterialShadow>   m_ShadowMaterial[kNumCascades];
         std::shared_ptr<Framebuffer>      m_CascadeFB[kNumCascades];
         glm::mat4                         m_CascadeVP[kNumCascades] = { glm::mat4( 1.0f ) };
+        // World-space size of one shadow-map texel per cascade (2*radius/res) — drives a cascade-correct
+        // normal-offset/bias in the PBR shader instead of the old fixed world-unit constants.
+        glm::vec4                         m_CascadeWorldPerTexel    = glm::vec4( 1.0f );
         bool                              m_ShadowsEnabled  = true;
         float                             m_ShadowBias      = 0.005f;
         int                               m_ShadowDebugMode = 0;     // ShadowDebugMode (Off/ShadowFactor/Cascades)
@@ -156,6 +161,7 @@ namespace Desert::Graphic::System
 
         // Debug visualization (Scene Settings -> Debug)
         bool      m_ShowNormals          = false; // per-pixel normal color (PBR shader branch)
+        bool      m_LightingDebug        = false; // per-light colored "where light lands" (PBR shader branch)
         bool      m_ShowBoundingBoxes    = false; // AABB wireframes via the debug line renderer below
         glm::vec3 m_BoundingBoxColor     = glm::vec3( 0.25f, 0.95f, 0.35f );
         float     m_BoundingBoxLineWidth = 1.5f;

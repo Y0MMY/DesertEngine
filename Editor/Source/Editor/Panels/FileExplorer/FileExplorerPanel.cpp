@@ -1,9 +1,23 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 
+// This TU now pulls engine headers (via UIHelper -> Engine/Desert.hpp) that use std::max/std::min and
+// std::numeric_limits<>::max(); keep the windows.h min/max macros from clobbering them.
+#define NOMINMAX
+
 #include "FileExplorerPanel.hpp"
 #include "../../Core/EditorResources.hpp"
 
+#include <Editor/Import/TextureDnD.hpp>
+#include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
+#include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Common/Core/Events/WindowEvents.hpp>
+
 #include <ImGui/imgui_internal.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <system_error>
 
 namespace Desert::Editor
 {
@@ -40,6 +54,8 @@ namespace Desert::Editor
          { "fbx", FileType::Model },   { "gltf", FileType::Model },     { "glb", FileType::Model },
          { "mp3", FileType::Audio },   { "m4a", FileType::Audio },      { "wav", FileType::Audio },
          { "ogg", FileType::Audio },   { "lmat", FileType::Material },
+         // Engine-native extensions (see Common::Constants::Extensions).
+         { "demat", FileType::Material }, { "desce", FileType::Scene }, { "demesh", FileType::Model },
     };
 
     static const std::unordered_map<FileType, ImVec4> s_TypeColors = {
@@ -67,12 +83,18 @@ namespace Desert::Editor
          { FileType::Audio, ICON_MDI_MICROPHONE },
     };
 
-    FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath )
+    FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath,
+                                          Assets::AssetManager*        assetManager )
          : IPanel( "Assets" ), m_CurrentPath( rootPath ), m_CurrentDir( nullptr ),
            m_BaseProjectDir( nullptr ), m_PreviousDirectory( nullptr ), m_GridSize( 120.0f ),
            m_MinGridSize( 40.0f ), m_MaxGridSize( 400.0f ), m_IsInListView( false ), m_IsDragging( false ),
-           m_ShowHiddenFiles( false ), m_UpdateNavigationPath( true ), m_Refresh( false )
+           m_ShowHiddenFiles( false ), m_UpdateNavigationPath( true ), m_Refresh( false ),
+           m_AssetManager( assetManager )
     {
+        m_UIHelper = std::make_unique<UI::UIHelper>();
+        m_UIHelper->Init();
+        m_Thumbnails = std::make_unique<ThumbnailCache>();
+
 #ifdef DESERT_PLATFORM_WINDOWS
         m_Delimiter = std::string( "\\" );
 #else
@@ -113,6 +135,52 @@ namespace Desert::Editor
             {
                 ChangeDirectory( m_BaseProjectDir );
             }
+        }
+    }
+
+    FileExplorerPanel::~FileExplorerPanel() = default;
+
+    namespace
+    {
+        // Cheap signature of a directory's immediate entries (name + write-time). Detects external
+        // add/remove/rename without an OS watch API.
+        size_t DirectorySignature( const std::string& dirPath )
+        {
+            size_t          sig = 0;
+            std::error_code ec;
+            if ( !std::filesystem::is_directory( dirPath, ec ) )
+                return sig;
+            for ( const auto& entry : std::filesystem::directory_iterator( dirPath, ec ) )
+            {
+                if ( ec )
+                    break;
+                sig ^= std::hash<std::string>{}( entry.path().filename().string() ) + 0x9e3779b9 + ( sig << 6 ) +
+                       ( sig >> 2 );
+                std::error_code tec;
+                const auto      t = std::filesystem::last_write_time( entry.path(), tec );
+                if ( !tec )
+                    sig ^= static_cast<size_t>( t.time_since_epoch().count() ) + 0x9e3779b9 + ( sig << 6 ) +
+                           ( sig >> 2 );
+            }
+            return sig;
+        }
+    } // namespace
+
+    void FileExplorerPanel::OnPreUpdate()
+    {
+        // Throttle to ~every 30 frames (~0.5s @60fps) — directory_iterator is cheap but not free.
+        if ( ++m_PollCounter < 30 )
+            return;
+        m_PollCounter = 0;
+
+        if ( !m_CurrentDir )
+            return;
+
+        const size_t sig = DirectorySignature( m_CurrentDir->AssetPath );
+        if ( sig != m_DirSignature )
+        {
+            m_DirSignature = sig;
+            QueueRefresh();
         }
     }
 
@@ -350,6 +418,8 @@ namespace Desert::Editor
 
     void FileExplorerPanel::OnUIRender()
     {
+        // Captured for the OS file-drop handler (which runs outside the ImGui frame, via OnEvent).
+        m_IsHovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_RootAndChildWindows );
         {
             FileIndex              = 0;
             auto        windowSize = ImGui::GetWindowSize();
@@ -358,7 +428,7 @@ namespace Desert::Editor
 
             if ( m_Refresh )
             {
-                Refresh();
+                RefreshCurrentDirectory(); // in-place: keeps navigation (watcher / import / rebuild)
                 m_Refresh = false;
             }
 
@@ -487,6 +557,11 @@ namespace Desert::Editor
                         m_UpdateNavigationPath = true;
                     }
                     ImGui::SameLine();
+                    if ( ImGui::Button( ICON_MDI_FILE_IMPORT " Import" ) )
+                    {
+                        ImportExternalTexture();
+                    }
+                    ImGui::SameLine();
 
                     if ( m_UpdateNavigationPath )
                     {
@@ -598,7 +673,7 @@ namespace Desert::Editor
 
                         m_GridItemsPerRow =
                              (int)floor( xAvail / ( m_GridSize + ImGui::GetStyle().ItemSpacing.x ) );
-                        m_GridItemsPerRow = max( 1, m_GridItemsPerRow );
+                        m_GridItemsPerRow = std::max( 1, m_GridItemsPerRow );
 
                         bool textureCreated = false;
 
@@ -663,21 +738,21 @@ namespace Desert::Editor
 
                             ImGui::Separator();
 
-                            if ( ImGui::Selectable( "Import New Asset" ) )
+                            if ( ImGui::Selectable( "Import Texture..." ) )
                             {
-                                // Import asset implementation
+                                ImportExternalTexture();
                             }
 
                             if ( ImGui::Selectable( "Refresh" ) )
                             {
-                                Refresh();
+                                QueueRefresh();
                             }
 
                             if ( ImGui::Selectable( "New folder" ) )
                             {
                                 std::string fullPath = m_CurrentDir->AssetPath + "/NewFolder";
                                 std::filesystem::create_directory( fullPath );
-                                Refresh();
+                                QueueRefresh();
                             }
 
                             if ( !m_IsInListView )
@@ -711,483 +786,205 @@ namespace Desert::Editor
         }
     }
 
+    static const char* IconForType( FileType type )
+    {
+        const auto it = s_FileTypesToIcon.find( type );
+        return it != s_FileTypesToIcon.end() ? it->second : ICON_MDI_FILE;
+    }
+
+    // Emit the drag-drop payloads a dragged asset can be dropped as. Target widgets accept exactly the
+    // type they expect (texture slots: TEXTURE_ASSET; material slots: MATERIAL_ASSET; hierarchy: PREFAB_FILE).
+    static void EmitAssetDragSource( const DirectoryInformation& entry )
+    {
+        if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceAllowNullID ) )
+        {
+            const std::string& assetPath = entry.AssetPath;
+            const char*         type      = "AssetFile";
+            if ( entry.Type == FileType::Prefab )
+                type = "PREFAB_FILE";
+            else if ( entry.Type == FileType::Texture )
+                type = "TEXTURE_ASSET";
+            else if ( entry.Type == FileType::Material )
+                type = "MATERIAL_ASSET";
+
+            ImGui::SetDragDropPayload( type, assetPath.c_str(), assetPath.size() + 1 );
+            // Drag preview: filename (the full path is long + reads as empty in a small tooltip).
+            ImGui::TextUnformatted( std::filesystem::path( assetPath ).filename().string().c_str() );
+            ImGui::EndDragDropSource();
+        }
+    }
+
+    bool FileExplorerPanel::DrawTextureThumbnail( DirectoryInformation* entry, const ImVec2& size )
+    {
+        if ( !m_UIHelper || !m_Thumbnails )
+            return false;
+
+        // Decode the source image directly (cached), independent of the cook pipeline — so EVERY image
+        // previews, not just already-cooked ones.
+        auto img = m_Thumbnails->Get( entry->AssetPath );
+        if ( !img )
+            return false;
+
+        // ImageButton (not Image) so the thumbnail is a real interactive item and can be a drag source.
+        m_UIHelper->ImageButton( "##thumb", img, size );
+        return true;
+    }
+
+    void FileExplorerPanel::ImportExternalTexture()
+    {
+        const auto picked =
+             Common::Utils::FileSystem::OpenFileDialog( "Images\0*.png;*.tga;*.jpg;*.jpeg;*.bmp;*.hdr\0All\0*.*\0" );
+        if ( !picked.empty() )
+            ImportExternalFile( picked );
+    }
+
+    void FileExplorerPanel::ImportExternalFile( const std::filesystem::path& src )
+    {
+        std::error_code ec;
+        if ( !m_AssetManager || src.empty() || !std::filesystem::exists( src, ec ) ||
+             std::filesystem::is_directory( src, ec ) )
+            return;
+
+        // Copy into the current dir (assets must live under Resources/ so the cook paths stay project-relative).
+        std::filesystem::path destDir =
+             m_CurrentDir ? std::filesystem::path( m_CurrentDir->AssetPath ) : std::filesystem::path( "Resources/Textures" );
+        if ( !std::filesystem::is_directory( destDir ) )
+            destDir = "Resources/Textures";
+        std::filesystem::create_directories( destDir, ec );
+
+        std::filesystem::path dest = destDir / src.filename();
+        std::filesystem::copy_file( src, dest, std::filesystem::copy_options::overwrite_existing, ec );
+        if ( ec )
+        {
+            LOG_ERROR( "Import: failed to copy '{}' -> '{}': {}", src.string(), dest.string(), ec.message() );
+            return;
+        }
+
+        // Textures cook + register immediately (instantly usable / draggable). Other files just appear in
+        // the panel (meshes cook on next launch / Rebuild Cooked).
+        std::string ext = dest.extension().string();
+        if ( !ext.empty() && ext[0] == '.' )
+            ext = ext.substr( 1 );
+        std::transform( ext.begin(), ext.end(), ext.begin(), ::tolower );
+        const auto     it   = s_FileTypes.find( ext );
+        const FileType type = it != s_FileTypes.end() ? it->second : FileType::Unknown;
+        if ( type == FileType::Texture || type == FileType::Cubemap )
+            TextureDnD::ResolveOrImport( *m_AssetManager, dest.generic_string() );
+
+        QueueRefresh();
+    }
+
+    void FileExplorerPanel::OnEvent( Common::Event& e )
+    {
+        Common::EventManager mgr( e );
+        mgr.Notify<Common::EventWindowFileDrop>(
+             [this]( Common::EventWindowFileDrop& drop ) -> bool
+             {
+                 if ( !m_IsHovered ) // only when the drop landed on the Assets panel
+                     return false;
+                 for ( const auto& path : drop.Paths )
+                     ImportExternalFile( path );
+                 return true;
+             } );
+    }
+
     bool FileExplorerPanel::RenderFile( int dirIndex, bool folder, int shownIndex, bool gridView )
     {
-        constexpr float padding              = 4.0f;
-        const float     scaledThumbnailSize  = m_GridSize * ImGui::GetIO().FontGlobalScale;
-        const float     scaledThumbnailSizeX = scaledThumbnailSize * 0.55f;
-        const float     cellSize             = scaledThumbnailSizeX + 2 * padding + scaledThumbnailSizeX * 0.1f;
+        DirectoryInformation* entry         = m_CurrentDir->Children[dirIndex];
+        bool                  doubleClicked = false;
 
-        constexpr float overlayPaddingY  = 6.0f * padding;
-        constexpr float thumbnailPadding = overlayPaddingY * 0.5f;
-        const float     thumbnailSize    = scaledThumbnailSizeX - thumbnailPadding;
+        const std::string fileName = std::filesystem::path( entry->AssetPath ).filename().string();
+        const char*       icon     = folder ? ICON_MDI_FOLDER : IconForType( entry->Type );
 
-        const ImVec2 backgroundThumbnailSize = { scaledThumbnailSizeX + padding * 2,
-                                                 scaledThumbnailSize + padding * 2 };
-
-        const float panelWidth  = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize;
-        int         columnCount = static_cast<int>( panelWidth / cellSize );
-        if ( columnCount < 1 )
-            columnCount = 1;
-
-        bool doubleClicked = false;
+        ImGui::PushID( dirIndex );
 
         if ( gridView )
         {
-            /* auto&                CurrentEnty = m_CurrentDir->Children[dirIndex];
-             Graphics::Texture2D* textureId   = m_FolderIcon;
+            const float thumb = m_GridSize * 0.6f;
 
-             auto cursorPos = ImGui::GetCursorPos();
+            ImGui::BeginGroup();
 
-             if ( CurrentEnty->IsFile )
-             {
-                 textureId = m_FileIcon;
-                 switch ( CurrentEnty->Type )
-                 {
-                     case FileType::Texture:
-                     {
-                         if ( CurrentEnty->Thumbnail )
-                         {
-                             textureId = CurrentEnty->Thumbnail;
-                         }
-                         else if ( !textureCreated )
-                         {
-                             textureCreated = true;
-                             if ( !m_Editor->GetAssetManager()->AssetExists( CurrentEnty->AssetPath ) )
-                                 CurrentEnty->Thumbnail =
-                                      m_Editor->GetAssetManager()->LoadTextureAsset( CurrentEnty->AssetPath, true
-             ); else CurrentEnty->Thumbnail = m_Editor->GetAssetManager()
-                                                               ->GetAssetData( CurrentEnty->AssetPath )
-                                                               .As<Graphics::Texture2D>();
-                             textureId = CurrentEnty->Thumbnail ? CurrentEnty->Thumbnail : m_FileIcon;
-                         }
-                         break;
-                     }
-                     case FileType::Scene:
-                     {
-                         ArenaTemp scratch = ArenaTempBegin( m_Arena );
-                         String8   fileName =
-                              PushStr8Copy( scratch.arena, StringUtilities::GetFileName( CurrentEnty->AssetPath )
-             ); String8 sceneScreenShotPath = PushStr8F( scratch.arena, "%s/Scenes/Cache/%s.png", (const
-             char*)m_BasePath.str, (const char*)fileName.str ); std::string sceneScreenShotPathtdString =
-                              std::string( (const char*)sceneScreenShotPath.str, sceneScreenShotPath.size );
-                         if ( std::filesystem::exists( std::filesystem::path( sceneScreenShotPathtdString ) ) )
-                         {
-                             textureCreated = true;
-                             String8 sceneScreenShotAssetPath =
-                                  PushStr8F( scratch.arena, "%s/Scenes/Cache/%s.png",
-                                             (const char*)Str8Lit( "//Assets" ).str, (const char*)fileName.str );
-
-                             if ( !m_Editor->GetAssetManager()->AssetExists( sceneScreenShotAssetPath ) )
-                                 CurrentEnty->Thumbnail = m_Editor->GetAssetManager()->LoadTextureAsset(
-                                      sceneScreenShotAssetPath, true );
-                             else
-                                 CurrentEnty->Thumbnail = m_Editor->GetAssetManager()
-                                                               ->GetAssetData( sceneScreenShotAssetPath )
-                                                               .As<Graphics::Texture2D>();
-                             textureId = CurrentEnty->Thumbnail ? CurrentEnty->Thumbnail : m_FileIcon;
-                         }
-                         ArenaTempEnd( scratch );
-                         break;
-                     }
-                     case FileType::Material:
-                     case FileType::Model:
-                     {
-                         if ( CurrentEnty->Thumbnail )
-                         {
-                             textureId = CurrentEnty->Thumbnail;
-                         }
-                         else if ( !textureCreated )
-                         {
-                             textureCreated    = true;
-                             ArenaTemp scratch = ArenaTempBegin( m_Arena );
-
-                             String8 thumbnailPath;
-                             String8 thumbnailAssetPath;
-                             CreateThumbnailPath( scratch.arena, CurrentEnty, thumbnailAssetPath, thumbnailPath );
-
-                             if ( std::filesystem::exists(
-                                       std::filesystem::path( (const char*)thumbnailPath.str ) ) )
-                             {
-                                 textureCreated = true;
-                                 if ( !m_Editor->GetAssetManager()->AssetExists( thumbnailAssetPath ) )
-                                     CurrentEnty->Thumbnail =
-                                          m_Editor->GetAssetManager()->LoadTextureAsset( thumbnailPath, true );
-                                 else
-                                     CurrentEnty->Thumbnail = m_Editor->GetAssetManager()
-                                                                   ->GetAssetData( thumbnailAssetPath )
-                                                                   .As<Graphics::Texture2D>();
-                                 textureId = CurrentEnty->Thumbnail ? CurrentEnty->Thumbnail : m_FileIcon;
-                             }
-                             else
-                             {
-                                 m_Editor->RequestThumbnail( CurrentEnty->AssetPath );
-                                 textureId = m_FileIcon;
-                             }
-
-                             ArenaTempEnd( scratch );
-                         }
-                         break;
-                     }
-                     default:
-                         break;
-                 }*/
-        }
-        bool flipImage = false;
-
-        bool highlight = false;
-        {
-            highlight = m_CurrentDir->Children[dirIndex] == m_CurrentSelected;
-        }
-
-        // Background button
-        bool const clicked = false; // ImGuiUtilities::ToggleButton(ImGuiUtilities::GenerateID(), highlight,
-                                    // backgroundThumbnailSize,
-                                    //  0.0f, 1.0f, ImGuiButtonFlags_AllowOverlap );
-        if ( clicked )
-        {
-            m_CurrentSelected = m_CurrentDir->Children[dirIndex];
-        }
-
-        if ( ImGui::BeginPopupContextItem() )
-        {
-            m_CurrentSelected = m_CurrentDir->Children[dirIndex];
-
-            if ( ImGui::Selectable( "Cut" ) )
+            // Texture -> thumbnail; everything else -> a large type icon. Either way the item is hoverable,
+            // selectable and drag-able.
+            const bool drewThumb =
+                 entry->IsFile && entry->Type == FileType::Texture && DrawTextureThumbnail( entry, ImVec2( thumb, thumb ) );
+            if ( !drewThumb )
             {
-                m_CopiedPath = m_CurrentDir->Children[dirIndex]->AssetPath;
-                m_CutFile    = true;
+                const ImVec4 col = entry->IsFile ? entry->FileTypeColour : ImVec4( 0.90f, 0.78f, 0.38f, 1.0f );
+                ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_Text, col );
+                ImGui::PushFont( EditorResources::GetBigIconFont() );
+                ImGui::Button( icon, ImVec2( thumb, thumb ) );
+                ImGui::PopFont();
+                ImGui::PopStyleColor( 2 );
             }
 
-            if ( ImGui::Selectable( "Copy" ) )
-            {
-                m_CopiedPath = m_CurrentDir->Children[dirIndex]->AssetPath;
-                m_CutFile    = false;
-            }
+            if ( ImGui::IsItemClicked() )
+                m_CurrentSelected = entry;
+            if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+                doubleClicked = true;
 
-            if ( ImGui::Selectable( "Delete" ) )
-            {
-                /* ArenaTemp temp     = ScratchBegin( &m_Arena, 1 );
-                 String8   fullPath = StringUtilities::RelativeToAbsolutePath(
-                      temp.arena, m_CurrentDir->Children[dirIndex]->AssetPath, Str8Lit( "//Assets" ),
-                      m_BasePath );
-                 std::filesystem::remove_all( std::string( (const char*)fullPath.str, fullPath.size ) );
-                 ScratchEnd( temp );*/
-                QueueRefresh();
-            }
+            EmitAssetDragSource( *entry );
 
-            if ( ImGui::Selectable( "Duplicate" ) )
-            {
+            // Hover tooltip — but NOT while dragging, or it clobbers the drag-source preview (shows empty).
+            if ( ImGui::IsItemHovered() && !ImGui::IsDragDropActive() )
+                ImGui::SetTooltip( "%s", fileName.c_str() );
 
-                /* ArenaTemp temp     = ScratchBegin( &m_Arena, 1 );
-                 String8   fullPath = StringUtilities::RelativeToAbsolutePath(
-                      temp.arena, m_CurrentDir->Children[dirIndex]->AssetPath, Str8Lit( "//Assets" ),
-                      m_BasePath );
+            ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + thumb );
+            ImGui::TextWrapped( "%s", fileName.c_str() );
+            ImGui::PopTextWrapPos();
 
-                 std::filesystem::path fullPathFS = std::string( (const char*)fullPath.str, fullPath.size );
-                 std::filesystem::path destinationPath = fullPathFS;
-
-                 {
-                     std::string filename  = fullPathFS.stem().string();
-                     std::string extension = fullPathFS.extension().string();
-
-                     while ( std::filesystem::exists( destinationPath ) )
-                     {
-                         filename += "_copy";
-                         destinationPath = destinationPath.parent_path() / ( filename + extension );
-                     }
-                 }
-                 std::filesystem::copy( fullPathFS, destinationPath );
-
-                 ScratchEnd( temp );*/
-                QueueRefresh();
-            }
-
-            ImGui::Separator();
-
-            if ( ImGui::Selectable( "Open Location" ) )
-            {
-                /*ArenaTemp temp     = ScratchBegin( &m_Arena, 1 );
-                String8   fullPath = StringUtilities::RelativeToAbsolutePath(
-                     temp.arena, m_CurrentDir->Children[dirIndex]->AssetPath, Str8Lit( "//Assets" ),
-                     m_BasePath );
-                Lumos::OS::Get().OpenFileLocation( std::string( (const char*)fullPath.str, fullPath.size ) );
-                ScratchEnd( temp );*/
-            }
-
-            if ( m_CurrentDir->Children[dirIndex]->IsFile && ImGui::Selectable( "Open External" ) )
-            {
-                /*ArenaTemp temp     = ScratchBegin( &m_Arena, 1 );
-                String8   fullPath = StringUtilities::RelativeToAbsolutePath(
-                     temp.arena, m_CurrentDir->Children[dirIndex]->AssetPath, Str8Lit( "//Assets" ),
-                     m_BasePath );
-                Lumos::OS::Get().OpenFileExternal( std::string( (const char*)fullPath.str, fullPath.size ) );
-                ScratchEnd( temp );*/
-            }
-
-            if ( ImGui::Selectable( "Copy Full Path" ) )
-            {
-                /*  ArenaTemp temp     = ScratchBegin( &m_Arena, 1 );
-                  String8   fullPath = StringUtilities::RelativeToAbsolutePath(
-                       temp.arena, m_CurrentDir->Children[dirIndex]->AssetPath, Str8Lit( "//Assets" ),
-                       m_BasePath );
-                  ImGui::SetClipboardText( (const char*)ToStdString( fullPath ).c_str() );
-                  ScratchEnd( temp );*/
-            }
-
-            if ( m_CurrentDir->Children[dirIndex]->IsFile && ImGui::Selectable( "Copy Asset Path" ) )
-            {
-                /*  ImGui::SetClipboardText(
-                       (const char*)ToStdString( m_CurrentDir->Children[dirIndex]->AssetPath ).c_str() );*/
-            }
-
-            ImGui::Separator();
-
-            if ( ImGui::Selectable( "Import New Asset" ) )
-            {
-                //   m_Editor->OpenFile();
-            }
-
-            if ( ImGui::Selectable( "Refresh" ) )
-            {
-                QueueRefresh();
-            }
-
-            if ( ImGui::Selectable( "New folder" ) )
-            {
-                /*ArenaTemp temp     = ScratchBegin( &m_Arena, 1 );
-                String8   fullPath = StringUtilities::RelativeToAbsolutePath(
-                     temp.arena, m_CurrentDir->AssetPath, Str8Lit( "//Assets" ), m_BasePath );
-                std::filesystem::create_directory( std::filesystem::path(
-                     std::string( (const char*)fullPath.str, fullPath.size ) + "/NewFolder" ) );
-                ScratchEnd( temp );*/
-
-                QueueRefresh();
-            }
-
-            if ( !m_IsInListView )
-            {
-                // ImGui::SliderFloat( "##GridSize", &m_GridSize, MinGridSize, MaxGridSize );
-            }
-            ImGui::EndPopup();
-        }
-
-        if ( ImGui::IsItemHovered() /*&& m_CurrentDir->Children[dirIndex]->Thumbnail*/ )
-        {
-            /* Vec2 TooltipSize =
-                  GetAspectCorrectedSize( Vec2( textureId->GetWidth(), textureId->GetHeight() ), 512 );
-             ImGuiUtilities::Tooltip( m_CurrentDir->Children[dirIndex]->Thumbnail, TooltipSize,
-                                      (const char*)( m_CurrentDir->Children[dirIndex]->AssetPath.str ) );*/
+            ImGui::EndGroup();
         }
         else
         {
-
-            //  ImGuiUtilities::Tooltip( (const char*)( m_CurrentDir->Children[dirIndex]->AssetPath.str ) );
-        }
-
-        if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceAllowNullID ) )
-        {
-            const std::string& assetPath = m_CurrentDir->Children[dirIndex]->AssetPath;
-            const FileType     fileType  = m_CurrentDir->Children[dirIndex]->Type;
-
-            // Generic payload for all asset files
-            ImGui::SetDragDropPayload( "AssetFile", assetPath.c_str(), assetPath.size() + 1 );
-
-            // Type-specific payloads so target widgets (material texture slots, material slots, prefab
-            // instantiation) can accept exactly what they expect. Payload data is the asset path.
-            if ( fileType == FileType::Prefab )
-                ImGui::SetDragDropPayload( "PREFAB_FILE", assetPath.c_str(), assetPath.size() + 1 );
-            else if ( fileType == FileType::Texture )
-                ImGui::SetDragDropPayload( "TEXTURE_ASSET", assetPath.c_str(), assetPath.size() + 1 );
-            else if ( fileType == FileType::Material )
-                ImGui::SetDragDropPayload( "MATERIAL_ASSET", assetPath.c_str(), assetPath.size() + 1 );
-
-            ImGui::TextUnformatted( assetPath.c_str() );
-            m_IsDragging = true;
-            ImGui::EndDragDropSource();
-        }
-
-        if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
-        {
-            doubleClicked = true;
-        }
-
-        /* ImGui::SetCursorPos( { cursorPos.x + padding, cursorPos.y + padding } );
-         ImGui::SetNextItemAllowOverlap();
-         ImGui::Image(
-              reinterpret_cast<ImTextureID>( Application::Get().GetImGuiManager()->GetImGuiRenderer()->AddTexture(
-                   Graphics::Material::GetDefaultTexture() ) ),
-              { backgroundThumbnailSize.x - padding * 2.0f, backgroundThumbnailSize.y - padding * 2.0f }, { 0, 0 },
-              { 1, 1 }, ImGui::GetStyleColorVec4( ImGuiCol_WindowBg ) + ImVec4( 0.04f, 0.04f, 0.04f, 0.04f ) );
-
-         ImGui::SetCursorPos( { cursorPos.x + thumbnailPadding * 0.75f, cursorPos.y + thumbnailPadding } );
-         ImGui::SetNextItemAllowOverlap();
-
-         Vec2 correctedSize =
-              GetAspectCorrectedSize( Vec2( textureId->GetWidth(), textureId->GetHeight() ), thumbnailSize );
-         Vec2 padding2 = ( Vec2( thumbnailSize ) - correctedSize ) * 0.5f;
-         ImGui::SetCursorPos( ImGui::GetCursorPos() + ImVec2( padding2.x, padding2.y ) );
-         ImGuiUtilities::Image( textureId, correctedSize );
-
-         const ImVec2 typeColorFrameSize = { scaledThumbnailSizeX, scaledThumbnailSizeX * 0.03f };
-         ImGui::SetCursorPosX( cursorPos.x + padding );
-         ImGui::Image(
-              reinterpret_cast<ImTextureID>( Application::Get().GetImGuiManager()->GetImGuiRenderer()->AddTexture(
-                   Graphics::Material::GetDefaultTexture() ) ),
-              typeColorFrameSize, ImVec2( 0.0f, flipImage ? 1.0f : 0.0f ), ImVec2( 1.0f, flipImage ? 0.0f : 1.0f ),
-              !CurrentEnty->IsFile ? ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) : CurrentEnty->FileTypeColour );
-
-         const ImVec2 rectMin  = ImGui::GetItemRectMin() + ImVec2( 0.0f, 8.0f );
-         const ImVec2 rectSize = ImGui::GetItemRectSize() + ImVec2( 0.0f, 4.0f );
-         const ImRect clipRect =
-              ImRect( { rectMin.x + padding * 2.0f, rectMin.y + padding * 4.0f },
-                      { rectMin.x + rectSize.x, rectMin.y + scaledThumbnailSizeX -
-                                                     ImGui::GetIO().Fonts->Fonts[2]->FontSize - padding * 4.0f }
-         );*/
-
-        {
-            /* if ( m_GridSize < 140 * (float)m_Editor->GetWindow()->GetDPIScale() )
-             {
-                 ImGuiUtilities::ScopedFont smallFont( ImGui::GetIO().Fonts->Fonts[2] );
-                 ImGuiUtilities::ClippedText(
-                      clipRect.Min, clipRect.Max,
-                      (const char*)( StringUtilities::GetFileName( CurrentEnty->AssetPath, !CurrentEnty->IsFile )
-                                          .str ),
-                      nullptr, nullptr, { 0, 0 }, nullptr, clipRect.GetSize().x );
-             }
-             else
-             {
-                 ImGuiUtilities::ClippedText(
-                      clipRect.Min, clipRect.Max,
-                      (const char*)( StringUtilities::GetFileName( CurrentEnty->AssetPath, !CurrentEnty->IsFile )
-                                          .str ),
-                      nullptr, nullptr, { 0, 0 }, nullptr, clipRect.GetSize().x );
-             }*/
-        }
-
-        // if ( CurrentEnty->IsFile )
-        //{
-        //     ImGui::SetCursorPos( { cursorPos.x + padding * (float)m_Editor->GetWindow()->GetDPIScale(),
-        //                            cursorPos.y + backgroundThumbnailSize.y -
-        //                                 ( ImGui::GetIO().Fonts->Fonts[2]->FontSize -
-        //                                   padding * (float)m_Editor->GetWindow()->GetDPIScale() ) *
-        //                                      3.3f } );
-        //     ImGui::BeginDisabled();
-        //     ImGuiUtilities::ScopedFont smallFont( ImGui::GetIO().Fonts->Fonts[2] );
-        //     ImGui::Indent();
-
-        //    String8     fileTypeString   = s_FileTypesToString.at( FileType::Unknown );
-        //    const auto& fileStringTypeIt = s_FileTypesToString.find( CurrentEnty->Type );
-        //    if ( fileStringTypeIt != s_FileTypesToString.end() )
-        //        fileTypeString = fileStringTypeIt->second;
-
-        //    ImGui::TextUnformatted( (const char*)( fileTypeString ).str );
-        //    ImGui::Unindent();
-        //    cursorPos = ImGui::GetCursorPos();
-        //    ImGui::SetCursorPos( { cursorPos.x + padding * (float)m_Editor->GetWindow()->GetDPIScale(),
-        //                           cursorPos.y - ( ImGui::GetIO().Fonts->Fonts[2]->FontSize * 0.8f -
-        //                                           padding * (float)m_Editor->GetWindow()->GetDPIScale() ) } );
-        //    ImGui::Indent();
-
-        //    ImGui::TextUnformatted( StringUtilities::BytesToString( CurrentEnty->FileSize ).c_str() );
-        //    ImGui::Unindent();
-
-        //    ImGui::EndDisabled();
-        //}
-
-        // if ( CurrentEnty->IsFile )
-        //{
-        //     ImGui::SetCursorPos( { cursorPos.x + padding * (float)m_Editor->GetWindow()->GetDPIScale(),
-        //                            cursorPos.y + backgroundThumbnailSize.y -
-        //                                 ( ImGui::GetIO().Fonts->Fonts[2]->FontSize -
-        //                                   padding * (float)m_Editor->GetWindow()->GetDPIScale() ) *
-        //                                      3.3f } );
-        //     ImGui::BeginDisabled();
-        //     ImGuiUtilities::ScopedFont smallFont( ImGui::GetIO().Fonts->Fonts[2] );
-        //     ImGui::Indent();
-
-        //    String8     fileTypeString   = s_FileTypesToString.at( FileType::Unknown );
-        //    const auto& fileStringTypeIt = s_FileTypesToString.find( CurrentEnty->Type );
-        //    if ( fileStringTypeIt != s_FileTypesToString.end() )
-        //        fileTypeString = fileStringTypeIt->second;
-
-        //    ImGui::TextUnformatted( (const char*)( fileTypeString ).str );
-        //    ImGui::Unindent();
-        //    cursorPos = ImGui::GetCursorPos();
-        //    ImGui::SetCursorPos( { cursorPos.x + padding * (float)m_Editor->GetWindow()->GetDPIScale(),
-        //                           cursorPos.y - ( ImGui::GetIO().Fonts->Fonts[2]->FontSize * 0.8f -
-        //                                           padding * (float)m_Editor->GetWindow()->GetDPIScale() ) } );
-        //    ImGui::Indent();
-
-        //    ImGui::TextUnformatted( StringUtilities::BytesToString( CurrentEnty->FileSize ).c_str() );
-        //    ImGui::Unindent();
-
-        //    ImGui::EndDisabled();
-        //}
-       // else
-        {
-          /*  ImGui::TextUnformatted( folder ? ICON_MDI_FOLDER
-                                           : m_Editor->GetIconFontIcon( std::string(
-                                                  (const char*)m_CurrentDir->Children[dirIndex]->AssetPath.str,
-                                                  m_CurrentDir->Children[dirIndex]->AssetPath.size ) ) );
-            ImGui::SameLine();
-
-            if ( ImGui::Selectable(
-                      (const char*)StringUtilities::GetFileName( m_CurrentDir->Children[dirIndex]->AssetPath,
-                                                                 !m_CurrentDir->Children[dirIndex]->IsFile )
-                           .str,
-                      false, ImGuiSelectableFlags_AllowDoubleClick ) )
+            const std::string label = std::string( icon ) + "  " + fileName;
+            if ( ImGui::Selectable( label.c_str(), m_CurrentSelected == entry, ImGuiSelectableFlags_AllowDoubleClick ) )
             {
-                if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
-                {
+                m_CurrentSelected = entry;
+                if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
                     doubleClicked = true;
-                }
             }
-
-            ImGuiUtilities::Tooltip( (const char*)m_CurrentDir->Children[dirIndex]->AssetPath.str );
-
-            if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceAllowNullID ) )
-            {
-                ImGui::TextUnformatted(
-                     m_Editor->GetIconFontIcon( ToStdString( m_CurrentDir->Children[dirIndex]->AssetPath ) ) );
-
-                ImGui::SameLine();
-                m_MovePath = m_CurrentDir->Children[dirIndex]->AssetPath;
-                ImGui::TextUnformatted( (const char*)ToStdString( m_MovePath ).c_str() );
-
-                size_t size = sizeof( const char* ) + m_MovePath.size;
-                ImGui::SetDragDropPayload( "AssetFile", m_MovePath.str, size );
-                m_IsDragging = true;
-                ImGui::EndDragDropSource();
-            }*/
+            EmitAssetDragSource( *entry );
         }
 
-        if ( doubleClicked )
-        {
-           /* if ( folder )
-            {
-                ChangeDirectory( m_CurrentDir->Children[dirIndex] );
-            }
-            else
-            {
-                ArenaTemp temp        = ScratchBegin( &m_Arena, 1 );
-                String8   currentPath = StringUtilities::RelativeToAbsolutePath(
-                     temp.arena, m_CurrentDir->Children[dirIndex]->AssetPath, Str8Lit( "//Assets" ), m_BasePath );
-                m_Editor->FileOpenCallback( std::string( (const char*)currentPath.str, currentPath.size ) );
-                ScratchEnd( temp );
-            }*/
-        }
+        if ( doubleClicked && folder )
+            ChangeDirectory( entry );
 
+        ImGui::PopID();
         return doubleClicked;
+    }
+
+    void FileExplorerPanel::RefreshCurrentDirectory()
+    {
+        if ( m_Thumbnails )
+            m_Thumbnails->Clear();
+        if ( !m_CurrentDir )
+            return;
+
+        // Drop cached child entries so they re-process from disk (picks up added/removed files), then
+        // re-scan the current directory in place — navigation (m_CurrentDir / the tree) is preserved.
+        for ( auto* child : m_CurrentDir->Children )
+            if ( child )
+                m_Directories.erase( child->AssetPath );
+        m_CurrentDir->Children.clear();
+        m_CurrentDir->Opened = false;
+
+        ProcessDirectory( m_CurrentDir->AssetPath, m_CurrentDir->Parent, true );
+        m_UpdateNavigationPath = true;
     }
 
     void FileExplorerPanel::Refresh()
     {
+        if ( m_Thumbnails )
+            m_Thumbnails->Clear();
+
         std::string currentPath = m_CurrentDir->AssetPath;
 
         m_Directories.clear();
 
-        m_BasePath                      = "Assets"; // Replace with actual path
+        // Re-scan the panel's actual root (set in the ctor, e.g. "Resources/"). Previously this reset to a
+        // hardcoded "Assets" placeholder, wiping the tree on every refresh.
         std::string baseDirectoryHandle = ProcessDirectory( m_BasePath, nullptr, true );
         m_BaseProjectDir                = m_Directories[baseDirectoryHandle].get();
         ChangeDirectory( m_BaseProjectDir );

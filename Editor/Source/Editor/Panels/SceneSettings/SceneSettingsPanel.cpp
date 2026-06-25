@@ -80,6 +80,28 @@ namespace Desert::Editor
             ImGui::SliderFloat( "Bloom Intensity", &s.BloomIntensity, 0.0f, 3.0f );
         }
 
+        if ( ImGui::CollapsingHeader( "Textures", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            // Global sampler filter — applies live (samplers are recreated when this changes).
+            const char* items[]  = { "Nearest", "Bilinear", "Trilinear", "Anisotropic" };
+            int         current  = static_cast<int>( s.TextureFilterMode );
+            if ( ImGui::Combo( "Filter", &current, items, IM_ARRAYSIZE( items ) ) )
+                s.TextureFilterMode = static_cast<Core::TextureFilter>( current );
+
+            // Anisotropy level — only meaningful in Anisotropic mode.
+            if ( s.TextureFilterMode == Core::TextureFilter::Anisotropic )
+            {
+                const char* levels[]  = { "1x", "2x", "4x", "8x", "16x" };
+                const int   values[]  = { 1, 2, 4, 8, 16 };
+                int         levelIdx  = 3; // default 8x
+                for ( int i = 0; i < IM_ARRAYSIZE( values ); ++i )
+                    if ( values[i] == s.Anisotropy )
+                        levelIdx = i;
+                if ( ImGui::Combo( "Anisotropy", &levelIdx, levels, IM_ARRAYSIZE( levels ) ) )
+                    s.Anisotropy = values[levelIdx];
+            }
+        }
+
         // The settings below have no renderer backing yet (no shadow / IBL-intensity / debug-viz systems).
         // Shown disabled so they read honestly rather than appearing to do nothing.
         if ( ImGui::CollapsingHeader( "Environment" ) )
@@ -102,6 +124,9 @@ namespace Desert::Editor
 
         if ( ImGui::CollapsingHeader( "Debug" ) )
         {
+            // Live — infinite editor ground grid.
+            ImGui::Checkbox( "Show Grid", &s.ShowGrid );
+
             // Live — selects the line-polygon mesh pipeline.
             ImGui::Checkbox( "Wireframe", &s.WireframeMode );
 
@@ -136,6 +161,10 @@ namespace Desert::Editor
             ImGui::SliderFloat( "BB Line Width", &s.BoundingBoxLineWidth, 1.0f, 10.0f, "%.1f" );
             ImGui::EndDisabled();
             ImGui::Checkbox( "Show Normals", &s.ShowNormals );
+            ImGui::Checkbox( "Light Debug", &s.LightingDebug );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Tint surfaces by which light reaches them (a distinct color per source;\n"
+                                   "brightness = light strength). Unlit areas are black." );
         }
     }
 } // namespace Desert::Editor

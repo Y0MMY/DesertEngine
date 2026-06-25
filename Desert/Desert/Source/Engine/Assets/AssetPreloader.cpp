@@ -127,6 +127,14 @@ namespace Desert::Assets
         }
     }
 
+    void AssetPreloader::ReloadCooked()
+    {
+        // Re-process cooked files (new ones get created) and re-register meshes/textures/materials.
+        // Register reloads texture pixels from source and rebuilds runtime materials against the new
+        // images (textures are re-registered before materials in PreloadMeshes, so no dangling images).
+        PreloadMeshes();
+    }
+
     void AssetPreloader::PreloadSkyboxes()
     {
         ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, true, SUPPORTED_SKYBOX_EXTENSIONS,
@@ -136,8 +144,11 @@ namespace Desert::Assets
         {
             for ( const auto& [handle, skyboxAsset] : manager->FindAllByType<Assets::SkyboxAsset>() )
             {
-                //  m_RuntimeServices->Skyboxes().Register( skyboxAsset );
-                return;
+                // Eagerly build + cache each skybox's IBL (radiance / irradiance / prefilter compute) at
+                // load — Register() constructs the MaterialSkybox which runs the compute once and caches
+                // it. Then selecting an HDR skybox in the editor is instant (no per-select compute stall).
+                // Runs after PreloadShaders (the compute shaders must be registered first).
+                Runtime::ResourceRegistry::GetSkyboxService()->Register( skyboxAsset );
             }
         }
     }

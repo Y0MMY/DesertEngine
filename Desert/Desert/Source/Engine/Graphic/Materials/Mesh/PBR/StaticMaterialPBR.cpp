@@ -19,17 +19,19 @@ namespace Desert::Graphic
     }
 
     void StaticMaterialPBR::UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
+                                          const ShaderProtocols::SpotLight&      spotLights,
                                           const ShaderProtocols::DirectionLight& dirLights )
     {
-        MaterialPBRBase::UpdateLights( instance, pointLights, dirLights );
+        MaterialPBRBase::UpdateLights( instance, pointLights, spotLights, dirLights );
     }
 
     void StaticMaterialPBR::UpdateShadow( MaterialInstance* instance, const glm::mat4* cascadeViewProj,
                                           Image2D* const* cascadeMaps, uint32_t numCascades, float bias,
-                                          bool enabled, int debugMode, bool showNormals )
+                                          bool enabled, int debugMode, bool showNormals,
+                                          const glm::vec4& cascadeWorldPerTexel, bool lightingDebug )
     {
         MaterialPBRBase::UpdateShadow( instance, cascadeViewProj, cascadeMaps, numCascades, bias, enabled,
-                                       debugMode, showNormals );
+                                       debugMode, showNormals, cascadeWorldPerTexel, lightingDebug );
     }
 
     void StaticMaterialPBR::UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance,

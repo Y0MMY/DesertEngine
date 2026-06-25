@@ -29,22 +29,39 @@ namespace Desert::Graphic
     }
 
     void MaterialPBRBase::UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
+                                       const ShaderProtocols::SpotLight&      spotLights,
                                        const ShaderProtocols::DirectionLight& dirLights )
     {
         UpdatePointLights( instance, pointLights );
+        UpdateSpotLights( instance, spotLights );
         UpdateDirectionLights( instance, dirLights );
-        UpdateLightsMetadata( instance, pointLights, dirLights );
+        UpdateLightsMetadata( instance, pointLights, spotLights, dirLights );
     }
 
     void MaterialPBRBase::UpdatePointLights( MaterialInstance* instance, const ShaderProtocols::PointLight& lights )
     {
+        // Point lights live in an unbounded std430 storage buffer (no MAX_POINT_LIGHT cap). Empty is fine —
+        // the shader loops 0..PointLightCount, so a stale buffer is simply never read.
         if ( lights.PointLights.empty() )
         {
             return;
         }
-        instance->GetParentMaterial()->Get<UniformBufferProperty>( lights.Name )
-             ->SetRawData( (std::byte*)lights.PointLights.data(),
-                           lights.PointLights.size() * sizeof( ShaderProtocols::PointLightPayload ) );
+        if ( auto* sb = instance->GetParentMaterial()->Get<StorageBufferProperty>( lights.Name ) )
+            sb->SetRawData( (std::byte*)lights.PointLights.data(),
+                            static_cast<uint32_t>( lights.PointLights.size() *
+                                                   sizeof( ShaderProtocols::PointLightPayload ) ) );
+    }
+
+    void MaterialPBRBase::UpdateSpotLights( MaterialInstance* instance, const ShaderProtocols::SpotLight& lights )
+    {
+        if ( lights.SpotLights.empty() )
+        {
+            return;
+        }
+        if ( auto* sb = instance->GetParentMaterial()->Get<StorageBufferProperty>( lights.Name ) )
+            sb->SetRawData( (std::byte*)lights.SpotLights.data(),
+                            static_cast<uint32_t>( lights.SpotLights.size() *
+                                                   sizeof( ShaderProtocols::SpotLightPayload ) ) );
     }
 
     void MaterialPBRBase::UpdateDirectionLights( MaterialInstance*                     instance,
@@ -61,15 +78,17 @@ namespace Desert::Graphic
 
     void MaterialPBRBase::UpdateShadow( MaterialInstance* instance, const glm::mat4* cascadeViewProj,
                                         Image2D* const* cascadeMaps, uint32_t numCascades, float bias,
-                                        bool enabled, int debugMode, bool showNormals )
+                                        bool enabled, int debugMode, bool showNormals,
+                                        const glm::vec4& cascadeWorldPerTexel, bool lightingDebug )
     {
-        // Matches ShadowUB in PBR.glsl.frag: mat4 u_LightViewProj[4]; vec4 u_ShadowParams; vec4 u_DebugParams.
+        // Matches ShadowUB in PBR.glsl.frag.
         constexpr uint32_t kMaxCascades = 4;
         struct ShadowUBData
         {
             glm::mat4 LightViewProj[kMaxCascades];
-            glm::vec4 Params;      // x = bias, y = enabled, z = debug mode, w = cascade count
-            glm::vec4 DebugParams; // x = show normals
+            glm::vec4 Params;           // x = bias, y = enabled, z = debug mode, w = cascade count
+            glm::vec4 DebugParams;      // x = show normals
+            glm::vec4 CascadeTexelWorld; // per-cascade world size of one shadow-map texel
         } data;
 
         const uint32_t n = numCascades < kMaxCascades ? numCascades : kMaxCascades;
@@ -77,7 +96,8 @@ namespace Desert::Graphic
             data.LightViewProj[i] = ( i < n ) ? cascadeViewProj[i] : glm::mat4( 1.0f );
         data.Params = glm::vec4( bias, enabled ? 1.0f : 0.0f, static_cast<float>( debugMode ),
                                  static_cast<float>( n ) );
-        data.DebugParams = glm::vec4( showNormals ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f );
+        data.DebugParams = glm::vec4( showNormals ? 1.0f : 0.0f, lightingDebug ? 1.0f : 0.0f, 0.0f, 0.0f );
+        data.CascadeTexelWorld = cascadeWorldPerTexel;
 
         auto* parent = instance->GetParentMaterial();
         if ( auto* ub = parent->Get<UniformBufferProperty>( "ShadowUB" ) )
@@ -111,15 +131,20 @@ namespace Desert::Graphic
     }
 
     void MaterialPBRBase::UpdateLightsMetadata( MaterialInstance* instance, const ShaderProtocols::PointLight& point,
+                                                const ShaderProtocols::SpotLight&      spot,
                                                 const ShaderProtocols::DirectionLight& dir )
     {
-        static ShaderProtocols::LightsMetadata LightsMetadataUB;
+        ShaderProtocols::LightsMetadata LightsMetadataUB;
 
-        LightsMetadataUB.DirectionLightsCount = dir.DirectionLights.size();
-        LightsMetadataUB.PointLightsCount     = point.PointLights.size();
+        LightsMetadataUB.DirectionLightsCount = static_cast<uint32_t>( dir.DirectionLights.size() );
+        LightsMetadataUB.PointLightsCount     = static_cast<uint32_t>( point.PointLights.size() );
+        LightsMetadataUB.SpotLightsCount      = static_cast<uint32_t>( spot.SpotLights.size() );
 
+        // `Name` is a static member (not in the object), so the struct is just the three uint counts.
+        const uint32_t counts[3] = { LightsMetadataUB.DirectionLightsCount, LightsMetadataUB.PointLightsCount,
+                                     LightsMetadataUB.SpotLightsCount };
         instance->GetParentMaterial()->Get<UniformBufferProperty>( LightsMetadataUB.Name )
-             ->SetRawData( (std::byte*)&LightsMetadataUB, sizeof( LightsMetadataUB ) );
+             ->SetRawData( (std::byte*)counts, sizeof( counts ) );
     }
 
 } // namespace Desert::Graphic
