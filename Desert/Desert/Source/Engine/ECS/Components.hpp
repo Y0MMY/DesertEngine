@@ -178,6 +178,10 @@ namespace Desert::ECS
         bool  Procedural    = false;
         float SunIntensity  = 22.0f;  // atmosphere sun radiance scale
         float SunDiskRadius = 0.02f;  // sun angular radius (radians)
+
+        // Transient (not serialized): set by the editor's "Bake" button to request a one-shot sky-IBL
+        // rebuild. The SkyboxECSSystem forwards it for one frame, then clears it.
+        bool  RequestBake   = false;
     };
 
     struct PrefabComponent

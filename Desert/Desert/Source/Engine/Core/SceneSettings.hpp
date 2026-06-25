@@ -14,6 +14,15 @@ namespace Desert::Core
         SMAA,
     };
 
+    // Directional-shadow debug visualization (CSM). Off = normal lit; ShadowFactor = raw grayscale shadow
+    // term; Cascades = tint each fragment by the cascade that shadows it (red/green/blue/yellow front→back).
+    enum class ShadowDebugMode : int
+    {
+        Off = 0,
+        ShadowFactor,
+        Cascades,
+    };
+
     struct SceneSettings
     {
         // Outline settings (Jump Flood). Width and smoothness are in screen pixels.
@@ -31,7 +40,9 @@ namespace Desert::Core
         // front-face culling + normal-offset/slope bias to suppress self-shadow acne. On by default.
         bool  EnableShadows           = true;
         float ShadowBias              = 0.005f;
-        bool  VisualizeShadows        = false; // debug: output the raw shadow factor as grayscale
+        // CSM: blend between uniform and logarithmic cascade splits (0 = uniform, 1 = fully log).
+        float CascadeSplitLambda      = 0.6f;
+        ShadowDebugMode ShadowDebug   = ShadowDebugMode::Off; // debug visualization (grayscale / cascade tint)
 
         // Post-processing (example)
         float Exposure       = 1.0f; // manual exposure (used when auto-exposure is off)
@@ -53,9 +64,11 @@ namespace Desert::Core
         float BloomIntensity = 0.8f;
 
         // Debug visualization
-        bool ShowBoundingBoxes = false;
-        bool ShowNormals       = false;
-        bool WireframeMode     = false;
+        bool      ShowBoundingBoxes    = false;
+        glm::vec3 BoundingBoxColor     = glm::vec3( 0.25f, 0.95f, 0.35f );
+        float     BoundingBoxLineWidth = 1.5f;
+        bool      ShowNormals          = false;
+        bool      WireframeMode        = false;
 
         // Other scene-wide settings
         float Gravity         = 9.81f; // For physics simulation

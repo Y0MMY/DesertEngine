@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../IPanel.hpp"
+#include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 
 #include <memory>
 
@@ -23,5 +24,6 @@ namespace Desert::Editor
 
     private:
         std::shared_ptr<::Desert::Core::Scene> m_Scene;
+        std::unique_ptr<UI::UIHelper>          m_UIHelper; // for the CSM cascade depth-map thumbnails
     };
 } // namespace Desert::Editor

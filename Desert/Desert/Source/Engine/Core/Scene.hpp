@@ -64,6 +64,11 @@ namespace Desert::Core
 
         [[nodiscard]] const std::optional<Graphic::Environment>& GetEnvironment() const;
 
+        [[nodiscard]] Graphic::SceneRenderer* GetSceneRenderer() const
+        {
+            return m_SceneRenderer;
+        }
+
         [[nodiscard]] auto& GetRegistry()
         {
             return m_Registry;

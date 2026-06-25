@@ -34,8 +34,9 @@ namespace Desert::Graphic
         static void UpdateCamera( MaterialInstance* instance, const Core::Camera* camera );
         static void UpdateLights( MaterialInstance* instance, const ShaderProtocols::PointLight& pointLights,
                                   const ShaderProtocols::DirectionLight& dirLights );
-        static void UpdateShadow( MaterialInstance* instance, const glm::mat4& lightViewProj, Image2D* shadowMap,
-                                  float bias, bool enabled, bool debugVisualize = false );
+        static void UpdateShadow( MaterialInstance* instance, const glm::mat4* cascadeViewProj,
+                                  Image2D* const* cascadeMaps, uint32_t numCascades, float bias, bool enabled,
+                                  int debugMode, bool showNormals );
         static void UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance, ImageCube* prefiltered,
                                        Image2D* brdfLut );
 

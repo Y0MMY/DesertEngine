@@ -3,6 +3,7 @@
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
@@ -162,4 +163,9 @@ namespace Desert::Editor
             ImGui::Unindent();
         }
     }
+
+    DESERT_REGISTER_CUSTOM_COMPONENT(
+         ECS::SkinnedMeshComponent, "Skinned Mesh", false,
+         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
+           { SkinnedMeshComponentWidget( ctx.AssetManager ).Render( e, s ); } ) )
 } // namespace Desert::Editor

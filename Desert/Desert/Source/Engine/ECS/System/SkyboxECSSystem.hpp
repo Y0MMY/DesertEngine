@@ -40,11 +40,15 @@ namespace Desert::ECS
             const auto& skyboxes = registry.view<ECS::SkyboxComponent>();
             for ( const auto skyboxEntity : skyboxes )
             {
-                const auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
+                auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
+
+                // One-shot Bake request from the editor: forward it for this frame, then clear it.
+                const bool bakeNow = skybox.RequestBake;
+                skybox.RequestBake = false;
 
                 // Procedural-sky config always flows to the renderer (it toggles the Sky-pass mode).
                 renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
-                     skybox.Procedural, sunDir, skybox.SunIntensity, skybox.SunDiskRadius );
+                     skybox.Procedural, sunDir, skybox.SunIntensity, skybox.SunDiskRadius, bakeNow );
 
                 // The HDR cubemap is only needed when NOT procedural (and only if an asset is assigned).
                 if ( !skybox.Procedural )

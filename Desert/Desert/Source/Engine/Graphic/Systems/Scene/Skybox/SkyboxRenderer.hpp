@@ -8,8 +8,6 @@
 
 #include <glm/glm.hpp>
 
-#include <chrono>
-
 namespace Desert::Graphic::System
 {
     class SkyboxRenderer final : public RenderSystem
@@ -27,22 +25,19 @@ namespace Desert::Graphic::System
 
         // When enabled, the Sky pass renders the engine-generated procedural atmosphere instead of the
         // HDR cubemap. The sun direction is the directional light's (toward-sun) direction.
-        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius )
+        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
+                               bool bakeNow )
         {
             m_UseProceduralSky = enabled;
             m_SunDir           = sunDir;
             m_SunIntensity     = sunIntensity;
             m_SunDiskRadius    = sunDiskRadius;
 
-            // The baked sky IBL must follow the sun: mark it dirty on first enable and whenever the sun
-            // moves past a small angular threshold (the actual rebake is throttled in
-            // EnsureProceduralEnvironment so a dragged sun doesn't rebake every frame).
-            if ( enabled )
-            {
-                constexpr float kSunMoveCos = 0.99966f; // cos(~1.5 degrees)
-                if ( !m_ProceduralEnv || glm::dot( glm::normalize( sunDir ), m_BakedSunDir ) < kSunMoveCos )
-                    m_EnvDirty = true;
-            }
+            // Bake the sky IBL on FIRST enable (so the scene isn't unlit by default) or on an explicit
+            // Bake request from the editor. Moving the sun no longer auto-rebakes — the user controls it
+            // with the Bake button (baking is a heavy device-idle operation).
+            if ( enabled && ( bakeNow || !m_ProceduralEnv ) )
+                m_EnvDirty = true;
         }
 
         // Bakes / rebakes the procedural-sky IBL when needed (throttled). Call once per frame from a
@@ -84,9 +79,8 @@ namespace Desert::Graphic::System
         float     m_SunDiskRadius    = 0.02f;
 
         // Baked sky IBL (radiance/irradiance/prefiltered cubes) generated from the procedural atmosphere.
-        Environment                                        m_ProceduralEnv;
-        glm::vec3                                          m_BakedSunDir = glm::vec3( 0.0f, 1.0f, 0.0f );
-        bool                                               m_EnvDirty    = false;
-        std::chrono::steady_clock::time_point              m_LastBakeTime{};
+        Environment m_ProceduralEnv;
+        glm::vec3   m_BakedSunDir = glm::vec3( 0.0f, 1.0f, 0.0f );
+        bool        m_EnvDirty    = false;
     };
 } // namespace Desert::Graphic::System

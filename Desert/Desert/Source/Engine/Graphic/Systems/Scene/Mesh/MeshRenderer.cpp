@@ -6,6 +6,7 @@
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
 #include <variant>
+#include <cmath>
 
 namespace Desert::Graphic::System
 {
@@ -88,6 +89,9 @@ namespace Desert::Graphic::System
         if ( !SetupShadowPass() )
             return Common::MakeError( "Failed to setup shadow pass" );
 
+        if ( !SetupDebugLinePass() )
+            return Common::MakeError( "Failed to setup debug line pass" );
+
         m_StaticMaterialFallback =
              std::make_unique<Graphic::StaticMaterialPBR>();
 
@@ -103,8 +107,11 @@ namespace Desert::Graphic::System
         m_SilhouetteMaterial.reset();
         m_SilhouetteMaskFramebuffer.reset();
         m_ShadowPipeline.reset();
-        m_ShadowMaterial.reset();
-        m_ShadowMapFramebuffer.reset();
+        for ( uint32_t i = 0; i < kNumCascades; ++i )
+        {
+            m_ShadowMaterial[i].reset();
+            m_CascadeFB[i].reset();
+        }
     }
 
     void MeshRenderer::ClearQueues()
@@ -139,6 +146,7 @@ namespace Desert::Graphic::System
         // fresh input every frame. Outline visibility is controlled by JumpFloodOutlineRenderer.
         RegisterSilhouettePass( builder );
         RegisterShadowPass( builder );
+        RegisterDebugPass( builder );
     }
 
     void MeshRenderer::UpdateGlobalUniforms( const Core::Camera*                    camera,
@@ -223,10 +231,12 @@ namespace Desert::Graphic::System
                 StaticMaterialPBR::UpdateCamera( inst, camera );
                 StaticMaterialPBR::UpdateLights( inst, pointLights, dirLights );
                 StaticMaterialPBR::UpdateTransform( inst, obj->Transform );
-                StaticMaterialPBR::UpdateShadow(
-                     inst, m_LightViewProj,
-                     m_ShadowMapFramebuffer ? m_ShadowMapFramebuffer->GetColorAttachmentImage().get() : nullptr,
-                     m_ShadowBias, m_ShadowsEnabled, m_ShadowDebug );
+                Image2D* cascadeMaps[kNumCascades];
+                for ( uint32_t c = 0; c < kNumCascades; ++c )
+                    cascadeMaps[c] =
+                         m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
+                StaticMaterialPBR::UpdateShadow( inst, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
+                                                 m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals );
                 StaticMaterialPBR::UpdateEnvironment( inst, iblIrradiance, iblPrefiltered, iblBrdfLut );
 
                 mat->SetMaterialIndex( i );
@@ -392,13 +402,19 @@ namespace Desert::Graphic::System
 
         constexpr uint32_t kShadowMapSize = 2048;
 
-        // R32F (in RGBA32F) light-space depth + a depth attachment for the z-test.
-        FramebufferSpecification shadowSpec;
-        shadowSpec.DebugName = "ShadowMap";
-        shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
-        shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
-        m_ShadowMapFramebuffer = Graphic::Framebuffer::Create( shadowSpec );
-        m_ShadowMapFramebuffer->Resize( kShadowMapSize, kShadowMapSize );
+        // One R32F (in RGBA32F) light-space depth map + depth attachment PER CASCADE. Each cascade also
+        // gets its own MaterialShadow so the 4 shadow passes don't alias a single shared light-matrix UBO
+        // (all draws recorded into one command buffer would otherwise see the last cascade's matrix).
+        for ( uint32_t i = 0; i < kNumCascades; ++i )
+        {
+            FramebufferSpecification shadowSpec;
+            shadowSpec.DebugName = "ShadowCascade" + std::to_string( i );
+            shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+            shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
+            m_CascadeFB[i] = Graphic::Framebuffer::Create( shadowSpec );
+            m_CascadeFB[i]->Resize( kShadowMapSize, kShadowMapSize );
+            m_ShadowMaterial[i] = std::make_unique<MaterialShadow>();
+        }
 
         GraphicsPipelineSpecification spec;
         spec.DebugName = "ShadowPipeline";
@@ -415,67 +431,230 @@ namespace Desert::Graphic::System
         // scene). Self-shadow acne is handled by the normal-offset + slope bias in the PBR sampling.
         spec.CullMode          = CullMode::None;
         spec.Shader            = m_ShadowShader;
-        spec.Framebuffer       = m_ShadowMapFramebuffer;
+        // All cascade framebuffers share the same attachment formats, so one pipeline is render-pass
+        // compatible with all of them.
+        spec.Framebuffer       = m_CascadeFB[0];
 
         m_ShadowPipeline = GraphicsPipeline::Create( spec );
         m_ShadowPipeline->Invalidate();
 
-        m_ShadowMaterial = std::make_unique<MaterialShadow>();
         return true;
+    }
+
+    void MeshRenderer::UpdateCascades()
+    {
+        const auto camera = m_SceneRenderer->GetMainCamera();
+        if ( !camera )
+            return;
+
+        const auto& dirLights = m_SceneRenderer->GetDirectionLights();
+        if ( dirLights.DirectionLights.empty() )
+            return;
+        glm::vec3 lightDir = glm::vec3( dirLights.DirectionLights[0].Direction );
+        if ( glm::length( lightDir ) < 1e-4f )
+            return;
+        lightDir = glm::normalize( lightDir );
+
+        // Two ranges: the CAMERA's real near/far parametrize the unprojected frustum corners (they must
+        // match invVP below), while the shadow coverage is capped so far cascades stay usefully sized.
+        constexpr float kShadowMaxDistance = 150.0f;
+        const float     camNear   = camera->GetNear();
+        const float     camFar    = camera->GetFar();
+        const float     shadowFar = glm::min( camFar, kShadowMaxDistance );
+        const float     splitRange = shadowFar - camNear;
+        const float     ratio      = shadowFar / glm::max( camNear, 1e-4f );
+
+        // Practical split scheme: blend uniform and logarithmic distributions (lambda).
+        float splitFar[kNumCascades];
+        for ( uint32_t i = 0; i < kNumCascades; ++i )
+        {
+            const float p   = static_cast<float>( i + 1 ) / static_cast<float>( kNumCascades );
+            const float log = camNear * std::pow( ratio, p );
+            const float uni = camNear + splitRange * p;
+            splitFar[i]     = glm::mix( uni, log, m_SplitLambda );
+        }
+
+        // Full camera-frustum world corners (GL NDC z in [-1,1]). Each near corner shares a ray from the
+        // eye with its matching far corner, so a cascade slice = lerp(near,far) by the view-depth fraction.
+        const glm::mat4 invVP = glm::inverse( camera->GetProjectionMatrix() * camera->GetViewMatrix() );
+        glm::vec3       nearCorners[4];
+        glm::vec3       farCorners[4];
+        int             ci = 0;
+        for ( int x = 0; x < 2; ++x )
+            for ( int y = 0; y < 2; ++y )
+            {
+                const glm::vec4 nc =
+                     invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, -1.0f, 1.0f ); // near plane
+                const glm::vec4 fc =
+                     invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, 1.0f, 1.0f ); // far plane
+                nearCorners[ci] = glm::vec3( nc ) / nc.w;
+                farCorners[ci]  = glm::vec3( fc ) / fc.w;
+                ++ci;
+            }
+
+        // Corner lerp fractions are relative to the CAMERA's full range (the range invVP encodes), NOT
+        // the capped shadow range — otherwise the slice corners scale to the wrong (1000u) frustum.
+        const float frustumRange = camFar - camNear;
+        float       lastFar      = camNear;
+        for ( uint32_t c = 0; c < kNumCascades; ++c )
+        {
+            const float tNear = ( lastFar - camNear ) / frustumRange;
+            const float tFar  = ( splitFar[c] - camNear ) / frustumRange;
+
+            glm::vec3 corners[8];
+            glm::vec3 center( 0.0f );
+            for ( int i = 0; i < 4; ++i )
+            {
+                const glm::vec3 edge = farCorners[i] - nearCorners[i];
+                corners[i]           = nearCorners[i] + edge * tNear;
+                corners[i + 4]       = nearCorners[i] + edge * tFar;
+                center += corners[i] + corners[i + 4];
+            }
+            center /= 8.0f;
+
+            // Bounding-sphere fit → cascade extent is rotation-invariant (reduces shimmer).
+            float radius = 0.0f;
+            for ( const auto& corner : corners )
+                radius = glm::max( radius, glm::length( corner - center ) );
+            radius = std::ceil( radius * 16.0f ) / 16.0f; // quantize a bit for stability
+
+            const glm::vec3 up =
+                 glm::abs( lightDir.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 );
+            // Push the light eye back by 2*radius so casters between the light and the slice still cast.
+            const glm::mat4 view = glm::lookAt( center - lightDir * ( radius * 2.0f ), center, up );
+            const glm::mat4 proj = glm::orthoRH_ZO( -radius, radius, -radius, radius, 0.1f, radius * 4.0f );
+            m_CascadeVP[c] = proj * view;
+
+            lastFar = splitFar[c];
+        }
     }
 
     void MeshRenderer::RegisterShadowPass( RenderGraphBuilder& builder )
     {
-        if ( !m_ShadowMapFramebuffer )
+        // One depth-only pass per cascade, all in DepthPrePass (before Geometry, which depends on it).
+        // Cascade matrices are computed in UpdateCascades() before the graph records (intra-phase order is
+        // nondeterministic, so per-pass matrix computation can't be relied on for ordering).
+        for ( uint32_t c = 0; c < kNumCascades; ++c )
+        {
+            if ( !m_CascadeFB[c] )
+                continue;
+
+            builder.AddPass(
+                 "MeshShadowCascade" + std::to_string( c ), RenderPhase::DepthPrePass,
+                 [this, c]()
+                 {
+                     if ( !m_ShadowsEnabled )
+                         return;
+
+                     // Shadow vert computes Projection*View*Transform; feed the combined cascade matrix as
+                     // Projection and identity as View, matching u_LightViewProj[c] on the PBR side.
+                     m_ShadowMaterial[c]->SetLightMatrix( glm::mat4( 1.0f ), m_CascadeVP[c] );
+
+                     auto& renderer = Renderer::GetInstance();
+                     for ( const auto& renderData : m_StaticQueue )
+                     {
+                         if ( !renderData.Mesh )
+                             continue;
+                         renderer.RenderMesh( m_ShadowPipeline.get(), renderData.Mesh, renderData.Transform,
+                                              m_ShadowMaterial[c]->GetMaterialExecutor() );
+                     }
+                 },
+                 m_ShadowPipeline->GetSpecification(), m_CascadeFB[c], {},
+                 // Clear the R32F depth target to 1.0 (far): background texels must read as "no occluder",
+                 // else the default 0.1 grey clear falsely shadows receivers whose light-space depth > 0.1.
+                 glm::vec4( 1.0f ) );
+        }
+    }
+
+    bool MeshRenderer::SetupDebugLinePass()
+    {
+        m_DebugLineShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "DebugLine" );
+        if ( !m_DebugLineShader )
+        {
+            LOG_ERROR( "Failed to load DebugLine shader" );
+            return false;
+        }
+
+        const auto& targetFb = m_TargetFramebuffer.lock();
+        if ( !targetFb )
+            return false;
+
+        GraphicsPipelineSpecification spec;
+        spec.DebugName         = "DebugLinePipeline";
+        spec.Shader            = m_DebugLineShader;
+        spec.Framebuffer       = targetFb;
+        spec.Topology          = PrimitiveTopology::Lines;
+        spec.LineWidth         = 1.0f; // dynamic line width is set to 1.0 in SubmitLines (no wideLines feature)
+        spec.DepthTestEnabled  = true;
+        spec.DepthWriteEnabled = false;
+        spec.DepthCompareOp    = CompareOp::LessOrEqual;
+        spec.CullMode          = CullMode::None;
+        // No vertex Layout: the DebugLine shader pulls endpoints from the Lines storage buffer by index.
+
+        m_DebugLinePipeline = GraphicsPipeline::Create( spec );
+        m_DebugLinePipeline->Invalidate();
+
+        m_DebugLineMaterial = std::make_unique<MaterialDebugLine>();
+        return m_DebugLinePipeline != nullptr;
+    }
+
+    void MeshRenderer::RegisterDebugPass( RenderGraphBuilder& builder )
+    {
+        auto targetFb = m_TargetFramebuffer.lock();
+        if ( !targetFb || !m_DebugLinePipeline )
             return;
 
-        // Depth-only render of all static meshes from the directional light's POV, in the DepthPrePass
-        // phase (before Geometry, which depends on it) so the shadow map is ready for the PBR pass.
-        builder.AddPass( "MeshShadowPass", RenderPhase::DepthPrePass,
-                         [this]()
+        // Overlay debug lines (AABB wireframes) over the lit scene; runs after Geometry, depth-tested.
+        builder.AddPass(
+             "DebugLinesPass", RenderPhase::Debug,
+             [this]()
+             {
+                 if ( !m_ShowBoundingBoxes )
+                     return;
+                 const auto camera = m_SceneRenderer->GetMainCamera();
+                 if ( !camera )
+                     return;
+
+                 // 12 box edges as index pairs into the 8 AABB corners (index bits = x|y<<1|z<<2).
+                 static const int kEdges[12][2] = { { 0, 1 }, { 1, 3 }, { 3, 2 }, { 2, 0 },
+                                                    { 4, 5 }, { 5, 7 }, { 7, 6 }, { 6, 4 },
+                                                    { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+                 const glm::vec4 color( m_BoundingBoxColor, 1.0f );
+
+                 std::vector<MaterialDebugLine::LineVertex> lines;
+                 for ( const auto& rd : m_StaticQueue )
+                 {
+                     if ( !rd.Mesh )
+                         continue;
+                     for ( const auto& sm : rd.Mesh->GetSubmeshes() )
+                     {
+                         const glm::vec3 mn = sm.BoundingBox.Min;
+                         const glm::vec3 mx = sm.BoundingBox.Max;
+                         glm::vec3       c[8] = { { mn.x, mn.y, mn.z }, { mx.x, mn.y, mn.z },
+                                                  { mn.x, mx.y, mn.z }, { mx.x, mx.y, mn.z },
+                                                  { mn.x, mn.y, mx.z }, { mx.x, mn.y, mx.z },
+                                                  { mn.x, mx.y, mx.z }, { mx.x, mx.y, mx.z } };
+                         const glm::mat4 world = rd.Transform * sm.Transform;
+                         for ( auto& corner : c )
+                             corner = glm::vec3( world * glm::vec4( corner, 1.0f ) );
+                         for ( const auto& e : kEdges )
                          {
-                             if ( !m_ShadowsEnabled )
-                                 return;
+                             lines.push_back( { glm::vec4( c[e[0]], 1.0f ), color } );
+                             lines.push_back( { glm::vec4( c[e[1]], 1.0f ), color } );
+                         }
+                     }
+                 }
+                 if ( lines.empty() )
+                     return;
 
-                             const auto& dirLights = m_SceneRenderer->GetDirectionLights();
-                             if ( dirLights.DirectionLights.empty() )
-                                 return;
-
-                             glm::vec3 lightDir = glm::vec3( dirLights.DirectionLights[0].Direction );
-                             if ( glm::length( lightDir ) < 1e-4f )
-                                 return;
-                             lightDir = glm::normalize( lightDir );
-
-                             // v1: fixed orthographic box centred on the origin. (CSM later fits cascades.)
-                             const glm::vec3 center   = glm::vec3( 0.0f );
-                             const float     dist     = 40.0f;
-                             const float     halfSize = 25.0f;
-                             const glm::vec3 up =
-                                  glm::abs( lightDir.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 );
-                             const glm::mat4 view = glm::lookAt( center - lightDir * dist, center, up );
-                             // orthoRH_ZO = right-handed, [0,1] depth (Vulkan), regardless of the project-
-                             // wide GL convention. A plain glm::ortho yields [-1,1] and the scene lands in
-                             // the clipped negative half (see [[coordinate-conventions]]).
-                             const glm::mat4 proj =
-                                  glm::orthoRH_ZO( -halfSize, halfSize, -halfSize, halfSize, 0.1f, 120.0f );
-                             m_LightViewProj = proj * view;
-
-                             m_ShadowMaterial->SetLightMatrix( view, proj );
-
-                             auto& renderer = Renderer::GetInstance();
-                             for ( const auto& renderData : m_StaticQueue )
-                             {
-                                 if ( !renderData.Mesh )
-                                     continue;
-                                 renderer.RenderMesh( m_ShadowPipeline.get(), renderData.Mesh,
-                                                      renderData.Transform, m_ShadowMaterial->GetMaterialExecutor() );
-                             }
-                         },
-                         m_ShadowPipeline->GetSpecification(), m_ShadowMapFramebuffer, {},
-                         // Clear the R32F depth target to 1.0 (far): background texels must read as "no
-                         // occluder", otherwise the default 0.1 grey clear falsely shadows receivers whose
-                         // light-space depth exceeds 0.1 (the self-shadow on the lit plane edges).
-                         glm::vec4( 1.0f ) );
+                 m_DebugLineMaterial->Update( camera, lines );
+                 Renderer::GetInstance().SubmitLines( m_DebugLinePipeline.get(),
+                                                      static_cast<uint32_t>( lines.size() ),
+                                                      m_BoundingBoxLineWidth,
+                                                      m_DebugLineMaterial->GetMaterialExecutor() );
+             },
+             m_DebugLinePipeline->GetSpecification(), targetFb,
+             { RenderPassDependency( RenderPhase::Geometry ) } );
     }
 
     void MeshRenderer::RegisterSilhouettePass( RenderGraphBuilder& builder )

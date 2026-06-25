@@ -32,6 +32,10 @@ namespace Desert::Graphic
 
         void SubmitFullscreenQuad( const GraphicsPipeline* pipeline, const MaterialExecutor* materialExecutor );
 
+        // Vertexless line draw: the pipeline (Lines topology) pulls vertices from a storage buffer by index.
+        void SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
+                          const MaterialExecutor* materialExecutor );
+
         void DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
                               uint32_t groupCountZ, const MaterialExecutor* materialExecutor = nullptr );
 

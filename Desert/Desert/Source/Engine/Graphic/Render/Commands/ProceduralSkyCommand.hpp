@@ -14,15 +14,18 @@ namespace Desert::Graphic::Render
         glm::vec3 SunDir;
         float     SunIntensity;
         float     SunDiskRadius;
+        bool      BakeNow; // one-shot: editor Bake button requested an IBL rebuild this frame
 
-        ProceduralSkyCommand( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius )
-             : Enabled( enabled ), SunDir( sunDir ), SunIntensity( sunIntensity ), SunDiskRadius( sunDiskRadius )
+        ProceduralSkyCommand( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
+                              bool bakeNow )
+             : Enabled( enabled ), SunDir( sunDir ), SunIntensity( sunIntensity ),
+               SunDiskRadius( sunDiskRadius ), BakeNow( bakeNow )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
-            renderer.SetProceduralSky( Enabled, SunDir, SunIntensity, SunDiskRadius );
+            renderer.SetProceduralSky( Enabled, SunDir, SunIntensity, SunDiskRadius, BakeNow );
         }
     };
 } // namespace Desert::Graphic::Render

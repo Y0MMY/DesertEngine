@@ -66,7 +66,9 @@ namespace Desert::Graphic
         const std::optional<Environment>& GetEnvironment();
 
         // Procedural sky configuration (from the SkyboxComponent + directional light via the ECS).
-        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius );
+        // bakeNow = one-shot request from the editor's Bake button (rebuild the sky IBL).
+        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
+                               bool bakeNow );
 
         const auto& GetMainCamera() const
         {
@@ -77,6 +79,10 @@ namespace Desert::Graphic
         {
             return m_DirectionLights;
         }
+
+        // CSM debug: the per-cascade shadow depth maps (for the editor's cascade viewer).
+        std::shared_ptr<Image2D> GetShadowCascadeImage( uint32_t cascade );
+        uint32_t                 GetShadowCascadeCount();
 
         const std::shared_ptr<Image2D>     GetFinalImage();
         const std::shared_ptr<Framebuffer> GetTargetFramebuffer() const

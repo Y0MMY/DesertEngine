@@ -1,6 +1,7 @@
 #include "StaticMeshComponent.hpp"
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Engine/Geometry/Mesh.hpp>
 
 #include "MaterialsPanelComponent.hpp"
@@ -156,5 +157,10 @@ namespace Desert::Editor
             default: return "Primitive";
         }
     }
+
+    DESERT_REGISTER_CUSTOM_COMPONENT(
+         ECS::StaticMeshComponent, "3D Model", false,
+         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
+           { StaticMeshComponentWidget( ctx.AssetMgr() ).Render( e, s ); } ) )
 
 } // namespace Desert::Editor

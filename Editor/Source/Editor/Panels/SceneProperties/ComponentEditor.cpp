@@ -3,14 +3,7 @@
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
 
-#include "ComponentWidgets/TransformComponentWidget.hpp"
-#include "ComponentWidgets/StaticMeshComponent.hpp"
-#include "ComponentWidgets/SkyboxComponent.hpp"
-#include "ComponentWidgets/PointLightComponent.hpp"
-#include "ComponentWidgets/DirectionalLightComponentWidget.hpp"
-#include "ComponentWidgets/CameraComponentWidget.hpp"
-#include "ComponentWidgets/AnimationComponentWidget.hpp"
-#include "ComponentWidgets/SkinnedMeshComponentWidget.hpp"
+#include <Engine/ECS/Entity.hpp>
 
 namespace Desert::Editor
 {
@@ -18,50 +11,29 @@ namespace Desert::Editor
 
     ComponentEditor::ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager,
                                       const Animation::AnimationLibrary*           animationLibrary )
-         : m_AssetManager( assetManager )
+         : m_AssetManager( assetManager ), m_AnimationLibrary( animationLibrary )
     {
-        RegisterDefaultComponents( animationLibrary );
     }
 
-    void ComponentEditor::RegisterComponent( std::function<std::unique_ptr<IComponentWidget>()> factory )
+    ComponentEditContext ComponentEditor::MakeContext() const
     {
-        m_AvailableComponents.emplace_back( factory );
-    }
-
-    void ComponentEditor::RegisterDefaultComponents( const Animation::AnimationLibrary* animationLibrary )
-    {
-        RegisterComponent( []() { return std::make_unique<TransformComponentWidget>(); } );
-        RegisterComponent(
-             [this]() { return std::make_unique<StaticMeshComponentWidget>( m_AssetManager.lock().get() ); } );
-        RegisterComponent(
-             [this, animationLibrary]()
-             {
-                 return std::make_unique<AnimationComponentWidget>( m_AssetManager.lock().get(),
-                                                                    animationLibrary );
-             } );
-        RegisterComponent( [this]() { return std::make_unique<SkyboxComponentWidget>( m_AssetManager ); } );
-        RegisterComponent( [this]() { return std::make_unique<SkinnedMeshComponentWidget>( m_AssetManager ); } );
-        RegisterComponent( []() { return std::make_unique<PointLightComponentWidget>(); } );
-        RegisterComponent( []() { return std::make_unique<DirectionalLightComponentWidget>(); } );
-        RegisterComponent( []() { return std::make_unique<CameraComponentWidget>(); } );
+        ComponentEditContext ctx;
+        ctx.AssetManager     = m_AssetManager;
+        ctx.AnimationLibrary = m_AnimationLibrary;
+        ctx.UIHelper         = nullptr;
+        return ctx;
     }
 
     void ComponentEditor::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
-        std::vector<std::unique_ptr<IComponentWidget>> activeWidgets;
+        const auto ctx = MakeContext();
 
-        for ( const auto& factory : m_AvailableComponents )
+        for ( const auto& entry : ComponentWidgetRegistry::Get().Entries() )
         {
-            auto widget = factory();
-            if ( widget->EntityHasComponent( entity ) )
+            if ( entry.Has && entry.Has( entity ) )
             {
-                activeWidgets.push_back( std::move( widget ) );
+                RenderComponentHeader( entry, entity, scene, ctx );
             }
-        }
-
-        for ( auto& widget : activeWidgets )
-        {
-            RenderComponentHeader( *widget, entity, scene );
         }
 
         if ( ImGui::Button( ICON_MDI_PLUS_BOX_OUTLINE " Add Component",
@@ -87,18 +59,16 @@ namespace Desert::Editor
             filterSize       = filterSize < 200 ? 200 : filterSize;
             m_ComponentFilter.Draw( "##ComponentFilter", filterSize );
 
-            for ( const auto& factory : m_AvailableComponents )
+            for ( const auto& entry : ComponentWidgetRegistry::Get().Entries() )
             {
-                auto testWidget = factory();
-                bool alreadyHas = testWidget->EntityHasComponent( entity );
+                if ( entry.Has && entry.Has( entity ) )
+                    continue;
+                if ( !m_ComponentFilter.PassFilter( entry.Name.c_str() ) )
+                    continue;
 
-                if ( !alreadyHas && ImGui::Selectable( testWidget->GetName().c_str() ) )
+                if ( ImGui::Selectable( entry.Name.c_str() ) && entry.Add )
                 {
-                    if ( m_ComponentFilter.PassFilter( testWidget->GetName().c_str() ) )
-                    {
-                        auto widget = factory();
-                        widget->AddComponentToEntity( entity );
-                    }
+                    entry.Add( entity );
                 }
             }
 
@@ -106,13 +76,14 @@ namespace Desert::Editor
         }
     }
 
-    void ComponentEditor::RenderComponentHeader( IComponentWidget& widget, ECS::Entity& entity, ::Desert::Core::Scene* scene )
+    void ComponentEditor::RenderComponentHeader( const ComponentEditorEntry& entry, ECS::Entity& entity,
+                                                 ::Desert::Core::Scene* scene, const ComponentEditContext& ctx )
     {
         bool removed = false;
 
-        bool open = ImGui::CollapsingHeader( widget.GetName().c_str(), ImGuiTreeNodeFlags_AllowItemOverlap |
-                                                                            ImGuiTreeNodeFlags_DefaultOpen );
-        if ( widget.CanRemove() )
+        bool open = ImGui::CollapsingHeader( entry.Name.c_str(), ImGuiTreeNodeFlags_AllowItemOverlap |
+                                                                      ImGuiTreeNodeFlags_DefaultOpen );
+        if ( entry.CanRemove )
         {
             ImGui::SameLine( ImGui::GetContentRegionAvail().x - ImGui::GetFontSize() -
                              ImGui::GetStyle().ItemSpacing.x );
@@ -137,12 +108,18 @@ namespace Desert::Editor
 
         if ( removed )
         {
-            widget.RemoveComponentFromEntity( entity );
+            if ( entry.Remove )
+                entry.Remove( entity );
         }
         else if ( open )
         {
-            ImGui::PushID( widget.GetName().c_str() );
-            widget.Render( entity, scene );
+            // Indent every component body uniformly so nested widgets read as children of the header
+            // (consistent tabulation across Transform / lights / mesh / skybox / reflected components).
+            ImGui::PushID( entry.Name.c_str() );
+            ImGui::Indent();
+            if ( entry.Draw )
+                entry.Draw( entity, scene, ctx );
+            ImGui::Unindent();
             ImGui::PopID();
         }
     }

@@ -113,7 +113,10 @@ namespace Desert::Graphic
              ->SetWireframe( sceneSettings.WireframeMode );
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetShadows( sceneSettings.EnableShadows, sceneSettings.ShadowBias,
-                           sceneSettings.VisualizeShadows );
+                           static_cast<int>( sceneSettings.ShadowDebug ), sceneSettings.CascadeSplitLambda );
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SetDebugView( sceneSettings.ShowNormals, sceneSettings.ShowBoundingBoxes,
+                             sceneSettings.BoundingBoxColor, sceneSettings.BoundingBoxLineWidth );
 
         m_BloomEnabled = sceneSettings.EnableBloom;
         UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )
@@ -138,6 +141,10 @@ namespace Desert::Graphic
         // Bake/rebake the procedural-sky IBL if the sun moved (throttled). Done here — before the render
         // graph records its command buffer — so the heavy compute + device idle stays at a safe boundary.
         skyboxSystem->EnsureProceduralEnvironment();
+
+        // Recompute CSM cascade matrices once per frame BEFORE the render graph records (intra-phase pass
+        // order is nondeterministic, so the cascade passes can't compute them themselves).
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->UpdateCascades();
 
         ClearMainFramebuffer();
         ExecuteRenderGraph();
@@ -238,15 +245,26 @@ namespace Desert::Graphic
     }
 
     void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity,
-                                          float sunDiskRadius )
+                                          float sunDiskRadius, bool bakeNow )
     {
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
-             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius );
+             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow );
     }
 
     const std::optional<Environment>& SceneRenderer::GetEnvironment()
     {
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->GetEnvironment();
+    }
+
+    std::shared_ptr<Image2D> SceneRenderer::GetShadowCascadeImage( uint32_t cascade )
+    {
+        return UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->GetCascadeShadowImage( cascade );
+    }
+
+    uint32_t SceneRenderer::GetShadowCascadeCount()
+    {
+        return System::MeshRenderer::GetCascadeCount();
     }
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage()

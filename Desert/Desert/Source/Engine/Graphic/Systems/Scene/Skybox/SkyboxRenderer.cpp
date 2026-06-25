@@ -80,20 +80,16 @@ namespace Desert::Graphic::System
         if ( !m_UseProceduralSky || !m_EnvDirty )
             return;
 
-        // Throttle: at most one rebake per interval so a dragged sun doesn't rebuild the IBL every frame.
-        constexpr auto kMinInterval = std::chrono::milliseconds( 150 );
-        const auto     now          = std::chrono::steady_clock::now();
-        if ( m_ProceduralEnv && ( now - m_LastBakeTime ) < kMinInterval )
-            return;
-
         // The bake runs immediate compute dispatches; idle the device first (mirrors the editor's
         // skybox-swap path) since we're recreating GPU images that prior frames may have referenced.
         Renderer::GetInstance().WaitDeviceIdle();
 
         Environment baked = EnvironmentManager::CreateProcedural( m_SunDir, m_SunIntensity, m_SunDiskRadius );
-        m_LastBakeTime    = now;
         if ( !baked )
-            return; // bake failed (e.g. shader missing) — keep the prior environment, retry later.
+        {
+            m_EnvDirty = false; // bake failed (e.g. shader missing) — keep prior env; user can retry via Bake.
+            return;
+        }
 
         const Environment previous = m_ProceduralEnv;
         m_ProceduralEnv            = baked;

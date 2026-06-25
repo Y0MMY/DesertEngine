@@ -43,6 +43,15 @@ namespace Desert::Core
             return m_Position;
         }
 
+        float GetNear() const
+        {
+            return m_NearPlane;
+        }
+        float GetFar() const
+        {
+            return m_FarPlane;
+        }
+
         const Frustum& GetFrustum();
 
     private:

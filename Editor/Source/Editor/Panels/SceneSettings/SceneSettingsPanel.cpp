@@ -2,6 +2,8 @@
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/SceneSettings.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/Image.hpp>
 
 #include <ImGui/imgui.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -23,8 +25,10 @@ namespace Desert::Editor
     } // namespace
 
     SceneSettingsPanel::SceneSettingsPanel( std::shared_ptr<::Desert::Core::Scene> scene )
-         : IPanel( "Scene Settings" ), m_Scene( std::move( scene ) )
+         : IPanel( "Scene Settings" ), m_Scene( std::move( scene ) ),
+           m_UIHelper( std::make_unique<UI::UIHelper>() )
     {
+        m_UIHelper->Init();
     }
 
     void SceneSettingsPanel::OnUIRender()
@@ -80,9 +84,10 @@ namespace Desert::Editor
         // Shown disabled so they read honestly rather than appearing to do nothing.
         if ( ImGui::CollapsingHeader( "Environment" ) )
         {
-            // Live — directional shadow map.
+            // Live — cascaded directional shadow maps.
             ImGui::Checkbox( "Shadows", &s.EnableShadows );
             ImGui::SliderFloat( "Shadow Bias", &s.ShadowBias, 0.0f, 0.02f, "%.4f" );
+            ImGui::SliderFloat( "Cascade Split Lambda", &s.CascadeSplitLambda, 0.0f, 1.0f );
 
             ImGui::Spacing();
             ImGui::TextDisabled( "Procedural Sky moved to the Skybox component (Details panel)." );
@@ -100,16 +105,37 @@ namespace Desert::Editor
             // Live — selects the line-polygon mesh pipeline.
             ImGui::Checkbox( "Wireframe", &s.WireframeMode );
 
-            // Live — bypasses PBR lighting and shows the raw shadow factor (grayscale) so the shadow
-            // map can be verified independently of scene lighting (IBL doesn't get shadowed).
-            ImGui::Checkbox( "Visualize Shadows", &s.VisualizeShadows );
+            // Live — shadow debug: Off / raw shadow factor (grayscale) / cascade tint. Lets the CSM
+            // shadow maps be verified independently of scene lighting (IBL isn't shadowed).
+            {
+                const char* modes[] = { "Off", "Shadow Factor", "Cascades" };
+                int         cur     = static_cast<int>( s.ShadowDebug );
+                if ( ImGui::Combo( "Shadow Debug", &cur, modes, IM_ARRAYSIZE( modes ) ) )
+                    s.ShadowDebug = static_cast<Core::ShadowDebugMode>( cur );
+            }
+
+            // CSM cascade depth maps (R32F light-space depth, near→far cascades).
+            if ( auto* sr = m_Scene->GetSceneRenderer() )
+            {
+                const uint32_t count = sr->GetShadowCascadeCount();
+                ImGui::TextDisabled( "CSM cascade depth maps (near -> far):" );
+                constexpr float kThumb = 96.0f;
+                for ( uint32_t c = 0; c < count; ++c )
+                {
+                    if ( auto img = sr->GetShadowCascadeImage( c ) )
+                        m_UIHelper->Image( img, ImVec2( kThumb, kThumb ) );
+                    if ( ( c % 3 ) != 2 && c + 1 < count )
+                        ImGui::SameLine();
+                }
+            }
 
             ImGui::Spacing();
-            NotImplementedNote( "bounding-box / normals visualization" );
-            ImGui::BeginDisabled();
             ImGui::Checkbox( "Show Bounding Boxes", &s.ShowBoundingBoxes );
-            ImGui::Checkbox( "Show Normals", &s.ShowNormals );
+            ImGui::BeginDisabled( !s.ShowBoundingBoxes );
+            ImGui::ColorEdit3( "BB Color", glm::value_ptr( s.BoundingBoxColor ) );
+            ImGui::SliderFloat( "BB Line Width", &s.BoundingBoxLineWidth, 1.0f, 10.0f, "%.1f" );
             ImGui::EndDisabled();
+            ImGui::Checkbox( "Show Normals", &s.ShowNormals );
         }
     }
 } // namespace Desert::Editor

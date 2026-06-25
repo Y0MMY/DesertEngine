@@ -46,7 +46,13 @@ namespace Desert::Graphic
 
         Graphic::TextureSpecification spec;
         spec.GenerateMips = false;
-        m_BRDFTexture     = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" ).ExtractValue();
+        // Path must be rooted at the resource-textures dir (CWD-relative), like every other texture load
+        // (e.g. EnvironmentManager). The bare "PBR/BRDF_LUT.tga" resolved to <cwd>/PBR/... → not found →
+        // null texture → the split-sum LUT bind fell back to the white dummy (IBL specular too bright).
+        m_BRDFTexture =
+             Texture2D::Create( spec, Common::Filepath( "Resources/Textures" ) / "PBR/BRDF_LUT.tga" ).ExtractValue();
+        if ( !m_BRDFTexture )
+            LOG_ERROR( "Failed to load BRDF LUT (Resources/Textures/PBR/BRDF_LUT.tga) — IBL specular will be wrong" );
 
         return Common::MakeSuccess( true );
     }
@@ -85,6 +91,12 @@ namespace Desert::Graphic
     void Renderer::SubmitFullscreenQuad( const GraphicsPipeline* pipeline, const MaterialExecutor* materialExecutor )
     {
         s_RendererAPI->SubmitFullscreenQuad( pipeline, materialExecutor );
+    }
+
+    void Renderer::SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
+                                const MaterialExecutor* materialExecutor )
+    {
+        s_RendererAPI->SubmitLines( pipeline, vertexCount, lineWidth, materialExecutor );
     }
 
     void Renderer::DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,

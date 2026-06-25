@@ -5,6 +5,7 @@
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialSilhouette.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialShadow.hpp>
+#include <Engine/Graphic/Materials/Debug/MaterialDebugLine.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
@@ -50,6 +51,9 @@ namespace Desert::Graphic::System
 
         using RenderSystem::RenderSystem;
 
+        // Cascaded shadow maps: number of directional-shadow cascades (frustum splits).
+        static constexpr uint32_t kNumCascades = 4;
+
         virtual Common::BoolResultStr Initialize() override;
         virtual void                  Shutdown() override;
         virtual void                  RegisterPasses( RenderGraphBuilder& builder ) override;
@@ -70,23 +74,39 @@ namespace Desert::Graphic::System
             m_Wireframe = enabled;
         }
 
-        // Directional shadow map (R32F light-space depth) + the light view-projection used to build it.
-        std::shared_ptr<Framebuffer> GetShadowMapFramebuffer() const
+        // Cascaded shadow maps (R32F light-space depth, one framebuffer per cascade). Recompute the
+        // per-cascade light matrices once per frame BEFORE the render graph records (intra-phase order is
+        // nondeterministic). Called from SceneRenderer::OnUpdate.
+        void UpdateCascades();
+
+        // Cascade depth map (for the editor's CSM debug viewer). Null if out of range / not yet created.
+        std::shared_ptr<Image2D> GetCascadeShadowImage( uint32_t cascade ) const
         {
-            return m_ShadowMapFramebuffer;
+            if ( cascade >= kNumCascades || !m_CascadeFB[cascade] )
+                return nullptr;
+            return m_CascadeFB[cascade]->GetColorAttachmentImage();
         }
-        const glm::mat4& GetLightViewProj() const
+        static constexpr uint32_t GetCascadeCount() { return kNumCascades; }
+
+        void SetShadows( bool enabled, float bias, int debugMode, float splitLambda )
         {
-            return m_LightViewProj;
-        }
-        void SetShadows( bool enabled, float bias, bool debugVisualize = false )
-        {
-            m_ShadowsEnabled = enabled;
-            m_ShadowBias     = bias;
-            m_ShadowDebug    = debugVisualize;
+            m_ShadowsEnabled  = enabled;
+            m_ShadowBias      = bias;
+            m_ShadowDebugMode = debugMode;
+            m_SplitLambda     = splitLambda;
         }
         bool  AreShadowsEnabled() const { return m_ShadowsEnabled; }
         float GetShadowBias() const     { return m_ShadowBias; }
+
+        // Debug visualizations (Scene Settings -> Debug): per-pixel normals (PBR shader) + AABB wireframes.
+        void SetDebugView( bool showNormals, bool showBoundingBoxes, const glm::vec3& bbColor,
+                           float bbLineWidth )
+        {
+            m_ShowNormals          = showNormals;
+            m_ShowBoundingBoxes    = showBoundingBoxes;
+            m_BoundingBoxColor     = bbColor;
+            m_BoundingBoxLineWidth = bbLineWidth;
+        }
 
     private:
         bool SetupGeometryPass();
@@ -98,6 +118,8 @@ namespace Desert::Graphic::System
         void DrawSkinnedMeshes();
         void RegisterSilhouettePass( RenderGraphBuilder& builder );
         void RegisterShadowPass( RenderGraphBuilder& builder );
+        bool SetupDebugLinePass();
+        void RegisterDebugPass( RenderGraphBuilder& builder );
 
         void UpdateGlobalUniforms( const Core::Camera* camera, const ShaderProtocols::PointLight& pointLights,
                                    const ShaderProtocols::DirectionLight& dirLights );
@@ -119,15 +141,29 @@ namespace Desert::Graphic::System
         std::unique_ptr<MaterialSilhouette> m_SilhouetteMaterial;
         std::shared_ptr<Framebuffer>        m_SilhouetteMaskFramebuffer;
 
-        // Directional shadow map
+        // Cascaded directional shadow maps: one framebuffer + one MaterialShadow (its own light-matrix UB,
+        // so the 4 cascade passes don't alias a shared UBO) per cascade. m_CascadeVP is recomputed each
+        // frame by UpdateCascades().
         std::shared_ptr<GraphicsPipeline> m_ShadowPipeline;
         std::shared_ptr<Shader>           m_ShadowShader;
-        std::unique_ptr<MaterialShadow>   m_ShadowMaterial;
-        std::shared_ptr<Framebuffer>      m_ShadowMapFramebuffer;
-        glm::mat4                         m_LightViewProj  = glm::mat4( 1.0f );
-        bool                              m_ShadowsEnabled = true;
-        float                             m_ShadowBias     = 0.005f;
-        bool                              m_ShadowDebug    = false;
+        std::unique_ptr<MaterialShadow>   m_ShadowMaterial[kNumCascades];
+        std::shared_ptr<Framebuffer>      m_CascadeFB[kNumCascades];
+        glm::mat4                         m_CascadeVP[kNumCascades] = { glm::mat4( 1.0f ) };
+        bool                              m_ShadowsEnabled  = true;
+        float                             m_ShadowBias      = 0.005f;
+        int                               m_ShadowDebugMode = 0;     // ShadowDebugMode (Off/ShadowFactor/Cascades)
+        float                             m_SplitLambda     = 0.6f;  // cascade split uniform<->log blend
+
+        // Debug visualization (Scene Settings -> Debug)
+        bool      m_ShowNormals          = false; // per-pixel normal color (PBR shader branch)
+        bool      m_ShowBoundingBoxes    = false; // AABB wireframes via the debug line renderer below
+        glm::vec3 m_BoundingBoxColor     = glm::vec3( 0.25f, 0.95f, 0.35f );
+        float     m_BoundingBoxLineWidth = 1.5f;
+
+        // Debug line renderer (AABB wireframes): Lines-topology pipeline + storage-buffer line verts.
+        std::shared_ptr<GraphicsPipeline>  m_DebugLinePipeline;
+        std::shared_ptr<Shader>            m_DebugLineShader;
+        std::unique_ptr<MaterialDebugLine> m_DebugLineMaterial;
 
         std::vector<StaticMeshRenderData>  m_StaticQueue;
         std::vector<SkinnedMeshRenderData> m_SkinnedQueue;

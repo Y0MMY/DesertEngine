@@ -1,5 +1,6 @@
 #include "TransformComponentWidget.hpp"
 #include <Editor/Widgets/Controls/Controls.hpp>
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 
 #include <ImGui/imgui.h>
 
@@ -31,5 +32,10 @@ namespace Desert::Editor
             Widgets::DrawDirectionWidget( "Direction", transform.Translation );
         }
     }
+
+    DESERT_REGISTER_CUSTOM_COMPONENT(
+         ECS::TransformComponent, "Transform", false,
+         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& )
+           { TransformComponentWidget().Render( e, s ); } ) )
 
 } // namespace Desert::Editor
