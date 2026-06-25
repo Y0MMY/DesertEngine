@@ -25,8 +25,13 @@ namespace Desert::Core
         // Environment settings
         float EnvironmentMapIntensity = 1.0f;
         float SkyboxLOD               = 0.0f; // Level of detail for skybox
+        // NOTE: procedural sky now lives on the SkyboxComponent (entity), not here — so it serializes
+        // with the scene and sits next to the rest of the sky/environment config.
+        // Directional shadow map (single map): orthoRH_ZO light proj ([0,1] depth), Y-flipped sampling,
+        // front-face culling + normal-offset/slope bias to suppress self-shadow acne. On by default.
         bool  EnableShadows           = true;
         float ShadowBias              = 0.005f;
+        bool  VisualizeShadows        = false; // debug: output the raw shadow factor as grayscale
 
         // Post-processing (example)
         float Exposure       = 1.0f; // manual exposure (used when auto-exposure is off)

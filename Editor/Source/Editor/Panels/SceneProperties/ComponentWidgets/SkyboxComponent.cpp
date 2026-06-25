@@ -72,13 +72,18 @@ namespace Desert::Editor
             ImGui::EndPopup();
         }
 
-        // if ( staticMesh.Mesh )
-        {
-            /*ImGui::Dummy( ImVec2( 0, 10 ) );
-            ImGui::Text( "Mesh Info:" );
-            ImGui::Text( "Vertices: %zu", staticMesh.Mesh->GetVertexCount() );
-            ImGui::Text( "Triangles: %zu", staticMesh.Mesh->GetTriangleCount() );*/
-        }
+        ImGui::Dummy( ImVec2( 0, 8 ) );
+        ImGui::Separator();
+        ImGui::Text( "Procedural Sky" );
+
+        // Engine-generated atmosphere (no HDR asset). The sun follows the scene's directional light.
+        ImGui::Checkbox( "Procedural", &skybox.Procedural );
+        ImGui::BeginDisabled( !skybox.Procedural );
+        ImGui::SliderFloat( "Sun Intensity", &skybox.SunIntensity, 1.0f, 50.0f );
+        ImGui::SliderFloat( "Sun Disk Size", &skybox.SunDiskRadius, 0.002f, 0.1f, "%.3f" );
+        ImGui::EndDisabled();
+        if ( skybox.Procedural )
+            ImGui::TextDisabled( "HDR cubemap above is ignored while Procedural is on." );
     }
 
 } // namespace Desert::Editor

@@ -331,7 +331,10 @@ namespace Desert::Core::Serialize
             {
                 const auto&                skybox = entity.GetComponent<ECS::SkyboxComponent>();
                 Assets::SkyboxComponentSer skyboxSer;
-                skyboxSer.Intensity = skybox.Intensity;
+                skyboxSer.Intensity     = skybox.Intensity;
+                skyboxSer.Procedural    = skybox.Procedural;
+                skyboxSer.SunIntensity  = skybox.SunIntensity;
+                skyboxSer.SunDiskRadius = skybox.SunDiskRadius;
 
                 if ( skybox.SkyboxHandle != 0 )
                 {
@@ -351,8 +354,11 @@ namespace Desert::Core::Serialize
                     return;
                 const auto& skyboxData = parsed.value();
 
-                auto& skybox     = entity.AddComponent<ECS::SkyboxComponent>();
-                skybox.Intensity = skyboxData.Intensity;
+                auto& skybox         = entity.AddComponent<ECS::SkyboxComponent>();
+                skybox.Intensity     = skyboxData.Intensity;
+                skybox.Procedural    = skyboxData.Procedural;
+                skybox.SunIntensity  = skyboxData.SunIntensity;
+                skybox.SunDiskRadius = skyboxData.SunDiskRadius;
 
                 if ( skyboxData.SkyboxPath )
                 {

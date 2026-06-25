@@ -4,6 +4,9 @@
 
 #include <Engine/Graphic/ShaderProtocols/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/Metadata.hpp>
+#include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/TextureCubeProperty.hpp>
+#include <Engine/Graphic/Image.hpp>
 
 namespace Desert::Graphic
 {
@@ -54,6 +57,40 @@ namespace Desert::Graphic
         instance->GetParentMaterial()->Get<UniformBufferProperty>( lights.Name )
              ->SetRawData( (std::byte*)lights.DirectionLights.data(),
                            lights.DirectionLights.size() * sizeof( ShaderProtocols::DirectionLightPayload ) );
+    }
+
+    void MaterialPBRBase::UpdateShadow( MaterialInstance* instance, const glm::mat4& lightViewProj,
+                                        Image2D* shadowMap, float bias, bool enabled, bool debugVisualize )
+    {
+        struct ShadowUBData
+        {
+            glm::mat4 LightViewProj;
+            glm::vec4 Params; // x = bias, y = enabled, z = debug-visualize
+        } data;
+        data.LightViewProj = lightViewProj;
+        data.Params = glm::vec4( bias, enabled ? 1.0f : 0.0f, debugVisualize ? 1.0f : 0.0f, 0.0f );
+
+        auto* parent = instance->GetParentMaterial();
+        if ( auto* ub = parent->Get<UniformBufferProperty>( "ShadowUB" ) )
+            ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), sizeof( data ) );
+        if ( shadowMap )
+            if ( auto* tex = parent->Get<Texture2DProperty>( "u_ShadowMap" ) )
+                tex->SetImage( shadowMap );
+    }
+
+    void MaterialPBRBase::UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance,
+                                             ImageCube* prefiltered, Image2D* brdfLut )
+    {
+        auto* parent = instance->GetParentMaterial();
+        if ( irradiance )
+            if ( auto* tex = parent->Get<TextureCubeProperty>( "u_EnvIrradianceTex" ) )
+                tex->SetTexture( irradiance );
+        if ( prefiltered )
+            if ( auto* tex = parent->Get<TextureCubeProperty>( "u_EnvSpecularTex" ) )
+                tex->SetTexture( prefiltered );
+        if ( brdfLut )
+            if ( auto* tex = parent->Get<Texture2DProperty>( "u_BRDFLUTTexture" ) )
+                tex->SetImage( brdfLut );
     }
 
     void MaterialPBRBase::UpdateLightsMetadata( MaterialInstance* instance, const ShaderProtocols::PointLight& point,

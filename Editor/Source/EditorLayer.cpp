@@ -56,7 +56,7 @@ namespace Desert::Editor
 
         BuiltinMeshRegistry::Init( nullptr );
 
-        LoadScene( "Resources/Assets/Scene/HouseDemo.desce" );
+        //LoadScene( "Resources/Assets/Scene/HouseDemo.desce" );
         }
 
     EditorLayer::~EditorLayer() = default;

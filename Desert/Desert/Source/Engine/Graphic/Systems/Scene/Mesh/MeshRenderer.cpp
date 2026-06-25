@@ -85,6 +85,9 @@ namespace Desert::Graphic::System
         if ( !SetupSilhouettePass() )
             return Common::MakeError( "Failed to setup silhouette pass" );
 
+        if ( !SetupShadowPass() )
+            return Common::MakeError( "Failed to setup shadow pass" );
+
         m_StaticMaterialFallback =
              std::make_unique<Graphic::StaticMaterialPBR>();
 
@@ -99,6 +102,9 @@ namespace Desert::Graphic::System
         m_SilhouettePipeline.reset();
         m_SilhouetteMaterial.reset();
         m_SilhouetteMaskFramebuffer.reset();
+        m_ShadowPipeline.reset();
+        m_ShadowMaterial.reset();
+        m_ShadowMapFramebuffer.reset();
     }
 
     void MeshRenderer::ClearQueues()
@@ -132,6 +138,7 @@ namespace Desert::Graphic::System
         // The silhouette mask is always produced (and cleared) so the Jump Flood outline has a
         // fresh input every frame. Outline visibility is controlled by JumpFloodOutlineRenderer.
         RegisterSilhouettePass( builder );
+        RegisterShadowPass( builder );
     }
 
     void MeshRenderer::UpdateGlobalUniforms( const Core::Camera*                    camera,
@@ -154,6 +161,26 @@ namespace Desert::Graphic::System
 
         const auto& pointLights = m_SceneRenderer->GetPointLights();
         const auto& dirLights   = m_SceneRenderer->GetDirectionLights();
+
+        // Resolve the active IBL environment cubemaps once (diffuse irradiance + prefiltered specular)
+        // so each PBR object can sample real ambient/reflections instead of the fallback dummy cube.
+        ImageCube*  iblIrradiance  = nullptr;
+        ImageCube*  iblPrefiltered = nullptr;
+        Image2D*    iblBrdfLut     = nullptr;
+        {
+            auto* imageService = Runtime::ResourceRegistry::GetImageService();
+            if ( const auto& env = m_SceneRenderer->GetEnvironment(); env.has_value() )
+            {
+                if ( env->IrradianceMap.IsValid() )
+                    iblIrradiance = static_cast<ImageCube*>( imageService->Resolve( env->IrradianceMap ) );
+                if ( env->PreFilteredMap.IsValid() )
+                    iblPrefiltered = static_cast<ImageCube*>( imageService->Resolve( env->PreFilteredMap ) );
+            }
+            // Split-sum BRDF LUT (precomputed .tga loaded by the Renderer) — needed for correct IBL specular.
+            if ( const auto& brdf = Renderer::GetInstance().GetBRDFTexture();
+                 brdf && brdf->GetImageHandle().IsValid() )
+                iblBrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
+        }
 
         // Group draws by material so each material's per-object data fills ONE storage buffer, indexed
         // per draw (GPU-scene style). Objects of the same material that wrote a shared buffer per-draw
@@ -196,6 +223,11 @@ namespace Desert::Graphic::System
                 StaticMaterialPBR::UpdateCamera( inst, camera );
                 StaticMaterialPBR::UpdateLights( inst, pointLights, dirLights );
                 StaticMaterialPBR::UpdateTransform( inst, obj->Transform );
+                StaticMaterialPBR::UpdateShadow(
+                     inst, m_LightViewProj,
+                     m_ShadowMapFramebuffer ? m_ShadowMapFramebuffer->GetColorAttachmentImage().get() : nullptr,
+                     m_ShadowBias, m_ShadowsEnabled, m_ShadowDebug );
+                StaticMaterialPBR::UpdateEnvironment( inst, iblIrradiance, iblPrefiltered, iblBrdfLut );
 
                 mat->SetMaterialIndex( i );
                 mat->Bind( inst );
@@ -347,6 +379,103 @@ namespace Desert::Graphic::System
         m_SilhouetteMaterial = std::make_unique<MaterialSilhouette>();
 
         return true;
+    }
+
+    bool MeshRenderer::SetupShadowPass()
+    {
+        m_ShadowShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Shadow" );
+        if ( !m_ShadowShader )
+        {
+            LOG_ERROR( "Failed to load shadow shader" );
+            return false;
+        }
+
+        constexpr uint32_t kShadowMapSize = 2048;
+
+        // R32F (in RGBA32F) light-space depth + a depth attachment for the z-test.
+        FramebufferSpecification shadowSpec;
+        shadowSpec.DebugName = "ShadowMap";
+        shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+        shadowSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
+        m_ShadowMapFramebuffer = Graphic::Framebuffer::Create( shadowSpec );
+        m_ShadowMapFramebuffer->Resize( kShadowMapSize, kShadowMapSize );
+
+        GraphicsPipelineSpecification spec;
+        spec.DebugName = "ShadowPipeline";
+        spec.Layout    = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                           { Graphic::ShaderDataType::Float3, "a_Normal" },
+                           { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                           { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                           { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+        spec.DepthTestEnabled  = true;
+        spec.DepthWriteEnabled = true;
+        spec.DepthCompareOp    = CompareOp::LessOrEqual;
+        // No culling in the shadow pass: store ALL faces so the map can never come out empty (front-face
+        // culling under the engine's negative-height viewport could cull the wrong set and black out the
+        // scene). Self-shadow acne is handled by the normal-offset + slope bias in the PBR sampling.
+        spec.CullMode          = CullMode::None;
+        spec.Shader            = m_ShadowShader;
+        spec.Framebuffer       = m_ShadowMapFramebuffer;
+
+        m_ShadowPipeline = GraphicsPipeline::Create( spec );
+        m_ShadowPipeline->Invalidate();
+
+        m_ShadowMaterial = std::make_unique<MaterialShadow>();
+        return true;
+    }
+
+    void MeshRenderer::RegisterShadowPass( RenderGraphBuilder& builder )
+    {
+        if ( !m_ShadowMapFramebuffer )
+            return;
+
+        // Depth-only render of all static meshes from the directional light's POV, in the DepthPrePass
+        // phase (before Geometry, which depends on it) so the shadow map is ready for the PBR pass.
+        builder.AddPass( "MeshShadowPass", RenderPhase::DepthPrePass,
+                         [this]()
+                         {
+                             if ( !m_ShadowsEnabled )
+                                 return;
+
+                             const auto& dirLights = m_SceneRenderer->GetDirectionLights();
+                             if ( dirLights.DirectionLights.empty() )
+                                 return;
+
+                             glm::vec3 lightDir = glm::vec3( dirLights.DirectionLights[0].Direction );
+                             if ( glm::length( lightDir ) < 1e-4f )
+                                 return;
+                             lightDir = glm::normalize( lightDir );
+
+                             // v1: fixed orthographic box centred on the origin. (CSM later fits cascades.)
+                             const glm::vec3 center   = glm::vec3( 0.0f );
+                             const float     dist     = 40.0f;
+                             const float     halfSize = 25.0f;
+                             const glm::vec3 up =
+                                  glm::abs( lightDir.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 );
+                             const glm::mat4 view = glm::lookAt( center - lightDir * dist, center, up );
+                             // orthoRH_ZO = right-handed, [0,1] depth (Vulkan), regardless of the project-
+                             // wide GL convention. A plain glm::ortho yields [-1,1] and the scene lands in
+                             // the clipped negative half (see [[coordinate-conventions]]).
+                             const glm::mat4 proj =
+                                  glm::orthoRH_ZO( -halfSize, halfSize, -halfSize, halfSize, 0.1f, 120.0f );
+                             m_LightViewProj = proj * view;
+
+                             m_ShadowMaterial->SetLightMatrix( view, proj );
+
+                             auto& renderer = Renderer::GetInstance();
+                             for ( const auto& renderData : m_StaticQueue )
+                             {
+                                 if ( !renderData.Mesh )
+                                     continue;
+                                 renderer.RenderMesh( m_ShadowPipeline.get(), renderData.Mesh,
+                                                      renderData.Transform, m_ShadowMaterial->GetMaterialExecutor() );
+                             }
+                         },
+                         m_ShadowPipeline->GetSpecification(), m_ShadowMapFramebuffer, {},
+                         // Clear the R32F depth target to 1.0 (far): background texels must read as "no
+                         // occluder", otherwise the default 0.1 grey clear falsely shadows receivers whose
+                         // light-space depth exceeds 0.1 (the self-shadow on the lit plane edges).
+                         glm::vec4( 1.0f ) );
     }
 
     void MeshRenderer::RegisterSilhouettePass( RenderGraphBuilder& builder )

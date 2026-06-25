@@ -48,6 +48,11 @@ namespace Desert::Assets
     {
         std::optional<std::string> SkyboxPath;
         float                      Intensity = 1.0f;
+
+        // Procedural atmosphere (engine-generated sky).
+        bool  Procedural    = false;
+        float SunIntensity  = 22.0f;
+        float SunDiskRadius = 0.02f;
     };
 
     struct EntityData

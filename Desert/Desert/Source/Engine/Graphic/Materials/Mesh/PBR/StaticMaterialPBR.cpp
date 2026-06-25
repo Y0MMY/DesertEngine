@@ -24,6 +24,18 @@ namespace Desert::Graphic
         MaterialPBRBase::UpdateLights( instance, pointLights, dirLights );
     }
 
+    void StaticMaterialPBR::UpdateShadow( MaterialInstance* instance, const glm::mat4& lightViewProj,
+                                          Image2D* shadowMap, float bias, bool enabled, bool debugVisualize )
+    {
+        MaterialPBRBase::UpdateShadow( instance, lightViewProj, shadowMap, bias, enabled, debugVisualize );
+    }
+
+    void StaticMaterialPBR::UpdateEnvironment( MaterialInstance* instance, ImageCube* irradiance,
+                                               ImageCube* prefiltered, Image2D* brdfLut )
+    {
+        MaterialPBRBase::UpdateEnvironment( instance, irradiance, prefiltered, brdfLut );
+    }
+
     void StaticMaterialPBR::Bind( const MaterialInstance* instance )
     {
         if ( !m_MaterialExecutor )

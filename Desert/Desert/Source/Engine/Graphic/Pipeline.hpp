@@ -132,11 +132,25 @@ namespace Desert::Graphic
     {
     public:
         [[nodiscard]] virtual const ComputePipelineSpecification& GetSpecification() const = 0;
-        
+
         /**
          * @brief Updates the internal storage buffer (if any) associated with this pipeline.
          */
         virtual void UpdateStorageBuffer( void* data, std::size_t size ) = 0;
+
+        // --- Resource-binding API (UE-style): set inputs/outputs/push-constants, then Dispatch ---
+
+        /** Bind a sampled input image at @p binding (e.g. a panorama or a source cubemap). */
+        virtual ComputePipeline& SetInput( uint32_t binding, Image* image ) = 0;
+        /** Bind a writable storage output image at @p binding; @p mip selects the target mip view. */
+        virtual ComputePipeline& SetOutput( uint32_t binding, Image* image, uint32_t mip = 0 ) = 0;
+        /** Set the raw push-constant block used by the next Dispatch (e.g. prefilter roughness). */
+        virtual ComputePipeline& SetPushConstants( const void* data, uint32_t size ) = 0;
+        /** Record + submit one immediate compute dispatch with the currently-bound resources. */
+        virtual void Dispatch( uint32_t groupsX, uint32_t groupsY, uint32_t groupsZ ) = 0;
+
+        [[nodiscard]] virtual Image* GetInput( uint32_t binding ) const  = 0;
+        [[nodiscard]] virtual Image* GetOutput( uint32_t binding ) const = 0;
 
         static std::shared_ptr<ComputePipeline> Create( const ComputePipelineSpecification& spec );
     };

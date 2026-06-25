@@ -5,6 +5,7 @@
 #include "Pipeline.hpp"
 
 #include <set>
+#include <optional>
 
 namespace Desert::Graphic
 {
@@ -32,6 +33,11 @@ namespace Desert::Graphic
             std::shared_ptr<Framebuffer>      TargetFramebuffer;
             std::vector<RenderPassDependency> Dependencies;
 
+            // Optional per-pass color clear override. When unset the default (0.1 grey) is used. The
+            // shadow pass needs 1.0 here so its R32F depth target clears to "far" (no occluder) — a 0.1
+            // background would falsely occlude any receiver whose depth exceeds it.
+            std::optional<glm::vec4>          ClearColor;
+
             // Cached once in Build(); reused every frame.
             std::shared_ptr<RenderPass>       CachedRenderPass;
         };
@@ -44,7 +50,8 @@ namespace Desert::Graphic
                       std::function<void()>                    executeFunc,
                       const GraphicsPipelineSpecification&     pipelineSpec      = {},
                       std::shared_ptr<Framebuffer>             targetFramebuffer = nullptr,
-                      const std::vector<RenderPassDependency>& dependencies      = {} );
+                      const std::vector<RenderPassDependency>& dependencies      = {},
+                      const std::optional<glm::vec4>&          clearColor        = std::nullopt );
 
         void AddPhaseDependency( RenderPhaseID requiredPhase, RenderPhaseID dependentPhase );
         void AddTextureDependency( const std::string& textureName,

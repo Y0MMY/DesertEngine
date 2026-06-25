@@ -65,6 +65,9 @@ namespace Desert::Graphic
         void                              SetEnvironment( const std::shared_ptr<MaterialSkybox>& material );
         const std::optional<Environment>& GetEnvironment();
 
+        // Procedural sky configuration (from the SkyboxComponent + directional light via the ECS).
+        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius );
+
         const auto& GetMainCamera() const
         {
             return m_SceneInfo.ActiveCamera;

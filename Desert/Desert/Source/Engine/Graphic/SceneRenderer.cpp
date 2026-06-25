@@ -111,6 +111,9 @@ namespace Desert::Graphic
 
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetWireframe( sceneSettings.WireframeMode );
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SetShadows( sceneSettings.EnableShadows, sceneSettings.ShadowBias,
+                           sceneSettings.VisualizeShadows );
 
         m_BloomEnabled = sceneSettings.EnableBloom;
         UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )
@@ -131,6 +134,10 @@ namespace Desert::Graphic
     {
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
         m_DirectionLights        = sceneRenderInfo.DirLights;
+
+        // Bake/rebake the procedural-sky IBL if the sun moved (throttled). Done here — before the render
+        // graph records its command buffer — so the heavy compute + device idle stays at a safe boundary.
+        skyboxSystem->EnsureProceduralEnvironment();
 
         ClearMainFramebuffer();
         ExecuteRenderGraph();
@@ -228,6 +235,13 @@ namespace Desert::Graphic
     void SceneRenderer::SetEnvironment( const std::shared_ptr<MaterialSkybox>& material )
     {
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->PrepareMaterial( material );
+    }
+
+    void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity,
+                                          float sunDiskRadius )
+    {
+        UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
+             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius );
     }
 
     const std::optional<Environment>& SceneRenderer::GetEnvironment()

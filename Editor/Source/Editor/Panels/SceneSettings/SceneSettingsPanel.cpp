@@ -80,12 +80,18 @@ namespace Desert::Editor
         // Shown disabled so they read honestly rather than appearing to do nothing.
         if ( ImGui::CollapsingHeader( "Environment" ) )
         {
-            NotImplementedNote( "shadows & environment intensity" );
+            // Live — directional shadow map.
+            ImGui::Checkbox( "Shadows", &s.EnableShadows );
+            ImGui::SliderFloat( "Shadow Bias", &s.ShadowBias, 0.0f, 0.02f, "%.4f" );
+
+            ImGui::Spacing();
+            ImGui::TextDisabled( "Procedural Sky moved to the Skybox component (Details panel)." );
+
+            ImGui::Spacing();
+            NotImplementedNote( "environment-map intensity / skybox LOD" );
             ImGui::BeginDisabled();
             ImGui::SliderFloat( "Env Map Intensity", &s.EnvironmentMapIntensity, 0.0f, 5.0f );
             ImGui::SliderFloat( "Skybox LOD", &s.SkyboxLOD, 0.0f, 10.0f );
-            ImGui::Checkbox( "Shadows", &s.EnableShadows );
-            ImGui::SliderFloat( "Shadow Bias", &s.ShadowBias, 0.0f, 0.05f, "%.4f" );
             ImGui::EndDisabled();
         }
 
@@ -93,6 +99,10 @@ namespace Desert::Editor
         {
             // Live — selects the line-polygon mesh pipeline.
             ImGui::Checkbox( "Wireframe", &s.WireframeMode );
+
+            // Live — bypasses PBR lighting and shows the raw shadow factor (grayscale) so the shadow
+            // map can be verified independently of scene lighting (IBL doesn't get shadowed).
+            ImGui::Checkbox( "Visualize Shadows", &s.VisualizeShadows );
 
             ImGui::Spacing();
             NotImplementedNote( "bounding-box / normals visualization" );

@@ -172,6 +172,12 @@ namespace Desert::ECS
         Assets::AssetHandle SkyboxHandle;
 
         float Intensity;
+
+        // Engine-generated procedural atmosphere (Rayleigh+Mie). When true, the visible sky is generated
+        // in-shader (no HDR asset needed) with the sun driven by the scene's directional light.
+        bool  Procedural    = false;
+        float SunIntensity  = 22.0f;  // atmosphere sun radiance scale
+        float SunDiskRadius = 0.02f;  // sun angular radius (radians)
     };
 
     struct PrefabComponent

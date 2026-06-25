@@ -36,6 +36,24 @@ namespace Desert::Graphic::System
         m_Pipeline = Graphic::GraphicsPipeline::Create( pipeSpec );
         m_Pipeline->Invalidate();
 
+        // Procedural sky: same fullscreen-quad pass/target, but the engine-generated atmosphere shader.
+        m_ProceduralShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "ProceduralSky" );
+        if ( m_ProceduralShader )
+        {
+            Graphic::GraphicsPipelineSpecification skySpec;
+            skySpec.DebugName         = "ProceduralSky";
+            skySpec.Framebuffer       = compositeFramebuffer;
+            skySpec.Shader            = m_ProceduralShader;
+            skySpec.CullMode          = CullMode::None;
+            skySpec.DepthTestEnabled  = false;
+            skySpec.DepthWriteEnabled = false;
+
+            m_ProceduralPipeline = Graphic::GraphicsPipeline::Create( skySpec );
+            m_ProceduralPipeline->Invalidate();
+
+            m_ProceduralMaterial = std::make_shared<MaterialProceduralSky>();
+        }
+
         return BOOLSUCCESS;
     }
 
@@ -46,19 +64,51 @@ namespace Desert::Graphic::System
 
     void SkyboxRenderer::PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material )
     {
-        const auto& camera = m_ActiveCamera;
-        if ( !camera )
-        {
-            DESERT_VERIFY( false );
-        }
-
+        // Only record the material here. This can run from the skybox-load command (ExecuteAll) BEFORE
+        // BeginScene/PrepareCamera, so the active camera may not exist yet — the camera-dependent bind
+        // is deferred to Render(), which always runs with a valid camera.
         if ( !material )
         {
             return;
         }
 
-        material->Bind( { camera } );
         m_MaterialSkybox = material;
+    }
+
+    void SkyboxRenderer::EnsureProceduralEnvironment()
+    {
+        if ( !m_UseProceduralSky || !m_EnvDirty )
+            return;
+
+        // Throttle: at most one rebake per interval so a dragged sun doesn't rebuild the IBL every frame.
+        constexpr auto kMinInterval = std::chrono::milliseconds( 150 );
+        const auto     now          = std::chrono::steady_clock::now();
+        if ( m_ProceduralEnv && ( now - m_LastBakeTime ) < kMinInterval )
+            return;
+
+        // The bake runs immediate compute dispatches; idle the device first (mirrors the editor's
+        // skybox-swap path) since we're recreating GPU images that prior frames may have referenced.
+        Renderer::GetInstance().WaitDeviceIdle();
+
+        Environment baked = EnvironmentManager::CreateProcedural( m_SunDir, m_SunIntensity, m_SunDiskRadius );
+        m_LastBakeTime    = now;
+        if ( !baked )
+            return; // bake failed (e.g. shader missing) — keep the prior environment, retry later.
+
+        const Environment previous = m_ProceduralEnv;
+        m_ProceduralEnv            = baked;
+
+        // Release the previous baked cubes (the image service owns them until unregistered).
+        if ( previous )
+        {
+            auto* imageService = Runtime::ResourceRegistry::GetImageService();
+            imageService->Unregister( previous.RadianceMap );
+            imageService->Unregister( previous.IrradianceMap );
+            imageService->Unregister( previous.PreFilteredMap );
+        }
+
+        m_BakedSunDir = glm::normalize( m_SunDir );
+        m_EnvDirty    = false;
     }
 
     void SkyboxRenderer::RegisterPasses( RenderGraphBuilder& builder )
@@ -74,8 +124,20 @@ namespace Desert::Graphic::System
     void SkyboxRenderer::Render()
     {
         auto& renderer = Renderer::GetInstance();
+
+        // Engine-generated procedural atmosphere (no HDR asset needed).
+        if ( m_UseProceduralSky && m_ProceduralPipeline && m_ProceduralMaterial && m_ActiveCamera )
+        {
+            m_ProceduralMaterial->Update( m_ActiveCamera, m_SunDir, m_SunIntensity, m_SunDiskRadius );
+            renderer.SubmitFullscreenQuad( m_ProceduralPipeline.get(),
+                                           m_ProceduralMaterial->GetMaterialExecutor() );
+            return;
+        }
+
         if ( const auto& material = m_MaterialSkybox.lock() )
         {
+            if ( m_ActiveCamera )
+                material->Bind( { m_ActiveCamera } );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), material->GetMaterialExecutor() );
         }
     }

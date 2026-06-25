@@ -4,6 +4,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialSilhouette.hpp>
+#include <Engine/Graphic/Materials/Mesh/MaterialShadow.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
@@ -69,14 +70,34 @@ namespace Desert::Graphic::System
             m_Wireframe = enabled;
         }
 
+        // Directional shadow map (R32F light-space depth) + the light view-projection used to build it.
+        std::shared_ptr<Framebuffer> GetShadowMapFramebuffer() const
+        {
+            return m_ShadowMapFramebuffer;
+        }
+        const glm::mat4& GetLightViewProj() const
+        {
+            return m_LightViewProj;
+        }
+        void SetShadows( bool enabled, float bias, bool debugVisualize = false )
+        {
+            m_ShadowsEnabled = enabled;
+            m_ShadowBias     = bias;
+            m_ShadowDebug    = debugVisualize;
+        }
+        bool  AreShadowsEnabled() const { return m_ShadowsEnabled; }
+        float GetShadowBias() const     { return m_ShadowBias; }
+
     private:
         bool SetupGeometryPass();
         bool SetupSkinnedGeometryPass();
         bool SetupSilhouettePass();
+        bool SetupShadowPass();
 
         void DrawStaticMeshes();
         void DrawSkinnedMeshes();
         void RegisterSilhouettePass( RenderGraphBuilder& builder );
+        void RegisterShadowPass( RenderGraphBuilder& builder );
 
         void UpdateGlobalUniforms( const Core::Camera* camera, const ShaderProtocols::PointLight& pointLights,
                                    const ShaderProtocols::DirectionLight& dirLights );
@@ -97,6 +118,16 @@ namespace Desert::Graphic::System
         std::shared_ptr<Shader>             m_SilhouetteShader;
         std::unique_ptr<MaterialSilhouette> m_SilhouetteMaterial;
         std::shared_ptr<Framebuffer>        m_SilhouetteMaskFramebuffer;
+
+        // Directional shadow map
+        std::shared_ptr<GraphicsPipeline> m_ShadowPipeline;
+        std::shared_ptr<Shader>           m_ShadowShader;
+        std::unique_ptr<MaterialShadow>   m_ShadowMaterial;
+        std::shared_ptr<Framebuffer>      m_ShadowMapFramebuffer;
+        glm::mat4                         m_LightViewProj  = glm::mat4( 1.0f );
+        bool                              m_ShadowsEnabled = true;
+        float                             m_ShadowBias     = 0.005f;
+        bool                              m_ShadowDebug    = false;
 
         std::vector<StaticMeshRenderData>  m_StaticQueue;
         std::vector<SkinnedMeshRenderData> m_SkinnedQueue;
