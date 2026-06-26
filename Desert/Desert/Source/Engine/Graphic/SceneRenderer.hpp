@@ -6,6 +6,7 @@
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
+#include <Engine/Graphic/CloudSettings.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Core/Scene.hpp>
@@ -20,6 +21,7 @@
 #include "Systems/Scene/PostProcessing/TonemapRenderer.hpp"
 #include "Systems/Scene/PostProcessing/JumpFloodOutlineRenderer.hpp"
 #include "Systems/Scene/PostProcessing/FXAARenderer.hpp"
+#include "Systems/Scene/PostProcessing/SMAARenderer.hpp"
 #include "Systems/Scene/PostProcessing/BloomRenderer.hpp"
 #include "Systems/Scene/PostProcessing/AutoExposureRenderer.hpp"
 
@@ -71,7 +73,7 @@ namespace Desert::Graphic
         // Procedural sky configuration (from the SkyboxComponent + directional light via the ECS).
         // bakeNow = one-shot request from the editor's Bake button (rebuild the sky IBL).
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                               bool bakeNow );
+                               bool bakeNow, const CloudSettings& clouds );
 
         const auto& GetMainCamera() const
         {

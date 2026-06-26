@@ -240,8 +240,10 @@ namespace Desert::Editor
                 {
                     if ( ImGui::MenuItem( "Cube" ) )
                     {
-                        auto& cubeMesh      = scene->CreateNewEntity( "Cube" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.MeshHandle = BuiltinMeshRegistry::Get( BuiltinMeshType::Cube );
+                        // Use the Primitive path (RuntimeMesh generated + Invalidated by MeshECSSystem) —
+                        // it renders + serializes reliably, unlike the builtin procedural-handle path.
+                        auto& cubeMesh     = scene->CreateNewEntity( "Cube" ).AddComponent<ECS::StaticMeshComponent>();
+                        cubeMesh.Primitive = Geometry::PrimitiveType::Cube;
                     }
                     if ( ImGui::MenuItem( "Sphere" ) )
                     {

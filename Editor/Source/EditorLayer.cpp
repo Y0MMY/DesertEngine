@@ -457,10 +457,14 @@ namespace Desert::Editor
         {
             ImGui::TextUnformatted( m_MainScene->GetSceneName().c_str() );
 
-            if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+            if ( ImGui::IsItemHovered() )
             {
-                renameScene     = true;
-                sceneNameBuffer = m_MainScene->GetSceneName();
+                ImGui::SetTooltip( "Double-click to rename the scene" );
+                if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+                {
+                    renameScene     = true;
+                    sceneNameBuffer = m_MainScene->GetSceneName();
+                }
             }
         }
         else

@@ -124,7 +124,7 @@ namespace Desert::Graphic::System
         // Engine-generated procedural atmosphere (no HDR asset needed).
         if ( m_UseProceduralSky && m_ProceduralPipeline && m_ProceduralMaterial && m_ActiveCamera )
         {
-            m_ProceduralMaterial->Update( m_ActiveCamera, m_SunDir, m_SunIntensity, m_SunDiskRadius );
+            m_ProceduralMaterial->Update( m_ActiveCamera, m_SunDir, m_SunIntensity, m_SunDiskRadius, m_Clouds );
             renderer.SubmitFullscreenQuad( m_ProceduralPipeline.get(),
                                            m_ProceduralMaterial->GetMaterialExecutor() );
             return;

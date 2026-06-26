@@ -205,20 +205,42 @@ namespace Desert::ECS
         SpotLightData Data;
     };
 
+    // Reflected (REFLECT/PROPERTY) so it (de)serializes generically — the SkyboxHandle round-trips as an
+    // asset PATH via the serializer's AssetResolver. RequestBake has NO PROPERTY → excluded from
+    // reflection (transient). All fields kept flat (no Data sub-struct) so existing accessors are unchanged.
     struct SkyboxComponent
     {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Skybox" ), Category( "Skybox" ), Asset<SkyboxAsset> )
         Assets::AssetHandle SkyboxHandle;
 
-        float Intensity;
+        PROPERTY( DisplayName( "Intensity" ), Category( "Skybox" ), Range( 0.0f, 10.0f ) )
+        float Intensity = 1.0f;
 
-        // Engine-generated procedural atmosphere (Rayleigh+Mie). When true, the visible sky is generated
-        // in-shader (no HDR asset needed) with the sun driven by the scene's directional light.
+        // Engine-generated procedural atmosphere (Rayleigh+Mie).
+        PROPERTY( DisplayName( "Procedural" ), Category( "Skybox" ) )
         bool  Procedural    = false;
+        PROPERTY( DisplayName( "Sun Intensity" ), Category( "Skybox" ), Range( 1.0f, 50.0f ) )
         float SunIntensity  = 22.0f;  // atmosphere sun radiance scale
+        PROPERTY( DisplayName( "Sun Disk Size" ), Category( "Skybox" ), Range( 0.002f, 0.1f ) )
         float SunDiskRadius = 0.02f;  // sun angular radius (radians)
 
-        // Transient (not serialized): set by the editor's "Bake" button to request a one-shot sky-IBL
-        // rebuild. The SkyboxECSSystem forwards it for one frame, then clears it.
+        // Engine-generated volumetric clouds (raymarched in the procedural-sky pass; visual only).
+        PROPERTY( DisplayName( "Volumetric Clouds" ), Category( "Clouds" ) )
+        bool  EnableClouds   = false;
+        PROPERTY( DisplayName( "Coverage" ), Category( "Clouds" ), Range( 0.0f, 1.0f ) )
+        float CloudCoverage  = 0.5f;   // 0 = clear sky, 1 = overcast
+        PROPERTY( DisplayName( "Density" ), Category( "Clouds" ), Range( 0.0f, 3.0f ) )
+        float CloudDensity   = 0.6f;   // opacity / extinction multiplier
+        PROPERTY( DisplayName( "Cloud Height" ), Category( "Clouds" ), Range( 100.0f, 3000.0f ) )
+        float CloudHeight    = 600.0f; // world-space altitude of the cloud layer base
+        PROPERTY( DisplayName( "Thickness" ), Category( "Clouds" ), Range( 100.0f, 2000.0f ) )
+        float CloudThickness = 500.0f; // vertical extent of the layer
+        PROPERTY( DisplayName( "Wind Speed" ), Category( "Clouds" ), Range( 0.0f, 50.0f ) )
+        float CloudWindSpeed = 8.0f;   // horizontal drift speed (animation)
+
+        // Transient (not serialized — no PROPERTY): set by the editor's "Bake" button.
         bool  RequestBake   = false;
     };
 

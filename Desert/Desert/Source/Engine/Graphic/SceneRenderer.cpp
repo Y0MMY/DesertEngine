@@ -90,6 +90,12 @@ namespace Desert::Graphic
         if ( !SP_CAST( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
+        // SMAA consumes the same tonemapped image. Runs only when SceneSettings.AA == SMAA.
+        RegisterSystem<System::SMAARenderer>( "SMAASystem", this, tonemapSystem->GetSystemFramebuffer(),
+                                              m_RenderGraphBuilder );
+        if ( !SP_CAST( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Initialize() )
+            DESERT_VERIFY( false );
+
         RebuildRenderGraph();
     }
 
@@ -189,6 +195,8 @@ namespace Desert::Graphic
 
         if ( m_AAMode == Core::AntiAliasingMode::FXAA )
             UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Execute();
+        else if ( m_AAMode == Core::AntiAliasingMode::SMAA )
+            UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Execute();
 
         CompositeRenderPass();
     }
@@ -224,6 +232,7 @@ namespace Desert::Graphic
              ->OnResize( width, height );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Resize( width, height );
         UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Resize( width, height );
+        UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Resize( width, height );
 
         // Bloom recreates its (storage) mip-chain image on resize, so re-point tonemap at the new image.
         const auto& bloomSystem = UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
@@ -270,10 +279,10 @@ namespace Desert::Graphic
     }
 
     void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity,
-                                          float sunDiskRadius, bool bakeNow )
+                                          float sunDiskRadius, bool bakeNow, const CloudSettings& clouds )
     {
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
-             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow );
+             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow, clouds );
     }
 
     const std::optional<Environment>& SceneRenderer::GetEnvironment()
@@ -294,9 +303,10 @@ namespace Desert::Graphic
 
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage()
     {
-        // FXAA writes its own framebuffer downstream of tonemap; otherwise the tonemap output IS final.
-        const char* finalSystem =
-             ( m_AAMode == Core::AntiAliasingMode::FXAA ) ? "FXAASystem" : "TonemapSystem";
+        // FXAA/SMAA write their own framebuffer downstream of tonemap; otherwise tonemap output IS final.
+        const char* finalSystem = ( m_AAMode == Core::AntiAliasingMode::FXAA )   ? "FXAASystem"
+                                  : ( m_AAMode == Core::AntiAliasingMode::SMAA ) ? "SMAASystem"
+                                                                                : "TonemapSystem";
 
         return std::static_pointer_cast<System::RenderSystem>( m_RenderSystems[finalSystem] )
              ->GetSystemFramebuffer()

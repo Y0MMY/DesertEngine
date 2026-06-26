@@ -88,6 +88,18 @@ namespace Desert::Editor
         // current sun direction + parameters.
         if ( ImGui::Button( "Bake Sky IBL", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
             skybox.RequestBake = true;
+
+        // Engine-generated volumetric clouds (raymarched in the sky pass; visual only — not baked into IBL).
+        ImGui::Dummy( ImVec2( 0, 6 ) );
+        ImGui::Separator();
+        ImGui::Checkbox( "Volumetric Clouds", &skybox.EnableClouds );
+        ImGui::BeginDisabled( !skybox.EnableClouds );
+        ImGui::SliderFloat( "Coverage", &skybox.CloudCoverage, 0.0f, 1.0f );
+        ImGui::SliderFloat( "Density", &skybox.CloudDensity, 0.0f, 3.0f );
+        ImGui::SliderFloat( "Cloud Height", &skybox.CloudHeight, 100.0f, 3000.0f );
+        ImGui::SliderFloat( "Thickness", &skybox.CloudThickness, 100.0f, 2000.0f );
+        ImGui::SliderFloat( "Wind Speed", &skybox.CloudWindSpeed, 0.0f, 50.0f );
+        ImGui::EndDisabled();
         ImGui::EndDisabled();
 
         if ( skybox.Procedural )

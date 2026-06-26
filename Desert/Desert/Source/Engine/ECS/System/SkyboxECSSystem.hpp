@@ -46,9 +46,17 @@ namespace Desert::ECS
                 const bool bakeNow = skybox.RequestBake;
                 skybox.RequestBake = false;
 
+                Graphic::CloudSettings clouds;
+                clouds.Enabled   = skybox.EnableClouds;
+                clouds.Coverage  = skybox.CloudCoverage;
+                clouds.Density    = skybox.CloudDensity;
+                clouds.Height     = skybox.CloudHeight;
+                clouds.Thickness = skybox.CloudThickness;
+                clouds.WindSpeed = skybox.CloudWindSpeed;
+
                 // Procedural-sky config always flows to the renderer (it toggles the Sky-pass mode).
                 renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
-                     skybox.Procedural, sunDir, skybox.SunIntensity, skybox.SunDiskRadius, bakeNow );
+                     skybox.Procedural, sunDir, skybox.SunIntensity, skybox.SunDiskRadius, bakeNow, clouds );
 
                 // The HDR cubemap is only needed when NOT procedural (and only if an asset is assigned).
                 if ( !skybox.Procedural )

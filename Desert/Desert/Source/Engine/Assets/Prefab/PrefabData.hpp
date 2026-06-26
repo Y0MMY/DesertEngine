@@ -23,10 +23,14 @@ namespace Desert::Assets
         glm::vec2 TexCoord;
     };
 
+    // Mesh component serialization mirrors. Meshes keep a custom (non-reflected) serializer because they
+    // carry DERIVED data reflection can't express: dynamic/edited geometry (CustomVertices/CustomIndices,
+    // extracted from the transient RuntimeMesh) and a std::optional primitive type. Asset references
+    // (MeshPath / MaterialPaths) round-trip as paths through the shared AssetResolver — same code path the
+    // reflected components use.
     struct StaticMeshComponentSer
     {
         std::optional<std::string>                  MeshPath;
-        std::vector<AssetHandle>                    MaterialSlots;
         std::optional<std::vector<std::string>>     MaterialPaths;
         std::optional<Geometry::PrimitiveType>      Primitive;
         std::optional<std::vector<VertexSer>>       CustomVertices;
@@ -36,24 +40,12 @@ namespace Desert::Assets
     struct SkinnedMeshComponentSer
     {
         std::optional<std::string>              MeshPath;
-        std::vector<AssetHandle>                MaterialSlots;
         std::optional<std::vector<std::string>> MaterialPaths;
     };
 
-    // NOTE: camera/light payloads are no longer mirrored here — they serialize generically through the
-    // reflection registry (ComponentRegistry + ReflectionSerializer). The structs below remain only for
-    // the asset-bearing components whose handlers map asset handles <-> file paths.
-
-    struct SkyboxComponentSer
-    {
-        std::optional<std::string> SkyboxPath;
-        float                      Intensity = 1.0f;
-
-        // Procedural atmosphere (engine-generated sky).
-        bool  Procedural    = false;
-        float SunIntensity  = 22.0f;
-        float SunDiskRadius = 0.02f;
-    };
+    // NOTE: camera/light/skybox payloads are no longer mirrored here — they serialize generically through
+    // the reflection registry (ComponentRegistry + ReflectionSerializer + AssetResolver). Only the mesh
+    // mirrors above remain (derived geometry isn't reflectable).
 
     struct EntityData
     {

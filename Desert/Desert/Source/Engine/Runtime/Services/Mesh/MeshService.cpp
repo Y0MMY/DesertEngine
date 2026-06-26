@@ -21,6 +21,11 @@ namespace Desert::Runtime
     Assets::AssetHandle MeshService::RegisterProcedural( const std::shared_ptr<Mesh>& mesh )
     {
         Assets::AssetHandle handle{};
+        // Build the GPU vertex/index buffers — the mesh ctor doesn't (asset meshes get this via
+        // MeshFactory::Create, and the ECS primitive path Invalidates explicitly). Without this a builtin
+        // procedural mesh (e.g. the Cube) has no buffers and renders nothing.
+        if ( mesh )
+            mesh->Invalidate();
         m_Meshes[handle] = mesh;
         return handle;
     }

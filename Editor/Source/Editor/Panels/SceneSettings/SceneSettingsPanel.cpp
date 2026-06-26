@@ -55,7 +55,7 @@ namespace Desert::Editor
             int         current = static_cast<int>( s.AA );
             if ( ImGui::Combo( "Mode", &current, items, IM_ARRAYSIZE( items ) ) )
                 s.AA = static_cast<Core::AntiAliasingMode>( current );
-            ImGui::TextDisabled( "SMAA wiring is WIP; TAA/DLSS need motion vectors (deferred)." );
+            ImGui::TextDisabled( "TAA/DLSS need motion vectors (deferred)." );
         }
 
         if ( ImGui::CollapsingHeader( "Post-Processing", ImGuiTreeNodeFlags_DefaultOpen ) )

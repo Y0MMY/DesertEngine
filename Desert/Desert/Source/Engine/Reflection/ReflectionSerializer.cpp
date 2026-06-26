@@ -61,7 +61,7 @@ namespace Desert::Reflection
         }
     } // namespace
 
-    rfl::Generic::Object SerializeReflected( const TypeInfo& type, const void* obj )
+    rfl::Generic::Object SerializeReflected( const TypeInfo& type, const void* obj, const AssetResolver* resolver )
     {
         rfl::Generic::Object out;
         const auto* base = static_cast<const std::byte*>( obj );
@@ -69,6 +69,13 @@ namespace Desert::Reflection
         for ( const auto& field : type.Fields )
         {
             const void* p = base + field.Offset;
+
+            // Containers route through the codegen-emitted typed lambda (the switch can't iterate vectors).
+            if ( field.IsContainer && field.SerializeContainer )
+            {
+                out[field.Name] = field.SerializeContainer( p );
+                continue;
+            }
 
             switch ( field.Type )
             {
@@ -103,11 +110,15 @@ namespace Desert::Reflection
                     out[field.Name] = ReadIntBySize( p, field.Size );
                     break;
                 case FieldType::AssetHandle:
-                    out[field.Name] = static_cast<int64_t>( *static_cast<const uint64_t*>( p ) );
+                    if ( resolver && resolver->ToPath )
+                        out[field.Name] =
+                             resolver->ToPath( *static_cast<const uint64_t*>( p ), field.Meta.AssetType );
+                    else
+                        out[field.Name] = static_cast<int64_t>( *static_cast<const uint64_t*>( p ) );
                     break;
                 case FieldType::Struct:
                     if ( field.StructType )
-                        out[field.Name] = SerializeReflected( *field.StructType, p );
+                        out[field.Name] = SerializeReflected( *field.StructType, p, resolver );
                     break;
                 default:
                     break;
@@ -117,7 +128,8 @@ namespace Desert::Reflection
         return out;
     }
 
-    void DeserializeReflected( const TypeInfo& type, void* obj, const rfl::Generic::Object& src )
+    void DeserializeReflected( const TypeInfo& type, void* obj, const rfl::Generic::Object& src,
+                               const AssetResolver* resolver )
     {
         auto* base = static_cast<std::byte*>( obj );
 
@@ -129,6 +141,12 @@ namespace Desert::Reflection
 
             const rfl::Generic& g = found.value();
             void*               p = base + field.Offset;
+
+            if ( field.IsContainer && field.DeserializeContainer )
+            {
+                field.DeserializeContainer( p, g );
+                continue;
+            }
 
             switch ( field.Type )
             {
@@ -165,13 +183,23 @@ namespace Desert::Reflection
                     WriteIntBySize( p, field.Size, static_cast<int64_t>( AsNumber( g ) ) );
                     break;
                 case FieldType::AssetHandle:
-                    *static_cast<uint64_t*>( p ) = static_cast<uint64_t>( AsNumber( g ) );
+                    if ( resolver && resolver->FromPath )
+                    {
+                        if ( auto s = g.to_string(); s.has_value() )
+                            *static_cast<uint64_t*>( p ) = resolver->FromPath( s.value(), field.Meta.AssetType );
+                        else // raw-handle fallback (e.g. files saved without a resolver)
+                            *static_cast<uint64_t*>( p ) = static_cast<uint64_t>( AsNumber( g ) );
+                    }
+                    else
+                    {
+                        *static_cast<uint64_t*>( p ) = static_cast<uint64_t>( AsNumber( g ) );
+                    }
                     break;
                 case FieldType::Struct:
                     if ( field.StructType )
                     {
                         if ( auto o = g.to_object(); o.has_value() )
-                            DeserializeReflected( *field.StructType, p, o.value() );
+                            DeserializeReflected( *field.StructType, p, o.value(), resolver );
                     }
                     break;
                 default:
