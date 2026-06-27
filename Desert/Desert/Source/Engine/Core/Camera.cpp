@@ -31,11 +31,11 @@ namespace Desert::Core
 
         UpdateProjectionMatrix( width, height );
 
-        // === TEMP grass-iteration: eye-level view (auto-revert) ===
-        m_FocalPoint = glm::vec3( 0.0f, 0.5f, -15.0f );
-        m_Distance   = 11.5f;
-        m_Yaw        = 0.0f;
-        m_Pitch      = glm::radians( 6.0f );
+        constexpr glm::vec3 InitialPosition = { 5, 5, 5 };
+        m_Distance                          = glm::distance( InitialPosition, m_FocalPoint );
+
+        m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
+        m_Pitch = glm::pi<float>() / 4.0f;
 
         m_Position                  = m_FocalPoint - GetForwardDirection() * m_Distance + m_LocationDelta;
         const glm::quat orientation = GetOrientation();

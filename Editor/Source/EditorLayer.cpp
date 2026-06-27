@@ -120,19 +120,6 @@ namespace Desert::Editor
 
         m_MainScene->Init();
 
-        // === TEMP grass-iteration scaffolding (auto-revert) ===
-        {
-            auto& terrain          = m_MainScene->CreateNewEntity( "GrassTest" );
-            auto& tc               = terrain.AddComponent<ECS::TerrainComponent>();
-            tc.Data.Size           = 50.0f;
-            tc.Data.Resolution     = 64;
-            tc.Data.HeightScale    = 0.0f;   // FLAT = worst case for banding
-            tc.Data.NoiseFrequency = 0.08f;
-            tc.Data.EnableGrass    = true;
-            tc.Data.GrassDensity   = 256;    // grid; each instance now spawns several geometric blades
-            tc.Data.GrassHeight    = 0.4f;
-        }
-
 #ifdef EBABLE_IMGUI
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager,
