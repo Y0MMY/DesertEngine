@@ -32,6 +32,10 @@ namespace Desert::Graphic
                 return "Vertex";
             case Core::Formats::ShaderStage::Compute:
                 return "Compute";
+            case Core::Formats::ShaderStage::TessControl:
+                return "TessControl";
+            case Core::Formats::ShaderStage::TessEvaluation:
+                return "TessEvaluation";
         }
 
         return "Unknown";

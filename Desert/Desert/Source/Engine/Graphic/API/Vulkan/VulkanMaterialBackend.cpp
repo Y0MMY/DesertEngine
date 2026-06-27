@@ -211,7 +211,7 @@ namespace Desert::Graphic::API::Vulkan
         {
             if ( auto vulkanBuffer = sp_cast<ShaderResources::API::Vulkan::VulkanStorageBuffer>( bufferInfo ) )
             {
-                auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo();
+                auto& descriptorBufferInfo = vulkanBuffer->GetDescriptorBufferInfo( frameIndex );
                 auto  wds = DescriptorSetBuilder::GetStorageWDS( this, frameIndex, 0,
                                                                  vulkanBuffer->GetBinding(), 1U, &descriptorBufferInfo );
 

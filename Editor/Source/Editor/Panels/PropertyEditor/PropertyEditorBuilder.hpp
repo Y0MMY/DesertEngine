@@ -9,6 +9,11 @@ namespace Desert::Assets
     class AssetManager;
 }
 
+namespace Desert::Editor::UI
+{
+    class UIHelper;
+}
+
 namespace Desert::Editor
 {
     // Builds an ImGui property panel automatically from reflection metadata (ReflectionRegistry).
@@ -22,15 +27,16 @@ namespace Desert::Editor
     public:
         // Draws every visible field of `type` for the object at `object`, grouped by Category.
         // Returns true if any field value changed this frame.
+        // `uiHelper` is optional; when provided, texture slots show a thumbnail tooltip on hover.
         static bool Draw( void* object, const Reflection::TypeInfo& type,
-                          const Assets::AssetManager* assetMgr = nullptr );
+                          const Assets::AssetManager* assetMgr = nullptr, UI::UIHelper* uiHelper = nullptr );
 
         // Convenience: looks the type up in the registry by name. Returns false if not registered.
         static bool Draw( void* object, const std::string& typeName,
-                          const Assets::AssetManager* assetMgr = nullptr );
+                          const Assets::AssetManager* assetMgr = nullptr, UI::UIHelper* uiHelper = nullptr );
 
     private:
         static bool DrawField( void* object, const Reflection::FieldInfo& field,
-                               const Assets::AssetManager* assetMgr );
+                               const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper );
     };
 } // namespace Desert::Editor

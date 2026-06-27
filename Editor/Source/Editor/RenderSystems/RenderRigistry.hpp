@@ -2,10 +2,10 @@
 
 #include "IRender.hpp"
 
-#include "Grid/Grid.hpp"
-
 namespace Desert::Editor::Render
 {
+    // The scene grid is now an engine-side System::GridRenderer (registered in SceneRenderer); this
+    // editor registry no longer owns it.
     class RenderRegistry
     {
     public:
@@ -15,6 +15,5 @@ namespace Desert::Editor::Render
 
     private:
         std::weak_ptr<Core::Scene> m_Scene;
-        std::unique_ptr<Grid>      m_RenderGrid;
     };
 } // namespace Desert::Editor::Render

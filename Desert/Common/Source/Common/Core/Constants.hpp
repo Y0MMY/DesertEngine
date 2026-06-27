@@ -27,6 +27,7 @@ namespace Common::Constants // TODO: should be merge from config
         const std::string SCENE_EXTENSION             = ".desce";
         const std::string MESH_SERIALIZBLE_EXTENSION  = ".demesh";
         const std::string MATERIAL_EXTENSION          = ".demat";
+        const std::string PREFAB_EXTENSION            = ".deprefab";
         const std::string STATIC_MESH                 = ".skmesh";
         const std::string SKINNED_MESH                = ".stmesh";
     } // namespace Extensions

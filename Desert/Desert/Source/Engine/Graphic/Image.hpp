@@ -50,6 +50,10 @@ namespace Desert::Graphic
 
         virtual Core::Formats::Image2DSpecification& GetImageSpecification() = 0;
 
+        // Reads the image back to CPU as tightly-packed RGBA8 (size = width*height*4). Returns empty on
+        // failure / unsupported format. Used for offscreen thumbnail capture (render -> readback -> PNG).
+        virtual std::vector<uint8_t> ReadPixelsRGBA8() { return {}; }
+
         static std::shared_ptr<Image2D> Create( const Core::Formats::Image2DSpecification& spec,
                                                 const std::unique_ptr<MipMap2DGenerator>&  mipGenerator );
     };
@@ -73,7 +77,8 @@ namespace Desert::Graphic
         bool                   HasStencilComponent( Core::Formats::ImageFormat format );
         inline uint32_t        CalculateMipCount( uint32_t width, uint32_t height, uint32_t depth = 1 )
         {
-            uint32_t max_dim = std::max( { width, height, depth } );
+            // Parenthesize to defeat any windows.h max() macro that may be active in the including TU.
+            uint32_t max_dim = ( std::max )( { width, height, depth } );
             return max_dim > 0 ? (uint32_t)std::log2( max_dim ) + 1 : 1;
         }
     } // namespace Utils

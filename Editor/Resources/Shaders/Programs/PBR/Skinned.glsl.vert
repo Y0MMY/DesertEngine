@@ -10,9 +10,11 @@ layout(location = 6) in vec4  a_BoneWeights;
 
 #include "../../Common/CameraUB.glslh"
 
-layout(push_constant) uniform constants
+// Must match PBR.glsl.frag / Static.glsl.vert push block.
+layout(push_constant) uniform PushConstants
 {
-    mat4 Transform;
+    mat4 Transform;     // offset 0
+    uint MaterialIndex; // offset 64
 } m_PushConstants;
 
 layout(binding = 1) readonly buffer Bones

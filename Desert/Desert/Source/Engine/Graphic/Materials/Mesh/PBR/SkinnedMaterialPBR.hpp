@@ -21,6 +21,7 @@ namespace Desert::Graphic
 
             ShaderProtocols::DirectionLight DirectionLights;
             ShaderProtocols::PointLight     PointLights;
+            ShaderProtocols::SpotLight      SpotLights;
             ShaderProtocols::SkinnedUB      SkinnedUB;
         };
 

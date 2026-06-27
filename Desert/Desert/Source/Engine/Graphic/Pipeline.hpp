@@ -8,6 +8,11 @@
 
 #include <Common/Core/Memory/Buffer.hpp>
 
+namespace Desert::ShaderResources
+{
+    class StorageBuffer;
+}
+
 namespace Desert::Graphic
 {
     enum class PipelineType
@@ -28,7 +33,7 @@ namespace Desert::Graphic
         virtual void Release()    = 0;
 
         [[nodiscard]] virtual PipelineType GetType() const = 0;
-        [[nodiscard]] virtual std::shared_ptr<Shader> GetShader() const = 0;
+        [[nodiscard]] virtual const std::shared_ptr<Shader>& GetShader() const = 0;
     };
 
     // --- Graphics Pipeline ---
@@ -61,7 +66,7 @@ namespace Desert::Graphic
 
     enum class PrimitiveTopology
     {
-        Points = 0, Lines, Triangles, LineStrip, TriangleStrip, TriangleFan
+        Points = 0, Lines, Triangles, LineStrip, TriangleStrip, TriangleFan, Patches
     };
 
     inline bool PrimitiveIsLine( PrimitiveTopology topology )
@@ -104,10 +109,16 @@ namespace Desert::Graphic
         StencilOpState StencilBack;
         CullMode       CullMode          = CullMode::None;
         bool           DepthWriteEnabled = true;
+        // Standard src-alpha / one-minus-src-alpha blending (transparency overlays, e.g. the scene grid).
+        bool           BlendEnable       = false;
 
         float                LineWidth   = 1.0F;
         PrimitiveTopology    Topology    = PrimitiveTopology::Triangles;
         PrimitivePolygonMode PolygonMode = PrimitivePolygonMode::Solid;
+
+        // > 0 enables tessellation: topology becomes a patch list with this many control points per patch
+        // (the pipeline must have tessellation control + evaluation stages).
+        uint32_t PatchControlPoints = 0;
 
         std::string DebugName;
     };
@@ -132,11 +143,22 @@ namespace Desert::Graphic
     {
     public:
         [[nodiscard]] virtual const ComputePipelineSpecification& GetSpecification() const = 0;
-        
-        /**
-         * @brief Updates the internal storage buffer (if any) associated with this pipeline.
-         */
-        virtual void UpdateStorageBuffer( void* data, std::size_t size ) = 0;
+
+        // --- Resource-binding API (UE-style): set inputs/outputs/push-constants, then Dispatch ---
+
+        /** Bind a sampled input image at @p binding (e.g. a panorama or a source cubemap). */
+        virtual ComputePipeline& SetInput( uint32_t binding, Image* image ) = 0;
+        /** Bind a writable storage output image at @p binding; @p mip selects the target mip view. */
+        virtual ComputePipeline& SetOutput( uint32_t binding, Image* image, uint32_t mip = 0 ) = 0;
+        /** Bind a read-write storage buffer at @p binding (e.g. a luminance histogram). */
+        virtual ComputePipeline& SetStorageBuffer( uint32_t binding, ShaderResources::StorageBuffer* buffer ) = 0;
+        /** Set the raw push-constant block used by the next Dispatch (e.g. prefilter roughness). */
+        virtual ComputePipeline& SetPushConstants( const void* data, uint32_t size ) = 0;
+        /** Record + submit one immediate compute dispatch with the currently-bound resources. */
+        virtual void Dispatch( uint32_t groupsX, uint32_t groupsY, uint32_t groupsZ ) = 0;
+
+        [[nodiscard]] virtual Image* GetInput( uint32_t binding ) const  = 0;
+        [[nodiscard]] virtual Image* GetOutput( uint32_t binding ) const = 0;
 
         static std::shared_ptr<ComputePipeline> Create( const ComputePipelineSpecification& spec );
     };

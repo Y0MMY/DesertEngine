@@ -1,0 +1,133 @@
+#ifndef CLOUDS_GLSLH
+#define CLOUDS_GLSLH
+
+// Engine-generated volumetric clouds: a horizontal cloud slab raymarched per pixel. Density comes from
+// animated fBm value-noise shaped by a coverage threshold and a vertical cumulus profile; lighting is a
+// short secondary march toward the sun (Beer's law) with a Henyey-Greenstein phase. Composited over the
+// procedural-sky color. Visual only (not baked into the sky IBL).
+
+float cl_hash( vec3 p )
+{
+    p = fract( p * 0.3183099 + 0.1 );
+    p *= 17.0;
+    return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
+}
+
+float cl_vnoise( vec3 x )
+{
+    vec3 i = floor( x );
+    vec3 f = fract( x );
+    f = f * f * ( 3.0 - 2.0 * f );
+    return mix( mix( mix( cl_hash( i + vec3( 0, 0, 0 ) ), cl_hash( i + vec3( 1, 0, 0 ) ), f.x ),
+                     mix( cl_hash( i + vec3( 0, 1, 0 ) ), cl_hash( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+                mix( mix( cl_hash( i + vec3( 0, 0, 1 ) ), cl_hash( i + vec3( 1, 0, 1 ) ), f.x ),
+                     mix( cl_hash( i + vec3( 0, 1, 1 ) ), cl_hash( i + vec3( 1, 1, 1 ) ), f.x ), f.y ),
+                f.z );
+}
+
+float cl_fbm( vec3 p )
+{
+    float a = 0.5;
+    float s = 0.0;
+    for ( int i = 0; i < 5; ++i )
+    {
+        s += a * cl_vnoise( p );
+        p *= 2.02;
+        a *= 0.5;
+    }
+    return s;
+}
+
+// Cloud density at world position p. heightFrac in [0,1] is the position within the slab (for the
+// vertical cumulus profile: rounded bottom, eroded top).
+float cl_density( vec3 p, float heightFrac, float coverage, vec3 wind )
+{
+    vec3  q    = p * 0.0012 + wind;
+    float base = cl_fbm( q );
+
+    // Coverage threshold: more coverage -> lower threshold -> more cloud.
+    float d = base - ( 1.0 - coverage );
+    d = max( d, 0.0 );
+
+    // Erode the edges with higher-frequency detail.
+    d -= 0.25 * cl_fbm( q * 4.0 + 3.7 );
+
+    // Vertical shaping (rough cumulus): fade in above the base, erode toward the top.
+    float shape = smoothstep( 0.0, 0.15, heightFrac ) * ( 1.0 - smoothstep( 0.55, 1.0, heightFrac ) );
+
+    return clamp( d, 0.0, 1.0 ) * shape;
+}
+
+// Raymarch the cloud slab [baseY, baseY+thickness] (world Y) and composite over skyColor. Assumes a
+// viewer below the layer looking up (the common case); near-horizon and downward rays skip clouds.
+vec3 RenderClouds( vec3 skyColor, vec3 camPos, vec3 dir, vec3 sunDir, float sunI, float coverage,
+                   float density, float baseY, float thickness, float time, float windSpeed )
+{
+    if ( dir.y < 0.02 )
+        return skyColor;
+
+    float topY = baseY + thickness;
+    float t0   = ( baseY - camPos.y ) / dir.y;
+    float t1   = ( topY - camPos.y ) / dir.y;
+    if ( t1 < t0 )
+    {
+        float tmp = t0;
+        t0        = t1;
+        t1        = tmp;
+    }
+    t0 = max( t0, 0.0 );
+    if ( t1 <= t0 )
+        return skyColor;
+
+    // Clamp marched length so near-horizon rays stay bounded.
+    t1 = min( t1, t0 + 60000.0 );
+
+    const int STEPS = 48;
+    float     dt    = ( t1 - t0 ) / float( STEPS );
+    vec3      wind   = vec3( time * windSpeed * 0.02, 0.0, time * windSpeed * 0.013 );
+
+    // Henyey-Greenstein phase (forward scattering toward the sun).
+    float mu    = dot( dir, sunDir );
+    float g     = 0.4;
+    float phase = ( 1.0 - g * g ) / ( 4.0 * 3.14159265 * pow( 1.0 + g * g - 2.0 * g * mu, 1.5 ) );
+
+    float sigma = density * 0.06; // extinction
+
+    float transmittance = 1.0;
+    vec3  scattered     = vec3( 0.0 );
+
+    for ( int i = 0; i < STEPS; ++i )
+    {
+        float t  = t0 + ( float( i ) + 0.5 ) * dt;
+        vec3  p  = camPos + dir * t;
+        float hf = ( p.y - baseY ) / max( thickness, 1.0 );
+        float dens = cl_density( p, hf, coverage, wind );
+        if ( dens > 0.001 )
+        {
+            // Short light march toward the sun for self-shadowing (Beer-Lambert).
+            float lt    = 1.0;
+            float lstep = thickness / 5.0;
+            for ( int j = 1; j <= 5; ++j )
+            {
+                vec3  lp  = p + sunDir * ( lstep * float( j ) );
+                float lhf = clamp( ( lp.y - baseY ) / max( thickness, 1.0 ), 0.0, 1.0 );
+                float ld  = cl_density( lp, lhf, coverage, wind );
+                lt *= exp( -ld * sigma * lstep );
+            }
+
+            float stepExt  = exp( -dens * sigma * dt );
+            vec3  sunColor = vec3( 1.0, 0.96, 0.88 ) * sunI * 0.04;
+            vec3  ambient  = skyColor * 0.6;
+            vec3  lum      = ( sunColor * lt * phase + ambient ) * dens;
+
+            scattered += transmittance * lum * ( 1.0 - stepExt );
+            transmittance *= stepExt;
+            if ( transmittance < 0.01 )
+                break;
+        }
+    }
+
+    return skyColor * transmittance + scattered;
+}
+
+#endif // CLOUDS_GLSLH

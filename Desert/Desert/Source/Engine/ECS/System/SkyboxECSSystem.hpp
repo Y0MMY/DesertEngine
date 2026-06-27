@@ -7,6 +7,9 @@
 #include <Engine/Assets/AssetManager.hpp>
 
 #include <Engine/Graphic/Render/Commands/SkyboxCommand.hpp>
+#include <Engine/Graphic/Render/Commands/ProceduralSkyCommand.hpp>
+
+#include <glm/glm.hpp>
 
 namespace Desert::ECS
 {
@@ -18,21 +21,52 @@ namespace Desert::ECS
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
         {
+            // Sun = the directional light. Its direction lives in TransformComponent.Translation; the
+            // toward-sun direction (what the atmosphere wants) is the negated, normalized vector.
+            glm::vec3 sunDir = glm::normalize( glm::vec3( 0.3f, 0.9f, 0.3f ) );
+            {
+                auto dirLights = registry.view<ECS::DirectionLightComponent, ECS::TransformComponent>();
+                for ( const auto e : dirLights )
+                {
+                    const auto& t = dirLights.get<ECS::TransformComponent>( e );
+                    if ( glm::length( t.Translation ) > 1e-4f )
+                    {
+                        sunDir = -glm::normalize( t.Translation );
+                        break;
+                    }
+                }
+            }
 
             const auto& skyboxes = registry.view<ECS::SkyboxComponent>();
             for ( const auto skyboxEntity : skyboxes )
             {
-                const auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
-                /*if ( skybox.SkyboxHandle == m_CurrentSkyboxHandle )
-                    return;*/
-                // m_CurrentSkyboxHandle = skybox.SkyboxHandle;
-                auto skyboxAsset = Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle );
+                auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
 
-                if ( !skyboxAsset )
+                // One-shot Bake request from the editor: forward it for this frame, then clear it.
+                const bool bakeNow = skybox.RequestBake;
+                skybox.RequestBake = false;
+
+                Graphic::CloudSettings clouds;
+                clouds.Enabled   = skybox.EnableClouds;
+                clouds.Coverage  = skybox.CloudCoverage;
+                clouds.Density    = skybox.CloudDensity;
+                clouds.Height     = skybox.CloudHeight;
+                clouds.Thickness = skybox.CloudThickness;
+                clouds.WindSpeed = skybox.CloudWindSpeed;
+
+                // Procedural-sky config always flows to the renderer (it toggles the Sky-pass mode).
+                renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
+                     skybox.Procedural, sunDir, skybox.SunIntensity, skybox.SunDiskRadius, bakeNow, clouds );
+
+                // The HDR cubemap is only needed when NOT procedural (and only if an asset is assigned).
+                if ( !skybox.Procedural )
                 {
-                    return;
+                    if ( auto skyboxAsset =
+                              Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle ) )
+                    {
+                        renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset );
+                    }
                 }
-                renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset );
                 break;
             }
         }

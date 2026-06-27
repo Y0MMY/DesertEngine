@@ -91,8 +91,11 @@ namespace Desert::Graphic
         virtual uint32_t GetColorAttachmentCount() const = 0;
         virtual uint32_t GetDepthAttachmentCount() const = 0;
 
-        virtual std::shared_ptr<Image2D> GetColorAttachmentImage( uint32_t index = 0 ) const = 0;
-        virtual std::shared_ptr<Image2D> GetDepthAttachmentImage() const                     = 0;
+        // Observe-only: return the stored attachment by const-ref (no atomic refcount bump per call —
+        // these are hit per-frame per-pass). Callers that need ownership copy explicitly. See the
+        // ownership convention ([[cpp-ownership-convention]]).
+        virtual const std::shared_ptr<Image2D>& GetColorAttachmentImage( uint32_t index = 0 ) const = 0;
+        virtual const std::shared_ptr<Image2D>& GetDepthAttachmentImage() const                     = 0;
 
         static std::shared_ptr<Framebuffer> Create( const FramebufferSpecification& spec );
     };

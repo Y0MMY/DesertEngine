@@ -40,9 +40,9 @@ namespace Desert::Assets
             return AssetTypeID::Material;
         }
 
-        virtual MaterialType GetMaterialType() const override
+        virtual std::string GetShaderName() const override
         {
-            return MaterialAsset::MaterialType::PBR;
+            return "StaticMeshPBR";
         }
 
         virtual Common::UUID GetMaterialUUID() const override

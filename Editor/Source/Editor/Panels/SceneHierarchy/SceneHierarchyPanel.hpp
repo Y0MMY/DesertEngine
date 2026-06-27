@@ -26,6 +26,9 @@ namespace Desert::Editor
         const std::shared_ptr<Desert::Core::Scene>  m_Scene;
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
         ImGuiTextFilter                             m_HierarchyFilter;
-        std::string                                 m_PrefabInstantiatePath;
+        std::string                                 m_PrefabInstantiatePath =
+             "Resources/Assets/Prefabs/MyPrefab.deprefab";
+        bool                                        m_OpenInstantiatePrefab = false; // deferred OpenPopup
+        std::optional<Common::UUID>                 m_PendingDelete; // deferred: destroy after UI iteration
     };
 } // namespace Desert::Editor

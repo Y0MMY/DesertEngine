@@ -40,7 +40,13 @@ namespace Desert::Graphic::API::Vulkan
         const auto acquire = m_SwapChain->AcquireNextImage( m_FrameSemaphores[currentIndex].PresentComplete, &m_ImageIndex );
         if ( !acquire )
         {
-            LOG_ERROR( "[AcquireNextImage] Error: {}", acquire.GetError() );
+            // Most commonly VK_ERROR_OUT_OF_DATE_KHR after a window resize — recreate the swapchain (it
+            // re-queries the surface extent) and re-acquire from the fresh swapchain.
+            m_SwapChain->OnResize( m_SwapChain->GetWidth(), m_SwapChain->GetHeight() );
+            const auto reacquire =
+                 m_SwapChain->AcquireNextImage( m_FrameSemaphores[currentIndex].PresentComplete, &m_ImageIndex );
+            if ( !reacquire )
+                LOG_ERROR( "[AcquireNextImage] Error after swapchain recreate: {}", reacquire.GetError() );
         }
     }
 
@@ -110,6 +116,14 @@ namespace Desert::Graphic::API::Vulkan
         auto res = ( vkQueuePresentKHR( queue, &presentInfo ) );
         if ( res == VK_SUCCESS )
         {
+            return Common::MakeSuccess( VK_SUCCESS );
+        }
+
+        // Window was resized/minimized between acquire and present — recreate the swapchain (it re-queries
+        // the current surface extent) and treat this frame as handled. Standard Vulkan resize handling.
+        if ( res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR )
+        {
+            m_SwapChain->OnResize( m_SwapChain->GetWidth(), m_SwapChain->GetHeight() );
             return Common::MakeSuccess( VK_SUCCESS );
         }
 

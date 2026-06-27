@@ -2,6 +2,8 @@
 
 #include <ImGui/imgui_internal.h>
 
+#include <cmath>
+
 namespace Desert::Editor
 {
 
@@ -99,9 +101,9 @@ namespace Desert::Editor
         const float buttonWidth = 44.0f;
         const float spacing     = 28.0f;
 
-        if ( glm::length( glm::vec2( direction.x, direction.y ) ) < 0.001f )
+        if ( glm::length( direction ) < 1e-4f )
         {
-            direction = glm::vec3( 0.0f, 1.0f, -1.0f );
+            direction = glm::vec3( 0.0f, 1.0f, 0.0f );
         }
         ImVec2 startCursorPos = ImGui::GetCursorPos();
         ImVec2 startScreenPos = ImGui::GetCursorScreenPos();
@@ -132,14 +134,41 @@ namespace Desert::Editor
             if ( length > radius )
                 delta = delta / length * radius;
 
-            direction.x = delta.x / radius;
-            direction.y = delta.y / radius;
+            // The disk is an orthographic projection of the UNIT direction onto the XY plane: the radius
+            // from centre is the in-plane magnitude, so Z is derived to keep |dir| = 1. That makes the
+            // circle drive Z too (centre = pointing straight along ±Z, rim = fully in-plane). The previous
+            // Z sign is preserved so a back-facing direction stays back-facing (flip via right-click).
+            const float nx        = delta.x / radius;
+            const float ny        = delta.y / radius;
+            const float prevZSign = ( direction.z >= 0.0f ) ? 1.0f : -1.0f;
+            const float nz        = std::sqrt( glm::max( 0.0f, 1.0f - nx * nx - ny * ny ) ) * prevZSign;
+            direction             = glm::vec3( nx, ny, nz );
         }
 
-        glm::vec2 dirNormalized = glm::normalize( glm::vec2( direction.x, direction.y ) );
-        drawList->AddCircleFilled(
-             ImVec2( center.x + dirNormalized.x * radius, center.y + dirNormalized.y * radius ), markerRadius,
-             ImGui::GetColorU32( ImVec4( 0.22f, 0.42f, 0.69f, 1.0f ) ), 12 );
+        // The 2D disk can't disambiguate the two Z hemispheres (front/back) — right-click flips it.
+        if ( ImGui::IsItemHovered() && ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
+        {
+            direction.z = ( glm::abs( direction.z ) < 1e-4f ) ? -1e-3f : -direction.z;
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Drag: aim direction (centre = toward ±Z)\nRight-click: flip front/back" );
+
+        const glm::vec3 dirN =
+             glm::length( direction ) > 1e-4f ? glm::normalize( direction ) : glm::vec3( 0.0f, 1.0f, 0.0f );
+        // Marker at the projected position: moves toward the centre as the direction tilts toward ±Z. Front
+        // hemisphere (z>=0) = filled dot; back hemisphere (z<0) = hollow ring, so the two are distinguishable.
+        const ImVec2 markerPos( center.x + dirN.x * radius, center.y + dirN.y * radius );
+        const ImU32  markerCol = ImGui::GetColorU32( ImVec4( 0.22f, 0.42f, 0.69f, 1.0f ) );
+        if ( dirN.z >= 0.0f )
+        {
+            drawList->AddCircleFilled( markerPos, markerRadius, markerCol, 12 );
+        }
+        else
+        {
+            drawList->AddCircleFilled( markerPos, markerRadius,
+                                       ImGui::GetColorU32( ImVec4( 0.11f, 0.11f, 0.12f, 1.0f ) ), 12 );
+            drawList->AddCircle( markerPos, markerRadius, markerCol, 12, 2.0f );
+        }
         ImGui::SetCursorScreenPos( ImVec2( widgetMax.x + spacing, startScreenPos.y ) );
 
         float totalInputHeight = inputHeight * 3 + ImGui::GetStyle().ItemSpacing.y * 2;
@@ -181,6 +210,14 @@ namespace Desert::Editor
             ImGui::SameLine();
             ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x );
             ImGui::DragFloat( "##Z", &direction.z, 0.01f, -1.0f, 1.0f, "%.2f" );
+
+            // Explicit hemisphere flip (same as right-clicking the disk); label shows the current side.
+            const bool back = direction.z < 0.0f;
+            if ( ImGui::Button( back ? "Hemisphere: Back" : "Hemisphere: Front",
+                                ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+            {
+                direction.z = ( glm::abs( direction.z ) < 1e-4f ) ? -1e-3f : -direction.z;
+            }
         }
         ImGui::EndGroup();
 

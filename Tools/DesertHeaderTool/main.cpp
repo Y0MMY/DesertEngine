@@ -52,6 +52,9 @@ namespace
         std::string fieldType;  // FieldType enum name, e.g. "Vec4"
         Metadata    meta;
         std::vector<std::pair<std::string, long long>> enumValues; // populated when fieldType == "Enum"
+
+        bool        isContainer   = false; // std::vector<...>
+        std::string elemFieldType;         // FieldType of the element (when isContainer)
     };
 
     // A scanned enum definition (collected across all headers before reflected types are parsed, so a
@@ -198,6 +201,18 @@ namespace
         while ( !v.empty() && std::isspace( (unsigned char)v.front() ) ) v.erase( v.begin() );
         while ( !v.empty() && std::isspace( (unsigned char)v.back() ) ) v.pop_back();
         return v;
+    }
+
+    // If `type` is a std::vector<...> spelling, returns the trimmed element type; else empty.
+    std::string VectorElement( const std::string& typeRaw )
+    {
+        std::string t = TrimCopy( typeRaw );
+        for ( const std::string pre : { std::string( "std::vector<" ), std::string( "vector<" ) } )
+        {
+            if ( t.rfind( pre, 0 ) == 0 && !t.empty() && t.back() == '>' )
+                return TrimCopy( t.substr( pre.size(), t.size() - pre.size() - 1 ) );
+        }
+        return "";
     }
 
     // Parses a single enumerator initializer ("= 2", "= 0x4", "= Other"). Falls back to the running
@@ -587,11 +602,22 @@ namespace
                         }
                         else if ( f.fieldType == "Struct" )
                         {
-                            // Unknown class spelling — it may actually be an enum.
+                            // Unknown class spelling — enum, or a std::vector<...> container.
                             if ( const EnumDef* e = FindEnum( enums, typeName ) )
                             {
                                 f.fieldType  = "Enum";
                                 f.enumValues = e->values;
+                            }
+                            else if ( std::string elem = VectorElement( typeName ); !elem.empty() )
+                            {
+                                std::string et = MapFieldType( elem );
+                                // Supported element types (scalars + asset handle). vector<struct/vec> later.
+                                if ( et == "AssetHandle" || et == "Bool" || et == "Int" || et == "UInt" ||
+                                     et == "Float" || et == "Double" || et == "String" )
+                                {
+                                    f.isContainer   = true;
+                                    f.elemFieldType = et;
+                                }
                             }
                         }
                         scopes.back().fields.push_back( f );
@@ -647,13 +673,61 @@ namespace
         o << "}";
     }
 
+    // Emits `.IsContainer = true` + typed serialize/deserialize lambdas for a std::vector<...> field.
+    // Uses decltype( T::field ) so the exact vector type never has to be re-spelled here.
+    void EmitContainerLambdas( std::ostream& o, const Field& f )
+    {
+        std::string serExpr, deserStmt;
+        const std::string& et = f.elemFieldType;
+        if ( et == "Bool" )
+        {
+            serExpr   = "::rfl::Generic( e )";
+            deserStmt = "{ auto x = e.to_bool(); v.push_back( x.has_value() ? x.value() : false ); }";
+        }
+        else if ( et == "Int" || et == "UInt" )
+        {
+            serExpr   = "::rfl::Generic( static_cast<int64_t>( e ) )";
+            deserStmt = "{ auto x = e.to_int64(); v.push_back( static_cast<Elem>( x.has_value() ? x.value() : (int64_t)0 ) ); }";
+        }
+        else if ( et == "Float" || et == "Double" )
+        {
+            serExpr   = "::rfl::Generic( static_cast<double>( e ) )";
+            deserStmt = "{ auto x = e.to_double(); v.push_back( static_cast<Elem>( x.has_value() ? x.value() : 0.0 ) ); }";
+        }
+        else if ( et == "String" )
+        {
+            serExpr   = "::rfl::Generic( e )";
+            deserStmt = "{ auto x = e.to_string(); v.push_back( x.has_value() ? x.value() : std::string{} ); }";
+        }
+        else // AssetHandle
+        {
+            serExpr   = "::rfl::Generic( static_cast<int64_t>( static_cast<uint64_t>( e ) ) )";
+            deserStmt = "{ auto x = e.to_int64(); v.push_back( Elem( static_cast<uint64_t>( x.has_value() ? x.value() : (int64_t)0 ) ) ); }";
+        }
+
+        o << ", .IsContainer = true"
+          << ", .SerializeContainer = []( const void* p ) -> ::rfl::Generic { "
+          << "const auto& v = *static_cast<const decltype( T::" << f.name << " )*>( p ); "
+          << "::rfl::Generic::Array arr; for ( const auto& e : v ) arr.push_back( " << serExpr << " ); "
+          << "return ::rfl::Generic( std::move( arr ) ); }"
+          << ", .DeserializeContainer = []( void* p, const ::rfl::Generic& g ) { "
+          << "auto& v = *static_cast<decltype( T::" << f.name << " )*>( p ); v.clear(); "
+          << "auto a = g.to_array(); if ( !a.has_value() ) return; "
+          << "using Elem = std::decay_t<decltype( v )>::value_type; "
+          << "for ( const auto& e : a.value() ) " << deserStmt << " }";
+    }
+
     void Generate( std::ostream& o, const std::vector<ReflectedType>& types )
     {
         o << "// AUTO-GENERATED by DesertHeaderTool. DO NOT EDIT.\n";
         o << "// Regenerated on every build from REFLECT()/PROPERTY() annotations.\n\n";
         o << "#include <Engine/Reflection/TypeRegistrar.hpp>\n";
         o << "#include <Engine/Reflection/ReflectionRegistry.hpp>\n";
-        o << "#include <cstddef>\n\n";
+        o << "#include <cstddef>\n";
+        o << "#include <cstdint>\n";
+        o << "#include <string>\n";
+        o << "#include <type_traits>\n";
+        o << "#include <vector>\n\n";
 
         // unique includes
         std::vector<std::string> includes;
@@ -690,6 +764,8 @@ namespace
                         o << "EnumValue{ \"" << vname << "\", " << vval << " }, ";
                     o << "}";
                 }
+                if ( f.isContainer )
+                    EmitContainerLambdas( o, f );
                 o << " } )\n";
             }
             o << "                    .Register();\n";

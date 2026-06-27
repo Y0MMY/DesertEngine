@@ -14,9 +14,11 @@ namespace Desert::Core
         {
             switch ( stage )
             {
-                case Formats::ShaderStage::Vertex:   return shaderc_vertex_shader;
-                case Formats::ShaderStage::Fragment: return shaderc_fragment_shader;
-                case Formats::ShaderStage::Compute:  return shaderc_compute_shader;
+                case Formats::ShaderStage::Vertex:         return shaderc_vertex_shader;
+                case Formats::ShaderStage::TessControl:    return shaderc_tess_control_shader;
+                case Formats::ShaderStage::TessEvaluation: return shaderc_tess_evaluation_shader;
+                case Formats::ShaderStage::Fragment:       return shaderc_fragment_shader;
+                case Formats::ShaderStage::Compute:        return shaderc_compute_shader;
                 default:
                     DESERT_VERIFY( false, "Unsupported shader stage for compilation" );
                     return (shaderc_shader_kind)0;

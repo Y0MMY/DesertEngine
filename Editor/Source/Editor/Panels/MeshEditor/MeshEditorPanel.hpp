@@ -45,6 +45,13 @@ namespace Desert::Editor
 
         [[nodiscard]] std::shared_ptr<::Desert::DynamicMesh> GetActiveMesh() const { return m_Mesh; }
         [[nodiscard]] ECS::Entity                            GetTargetEntity() const { return m_TargetEntity; }
+
+        // True while this panel is open and editing `entity` — the main viewport uses this to step aside
+        // (suppress its object gizmo) so vertex editing owns the interaction (shared global ImGuizmo state).
+        [[nodiscard]] bool IsActivelyEditing( ECS::Entity entity ) const
+        {
+            return m_SowPanel && m_Mesh && m_TargetEntity == entity;
+        }
         [[nodiscard]] Selection&                             GetSelection() { return m_Selection; }
         [[nodiscard]] const Selection&                       GetSelection() const { return m_Selection; }
 
@@ -69,6 +76,12 @@ namespace Desert::Editor
         void  ClearSelection();
         float ComputeOrbitDistance() const;
         void  ResetCamera();
+
+        // Moves the selected vertices (and any coincident-but-split twins) by a local-space delta, so
+        // seams in per-face-duplicated meshes don't tear open. Re-uploads and marks the preview dirty.
+        void  MoveSelectedVerticesLocal( const glm::vec3& deltaLocal );
+        // World transform of the edited entity (identity if it has none). Drives the transform-aware gizmo.
+        glm::mat4 GetTargetModelMatrix() const;
 
         // ---- Preview scene ----
         void InitPreviewScene();
@@ -104,6 +117,12 @@ namespace Desert::Editor
         ECS::Entity                             m_PreviewEntity;
         ECS::Entity                             m_PreviewCamera;
         std::unique_ptr<UI::UIHelper>           m_UIHelper;
+
+        // Render-on-demand: the preview scene is only re-rendered when something visible changed
+        // (camera, mesh edit, resize, target/transform change). Otherwise the last frame is blitted.
+        bool     m_PreviewDirty = true;
+        uint32_t m_LastPreviewW = 0;
+        uint32_t m_LastPreviewH = 0;
 
         // Viewport rect (set during RenderRightPane, used by DrawGizmo)
         float m_ViewportX = 0, m_ViewportY = 0, m_ViewportW = 1, m_ViewportH = 1;

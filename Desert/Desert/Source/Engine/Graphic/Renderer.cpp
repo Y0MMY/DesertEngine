@@ -6,7 +6,9 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 
+#include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 
 namespace Desert::Graphic
@@ -46,7 +48,13 @@ namespace Desert::Graphic
 
         Graphic::TextureSpecification spec;
         spec.GenerateMips = false;
-        m_BRDFTexture     = Texture2D::Create( spec, "PBR/BRDF_LUT.tga" ).ExtractValue();
+        // Path must be rooted at the resource-textures dir (CWD-relative), like every other texture load
+        // (e.g. EnvironmentManager). The bare "PBR/BRDF_LUT.tga" resolved to <cwd>/PBR/... → not found →
+        // null texture → the split-sum LUT bind fell back to the white dummy (IBL specular too bright).
+        m_BRDFTexture =
+             Texture2D::Create( spec, Common::Filepath( "Resources/Textures" ) / "PBR/BRDF_LUT.tga" ).ExtractValue();
+        if ( !m_BRDFTexture )
+            LOG_ERROR( "Failed to load BRDF LUT (Resources/Textures/PBR/BRDF_LUT.tga) — IBL specular will be wrong" );
 
         return Common::MakeSuccess( true );
     }
@@ -87,18 +95,45 @@ namespace Desert::Graphic
         s_RendererAPI->SubmitFullscreenQuad( pipeline, materialExecutor );
     }
 
-    void Renderer::DispatchCompute( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
-                                    uint32_t groupCountZ, const MaterialExecutor* materialExecutor )
+    void Renderer::SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
+                                const MaterialExecutor* materialExecutor )
     {
-        s_RendererAPI->DispatchCompute( pipeline, groupCountX, groupCountY, groupCountZ, materialExecutor );
+        s_RendererAPI->SubmitLines( pipeline, vertexCount, lineWidth, materialExecutor );
     }
 
-    void Renderer::ImmediateComputeDispatch( const ComputePipeline* pipeline,
-                                              Image2D* inputImage, ImageCube* outputImage,
-                                              uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ )
+    void Renderer::SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
+                                   const MaterialExecutor* materialExecutor, uint32_t instanceCount )
     {
-        s_RendererAPI->ImmediateComputeDispatch( pipeline, inputImage, outputImage,
-                                                  groupCountX, groupCountY, groupCountZ );
+        s_RendererAPI->SubmitVertices( pipeline, vertexCount, materialExecutor, instanceCount );
+    }
+
+    void Renderer::SubmitVerticesIndirect( const GraphicsPipeline*         pipeline,
+                                           ShaderResources::StorageBuffer* argsBuffer,
+                                           const MaterialExecutor*         materialExecutor )
+    {
+        s_RendererAPI->SubmitVerticesIndirect( pipeline, argsBuffer, materialExecutor );
+    }
+
+    void Renderer::DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                           uint32_t groupCountY, uint32_t groupCountZ )
+    {
+        s_RendererAPI->DispatchComputeInFrame( pipeline, groupCountX, groupCountY, groupCountZ );
+    }
+
+    void Renderer::DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                        uint32_t groupCountY, uint32_t groupCountZ )
+    {
+        s_RendererAPI->DispatchComputeCull( pipeline, groupCountX, groupCountY, groupCountZ );
+    }
+
+    void Renderer::ComputeImageBeginWrite( Image2D* image )
+    {
+        s_RendererAPI->ComputeImageBeginWrite( image );
+    }
+
+    void Renderer::ComputeImageEndWrite( Image2D* image )
+    {
+        s_RendererAPI->ComputeImageEndWrite( image );
     }
 
     void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
@@ -126,6 +161,19 @@ namespace Desert::Graphic
         s_RendererAPI->WaitDeviceIdle();
     }
 
+    void Renderer::RecreateImageSamplers()
+    {
+        // Idle first: we destroy/recreate VkSamplers that in-flight frames may still reference.
+        WaitDeviceIdle();
+        auto* imageService = Runtime::ResourceRegistry::GetImageService();
+        for ( const auto& image : imageService->All() )
+        {
+            if ( auto* vulkanImage = dynamic_cast<API::Vulkan::IVulkanImage*>( image.get() ) )
+                vulkanImage->RecreateSampler();
+        }
+        // Next frame, MaterialExecutor::Apply rebinds the new samplers into descriptor sets.
+    }
+
     std::shared_ptr<Framebuffer> Renderer::GetCompositeFramebuffer()
     {
         return s_RendererAPI->GetCompositeFramebuffer();
@@ -137,7 +185,7 @@ namespace Desert::Graphic
         s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor );
     }
 
-    const std::shared_ptr<Desert::Graphic::Texture2D> Renderer::GetBRDFTexture() const
+    const std::shared_ptr<Desert::Graphic::Texture2D>& Renderer::GetBRDFTexture() const
     {
         return m_BRDFTexture;
     }

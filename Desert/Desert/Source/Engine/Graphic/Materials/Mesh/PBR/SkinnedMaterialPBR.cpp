@@ -8,7 +8,7 @@ namespace Desert::Graphic
     void SkinnedMaterialPBR::Bind( const UpdateSkinnedMaterialPBRInfo& info )
     {
         UpdateCamera( info.instance, info.MainCamera );
-        UpdateLights( info.instance, info.PointLights, info.DirectionLights );
+        UpdateLights( info.instance, info.PointLights, info.SpotLights, info.DirectionLights );
         UpdateSkinnedUB( info.instance, info.SkinnedUB );
 
         // Single-object material buffer (the skinned path draws one mesh at a time).

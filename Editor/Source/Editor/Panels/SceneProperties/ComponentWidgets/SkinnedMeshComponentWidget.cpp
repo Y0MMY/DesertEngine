@@ -2,9 +2,14 @@
 
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include "Helper/MeshDetailsWidget.hpp"
+
+#include <functional>
 
 namespace Desert::Editor
 {
@@ -104,18 +109,22 @@ namespace Desert::Editor
 
         if ( ImGui::CollapsingHeader( "Skeleton", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
+            ImGui::Indent(); // indent the sub-section content (collapsing headers don't auto-indent)
+
             const auto& bones = skeleton.GetBones();
 
             ImGui::Text( "Bone Count: %zu", bones.size() );
             ImGui::Separator();
 
-            // Build hierarchy
+            // Build child adjacency and collect root bones.
             std::unordered_map<size_t, std::vector<size_t>> children;
-
+            std::vector<size_t>                             roots;
             for ( size_t i = 0; i < bones.size(); ++i )
             {
                 if ( bones[i].ParentBoneID.has_value() )
                     children[bones[i].ParentBoneID.value()].push_back( i );
+                else
+                    roots.push_back( i );
             }
 
             std::function<void( size_t )> DrawBone;
@@ -123,33 +132,40 @@ namespace Desert::Editor
             {
                 const auto& bone = bones[boneIndex];
 
-                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow;
-
+                ImGuiTreeNodeFlags flags =
+                     ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
                 if ( children[boneIndex].empty() )
-                    flags |= ImGuiTreeNodeFlags_Leaf;
+                    flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
 
-                bool opened =
-                     ImGui::TreeNodeEx( ( bone.Name + "##" + std::to_string( boneIndex ) ).c_str(), flags );
-
-                if ( opened )
+                const std::string label =
+                     std::string( ICON_MDI_BONE ) + "  " + bone.Name + "##" + std::to_string( boneIndex );
+                if ( ImGui::TreeNodeEx( label.c_str(), flags ) )
                 {
                     for ( auto child : children[boneIndex] )
-                    {
                         DrawBone( child );
-                    }
-
                     ImGui::TreePop();
                 }
             };
 
-            // Draw roots
-            for ( size_t i = 0; i < bones.size(); ++i )
+            // UE-style: a single "Armature" root (accent-coloured) that holds the actual root bones.
+            ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetIconColor() );
+            const bool armatureOpen = ImGui::TreeNodeEx(
+                 ICON_MDI_HUMAN "  Armature",
+                 ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth );
+            ImGui::PopStyleColor();
+            if ( armatureOpen )
             {
-                if ( !bones[i].ParentBoneID.has_value() )
-                {
-                    DrawBone( i );
-                }
+                for ( size_t r : roots )
+                    DrawBone( r );
+                ImGui::TreePop();
             }
+
+            ImGui::Unindent();
         }
     }
+
+    DESERT_REGISTER_CUSTOM_COMPONENT(
+         ECS::SkinnedMeshComponent, "Skinned Mesh", false,
+         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
+           { SkinnedMeshComponentWidget( ctx.AssetManager ).Render( e, s ); } ) )
 } // namespace Desert::Editor

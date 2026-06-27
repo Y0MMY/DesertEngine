@@ -60,6 +60,11 @@ namespace Desert::Graphic::API::Vulkan
             return m_ShaderPath;
         }
 
+        virtual const Core::Formats::ShaderProgramMeta& GetProgramMeta() const override
+        {
+            return m_ProgramMeta;
+        }
+
         const std::vector<VkPipelineShaderStageCreateInfo>& GetPipelineShaderStageCreateInfos() const
         {
             return m_PipelineShaderStageCreateInfos;
@@ -121,6 +126,8 @@ namespace Desert::Graphic::API::Vulkan
         std::vector<VkShaderModule>                  m_ShaderModules;
         std::filesystem::path                        m_ShaderPath;
         std::string                                  m_ShaderName;
+
+        Core::Formats::ShaderProgramMeta             m_ProgramMeta;
 
         ReflectionData                     m_ReflectionData;
         std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts; // set

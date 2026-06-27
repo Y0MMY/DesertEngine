@@ -15,6 +15,11 @@ namespace Desert::Assets
 
         void PreloadAllAssets();
 
+        // Re-process + re-register cooked meshes/textures/materials (Rebuild Cooked Assets). Re-registering
+        // reloads texture pixels from source and rebuilds runtime materials; callers must idle the GPU
+        // first and clear cached per-entity material instances after. Skips shaders/skyboxes (no IBL re-bake).
+        void ReloadCooked();
+
     private:
         void PreloadMeshes();
         void PreloadSkyboxes();

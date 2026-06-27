@@ -2,8 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
+
+#include <rflcpp/rfl/Generic.hpp>
 
 namespace Desert::Reflection
 {
@@ -65,6 +68,13 @@ namespace Desert::Reflection
         const TypeInfo*         StructType = nullptr;
         // For FieldType::Enum.
         std::vector<EnumValue>  EnumValues;
+
+        // Containers (std::vector<...>). The byte-offset serializer can't iterate/resize a vector
+        // generically (it needs the element type at compile time), so the codegen emits typed lambdas
+        // here. When set, the serializer routes this field through them instead of the switch above.
+        bool                                                    IsContainer = false;
+        std::function<rfl::Generic( const void* /*field*/ )>    SerializeContainer;
+        std::function<void( void* /*field*/, const rfl::Generic& )> DeserializeContainer;
 
         const std::string& DisplayName() const
         {

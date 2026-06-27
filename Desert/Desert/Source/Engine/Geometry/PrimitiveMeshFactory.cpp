@@ -1,6 +1,7 @@
 #include "PrimitiveMeshFactory.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
+#include <cmath>
 #include <vector>
 
 #include <Engine/Geometry/MeshFactory.hpp>
@@ -82,8 +83,63 @@ namespace Desert::Geometry
 
     std::shared_ptr<DynamicMesh> PrimitiveMeshFactory::CreateSphere()
     {
-        // TODO: Implement actual sphere vertex generation logic
-        return nullptr;
+        // UV sphere, radius 0.5 to match the cube's [-0.5, 0.5] extents. Winding is CCW when viewed from
+        // outside (front face), consistent with CreateCube so back-face culling keeps the outer surface.
+        constexpr uint32_t sectorCount = 32; // longitude divisions (theta: 0..2pi)
+        constexpr uint32_t stackCount  = 16; // latitude divisions  (phi:   0..pi)
+        constexpr float    radius      = 0.5f;
+
+        std::vector<Vertex> vertices;
+        vertices.reserve( ( stackCount + 1 ) * ( sectorCount + 1 ) );
+
+        for ( uint32_t i = 0; i <= stackCount; ++i )
+        {
+            const float phi    = glm::pi<float>() * static_cast<float>( i ) / static_cast<float>( stackCount );
+            const float sinPhi = std::sin( phi );
+            const float cosPhi = std::cos( phi );
+
+            for ( uint32_t j = 0; j <= sectorCount; ++j )
+            {
+                const float theta    = glm::two_pi<float>() * static_cast<float>( j ) / static_cast<float>( sectorCount );
+                const float sinTheta = std::sin( theta );
+                const float cosTheta = std::cos( theta );
+
+                const glm::vec3 normal    = { sinPhi * cosTheta, cosPhi, sinPhi * sinTheta };
+                const glm::vec3 position  = normal * radius;
+                const glm::vec3 tangent   = { -sinTheta, 0.0f, cosTheta };
+                const glm::vec3 bitangent = glm::cross( normal, tangent );
+                const glm::vec2 uv = { static_cast<float>( j ) / static_cast<float>( sectorCount ),
+                                       static_cast<float>( i ) / static_cast<float>( stackCount ) };
+
+                vertices.push_back( { position, normal, tangent, bitangent, uv } );
+            }
+        }
+
+        std::vector<Index> indices;
+        indices.reserve( stackCount * sectorCount * 2 );
+
+        const uint32_t stride = sectorCount + 1;
+        for ( uint32_t i = 0; i < stackCount; ++i )
+        {
+            for ( uint32_t j = 0; j < sectorCount; ++j )
+            {
+                const uint32_t a = i * stride + j;
+                const uint32_t b = a + stride;
+
+                indices.push_back( { a, a + 1, b } );
+                indices.push_back( { a + 1, b + 1, b } );
+            }
+        }
+
+        Common::Math::AABB aabb;
+        aabb.Min = glm::vec3( -radius );
+        aabb.Max = glm::vec3( radius );
+
+        std::vector<Submesh> submeshes = {
+            { "Sphere", 0, (uint32_t)vertices.size(), 0, (uint32_t)indices.size() * 3, glm::mat4( 1.0f ), aabb }
+        };
+
+        return std::make_shared<DynamicMesh>( vertices, indices, submeshes );
     }
 
     std::shared_ptr<DynamicMesh> PrimitiveMeshFactory::CreatePlane()

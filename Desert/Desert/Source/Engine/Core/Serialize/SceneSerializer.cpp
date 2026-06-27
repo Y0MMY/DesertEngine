@@ -4,6 +4,9 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Core/Serialize/EntitySerializer.hpp>
 #include <Engine/Runtime/Factory/PrefabFactory.hpp>
+#include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Reflection/ReflectionSerializer.hpp>
+#include <Engine/Core/SceneSettings.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Constants.hpp>
 #include <rflcpp/rfl/json.hpp>
@@ -15,6 +18,8 @@ namespace Desert::Core
     {
         std::string                     SceneName;
         std::vector<Assets::EntityData> Entities;
+        // Scene-wide settings — reflected, so the whole block round-trips through the generic serializer.
+        std::optional<rfl::Generic>     Settings;
     };
 
     SceneSerializer::SceneSerializer( const Scene* scene, const Assets::AssetManager* assetManager )
@@ -56,6 +61,10 @@ namespace Desert::Core
             scene.Entities.push_back( Serialize::EntitySerializer::SerializeEntity( entity, *m_AssetManager ) );
         }
 
+        // Scene-wide settings via the generic reflection serializer (no hand-written mirror struct).
+        if ( const auto* st = Reflection::ReflectionRegistry::Get().Find( "SceneSettings" ) )
+            scene.Settings = rfl::Generic( Reflection::SerializeReflected( *st, &m_Scene->GetSettings() ) );
+
         return rfl::json::write( scene );
     }
 
@@ -70,6 +79,18 @@ namespace Desert::Core
         }
 
         LOG_INFO( "Loading scene: {0}", sceneData->SceneName );
+
+        // Restore the scene name (was only logged before — so a renamed+saved scene reverted on load).
+        if ( !sceneData->SceneName.empty() )
+            m_Scene->SetSceneName( sceneData->SceneName );
+
+        // Restore scene-wide settings (reflected). Missing keys keep their defaults (forward-compatible).
+        if ( sceneData->Settings.has_value() )
+        {
+            if ( const auto* st = Reflection::ReflectionRegistry::Get().Find( "SceneSettings" ) )
+                if ( auto obj = sceneData->Settings->to_object(); obj.has_value() )
+                    Reflection::DeserializeReflected( *st, &m_Scene->GetSettings(), obj.value() );
+        }
 
         // Split records: prefab-root entries are instantiated directly from their file;
         // normal entries follow the standard create-then-deserialize path.

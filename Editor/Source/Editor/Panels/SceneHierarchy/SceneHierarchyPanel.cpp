@@ -11,6 +11,9 @@
 #include <ImGui/imgui_internal.h>
 
 #include <Editor/Builtin/BuiltinMeshRegistry.hpp>
+#include <Common/Core/Constants.hpp>
+
+#include <filesystem>
 
 namespace Desert::Editor
 {
@@ -24,8 +27,12 @@ namespace Desert::Editor
             return "DirectionalLight";
         if ( entity.HasComponent<ECS::PointLightComponent>() )
             return "PointLight";
+        if ( entity.HasComponent<ECS::SpotLightComponent>() )
+            return "SpotLight";
         if ( entity.HasComponent<ECS::SkyboxComponent>() )
             return "SkyboxActor";
+        if ( entity.HasComponent<ECS::TerrainComponent>() )
+            return "TerrainActor";
         if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
             return "SkinnedMeshActor";
         if ( entity.HasComponent<ECS::StaticMeshComponent>() )
@@ -61,11 +68,15 @@ namespace Desert::Editor
         const char* icon = ICON_MDI_CUBE_OUTLINE;
         if ( entity.HasComponent<ECS::CameraComponent>() )
             icon = ICON_MDI_CAMERA;
+        else if ( entity.HasComponent<ECS::SpotLightComponent>() )
+            icon = ICON_MDI_SPOTLIGHT;
         else if ( entity.HasComponent<ECS::DirectionLightComponent>() ||
                   entity.HasComponent<ECS::PointLightComponent>() )
             icon = ICON_MDI_LIGHTBULB;
         else if ( entity.HasComponent<ECS::SkyboxComponent>() )
             icon = ICON_MDI_EARTH;
+        else if ( entity.HasComponent<ECS::TerrainComponent>() )
+            icon = ICON_MDI_TERRAIN;
         else if ( isPrefab )
             icon = ICON_MDI_PACKAGE_VARIANT;
 
@@ -134,12 +145,10 @@ namespace Desert::Editor
 
             ImGui::Separator();
             if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )
-                ImGui::OpenPopup( "InstantiatePrefabPopup" );
+                m_OpenInstantiatePrefab = true; // deferred: OpenPopup at panel scope (see OnUIRender)
 
             ImGui::EndPopup();
         }
-
-        DrawInstantiatePrefabPopup();
 
         // Column 1: type label
         ImGui::TableSetColumnIndex( 1 );
@@ -160,12 +169,10 @@ namespace Desert::Editor
             ImGui::TreePop();
         }
 
+        // Deferred: destroying here would invalidate the entt view being iterated in OnUIRender
+        // (deleting a parent destroys its whole subtree at once). Process after EndTable.
         if ( deleteEntity )
-        {
-            m_Scene->DestroyEntity( entity );
-            if ( isSelected )
-                Core::SelectionManager::ClearSelection();
-        }
+            m_PendingDelete = UUID;
 
         Utils::ImGuiUtilities::PopID();
     }
@@ -195,13 +202,20 @@ namespace Desert::Editor
                     }
                     if ( ImGui::Selectable( "Spot Light" ) )
                     {
-                        scene->CreateNewEntity( "Spot Light" );
+                        auto entity = scene->CreateNewEntity( "Spot Light" );
+                        entity.AddComponent<ECS::SpotLightComponent>();
                     }
                     ImGui::EndMenu();
                 }
 
                 if ( ImGui::Selectable( "Skybox" ) )
                     scene->CreateNewEntity( "Skybox" ).AddComponent<ECS::SkyboxComponent>();
+
+                if ( ImGui::Selectable( "Terrain" ) )
+                    scene->CreateNewEntity( "Terrain" ).AddComponent<ECS::TerrainComponent>();
+
+                // NOTE: no standalone "Material" entity — a MaterialComponent is meaningless without
+                // geometry. It is added ONTO a renderable entity via Details -> Add Component.
 
                 if ( ImGui::Selectable( "3D Model" ) )
                 {
@@ -235,8 +249,10 @@ namespace Desert::Editor
                 {
                     if ( ImGui::MenuItem( "Cube" ) )
                     {
-                        auto& cubeMesh      = scene->CreateNewEntity( "Cube" ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.MeshHandle = BuiltinMeshRegistry::Get( BuiltinMeshType::Cube );
+                        // Use the Primitive path (RuntimeMesh generated + Invalidated by MeshECSSystem) —
+                        // it renders + serializes reliably, unlike the builtin procedural-handle path.
+                        auto& cubeMesh     = scene->CreateNewEntity( "Cube" ).AddComponent<ECS::StaticMeshComponent>();
+                        cubeMesh.Primitive = Geometry::PrimitiveType::Cube;
                     }
                     if ( ImGui::MenuItem( "Sphere" ) )
                     {
@@ -312,11 +328,27 @@ namespace Desert::Editor
             AddEntity( m_Scene );
             ImGui::Separator();
             if ( ImGui::MenuItem( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )
-                ImGui::OpenPopup( "InstantiatePrefabPopup" );
+                m_OpenInstantiatePrefab = true; // deferred: OpenPopup at panel scope below
             ImGui::EndPopup();
         }
 
+        // Open the modal at panel scope (NOT inside a context popup — that ID mismatch was why it never
+        // opened). Both context-menu triggers set the flag; we open + draw here.
+        if ( m_OpenInstantiatePrefab )
+        {
+            ImGui::OpenPopup( "InstantiatePrefabPopup" );
+            m_OpenInstantiatePrefab = false;
+        }
         DrawInstantiatePrefabPopup();
+
+        // Delete key: remove the selected entity when the outliner is focused (not while typing in a field).
+        // Routed through the same deferred path (processed after the entt-view iteration below).
+        if ( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) &&
+             !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed( ImGuiKey_Delete, false ) )
+        {
+            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+                m_PendingDelete = *sel;
+        }
 
         // Entity table
         {
@@ -381,22 +413,61 @@ namespace Desert::Editor
                 ImGui::EndDragDropTarget();
             }
         }
+
+        // Process deferred deletion AFTER the entt view iteration above (DestroyEntity is recursive
+        // and removes the whole subtree, which would corrupt the view if done mid-iteration).
+        if ( m_PendingDelete.has_value() )
+        {
+            auto entityRef = m_Scene->FindEntityByID( *m_PendingDelete );
+            if ( entityRef )
+            {
+                const auto& selected = Core::SelectionManager::GetSelected();
+                const bool  wasSelected = selected.has_value() && *selected == *m_PendingDelete;
+                m_Scene->DestroyEntity( const_cast<ECS::Entity&>( entityRef.value().get() ) );
+                if ( wasSelected )
+                    Core::SelectionManager::ClearSelection();
+            }
+            m_PendingDelete.reset();
+        }
     }
 
     void SceneHierarchyPanel::DrawInstantiatePrefabPopup()
     {
         if ( ImGui::BeginPopupModal( "InstantiatePrefabPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
         {
-            ImGui::TextUnformatted( "Prefab path (.lprefab):" );
+            ImGui::TextUnformatted( "Prefab path (.deprefab):" );
             ImGui::SetNextItemWidth( 420.0f );
             Utils::ImGuiUtilities::InputText( m_PrefabInstantiatePath, "##PrefabInstPath" );
+
+            static std::string s_prefabError;
+            if ( !s_prefabError.empty() )
+                ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "%s", s_prefabError.c_str() );
 
             ImGui::Spacing();
 
             if ( ImGui::Button( "Instantiate", ImVec2( 130, 0 ) ) && !m_PrefabInstantiatePath.empty() )
             {
-                if ( m_AssetManager )
+                namespace fs = std::filesystem;
+                std::error_code ec;
+                const bool exists  = fs::exists( m_PrefabInstantiatePath, ec ) &&
+                                     fs::is_regular_file( m_PrefabInstantiatePath, ec );
+                const bool rightExt =
+                     fs::path( m_PrefabInstantiatePath ).extension() ==
+                     Common::Constants::Extensions::PREFAB_EXTENSION;
+
+                if ( !exists )
                 {
+                    s_prefabError = "File not found (point to an existing .deprefab file, not a folder).";
+                    LOG_ERROR( "Could not load prefab, file not found: {0}", m_PrefabInstantiatePath );
+                }
+                else if ( !rightExt )
+                {
+                    s_prefabError = "Not a .deprefab file.";
+                    LOG_ERROR( "Could not load prefab, wrong extension: {0}", m_PrefabInstantiatePath );
+                }
+                else if ( m_AssetManager )
+                {
+                    s_prefabError.clear();
                     auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( m_PrefabInstantiatePath );
                     if ( !prefabAsset )
                     {
@@ -409,13 +480,14 @@ namespace Desert::Editor
                         if ( !prefabAsset->IsReadyForUse() )
                             prefabAsset->Load();
                         prefabAsset->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                        ImGui::CloseCurrentPopup();
                     }
                     else
                     {
+                        s_prefabError = "Could not load prefab.";
                         LOG_ERROR( "Could not load prefab: {0}", m_PrefabInstantiatePath );
                     }
                 }
-                ImGui::CloseCurrentPopup();
             }
 
             ImGui::SameLine();

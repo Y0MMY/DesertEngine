@@ -13,6 +13,18 @@ namespace Common
         UUID( const UUID& other );
         explicit UUID( const std::string& uuidStr );
 
+        // Explicit "no UUID" value (0). NOTE: the default ctor mints a RANDOM id, so `UUID{}` must NEVER be
+        // used as an invalid/not-found sentinel — use Null()/IsNull() for that.
+        static UUID Null()
+        {
+            return UUID( static_cast<uint64_t>( 0 ) );
+        }
+
+        bool IsNull() const
+        {
+            return m_UUID == 0;
+        }
+
         const std::string ToString() const
         {
             return std::to_string( m_UUID ); // TODO: Cache

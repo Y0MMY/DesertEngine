@@ -1,5 +1,11 @@
 #pragma once
 
+#include <variant>
+#include <optional>
+#include <vector>
+#include <string>
+#include <cstdint>
+
 namespace Desert::Core::Formats
 {
     enum class Image2DUsage
@@ -75,6 +81,10 @@ namespace Desert::Core::Formats
         ImagePixelData        Data;
         const Image2DUsage    Usage;
         const ImageProperties Properties;
+        // When true, the backend allocates a FULL mip chain (floor(log2(max(w,h)))+1) and generates the
+        // lower mips from mip 0 via linear blits. Use for sampled textures that minify (e.g. foliage) so
+        // they filter at distance instead of aliasing. Ignored if no pixel Data is supplied.
+        bool                  GenerateMips = false;
     };
 
     struct ImageCubeSpecification

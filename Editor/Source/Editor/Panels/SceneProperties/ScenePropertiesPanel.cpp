@@ -11,6 +11,7 @@
 #include <ImGui/imgui.h>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Engine/Core/Scene.hpp>
+#include <Common/Core/Constants.hpp>
 
 namespace Desert::Editor
 {
@@ -26,8 +27,12 @@ namespace Desert::Editor
                 return "DirectionalLightComponent";
             if ( entity.HasComponent<ECS::PointLightComponent>() )
                 return "PointLightComponent";
+            if ( entity.HasComponent<ECS::SpotLightComponent>() )
+                return "SpotLightComponent";
             if ( entity.HasComponent<ECS::SkyboxComponent>() )
                 return "SkyboxComponent";
+            if ( entity.HasComponent<ECS::TerrainComponent>() )
+                return "TerrainComponent";
             if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
                 return "SkinnedMeshComponent";
             if ( entity.HasComponent<ECS::StaticMeshComponent>() )
@@ -39,11 +44,15 @@ namespace Desert::Editor
         {
             if ( entity.HasComponent<ECS::CameraComponent>() )
                 return ICON_MDI_CAMERA;
+            if ( entity.HasComponent<ECS::SpotLightComponent>() )
+                return ICON_MDI_SPOTLIGHT;
             if ( entity.HasComponent<ECS::DirectionLightComponent>() ||
                  entity.HasComponent<ECS::PointLightComponent>() )
                 return ICON_MDI_LIGHTBULB;
             if ( entity.HasComponent<ECS::SkyboxComponent>() )
                 return ICON_MDI_EARTH;
+            if ( entity.HasComponent<ECS::TerrainComponent>() )
+                return ICON_MDI_TERRAIN;
             return ICON_MDI_CUBE_OUTLINE;
         }
     } // namespace
@@ -61,9 +70,13 @@ namespace Desert::Editor
         const auto& selectedEntity = selectedEntityOpt.value().get();
 
         // --- Header row: [ ] [icon] [Name (bold, editable)]      [save] [tune] ---
-        bool active = true;
+        // Visible toggle -> VisibilityComponent.Visible (added on demand). Render systems skip invisible.
+        bool active = !selectedEntity.HasComponent<ECS::VisibilityComponent>() ||
+                      selectedEntity.GetComponent<ECS::VisibilityComponent>().Visible;
         if ( ImGui::Checkbox( "##ActiveCheckbox", &active ) )
         {
+            // Cascade visibility to the whole subtree so hiding a parent hides its children (UE-like).
+            m_Scene->SetVisibleRecursive( const_cast<ECS::Entity&>( selectedEntity ), active );
         }
         ImGui::SameLine();
 
@@ -157,7 +170,8 @@ namespace Desert::Editor
 
             if ( ImGui::Button( "OK", ImVec2( 120, 0 ) ) )
             {
-                const Common::Filepath fullPath = Common::Filepath( m_PrefabSavePath ) / ( tag + ".lprefab" );
+                const Common::Filepath fullPath =
+                     Common::Filepath( m_PrefabSavePath ) / ( tag + Common::Constants::Extensions::PREFAB_EXTENSION );
 
                 // Register in AssetManager (skip Load — we populate via CreateFromEntity)
                 auto newPrefab = m_AssetManager->CreateAsset<Assets::PrefabAsset>(

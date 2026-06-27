@@ -8,6 +8,9 @@
 
 namespace Desert::Editor
 {
+    class ImportManager;
+    class FileExplorerPanel;
+
     class EditorLayer : public Common::Layer
     {
     public:
@@ -41,6 +44,11 @@ namespace Desert::Editor
         void DrawPlaybackControls();
         void DrawPlayButton();
         void DrawPauseButton();
+
+        // Play mode: snapshot the scene on Play, restore it on Stop (so play-time changes don't persist).
+        void OnScenePlay();
+        void OnSceneStop();
+        void OnScenePauseToggle();
         void DrawEngineStats();
 
         // ===== Popups =====
@@ -55,6 +63,9 @@ namespace Desert::Editor
         void LoadScene( const Common::Filepath& path );
         void LoadSceneInternal( const Common::Filepath& path );
 
+        // Force re-cook of Cooked/ from sources, re-register cooked assets, refresh the asset panel.
+        void RebuildCookedAssets();
+
     private:
         enum class EditorState
         {
@@ -63,13 +74,17 @@ namespace Desert::Editor
         };
 
         EditorState m_EditorState;
+        std::string m_PlaySnapshot; // serialized scene captured on Play, restored on Stop
 
     private:
         const Engine::Application* m_Application;
 
         std::shared_ptr<Assets::AssetManager>        m_AssetManager;
         std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
+        std::unique_ptr<ImportManager>               m_ImportManager;
         std::unique_ptr<Animation::AnimationLibrary> m_AnimationLibrary;
+
+        FileExplorerPanel* m_FileExplorerPanel = nullptr; // non-owning (lives in m_Panels)
 
         std::shared_ptr<Desert::Core::Scene> m_MainScene;
 

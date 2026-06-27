@@ -1,6 +1,7 @@
 #version 450 core
 
 #include "../../Mesh/PointLight.glslh"
+#include "../../Mesh/Spotlight.glslh"
 #include "../../Mesh/LightsMetadata.glslh"
 
 layout(location=0) in Vertex
@@ -19,26 +20,136 @@ const vec3 Fdielectric = vec3(0.04);
 
 layout(location = 0) out vec4 oColor;
 
-layout(binding = 2) uniform PBRMaterialPropertiesUB {
-	vec3	  AlbedoColor;
-    float     AlbedoBlend;
-    float     MetallicValue;
-    float     MetallicBlend;
-    float     RoughnessValue;
-    float     RoughnessBlend;
-    vec3	  EmissionColor;
-    float     EmissionStrength;
-    float     AOValue;
-} pbr;
+// Shared push-constant block. Must be byte-for-byte identical to the one in Static.glsl.vert /
+// Skinned.glsl.vert. Per-object material data lives in the Materials[] storage buffer (GPU-scene
+// style); the push constant only carries the per-object index into it.
+layout( push_constant ) uniform PushConstants
+{
+	mat4 Transform;     // offset 0   (vertex)
+	uint MaterialIndex; // offset 64  index into Materials[]
+} pc;
+
+// One entry per drawn object (std430). Filled on the CPU each frame (per-object / per-instance).
+struct GpuMaterial
+{
+	vec4 AlbedoAO;           // rgb = albedo, a = ambient occlusion
+	vec4 MetalRoughEmission; // x = metallic, y = roughness, z = emission strength
+	vec4 EmissionColor;      // rgb = emission color
+};
+
+layout( std430, binding = 2 ) readonly buffer Materials
+{
+	GpuMaterial materials[];
+};
 
 struct DirectionLight
 {
-	vec3 Direction;
+	vec4 Direction;      // xyz = normalized direction
+	vec4 ColorIntensity; // rgb = color, a = intensity
 };
 
 layout(binding = 3) uniform DirectionLightsUB {
 	DirectionLight 		directionLights;
 } directionLights;
+
+// Cascaded directional shadow maps (R32F light-space depth, one per cascade) + per-cascade light VP.
+layout(binding = 5)  uniform sampler2D u_ShadowMap0;
+layout(binding = 13) uniform sampler2D u_ShadowMap1;
+layout(binding = 14) uniform sampler2D u_ShadowMap2;
+layout(binding = 15) uniform sampler2D u_ShadowMap3;
+layout(binding = 7) uniform ShadowUB {
+	mat4 u_LightViewProj[4];
+	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode (0/1/2), w = cascade count
+	vec4 u_DebugParams;       // x = show normals (>0.5); y,z,w reserved
+	vec4 u_CascadeTexelWorld; // per-cascade world size of one shadow-map texel (x..w = cascade 0..3)
+};
+
+// Runtime cascade index can't index a sampler array here, so branch over the 4 named maps.
+float sampleShadowMap(int c, vec2 uv)
+{
+	if (c == 0) return texture(u_ShadowMap0, uv).r;
+	if (c == 1) return texture(u_ShadowMap1, uv).r;
+	if (c == 2) return texture(u_ShadowMap2, uv).r;
+	return texture(u_ShadowMap3, uv).r;
+}
+ivec2 shadowMapSize(int c)
+{
+	if (c == 0) return textureSize(u_ShadowMap0, 0);
+	if (c == 1) return textureSize(u_ShadowMap1, 0);
+	if (c == 2) return textureSize(u_ShadowMap2, 0);
+	return textureSize(u_ShadowMap3, 0);
+}
+vec3 cascadeDebugColor(int c)
+{
+	if (c == 0) return vec3(1.0, 0.35, 0.35);
+	if (c == 1) return vec3(0.35, 1.0, 0.35);
+	if (c == 2) return vec3(0.35, 0.55, 1.0);
+	if (c == 3) return vec3(1.0, 0.95, 0.35);
+	return vec3(0.4); // outside all cascades
+}
+
+// First cascade (tightest→loosest) whose light-space projection contains worldPos. -1 = outside all.
+int chooseCascade(vec3 worldPos)
+{
+	for (int c = 0; c < int(u_ShadowParams.w); ++c)
+	{
+		vec4 lc  = u_LightViewProj[c] * vec4(worldPos, 1.0);
+		vec3 ndc = lc.xyz / lc.w;
+		vec2 uv  = ndc.xy * 0.5 + 0.5;
+		if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0 && ndc.z <= 1.0)
+			return c;
+	}
+	return -1;
+}
+
+// N = world-space surface normal, L = world-space direction TOWARD the sun (both normalized).
+// Picks the cascade covering worldPos and PCF-samples it. `cascadeOut` returns the chosen cascade (-1
+// if outside all / disabled) for the debug visualization.
+float ShadowFactor(vec3 worldPos, vec3 N, vec3 L, out int cascadeOut)
+{
+	cascadeOut = -1;
+	if (u_ShadowParams.y < 0.5)
+		return 1.0;
+
+	int c = chooseCascade(worldPos);
+	cascadeOut = c;
+	if (c < 0)
+		return 1.0;
+
+	float NdotL = max(dot(N, L), 0.0);
+
+	// Normal-offset bias scaled by the CHOSEN cascade's world-per-texel: a few texels along the normal,
+	// widening at grazing angles. Cascade-correct (tight near cascades get a small offset, far ones large)
+	// instead of the old fixed world-unit constants.
+	float texelWorld   = u_CascadeTexelWorld[c];
+	float normalOffset = (1.5 + 2.5 * (1.0 - NdotL)) * texelWorld;
+	vec3  samplePos    = worldPos + N * normalOffset;
+
+	vec4 lightClip = u_LightViewProj[c] * vec4(samplePos, 1.0);
+	vec3 ndc = lightClip.xyz / lightClip.w;
+	vec2 uv = ndc.xy * 0.5 + 0.5;
+	// Shadow maps are rendered through the engine's negative-height (Y-flipped) viewport -> flip Y.
+	uv.y = 1.0 - uv.y;
+
+	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0)
+		return 1.0;
+
+	float currentDepth = ndc.z;
+	float bias = clamp(u_ShadowParams.x * (1.0 - NdotL) * 4.0, u_ShadowParams.x, 0.02);
+
+	// 3x3 PCF for soft edges.
+	float shadow = 0.0;
+	vec2 texel = 1.0 / vec2(shadowMapSize(c));
+	for (int y = -1; y <= 1; ++y)
+	{
+		for (int x = -1; x <= 1; ++x)
+		{
+			float closest = sampleShadowMap(c, uv + vec2(x, y) * texel);
+			shadow += (currentDepth - bias > closest) ? 0.0 : 1.0;
+		}
+	}
+	return shadow / 9.0;
+}
 
 // Environment maps
 layout (binding = 8) uniform samplerCube u_EnvSpecularTex;
@@ -62,8 +173,9 @@ vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec
 
 	for(uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
 	{
-		vec3 Li = -directionLights.directionLights.Direction;
-		vec3 Lradiance = vec3(1.0, 1.0, 1.0);
+		vec3 Li = -directionLights.directionLights.Direction.xyz;
+		vec3 Lradiance = directionLights.directionLights.ColorIntensity.rgb
+		               * directionLights.directionLights.ColorIntensity.a;
 		vec3 Lh = normalize(Li + view);
 
 		float cosLi = max(0.0, dot(N, Li));
@@ -73,13 +185,13 @@ vec3 Lightning(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec
 		vec3 F  = fresnelSchlick(F0, max(0.0, dot(Lh, view)));
 		// Calculate normal distribution for specular BRDF.
 		float D = DistributionGGX(cosLh, roughness);
-		// Calculate geometric attenuation for specular BRDF.
-		float G = GeometrySchlickGGX(cosLi, cosLo, roughness);
+		// Visibility = G/(4*NdotL*NdotV) computed analytically to avoid 0/0 at grazing angles.
+		float Vis = VisibilitySmith(cosLi, cosLo, roughness);
 
 		vec3 kd = (1.0 - F) * (1.0 - metalness);
 		vec3 diffuseBRDF = kd * albedo;
 
-		vec3 specularBRDF  = (F * D * G) / max(Epsilon, 4.0 * cosLi * cosLo);
+		vec3 specularBRDF = F * D * Vis;
 
 		color += (diffuseBRDF + specularBRDF) * Lradiance * cosLi;
 	}
@@ -94,7 +206,8 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 
 	float cosLo = max(0.0, dot(N, view));
 
-	vec3 Lr = 2.0 * cosLo * N - view;
+	// reflect(-view, N) = 2*dot(N,view)*N - view (unclamped, correct specular reflection)
+	vec3 Lr = reflect(-view, N);
 
 	// Calculate Fresnel term for ambient lighting.
 	// Since we use pre-filtered cubemap(s) and irradiance is coming from many directions
@@ -123,19 +236,35 @@ vec3 IBL(vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albe
 
 void main() {
 
-	m_Params.AlbedoColor = pbr.AlbedoColor * pbr.AlbedoBlend;
+	GpuMaterial mat = materials[pc.MaterialIndex];
+
+	m_Params.AlbedoColor = mat.AlbedoAO.rgb;
 	m_Params.AlbedoColor *= texture(u_AlbedoTexture, inVertex.Texcoord).rgb;
-	m_Params.Normal =  normalize(inVertex.Normal);
+
+	// Default: use the world-space normal from the vertex shader directly.
+	m_Params.Normal = normalize(inVertex.Normal);
 
 	const ivec2 textureSize = textureSize(u_NormalTexture, 0);
-	if(textureSize.x > 1 && textureSize.y > 1) // not fallback (TODO. bad way)
+	if(textureSize.x > 1 && textureSize.y > 1) // real normal map — not the 1x1 fallback
 	{
-		m_Params.Normal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
+		// Transform tangent-space normal to world space via TBN.
+		vec3 tangentNormal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
+		m_Params.Normal = normalize(inVertex.TBN * tangentNormal);
 	}
-	m_Params.Normal = normalize(inVertex.TBN * m_Params.Normal);
+	// Without a normal map the TBN transform is intentionally skipped:
+	// inVertex.Normal is already in world space and needs no further transformation.
 
-	const float metalness = pbr.MetallicValue * pbr.MetallicBlend;
-	const float roughness  = pbr.RoughnessValue * pbr.RoughnessBlend;
+	// Debug: visualize the final world-space normal as RGB (Scene Settings -> Debug -> Show Normals).
+	if (u_DebugParams.x > 0.5)
+	{
+		oColor = vec4(m_Params.Normal * 0.5 + 0.5, 1.0);
+		return;
+	}
+
+	const float metalness = mat.MetalRoughEmission.x;
+	// Clamp to a minimum roughness so the GGX NDF stays finite even for mirror-smooth materials.
+	const float roughness = max(mat.MetalRoughEmission.y, 0.04);
+	const float ao        = mat.AlbedoAO.a;
 
 	const vec3 view = normalize(inVertex.CameraPosition - inVertex.WorldPosition);
 
@@ -147,11 +276,72 @@ void main() {
 
 	for(uint i = 0; i < lightsMetadata.PointLightCount; i++)
 	{
-		PointLight light = pointLights.lights[i];
-        pointLight += CalculatePointLight(light, inVertex.WorldPosition, view, 
-                                        m_Params.Normal, F0, metalness, 
+		PointLight light = pointLights[i];
+        pointLight += CalculatePointLight(light, inVertex.WorldPosition, view,
+                                        m_Params.Normal, F0, metalness,
                                         roughness, m_Params.AlbedoColor);
 	}
 
-    oColor = vec4( pointLight, 1.0);
+	vec3 spotLight = vec3(0.0);
+	for(uint i = 0; i < lightsMetadata.SpotLightCount; i++)
+	{
+        spotLight += CalculateSpotLight(spotLights[i], inVertex.WorldPosition, view,
+                                        m_Params.Normal, F0, metalness,
+                                        roughness, m_Params.AlbedoColor);
+	}
+
+    // Directional (sun) light is occluded by the shadow map; IBL/point/emission are not.
+    vec3  sunDir = normalize(-directionLights.directionLights.Direction.xyz); // toward the sun
+    int   cascade;
+    float shadow = ShadowFactor(inVertex.WorldPosition, m_Params.Normal, sunDir, cascade);
+
+    // Lighting debug (Scene Settings -> Debug -> Light Debug): each source gets a distinct color, the
+    // surface is tinted by the sources reaching it (weighted by attenuation * NdotL), brightness = light
+    // strength, fully-unlit areas read black. Albedo/IBL/emission are ignored.
+    if (u_DebugParams.y > 0.5)
+    {
+        vec3 dbg = vec3(0.0);
+        // Point lights: hue cycles 0,1,2,... (red, then well-spread).
+        for (uint i = 0; i < lightsMetadata.PointLightCount; i++)
+            dbg += LightDebugColor(i) * PointLightContribution(pointLights[i], inVertex.WorldPosition, m_Params.Normal);
+        // Spot lights: same hue cycle but offset half a turn so spot #0 != point #0.
+        for (uint i = 0; i < lightsMetadata.SpotLightCount; i++)
+            dbg += HueToRGB(fract(float(i) * 0.61803398875 + 0.5)) * SpotLightContribution(spotLights[i], inVertex.WorldPosition, m_Params.Normal);
+        // Sun (directional): fixed warm yellow, occluded by its shadow — unmistakable vs the cycled hues.
+        for (uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
+        {
+            float sunStrength = directionLights.directionLights.ColorIntensity.a
+                              * max(dot(m_Params.Normal, sunDir), 0.0) * shadow;
+            dbg += vec3(1.0, 0.85, 0.35) * sunStrength;
+        }
+        // Physical attenuation*NdotL is numerically dim, so a debug viz built from it reads as near-black.
+        // Map it through an exposure-like curve so ANY light reaching the surface shows as a clear color,
+        // while a truly unlit fragment (dbg == 0) stays black. This is a visualization, not radiometry.
+        dbg = vec3(1.0) - exp(-dbg * 6.0);
+        oColor = vec4(dbg, 1.0);
+        return;
+    }
+
+    // Debug mode 2 (Cascades): tint by the cascade that shadows this fragment, darkened where shadowed.
+    if (u_ShadowParams.z > 1.5)
+    {
+        oColor = vec4(cascadeDebugColor(cascade) * (shadow * 0.7 + 0.3), 1.0);
+        return;
+    }
+    // Debug mode 1 (ShadowFactor): raw shadow factor as grayscale (1 = lit, 0 = shadowed).
+    if (u_ShadowParams.z > 0.5)
+    {
+        oColor = vec4(vec3(shadow), 1.0);
+        return;
+    }
+
+    // Ambient occlusion attenuates only the ambient (IBL) term; emission is added unlit.
+    vec3 emission = mat.EmissionColor.rgb * mat.MetalRoughEmission.z;
+
+    // Tiny anti-black epsilon only: real ambient now comes from IBL (HDR skybox OR the baked procedural
+    // sky). This just keeps fully-occluded faces from reading as pure-black holes when no environment is
+    // bound; it is intentionally far below the previous cold "floor" so it no longer double-counts ambient.
+    vec3 ambientFloor = m_Params.AlbedoColor * ao * vec3( 0.008, 0.009, 0.012 );
+
+    oColor = vec4( light * shadow + ibl * ao + pointLight + spotLight + emission + ambientFloor, 1.0);
 }

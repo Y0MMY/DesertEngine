@@ -43,6 +43,8 @@ namespace Desert::ECS
                      light.Intensity = pointlight.Data.Intensity;
                      light.Position  = glm::vec3(worldTransform[3]); // Extract translation from world matrix
                      light.Radius    = pointlight.Data.Radius;
+                     light.MinRadius = pointlight.Data.MinRadius;
+                     light.Falloff   = static_cast<int32_t>( pointlight.Data.Falloff );
 
                      renderCommandBuffer.Emplace<Graphic::Render::PointLightCommand>( light );
                  } );

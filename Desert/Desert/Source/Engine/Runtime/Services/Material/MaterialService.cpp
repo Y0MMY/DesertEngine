@@ -47,7 +47,7 @@ namespace Desert::Runtime
         auto it = m_ExternalToInternal.find( uuid );
         if ( it == m_ExternalToInternal.end() )
         {
-            return Assets::AssetHandle{};
+            return Common::UUID::Null();
         }
 
         return it->second;

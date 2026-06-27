@@ -33,7 +33,8 @@ namespace Desert::Graphic
                                       std::function<void()>                    executeFunc,
                                       const GraphicsPipelineSpecification&     pipelineSpec,
                                       std::shared_ptr<Framebuffer>             targetFramebuffer,
-                                      const std::vector<RenderPassDependency>& dependencies )
+                                      const std::vector<RenderPassDependency>& dependencies,
+                                      const std::optional<glm::vec4>&          clearColor )
     {
         PassConfig config;
         config.Name              = name;
@@ -42,6 +43,7 @@ namespace Desert::Graphic
         config.PipelineSpec      = pipelineSpec;
         config.TargetFramebuffer = targetFramebuffer;
         config.Dependencies      = dependencies;
+        config.ClearColor        = clearColor;
 
         InternalPassData passData;
         passData.Config = config;
@@ -165,10 +167,12 @@ namespace Desert::Graphic
                 {
                     if ( pass.TargetFramebuffer && !pass.CachedRenderPass )
                     {
-                        pass.CachedRenderPass = RenderPass::Create( {
-                             .TargetFramebuffer = pass.TargetFramebuffer,
-                             .DebugName         = pass.Name,
-                        } );
+                        RenderPassSpecification rpSpec;
+                        rpSpec.TargetFramebuffer = pass.TargetFramebuffer;
+                        rpSpec.DebugName         = pass.Name;
+                        if ( pass.ClearColor )
+                            rpSpec.ClearColor.Color = *pass.ClearColor;
+                        pass.CachedRenderPass = RenderPass::Create( rpSpec );
                     }
                     m_SortedPasses.push_back( pass );
                 }

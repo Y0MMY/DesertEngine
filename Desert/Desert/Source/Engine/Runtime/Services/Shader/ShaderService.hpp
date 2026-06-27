@@ -13,6 +13,9 @@ namespace Desert::Runtime
         std::shared_ptr<Graphic::Shader> GetByName( const std::string& name ) const;
         void                             Clear();
 
+        // All registered shader program names (for the editor's material shader picker).
+        std::vector<std::string> GetAllNames() const;
+
     private:
         std::unordered_map<Assets::AssetHandle, std::shared_ptr<Graphic::Shader>> m_Shaders;
         std::unordered_map<std::string, Assets::AssetHandle>                      m_NameToHandleMap;

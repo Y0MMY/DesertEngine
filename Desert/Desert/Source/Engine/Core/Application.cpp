@@ -10,7 +10,24 @@ namespace Desert::Engine
 {
     Application::Application( const ApplicationInfo& appInfo ) : m_ApplicationInfo( appInfo )
     {
-        m_Window = Window::Create( WindowSpecification( appInfo.Title, appInfo.Width, appInfo.Height ) );
+        WindowSpecification windowSpec;
+        windowSpec.Title = appInfo.Title;
+        windowSpec.VSync = appInfo.VSync;
+        if ( appInfo.Width.has_value() && appInfo.Height.has_value() )
+        {
+            windowSpec.Width      = *appInfo.Width;
+            windowSpec.Height     = *appInfo.Height;
+            windowSpec.Fullscreen = false;
+        }
+        else
+        {
+            // No explicit size -> fullscreen at the monitor's native resolution (WindowsWindow::Init fills
+            // Width/Height from the primary monitor's video mode).
+            windowSpec.Fullscreen             = true;
+            windowSpec.FullscreenCoverTaskbar = appInfo.FullscreenCoverTaskbar;
+        }
+
+        m_Window = Window::Create( windowSpec );
         m_Window->Init();
 
         // 1. Create RendererContext (Vulkan Instance)

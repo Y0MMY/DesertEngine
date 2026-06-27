@@ -1,5 +1,6 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/RenderPhaseRegistry.hpp>
+#include <Engine/Graphic/RenderConfig.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
@@ -16,6 +17,10 @@ namespace Desert::Graphic
         // Rebuild from scratch so every system and its framebuffers are recreated consistently —
         // stale systems hold weak_ptrs to framebuffers that get recreated here, which would dangle.
         m_RenderSystems.clear();
+
+        // Pipelines key off framebuffer pointers that are recreated below; drop the cache so systems
+        // request fresh pipelines during their Initialize().
+        m_PipelineCache.Clear();
 
         // Ensure the phase registry exists before any system registers custom phases or passes.
         RenderPhaseRegistry::CreateInstance();
@@ -48,6 +53,17 @@ namespace Desert::Graphic
         if ( !meshSystem->Initialize() )
             DESERT_VERIFY( false );
 
+        // Infinite editor grid (draws after geometry, depth-occluded, into the scene framebuffer).
+        RegisterSystem<System::GridRenderer>( "GridSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
+        if ( !SP_CAST( System::GridRenderer, m_RenderSystems["GridSystem"] )->Initialize() )
+            DESERT_VERIFY( false );
+
+        // GPU terrain (tessellated patch grid; opaque geometry, depth-tested with the meshes).
+        RegisterSystem<System::TerrainRenderer>( "TerrainSystem", this, m_TargetFramebuffer,
+                                                 m_RenderGraphBuilder );
+        if ( !SP_CAST( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->Initialize() )
+            DESERT_VERIFY( false );
+
         const auto& jumpFloodSystem =
              SP_CAST( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
         if ( !jumpFloodSystem->Initialize() )
@@ -59,7 +75,35 @@ namespace Desert::Graphic
         // Tonemap consumes the Jump Flood output (the outlined scene).
         RegisterSystem<System::TonemapRenderer>( "TonemapSystem", this,
                                                  jumpFloodSystem->GetSystemFramebuffer(), m_RenderGraphBuilder );
-        if ( !SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Initialize() )
+        const auto& tonemapSystem = SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
+        if ( !tonemapSystem->Initialize() )
+            DESERT_VERIFY( false );
+
+        // Bloom reads the HDR scene color and produces a compute mip-chain glow that tonemap adds in.
+        RegisterSystem<System::BloomRenderer>( "BloomSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
+        const auto& bloomSystem = SP_CAST( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
+        if ( !bloomSystem->Initialize() )
+            DESERT_VERIFY( false );
+        tonemapSystem->SetBloomImage( bloomSystem->GetBloomImage() );
+
+        // Auto-exposure measures the HDR scene luminance into a 1x1 buffer that tonemap reads.
+        RegisterSystem<System::AutoExposureRenderer>( "AutoExposureSystem", this, m_TargetFramebuffer,
+                                                      m_RenderGraphBuilder );
+        const auto& autoExposureSystem = SP_CAST( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
+        if ( !autoExposureSystem->Initialize() )
+            DESERT_VERIFY( false );
+        tonemapSystem->SetAutoExposureImage( autoExposureSystem->GetAdaptedLuminanceImage() );
+
+        // FXAA consumes the tonemapped image (LDR). It only runs when SceneSettings.AA == FXAA.
+        RegisterSystem<System::FXAARenderer>( "FXAASystem", this, tonemapSystem->GetSystemFramebuffer(),
+                                              m_RenderGraphBuilder );
+        if ( !SP_CAST( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Initialize() )
+            DESERT_VERIFY( false );
+
+        // SMAA consumes the same tonemapped image. Runs only when SceneSettings.AA == SMAA.
+        RegisterSystem<System::SMAARenderer>( "SMAASystem", this, tonemapSystem->GetSystemFramebuffer(),
+                                              m_RenderGraphBuilder );
+        if ( !SP_CAST( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
         RebuildRenderGraph();
@@ -82,6 +126,47 @@ namespace Desert::Graphic
         jumpFloodSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
         jumpFloodSystem->SetOutlineSmoothness( sceneSettings.OutlineSmoothness );
 
+        m_AAMode = sceneSettings.AA;
+
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetParams( sceneSettings.Exposure, sceneSettings.Gamma );
+
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SetWireframe( sceneSettings.WireframeMode );
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SetShadows( sceneSettings.EnableShadows, sceneSettings.ShadowBias,
+                           static_cast<int>( sceneSettings.ShadowDebug ), sceneSettings.CascadeSplitLambda );
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SetDebugView( sceneSettings.ShowNormals, sceneSettings.ShowBoundingBoxes,
+                             sceneSettings.BoundingBoxColor, sceneSettings.BoundingBoxLineWidth,
+                             sceneSettings.LightingDebug );
+
+        // Global texture filter: push into RenderConfig (read by sampler creation). On an actual change,
+        // recreate all image samplers so the new filter applies live (no reload).
+        const int desiredFilter = static_cast<int>( sceneSettings.TextureFilterMode );
+        const int desiredAniso  = sceneSettings.Anisotropy;
+        const bool filterChanged = RenderConfig::TextureFilter.exchange( desiredFilter ) != desiredFilter;
+        const bool anisoChanged  = RenderConfig::AnisotropyLevel.exchange( desiredAniso ) != desiredAniso;
+        if ( filterChanged || anisoChanged )
+            Renderer::GetInstance().RecreateImageSamplers();
+
+        UNIQUE_GET_AS( System::GridRenderer, m_RenderSystems["GridSystem"] )
+             ->SetShowGrid( sceneSettings.ShowGrid );
+
+        m_BloomEnabled = sceneSettings.EnableBloom;
+        UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )
+             ->SetThreshold( sceneSettings.BloomThreshold );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetBloomIntensity( sceneSettings.EnableBloom ? sceneSettings.BloomIntensity : 0.0f );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetChromaticBloom( sceneSettings.EnableBloom ? sceneSettings.LensDispersion : 0.0f );
+
+        UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] )
+             ->SetParams( sceneSettings.AutoExposureSpeed, sceneSettings.AutoExposureMin,
+                          sceneSettings.AutoExposureMax );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetAutoExposure( sceneSettings.AutoExposure, sceneSettings.AutoExposureKey );
+
         return BOOLSUCCESS;
     }
 
@@ -90,13 +175,45 @@ namespace Desert::Graphic
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
         m_DirectionLights        = sceneRenderInfo.DirLights;
 
+        // Bake/rebake the procedural-sky IBL if the sun moved (throttled). Done here — before the render
+        // graph records its command buffer — so the heavy compute + device idle stays at a safe boundary.
+        skyboxSystem->EnsureProceduralEnvironment();
+
+        // Recompute CSM cascade matrices once per frame BEFORE the render graph records (intra-phase pass
+        // order is nondeterministic, so the cascade passes can't compute them themselves).
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->UpdateCascades();
+
         ClearMainFramebuffer();
+
+        // GPU grass culling: dispatch the cull compute (outside any render pass) BEFORE the render graph
+        // records the grass draw, so the indirect instanceCount + compacted visible list are ready.
+        UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->CullGrassInFrame();
+
         ExecuteRenderGraph();
 
         // Explicit post-process chain (runs after the scene graph has produced the scene color and
         // the silhouette mask): Jump Flood outline -> Tonemap.
         UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] )->Execute();
+
+        // Eye adaptation: measure scene luminance into the 1x1 buffer, then point tonemap at the latest
+        // (the ping-pong target alternates each frame, so the reference must be refreshed here).
+        {
+            const auto& autoExp = UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
+            autoExp->Execute();
+            UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+                 ->SetAutoExposureImage( autoExp->GetAdaptedLuminanceImage() );
+        }
+
+        // Bloom (HDR scene color -> blurred bright) runs before tonemap, which adds it in.
+        if ( m_BloomEnabled )
+            UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )->Execute();
+
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
+
+        if ( m_AAMode == Core::AntiAliasingMode::FXAA )
+            UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Execute();
+        else if ( m_AAMode == Core::AntiAliasingMode::SMAA )
+            UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Execute();
 
         CompositeRenderPass();
     }
@@ -104,8 +221,10 @@ namespace Desert::Graphic
     NO_DISCARD Common::BoolResultStr SceneRenderer::EndScene()
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->ClearQueues();
+        UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->ClearQueue();
 
         m_PointLight.PointLights.clear();
+        m_SpotLight.SpotLights.clear();
 
         return BOOLSUCCESS;
     }
@@ -130,6 +249,14 @@ namespace Desert::Graphic
         UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] )
              ->OnResize( width, height );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Resize( width, height );
+        UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Resize( width, height );
+        UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Resize( width, height );
+
+        // Bloom recreates its (storage) mip-chain image on resize, so re-point tonemap at the new image.
+        const auto& bloomSystem = UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
+        bloomSystem->Resize( width, height );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetBloomImage( bloomSystem->GetBloomImage() );
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
@@ -159,6 +286,45 @@ namespace Desert::Graphic
                              .Outlined      = extra.Outlined } );
     }
 
+    void SceneRenderer::SubmitTerrain( const glm::mat4& transform, float size, int resolution,
+                                       float heightScale, float noiseFrequency, int seed,
+                                       const glm::vec3&                                      layerModes,
+                                       Image2D*                                              splatMap,
+                                       const glm::vec4&                                      grassParams,
+                                       const glm::vec3&                                      grassTint,
+                                       const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides,
+                                       const std::vector<std::pair<std::string, uint64_t>>& textureOverrides )
+    {
+        UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )
+             ->Submit( { .Transform        = transform,
+                         .Size             = size,
+                         .Resolution       = resolution,
+                         .HeightScale      = heightScale,
+                         .NoiseFrequency   = noiseFrequency,
+                         .Seed             = seed,
+                         .LayerModes       = layerModes,
+                         .SplatMap         = splatMap,
+                         .GrassParams      = grassParams,
+                         .GrassTint        = grassTint,
+                         .ParamOverrides   = paramOverrides,
+                         .TextureOverrides = textureOverrides } );
+    }
+
+    void SceneRenderer::SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform,
+                                           const std::string&                                   shaderName,
+                                           const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides,
+                                           const std::vector<std::pair<std::string, uint64_t>>& textureOverrides,
+                                           bool                                                 outlined )
+    {
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SubmitGenericMesh( { .Mesh             = const_cast<Mesh*>( mesh ),
+                                    .Transform        = transform,
+                                    .ShaderName       = shaderName,
+                                    .ParamOverrides   = paramOverrides,
+                                    .TextureOverrides = textureOverrides,
+                                    .Outlined         = outlined } );
+    }
+
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
     {
         return {}; // EnvironmentManager::Create( filepath );
@@ -169,14 +335,37 @@ namespace Desert::Graphic
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->PrepareMaterial( material );
     }
 
+    void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity,
+                                          float sunDiskRadius, bool bakeNow, const CloudSettings& clouds )
+    {
+        UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
+             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow, clouds );
+    }
+
     const std::optional<Environment>& SceneRenderer::GetEnvironment()
     {
         return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->GetEnvironment();
     }
 
+    std::shared_ptr<Image2D> SceneRenderer::GetShadowCascadeImage( uint32_t cascade )
+    {
+        return UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->GetCascadeShadowImage( cascade );
+    }
+
+    uint32_t SceneRenderer::GetShadowCascadeCount()
+    {
+        return System::MeshRenderer::GetCascadeCount();
+    }
+
     const std::shared_ptr<Desert::Graphic::Image2D> SceneRenderer::GetFinalImage()
     {
-        return SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+        // FXAA/SMAA write their own framebuffer downstream of tonemap; otherwise tonemap output IS final.
+        const char* finalSystem = ( m_AAMode == Core::AntiAliasingMode::FXAA )   ? "FXAASystem"
+                                  : ( m_AAMode == Core::AntiAliasingMode::SMAA ) ? "SMAASystem"
+                                                                                : "TonemapSystem";
+
+        return std::static_pointer_cast<System::RenderSystem>( m_RenderSystems[finalSystem] )
              ->GetSystemFramebuffer()
              ->GetColorAttachmentImage();
     }
@@ -184,6 +373,11 @@ namespace Desert::Graphic
     void SceneRenderer::AddPointLight( ShaderProtocols::PointLightPayload&& pointLight )
     {
         m_PointLight.PointLights.push_back( std::move( pointLight ) );
+    }
+
+    void SceneRenderer::AddSpotLight( ShaderProtocols::SpotLightPayload&& spotLight )
+    {
+        m_SpotLight.SpotLights.push_back( std::move( spotLight ) );
     }
 
     void SceneRenderer::RegisterRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system )

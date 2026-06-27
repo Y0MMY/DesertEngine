@@ -12,6 +12,12 @@ namespace Desert::Runtime
         void                      Unregister( const ImageHandle& handle );
         Graphic::Image*           Resolve( const ImageHandle& handle ) const;
 
+        // All registered images (for global operations like recreating samplers on a filter change).
+        [[nodiscard]] const std::vector<std::shared_ptr<Graphic::Image>>& All() const
+        {
+            return m_Images;
+        }
+
     private:
         Common::Core::HandlePool                     m_HandlePool;
         std::vector<std::shared_ptr<Graphic::Image>> m_Images;

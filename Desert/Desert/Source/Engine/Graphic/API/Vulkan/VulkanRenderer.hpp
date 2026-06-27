@@ -31,15 +31,25 @@ namespace Desert::Graphic::API::Vulkan
         virtual void SubmitFullscreenQuad( const GraphicsPipeline*         pipeline,
                                            const MaterialExecutor* materialExecutor ) override;
 
-        virtual void DispatchCompute( const ComputePipeline* pipeline,
-                                      uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ,
-                                      const MaterialExecutor* materialExecutor = nullptr ) override;
+        virtual void SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
+                                  const MaterialExecutor* materialExecutor ) override;
 
-        virtual void ImmediateComputeDispatch( const ComputePipeline* pipeline,
-                                               Image2D*   inputImage,
-                                               ImageCube* outputImage,
-                                               uint32_t groupCountX, uint32_t groupCountY,
-                                               uint32_t groupCountZ ) override;
+        virtual void SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
+                                     const MaterialExecutor* materialExecutor,
+                                     uint32_t                instanceCount = 1 ) override;
+
+        virtual void SubmitVerticesIndirect( const GraphicsPipeline*         pipeline,
+                                             ShaderResources::StorageBuffer* argsBuffer,
+                                             const MaterialExecutor*         materialExecutor ) override;
+
+        virtual void DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                             uint32_t groupCountY, uint32_t groupCountZ ) override;
+
+        virtual void DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                          uint32_t groupCountY, uint32_t groupCountZ ) override;
+
+        virtual void ComputeImageBeginWrite( Image2D* image ) override;
+        virtual void ComputeImageEndWrite( Image2D* image ) override;
 
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
         virtual void WaitDeviceIdle() override;

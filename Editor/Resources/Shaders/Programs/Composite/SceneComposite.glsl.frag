@@ -1,18 +1,54 @@
 #version 450 core
 
-layout(location = 0) in vec2 v_TexCoord; 
-layout(binding = 2) uniform sampler2D u_GeometryTexture; 
-layout(location = 0) out vec4 oColor; 
+layout(location = 0) in vec2 v_TexCoord;
+layout(binding = 2) uniform sampler2D u_GeometryTexture;
+layout(binding = 3) uniform sampler2D u_BloomTexture;
+layout(binding = 4) uniform sampler2D u_AvgLuminance; // 1x1 adapted luminance (eye adaptation)
+layout(location = 0) out vec4 oColor;
+
+layout(binding = 0) uniform TonemapUB
+{
+    float u_Exposure;
+    float u_Gamma;
+    float u_BloomIntensity;
+    float u_ExposureKey;          // middle-grey target for auto-exposure
+    float u_AutoExposureEnabled;  // > 0.5 -> use measured luminance instead of manual exposure
+    float u_ChromaticBloom;       // lens dispersion strength on the bloom halo (0 = off)
+};
 
 void main()
 {
-    const float gamma     = 2.2;
-	const float pureWhite = 1.0;
+    const float pureWhite = 1.0;
 
-    ivec2 texSize = textureSize(u_GeometryTexture, 0);
-	ivec2 texCoord = ivec2(v_TexCoord * texSize);
+    // Auto-exposure: scale so the adapted average luminance maps to the key value; else manual exposure.
+    float exposure = u_Exposure;
+    if (u_AutoExposureEnabled > 0.5)
+    {
+        float adaptedLum = texture(u_AvgLuminance, vec2(0.5)).r;
+        exposure = u_ExposureKey / max(adaptedLum, 1e-4);
+    }
 
-    vec3 color = texture(u_GeometryTexture, v_TexCoord).rgb;
+    vec3 scene = texture(u_GeometryTexture, v_TexCoord).rgb;
+
+    // Bloom. With lens dispersion on, sample the bloom per-channel along a radial offset (R pushed outward,
+    // B inward), proportional to distance from the screen centre -> a rainbow fringe / glare around bright
+    // sources. The global sampler is REPEAT, so clamp the offset UVs to [0,1] (else bright content wraps).
+    vec3 bloom;
+    if (u_ChromaticBloom > 0.0001)
+    {
+        vec2  dir   = v_TexCoord - vec2(0.5);
+        vec2  off   = dir * (0.012 * u_ChromaticBloom);
+        bloom.r = texture(u_BloomTexture, clamp(v_TexCoord + off, 0.0, 1.0)).r;
+        bloom.g = texture(u_BloomTexture, v_TexCoord).g;
+        bloom.b = texture(u_BloomTexture, clamp(v_TexCoord - off, 0.0, 1.0)).b;
+    }
+    else
+    {
+        bloom = texture(u_BloomTexture, v_TexCoord).rgb;
+    }
+    bloom *= u_BloomIntensity;
+
+    vec3 color = (scene + bloom) * exposure;
 
     // Reinhard tonemapping operator.
 	// see: "Photographic Tone Reproduction for Digital Images", eq. 4
@@ -23,6 +59,5 @@ void main()
 	vec3 mappedColor = (mappedLuminance / (luminance + 0.0001)) * color;
 
 	// Gamma correction.
-	oColor = vec4(pow(mappedColor, vec3(1.0 / gamma)), 1.0);
-
+	oColor = vec4(pow(mappedColor, vec3(1.0 / u_Gamma)), 1.0);
 }

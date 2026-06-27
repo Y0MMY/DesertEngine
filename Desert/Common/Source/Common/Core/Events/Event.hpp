@@ -7,7 +7,7 @@ namespace Common
 	enum class EventType
 	{
 		None = 0,
-		WindowClose, WindowResize, // Window
+		WindowClose, WindowResize, WindowFileDrop, // Window
 		KeyPressed, // Keys
 		MouseMoved, MouseScroll, MousePressed// Mouse
 	};

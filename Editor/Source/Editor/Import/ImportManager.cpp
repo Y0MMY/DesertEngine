@@ -5,6 +5,9 @@
 
 #include <Common/Core/Constants.hpp>
 
+#include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
 #include <regex>
 
 namespace Desert::Editor
@@ -58,19 +61,43 @@ namespace Desert::Editor
         m_Importers[".glb"]  = std::make_unique<AssimpImporter>();
     }
 
-    void ImportManager::Import( const std::filesystem::path& path )
+    namespace
+    {
+        // A cooked file counts as up-to-date if it exists and isn't older than its source.
+        bool CookedFresh( const std::filesystem::path& source, const std::filesystem::path& cooked )
+        {
+            std::error_code ec;
+            if ( !std::filesystem::exists( cooked, ec ) )
+                return false;
+            const auto cookedT = std::filesystem::last_write_time( cooked, ec );
+            if ( ec )
+                return false;
+            const auto srcT = std::filesystem::last_write_time( source, ec );
+            if ( ec )
+                return false;
+            return cookedT >= srcT;
+        }
+    } // namespace
+
+    void ImportManager::Import( const std::filesystem::path& path, bool force )
     {
         auto ext = path.extension().string();
 
-        if ( m_Importers.contains( ext ) )
-        {
-            auto result = m_Importers[ext]->Import( path, *this );
+        if ( !m_Importers.contains( ext ) )
+            return;
 
-            CreateAssetsFromImport( result, path );
-        }
+        // Skip the expensive Assimp re-parse (+ its texture/material re-cook) when a cooked mesh output
+        // already exists and is up-to-date. A source produces either a static or a skinned mesh, so accept
+        // either. `force` (Rebuild Cooked Assets) bypasses this.
+        if ( !force && ( CookedFresh( path, BuildCookedPath( path, ".stmesh" ) ) ||
+                         CookedFresh( path, BuildCookedPath( path, ".skmesh" ) ) ) )
+            return;
+
+        auto result = m_Importers[ext]->Import( path, *this );
+        CreateAssetsFromImport( result, path );
     }
 
-    void ImportManager::ImportAllFromDirectory( const std::filesystem::path& root )
+    void ImportManager::ImportAllFromDirectory( const std::filesystem::path& root, bool force )
     {
         namespace fs = std::filesystem;
 
@@ -84,7 +111,7 @@ namespace Desert::Editor
 
             if ( m_Importers.contains( ext ) )
             {
-                Import( entry.path() );
+                Import( entry.path(), force );
             }
         }
     }
@@ -152,6 +179,28 @@ namespace Desert::Editor
     Common::UUID ImportManager::ImportTexture( const std::filesystem::path& path )
     {
         return m_TextureImporter->Import( path );
+    }
+
+    Assets::AssetHandle ImportManager::ImportAndRegisterTexture( Assets::AssetManager&         mgr,
+                                                                 const std::filesystem::path& source )
+    {
+        // Cook the source -> Cooked/Textures/<name>.tex (writes metadata referencing the abs source path).
+        m_TextureImporter->Import( source );
+
+        const auto cookedMeta = TextureImporter::CookedMetaPath( source );
+
+        // Create + load the TextureAsset from the cooked .tex (Load reads the handle + source path, and
+        // syncs the metadata handle), then register it so TextureService can resolve it at draw time.
+        auto asset = mgr.CreateAsset<Assets::TextureAsset>( Assets::AssetPriority::Low, cookedMeta.string() );
+        if ( !asset )
+        {
+            LOG_ERROR( "ImportAndRegisterTexture: failed to create TextureAsset from {}",
+                       cookedMeta.string() );
+            return Common::UUID::Null();
+        }
+
+        Runtime::ResourceRegistry::GetTextureService()->Register( asset );
+        return asset->GetMetadata().Handle;
     }
 
 } // namespace Desert::Editor

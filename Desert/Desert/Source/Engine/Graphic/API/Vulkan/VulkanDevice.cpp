@@ -3,6 +3,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/RenderConfig.hpp>
 
 #include <Engine/Core/EngineContext.hpp>
 
@@ -48,6 +49,8 @@ namespace Desert::Graphic::API::Vulkan
                 m_Capabilities.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
                 m_Capabilities.SupportsWideLines      = deviceFeatures.wideLines == VK_TRUE;
                 m_Capabilities.MaxLineWidth           = deviceProperties.limits.lineWidthRange[1];
+                m_Capabilities.SupportsAnisotropy     = deviceFeatures.samplerAnisotropy == VK_TRUE;
+                m_Capabilities.MaxAnisotropy          = deviceProperties.limits.maxSamplerAnisotropy;
 
                 break;
             }
@@ -64,7 +67,13 @@ namespace Desert::Graphic::API::Vulkan
             m_Capabilities.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
             m_Capabilities.SupportsWideLines      = deviceFeatures.wideLines == VK_TRUE;
             m_Capabilities.MaxLineWidth           = deviceProperties.limits.lineWidthRange[1];
+            m_Capabilities.SupportsAnisotropy     = deviceFeatures.samplerAnisotropy == VK_TRUE;
+            m_Capabilities.MaxAnisotropy          = deviceProperties.limits.maxSamplerAnisotropy;
         }
+
+        // Publish anisotropy support to the low-level sampler-creation path (0 = unsupported -> no aniso).
+        Graphic::RenderConfig::MaxAnisotropy =
+             m_Capabilities.SupportsAnisotropy ? m_Capabilities.MaxAnisotropy : 0.0f;
 
         DESERT_VERIFY( selectedPhysicalDevice, "Could not find any physical devices!" );
 
@@ -184,10 +193,15 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkDeviceCreateInfo       createInfo{};
         VkPhysicalDeviceFeatures deviceFeatures{};
+        deviceFeatures.tessellationShader = VK_TRUE; // required for the terrain tessellation pipeline
         if ( m_PhysicalDevice->m_Capabilities.SupportsWideLines )
         {
             deviceFeatures.wideLines        = VK_TRUE;
             deviceFeatures.fillModeNonSolid = VK_TRUE;
+        }
+        if ( m_PhysicalDevice->m_Capabilities.SupportsAnisotropy )
+        {
+            deviceFeatures.samplerAnisotropy = VK_TRUE;
         }
         createInfo.sType                 = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         createInfo.pQueueCreateInfos     = m_PhysicalDevice->m_QueueCreateInfos.data();

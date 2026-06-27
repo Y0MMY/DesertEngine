@@ -16,6 +16,8 @@ namespace Desert::Engine
         uint64_t StorageBufferAlignment;
         bool     SupportsWideLines;
         float    MaxLineWidth;
+        bool     SupportsAnisotropy = false;
+        float    MaxAnisotropy      = 1.0f;
     };
 
     /**

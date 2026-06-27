@@ -17,7 +17,7 @@ namespace Desert::Graphic::API::Vulkan
         virtual void Release() override;
 
         [[nodiscard]] virtual PipelineType GetType() const override { return PipelineType::Graphics; }
-        [[nodiscard]] virtual std::shared_ptr<Shader> GetShader() const override { return m_Specification.Shader; }
+        [[nodiscard]] virtual const std::shared_ptr<Shader>& GetShader() const override { return m_Specification.Shader; }
 
         [[nodiscard]] virtual const GraphicsPipelineSpecification& GetSpecification() const override
         {

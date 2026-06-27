@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <optional>
+#include <cstdint>
 
 #include <Common/Core/Singleton.hpp>
 #include <Common/Core/LayerStack.hpp>
@@ -22,9 +24,14 @@ namespace Desert::Engine
     struct ApplicationInfo
     {
         std::string Title;
-        uint32_t    Width;
-        uint32_t    Height;
-        bool        Fullscreen = true;
+        // Window size. std::nullopt (the default) = start fullscreen at the monitor's native resolution;
+        // set a concrete value for a windowed size.
+        std::optional<uint32_t> Width;
+        std::optional<uint32_t> Height;
+        // Only when starting fullscreen (Width/Height = nullopt): true = cover the taskbar, false = leave
+        // the taskbar visible (fit the monitor work area).
+        bool FullscreenCoverTaskbar = false;
+        bool VSync                  = true;
     };
 
     class Application

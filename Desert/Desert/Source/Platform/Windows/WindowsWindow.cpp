@@ -40,13 +40,35 @@ namespace Desert::Platform::Windows
         auto width  = m_Data.Specification.Width;
         auto height = m_Data.Specification.Height;
 
-        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode    = glfwGetVideoMode( monitor );
+        GLFWmonitor*       monitor      = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode         = glfwGetVideoMode( monitor );
+        int                posX         = 0, posY = 0;
+        bool               setPos       = false;
+        const bool         coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
+
         if ( m_Data.Specification.Fullscreen )
         {
-
-            width  = mode->width;
-            height = mode->height;
+            if ( coverTaskbar )
+            {
+                // Borderless over the whole monitor (no decorations, hides the taskbar).
+                glfwWindowHint( GLFW_DECORATED, GLFW_FALSE );
+                width  = mode->width;
+                height = mode->height;
+                posX   = 0;
+                posY   = 0;
+                setPos = true;
+            }
+            else
+            {
+                // Decorated window MAXIMIZED to the work area: keeps the title bar (minimize/close) and
+                // leaves the taskbar visible. The OS positions/sizes it; we just give a sane restore size.
+                glfwWindowHint( GLFW_DECORATED, GLFW_TRUE );
+                glfwWindowHint( GLFW_MAXIMIZED, GLFW_TRUE );
+                int wx, wy, ww, wh;
+                glfwGetMonitorWorkarea( monitor, &wx, &wy, &ww, &wh );
+                width  = (uint32_t)ww;
+                height = (uint32_t)wh;
+            }
 
             m_Data.Specification.Width  = width;
             m_Data.Specification.Height = height;
@@ -54,6 +76,24 @@ namespace Desert::Platform::Windows
 
         m_GLFWWindow =
              glfwCreateWindow( (int)width, (int)height, m_Data.Specification.Title.c_str(), nullptr, nullptr );
+
+        if ( setPos && m_GLFWWindow )
+            glfwSetWindowPos( m_GLFWWindow, posX, posY );
+
+        // Maximized open size differs from the restore size -> sync the spec to the real client size so the
+        // swapchain/camera use the correct dimensions.
+        if ( m_Data.Specification.Fullscreen && !coverTaskbar && m_GLFWWindow )
+        {
+            int fw = 0, fh = 0;
+            glfwGetWindowSize( m_GLFWWindow, &fw, &fh );
+            if ( fw > 0 && fh > 0 )
+            {
+                m_Data.Specification.Width  = (uint32_t)fw;
+                m_Data.Specification.Height = (uint32_t)fh;
+            }
+        }
+
+        glfwWindowHint( GLFW_MAXIMIZED, GLFW_FALSE ); // reset sticky hint
 
         // EngineContext::GetInstance().m_CurrentWindow = m_GLFWWindow;
 
@@ -103,6 +143,20 @@ namespace Desert::Platform::Windows
                                     }
                                 }
                             } );
+
+        glfwSetDropCallback( m_GLFWWindow,
+                             []( GLFWwindow* window, int count, const char** paths )
+                             {
+                                 auto& data = *( (WindowData*)glfwGetWindowUserPointer( window ) );
+
+                                 std::vector<std::string> dropped;
+                                 dropped.reserve( count );
+                                 for ( int i = 0; i < count; ++i )
+                                     dropped.emplace_back( paths[i] );
+
+                                 Common::EventWindowFileDrop event( std::move( dropped ) );
+                                 data.EventCallback( event );
+                             } );
 
         glfwSetMouseButtonCallback( m_GLFWWindow,
                                     []( GLFWwindow* window, int button, int action, int mods )

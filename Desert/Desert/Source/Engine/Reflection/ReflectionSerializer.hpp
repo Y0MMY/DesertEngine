@@ -4,8 +4,23 @@
 
 #include <rflcpp/rfl/Generic.hpp>
 
+#include <cstdint>
+#include <functional>
+#include <string>
+
 namespace Desert::Reflection
 {
+    // Bridges reflected AssetHandle fields to their on-disk form. The reflection core can't know about
+    // the AssetManager/asset services, so the caller (ComponentRegistry) injects this. When present, an
+    // AssetHandle field (de)serializes as a stable PATH STRING (backward-compatible with the old custom
+    // serializers) instead of a raw runtime uint64. `assetType` comes from PROPERTY(Asset<...>) metadata
+    // so the resolver can dispatch per asset type (skybox vs mesh vs material).
+    struct AssetResolver
+    {
+        std::function<std::string( uint64_t handle, const std::string& assetType )>      ToPath;
+        std::function<uint64_t( const std::string& path, const std::string& assetType )> FromPath;
+    };
+
     // Generic, reflection-driven (de)serialization. Walks a TypeInfo's fields and reads/writes the raw
     // object bytes at each field offset into an rfl::Generic tree. This is the single code path that makes
     // "everything reflected serializes the same way" true: materials, light/camera data blocks, and any
@@ -14,10 +29,14 @@ namespace Desert::Reflection
     // When the reflection core gains enum/nested/container support (#4), this serializer picks it up for
     // free — no per-type serialization code to update.
 
-    // Serializes a reflected object (described by `type`) into a generic JSON object.
-    rfl::Generic::Object SerializeReflected( const TypeInfo& type, const void* obj );
+    // Serializes a reflected object (described by `type`) into a generic JSON object. When `resolver` is
+    // given, AssetHandle fields are written as path strings (else as raw uint64).
+    rfl::Generic::Object SerializeReflected( const TypeInfo& type, const void* obj,
+                                             const AssetResolver* resolver = nullptr );
 
     // Deserializes from a generic JSON object into a reflected object, in place. Fields missing from
-    // `src` keep their current (default) value — this gives forward/backward field compatibility.
-    void DeserializeReflected( const TypeInfo& type, void* obj, const rfl::Generic::Object& src );
+    // `src` keep their current (default) value — this gives forward/backward field compatibility. An
+    // AssetHandle value that is a string is resolved via `resolver`; a number is read as a raw handle.
+    void DeserializeReflected( const TypeInfo& type, void* obj, const rfl::Generic::Object& src,
+                               const AssetResolver* resolver = nullptr );
 } // namespace Desert::Reflection

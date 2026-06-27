@@ -2,6 +2,7 @@
 
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 
 namespace Desert::Editor
 {
@@ -258,4 +259,9 @@ namespace Desert::Editor
         ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
     }
+
+    DESERT_REGISTER_CUSTOM_COMPONENT(
+         ECS::AnimationComponent, "Animation", false,
+         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
+           { AnimationComponentWidget( ctx.AssetMgr(), ctx.AnimationLibrary ).Render( e, s ); } ) )
 } // namespace Desert::Editor

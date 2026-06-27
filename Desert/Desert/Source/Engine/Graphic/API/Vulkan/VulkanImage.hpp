@@ -42,8 +42,11 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] virtual const VulkanImageResource& GetResource() const = 0;
         
         virtual void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, uint32_t mip = 0 ) = 0;
-        
+
         [[nodiscard]] virtual VkImageView GetMipView( uint32_t level ) const = 0;
+
+        // Destroy + recreate this image's VkSampler from the current RenderConfig filter (live filter swap).
+        virtual void RecreateSampler() = 0;
     };
 
     /**
@@ -63,6 +66,7 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] bool IsLoaded() const override { return m_IsLoaded; }
         [[nodiscard]] Core::Formats::Image2DSpecification& GetImageSpecification() override { return m_Specification; }
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
+        std::vector<uint8_t> ReadPixelsRGBA8() override;
         
         void Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;
@@ -72,6 +76,15 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] const VulkanImageResource& GetResource() const override { return m_Resource; }
         void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, uint32_t mip = 0 ) override;
         [[nodiscard]] VkImageView GetMipView( uint32_t level ) const override;
+        void RecreateSampler() override;
+
+        // Explicitly-synchronized whole-image layout transition (proper src/dst stage + access masks,
+        // unlike the conservative ALL_COMMANDS/zero-access default above). Needed for compute storage
+        // targets where execution-only ordering is insufficient (cache flush/invalidate is required).
+        // Updates the tracked layout so descriptor binds capture it.
+        void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout,
+                               VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                               VkAccessFlags srcAccess, VkAccessFlags dstAccess );
 
         // --- Legacy compatibility (TODO: remove) ---
         [[nodiscard]] const VulkanImageResource& GetVulkanImageInfo() const { return m_Resource; }
@@ -82,6 +95,9 @@ namespace Desert::Graphic::API::Vulkan
     private:
         Common::BoolResultStr CreateResource();
         void UploadData( VkCommandBuffer cmdBuffer, VkBuffer stagingBuffer );
+        // Generate mips 1..N-1 from mip 0 via linear blits, leaving every mip in `finalLayout`.
+        // Precondition: the whole image is in TRANSFER_DST_OPTIMAL and mip 0 holds the source pixels.
+        void GenerateMips( VkCommandBuffer cmdBuffer, VkImageLayout finalLayout );
 
     private:
         Core::Formats::Image2DSpecification m_Specification;
@@ -116,6 +132,7 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] const VulkanImageResource& GetResource() const override { return m_Resource; }
         void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, uint32_t mip = 0 ) override;
         [[nodiscard]] VkImageView GetMipView( uint32_t level ) const override;
+        void RecreateSampler() override;
 
         // --- Legacy compatibility (TODO: remove) ---
         [[nodiscard]] const VulkanImageResource& GetVulkanImageInfo() const { return m_Resource; }
