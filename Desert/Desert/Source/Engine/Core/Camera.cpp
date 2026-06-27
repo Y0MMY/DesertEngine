@@ -9,8 +9,21 @@
 
 namespace Desert::Core
 {
+    // ─── Camera (base) ──────────────────────────────────────────────────────────
+    void Camera::UpdateProjectionMatrix( const uint32_t width, const uint32_t height )
+    {
+        const float aspectRatio = static_cast<float>( width ) / static_cast<float>( height == 0 ? 1 : height );
+        m_ProjectionMatrix      = glm::perspective( glm::radians( m_FOV ), aspectRatio, m_NearPlane, m_FarPlane );
+    }
 
-    Camera::Camera()
+    const Frustum& Camera::GetFrustum()
+    {
+        m_Frustum.Rebuild( m_ProjectionMatrix, m_ViewMatrix );
+        return m_Frustum;
+    }
+
+    // ─── EditorCamera (orbit / fly) ─────────────────────────────────────────────
+    EditorCamera::EditorCamera()
     {
         const auto window = EngineContext::GetInstance().GetWindow();
         const auto width  = window ? window->GetWidth() : 1280;
@@ -18,11 +31,11 @@ namespace Desert::Core
 
         UpdateProjectionMatrix( width, height );
 
-        constexpr glm::vec3 InitialPosition = { 5, 5, 5 };
-        m_Distance                          = glm::distance( InitialPosition, m_FocalPoint );
-
-        m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
-        m_Pitch = glm::pi<float>() / 4.0f;
+        // === TEMP grass-iteration: eye-level view (auto-revert) ===
+        m_FocalPoint = glm::vec3( 0.0f, 0.5f, -15.0f );
+        m_Distance   = 11.5f;
+        m_Yaw        = 0.0f;
+        m_Pitch      = glm::radians( 6.0f );
 
         m_Position                  = m_FocalPoint - GetForwardDirection() * m_Distance + m_LocationDelta;
         const glm::quat orientation = GetOrientation();
@@ -32,13 +45,14 @@ namespace Desert::Core
         m_ViewMatrix = glm::inverse( m_ViewMatrix );
     }
 
-    Camera::Camera( const glm::mat4& projectionMatrix ) : m_ProjectionMatrix( projectionMatrix )
+    EditorCamera::EditorCamera( const glm::mat4& projectionMatrix )
     {
-        m_Direction  = glm::vec3( 90.0f, 0.0f, 0.0f );
-        m_FocalPoint = glm::vec3( 0.0f );
+        m_ProjectionMatrix = projectionMatrix;
+        m_Direction        = glm::vec3( 90.0f, 0.0f, 0.0f );
+        m_FocalPoint       = glm::vec3( 0.0f );
 
-        glm::vec3 position = { -5, 5, 5 };
-        m_Distance         = glm::distance( position, m_FocalPoint );
+        const glm::vec3 position = { -5, 5, 5 };
+        m_Distance              = glm::distance( position, m_FocalPoint );
 
         m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
         m_Pitch = glm::pi<float>() / 4.0f;
@@ -47,7 +61,7 @@ namespace Desert::Core
         UpdateCameraView();
     }
 
-    void Camera::OnEvent( Common::Event& e )
+    void EditorCamera::OnEvent( Common::Event& e )
     {
         Common::EventManager eventManager( e );
         eventManager.Notify<Common::KeyPressedEvent>( [this]( Common::KeyPressedEvent& e )
@@ -57,25 +71,17 @@ namespace Desert::Core
                                                       { return this->OnMouseMove( e ); } );
     }
 
-    void Camera::UpdateProjectionMatrix( const uint32_t width, const uint32_t height )
+    bool EditorCamera::OnKeyPress( Common::KeyPressedEvent& e )
     {
-        float aspectRatio  = static_cast<float>( width ) / static_cast<float>( height == 0 ? 1 : height );
-        m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), aspectRatio, m_NearPlane, m_FarPlane );
-    }
-
-    bool Camera::OnKeyPress( Common::KeyPressedEvent& e )
-    {
-
         return false;
     }
 
-    bool Camera::OnMouseMove( Common::MouseMovedEvent& e )
+    bool EditorCamera::OnMouseMove( Common::MouseMovedEvent& e )
     {
-
         return false;
     }
 
-    void Camera::OnUpdate( const Common::Timestep& timestep )
+    void EditorCamera::OnUpdate( const Common::Timestep& timestep )
     {
         const glm::vec2& MousePosition{ Input::Mouse::Get().GetMouseX(), Input::Mouse::Get().GetMouseY() };
         const glm::vec2  MouseDelta = ( MousePosition - m_InitialMousePosition ) * 0.002f;
@@ -108,18 +114,15 @@ namespace Desert::Core
 
         m_InitialMousePosition = MousePosition;
 
-        // Accumulate all deltas first so GetOrientation() sees a consistent state below.
         m_Position += m_LocationDelta;
         m_Yaw      += m_YawDelta;
         m_Pitch    += m_PitchDelta;
 
-        // Clamp pitch BEFORE computing the view matrix — exceeding ±90° makes the
-        // lookAt target parallel to the up vector, producing a degenerate matrix that
-        // collapses all vertices to the same clip position and makes objects disappear.
+        // Clamp pitch BEFORE computing the view matrix — exceeding ±90° makes the lookAt target parallel to
+        // the up vector, producing a degenerate matrix that collapses all vertices to one clip position.
         static constexpr float kMaxPitch = glm::radians( 89.0f );
         m_Pitch = glm::clamp( m_Pitch, -kMaxPitch, kMaxPitch );
 
-        // Rebuild focal point from the now-correct (clamped) forward direction.
         if ( mousePressed )
         {
             const float distance = glm::distance( m_FocalPoint, m_Position );
@@ -130,27 +133,27 @@ namespace Desert::Core
         UpdateCameraView();
     }
 
-    glm::quat Camera::GetOrientation() const
+    glm::quat EditorCamera::GetOrientation() const
     {
         return glm::quat( glm::vec3( -m_Pitch, -m_Yaw, 0.0f ) );
     }
 
-    glm::vec3 Camera::GetUpDirection() const
+    glm::vec3 EditorCamera::GetUpDirection() const
     {
         return glm::rotate( GetOrientation(), glm::vec3( 0.0, 1.0, 0.0 ) );
     }
 
-    glm::vec3 Camera::GetRightDirection() const
+    glm::vec3 EditorCamera::GetRightDirection() const
     {
         return glm::rotate( GetOrientation(), glm::vec3( 1.0, 0.0, 0.0 ) );
     }
 
-    glm::vec3 Camera::GetForwardDirection() const
+    glm::vec3 EditorCamera::GetForwardDirection() const
     {
         return glm::rotate( GetOrientation(), glm::vec3( 0.0, 0.0, -1.0 ) );
     }
 
-    void Camera::UpdateCameraView()
+    void EditorCamera::UpdateCameraView()
     {
         const float     YAWsign       = GetUpDirection().y > 0 ? 1 : -1;
         const glm::vec3 lookDirection = m_Position + GetForwardDirection();
@@ -166,11 +169,21 @@ namespace Desert::Core
         m_LocationDelta *= 0.8f;
     }
 
-    const Frustum& Camera::GetFrustum()
+    // ─── GameplayCamera (driven by a CameraComponent) ───────────────────────────
+    void GameplayCamera::SetFromTransform( const glm::vec3& position, const glm::vec3& eulerRotation,
+                                           float fovDegrees, float nearPlane, float farPlane, uint32_t width,
+                                           uint32_t height )
     {
-        m_Frustum.Rebuild( m_ProjectionMatrix, m_ViewMatrix );
+        m_Position  = position;
+        m_FOV       = fovDegrees;
+        m_NearPlane = nearPlane;
+        m_FarPlane  = farPlane;
 
-        return m_Frustum;
+        const glm::quat orientation = glm::quat( eulerRotation );
+        const glm::vec3 forward     = glm::rotate( orientation, glm::vec3( 0.0f, 0.0f, -1.0f ) );
+        const glm::vec3 up          = glm::rotate( orientation, glm::vec3( 0.0f, 1.0f, 0.0f ) );
+        m_ViewMatrix                = glm::lookAt( position, position + forward, up );
+
+        UpdateProjectionMatrix( width, height );
     }
-
 } // namespace Desert::Core

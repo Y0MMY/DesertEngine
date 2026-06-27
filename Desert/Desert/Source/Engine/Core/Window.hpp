@@ -22,7 +22,10 @@ namespace Desert
         uint32_t    Height     = 900;
         bool        Decorated  = true;
         bool        Fullscreen = false;
-        bool        VSync      = true;
+        // When Fullscreen (borderless): cover the whole monitor (over the taskbar) if true, else fit the
+        // monitor work area (taskbar stays visible).
+        bool        FullscreenCoverTaskbar = false;
+        bool        VSync                  = true;
     };
 
     class Window : public Common::EventHandler

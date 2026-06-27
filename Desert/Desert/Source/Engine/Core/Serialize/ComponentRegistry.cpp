@@ -7,6 +7,7 @@
 #include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
 #include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
@@ -97,6 +98,11 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByHandle<Assets::MaterialAsset>( Common::UUID( handle ) );
                     return a ? a->GetMetadata().Filepath.string() : "";
                 }
+                if ( type == "TextureAsset" )
+                {
+                    auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
+                    return a ? a->GetMetadata().Filepath.string() : "";
+                }
                 // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
                 auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
                 return a ? a->GetMetadata().Filepath.string() : "";
@@ -142,6 +148,12 @@ namespace Desert::Core::Serialize
                             a = created;
                         }
                     }
+                    return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+                }
+                if ( type == "TextureAsset" )
+                {
+                    // Textures are registered from cooked paths by the preloader; just look up by path.
+                    auto a = mgr.FindByPath<Assets::TextureAsset>( path );
                     return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
                 }
                 // Meshes: find, else cook-create as the concrete type + register + load.
@@ -349,6 +361,64 @@ namespace Desert::Core::Serialize
             Register( std::move( s ) );
         }
 
+        // ---- Material (generic data-driven: shader name + param overrides + texture refs as paths) ----
+        {
+            ComponentSerializer s;
+            s.Key = "Material";
+            s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::MaterialComponent>(); };
+
+            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& assetManager ) -> rfl::Generic
+            {
+                const auto&                  mc = entity.GetComponent<ECS::MaterialComponent>();
+                Assets::MaterialComponentSer ser;
+                ser.ShaderName = mc.ShaderName;
+
+                if ( !mc.Params.empty() )
+                {
+                    std::vector<Assets::MaterialParamSer> ps;
+                    for ( const auto& p : mc.Params )
+                        ps.push_back( { p.Name, p.Value } );
+                    ser.Params = std::move( ps );
+                }
+
+                if ( !mc.Textures.empty() )
+                {
+                    auto                                    resolver = MakeAssetResolver( assetManager );
+                    std::vector<Assets::MaterialTextureSer> ts;
+                    for ( const auto& t : mc.Textures )
+                        ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ) } );
+                    ser.Textures = std::move( ts );
+                }
+
+                return ToGeneric( ser );
+            };
+
+            s.Deserialize =
+                 []( ECS::Entity entity, const rfl::Generic& g, const Assets::AssetManager& assetManager )
+            {
+                auto parsed = FromGeneric<Assets::MaterialComponentSer>( g );
+                if ( !parsed.has_value() )
+                    return;
+                const auto& data = parsed.value();
+
+                auto& mc      = entity.AddComponent<ECS::MaterialComponent>();
+                mc.ShaderName = data.ShaderName;
+
+                if ( data.Params.has_value() )
+                    for ( const auto& p : *data.Params )
+                        mc.Params.push_back( { p.Name, p.Value } );
+
+                if ( data.Textures.has_value() )
+                {
+                    auto resolver = MakeAssetResolver( assetManager );
+                    for ( const auto& t : *data.Textures )
+                        mc.Textures.push_back( { t.Name, resolver.FromPath( t.Path, "TextureAsset" ) } );
+                }
+            };
+
+            Register( std::move( s ) );
+        }
+
         // ---- Skinned Mesh (asset-bearing) ----
         {
             ComponentSerializer s;
@@ -411,6 +481,8 @@ namespace Desert::Core::Serialize
              "PointLight", "PointLightData", &ECS::PointLightComponent::Data ) );
         Register( MakeReflected<ECS::SpotLightComponent, ECS::SpotLightData>(
              "SpotLight", "SpotLightData", &ECS::SpotLightComponent::Data ) );
+        Register( MakeReflected<ECS::TerrainComponent, ECS::TerrainData>( "Terrain", "TerrainData",
+                                                                          &ECS::TerrainComponent::Data ) );
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its
@@ -419,5 +491,53 @@ namespace Desert::Core::Serialize
         // reflected field is "SkyboxHandle", so an old HDR selection needs re-pick — procedural sky +
         // clouds carry over (those field names are unchanged).
         Register( MakeReflectedSelf<ECS::SkyboxComponent>( "Skybox", "SkyboxComponent" ) );
+    }
+
+    std::string SaveMaterialComponentToJson( const ECS::MaterialComponent& mc, const Assets::AssetManager& mgr )
+    {
+        Assets::MaterialComponentSer ser;
+        ser.ShaderName = mc.ShaderName;
+
+        if ( !mc.Params.empty() )
+        {
+            std::vector<Assets::MaterialParamSer> ps;
+            for ( const auto& p : mc.Params )
+                ps.push_back( { p.Name, p.Value } );
+            ser.Params = std::move( ps );
+        }
+        if ( !mc.Textures.empty() )
+        {
+            auto                                    resolver = MakeAssetResolver( mgr );
+            std::vector<Assets::MaterialTextureSer> ts;
+            for ( const auto& t : mc.Textures )
+                ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ) } );
+            ser.Textures = std::move( ts );
+        }
+        return rfl::json::write( ser );
+    }
+
+    bool LoadMaterialComponentFromJson( const std::string& json, ECS::MaterialComponent& mc,
+                                        const Assets::AssetManager& mgr )
+    {
+        auto parsed = rfl::json::read<Assets::MaterialComponentSer>( json );
+        if ( !parsed )
+            return false;
+        const auto& data = parsed.value();
+
+        mc.ShaderName = data.ShaderName;
+        mc.Params.clear();
+        mc.Textures.clear();
+
+        if ( data.Params.has_value() )
+            for ( const auto& p : *data.Params )
+                mc.Params.push_back( { p.Name, p.Value } );
+
+        if ( data.Textures.has_value() )
+        {
+            auto resolver = MakeAssetResolver( mgr );
+            for ( const auto& t : *data.Textures )
+                mc.Textures.push_back( { t.Name, resolver.FromPath( t.Path, "TextureAsset" ) } );
+        }
+        return true;
     }
 } // namespace Desert::Core::Serialize

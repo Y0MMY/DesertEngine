@@ -4,12 +4,15 @@
 
 namespace Desert::Core::Formats
 {
+    // Values are the exact VkShaderStageFlagBits (StageToVkStage casts directly).
     enum class ShaderStage
     {
-        None     = 0,
-        Vertex   = 0x00000001,
-        Fragment = 0x00000010,
-        Compute  = 0x00000020
+        None           = 0,
+        Vertex         = 0x00000001,
+        TessControl    = 0x00000002,
+        TessEvaluation = 0x00000004,
+        Fragment       = 0x00000010,
+        Compute        = 0x00000020
     };
 
     enum class ShaderPragmas

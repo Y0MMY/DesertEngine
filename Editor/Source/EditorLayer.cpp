@@ -33,6 +33,9 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/ECS/System/TerrainECSSystem.hpp>
+#include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
+#include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/SpotLightSystem.hpp>
 #include <Engine/ECS/System/AnimationECSSystem.hpp>
@@ -100,6 +103,7 @@ namespace Desert::Editor
 
         m_MainScene->AddSystem<ECS::MeshECSSystem>();
         m_MainScene->AddSystem<ECS::SkyboxECSSystem>();
+        m_MainScene->AddSystem<ECS::TerrainECSSystem>();
         m_MainScene->AddSystem<ECS::PointLightECSSystem>();
         m_MainScene->AddSystem<ECS::SpotLightECSSystem>();
         m_MainScene->AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
@@ -115,12 +119,31 @@ namespace Desert::Editor
         }
 
         m_MainScene->Init();
+
+        // === TEMP grass-iteration scaffolding (auto-revert) ===
+        {
+            auto  terrainEntity     = m_MainScene->CreateNewEntity( "GrassTest" );
+            auto& tc                = terrainEntity.AddComponent<ECS::TerrainComponent>();
+            tc.Data.Size            = 50.0f;
+            tc.Data.Resolution      = 64;
+            tc.Data.HeightScale     = 1.2f;
+            tc.Data.NoiseFrequency  = 0.05f;
+            tc.Data.EnableGrass     = true;
+            tc.Data.GrassDensity    = 400;
+            tc.Data.GrassHeight     = 0.45f;
+            tc.Data.GrassWidth      = 1.0f;
+
+            auto sun = m_MainScene->CreateNewEntity( "Sun" );
+            sun.AddComponent<ECS::DirectionLightComponent>();
+            sun.GetComponent<ECS::TransformComponent>().Translation = glm::vec3( -0.4f, -0.85f, -0.35f );
+        }
+        // === END TEMP ===
 #ifdef EBABLE_IMGUI
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager,
                                                                                m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
-        m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() ) );
         {
             auto fileExplorer   = std::make_unique<Editor::FileExplorerPanel>( "Resources/", m_AssetManager.get() );
             m_FileExplorerPanel = fileExplorer.get();
@@ -650,52 +673,89 @@ namespace Desert::Editor
 
     void EditorLayer::DrawPlayButton()
     {
-        namespace ImGui = ::ImGui;
+        namespace ImGui    = ::ImGui;
+        using SceneState   = ::Desert::Core::Scene::SceneState;
+        const bool playing = m_MainScene->GetState() != SceneState::Edit;
 
-        bool selected = m_EditorState == EditorState::Play;
-
-        if ( selected )
-        {
+        if ( playing )
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
-        }
 
-        if ( ImGui::Button( ICON_MDI_PLAY ) )
+        // One toggle: Play when editing, Stop (restore the snapshot) when playing/paused.
+        if ( ImGui::Button( playing ? ICON_MDI_STOP : ICON_MDI_PLAY ) )
         {
-            // TODO
+            if ( playing )
+                OnSceneStop();
+            else
+                OnScenePlay();
         }
-
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Play" );
+            ImGui::SetTooltip( playing ? "Stop" : "Play" );
 
-        if ( selected )
+        if ( playing )
             ImGui::PopStyleColor();
     }
 
     void EditorLayer::DrawPauseButton()
     {
-        namespace ImGui = ::ImGui;
+        namespace ImGui  = ::ImGui;
+        using SceneState = ::Desert::Core::Scene::SceneState;
+        const bool paused = m_MainScene->GetState() == SceneState::Paused;
+        const bool active = m_MainScene->GetState() != SceneState::Edit; // pause only matters while playing
 
-        bool selected = m_EditorState == EditorState::Paused;
-
-        if ( selected )
-        {
+        if ( !active )
+            ImGui::BeginDisabled();
+        if ( paused )
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
-        }
 
         if ( ImGui::Button( ICON_MDI_PAUSE ) )
-        {
-            // TODO
-        }
-
+            OnScenePauseToggle();
         if ( ImGui::IsItemHovered() )
-        {
-            ImGui::SetTooltip( "Pause" );
-        }
+            ImGui::SetTooltip( paused ? "Resume" : "Pause" );
 
-        if ( selected )
-        {
+        if ( paused )
             ImGui::PopStyleColor();
-        }
+        if ( !active )
+            ImGui::EndDisabled();
+    }
+
+    void EditorLayer::OnScenePlay()
+    {
+        using SceneState = ::Desert::Core::Scene::SceneState;
+        if ( m_MainScene->GetState() != SceneState::Edit )
+            return;
+        // Snapshot the authored scene so Stop can restore it exactly (play-time edits are discarded).
+        Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
+        m_PlaySnapshot = serializer.SerializeToJson();
+        m_MainScene->SetState( SceneState::Play );
+        m_EditorState = EditorState::Play;
+    }
+
+    void EditorLayer::OnSceneStop()
+    {
+        using SceneState = ::Desert::Core::Scene::SceneState;
+        if ( m_MainScene->GetState() == SceneState::Edit || m_PlaySnapshot.empty() )
+            return;
+
+        EngineContext::GetInstance().GetDevice()->WaitIdle();
+        m_MainScene->Clear();
+
+        Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
+        serializer.DeserializeFromJson( m_PlaySnapshot );
+        m_MainScene->Init();
+
+        m_RenderRegistry.release();
+        m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+
+        m_MainScene->SetState( SceneState::Edit );
+    }
+
+    void EditorLayer::OnScenePauseToggle()
+    {
+        using SceneState = ::Desert::Core::Scene::SceneState;
+        if ( m_MainScene->GetState() == SceneState::Play )
+            m_MainScene->SetState( SceneState::Paused );
+        else if ( m_MainScene->GetState() == SceneState::Paused )
+            m_MainScene->SetState( SceneState::Play );
     }
 
     void EditorLayer::DrawOpenScenePopup()

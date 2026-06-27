@@ -36,4 +36,13 @@ namespace Desert::Runtime
     {
     }
 
+    std::vector<std::string> ShaderService::GetAllNames() const
+    {
+        std::vector<std::string> names;
+        names.reserve( m_NameToHandleMap.size() );
+        for ( const auto& [name, handle] : m_NameToHandleMap )
+            names.push_back( name );
+        return names;
+    }
+
 } // namespace Desert::Runtime

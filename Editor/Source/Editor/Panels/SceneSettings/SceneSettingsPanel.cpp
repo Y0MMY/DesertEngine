@@ -78,6 +78,9 @@ namespace Desert::Editor
             ImGui::Checkbox( "Bloom", &s.EnableBloom );
             ImGui::SliderFloat( "Bloom Threshold", &s.BloomThreshold, 0.0f, 5.0f );
             ImGui::SliderFloat( "Bloom Intensity", &s.BloomIntensity, 0.0f, 3.0f );
+            ImGui::SliderFloat( "Lens Dispersion", &s.LensDispersion, 0.0f, 3.0f );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Chromatic rainbow fringe around bright sources (glare). Needs Bloom on." );
         }
 
         if ( ImGui::CollapsingHeader( "Textures", ImGuiTreeNodeFlags_DefaultOpen ) )

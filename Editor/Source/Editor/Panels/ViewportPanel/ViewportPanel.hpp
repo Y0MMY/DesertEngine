@@ -15,7 +15,8 @@ namespace Desert::Editor
     class ViewportPanel : public IPanel, public Common::EventHandler
     {
     public:
-        explicit ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene );
+        ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
+                       const Assets::AssetManager*                 assetManager = nullptr );
         void OnUIRender() override;
         void OnPreUpdate() override;
 
@@ -58,6 +59,24 @@ namespace Desert::Editor
         std::pair<float, float> GetMouseViewportSpace() const;
         void                    RenderGizmo();
 
+        // --- Terrain splat painting (Stage 3b) ---
+        void DrawTerrainPaintOverlay( const ECS::Entity& terrainEntity ); // brush UI when terrain selected
+        void PaintTerrainAtCursor( const ECS::Entity& terrainEntity );    // ray->plane pick + stamp splat
+        void DrawBrushRing( const ECS::Entity& terrainEntity );           // world-space radius ring at cursor
+        void UploadDirtySplatMaps();                                      // safe GPU (re)upload (OnPreUpdate)
+        // Mouse ray x horizontal plane at the terrain's base height -> world hit point. false if no hit.
+        bool TerrainPickPoint( const ECS::Entity& terrainEntity, glm::vec3& outHit ) const;
+
+        struct TerrainBrush
+        {
+            bool  Enabled  = false;
+            int   Layer    = 0;    // 0 = grass (R), 1 = rock (G), 2 = snow (B)
+            float Radius   = 6.0f; // world meters
+            float Strength = 0.6f; // 0..1 per application
+            bool  Erase    = false;
+        };
+        TerrainBrush m_TerrainBrush;
+
         struct ViewportData
         {
             glm::vec2 MousePosition;
@@ -77,6 +96,7 @@ namespace Desert::Editor
         std::optional<glm::vec2> m_PendingViewportSize;
 
         std::shared_ptr<Desert::Core::Scene>  m_Scene;
+        const Assets::AssetManager*           m_AssetManager = nullptr; // for prefab drag-drop instantiate
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
         std::unique_ptr<LightGizmoRenderer>   m_LightGizmoRenderer;
     };

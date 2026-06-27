@@ -21,16 +21,72 @@ namespace Desert::Core
     NO_DISCARD Common::BoolResultStr Scene::Init()
     {
         m_SceneRenderer->Init();
+
+        // Every scene gets a persistent EditorCamera as its Edit-mode view, so the viewport works
+        // immediately (no "add a camera" requirement) and the editor view is independent of any scene
+        // CameraComponent.
+        if ( !m_EditorCamera )
+            m_EditorCamera = std::make_shared<EditorCamera>();
+        if ( m_State != SceneState::Play )
+            SetActiveCamera( m_EditorCamera );
+
         return BOOLSUCCESS;
     }
 
     void Scene::OnUpdate( const Common::Timestep& ts )
     {
+        // Camera source follows the play state: Edit/Paused -> EditorCamera; Play -> the main
+        // CameraComponent (driven into a GameplayCamera each frame so moving the camera entity moves the
+        // view). If Play has no camera entity, fall back to the editor camera so you still see the scene.
+        if ( m_State == SceneState::Play )
+        {
+            const ECS::CameraComponent*    mainCam = nullptr;
+            const ECS::TransformComponent* mainTf  = nullptr;
+            auto camView = m_Registry.view<ECS::CameraComponent, ECS::TransformComponent>();
+            for ( auto entity : camView )
+            {
+                const auto& cc = camView.get<ECS::CameraComponent>( entity );
+                if ( !mainCam || cc.Data.IsMainCamera ) // prefer an IsMainCamera, else the first one
+                {
+                    mainCam = &cc;
+                    mainTf  = &camView.get<ECS::TransformComponent>( entity );
+                    if ( cc.Data.IsMainCamera )
+                        break;
+                }
+            }
+
+            if ( mainCam && mainTf )
+            {
+                if ( !m_GameplayCamera )
+                    m_GameplayCamera = std::make_shared<GameplayCamera>();
+                static_cast<GameplayCamera*>( m_GameplayCamera.get() )
+                     ->SetFromTransform( mainTf->Translation, mainTf->Rotation, mainCam->Data.FOV,
+                                         mainCam->Data.Near, mainCam->Data.Far, m_ViewportWidth,
+                                         m_ViewportHeight );
+                if ( m_ActiveCamera != m_GameplayCamera )
+                    SetActiveCamera( m_GameplayCamera );
+            }
+            else if ( m_ActiveCamera != m_EditorCamera )
+            {
+                SetActiveCamera( m_EditorCamera ); // no game camera -> keep the editor view
+            }
+        }
+        else if ( m_EditorCamera && m_ActiveCamera != m_EditorCamera )
+        {
+            SetActiveCamera( m_EditorCamera );
+        }
+
         Graphic::SceneRenderer::UpdateInfo sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
 
-        std::ranges::for_each( m_Systems,
-                               [&]( const auto& system ) { system->Update( m_Registry, *m_CommandBuffer, ts ); } );
+        // Gameplay time only advances in Play (Edit/Paused freeze it -> animation/physics/scripts hold).
+        // Systems still RUN every frame (they collect render data); they just see a zero timestep when not
+        // playing. The editor camera below uses the real ts so you can fly around while paused/editing.
+        const Common::Timestep gameplayTs =
+             ( m_State == SceneState::Play ) ? ts : Common::Timestep( 0.0f );
+
+        std::ranges::for_each( m_Systems, [&]( const auto& system )
+                               { system->Update( m_Registry, *m_CommandBuffer, gameplayTs ); } );
 
         // Dir lights
         {
@@ -116,6 +172,8 @@ namespace Desert::Core
     void Scene::Resize( const uint32_t width, const uint32_t height ) const
     {
         m_SceneRenderer->Resize( width, height );
+        m_ViewportWidth  = width;
+        m_ViewportHeight = height;
 
         const auto& mainCamera = m_MainCamera.lock();
         if ( mainCamera )
@@ -151,7 +209,9 @@ namespace Desert::Core
 
     void Scene::OnEntityCreated_Camera()
     {
-        FindMainCamera();
+        // Intentionally a no-op now: a scene CameraComponent is a GAME camera, NOT the editor view. The
+        // editor renders through its own EditorCamera (set via SetActiveCamera); Play mode switches to the
+        // main CameraComponent via a GameplayCamera. (FindMainCamera kept for the Play-mode lookup.)
     }
 
     void Scene::FindMainCamera()
@@ -169,7 +229,7 @@ namespace Desert::Core
                 // TODO: Get from scene config
                 const glm::mat4 projection =
                      glm::perspectiveFov( glm::radians( 45.0f ), 1280.0f, 720.0f, 0.1f, 1000.0f );
-                cameraComponent.Camera = std::make_shared<Core::Camera>( projection );
+                cameraComponent.Camera = std::make_shared<EditorCamera>( projection );
                 m_MainCamera           = cameraComponent.Camera;
 
                 break;
@@ -218,6 +278,23 @@ namespace Desert::Core
 
         childRel.Parent = parent.GetHandle();
         parentRel.Children.push_back( child.GetHandle() );
+    }
+
+    void Scene::SetVisibleRecursive( ECS::Entity entity, bool visible )
+    {
+        if ( !entity ) return;
+
+        if ( entity.HasComponent<ECS::VisibilityComponent>() )
+            entity.GetComponent<ECS::VisibilityComponent>().Visible = visible;
+        else
+            entity.AddComponent<ECS::VisibilityComponent>().Visible = visible;
+
+        if ( entity.HasComponent<ECS::RelationshipComponent>() )
+        {
+            auto& rel = entity.GetComponent<ECS::RelationshipComponent>();
+            for ( auto childHandle : rel.Children )
+                SetVisibleRecursive( ECS::Entity( childHandle, m_Registry ), visible );
+        }
     }
 
     void Scene::DestroyEntity( ECS::Entity entity )

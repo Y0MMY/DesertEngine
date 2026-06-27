@@ -18,6 +18,10 @@ namespace Desert::Graphic
         // stale systems hold weak_ptrs to framebuffers that get recreated here, which would dangle.
         m_RenderSystems.clear();
 
+        // Pipelines key off framebuffer pointers that are recreated below; drop the cache so systems
+        // request fresh pipelines during their Initialize().
+        m_PipelineCache.Clear();
+
         // Ensure the phase registry exists before any system registers custom phases or passes.
         RenderPhaseRegistry::CreateInstance();
 
@@ -52,6 +56,12 @@ namespace Desert::Graphic
         // Infinite editor grid (draws after geometry, depth-occluded, into the scene framebuffer).
         RegisterSystem<System::GridRenderer>( "GridSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
         if ( !SP_CAST( System::GridRenderer, m_RenderSystems["GridSystem"] )->Initialize() )
+            DESERT_VERIFY( false );
+
+        // GPU terrain (tessellated patch grid; opaque geometry, depth-tested with the meshes).
+        RegisterSystem<System::TerrainRenderer>( "TerrainSystem", this, m_TargetFramebuffer,
+                                                 m_RenderGraphBuilder );
+        if ( !SP_CAST( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->Initialize() )
             DESERT_VERIFY( false );
 
         const auto& jumpFloodSystem =
@@ -148,6 +158,8 @@ namespace Desert::Graphic
              ->SetThreshold( sceneSettings.BloomThreshold );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetBloomIntensity( sceneSettings.EnableBloom ? sceneSettings.BloomIntensity : 0.0f );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetChromaticBloom( sceneSettings.EnableBloom ? sceneSettings.LensDispersion : 0.0f );
 
         UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] )
              ->SetParams( sceneSettings.AutoExposureSpeed, sceneSettings.AutoExposureMin,
@@ -204,6 +216,7 @@ namespace Desert::Graphic
     NO_DISCARD Common::BoolResultStr SceneRenderer::EndScene()
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->ClearQueues();
+        UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->ClearQueue();
 
         m_PointLight.PointLights.clear();
         m_SpotLight.SpotLights.clear();
@@ -266,6 +279,45 @@ namespace Desert::Graphic
                              .MaterialSlots = materialSlots,
                              .BoneMatrices  = extra.BoneMatrices,
                              .Outlined      = extra.Outlined } );
+    }
+
+    void SceneRenderer::SubmitTerrain( const glm::mat4& transform, float size, int resolution,
+                                       float heightScale, float noiseFrequency, int seed,
+                                       const glm::vec3&                                      layerModes,
+                                       Image2D*                                              splatMap,
+                                       const glm::vec4&                                      grassParams,
+                                       const glm::vec3&                                      grassTint,
+                                       const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides,
+                                       const std::vector<std::pair<std::string, uint64_t>>& textureOverrides )
+    {
+        UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )
+             ->Submit( { .Transform        = transform,
+                         .Size             = size,
+                         .Resolution       = resolution,
+                         .HeightScale      = heightScale,
+                         .NoiseFrequency   = noiseFrequency,
+                         .Seed             = seed,
+                         .LayerModes       = layerModes,
+                         .SplatMap         = splatMap,
+                         .GrassParams      = grassParams,
+                         .GrassTint        = grassTint,
+                         .ParamOverrides   = paramOverrides,
+                         .TextureOverrides = textureOverrides } );
+    }
+
+    void SceneRenderer::SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform,
+                                           const std::string&                                   shaderName,
+                                           const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides,
+                                           const std::vector<std::pair<std::string, uint64_t>>& textureOverrides,
+                                           bool                                                 outlined )
+    {
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SubmitGenericMesh( { .Mesh             = const_cast<Mesh*>( mesh ),
+                                    .Transform        = transform,
+                                    .ShaderName       = shaderName,
+                                    .ParamOverrides   = paramOverrides,
+                                    .TextureOverrides = textureOverrides,
+                                    .Outlined         = outlined } );
     }
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )

@@ -40,6 +40,7 @@ namespace Desert::Editor
 
         RenderPointLights( camera, width, height, xpos, ypos );
         RenderSpotLights( camera, width, height, xpos, ypos );
+        RenderCameras( camera, width, height, xpos, ypos );
     }
 
     void LightGizmoRenderer::RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
@@ -150,6 +151,100 @@ namespace Desert::Editor
                                   transform.Translation.x, transform.Translation.y, transform.Translation.z )
                           .c_str() );
                 ImGui::PopStyleColor( 2 );
+            }
+        }
+    }
+
+    void LightGizmoRenderer::RenderCameras( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
+                                            float height, float xpos, float ypos )
+    {
+        auto         entities  = m_Scene->GetAllEntities();
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        const auto   mvp       = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+        ImDrawList*  drawList  = ImGui::GetWindowDrawList();
+
+        for ( auto entity : entities )
+        {
+            if ( !entity.HasComponent<ECS::CameraComponent>() )
+                continue;
+
+            const auto& cam       = entity.GetComponent<ECS::CameraComponent>().Data;
+            const auto& transform = entity.GetComponent<ECS::TransformComponent>();
+
+            // Billboard icon at the camera position.
+            glm::vec2 screenPos;
+            if ( ProjectToScreen( transform.Translation, mvp, width, height, screenPos ) )
+            {
+                const char*  icon     = ICON_MDI_VIDEO; // video/movie camera (not a photo camera)
+                const ImVec2 iconSize = ImGui::CalcTextSize( icon );
+                const float  ax       = windowPos.x + screenPos.x;
+                const float  ay       = windowPos.y + screenPos.y;
+                drawList->AddText( ImVec2( ax - iconSize.x * 0.5f, ay - iconSize.y * 0.5f ),
+                                   ImColor( ImVec4( 0.6f, 0.85f, 1.0f, 1.0f ) ), icon );
+
+                const ImVec2 m = ImGui::GetMousePos();
+                if ( m.x >= ax - iconSize.x * 0.5f && m.x <= ax + iconSize.x * 0.5f &&
+                     m.y >= ay - iconSize.y * 0.5f && m.y <= ay + iconSize.y * 0.5f )
+                {
+                    ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
+                    ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
+                    Utils::ImGuiUtilities::Tooltip(
+                         std::format( "Camera{}\nFOV: {}\nNear: {}  Far: {}", cam.IsMainCamera ? " (Main)" : "",
+                                      cam.FOV, cam.Near, cam.Far )
+                              .c_str() );
+                    ImGui::PopStyleColor( 2 );
+                }
+            }
+
+            // View frustum wireframe. The real Far can be huge (1000) -> draw only a SHORT, compact frustum
+            // (a couple units deep) so the FOV/aspect shape reads clearly near the icon instead of a few
+            // diverging lines streaking off-screen.
+            const glm::mat4 world    = transform.GetTransform();
+            const glm::vec3 pos      = transform.Translation;
+            const glm::vec3 forward  = glm::normalize( -glm::vec3( world[2] ) );
+            const glm::vec3 up       = glm::normalize( glm::vec3( world[1] ) );
+            const float     aspect   = height > 0.0f ? width / height : 1.7778f;
+            const float     gizmoFar = glm::min( cam.Far, cam.Near + 2.5f );
+            const glm::mat4 camView  = glm::lookAt( pos, pos + forward, up );
+            const glm::mat4 camProj  = glm::perspective( glm::radians( cam.FOV ), aspect, cam.Near, gizmoFar );
+            const glm::mat4 invVP    = glm::inverse( camProj * camView );
+
+            // GL-convention NDC cube corners (z in [-1,1]): 0-3 near, 4-7 far. Keep them in WORLD space so we
+            // can clip each edge to the editor camera's near plane before projecting (a wide FOV puts corners
+            // near/behind the editor camera; an unclipped perspective divide then streaks lines off-screen).
+            static const glm::vec3 ndc[8] = { { -1, -1, -1 }, { 1, -1, -1 }, { 1, 1, -1 }, { -1, 1, -1 },
+                                              { -1, -1, 1 },  { 1, -1, 1 },  { 1, 1, 1 },  { -1, 1, 1 } };
+            glm::vec3              corners[8];
+            for ( int i = 0; i < 8; ++i )
+            {
+                glm::vec4 w = invVP * glm::vec4( ndc[i], 1.0f );
+                corners[i]  = glm::vec3( w ) / w.w;
+            }
+
+            static const int edges[12][2] = { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, { 4, 5 }, { 5, 6 },
+                                              { 6, 7 }, { 7, 4 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+            const ImU32      col = IM_COL32( 150, 220, 255, 200 );
+
+            const auto toScreen = [&]( const glm::vec4& clip ) -> ImVec2
+            {
+                const glm::vec3 n = glm::vec3( clip ) / clip.w;
+                return ImVec2( windowPos.x + ( n.x * 0.5f + 0.5f ) * width,
+                               windowPos.y + ( 1.0f - ( n.y * 0.5f + 0.5f ) ) * height );
+            };
+
+            for ( const auto& e : edges )
+            {
+                glm::vec4   ca   = mvp * glm::vec4( corners[e[0]], 1.0f );
+                glm::vec4   cb   = mvp * glm::vec4( corners[e[1]], 1.0f );
+                const float kEps = 1e-3f;
+                if ( ca.w <= kEps && cb.w <= kEps )
+                    continue; // both behind the editor camera
+                // Clip the endpoint that crosses the near plane (w = kEps) so the line never wraps.
+                if ( ca.w <= kEps )
+                    ca = ca + ( ( kEps - ca.w ) / ( cb.w - ca.w ) ) * ( cb - ca );
+                else if ( cb.w <= kEps )
+                    cb = cb + ( ( kEps - cb.w ) / ( ca.w - cb.w ) ) * ( ca - cb );
+                drawList->AddLine( toScreen( ca ), toScreen( cb ), col, 1.5f );
             }
         }
     }

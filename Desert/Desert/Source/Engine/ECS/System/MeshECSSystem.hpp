@@ -8,6 +8,7 @@
 
 #include <Engine/Graphic/Render/Commands/DrawMeshCommand.hpp>
 #include <Engine/Graphic/Render/Commands/DrawSkinnedMeshCommand.hpp>
+#include <Engine/Graphic/Render/Commands/DrawGenericMeshCommand.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -35,6 +36,11 @@ namespace Desert::ECS
                      [&]( entt::entity entity, StaticMeshComponent& mesh,
                           const TransformComponent& transform )
                      {
+                         // Hidden entities (Visible toggle) are skipped.
+                         if ( registry.has<VisibilityComponent>( entity ) &&
+                              !registry.get<VisibilityComponent>( entity ).Visible )
+                             return;
+
                          if ( !mesh.RuntimeMesh && !mesh.Primitive.has_value() && !mesh.MeshHandle )
                              return;
 
@@ -166,6 +172,31 @@ namespace Desert::ECS
                              }
                          }
 
+                         // A MaterialComponent assigning a NON-PBR shader takes this mesh off the batched
+                         // PBR path onto the generic per-object data-driven path.
+                         if ( registry.has<MaterialComponent>( entity ) )
+                         {
+                             const auto& matc = registry.get<MaterialComponent>( entity );
+                             if ( !matc.ShaderName.empty() && matc.ShaderName != "StaticMeshPBR" &&
+                                  matc.ShaderName != "SkinnedMeshPBR" )
+                             {
+                                 std::vector<std::pair<std::string, glm::vec4>> overrides;
+                                 overrides.reserve( matc.Params.size() );
+                                 for ( const auto& p : matc.Params )
+                                     overrides.emplace_back( p.Name, p.Value );
+
+                                 std::vector<std::pair<std::string, uint64_t>> texOverrides;
+                                 texOverrides.reserve( matc.Textures.size() );
+                                 for ( const auto& t : matc.Textures )
+                                     texOverrides.emplace_back( t.Name, t.TextureHandle );
+
+                                 renderCommandBuffer.Emplace<Graphic::Render::DrawGenericMeshCommand>(
+                                      targetMesh, worldTransform, matc.ShaderName, std::move( overrides ),
+                                      std::move( texOverrides ), isSelected );
+                                 return; // skip the PBR path for this entity
+                             }
+                         }
+
                          renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
                               targetMesh, materialSlots, worldTransform, isSelected );
                      } );
@@ -181,6 +212,10 @@ namespace Desert::ECS
                      [&]( entt::entity entity, const SkinnedMeshComponent& mesh,
                           const AnimationComponent& animation, const TransformComponent& transform )
                      {
+                         if ( registry.has<VisibilityComponent>( entity ) &&
+                              !registry.get<VisibilityComponent>( entity ).Visible )
+                             return;
+
                          if ( mesh.MaterialSlots.empty() || !animation.Animator )
                              return;
 

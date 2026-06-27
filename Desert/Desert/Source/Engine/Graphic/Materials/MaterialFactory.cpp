@@ -5,49 +5,13 @@
 
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
+#include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 
 #include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Graphic
 {
-    // std::shared_ptr<Material> MaterialFactory::Create( const std::shared_ptr<Assets::MaterialAsset>& asset )
-    //{
-    //     switch ( asset->GetMaterialType() )
-    //     {
-    //         case Assets::MaterialAsset::MaterialType::PBR:
-    //         {
-    //             const auto                       pbrAsset = static_cast<Assets::PBRMaterialAsset*>( asset.get()
-    //             ); MaterialPBRBase::PBRMaterialData data; const auto handleAlbedo = pbrAsset->GetTextureHandle(
-    //             Assets::TextureAsset::Type::Albedo ); if ( handleAlbedo.has_value() )
-    //             {
-    //                 const auto texture =
-    //                      Runtime::ResourceRegistry::GetTextureService()->Get( handleAlbedo.value() );
-    //                 if ( texture != nullptr )
-    //                 {
-    //                     const auto imageHandle = texture->GetImageHandle();
-
-    //                    data.Albedo = static_cast<Image2D*>(
-    //                         Runtime::ResourceRegistry::GetImageService()->Resolve( imageHandle ) );
-    //                }
-    //            }
-    //            return std::make_shared<StaticMaterialPBR>( data );
-    //        }
-
-    //        case Assets::MaterialAsset::MaterialType::Skybox:
-    //        {
-    //            //  return std::make_shared<MaterialSkybox>( asset );
-    //        }
-
-    //        default:
-    //        {
-    //            return nullptr; // CreateDefault();
-    //        }
-    //    }
-
-    //    return nullptr;
-    //}
-
     void MaterialFactory::ApplyPBRAsset( StaticMaterialPBR& material, const Assets::PBRMaterialAsset& asset )
     {
         // The reflected data IS the material parameters — copy it wholesale (color, metallic, roughness,
@@ -82,18 +46,20 @@ namespace Desert::Graphic
         if ( !asset )
             return nullptr;
 
-        switch ( asset->GetMaterialType() )
-        {
-            case Assets::MaterialAsset::MaterialType::PBR:
-            {
-                auto pbrMaterial = std::make_shared<StaticMaterialPBR>();
-                ApplyPBRAsset( *pbrMaterial, *static_cast<const Assets::PBRMaterialAsset*>( asset ) );
-                return pbrMaterial;
-            }
+        const std::string shaderName = asset->GetShaderName();
 
-            default:
-                return CreateDefaultPBRMaterial();
+        // Shader-name registry (replaces the old closed MaterialType switch). Specialized shaders keep
+        // their optimized C++ material (PBR batches into an SSBO); any other shader is handled generically
+        // by DataDrivenMaterial — so a new shader becomes assignable with zero C++.
+        if ( shaderName.empty() || shaderName == "StaticMeshPBR" || shaderName == "SkinnedMeshPBR" )
+        {
+            auto pbrMaterial = std::make_shared<StaticMaterialPBR>();
+            if ( const auto* pbr = dynamic_cast<const Assets::PBRMaterialAsset*>( asset ) )
+                ApplyPBRAsset( *pbrMaterial, *pbr );
+            return pbrMaterial;
         }
+
+        return std::make_shared<DataDrivenMaterial>( shaderName );
     }
 
     std::shared_ptr<MaterialInstance> MaterialFactory::CreateMaterialInstance( const Assets::MaterialAsset* asset,

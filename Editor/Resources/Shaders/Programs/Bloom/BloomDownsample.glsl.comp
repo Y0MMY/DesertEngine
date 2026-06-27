@@ -35,20 +35,28 @@ void main()
     float l  = float( u_SrcMip );
     vec2  t  = u_SrcTexelSize;
 
+    // The global sampler addresses in REPEAT mode, so taps that fall outside [0,1] would wrap to the
+    // opposite edge and smear a bright object across the whole screen (worse at small mips where t is
+    // large). Clamp each sample to the source's valid texel-centre range so bloom never wraps.
+    vec2 lo = 0.5 * t;
+    vec2 hi = 1.0 - 0.5 * t;
+#define TAP( off ) textureLod( u_Source, clamp( uv + t * ( off ), lo, hi ), l ).rgb
+
     // 13 taps around uv (in source texels).
-    vec3 a = textureLod( u_Source, uv + t * vec2( -2, -2 ), l ).rgb;
-    vec3 b = textureLod( u_Source, uv + t * vec2(  0, -2 ), l ).rgb;
-    vec3 c = textureLod( u_Source, uv + t * vec2(  2, -2 ), l ).rgb;
-    vec3 d = textureLod( u_Source, uv + t * vec2( -2,  0 ), l ).rgb;
-    vec3 e = textureLod( u_Source, uv + t * vec2(  0,  0 ), l ).rgb;
-    vec3 f = textureLod( u_Source, uv + t * vec2(  2,  0 ), l ).rgb;
-    vec3 g = textureLod( u_Source, uv + t * vec2( -2,  2 ), l ).rgb;
-    vec3 h = textureLod( u_Source, uv + t * vec2(  0,  2 ), l ).rgb;
-    vec3 i = textureLod( u_Source, uv + t * vec2(  2,  2 ), l ).rgb;
-    vec3 j = textureLod( u_Source, uv + t * vec2( -1, -1 ), l ).rgb;
-    vec3 k = textureLod( u_Source, uv + t * vec2(  1, -1 ), l ).rgb;
-    vec3 m = textureLod( u_Source, uv + t * vec2( -1,  1 ), l ).rgb;
-    vec3 n = textureLod( u_Source, uv + t * vec2(  1,  1 ), l ).rgb;
+    vec3 a = TAP( vec2( -2, -2 ) );
+    vec3 b = TAP( vec2(  0, -2 ) );
+    vec3 c = TAP( vec2(  2, -2 ) );
+    vec3 d = TAP( vec2( -2,  0 ) );
+    vec3 e = TAP( vec2(  0,  0 ) );
+    vec3 f = TAP( vec2(  2,  0 ) );
+    vec3 g = TAP( vec2( -2,  2 ) );
+    vec3 h = TAP( vec2(  0,  2 ) );
+    vec3 i = TAP( vec2(  2,  2 ) );
+    vec3 j = TAP( vec2( -1, -1 ) );
+    vec3 k = TAP( vec2(  1, -1 ) );
+    vec3 m = TAP( vec2( -1,  1 ) );
+    vec3 n = TAP( vec2(  1,  1 ) );
+#undef TAP
 
     vec3 color;
     if ( u_FirstPass == 1 )

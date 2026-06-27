@@ -45,6 +45,14 @@ namespace Desert::Graphic
         virtual void SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
                                   const MaterialExecutor* materialExecutor )                            = 0;
 
+        // Vertexless draw of @p vertexCount vertices (no vertex/index buffer bound). The vertex shader
+        // synthesizes geometry from gl_VertexIndex. Used by the GPU terrain (patch-list tessellation).
+        // @p instanceCount > 1 issues an instanced draw (gl_InstanceIndex per instance) — GPU-driven
+        // foliage (grass) derives each blade's transform from gl_InstanceIndex without an instance buffer.
+        virtual void SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
+                                     const MaterialExecutor* materialExecutor,
+                                     uint32_t                instanceCount = 1 )                        = 0;
+
         /**
          * @brief Records a compute dispatch into the current frame command buffer (outside any render
          *        pass), then inserts a compute-write -> shader-read barrier so the next dispatch or a

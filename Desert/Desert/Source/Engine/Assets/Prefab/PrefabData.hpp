@@ -43,6 +43,27 @@ namespace Desert::Assets
         std::optional<std::vector<std::string>> MaterialPaths;
     };
 
+    // MaterialComponent (generic data-driven material) mirror. Param values reflect directly (glm::vec4 via
+    // GLMReflect); texture refs round-trip as cooked paths through the AssetResolver ("TextureAsset").
+    struct MaterialParamSer
+    {
+        std::string Name;
+        glm::vec4   Value;
+    };
+
+    struct MaterialTextureSer
+    {
+        std::string Name;
+        std::string Path;
+    };
+
+    struct MaterialComponentSer
+    {
+        std::string                                    ShaderName;
+        std::optional<std::vector<MaterialParamSer>>   Params;
+        std::optional<std::vector<MaterialTextureSer>> Textures;
+    };
+
     // NOTE: camera/light/skybox payloads are no longer mirrored here — they serialize generically through
     // the reflection registry (ComponentRegistry + ReflectionSerializer + AssetResolver). Only the mesh
     // mirrors above remain (derived geometry isn't reflectable).

@@ -8,11 +8,16 @@
 #include <Engine/Graphic/Materials/Debug/MaterialDebugLine.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
+#include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/RenderGraphBuilder.hpp>
 
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Geometry/StaticMesh.hpp>
+
+#include <string>
+#include <utility>
+#include <unordered_map>
 
 namespace Desert::Graphic::System
 {
@@ -49,6 +54,18 @@ namespace Desert::Graphic::System
             bool                               Outlined = false;
         };
 
+        // A static mesh drawn with a generic data-driven material (assigned via MaterialComponent with a
+        // non-PBR shader). Rendered per-object (no SSBO batching) — additive to the PBR path.
+        struct GenericMeshRenderData
+        {
+            class Mesh*                                    Mesh = nullptr;
+            glm::mat4                                      Transform = glm::mat4( 1.0f );
+            std::string                                    ShaderName;
+            std::vector<std::pair<std::string, glm::vec4>> ParamOverrides;
+            std::vector<std::pair<std::string, uint64_t>>  TextureOverrides; // name -> texture asset handle
+            bool                                           Outlined = false; // selected -> JFA outline
+        };
+
         using RenderSystem::RenderSystem;
 
         // Cascaded shadow maps: number of directional-shadow cascades (frustum splits) + per-map resolution.
@@ -67,6 +84,7 @@ namespace Desert::Graphic::System
         }
 
         void SubmitMesh( const MeshRenderData& data );
+        void SubmitGenericMesh( const GenericMeshRenderData& data );
         void ClearQueues();
 
         // Debug wireframe toggle (SceneSettings.WireframeMode) — selects the line-polygon pipeline.
@@ -118,6 +136,7 @@ namespace Desert::Graphic::System
 
         void DrawStaticMeshes();
         void DrawSkinnedMeshes();
+        void DrawGenericMeshes(); // per-object data-driven materials (MaterialComponent on a mesh)
         void RegisterSilhouettePass( RenderGraphBuilder& builder );
         void RegisterShadowPass( RenderGraphBuilder& builder );
         bool SetupDebugLinePass();
@@ -173,6 +192,11 @@ namespace Desert::Graphic::System
 
         std::vector<StaticMeshRenderData>  m_StaticQueue;
         std::vector<SkinnedMeshRenderData> m_SkinnedQueue;
+
+        // Generic (data-driven) static meshes + a per-shader DataDrivenMaterial cache (one material reused
+        // across all meshes of that shader; per-object data is the transform push-constant + overrides).
+        std::vector<GenericMeshRenderData>                              m_GenericQueue;
+        std::unordered_map<std::string, std::unique_ptr<DataDrivenMaterial>> m_GenericMaterials;
 
     private:
         // fallbacks

@@ -7,6 +7,7 @@
 
 #include <variant>
 #include <cmath>
+#include <algorithm>
 
 namespace Desert::Graphic::System
 {
@@ -118,6 +119,94 @@ namespace Desert::Graphic::System
     {
         m_StaticQueue.clear();
         m_SkinnedQueue.clear();
+        m_GenericQueue.clear();
+    }
+
+    void MeshRenderer::SubmitGenericMesh( const GenericMeshRenderData& data )
+    {
+        if ( data.Mesh && !data.ShaderName.empty() )
+            m_GenericQueue.push_back( data );
+    }
+
+    void MeshRenderer::DrawGenericMeshes()
+    {
+        if ( m_GenericQueue.empty() )
+            return;
+
+        const auto  targetFb = m_TargetFramebuffer.lock();
+        const auto* camera   = m_SceneRenderer->GetMainCamera();
+        if ( !targetFb || !camera )
+            return;
+
+        // Engine-filled CameraUB (matches Common/CameraUB.glslh: mat4 Projection, View; vec3 CameraPos).
+        struct CameraUBData
+        {
+            glm::mat4 Projection;
+            glm::mat4 View;
+            glm::vec4 CameraPos;
+        };
+        CameraUBData cam{};
+        cam.Projection = camera->GetProjectionMatrix();
+        cam.View       = camera->GetViewMatrix();
+        cam.CameraPos  = glm::vec4( camera->GetPosition(), 1.0f );
+
+        const VertexBufferLayout meshLayout = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                                { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                                { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                                { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                                { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+
+        for ( const auto& g : m_GenericQueue )
+        {
+            auto shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( g.ShaderName );
+            if ( !shader || !g.Mesh )
+                continue;
+
+            auto& material = m_GenericMaterials[g.ShaderName];
+            if ( !material )
+                material = std::make_unique<DataDrivenMaterial>( g.ShaderName );
+
+            GraphicsPipelineSpecification spec;
+            spec.DebugName   = "GenericMesh_" + g.ShaderName;
+            spec.Shader      = shader;
+            spec.Framebuffer = targetFb;
+            spec.Layout      = meshLayout;
+            ApplyShaderRenderState( spec, shader->GetProgramMeta().State );
+            auto pipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+            if ( !pipeline )
+                continue;
+
+            if ( auto* camUB = material->Get<UniformBufferProperty>( "CameraUB" ) )
+            {
+                // CameraUB ends in a vec3 (CameraPos) -> reflected size (140) < sizeof(cam) (144 padded).
+                // Clamp to the real buffer size; the first 140 bytes (Proj/View/CameraPos.xyz) are valid.
+                const size_t sz =
+                     std::min( sizeof( cam ), static_cast<size_t>( camUB->GetUniform()->GetSize() ) );
+                camUB->SetRawData( reinterpret_cast<const std::byte*>( &cam ), sz );
+            }
+
+            material->ApplyDefaults();
+            for ( const auto& [name, value] : g.ParamOverrides )
+                material->SetParamRaw( name, value );
+
+            // Texture overrides: resolve asset handle -> runtime Image2D and bind by sampler name.
+            // Unset samplers keep the backend fallback texture, so this is purely additive.
+            for ( const auto& [name, handle] : g.TextureOverrides )
+            {
+                if ( handle == 0 )
+                    continue;
+                auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( handle ) );
+                if ( !tex )
+                    continue;
+                auto* img = static_cast<Image2D*>(
+                     Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+                if ( img )
+                    material->SetTexture( name, img );
+            }
+
+            Renderer::GetInstance().RenderMesh( pipeline.get(), g.Mesh, g.Transform,
+                                                material->GetMaterialExecutor() );
+        }
     }
 
     void MeshRenderer::RegisterPasses( RenderGraphBuilder& builder )
@@ -138,6 +227,7 @@ namespace Desert::Graphic::System
 
                              DrawStaticMeshes();
                              DrawSkinnedMeshes();
+                             DrawGenericMeshes();
                          },
                          m_StaticPipeline->GetSpecification(), targetFb,
                          { RenderPassDependency( RenderPhase::DepthPrePass ) } );
@@ -304,15 +394,15 @@ namespace Desert::Graphic::System
         spec.Shader         = m_GeometryShader;
         spec.Framebuffer    = targetFb;
 
-        m_StaticPipeline = GraphicsPipeline::Create( spec );
-        m_StaticPipeline->Invalidate();
+        // Pipelines come from the shared cache (deduped by shader + target + state). The mesh keeps its
+        // explicit state for now; PBR's render-state moves to the shader's #pragma state in Phase 2.
+        m_StaticPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
 
         // Wireframe variant — identical spec, line polygon mode (device feature fillModeNonSolid is on).
         // Selected per-frame by the SceneSettings debug toggle; shares the same framebuffer/render pass.
         spec.DebugName   = "StaticMeshWireframe";
         spec.PolygonMode = PrimitivePolygonMode::Wireframe;
-        m_StaticWireframePipeline = GraphicsPipeline::Create( spec );
-        m_StaticWireframePipeline->Invalidate();
+        m_StaticWireframePipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
 
         return true;
     }
@@ -696,6 +786,16 @@ namespace Desert::Graphic::System
 
                                  renderer.RenderMesh( m_SilhouettePipeline.get(), renderData.Mesh,
                                                       renderData.Transform,
+                                                      m_SilhouetteMaterial->GetMaterialExecutor() );
+                             }
+
+                             // ===== Generic (data-driven materials) — same Silhouette pipeline, the
+                             // material's shader is irrelevant for the mask (just geometry + transform).
+                             for ( const auto& g : m_GenericQueue )
+                             {
+                                 if ( !g.Outlined || !g.Mesh )
+                                     continue;
+                                 renderer.RenderMesh( m_SilhouettePipeline.get(), g.Mesh, g.Transform,
                                                       m_SilhouetteMaterial->GetMaterialExecutor() );
                              }
 

@@ -80,7 +80,7 @@ namespace Desert::Editor
         e.CanRemove = canRemove;
         e.Has       = []( ECS::Entity& en ) { return en.HasComponent<ComponentT>(); };
         e.Add       = []( ECS::Entity& en ) { en.AddComponent<ComponentT>(); };
-        e.Remove    = []( ECS::Entity& ) {}; // preserve the current no-op remove behavior
+        e.Remove    = []( ECS::Entity& en ) { en.RemoveComponent<ComponentT>(); };
         e.Draw      = [member, dataTypeName]( ECS::Entity& en, ::Desert::Core::Scene*,
                                          const ComponentEditContext& ctx )
         {
@@ -102,7 +102,7 @@ namespace Desert::Editor
         e.CanRemove = canRemove;
         e.Has       = []( ECS::Entity& en ) { return en.HasComponent<ComponentT>(); };
         e.Add       = []( ECS::Entity& en ) { en.AddComponent<ComponentT>(); };
-        e.Remove    = []( ECS::Entity& ) {};
+        e.Remove    = []( ECS::Entity& en ) { en.RemoveComponent<ComponentT>(); };
         e.Draw      = std::move( draw );
         return e;
     }

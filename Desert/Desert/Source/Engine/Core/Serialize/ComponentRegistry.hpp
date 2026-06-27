@@ -49,4 +49,12 @@ namespace Desert::Core::Serialize
 
         std::vector<ComponentSerializer> m_Serializers;
     };
+
+    // Standalone (de)serialization of a single MaterialComponent to/from a JSON string — the generic
+    // ".demat" material file (reusable, data-driven). Reuses the same Ser mirror + asset resolver as the
+    // scene/entity serializers (texture refs round-trip as paths). MVP for a reusable generic material;
+    // full asset-system integration (handle/DnD/live-link) is a later milestone.
+    std::string SaveMaterialComponentToJson( const ECS::MaterialComponent& mc, const Assets::AssetManager& mgr );
+    bool        LoadMaterialComponentFromJson( const std::string& json, ECS::MaterialComponent& mc,
+                                               const Assets::AssetManager& mgr );
 } // namespace Desert::Core::Serialize

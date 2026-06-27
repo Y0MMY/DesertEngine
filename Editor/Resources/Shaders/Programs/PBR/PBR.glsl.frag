@@ -301,14 +301,23 @@ void main() {
     if (u_DebugParams.y > 0.5)
     {
         vec3 dbg = vec3(0.0);
+        // Point lights: hue cycles 0,1,2,... (red, then well-spread).
         for (uint i = 0; i < lightsMetadata.PointLightCount; i++)
             dbg += LightDebugColor(i) * PointLightContribution(pointLights[i], inVertex.WorldPosition, m_Params.Normal);
+        // Spot lights: same hue cycle but offset half a turn so spot #0 != point #0.
         for (uint i = 0; i < lightsMetadata.SpotLightCount; i++)
-            dbg += LightDebugColor(1000u + i) * SpotLightContribution(spotLights[i], inVertex.WorldPosition, m_Params.Normal);
-        // Sun as one extra debug source, occluded by its shadow.
-        float sunStrength = directionLights.directionLights.ColorIntensity.a
-                          * max(dot(m_Params.Normal, sunDir), 0.0) * shadow;
-        dbg += LightDebugColor(500u) * sunStrength;
+            dbg += HueToRGB(fract(float(i) * 0.61803398875 + 0.5)) * SpotLightContribution(spotLights[i], inVertex.WorldPosition, m_Params.Normal);
+        // Sun (directional): fixed warm yellow, occluded by its shadow — unmistakable vs the cycled hues.
+        for (uint i = 0; i < lightsMetadata.DirectionLightCount; i++)
+        {
+            float sunStrength = directionLights.directionLights.ColorIntensity.a
+                              * max(dot(m_Params.Normal, sunDir), 0.0) * shadow;
+            dbg += vec3(1.0, 0.85, 0.35) * sunStrength;
+        }
+        // Physical attenuation*NdotL is numerically dim, so a debug viz built from it reads as near-black.
+        // Map it through an exposure-like curve so ANY light reaching the surface shows as a clear color,
+        // while a truly unlit fragment (dbg == 0) stays black. This is a visualization, not radiometry.
+        dbg = vec3(1.0) - exp(-dbg * 6.0);
         oColor = vec4(dbg, 1.0);
         return;
     }

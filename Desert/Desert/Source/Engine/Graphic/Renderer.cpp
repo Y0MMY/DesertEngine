@@ -101,6 +101,12 @@ namespace Desert::Graphic
         s_RendererAPI->SubmitLines( pipeline, vertexCount, lineWidth, materialExecutor );
     }
 
+    void Renderer::SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
+                                   const MaterialExecutor* materialExecutor, uint32_t instanceCount )
+    {
+        s_RendererAPI->SubmitVertices( pipeline, vertexCount, materialExecutor, instanceCount );
+    }
+
     void Renderer::DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
                                            uint32_t groupCountY, uint32_t groupCountZ )
     {

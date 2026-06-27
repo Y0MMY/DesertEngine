@@ -61,6 +61,11 @@ namespace Desert::Editor
         return result;
     }
 
+    void ThumbnailCache::Invalidate( const std::string& sourcePath )
+    {
+        m_Cache.erase( sourcePath );
+    }
+
     void ThumbnailCache::Clear()
     {
         m_Cache.clear();

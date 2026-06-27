@@ -34,6 +34,10 @@ namespace Desert::Graphic::API::Vulkan
         virtual void SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
                                   const MaterialExecutor* materialExecutor ) override;
 
+        virtual void SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
+                                     const MaterialExecutor* materialExecutor,
+                                     uint32_t                instanceCount = 1 ) override;
+
         virtual void DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
                                              uint32_t groupCountY, uint32_t groupCountZ ) override;
 

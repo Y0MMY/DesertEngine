@@ -193,6 +193,7 @@ namespace Desert::Graphic::API::Vulkan
     {
         VkDeviceCreateInfo       createInfo{};
         VkPhysicalDeviceFeatures deviceFeatures{};
+        deviceFeatures.tessellationShader = VK_TRUE; // required for the terrain tessellation pipeline
         if ( m_PhysicalDevice->m_Capabilities.SupportsWideLines )
         {
             deviceFeatures.wideLines        = VK_TRUE;

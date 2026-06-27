@@ -66,7 +66,7 @@ namespace Desert::Graphic
 
     enum class PrimitiveTopology
     {
-        Points = 0, Lines, Triangles, LineStrip, TriangleStrip, TriangleFan
+        Points = 0, Lines, Triangles, LineStrip, TriangleStrip, TriangleFan, Patches
     };
 
     inline bool PrimitiveIsLine( PrimitiveTopology topology )
@@ -115,6 +115,10 @@ namespace Desert::Graphic
         float                LineWidth   = 1.0F;
         PrimitiveTopology    Topology    = PrimitiveTopology::Triangles;
         PrimitivePolygonMode PolygonMode = PrimitivePolygonMode::Solid;
+
+        // > 0 enables tessellation: topology becomes a patch list with this many control points per patch
+        // (the pipeline must have tessellation control + evaluation stages).
+        uint32_t PatchControlPoints = 0;
 
         std::string DebugName;
     };

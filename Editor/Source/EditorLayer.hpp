@@ -44,6 +44,11 @@ namespace Desert::Editor
         void DrawPlaybackControls();
         void DrawPlayButton();
         void DrawPauseButton();
+
+        // Play mode: snapshot the scene on Play, restore it on Stop (so play-time changes don't persist).
+        void OnScenePlay();
+        void OnSceneStop();
+        void OnScenePauseToggle();
         void DrawEngineStats();
 
         // ===== Popups =====
@@ -69,6 +74,7 @@ namespace Desert::Editor
         };
 
         EditorState m_EditorState;
+        std::string m_PlaySnapshot; // serialized scene captured on Play, restored on Stop
 
     private:
         const Engine::Application* m_Application;

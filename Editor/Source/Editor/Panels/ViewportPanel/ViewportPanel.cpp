@@ -3,15 +3,27 @@
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Engine/ECS/Entity.hpp>
+#include <Engine/ECS/Components.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Core/Formats/ImageFormat.hpp>
+#include <Common/Core/Math/Ray.hpp>
 
 #include <ImGuizmo.h>
 #include <glm/gtx/matrix_decompose.hpp>
 
+#include <cmath>
+#include <algorithm>
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
-    ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene )
-         : IPanel( "Scene###scene" ), m_Scene( scene )
+    ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
+                                  const Assets::AssetManager*                 assetManager )
+         : IPanel( "Scene###scene" ), m_Scene( scene ), m_AssetManager( assetManager )
     {
         m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
         m_UIHelper->Init();
@@ -64,15 +76,67 @@ namespace Desert::Editor
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
 
+        // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
+        if ( ImGui::BeginDragDropTarget() )
+        {
+            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "PREFAB_FILE" ); payload && m_AssetManager )
+            {
+                const std::string path( static_cast<const char*>( payload->Data ),
+                                        payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
+                auto& mgr = const_cast<Assets::AssetManager&>( *m_AssetManager );
+                auto  prefab = mgr.FindByPath<Assets::PrefabAsset>( path );
+                if ( !prefab )
+                    prefab = mgr.CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High, path );
+                if ( prefab )
+                {
+                    if ( !prefab->IsReadyForUse() )
+                        prefab->Load();
+                    prefab->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        // Terrain splat painting: when a terrain entity is selected, show the brush overlay; with the brush
+        // enabled, LMB-drag paints into the splat map (and suppresses the object gizmo to avoid conflicts).
+        const ECS::Entity* terrainEntity = nullptr;
+        if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+        {
+            if ( auto ref = m_Scene->FindEntityByID( *sel ); ref )
+            {
+                const ECS::Entity& e = ref->get();
+                if ( e.HasComponent<ECS::TerrainComponent>() )
+                    terrainEntity = &e;
+            }
+        }
+        if ( terrainEntity )
+            DrawTerrainPaintOverlay( *terrainEntity );
+
+        const bool painting = terrainEntity && m_TerrainBrush.Enabled;
+
         // Handle gizmos
         m_GizmoHovered = false;
-        if ( m_GizmoType != GizmoType::None )
+        if ( m_GizmoType != GizmoType::None && !painting )
         {
             RenderGizmo();
         }
 
-        m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y, m_ViewportData.ViewportPos.x,
-                                      m_ViewportData.ViewportPos.y );
+        if ( painting && m_ViewportData.IsHovered )
+        {
+            // Replace the OS pointer with the brush: hide the arrow and draw the world-space radius ring.
+            ImGui::SetMouseCursor( ImGuiMouseCursor_None );
+            DrawBrushRing( *terrainEntity );
+
+            if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) &&
+                 !ImGui::IsAnyItemActive() ) // don't paint while dragging the brush sliders
+                PaintTerrainAtCursor( *terrainEntity );
+        }
+
+        // Editor gizmos (light/camera icons + frustums) are authoring aids — hide them in Play/Paused so the
+        // running game view is clean.
+        if ( m_Scene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
+            m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y,
+                                          m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y );
     }
 
     void ViewportPanel::OnPreUpdate()
@@ -82,6 +146,10 @@ namespace Desert::Editor
             m_Scene->Resize( (uint32_t)m_PendingViewportSize->x, (uint32_t)m_PendingViewportSize->y );
             m_PendingViewportSize.reset();
         }
+
+        // Re-upload edited splat maps here (before any recording) so we never release a GPU image that is
+        // still bound to an in-flight command buffer.
+        UploadDirtySplatMaps();
     }
 
     void ViewportPanel::RenderGizmo()
@@ -271,7 +339,8 @@ namespace Desert::Editor
 
     bool ViewportPanel::OnMousePressed( Common::MouseButtonPressedEvent& e )
     {
-        if ( e.GetMouseButton() == Common::MouseButton::Left )
+        // While the terrain brush is active, LMB paints (handled in OnUIRender) — don't also pick/select.
+        if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainBrush.Enabled )
         {
             HandleObjectPicking();
         }
@@ -304,6 +373,226 @@ namespace Desert::Editor
         if ( component.MeshHandle )
             return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
         return component.RuntimeMesh ? component.RuntimeMesh.get() : nullptr;
+    }
+
+    void ViewportPanel::DrawTerrainPaintOverlay( const ECS::Entity& terrainEntity )
+    {
+        auto& comp = terrainEntity.GetComponent<ECS::TerrainComponent>();
+
+        // Floating overlay anchored to the viewport's top-left corner. Generous padding + a size that fits
+        // all controls and the hint text without scrolling.
+        ImGui::SetCursorPos( ImVec2( ImGui::GetWindowContentRegionMin().x + 12.0f,
+                                     ImGui::GetWindowContentRegionMin().y + 12.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 12.0f, 12.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8.0f, 8.0f ) );
+        ImGui::BeginChild( "##TerrainPaint", ImVec2( 320.0f, 260.0f ), true );
+
+        ImGui::TextUnformatted( "Terrain Paint" );
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::Checkbox( "Enable Brush", &m_TerrainBrush.Enabled );
+
+        const char* layers[] = { "Grass (R)", "Rock (G)", "Snow (B)" };
+        ImGui::SetNextItemWidth( 180.0f );
+        ImGui::Combo( "Layer", &m_TerrainBrush.Layer, layers, 3 );
+        ImGui::SetNextItemWidth( 180.0f );
+        ImGui::SliderFloat( "Radius", &m_TerrainBrush.Radius, 0.5f, comp.Data.Size, "%.1f m" );
+        ImGui::SetNextItemWidth( 180.0f );
+        ImGui::SliderFloat( "Strength", &m_TerrainBrush.Strength, 0.0f, 1.0f );
+        ImGui::Checkbox( "Erase", &m_TerrainBrush.Erase );
+
+        ImGui::Spacing();
+        if ( ImGui::Button( "Clear Splat", ImVec2( 180.0f, 0.0f ) ) )
+        {
+            const uint32_t res = ECS::TerrainComponent::SplatResolution;
+            comp.SplatPixels.assign( static_cast<size_t>( res ) * res * 4, 0 );
+            comp.SplatDirty = true;
+        }
+
+        ImGui::Spacing();
+        ImGui::TextDisabled( "Set the layer to 'Manual' in Details" );
+        ImGui::TextDisabled( "to see painted weights. Hold LMB" );
+        ImGui::TextDisabled( "and drag to paint." );
+
+        ImGui::EndChild();
+        ImGui::PopStyleVar( 2 );
+    }
+
+    bool ViewportPanel::TerrainPickPoint( const ECS::Entity& terrainEntity, glm::vec3& outHit ) const
+    {
+        const auto& camera = m_Scene->GetMainCamera().lock();
+        if ( !camera )
+            return false;
+
+        const auto& tf = terrainEntity.GetComponent<ECS::TransformComponent>();
+
+        auto [mouseX, mouseY] = GetMouseViewportSpace();
+        const auto ray        = Common::Math::Ray::FromScreenPosition(
+             { mouseX, mouseY }, camera->GetProjectionMatrix(), camera->GetViewMatrix(),
+             camera->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
+             static_cast<uint32_t>( m_ViewportData.Size.y ) );
+
+        // Intersect with the horizontal plane at the terrain's base height. The splat map is XZ-indexed,
+        // so the plane hit (ignoring displacement) is a good-enough position for v1.
+        if ( std::abs( ray.Direction.y ) < 1e-5f )
+            return false;
+        const float t = ( tf.Translation.y - ray.Origin.y ) / ray.Direction.y;
+        if ( t <= 0.0f )
+            return false;
+        outHit = ray.GetPoint( t );
+        return true;
+    }
+
+    void ViewportPanel::PaintTerrainAtCursor( const ECS::Entity& terrainEntity )
+    {
+        auto& comp = terrainEntity.GetComponent<ECS::TerrainComponent>();
+        auto& tf   = terrainEntity.GetComponent<ECS::TransformComponent>();
+
+        const float    size = comp.Data.Size;
+        const uint32_t res  = ECS::TerrainComponent::SplatResolution;
+        if ( size <= 0.0f )
+            return;
+        if ( comp.SplatPixels.empty() )
+            comp.SplatPixels.assign( static_cast<size_t>( res ) * res * 4, 0 );
+
+        glm::vec3 hit;
+        if ( !TerrainPickPoint( terrainEntity, hit ) )
+            return;
+
+        // Terrain-local UV (matches the shader's splat UV: (worldXZ - modelTranslationXZ)/Size + 0.5).
+        const float u = ( hit.x - tf.Translation.x ) / size + 0.5f;
+        const float v = ( hit.z - tf.Translation.z ) / size + 0.5f;
+        if ( u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f )
+            return;
+
+        const int   cx       = static_cast<int>( u * res );
+        const int   cy       = static_cast<int>( v * res );
+        const float radiusPx = ( m_TerrainBrush.Radius / size ) * res;
+        const int   channel  = std::clamp( m_TerrainBrush.Layer, 0, 2 ); // R=grass, G=rock, B=snow
+        const int   r        = static_cast<int>( std::ceil( radiusPx ) );
+        const float sign     = m_TerrainBrush.Erase ? -1.0f : 1.0f;
+
+        for ( int dy = -r; dy <= r; ++dy )
+        {
+            for ( int dx = -r; dx <= r; ++dx )
+            {
+                const int px = cx + dx;
+                const int py = cy + dy;
+                if ( px < 0 || py < 0 || px >= (int)res || py >= (int)res )
+                    continue;
+                const float dist = std::sqrt( static_cast<float>( dx * dx + dy * dy ) );
+                if ( dist > radiusPx )
+                    continue;
+                const float  falloff = 1.0f - dist / glm::max( radiusPx, 0.0001f );
+                const size_t idx     = ( static_cast<size_t>( py ) * res + px ) * 4 + channel;
+                const float  cur     = static_cast<float>( comp.SplatPixels[idx] );
+                // Builds up over the frames the button is held (not instant).
+                const float  delta   = sign * m_TerrainBrush.Strength * falloff * 60.0f;
+                comp.SplatPixels[idx] =
+                     static_cast<unsigned char>( glm::clamp( cur + delta, 0.0f, 255.0f ) );
+            }
+        }
+        comp.SplatDirty = true;
+    }
+
+    void ViewportPanel::DrawBrushRing( const ECS::Entity& terrainEntity )
+    {
+        const auto& camera = m_Scene->GetMainCamera().lock();
+        if ( !camera )
+            return;
+
+        glm::vec3 center;
+        if ( !TerrainPickPoint( terrainEntity, center ) )
+            return;
+
+        const glm::mat4 mvp   = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+        const float     w     = m_ViewportData.Size.x;
+        const float     h     = m_ViewportData.Size.y;
+        const glm::vec2 vpPos = m_ViewportData.ViewportPos;
+
+        const auto toScreen = [&]( const glm::vec3& world, ImVec2& out ) -> bool
+        {
+            const glm::vec4 clip = mvp * glm::vec4( world, 1.0f );
+            if ( clip.w <= 1e-4f )
+                return false;
+            const glm::vec3 ndc = glm::vec3( clip ) / clip.w;
+            out = ImVec2( vpPos.x + ( ndc.x * 0.5f + 0.5f ) * w,
+                          vpPos.y + ( 1.0f - ( ndc.y * 0.5f + 0.5f ) ) * h );
+            return true;
+        };
+
+        constexpr int N      = 48;
+        const float   radius = m_TerrainBrush.Radius;
+        ImVec2        pts[N];
+        for ( int i = 0; i < N; ++i )
+        {
+            const float a = static_cast<float>( i ) / N * 2.0f * 3.14159265f;
+            const glm::vec3 wp =
+                 center + glm::vec3( std::cos( a ) * radius, 0.0f, std::sin( a ) * radius );
+            if ( !toScreen( wp, pts[i] ) )
+                return; // part of the ring is behind the camera — skip this frame
+        }
+
+        auto*         dl  = ImGui::GetWindowDrawList();
+        const ImU32   col = IM_COL32( 255, 220, 60, 230 );
+        for ( int i = 0; i < N; ++i )
+            dl->AddLine( pts[i], pts[( i + 1 ) % N], col, 2.0f );
+
+        ImVec2 centerScreen;
+        if ( toScreen( center, centerScreen ) )
+            dl->AddCircleFilled( centerScreen, 3.0f, col );
+    }
+
+    void ViewportPanel::UploadDirtySplatMaps()
+    {
+        auto& registry = m_Scene->GetRegistry();
+        auto  view     = registry.view<ECS::TerrainComponent>();
+
+        bool any = false;
+        for ( auto e : view )
+        {
+            const auto& c = view.get<ECS::TerrainComponent>( e );
+            if ( c.SplatDirty && !c.SplatPixels.empty() )
+            {
+                any = true;
+                break;
+            }
+        }
+        if ( !any )
+            return;
+
+        // Releasing/recreating a sampled image must not race in-flight GPU work.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
+        const uint32_t res = ECS::TerrainComponent::SplatResolution;
+        for ( auto e : view )
+        {
+            auto& c = view.get<ECS::TerrainComponent>( e );
+            if ( !c.SplatDirty || c.SplatPixels.empty() )
+                continue;
+
+            if ( !c.SplatMap )
+            {
+                ::Desert::Core::Formats::Image2DSpecification spec = {
+                     .Tag        = "TerrainSplatMap",
+                     .Width      = res,
+                     .Height     = res,
+                     .Format     = ::Desert::Core::Formats::ImageFormat::RGBA8F,
+                     .Mips       = 1,
+                     .Data       = c.SplatPixels,
+                     .Usage      = ::Desert::Core::Formats::Image2DUsage::Image2D,
+                     .Properties = ::Desert::Core::Formats::ImageProperties::Sample,
+                };
+                c.SplatMap = Graphic::Image2D::Create( spec, nullptr );
+            }
+            else
+            {
+                c.SplatMap->GetImageSpecification().Data = c.SplatPixels;
+                c.SplatMap->Invalidate();
+            }
+            c.SplatDirty = false;
+        }
     }
 
 } // namespace Desert::Editor

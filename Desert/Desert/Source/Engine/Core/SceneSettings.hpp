@@ -91,6 +91,8 @@ namespace Desert::Core
         float BloomThreshold = 2.0f;
         PROPERTY( DisplayName( "Bloom Intensity" ), Category( "Post Processing" ), Range( 0.0f, 5.0f ) )
         float BloomIntensity = 0.8f;
+        PROPERTY( DisplayName( "Lens Dispersion" ), Category( "Post Processing" ), Range( 0.0f, 3.0f ) )
+        float LensDispersion = 0.0f; // chromatic rainbow fringe on the bloom halo (glare); 0 = off
 
         // Textures
         PROPERTY( DisplayName( "Texture Filter" ), Category( "Textures" ) )

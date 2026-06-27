@@ -29,6 +29,7 @@ namespace Desert::Graphic
         SetBloomIntensity( params.BloomIntensity );
         SetExposureKey( params.ExposureKey );
         SetAutoExposureEnabled( params.AutoExposure ? 1.0f : 0.0f );
+        SetChromaticBloom( params.ChromaticBloom );
 
         std::unordered_set<UniformBufferProperty*> dirtyUBs;
         UploadRegisteredProperties( dirtyUBs );

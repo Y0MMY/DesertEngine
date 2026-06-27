@@ -20,10 +20,8 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
     using namespace Desert::Engine;
 
     ApplicationInfo appInfo;
-    appInfo.Title  = "Desert Engine";
-    appInfo.Width  = 1920;
-    appInfo.Height = 780;
-    appInfo.Fullscreen = false;
+    appInfo.Title = "Desert Engine";
+    // Width/Height left as std::nullopt -> start fullscreen at the monitor's native resolution.
 
     return &Common::Singleton<Desert::Sandbox>::CreateInstance( appInfo );
 }

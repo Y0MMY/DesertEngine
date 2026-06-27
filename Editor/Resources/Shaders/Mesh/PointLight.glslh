@@ -20,13 +20,19 @@ layout(std430, binding = 6) readonly buffer PointLightsUB
     PointLight pointLights[];
 };
 
+// HSV hue (0..1) -> fully-saturated RGB.
+vec3 HueToRGB(float h)
+{
+    vec3 c = abs(fract(h + vec3(0.0, 1.0/3.0, 2.0/3.0)) * 6.0 - 3.0) - 1.0;
+    return clamp(c, 0.0, 1.0);
+}
+
 // Stable, distinct debug color per light index (for the "color per source" lighting debug view).
+// Golden-ratio hue stepping on the SMALL per-type index (0,1,2,...) gives well-spread colors; callers
+// must pass the per-type index (not a globally offset one) so different types don't collide near red.
 vec3 LightDebugColor(uint i)
 {
-    // Golden-ratio hue stepping -> visually distinct, deterministic colors.
-    float h = fract(float(i) * 0.61803398875);
-    vec3  c = abs(fract(h + vec3(0.0, 1.0/3.0, 2.0/3.0)) * 6.0 - 3.0) - 1.0;
-    return clamp(c, 0.0, 1.0);
+    return HueToRGB(fract(float(i) * 0.61803398875));
 }
 
 vec3 CalculatePointLight(PointLight light, vec3 worldPosition, vec3 view, vec3 N, vec3 F0, float metalness, float roughness, vec3 albedo)

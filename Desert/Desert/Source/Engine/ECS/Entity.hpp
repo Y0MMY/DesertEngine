@@ -40,6 +40,13 @@ namespace Desert::ECS
             return m_Registry->get<EntityT>( m_Handle );
         }
 
+        template <typename EntityT>
+        void RemoveComponent() const
+        {
+            if ( m_Registry->has<EntityT>( m_Handle ) )
+                m_Registry->remove<EntityT>( m_Handle );
+        }
+
         bool operator==( const Entity& other )
         {
             return m_Handle == other.m_Handle;

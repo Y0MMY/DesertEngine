@@ -87,6 +87,20 @@ namespace Desert::Core
         [[nodiscard]] std::optional<std::reference_wrapper<const ECS::Entity>>
         FindEntityByID( const Common::UUID& uuid ) const;
 
+        // Play-mode state. Edit = authoring (gameplay systems frozen); Play = running (gameplay ticks);
+        // Paused = running but time frozen (ts forced to 0). The editor snapshots the scene on Play and
+        // restores it on Stop, so play-time changes don't corrupt the authored scene.
+        enum class SceneState
+        {
+            Edit,
+            Play,
+            Paused
+        };
+
+        [[nodiscard]] SceneState GetState() const { return m_State; }
+        void                     SetState( SceneState state ) { m_State = state; }
+        [[nodiscard]] bool       IsPlaying() const { return m_State == SceneState::Play; }
+
         [[nodiscard]] SceneSettings& GetSettings()
         {
             return m_Settings;
@@ -107,6 +121,17 @@ namespace Desert::Core
             return m_MainCamera;
         }
 
+        // The scene renders through whatever camera is set active here. The editor sets its EditorCamera in
+        // Edit mode and a GameplayCamera (from the main CameraComponent) in Play mode. The scene owns the
+        // active camera so the view never depends on a scene CameraComponent existing (Init() defaults to an
+        // EditorCamera, so a brand-new scene still has a working viewport).
+        void SetActiveCamera( const std::shared_ptr<Core::Camera>& camera )
+        {
+            m_ActiveCamera = camera;
+            m_MainCamera   = m_ActiveCamera;
+        }
+        [[nodiscard]] const std::shared_ptr<Core::Camera>& GetActiveCamera() const { return m_ActiveCamera; }
+
         template <typename T, typename... Args>
         void AddSystem( Args&&... args )
         {
@@ -117,6 +142,9 @@ namespace Desert::Core
         void Attach( ECS::Entity parent, ECS::Entity child );
 
         void DestroyEntity( ECS::Entity entity );
+
+        // Sets VisibilityComponent on the entity and its entire subtree (UE-like hierarchical visibility).
+        void SetVisibleRecursive( ECS::Entity entity, bool visible );
 
     private:
         void FindMainCamera();
@@ -133,7 +161,14 @@ namespace Desert::Core
         std::unordered_map<Common::UUID, size_t> m_EntitysMap;
 
         Graphic::SceneRenderer*     m_SceneRenderer;
-        std::weak_ptr<Core::Camera> m_MainCamera;
+        std::weak_ptr<Core::Camera>   m_MainCamera;   // non-owning view (renderer reads this)
+        std::shared_ptr<Core::Camera> m_ActiveCamera; // owns the current camera (editor or gameplay)
+        std::shared_ptr<Core::Camera> m_EditorCamera;   // persistent editor view (Edit mode)
+        std::shared_ptr<Core::Camera> m_GameplayCamera; // persistent game view (Play mode), driven by the
+                                                        // main CameraComponent
+        mutable uint32_t              m_ViewportWidth  = 1280;
+        mutable uint32_t              m_ViewportHeight = 720;
+        SceneState                    m_State = SceneState::Edit;
 
         std::unique_ptr<Graphic::Render::RenderCommandBuffer> m_CommandBuffer;
 

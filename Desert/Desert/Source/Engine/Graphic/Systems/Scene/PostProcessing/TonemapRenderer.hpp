@@ -46,6 +46,11 @@ namespace Desert::Graphic::System
         {
             m_BloomIntensity = intensity;
         }
+        // Lens dispersion (chromatic fringe) strength on the bloom halo (0 = off).
+        void SetChromaticBloom( float strength )
+        {
+            m_ChromaticBloom = strength;
+        }
 
         // Auto-exposure (eye adaptation): the 1x1 adapted-luminance image + key, set per-frame. When
         // disabled, the manual Exposure is used instead.
@@ -72,6 +77,7 @@ namespace Desert::Graphic::System
 
         std::weak_ptr<Image2D> m_BloomImage;
         float                  m_BloomIntensity = 0.0f;
+        float                  m_ChromaticBloom = 0.0f;
 
         std::weak_ptr<Image2D> m_AutoExposureImage;
         bool                   m_AutoExposureEnabled = false;

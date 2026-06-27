@@ -18,6 +18,10 @@ namespace Desert::Editor
         // or null if the file can't be decoded (caller falls back to an icon). Null results are cached too.
         std::shared_ptr<Graphic::Image2D> Get( const std::string& sourcePath );
 
+        // Drop the cached entry for one path so the next Get() re-decodes it (used when a thumbnail PNG was
+        // regenerated on disk). No-op if not cached.
+        void Invalidate( const std::string& sourcePath );
+
         void Clear();
 
     private:

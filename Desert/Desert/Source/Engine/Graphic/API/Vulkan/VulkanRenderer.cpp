@@ -331,6 +331,45 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDraw( m_CurrentCommandBuffer, vertexCount, 1, 0, 0 );
     }
 
+    void VulkanRendererAPI::SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
+                                            const MaterialExecutor* materialExecutor, uint32_t instanceCount )
+    {
+        if ( !m_CurrentCommandBuffer || vertexCount == 0 || instanceCount == 0 )
+            return;
+        const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
+        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           vulkanPipeline->GetVkPipeline() );
+
+        if ( materialExecutor )
+        {
+            materialExecutor->Apply();
+            auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
+            if ( !vkBackend->HasDescriptorSets() )
+            {
+                LOG_WARN( "VulkanRendererAPI::SubmitVertices: MaterialExecutor has no valid descriptor sets!" );
+                return;
+            }
+            uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+            vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                           VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
+
+            const auto&   pcBuffer     = materialExecutor->GetPushConstantBuffer();
+            VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
+            if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
+            {
+                auto pcInfo = vulkanShader->GetShaderPushConstant().value();
+                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                    (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size,
+                                    pcBuffer.Data );
+            }
+        }
+
+        // Vertexless: the vertex shader synthesizes geometry from gl_VertexIndex. For a patch-list
+        // (tessellation) pipeline, vertexCount = patchCount * PatchControlPoints. instanceCount > 1 draws
+        // gl_InstanceIndex 0..N-1 (GPU-driven grass derives each blade's placement from it).
+        vkCmdDraw( m_CurrentCommandBuffer, vertexCount, instanceCount, 0, 0 );
+    }
+
     void VulkanRendererAPI::DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
                                                     uint32_t groupCountY, uint32_t groupCountZ )
     {

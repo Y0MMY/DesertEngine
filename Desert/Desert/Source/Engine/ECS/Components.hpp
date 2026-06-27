@@ -28,6 +28,11 @@ namespace Desert
     class DynamicMesh;
 }
 
+namespace Desert::Graphic
+{
+    class Image2D;
+}
+
 namespace Desert::ECS
 {
     struct TagComponent
@@ -49,6 +54,15 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Main Camera" ), Category( "Camera" ) )
         bool IsMainCamera = true;
+
+        PROPERTY( DisplayName( "Field of View" ), Category( "Camera" ), Range( 10.0f, 120.0f ) )
+        float FOV = 45.0f;
+
+        PROPERTY( DisplayName( "Near" ), Category( "Camera" ), Range( 0.01f, 10.0f ) )
+        float Near = 0.1f;
+
+        PROPERTY( DisplayName( "Far" ), Category( "Camera" ), Range( 10.0f, 10000.0f ) )
+        float Far = 1000.0f;
     };
 
     struct CameraComponent
@@ -59,7 +73,7 @@ namespace Desert::ECS
 
     struct VisibilityComponent
     {
-        bool Visible;
+        bool Visible = true;
     };
 
     struct StaticMeshComponent
@@ -77,6 +91,109 @@ namespace Desert::ECS
         Assets::AssetHandle                       MeshHandle;
         std::vector<Assets::AssetHandle>          MaterialSlots;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+    };
+
+    // Per-layer splat mode. Auto = weight from height/slope rules (in-shader); Manual = weight painted
+    // into the terrain splat map (brush, Stage 3b); Off = layer disabled. Reflected -> combo in editor.
+    enum class TerrainLayerMode
+    {
+        Auto,
+        Manual,
+        Off
+    };
+
+    // Procedural heightmap terrain params (reflected -> inspector + serialization).
+    struct TerrainData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Size" ), Category( "Terrain" ), Range( 1.0f, 500.0f ) )
+        float Size = 50.0f;
+
+        PROPERTY( DisplayName( "Resolution" ), Category( "Terrain" ), Range( 2.0f, 256.0f ) )
+        int Resolution = 64;
+
+        PROPERTY( DisplayName( "Height Scale" ), Category( "Terrain" ), Range( 0.0f, 50.0f ) )
+        float HeightScale = 5.0f;
+
+        PROPERTY( DisplayName( "Noise Frequency" ), Category( "Terrain" ), Range( 0.001f, 1.0f ) )
+        float NoiseFrequency = 0.08f;
+
+        PROPERTY( DisplayName( "Seed" ), Category( "Terrain" ), Range( 0.0f, 9999.0f ) )
+        int Seed = 1337;
+
+        PROPERTY( DisplayName( "Grass Layer" ), Category( "Terrain Layers" ) )
+        TerrainLayerMode GrassMode = TerrainLayerMode::Auto;
+
+        PROPERTY( DisplayName( "Rock Layer" ), Category( "Terrain Layers" ) )
+        TerrainLayerMode RockMode = TerrainLayerMode::Auto;
+
+        PROPERTY( DisplayName( "Snow Layer" ), Category( "Terrain Layers" ) )
+        TerrainLayerMode SnowMode = TerrainLayerMode::Auto;
+
+        // --- GPU-instanced grass (Stage 7). Density-gated by the splat grass channel. ---
+        PROPERTY( DisplayName( "Enable Grass" ), Category( "Grass" ) )
+        bool EnableGrass = false;
+
+        // Blades per side over the terrain -> GrassDensity^2 instances. Higher = blades closer together
+        // (smaller spacing = size/GrassDensity). 512 => up to ~262k blades.
+        PROPERTY( DisplayName( "Grass Density" ), Category( "Grass" ), Range( 8.0f, 512.0f ) )
+        int GrassDensity = 320;
+
+        PROPERTY( DisplayName( "Grass Height" ), Category( "Grass" ), Range( 0.05f, 5.0f ) )
+        float GrassHeight = 0.4f;
+
+        // Blade width multiplier (1 = ~fills the grid cell). Raise to widen blades and close gaps; lower
+        // for thinner, more individual blades.
+        PROPERTY( DisplayName( "Grass Width" ), Category( "Grass" ), Range( 0.1f, 5.0f ) )
+        float GrassWidth = 1.0f;
+
+        // RGB tint multiplier on the grass color — adjust the hue/shade (e.g. lower R/B & keep G for a
+        // greener look, or warm it up). 1,1,1 = the natural baked olive.
+        PROPERTY( DisplayName( "Grass Tint" ), Category( "Grass" ), Color )
+        glm::vec3 GrassTint = glm::vec3( 1.0f );
+    };
+
+    // TerrainECSSystem generates a grid mesh from Data into the entity's StaticMeshComponent.RuntimeMesh (so
+    // the normal mesh render path draws it). Regenerated when any param changes (tracked via BuiltHash).
+    struct TerrainComponent
+    {
+        TerrainData Data;
+        // Transient: hash of the params the current RuntimeMesh was built from; a mismatch -> regenerate.
+        std::size_t BuiltHash = 0;
+
+        // --- Splat painting (Stage 3b, runtime only; not yet serialized) ---
+        // RGBA8 splat map: R=grass, G=rock, B=snow weights. Manual-mode layers sample this. The CPU mirror
+        // is the brush's edit target; SplatDirty triggers a safe GPU re-upload (ViewportPanel::OnPreUpdate).
+        static constexpr uint32_t        SplatResolution = 256;
+        std::shared_ptr<Graphic::Image2D> SplatMap;
+        std::vector<unsigned char>        SplatPixels; // size = SplatResolution^2 * 4, lazily allocated
+        bool                              SplatDirty = false;
+    };
+
+    // One overridden material parameter (keyed by the shader's #pragma param name). vec4 stores any
+    // scalar/vector value (float uses .x, color uses rgba). Data-driven: NOT a fixed C++ field per param.
+    struct MaterialParamOverride
+    {
+        std::string Name;
+        glm::vec4   Value = glm::vec4( 0.0f );
+    };
+
+    // One overridden texture param (keyed by the shader's #pragma param texture2D name) -> texture asset.
+    struct MaterialTextureOverride
+    {
+        std::string Name;
+        uint64_t    TextureHandle = 0; // Assets::AssetHandle as uint64 (0 = unset -> shader fallback)
+    };
+
+    // Assigns an arbitrary shader (by program name) to whatever renderer draws this entity, with its
+    // parameters edited generically in Details (built from the shader's #pragma param schema). The
+    // renderer builds a DataDrivenMaterial from ShaderName and applies these overrides.
+    struct MaterialComponent
+    {
+        std::string                          ShaderName;
+        std::vector<MaterialParamOverride>   Params;   // scalar/vector overrides (on top of #pragma defaults)
+        std::vector<MaterialTextureOverride> Textures; // texture2D overrides (unset -> backend fallback)
     };
 
     struct AnimationComponent

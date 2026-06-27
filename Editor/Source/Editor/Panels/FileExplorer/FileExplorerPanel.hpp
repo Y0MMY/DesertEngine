@@ -6,6 +6,7 @@
 #include <stack>
 #include <functional>
 #include <memory>
+#include <unordered_set>
 
 namespace Desert::Assets
 {
@@ -19,6 +20,7 @@ namespace Desert::Editor
         class UIHelper;
     }
     class ThumbnailCache;
+    class AssetThumbnailRenderer;
 
     enum class FileType
     {
@@ -155,7 +157,9 @@ namespace Desert::Editor
 
         Assets::AssetManager*           m_AssetManager = nullptr;
         std::unique_ptr<UI::UIHelper>   m_UIHelper;
-        std::unique_ptr<ThumbnailCache> m_Thumbnails;
+        std::unique_ptr<ThumbnailCache>          m_Thumbnails;
+        std::unique_ptr<AssetThumbnailRenderer>  m_ThumbRenderer; // lazily created (needs the device ready)
+        std::unordered_set<std::string>          m_FailedThumbs;  // assets that failed to load -> show icon, no retry spam
 
         // File watcher: cheap throttled poll of the current dir's entry signature -> QueueRefresh on change.
         int    m_PollCounter   = 0;
@@ -169,6 +173,11 @@ namespace Desert::Editor
         void ImportExternalFile( const std::filesystem::path& src );
         // Resolve (existing-only) + draw a texture thumbnail for an entry; returns false if none.
         bool DrawTextureThumbnail( DirectoryInformation* entry, const ImVec2& size );
+        // Draw a rendered preview for a material entry (material-on-sphere). Generates the PNG lazily
+        // (throttled to ~1/frame) on first use and caches it to disk; returns false until the PNG exists.
+        bool DrawRenderedMaterialThumbnail( DirectoryInformation* entry, const ImVec2& size );
+        // Same, for a mesh entry (the mesh auto-framed by its bounds).
+        bool DrawRenderedMeshThumbnail( DirectoryInformation* entry, const ImVec2& size );
     };
 
 } // namespace Desert::Editor

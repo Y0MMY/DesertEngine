@@ -45,6 +45,13 @@ namespace Desert::Graphic::API::Vulkan
         auto asset = m_ShaderAsset.lock();
         if ( !asset ) return Common::MakeError( "Shader asset expired" );
 
+        m_ProgramMeta = Core::Preprocess::ShaderPreprocess::ParseProgramMeta( asset->GetShaderContent() );
+        if ( m_ProgramMeta.HasParams() || m_ProgramMeta.State.Topology.has_value() )
+        {
+            LOG_INFO( "Shader '{}': parsed {} param(s) + render-state from #pragma metadata", m_ShaderName,
+                      m_ProgramMeta.Params.size() );
+        }
+
         auto stages = Core::Preprocess::ShaderPreprocess::PreProcessProgram( asset->GetShaderContent(), m_ShaderPath );
         return CompileProgram( stages );
     }

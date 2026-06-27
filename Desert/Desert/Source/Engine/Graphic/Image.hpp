@@ -50,6 +50,10 @@ namespace Desert::Graphic
 
         virtual Core::Formats::Image2DSpecification& GetImageSpecification() = 0;
 
+        // Reads the image back to CPU as tightly-packed RGBA8 (size = width*height*4). Returns empty on
+        // failure / unsupported format. Used for offscreen thumbnail capture (render -> readback -> PNG).
+        virtual std::vector<uint8_t> ReadPixelsRGBA8() { return {}; }
+
         static std::shared_ptr<Image2D> Create( const Core::Formats::Image2DSpecification& spec,
                                                 const std::unique_ptr<MipMap2DGenerator>&  mipGenerator );
     };

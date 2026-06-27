@@ -10,12 +10,21 @@
 #include <Editor/Import/TextureDnD.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/AssetThumbnailRenderer.hpp>
 #include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/MaterialAsset.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Common/Core/Events/WindowEvents.hpp>
+#include <Common/Core/Constants.hpp>
 
 #include <ImGui/imgui_internal.h>
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <system_error>
 
@@ -45,7 +54,8 @@ namespace Desert::Editor
     };
 
     static const std::unordered_map<std::string, FileType> s_FileTypes = {
-         { "lsn", FileType::Scene },   { "lprefab", FileType::Prefab }, { "cs", FileType::Script },
+         { "lsn", FileType::Scene },   { "deprefab", FileType::Prefab }, { "prefab", FileType::Prefab },
+         { "lprefab", FileType::Prefab }, { "cs", FileType::Script },
          { "lua", FileType::Script },  { "glsl", FileType::Shader },    { "shader", FileType::Shader },
          { "frag", FileType::Shader }, { "vert", FileType::Shader },    { "comp", FileType::Shader },
          { "png", FileType::Texture }, { "jpg", FileType::Texture },    { "jpeg", FileType::Texture },
@@ -420,6 +430,11 @@ namespace Desert::Editor
     {
         // Captured for the OS file-drop handler (which runs outside the ImGui frame, via OnEvent).
         m_IsHovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_RootAndChildWindows );
+
+        // Advance the material-thumbnail capture state machine once per frame (renders + reads back the
+        // pending material; see AssetThumbnailRenderer).
+        if ( m_ThumbRenderer )
+            m_ThumbRenderer->Tick();
         {
             FileIndex              = 0;
             auto        windowSize = ImGui::GetWindowSize();
@@ -830,6 +845,157 @@ namespace Desert::Editor
         return true;
     }
 
+    bool FileExplorerPanel::DrawRenderedMaterialThumbnail( DirectoryInformation* entry, const ImVec2& size )
+    {
+        if ( !m_UIHelper || !m_Thumbnails || !m_AssetManager )
+            return false;
+
+        // Cache PNG path: Cooked/Thumbnails/<sanitized source path>.png (persists across restarts).
+        std::string key = entry->AssetPath;
+        for ( char& c : key )
+            if ( !std::isalnum( static_cast<unsigned char>( c ) ) )
+                c = '_';
+        const std::string pngPath = "Cooked/Thumbnails/" + key + ".png";
+
+        // Stale if the material was edited after the cached thumbnail was written (regenerate then).
+        std::error_code ec;
+        bool            haveFresh = std::filesystem::exists( pngPath, ec );
+        if ( haveFresh )
+        {
+            const auto pngT = std::filesystem::last_write_time( pngPath, ec );
+            const auto srcT = std::filesystem::last_write_time( entry->AssetPath, ec );
+            // Require the source to be newer by a margin: coarse-resolution filesystems (FAT/exFAT = 2s,
+            // some network drives) can otherwise report src slightly newer right after we wrote the PNG,
+            // causing endless regeneration.
+            if ( !ec && ( srcT - pngT ) > std::chrono::seconds( 3 ) )
+            {
+                haveFresh = false;             // material meaningfully newer than thumbnail -> regenerate
+                m_Thumbnails->Invalidate( pngPath ); // drop the stale decoded image so the new PNG is reloaded
+            }
+        }
+
+        // Rendered material-on-sphere preview ready + fresh -> show it. (Only Get() once the file exists so
+        // the cache never stores a null for this path.)
+        if ( haveFresh )
+        {
+            if ( auto img = m_Thumbnails->Get( pngPath ) )
+            {
+                m_UIHelper->ImageButton( "##thumb", img, size );
+                return true;
+            }
+        }
+
+        // Resolve material -> handle (load + register so the offscreen render can use it; mirrors the
+        // component deserializer's create-if-missing logic for cold start).
+        auto a = m_AssetManager->FindByPath<Assets::PBRMaterialAsset>( entry->AssetPath );
+        if ( !a )
+        {
+            a = m_AssetManager->CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High,
+                                                                       entry->AssetPath );
+            if ( a && !a->IsReadyForUse() )
+                a->Load();
+        }
+        if ( !a )
+            return false;
+        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( a->GetMetadata().Handle ) )
+            Runtime::ResourceRegistry::GetMaterialService()->Register( a );
+
+        // Queue the render (one capture in flight at a time; Tick() drives it over two frames).
+        if ( !m_ThumbRenderer )
+            m_ThumbRenderer = std::make_unique<AssetThumbnailRenderer>();
+        if ( !m_ThumbRenderer->HasPending() )
+            m_ThumbRenderer->RequestMaterial( a->GetMetadata().Handle, pngPath );
+
+        // Until the PNG exists, show the albedo colour as a placeholder swatch.
+        const glm::vec3 albedo = a->GetAlbedoColor().value_or( glm::vec3( 0.8f ) );
+        ImGui::ColorButton( "##matswatch", ImVec4( albedo.r, albedo.g, albedo.b, 1.0f ),
+                            ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop |
+                                 ImGuiColorEditFlags_NoBorder,
+                            size );
+        return true;
+    }
+
+    bool FileExplorerPanel::DrawRenderedMeshThumbnail( DirectoryInformation* entry, const ImVec2& size )
+    {
+        if ( !m_UIHelper || !m_Thumbnails || !m_AssetManager )
+            return false;
+        if ( m_FailedThumbs.count( entry->AssetPath ) ) // failed to load before -> icon, no per-frame retry
+            return false;
+
+        std::string key = entry->AssetPath;
+        for ( char& c : key )
+            if ( !std::isalnum( static_cast<unsigned char>( c ) ) )
+                c = '_';
+        const std::string pngPath = "Cooked/Thumbnails/" + key + ".png";
+
+        std::error_code ec;
+        bool            haveFresh = std::filesystem::exists( pngPath, ec );
+        if ( haveFresh )
+        {
+            const auto pngT = std::filesystem::last_write_time( pngPath, ec );
+            const auto srcT = std::filesystem::last_write_time( entry->AssetPath, ec );
+            if ( !ec && ( srcT - pngT ) > std::chrono::seconds( 3 ) )
+            {
+                haveFresh = false;
+                m_Thumbnails->Invalidate( pngPath );
+            }
+        }
+        if ( haveFresh )
+        {
+            if ( auto img = m_Thumbnails->Get( pngPath ) )
+            {
+                m_UIHelper->ImageButton( "##thumb", img, size );
+                return true;
+            }
+        }
+
+        // Meshes only load from the COOKED form (StaticMeshAsset::Load reads cooked JSON, not source FBX),
+        // so map the browsed source file -> its cooked .stmesh (Cooked/Meshes/<relative-to-MESH_PATH>). If it
+        // isn't cooked yet, fall back to the icon (don't try to parse the raw source -> it can't).
+        std::filesystem::path cooked =
+             Common::Constants::Path::MESH_PATH_COOKED /
+             std::filesystem::relative( entry->AssetPath, Common::Constants::Path::MESH_PATH, ec );
+        cooked.replace_extension( ".stmesh" );
+        const std::string cookedStr = cooked.generic_string();
+
+        if ( ec || !std::filesystem::exists( cooked ) )
+        {
+            m_FailedThumbs.insert( entry->AssetPath ); // not cooked -> icon
+            return false;
+        }
+
+        // The preloader already registers cooked meshes; otherwise create + load + register the cooked asset.
+        auto a = m_AssetManager->FindByPath<Assets::MeshAsset>( cookedStr );
+        if ( !a )
+        {
+            auto created =
+                 m_AssetManager->CreateAsset<Assets::StaticMeshAsset>( Assets::AssetPriority::High, cookedStr );
+            if ( created )
+            {
+                Runtime::ResourceRegistry::GetMeshService()->Register( created );
+                created->Load();
+                a = created;
+            }
+        }
+        // Missing / failed to load / empty geometry (e.g. a skinned mesh whose static buffer is empty) ->
+        // blacklist + icon, so we don't retry the (logging) load every frame.
+        const auto* runtimeMesh =
+             a ? Runtime::ResourceRegistry::GetMeshService()->Get( a->GetMetadata().Handle ) : nullptr;
+        if ( !runtimeMesh || runtimeMesh->GetSubmeshes().empty() )
+        {
+            m_FailedThumbs.insert( entry->AssetPath );
+            return false;
+        }
+
+        if ( !m_ThumbRenderer )
+            m_ThumbRenderer = std::make_unique<AssetThumbnailRenderer>();
+        if ( !m_ThumbRenderer->HasPending() )
+            m_ThumbRenderer->RequestMesh( a->GetMetadata().Handle, pngPath );
+
+        // No swatch for meshes — fall back to the type icon until the PNG is ready.
+        return false;
+    }
+
     void FileExplorerPanel::ImportExternalTexture()
     {
         const auto picked =
@@ -907,7 +1073,12 @@ namespace Desert::Editor
             // Texture -> thumbnail; everything else -> a large type icon. Either way the item is hoverable,
             // selectable and drag-able.
             const bool drewThumb =
-                 entry->IsFile && entry->Type == FileType::Texture && DrawTextureThumbnail( entry, ImVec2( thumb, thumb ) );
+                 entry->IsFile &&
+                 ( ( entry->Type == FileType::Texture && DrawTextureThumbnail( entry, ImVec2( thumb, thumb ) ) ) ||
+                   ( entry->Type == FileType::Material &&
+                     DrawRenderedMaterialThumbnail( entry, ImVec2( thumb, thumb ) ) ) ||
+                   ( entry->Type == FileType::Model &&
+                     DrawRenderedMeshThumbnail( entry, ImVec2( thumb, thumb ) ) ) );
             if ( !drewThumb )
             {
                 const ImVec4 col = entry->IsFile ? entry->FileTypeColour : ImVec4( 0.90f, 0.78f, 0.38f, 1.0f );

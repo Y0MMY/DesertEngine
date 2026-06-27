@@ -66,6 +66,7 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] bool IsLoaded() const override { return m_IsLoaded; }
         [[nodiscard]] Core::Formats::Image2DSpecification& GetImageSpecification() override { return m_Specification; }
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
+        std::vector<uint8_t> ReadPixelsRGBA8() override;
         
         void Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;

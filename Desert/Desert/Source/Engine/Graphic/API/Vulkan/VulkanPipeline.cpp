@@ -221,6 +221,7 @@ namespace Desert::Graphic::API::Vulkan
             case PrimitiveTopology::Triangles:     topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
             case PrimitiveTopology::TriangleStrip: topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP; break;
             case PrimitiveTopology::TriangleFan:   topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN; break;
+            case PrimitiveTopology::Patches:       topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST; break;
         }
 
         m_InputAssembly = VkPipelineInputAssemblyStateCreateInfo{
@@ -330,12 +331,19 @@ namespace Desert::Graphic::API::Vulkan
              std::static_pointer_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer )
                   ->GetVKRenderPass();
 
+        // Tessellation: patch-list topology needs a tessellation state (control points per patch).
+        VkPipelineTessellationStateCreateInfo tessellationState = {
+             .sType              = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+             .patchControlPoints = m_Specification.PatchControlPoints };
+        const bool usesTessellation = m_Specification.PatchControlPoints > 0;
+
         VkGraphicsPipelineCreateInfo pipelineInfo = {
              .sType      = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
              .stageCount = static_cast<uint32_t>( vulkanShader->GetPipelineShaderStageCreateInfos().size() ),
              .pStages    = vulkanShader->GetPipelineShaderStageCreateInfos().data(),
              .pVertexInputState   = &m_VertexInputInfo,
              .pInputAssemblyState = &m_InputAssembly,
+             .pTessellationState  = usesTessellation ? &tessellationState : nullptr,
              .pViewportState      = &m_ViewportState,
              .pRasterizationState = &m_Rasterizer,
              .pMultisampleState   = &m_Multisampling,

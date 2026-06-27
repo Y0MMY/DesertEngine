@@ -211,6 +211,76 @@ namespace Desert::Graphic::API::Vulkan
         TransitionLayout( cmd, originalLayout );
     }
 
+    std::vector<uint8_t> VulkanImage2D::ReadPixelsRGBA8()
+    {
+        const uint32_t w = m_Specification.Width;
+        const uint32_t h = m_Specification.Height;
+        if ( w == 0 || h == 0 || m_Resource.Image == VK_NULL_HANDLE )
+            return {};
+
+        const auto fmt = m_Specification.Format;
+        if ( fmt != Core::Formats::ImageFormat::RGBA8F && fmt != Core::Formats::ImageFormat::BGRA8F &&
+             fmt != Core::Formats::ImageFormat::RGBA32F )
+            return {}; // only color formats we know how to pack
+
+        auto allocator =
+             SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
+
+        const uint32_t     srcSize = Image::CalculateImageSize( w, h, fmt ); // GPU bytes
+        VkBuffer           staging = VK_NULL_HANDLE;
+        VkBufferCreateInfo bInfo   = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                       .size  = srcSize,
+                                       .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT };
+        auto allocRes = allocator->RT_AllocateBuffer( "ThumbReadback", bInfo, VMA_MEMORY_USAGE_GPU_TO_CPU, staging );
+        if ( !allocRes.IsSuccess() )
+            return {};
+        VmaAllocation stagingAlloc = allocRes.GetValue();
+
+        auto                cmd      = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+        const VkImageLayout original = m_Resource.Layout;
+        TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
+        VkBufferImageCopy copy = { .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
+                                   .imageExtent      = { w, h, 1 } };
+        vkCmdCopyImageToBuffer( cmd, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging, 1, &copy );
+        TransitionLayout( cmd, original == VK_IMAGE_LAYOUT_UNDEFINED ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                                     : original );
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+
+        std::vector<uint8_t> raw( srcSize );
+        void*                mapped = allocator->MapMemory( stagingAlloc );
+        memcpy( raw.data(), mapped, srcSize );
+        allocator->UnmapMemory( stagingAlloc );
+        allocator->RT_DestroyBuffer( staging, stagingAlloc );
+
+        std::vector<uint8_t> out( static_cast<size_t>( w ) * h * 4 );
+        const size_t         pixels = static_cast<size_t>( w ) * h;
+        if ( fmt == Core::Formats::ImageFormat::RGBA32F )
+        {
+            const float* f = reinterpret_cast<const float*>( raw.data() );
+            for ( size_t i = 0; i < pixels * 4; ++i )
+            {
+                float v = f[i];
+                v       = v < 0.0f ? 0.0f : ( v > 1.0f ? 1.0f : v );
+                out[i]  = static_cast<uint8_t>( v * 255.0f + 0.5f );
+            }
+        }
+        else // RGBA8F / BGRA8F (8-bit; swizzle B<->R for BGRA)
+        {
+            const bool bgra = ( fmt == Core::Formats::ImageFormat::BGRA8F );
+            for ( size_t i = 0; i < pixels; ++i )
+            {
+                uint8_t r = raw[i * 4 + 0], g = raw[i * 4 + 1], b = raw[i * 4 + 2], a = raw[i * 4 + 3];
+                if ( bgra )
+                    std::swap( r, b );
+                out[i * 4 + 0] = r;
+                out[i * 4 + 1] = g;
+                out[i * 4 + 2] = b;
+                out[i * 4 + 3] = a;
+            }
+        }
+        return out;
+    }
+
     void VulkanImage2D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )
     {
         Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format,

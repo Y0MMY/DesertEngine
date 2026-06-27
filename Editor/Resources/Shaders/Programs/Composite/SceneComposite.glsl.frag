@@ -13,6 +13,7 @@ layout(binding = 0) uniform TonemapUB
     float u_BloomIntensity;
     float u_ExposureKey;          // middle-grey target for auto-exposure
     float u_AutoExposureEnabled;  // > 0.5 -> use measured luminance instead of manual exposure
+    float u_ChromaticBloom;       // lens dispersion strength on the bloom halo (0 = off)
 };
 
 void main()
@@ -28,7 +29,25 @@ void main()
     }
 
     vec3 scene = texture(u_GeometryTexture, v_TexCoord).rgb;
-    vec3 bloom = texture(u_BloomTexture, v_TexCoord).rgb * u_BloomIntensity;
+
+    // Bloom. With lens dispersion on, sample the bloom per-channel along a radial offset (R pushed outward,
+    // B inward), proportional to distance from the screen centre -> a rainbow fringe / glare around bright
+    // sources. The global sampler is REPEAT, so clamp the offset UVs to [0,1] (else bright content wraps).
+    vec3 bloom;
+    if (u_ChromaticBloom > 0.0001)
+    {
+        vec2  dir   = v_TexCoord - vec2(0.5);
+        vec2  off   = dir * (0.012 * u_ChromaticBloom);
+        bloom.r = texture(u_BloomTexture, clamp(v_TexCoord + off, 0.0, 1.0)).r;
+        bloom.g = texture(u_BloomTexture, v_TexCoord).g;
+        bloom.b = texture(u_BloomTexture, clamp(v_TexCoord - off, 0.0, 1.0)).b;
+    }
+    else
+    {
+        bloom = texture(u_BloomTexture, v_TexCoord).rgb;
+    }
+    bloom *= u_BloomIntensity;
+
     vec3 color = (scene + bloom) * exposure;
 
     // Reinhard tonemapping operator.
