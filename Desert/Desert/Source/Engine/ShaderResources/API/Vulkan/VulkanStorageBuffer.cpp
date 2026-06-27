@@ -71,8 +71,10 @@ namespace Desert::ShaderResources::API::Vulkan
         {
             VkBufferCreateInfo bufferInfo = {};
             bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-            bufferInfo.usage              = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-            bufferInfo.size               = m_Size;
+            // INDIRECT lets a storage buffer also serve as a vkCmdDrawIndirect args source (GPU-culled
+            // grass writes its draw count here). Harmless for storage buffers never used indirectly.
+            bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+            bufferInfo.size  = m_Size;
 
             const auto allocatedBuffer = vulkanContext->GetVulkanAllocator()->RT_AllocateBuffer(
                  std::format( "{}-StorageBuffer-Frame{}", m_BufferName, i ), bufferInfo,

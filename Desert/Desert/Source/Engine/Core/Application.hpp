@@ -31,6 +31,7 @@ namespace Desert::Engine
         // Only when starting fullscreen (Width/Height = nullopt): true = cover the taskbar, false = leave
         // the taskbar visible (fit the monitor work area).
         bool FullscreenCoverTaskbar = false;
+        bool VSync                  = true;
     };
 
     class Application

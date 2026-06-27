@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
+#include <Engine/ShaderResources/StorageBuffer.hpp>
 
 #include <glm/glm.hpp>
 #include <memory>
@@ -67,6 +68,16 @@ namespace Desert::Graphic::System
             m_Queue.clear();
         }
 
+        // GPU grass culling: dispatch the cull compute (compacts visible clumps + writes the indirect
+        // draw count) into the frame command buffer BEFORE the render graph records the grass draw. Must
+        // run outside any render pass (SceneRenderer calls it after ClearMainFramebuffer).
+        void CullGrassInFrame();
+
+    private:
+        // Lazily (re)create the visible-instance + indirect-args buffers when the grid grows; injects the
+        // visible buffer into the grass material so the vertex shader reads the SAME compute-written SSBO.
+        void EnsureGrassCullBuffers( uint32_t maxInstances );
+
     private:
         std::shared_ptr<GraphicsPipeline>  m_Pipeline;
         std::unique_ptr<DataDrivenMaterial> m_Material;
@@ -78,5 +89,12 @@ namespace Desert::Graphic::System
         // Baked grass-clump alpha texture: the fragment samples this ONCE instead of looping over blades
         // per pixel — keeps FPS high regardless of blade detail.
         std::shared_ptr<Image2D>            m_GrassClumpTex;
+
+        // GPU grass culling (compacts visible clumps -> indirect instanced draw). Single grass terrain:
+        // one visible-instance buffer + one indirect-args buffer, reused each frame.
+        std::shared_ptr<ComputePipeline>                m_GrassCullPipeline;
+        std::shared_ptr<ShaderResources::StorageBuffer> m_GrassVisibleBuf;  // compacted visible clump ids
+        std::shared_ptr<ShaderResources::StorageBuffer> m_GrassIndirectBuf; // VkDrawIndirectCommand
+        uint32_t                                        m_GrassVisibleCapacity = 0; // in clumps
     };
 } // namespace Desert::Graphic::System

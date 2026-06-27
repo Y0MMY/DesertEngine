@@ -107,10 +107,23 @@ namespace Desert::Graphic
         s_RendererAPI->SubmitVertices( pipeline, vertexCount, materialExecutor, instanceCount );
     }
 
+    void Renderer::SubmitVerticesIndirect( const GraphicsPipeline*         pipeline,
+                                           ShaderResources::StorageBuffer* argsBuffer,
+                                           const MaterialExecutor*         materialExecutor )
+    {
+        s_RendererAPI->SubmitVerticesIndirect( pipeline, argsBuffer, materialExecutor );
+    }
+
     void Renderer::DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
                                            uint32_t groupCountY, uint32_t groupCountZ )
     {
         s_RendererAPI->DispatchComputeInFrame( pipeline, groupCountX, groupCountY, groupCountZ );
+    }
+
+    void Renderer::DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                        uint32_t groupCountY, uint32_t groupCountZ )
+    {
+        s_RendererAPI->DispatchComputeCull( pipeline, groupCountX, groupCountY, groupCountZ );
     }
 
     void Renderer::ComputeImageBeginWrite( Image2D* image )

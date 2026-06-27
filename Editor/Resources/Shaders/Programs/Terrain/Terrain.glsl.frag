@@ -74,9 +74,16 @@ void main()
     // Base tints (placeholder until Stage 6 PBR textures). Under grass the ground is GREEN (a darker grass
     // tone) so it fills the gaps between blades and the field reads as a continuous lawn (the instanced
     // blades add the 3D fuzz on top). Non-grass ground is rock.
-    vec3 grassCol = vec3( 0.13, 0.26, 0.09 ); // green ground under the grass blades
-    vec3 rockCol  = vec3( 0.40, 0.37, 0.33 ); // bare rock (default base)
-    vec3 snowCol  = vec3( 0.86, 0.88, 0.92 );
+    // Ground UNDER grass: a DARK olive that matches the lit blade tone, so the gaps between thin blades
+    // blend into a continuous lawn instead of glowing bright-green. (Flat ground catches full sun, so its
+    // albedo must be darker than the angled, AO'd blades to read at the same brightness.) + world variation.
+    // Params2.z carries the grass Brightness (engine-synced) so the lawn ground tracks the blades when
+    // you drag the Grass Brightness slider — they always read as one material.
+    float groundVar  = sin( v_WorldPos.x * 3.1 ) * sin( v_WorldPos.z * 2.7 ) * 0.5 + 0.5;
+    float grassBright = max( u.Params2.z, 0.05 );
+    vec3  grassCol   = vec3( 0.052, 0.10, 0.034 ) * ( 0.75 + 0.5 * groundVar ) * grassBright;
+    vec3  rockCol   = vec3( 0.40, 0.37, 0.33 ); // bare rock (default base)
+    vec3  snowCol   = vec3( 0.86, 0.88, 0.92 );
 
     float scale  = 1.0 / max( u_Mat.DetailTiling, 0.001 );
     vec3  grassT = Triplanar( u_GrassTex, v_WorldPos, N, scale ) * grassCol;

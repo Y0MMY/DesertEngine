@@ -7,6 +7,11 @@
 #include <Engine/Geometry/Mesh.hpp>
 #include <Engine/Graphic/Image.hpp>
 
+namespace Desert::ShaderResources
+{
+    class StorageBuffer;
+}
+
 namespace Desert::Graphic
 {
     enum class RendererAPIType : uint8_t
@@ -52,6 +57,20 @@ namespace Desert::Graphic
         virtual void SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
                                      const MaterialExecutor* materialExecutor,
                                      uint32_t                instanceCount = 1 )                        = 0;
+
+        // GPU-driven instanced draw whose instanceCount is produced on the GPU: @p argsBuffer holds a
+        // VkDrawIndirectCommand (vertexCount, instanceCount, firstVertex, firstInstance) written by a
+        // prior compute cull pass. Used by grass: the cull compute compacts visible clumps and writes
+        // the count, so no CPU readback / no per-instance VS work for culled clumps.
+        virtual void SubmitVerticesIndirect( const GraphicsPipeline*         pipeline,
+                                             ShaderResources::StorageBuffer* argsBuffer,
+                                             const MaterialExecutor*         materialExecutor ) = 0;
+
+        // Like DispatchComputeInFrame but the compute writes are made visible to the VERTEX stage
+        // (storage read) and to the DRAW_INDIRECT stage (indirect command read) — for GPU cull passes
+        // that feed an indirect instanced draw.
+        virtual void DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                          uint32_t groupCountY, uint32_t groupCountZ ) = 0;
 
         /**
          * @brief Records a compute dispatch into the current frame command buffer (outside any render

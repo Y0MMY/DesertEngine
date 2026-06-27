@@ -95,6 +95,9 @@ namespace Desert::Graphic::API::Vulkan
     private:
         Common::BoolResultStr CreateResource();
         void UploadData( VkCommandBuffer cmdBuffer, VkBuffer stagingBuffer );
+        // Generate mips 1..N-1 from mip 0 via linear blits, leaving every mip in `finalLayout`.
+        // Precondition: the whole image is in TRANSFER_DST_OPTIMAL and mip 0 holds the source pixels.
+        void GenerateMips( VkCommandBuffer cmdBuffer, VkImageLayout finalLayout );
 
     private:
         Core::Formats::Image2DSpecification m_Specification;

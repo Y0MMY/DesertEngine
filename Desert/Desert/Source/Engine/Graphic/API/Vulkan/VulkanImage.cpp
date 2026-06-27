@@ -8,6 +8,8 @@
 
 #include <Common/Utilities/String.hpp>
 
+#include <algorithm>
+
 namespace Desert::Graphic::API::Vulkan
 {
     namespace Utils
@@ -125,7 +127,17 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.Format     = GetImageVulkanFormat( m_Specification.Format );
         m_Resource.MipLevels  = m_Specification.Mips;
         m_Resource.LayerCount = 1;
-        m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED; 
+        m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        // Full mip chain requested: floor(log2(max(w,h)))+1 levels (generated from mip 0 below).
+        const bool generateMips = m_Specification.GenerateMips && Core::Formats::HasData( m_Specification.Data );
+        if ( generateMips )
+        {
+            uint32_t maxDim = std::max( m_Specification.Width, m_Specification.Height );
+            uint32_t levels = 1;
+            while ( maxDim > 1 ) { maxDim >>= 1; ++levels; }
+            m_Resource.MipLevels = levels;
+        }
         
         VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
@@ -182,9 +194,12 @@ namespace Desert::Graphic::API::Vulkan
             VkBufferImageCopy copy = { .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
                                        .imageExtent = { m_Specification.Width, m_Specification.Height, 1 } };
             vkCmdCopyBufferToImage( cmd, staging, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy );
-            
-            TransitionLayout( cmd, finalDefaultLayout );
-            
+
+            if ( generateMips && m_Resource.MipLevels > 1 )
+                GenerateMips( cmd, finalDefaultLayout ); // blit mip 0 down the chain, leaving all in finalLayout
+            else
+                TransitionLayout( cmd, finalDefaultLayout );
+
             allocator->RT_DestroyBuffer( staging, stagingAlloc );
         }
         else
@@ -196,6 +211,70 @@ namespace Desert::Graphic::API::Vulkan
 
         m_IsLoaded = true;
         return Common::MakeSuccess( true );
+    }
+
+    namespace
+    {
+        // Single-mip layout barrier with explicit stage/access masks (the blit chain needs precise
+        // per-mip synchronization, which the whole-image TransitionLayout can't express).
+        void MipBarrier( VkCommandBuffer cmd, VkImage image, uint32_t mip, VkImageLayout oldLayout,
+                         VkImageLayout newLayout, VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+                         VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage )
+        {
+            VkImageMemoryBarrier b = {
+                 .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                 .srcAccessMask       = srcAccess,
+                 .dstAccessMask       = dstAccess,
+                 .oldLayout           = oldLayout,
+                 .newLayout           = newLayout,
+                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                 .image               = image,
+                 .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 1 } };
+            vkCmdPipelineBarrier( cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b );
+        }
+    } // namespace
+
+    void VulkanImage2D::GenerateMips( VkCommandBuffer cmd, VkImageLayout finalLayout )
+    {
+        // The whole image arrives in TRANSFER_DST_OPTIMAL with mip 0 populated. Walk down the chain:
+        // transition the source mip to TRANSFER_SRC, blit (linear) into the next mip, then park the
+        // source mip in finalLayout. The last mip is transitioned at the end.
+        int32_t mipW = static_cast<int32_t>( m_Specification.Width );
+        int32_t mipH = static_cast<int32_t>( m_Specification.Height );
+
+        for ( uint32_t i = 1; i < m_Resource.MipLevels; ++i )
+        {
+            MipBarrier( cmd, m_Resource.Image, i - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT );
+
+            const int32_t nextW = mipW > 1 ? mipW / 2 : 1;
+            const int32_t nextH = mipH > 1 ? mipH / 2 : 1;
+
+            VkImageBlit blit = {
+                 .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1 },
+                 .srcOffsets     = { { 0, 0, 0 }, { mipW, mipH, 1 } },
+                 .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 },
+                 .dstOffsets     = { { 0, 0, 0 }, { nextW, nextH, 1 } } };
+            vkCmdBlitImage( cmd, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_Resource.Image,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR );
+
+            // Source mip done -> park it in the final sampled layout.
+            MipBarrier( cmd, m_Resource.Image, i - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, finalLayout,
+                        VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT );
+
+            mipW = nextW;
+            mipH = nextH;
+        }
+
+        // The last mip never served as a blit source; move it from TRANSFER_DST to the final layout.
+        MipBarrier( cmd, m_Resource.Image, m_Resource.MipLevels - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    finalLayout, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT );
+
+        m_Resource.Layout = finalLayout;
     }
 
     void VulkanImage2D::UploadData( VkCommandBuffer cmd, VkBuffer staging )

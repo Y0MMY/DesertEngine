@@ -55,7 +55,10 @@ namespace Desert::ECS
                 renderCommandBuffer.Emplace<Graphic::Render::DrawTerrainCommand>(
                      transform.GetTransform(), terrain.Size, terrain.Resolution, terrain.HeightScale,
                      terrain.NoiseFrequency, terrain.Seed, layerModes, terrainComp.SplatMap.get(),
-                     grassParams, terrain.GrassTint, std::move( overrides ), std::move( textureOverrides ) );
+                     grassParams,
+                     glm::vec3( terrain.GrassBrightness, static_cast<float>( terrain.GrassBladesPerClump ),
+                                0.0f ), // x=brightness, y=bladesPerClump (packed into the GrassTint channel)
+                     std::move( overrides ), std::move( textureOverrides ) );
             }
         }
     };

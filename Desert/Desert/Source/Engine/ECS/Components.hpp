@@ -143,15 +143,20 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Grass Height" ), Category( "Grass" ), Range( 0.05f, 5.0f ) )
         float GrassHeight = 0.4f;
 
+        // Geometric blades grown per clump instance. Higher = denser tufts (fills gaps, esp. for short
+        // grass) at more vertices/instance. Drives the indirect draw's vertex count (blades*24).
+        PROPERTY( DisplayName( "Blades Per Clump" ), Category( "Grass" ), Range( 1.0f, 12.0f ) )
+        int GrassBladesPerClump = 5;
+
         // Blade width multiplier (1 = ~fills the grid cell). Raise to widen blades and close gaps; lower
         // for thinner, more individual blades.
         PROPERTY( DisplayName( "Grass Width" ), Category( "Grass" ), Range( 0.1f, 5.0f ) )
         float GrassWidth = 1.0f;
 
-        // RGB tint multiplier on the grass color — adjust the hue/shade (e.g. lower R/B & keep G for a
-        // greener look, or warm it up). 1,1,1 = the natural baked olive.
-        PROPERTY( DisplayName( "Grass Tint" ), Category( "Grass" ), Color )
-        glm::vec3 GrassTint = glm::vec3( 1.0f );
+        // Brightness multiplier on the grass color — lower = darker grass, higher = lighter. 1.0 = the
+        // natural shaded green. Replaces the old RGB tint (a single light/dark slider is what's wanted).
+        PROPERTY( DisplayName( "Grass Brightness" ), Category( "Grass" ), Range( 0.2f, 2.0f ) )
+        float GrassBrightness = 1.0f;
     };
 
     // TerrainECSSystem generates a grid mesh from Data into the entity's StaticMeshComponent.RuntimeMesh (so

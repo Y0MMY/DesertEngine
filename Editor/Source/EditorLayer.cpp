@@ -122,22 +122,17 @@ namespace Desert::Editor
 
         // === TEMP grass-iteration scaffolding (auto-revert) ===
         {
-            auto  terrainEntity     = m_MainScene->CreateNewEntity( "GrassTest" );
-            auto& tc                = terrainEntity.AddComponent<ECS::TerrainComponent>();
-            tc.Data.Size            = 50.0f;
-            tc.Data.Resolution      = 64;
-            tc.Data.HeightScale     = 1.2f;
-            tc.Data.NoiseFrequency  = 0.05f;
-            tc.Data.EnableGrass     = true;
-            tc.Data.GrassDensity    = 400;
-            tc.Data.GrassHeight     = 0.45f;
-            tc.Data.GrassWidth      = 1.0f;
-
-            auto sun = m_MainScene->CreateNewEntity( "Sun" );
-            sun.AddComponent<ECS::DirectionLightComponent>();
-            sun.GetComponent<ECS::TransformComponent>().Translation = glm::vec3( -0.4f, -0.85f, -0.35f );
+            auto& terrain          = m_MainScene->CreateNewEntity( "GrassTest" );
+            auto& tc               = terrain.AddComponent<ECS::TerrainComponent>();
+            tc.Data.Size           = 50.0f;
+            tc.Data.Resolution     = 64;
+            tc.Data.HeightScale    = 0.0f;   // FLAT = worst case for banding
+            tc.Data.NoiseFrequency = 0.08f;
+            tc.Data.EnableGrass    = true;
+            tc.Data.GrassDensity   = 256;    // grid; each instance now spawns several geometric blades
+            tc.Data.GrassHeight    = 0.4f;
         }
-        // === END TEMP ===
+
 #ifdef EBABLE_IMGUI
         m_Panels.emplace_back( std::make_unique<Editor::SceneHierarchyPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager,

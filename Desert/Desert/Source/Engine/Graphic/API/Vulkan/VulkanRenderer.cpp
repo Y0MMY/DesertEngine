@@ -14,6 +14,7 @@
 #include <Engine/Graphic/API/Vulkan/VulkanImage.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/WriteDescriptorSetBuilder.hpp>
+#include <Engine/ShaderResources/API/Vulkan/VulkanStorageBuffer.hpp>
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/EngineContext.hpp>
@@ -368,6 +369,68 @@ namespace Desert::Graphic::API::Vulkan
         // (tessellation) pipeline, vertexCount = patchCount * PatchControlPoints. instanceCount > 1 draws
         // gl_InstanceIndex 0..N-1 (GPU-driven grass derives each blade's placement from it).
         vkCmdDraw( m_CurrentCommandBuffer, vertexCount, instanceCount, 0, 0 );
+    }
+
+    void VulkanRendererAPI::SubmitVerticesIndirect( const GraphicsPipeline*         pipeline,
+                                                    ShaderResources::StorageBuffer* argsBuffer,
+                                                    const MaterialExecutor*         materialExecutor )
+    {
+        if ( !m_CurrentCommandBuffer || !argsBuffer )
+            return;
+
+        const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
+        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           vulkanPipeline->GetVkPipeline() );
+
+        const uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+
+        if ( materialExecutor )
+        {
+            materialExecutor->Apply();
+            auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
+            if ( !vkBackend->HasDescriptorSets() )
+            {
+                LOG_WARN( "VulkanRendererAPI::SubmitVerticesIndirect: MaterialExecutor has no descriptor sets!" );
+                return;
+            }
+            vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                           VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
+
+            const auto&   pcBuffer     = materialExecutor->GetPushConstantBuffer();
+            VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
+            if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
+            {
+                auto pcInfo = vulkanShader->GetShaderPushConstant().value();
+                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                    (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size,
+                                    pcBuffer.Data );
+            }
+        }
+
+        // The cull compute wrote a VkDrawIndirectCommand at offset 0 of the (per-frame) args buffer.
+        auto* vkArgs = static_cast<ShaderResources::API::Vulkan::VulkanStorageBuffer*>( argsBuffer );
+        const VkBuffer argsVk = vkArgs->GetDescriptorBufferInfo( frameIndex ).buffer;
+        vkCmdDrawIndirect( m_CurrentCommandBuffer, argsVk, 0, 1, sizeof( VkDrawIndirectCommand ) );
+    }
+
+    void VulkanRendererAPI::DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                                 uint32_t groupCountY, uint32_t groupCountZ )
+    {
+        if ( !m_CurrentCommandBuffer || !pipeline )
+            return;
+
+        const_cast<VulkanPipelineCompute*>( static_cast<const VulkanPipelineCompute*>( pipeline ) )
+             ->RecordInFrame( m_CurrentCommandBuffer, groupCountX, groupCountY, groupCountZ );
+
+        // Make the cull's storage writes (visible-instance buffer + the indirect args' instanceCount)
+        // available + visible to the VERTEX stage (reads visible[]) and to the DRAW_INDIRECT stage.
+        VkMemoryBarrier barrier{ .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                                 .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                                 .dstAccessMask = VK_ACCESS_SHADER_READ_BIT |
+                                                  VK_ACCESS_INDIRECT_COMMAND_READ_BIT };
+        vkCmdPipelineBarrier( m_CurrentCommandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 1,
+                              &barrier, 0, nullptr, 0, nullptr );
     }
 
     void VulkanRendererAPI::DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,

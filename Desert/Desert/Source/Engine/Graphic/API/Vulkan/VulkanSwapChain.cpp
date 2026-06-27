@@ -66,7 +66,7 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t numberOfSwapChainImages =
              std::clamp( desiredImageCount, surfCaps.minImageCount, maxImageCount );
 
-        VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+        VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;// VK_PRESENT_MODE_FIFO_KHR;
 
         VkSurfaceTransformFlagsKHR preTransform;
         if ( surfCaps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR )

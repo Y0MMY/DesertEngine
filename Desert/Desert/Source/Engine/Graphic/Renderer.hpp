@@ -12,6 +12,11 @@
 #include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/Image.hpp>
 
+namespace Desert::ShaderResources
+{
+    class StorageBuffer;
+}
+
 namespace Desert::Graphic
 {
     class RendererAPI;
@@ -41,10 +46,20 @@ namespace Desert::Graphic
         void SubmitVertices( const GraphicsPipeline* pipeline, uint32_t vertexCount,
                              const MaterialExecutor* materialExecutor, uint32_t instanceCount = 1 );
 
+        // GPU-driven instanced draw whose instanceCount comes from @p argsBuffer (a VkDrawIndirectCommand
+        // written by a compute cull pass). Used by GPU-culled grass.
+        void SubmitVerticesIndirect( const GraphicsPipeline* pipeline, ShaderResources::StorageBuffer* argsBuffer,
+                                     const MaterialExecutor* materialExecutor );
+
         // In-frame compute dispatch (records into the frame command buffer outside any render pass,
         // inserts a trailing compute->shader barrier). The compute mip-chain bloom is built on this.
         void DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
                                      uint32_t groupCountY, uint32_t groupCountZ );
+
+        // Compute dispatch whose writes are made visible to the VERTEX + DRAW_INDIRECT stages (GPU cull
+        // feeding an indirect instanced draw).
+        void DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX, uint32_t groupCountY,
+                                  uint32_t groupCountZ );
 
         // Layout helpers for compute storage targets used in the frame command buffer (see RendererAPI).
         void ComputeImageBeginWrite( Image2D* image );

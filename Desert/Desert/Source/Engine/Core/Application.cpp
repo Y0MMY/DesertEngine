@@ -12,6 +12,7 @@ namespace Desert::Engine
     {
         WindowSpecification windowSpec;
         windowSpec.Title = appInfo.Title;
+        windowSpec.VSync = appInfo.VSync;
         if ( appInfo.Width.has_value() && appInfo.Height.has_value() )
         {
             windowSpec.Width      = *appInfo.Width;

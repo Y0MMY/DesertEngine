@@ -184,6 +184,11 @@ namespace Desert::Graphic
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->UpdateCascades();
 
         ClearMainFramebuffer();
+
+        // GPU grass culling: dispatch the cull compute (outside any render pass) BEFORE the render graph
+        // records the grass draw, so the indirect instanceCount + compacted visible list are ready.
+        UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->CullGrassInFrame();
+
         ExecuteRenderGraph();
 
         // Explicit post-process chain (runs after the scene graph has produced the scene color and

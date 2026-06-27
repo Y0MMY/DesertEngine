@@ -21,6 +21,7 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
 
     ApplicationInfo appInfo;
     appInfo.Title = "Desert Engine";
+    appInfo.VSync = false;
     // Width/Height left as std::nullopt -> start fullscreen at the monitor's native resolution.
 
     return &Common::Singleton<Desert::Sandbox>::CreateInstance( appInfo );

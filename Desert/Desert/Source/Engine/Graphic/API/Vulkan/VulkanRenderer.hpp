@@ -38,8 +38,15 @@ namespace Desert::Graphic::API::Vulkan
                                      const MaterialExecutor* materialExecutor,
                                      uint32_t                instanceCount = 1 ) override;
 
+        virtual void SubmitVerticesIndirect( const GraphicsPipeline*         pipeline,
+                                             ShaderResources::StorageBuffer* argsBuffer,
+                                             const MaterialExecutor*         materialExecutor ) override;
+
         virtual void DispatchComputeInFrame( const ComputePipeline* pipeline, uint32_t groupCountX,
                                              uint32_t groupCountY, uint32_t groupCountZ ) override;
+
+        virtual void DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX,
+                                          uint32_t groupCountY, uint32_t groupCountZ ) override;
 
         virtual void ComputeImageBeginWrite( Image2D* image ) override;
         virtual void ComputeImageEndWrite( Image2D* image ) override;

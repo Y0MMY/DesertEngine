@@ -33,6 +33,14 @@ namespace Desert::Graphic
             m_DirtyCount = PropertyDirty::DirtyLifetime();
         }
 
+        // Replace the reflection-created buffer with an externally-owned one (e.g. a correctly-sized,
+        // compute-written SSBO for GPU-culled grass). Marks dirty so the next Apply rebinds the new VkBuffer.
+        void SetBuffer( const std::shared_ptr<ShaderResources::StorageBuffer>& buffer )
+        {
+            m_Buffer     = buffer;
+            m_DirtyCount = PropertyDirty::DirtyLifetime();
+        }
+
         const auto& GetStorageBuffer() const
         {
             return m_Buffer;
