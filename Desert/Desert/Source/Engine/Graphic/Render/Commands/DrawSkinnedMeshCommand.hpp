@@ -12,16 +12,20 @@ namespace Desert::Graphic::Render
         std::vector<Graphic::MaterialInstance*> MaterialSlot;
         glm::mat4                               Transform;
         std::vector<glm::mat4>                  BoneMatrices;
+        bool                                    Outlined = false;
 
         DrawSkinnedMeshCommand( Desert::SkinnedMesh* mesh, const std::vector<Graphic::MaterialInstance*>& materialSlot,
-                                const glm::mat4& transform, const std::vector<glm::mat4>& bones )
-             : Mesh( mesh ), MaterialSlot( materialSlot ), Transform( transform ), BoneMatrices( bones )
+                                const glm::mat4& transform, const std::vector<glm::mat4>& bones,
+                                bool outlined = false )
+             : Mesh( mesh ), MaterialSlot( materialSlot ), Transform( transform ), BoneMatrices( bones ),
+               Outlined( outlined )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
-            renderer.SubmitMesh( Mesh, MaterialSlot, Transform, { .BoneMatrices = BoneMatrices } );
+            renderer.SubmitMesh( Mesh, MaterialSlot, Transform,
+                                 { .BoneMatrices = BoneMatrices, .Outlined = Outlined } );
         }
     };
 } // namespace Desert::Graphic::Render

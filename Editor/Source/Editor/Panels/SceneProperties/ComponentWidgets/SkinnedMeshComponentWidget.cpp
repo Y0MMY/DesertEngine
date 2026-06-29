@@ -5,6 +5,7 @@
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Editor/Core/ThemeManager.hpp>
+#include <Editor/Core/Selection/SkeletonEditMode.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include "Helper/MeshDetailsWidget.hpp"
@@ -137,9 +138,18 @@ namespace Desert::Editor
                 if ( children[boneIndex].empty() )
                     flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
 
+                const bool boneSelected =
+                     ::Desert::Editor::Core::SkeletonEditMode::GetSelectedBone() == static_cast<int>( boneIndex );
+                if ( boneSelected )
+                    flags |= ImGuiTreeNodeFlags_Selected;
+
                 const std::string label =
                      std::string( ICON_MDI_BONE ) + "  " + bone.Name + "##" + std::to_string( boneIndex );
-                if ( ImGui::TreeNodeEx( label.c_str(), flags ) )
+                const bool open = ImGui::TreeNodeEx( label.c_str(), flags );
+                // Clicking a bone selects it (highlighted in the Skeleton Edit viewport overlay).
+                if ( ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen() )
+                    ::Desert::Editor::Core::SkeletonEditMode::SetSelectedBone( static_cast<int>( boneIndex ) );
+                if ( open )
                 {
                     for ( auto child : children[boneIndex] )
                         DrawBone( child );

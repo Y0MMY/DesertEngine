@@ -4,6 +4,7 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Common/Core/Profiler.hpp>
 
 #include <variant>
 #include <cmath>
@@ -96,11 +97,22 @@ namespace Desert::Graphic::System
         m_StaticMaterialFallback =
              std::make_unique<Graphic::StaticMaterialPBR>();
 
+        // Shared instanced material for auto-batching (only usable if the instanced pipeline/shader exist).
+        // One instance is created up front; the per-frame scene data + the packed InstanceTransforms/Materials
+        // SSBOs are written into it in DrawStaticMeshes before the instanced draws are recorded.
+        if ( m_StaticInstancedPipeline )
+        {
+            m_StaticInstancedMaterial = std::make_unique<Graphic::StaticMaterialPBRInstanced>();
+            m_StaticInstancedInstance = m_StaticInstancedMaterial->CreateInstance( "StaticInstancedBatch" );
+        }
+
         return BOOLSUCCESS;
     }
 
     void MeshRenderer::Shutdown()
     {
+        m_StaticInstancedInstance.reset();
+        m_StaticInstancedMaterial.reset();
         m_StaticPipeline.reset();
         m_StaticWireframePipeline.reset();
         m_SkinnedPipeline.reset();
@@ -108,9 +120,11 @@ namespace Desert::Graphic::System
         m_SilhouetteMaterial.reset();
         m_SilhouetteMaskFramebuffer.reset();
         m_ShadowPipeline.reset();
+        m_ShadowInstancedPipeline.reset();
         for ( uint32_t i = 0; i < kNumCascades; ++i )
         {
             m_ShadowMaterial[i].reset();
+            m_ShadowInstancedMaterial[i].reset();
             m_CascadeFB[i].reset();
         }
     }
@@ -120,12 +134,19 @@ namespace Desert::Graphic::System
         m_StaticQueue.clear();
         m_SkinnedQueue.clear();
         m_GenericQueue.clear();
+        m_InstancedQueue.clear();
     }
 
     void MeshRenderer::SubmitGenericMesh( const GenericMeshRenderData& data )
     {
         if ( data.Mesh && !data.ShaderName.empty() )
             m_GenericQueue.push_back( data );
+    }
+
+    void MeshRenderer::SubmitInstancedMesh( const InstancedMeshRenderData& data )
+    {
+        if ( data.Mesh && data.Material && data.Transforms && !data.Transforms->empty() )
+            m_InstancedQueue.push_back( data );
     }
 
     void MeshRenderer::DrawGenericMeshes()
@@ -296,47 +317,190 @@ namespace Desert::Graphic::System
 
         for ( const auto& data : m_StaticQueue )
         {
-            if ( !data.Mesh || data.MaterialSlots.empty() || !data.MaterialSlots[0] )
+            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() ||
+                 !( *data.MaterialSlots )[0] )
                 continue;
-            if ( auto* mat = static_cast<StaticMaterialPBR*>( data.MaterialSlots[0]->GetParentMaterial() ) )
+            if ( auto* mat =
+                      static_cast<StaticMaterialPBR*>( ( *data.MaterialSlots )[0]->GetParentMaterial() ) )
                 groupFor( mat ).push_back( &data );
         }
 
+        // Accumulators for the auto-instanced path (shared across ALL material groups). The shared instanced
+        // material owns ONE InstanceTransforms / Materials SSBO per frame, so every batch's data is packed
+        // contiguously and uploaded ONCE: a per-batch refill of the same buffer would be overwritten by the
+        // next batch before the GPU executes the recorded draws (last-write-wins). Each instanced draw then
+        // reads its own transform slice via firstInstance (gl_InstanceIndex) and its own material via the
+        // MaterialIndex push constant (push constants ARE snapshotted per draw, so they stay correct).
+        const bool instancingOn = m_StaticInstancedPipeline && m_StaticInstancedMaterial &&
+                                  m_StaticInstancedInstance && !m_Wireframe;
+        std::vector<glm::mat4>       instTransforms;
+        std::vector<PBRPushMaterial> instMaterials;
+        struct InstancedDraw
+        {
+            Desert::StaticMesh* Mesh          = nullptr;
+            uint32_t            InstanceCount = 0;
+            uint32_t            FirstInstance = 0;
+            uint32_t            MaterialIndex = 0;
+        };
+        std::vector<InstancedDraw> instDraws;
+
         for ( auto& [mat, objects] : groups )
         {
+            if ( objects.empty() )
+                continue;
+
+            // Sub-group this material's objects by Mesh*; a sub-group of >= 2 identical meshes collapses into
+            // one instanced draw. Singletons (and everything when instancing is off / wireframe) take the
+            // classic per-object path below — which also preserves their individual material overrides.
+            std::vector<std::pair<Desert::StaticMesh*, std::vector<const StaticMeshRenderData*>>> byMesh;
+            const auto bucketFor =
+                 [&]( Desert::StaticMesh* mesh ) -> std::vector<const StaticMeshRenderData*>&
+            {
+                for ( auto& [m, v] : byMesh )
+                    if ( m == mesh )
+                        return v;
+                byMesh.emplace_back( mesh, std::vector<const StaticMeshRenderData*>{} );
+                return byMesh.back().second;
+            };
+            for ( const auto* obj : objects )
+                bucketFor( obj->Mesh ).push_back( obj );
+
+            std::vector<const StaticMeshRenderData*> singles;
+            for ( auto& [mesh, bucket] : byMesh )
+            {
+                if ( instancingOn && bucket.size() >= 2 )
+                {
+                    InstancedDraw d;
+                    d.Mesh          = mesh;
+                    d.InstanceCount = static_cast<uint32_t>( bucket.size() );
+                    d.FirstInstance = static_cast<uint32_t>( instTransforms.size() );
+                    d.MaterialIndex = static_cast<uint32_t>( instMaterials.size() );
+                    for ( const auto* obj : bucket )
+                        instTransforms.push_back( obj->Transform );
+                    // v1: all instances of a batch share ONE material (the first object's effective material).
+                    instMaterials.push_back( BuildEffectiveMaterial( mat, ( *bucket[0]->MaterialSlots )[0] ) );
+                    instDraws.push_back( d );
+                }
+                else
+                {
+                    for ( const auto* obj : bucket )
+                        singles.push_back( obj );
+                }
+            }
+
+            if ( singles.empty() )
+                continue;
+
+            // ---- Classic per-object path (singletons / wireframe) ----
             // Fill this material's per-object storage buffer (one GpuMaterial per drawn object).
             std::vector<PBRPushMaterial> gpuMaterials;
-            gpuMaterials.reserve( objects.size() );
-            for ( const auto* obj : objects )
-                gpuMaterials.push_back( BuildEffectiveMaterial( mat, obj->MaterialSlots[0] ) );
+            gpuMaterials.reserve( singles.size() );
+            for ( const auto* obj : singles )
+                gpuMaterials.push_back( BuildEffectiveMaterial( mat, ( *obj->MaterialSlots )[0] ) );
 
             if ( auto* sb = mat->Get<StorageBufferProperty>( "Materials" ) )
                 sb->SetRawData( gpuMaterials.data(),
                                 static_cast<uint32_t>( gpuMaterials.size() * sizeof( PBRPushMaterial ) ) );
 
-            for ( uint32_t i = 0; i < static_cast<uint32_t>( objects.size() ); ++i )
+            // SHARED per-frame scene data (camera / lights / shadow / env) is written ONCE per material
+            // group, NOT per mesh: these Update* all write the PARENT material's buffers (shared by every
+            // instance) and depend only on scene-global state. Only the transform is per-object (push
+            // constant), so it stays in the draw loop below.
             {
-                const auto*       obj  = objects[i];
-                MaterialInstance* inst = obj->MaterialSlots[0];
-
-                StaticMaterialPBR::UpdateCamera( inst, camera );
-                StaticMaterialPBR::UpdateLights( inst, pointLights, spotLights, dirLights );
-                StaticMaterialPBR::UpdateTransform( inst, obj->Transform );
+                DESERT_PROFILE_SCOPE( "Mesh: SharedSceneSetup (1x/group)" );
+                MaterialInstance* anyInst = ( *singles[0]->MaterialSlots )[0];
+                StaticMaterialPBR::UpdateCamera( anyInst, camera );
+                StaticMaterialPBR::UpdateLights( anyInst, pointLights, spotLights, dirLights );
                 Image2D* cascadeMaps[kNumCascades];
                 for ( uint32_t c = 0; c < kNumCascades; ++c )
-                    cascadeMaps[c] =
-                         m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
-                StaticMaterialPBR::UpdateShadow( inst, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
+                    cascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
+                StaticMaterialPBR::UpdateShadow( anyInst, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
                                                  m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals,
                                                  m_CascadeWorldPerTexel, m_LightingDebug );
-                StaticMaterialPBR::UpdateEnvironment( inst, iblIrradiance, iblPrefiltered, iblBrdfLut );
+                StaticMaterialPBR::UpdateEnvironment( anyInst, iblIrradiance, iblPrefiltered, iblBrdfLut );
+            }
 
-                mat->SetMaterialIndex( i );
-                mat->Bind( inst );
+            for ( uint32_t i = 0; i < static_cast<uint32_t>( singles.size() ); ++i )
+            {
+                const auto*       obj  = singles[i];
+                MaterialInstance* inst = ( *obj->MaterialSlots )[0];
 
-                auto* pipeline = ( m_Wireframe && m_StaticWireframePipeline ) ? m_StaticWireframePipeline.get()
-                                                                              : m_StaticPipeline.get();
-                renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor() );
+                {
+                    // Per-object work: transform (push constant) + material index + descriptor bind.
+                    DESERT_PROFILE_SCOPE( "Mesh: PerObject Setup" );
+                    StaticMaterialPBR::UpdateTransform( inst, obj->Transform );
+                    mat->SetMaterialIndex( i );
+                    mat->Bind( inst );
+                }
+
+                {
+                    // The actual draw call (bind pipeline + descriptor sets + vkCmdDrawIndexed).
+                    DESERT_PROFILE_SCOPE( "Mesh: RenderMesh (draw)" );
+                    auto* pipeline = ( m_Wireframe && m_StaticWireframePipeline )
+                                          ? m_StaticWireframePipeline.get()
+                                          : m_StaticPipeline.get();
+                    renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor() );
+                }
+            }
+        }
+
+        // UE-style Instanced Static Meshes (one entity = N instances): fold into the same instanced
+        // accumulation as the auto-batched static meshes. Each ISM is one batch; its transforms come
+        // straight from the component array (no per-instance ECS cost), appended to the shared SSBO.
+        if ( instancingOn )
+        {
+            for ( const auto& ism : m_InstancedQueue )
+            {
+                if ( !ism.Mesh || !ism.Material || !ism.Transforms || ism.Transforms->empty() )
+                    continue;
+                auto* mat = static_cast<StaticMaterialPBR*>( ism.Material->GetParentMaterial() );
+                if ( !mat )
+                    continue;
+
+                InstancedDraw d;
+                d.Mesh          = ism.Mesh;
+                d.InstanceCount = static_cast<uint32_t>( ism.Transforms->size() );
+                d.FirstInstance = static_cast<uint32_t>( instTransforms.size() );
+                d.MaterialIndex = static_cast<uint32_t>( instMaterials.size() );
+                instTransforms.insert( instTransforms.end(), ism.Transforms->begin(), ism.Transforms->end() );
+                instMaterials.push_back( BuildEffectiveMaterial( mat, ism.Material ) );
+                instDraws.push_back( d );
+            }
+        }
+
+        // ---- Instanced path: upload the packed SSBOs ONCE (at final size) before recording any instanced
+        // draw, so the descriptor points at the final VkBuffer (a later grow reallocates it). Scene data is
+        // uploaded a single time for the whole frame; each batch is then one instanced draw call. ----
+        if ( instancingOn && !instDraws.empty() )
+        {
+            DESERT_PROFILE_SCOPE( "Mesh: Instanced Batches" );
+            auto* instMat  = m_StaticInstancedMaterial.get();
+            auto* instInst = m_StaticInstancedInstance.get();
+
+            if ( auto* sb = instMat->Get<StorageBufferProperty>( "InstanceTransforms" ) )
+                sb->SetRawData( instTransforms.data(),
+                                static_cast<uint32_t>( instTransforms.size() * sizeof( glm::mat4 ) ) );
+            if ( auto* sb = instMat->Get<StorageBufferProperty>( "Materials" ) )
+                sb->SetRawData( instMaterials.data(),
+                                static_cast<uint32_t>( instMaterials.size() * sizeof( PBRPushMaterial ) ) );
+
+            StaticMaterialPBR::UpdateCamera( instInst, camera );
+            StaticMaterialPBR::UpdateLights( instInst, pointLights, spotLights, dirLights );
+            Image2D* cascadeMaps[kNumCascades];
+            for ( uint32_t c = 0; c < kNumCascades; ++c )
+                cascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
+            StaticMaterialPBR::UpdateShadow( instInst, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
+                                             m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals,
+                                             m_CascadeWorldPerTexel, m_LightingDebug );
+            StaticMaterialPBR::UpdateEnvironment( instInst, iblIrradiance, iblPrefiltered, iblBrdfLut );
+            StaticMaterialPBR::UpdateTransform( instInst, glm::mat4( 1.0f ) ); // unused by the instanced VS
+
+            for ( const auto& d : instDraws )
+            {
+                instMat->SetMaterialIndex( d.MaterialIndex );
+                instMat->Bind( instInst );
+                renderer.RenderMesh( m_StaticInstancedPipeline.get(), d.Mesh, glm::mat4( 1.0f ),
+                                     instMat->GetMaterialExecutor(), d.InstanceCount, d.FirstInstance );
             }
         }
     }
@@ -353,10 +517,10 @@ namespace Desert::Graphic::System
 
         for ( const auto& data : m_SkinnedQueue )
         {
-            // For now, we assume the first material instance is the PBR one
-            MaterialInstance* inst = (MaterialInstance*)data.Material;
+            if ( !data.Mesh || !data.Material || !data.Instance )
+                continue;
 
-            data.Material->Bind( { .instance        = inst,
+            data.Material->Bind( { .instance        = data.Instance,
                                    .MainCamera      = camera,
                                    .MeshTransform   = data.Transform,
                                    .DirectionLights = m_SceneRenderer->GetDirectionLights(),
@@ -403,6 +567,27 @@ namespace Desert::Graphic::System
         spec.DebugName   = "StaticMeshWireframe";
         spec.PolygonMode = PrimitivePolygonMode::Wireframe;
         m_StaticWireframePipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+
+        // Instanced variant: same vertex layout + state, but the vertex shader pulls the per-instance model
+        // matrix from the InstanceTransforms SSBO (binding 16) by gl_InstanceIndex. Drawn via one instanced
+        // draw call (RenderMeshInstanced). Optional — if the shader is missing, instancing is just disabled.
+        m_InstancedGeometryShader =
+             Runtime::ResourceRegistry::GetShaderService()->GetByName( "StaticMeshPBR_Instanced" );
+        if ( m_InstancedGeometryShader )
+        {
+            GraphicsPipelineSpecification ispec;
+            ispec.DebugName      = "StaticMeshGeometryInstanced";
+            ispec.Layout         = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                     { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                     { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                     { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                     { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+            ispec.DepthCompareOp = CompareOp::LessOrEqual;
+            ispec.CullMode       = CullMode::Back;
+            ispec.Shader         = m_InstancedGeometryShader;
+            ispec.Framebuffer    = targetFb;
+            m_StaticInstancedPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( ispec );
+        }
 
         return true;
     }
@@ -482,6 +667,27 @@ namespace Desert::Graphic::System
 
         m_SilhouetteMaterial = std::make_unique<MaterialSilhouette>();
 
+        // Skinned silhouette variant (optional): same mask target/state, but the skinned vertex layout +
+        // the Silhouette_Skinned shader (skins by the Bones SSBO). Used to outline selected skinned meshes.
+        m_SilhouetteSkinnedShader =
+             Runtime::ResourceRegistry::GetShaderService()->GetByName( "Silhouette_Skinned" );
+        if ( m_SilhouetteSkinnedShader )
+        {
+            GraphicsPipelineSpecification sspec = spec;
+            sspec.DebugName = "SilhouetteSkinnedPipeline";
+            sspec.Layout    = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                { Graphic::ShaderDataType::Float2, "a_TextureCoord" },
+                                { Graphic::ShaderDataType::Int4, "a_BoneIndices" },
+                                { Graphic::ShaderDataType::Float4, "a_BoneWeights" } };
+            sspec.Shader            = m_SilhouetteSkinnedShader;
+            m_SilhouetteSkinnedPipeline = GraphicsPipeline::Create( sspec );
+            m_SilhouetteSkinnedPipeline->Invalidate();
+            m_SilhouetteSkinnedMaterial = std::make_unique<MaterialSilhouetteSkinned>();
+        }
+
         return true;
     }
 
@@ -529,6 +735,23 @@ namespace Desert::Graphic::System
 
         m_ShadowPipeline = GraphicsPipeline::Create( spec );
         m_ShadowPipeline->Invalidate();
+
+        // Instanced shadow caster (optional): same depth-only state, but the vertex pulls per-instance model
+        // matrices from the InstanceTransforms SSBO. One instanced material per cascade (each its own light
+        // matrix UBO + SSBO). If the shader is missing, instanced shadows are simply disabled.
+        m_ShadowInstancedShader =
+             Runtime::ResourceRegistry::GetShaderService()->GetByName( "Shadow_Instanced" );
+        if ( m_ShadowInstancedShader )
+        {
+            GraphicsPipelineSpecification ispec = spec;
+            ispec.DebugName = "ShadowPipelineInstanced";
+            ispec.Shader    = m_ShadowInstancedShader;
+            m_ShadowInstancedPipeline = GraphicsPipeline::Create( ispec );
+            m_ShadowInstancedPipeline->Invalidate();
+
+            for ( uint32_t i = 0; i < kNumCascades; ++i )
+                m_ShadowInstancedMaterial[i] = std::make_unique<MaterialShadowInstanced>();
+        }
 
         return true;
     }
@@ -657,12 +880,86 @@ namespace Desert::Graphic::System
                      m_ShadowMaterial[c]->SetLightMatrix( glm::mat4( 1.0f ), m_CascadeVP[c] );
 
                      auto& renderer = Renderer::GetInstance();
-                     for ( const auto& renderData : m_StaticQueue )
+
+                     // Shadow casters are MATERIAL-INDEPENDENT (depth only), so batch purely by Mesh*: any
+                     // group of >= 2 identical meshes collapses into ONE instanced draw per cascade. This is
+                     // the dominant cost in the 256-mesh stress test (256x4 per-object draws -> 4 draws).
+                     const bool instancingOn = m_ShadowInstancedPipeline && m_ShadowInstancedMaterial[c];
+
+                     std::vector<std::pair<Desert::StaticMesh*, std::vector<const StaticMeshRenderData*>>> byMesh;
+                     const auto bucketFor =
+                          [&]( Desert::StaticMesh* mesh ) -> std::vector<const StaticMeshRenderData*>&
                      {
-                         if ( !renderData.Mesh )
-                             continue;
-                         renderer.RenderMesh( m_ShadowPipeline.get(), renderData.Mesh, renderData.Transform,
+                         for ( auto& [m, v] : byMesh )
+                             if ( m == mesh )
+                                 return v;
+                         byMesh.emplace_back( mesh, std::vector<const StaticMeshRenderData*>{} );
+                         return byMesh.back().second;
+                     };
+                     for ( const auto& rd : m_StaticQueue )
+                         if ( rd.Mesh )
+                             bucketFor( rd.Mesh ).push_back( &rd );
+
+                     // Pack all instanced-batch transforms contiguously; each batch reads its slice via
+                     // firstInstance. Upload the SSBO ONCE (final size) before any instanced draw is recorded.
+                     std::vector<glm::mat4> instTransforms;
+                     struct ShadowBatch
+                     {
+                         Desert::StaticMesh* Mesh;
+                         uint32_t            Count;
+                         uint32_t            First;
+                     };
+                     std::vector<ShadowBatch>                  batches;
+                     std::vector<const StaticMeshRenderData*>  singles;
+                     for ( auto& [mesh, bucket] : byMesh )
+                     {
+                         if ( instancingOn && bucket.size() >= 2 )
+                         {
+                             ShadowBatch b{ mesh, static_cast<uint32_t>( bucket.size() ),
+                                            static_cast<uint32_t>( instTransforms.size() ) };
+                             for ( const auto* rd : bucket )
+                                 instTransforms.push_back( rd->Transform );
+                             batches.push_back( b );
+                         }
+                         else
+                         {
+                             for ( const auto* rd : bucket )
+                                 singles.push_back( rd );
+                         }
+                     }
+
+                     // UE-style Instanced Static Meshes cast shadows too — append each as its own batch
+                     // (transforms straight from the component array).
+                     if ( instancingOn )
+                     {
+                         for ( const auto& ism : m_InstancedQueue )
+                         {
+                             if ( !ism.Mesh || !ism.Transforms || ism.Transforms->empty() )
+                                 continue;
+                             ShadowBatch b{ ism.Mesh, static_cast<uint32_t>( ism.Transforms->size() ),
+                                            static_cast<uint32_t>( instTransforms.size() ) };
+                             instTransforms.insert( instTransforms.end(), ism.Transforms->begin(),
+                                                    ism.Transforms->end() );
+                             batches.push_back( b );
+                         }
+                     }
+
+                     // Per-object path (singletons).
+                     for ( const auto* rd : singles )
+                         renderer.RenderMesh( m_ShadowPipeline.get(), rd->Mesh, rd->Transform,
                                               m_ShadowMaterial[c]->GetMaterialExecutor() );
+
+                     // Instanced path.
+                     if ( instancingOn && !batches.empty() )
+                     {
+                         auto* instMat = m_ShadowInstancedMaterial[c].get();
+                         instMat->SetLightMatrix( glm::mat4( 1.0f ), m_CascadeVP[c] );
+                         if ( auto* sb = instMat->Get<StorageBufferProperty>( "InstanceTransforms" ) )
+                             sb->SetRawData( instTransforms.data(),
+                                             static_cast<uint32_t>( instTransforms.size() * sizeof( glm::mat4 ) ) );
+                         for ( const auto& b : batches )
+                             renderer.RenderMesh( m_ShadowInstancedPipeline.get(), b.Mesh, glm::mat4( 1.0f ),
+                                                  instMat->GetMaterialExecutor(), b.Count, b.First );
                      }
                  },
                  m_ShadowPipeline->GetSpecification(), m_CascadeFB[c], {},
@@ -799,9 +1096,20 @@ namespace Desert::Graphic::System
                                                       m_SilhouetteMaterial->GetMaterialExecutor() );
                              }
 
-                             // NOTE: skinned mesh silhouettes require a skinned variant of the
-                             // Silhouette shader (bone matrices). Deferred until the skinned mesh
-                             // material path is re-enabled.
+                             // ===== Skinned ===== — skin the mask by the SAME bone matrices the mesh is
+                             // rendered with (animated or bind) so the outline tracks the posed shape.
+                             if ( m_SilhouetteSkinnedPipeline && m_SilhouetteSkinnedMaterial )
+                             {
+                                 for ( const auto& sd : m_SkinnedQueue )
+                                 {
+                                     if ( !sd.Outlined || !sd.Mesh )
+                                         continue;
+                                     m_SilhouetteSkinnedMaterial->UpdateCamera( camera );
+                                     m_SilhouetteSkinnedMaterial->SetBones( sd.BoneMatrices );
+                                     renderer.RenderMesh( m_SilhouetteSkinnedPipeline.get(), sd.Mesh, sd.Transform,
+                                                          m_SilhouetteSkinnedMaterial->GetMaterialExecutor() );
+                                 }
+                             }
                          },
                          m_SilhouettePipeline->GetSpecification(), m_SilhouetteMaskFramebuffer,
                          { RenderPassDependency( RenderPhase::Geometry ) } );
@@ -833,10 +1141,17 @@ namespace Desert::Graphic::System
                 SkinnedMeshRenderData skinnedData;
                 skinnedData.Mesh         = static_cast<SkinnedMesh*>( data.Mesh );
                 skinnedData.Transform    = data.Transform;
-             //   skinnedData.Material     = static_cast<SkinnedMaterialPBR*>( data.MaterialSlots[0] );
                 skinnedData.BoneMatrices = data.BoneMatrices;
-
-                m_SkinnedQueue.push_back( skinnedData );
+                skinnedData.Outlined     = data.Outlined;
+                if ( data.MaterialSlots && !data.MaterialSlots->empty() )
+                {
+                    skinnedData.Instance = ( *data.MaterialSlots )[0];
+                    if ( skinnedData.Instance )
+                        skinnedData.Material =
+                             static_cast<SkinnedMaterialPBR*>( skinnedData.Instance->GetParentMaterial() );
+                }
+                if ( skinnedData.Material && skinnedData.Instance )
+                    m_SkinnedQueue.push_back( std::move( skinnedData ) );
                 break;
             }
         }

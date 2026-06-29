@@ -91,7 +91,7 @@ namespace Desert::Core
         if ( mousePressed )
         {
             const float YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
-            const float cameraSpeed   = 0.0002f * timestep.GetMilliseconds();
+            const float cameraSpeed   = 0.0002f * m_MovementSpeed * timestep.GetMilliseconds();
             const float rotationSpeed = 0.133f * timestep.GetMilliseconds();
 
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::S ) )

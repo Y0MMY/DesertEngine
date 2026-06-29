@@ -22,6 +22,7 @@ project "Editor"
         "%{wks.location}/ThirdParty/entt/include/",
         "%{wks.location}/ThirdParty/ImGui/",
         "%{wks.location}/ThirdParty/glm/",
+        "%{wks.location}/ThirdParty/optick/src/",
         "%{wks.location}/ThirdParty/",
     }
 
@@ -29,12 +30,14 @@ project "Editor"
         includedirs { path }
     end
 
-    defines { "INCLUDE_HEADERS=#include <Engine/Desert.hpp>","YAML_CPP_STATIC_DEFINE" }
+    defines { "INCLUDE_HEADERS=#include <Engine/Desert.hpp>","YAML_CPP_STATIC_DEFINE",
+              "USE_OPTICK=1", "OPTICK_ENABLE_GPU=0", "OPTICK_ENABLE_TRACING=0" }
 
     links{
         "Desert",
         "yaml-cpp",
         "GLFW",
+        "Optick",
     }
 
     filter "configurations:Debug"

@@ -4,6 +4,8 @@
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
 
+#include <Common/Core/Profiler.hpp>
+
 #include <glm/glm.hpp>
 
 namespace Desert::Graphic
@@ -172,28 +174,53 @@ namespace Desert::Graphic
 
     void SceneRenderer::OnUpdate( const UpdateInfo& sceneRenderInfo )
     {
+        DESERT_PROFILE_SCOPE( "SceneRenderer::OnUpdate" );
+
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
         m_DirectionLights        = sceneRenderInfo.DirLights;
 
         // Bake/rebake the procedural-sky IBL if the sun moved (throttled). Done here — before the render
         // graph records its command buffer — so the heavy compute + device idle stays at a safe boundary.
-        skyboxSystem->EnsureProceduralEnvironment();
+        {
+            DESERT_PROFILE_SCOPE( "Sky: EnsureProceduralEnv" );
+            skyboxSystem->EnsureProceduralEnvironment();
+        }
 
         // Recompute CSM cascade matrices once per frame BEFORE the render graph records (intra-phase pass
         // order is nondeterministic, so the cascade passes can't compute them themselves).
-        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->UpdateCascades();
+        {
+            DESERT_PROFILE_SCOPE( "Shadow: UpdateCascades" );
+            UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->UpdateCascades();
+        }
 
-        ClearMainFramebuffer();
+        {
+            DESERT_PROFILE_SCOPE( "ClearMainFramebuffer" );
+            ClearMainFramebuffer();
+        }
 
         // GPU grass culling: dispatch the cull compute (outside any render pass) BEFORE the render graph
         // records the grass draw, so the indirect instanceCount + compacted visible list are ready.
-        UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->CullGrassInFrame();
+        {
+            DESERT_PROFILE_SCOPE( "Grass: CullInFrame" );
+            UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->CullGrassInFrame();
+        }
 
-        ExecuteRenderGraph();
+        {
+            DESERT_PROFILE_SCOPE( "ExecuteRenderGraph" );
+            ExecuteRenderGraph();
+        }
 
         // Explicit post-process chain (runs after the scene graph has produced the scene color and
         // the silhouette mask): Jump Flood outline -> Tonemap.
-        UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] )->Execute();
+        {
+            DESERT_PROFILE_SCOPE( "PostFX: JumpFlood" );
+            const auto& jfa = UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
+            // Skip the JFA step passes when nothing is outlined (sync is handled by render-pass layouts +
+            // the EndRenderPass barrier, not by the steps — see JumpFloodOutlineRenderer::Execute).
+            jfa->SetOutlineActive(
+                 UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->HasOutline() );
+            jfa->Execute();
+        }
 
         // Eye adaptation: measure scene luminance into the 1x1 buffer, then point tonemap at the latest
         // (the ping-pong target alternates each frame, so the reference must be refreshed here).
@@ -206,16 +233,31 @@ namespace Desert::Graphic
 
         // Bloom (HDR scene color -> blurred bright) runs before tonemap, which adds it in.
         if ( m_BloomEnabled )
+        {
+            DESERT_PROFILE_SCOPE( "PostFX: Bloom" );
             UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )->Execute();
+        }
 
-        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
+        {
+            DESERT_PROFILE_SCOPE( "PostFX: Tonemap" );
+            UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
+        }
 
         if ( m_AAMode == Core::AntiAliasingMode::FXAA )
+        {
+            DESERT_PROFILE_SCOPE( "PostFX: FXAA" );
             UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Execute();
+        }
         else if ( m_AAMode == Core::AntiAliasingMode::SMAA )
+        {
+            DESERT_PROFILE_SCOPE( "PostFX: SMAA" );
             UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Execute();
+        }
 
-        CompositeRenderPass();
+        {
+            DESERT_PROFILE_SCOPE( "CompositeRenderPass" );
+            CompositeRenderPass();
+        }
     }
 
     NO_DISCARD Common::BoolResultStr SceneRenderer::EndScene()
@@ -271,7 +313,7 @@ namespace Desert::Graphic
         // renderer.EndRenderPass();
     }
 
-    void SceneRenderer::SubmitMesh( const Mesh* mesh, const std::vector<MaterialInstance*> materialSlots,
+    void SceneRenderer::SubmitMesh( const Mesh* mesh, const std::vector<MaterialInstance*>& materialSlots,
                                     const glm::mat4& transform, const RenderSubmissionExtra& extra )
     {
         if ( !mesh || materialSlots.empty() )
@@ -281,7 +323,7 @@ namespace Desert::Graphic
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SubmitMesh( { .Mesh          = (Mesh*)mesh,
                              .Transform     = transform,
-                             .MaterialSlots = materialSlots,
+                             .MaterialSlots = &materialSlots,
                              .BoneMatrices  = extra.BoneMatrices,
                              .Outlined      = extra.Outlined } );
     }
@@ -323,6 +365,15 @@ namespace Desert::Graphic
                                     .ParamOverrides   = paramOverrides,
                                     .TextureOverrides = textureOverrides,
                                     .Outlined         = outlined } );
+    }
+
+    void SceneRenderer::SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
+                                             const std::vector<glm::mat4>* transforms )
+    {
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SubmitInstancedMesh( { .Mesh       = static_cast<Desert::StaticMesh*>( const_cast<Mesh*>( mesh ) ),
+                                      .Material    = material,
+                                      .Transforms = transforms } );
     }
 
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
@@ -435,12 +486,14 @@ namespace Desert::Graphic
 
             if ( passFb != currentFb )
             {
+                DESERT_PROFILE_SCOPE( "RenderPass Begin/End" ); // driver vkCmdBeginRenderPass + layout transitions
                 if ( currentFb )
                     renderer.EndRenderPass();
                 renderer.BeginRenderPass( pass.CachedRenderPass.get(), true );
                 currentFb = passFb;
             }
 
+            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
             pass.ExecuteFunc();
         }
 

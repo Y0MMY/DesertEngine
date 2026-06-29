@@ -8,6 +8,16 @@ namespace Desert::Graphic
     {
     }
 
+    StaticMaterialPBR::StaticMaterialPBR( std::string&& debugName, std::string&& shaderName )
+         : Material( std::move( debugName ), std::move( shaderName ) )
+    {
+    }
+
+    StaticMaterialPBRInstanced::StaticMaterialPBRInstanced()
+         : StaticMaterialPBR( "PBRMaterialInstanced", "StaticMeshPBR_Instanced" )
+    {
+    }
+
     void StaticMaterialPBR::UpdateTransform( MaterialInstance* instance, const glm::mat4& transform )
     {
         instance->SetMat4( "Transform", transform );

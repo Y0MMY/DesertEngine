@@ -62,6 +62,10 @@ namespace Desert::Core
 
         [[nodiscard]] const auto& GetDirection() const { return m_Direction; }
 
+        // Editor fly-camera movement speed multiplier (1.0 = default). Exposed in the viewport overlay.
+        [[nodiscard]] float GetMovementSpeed() const { return m_MovementSpeed; }
+        void                SetMovementSpeed( float speed ) { m_MovementSpeed = speed; }
+
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
@@ -86,6 +90,7 @@ namespace Desert::Core
         float m_Distance = 0.0f;
         float m_Pitch = 0.0f, m_PitchDelta = 0.0f;
         float m_Yaw = 0.0f, m_YawDelta = 0.0f;
+        float m_MovementSpeed = 1.0f; // multiplies the base fly speed (user-adjustable)
     };
 
     // Camera driven by a scene entity (CameraComponent): view from the entity transform, projection from

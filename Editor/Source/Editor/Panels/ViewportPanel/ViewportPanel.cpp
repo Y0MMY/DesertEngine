@@ -1,8 +1,16 @@
 #include "ViewportPanel.hpp"
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Core/Selection/SkeletonEditMode.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
+#include <Editor/Import/MeshDnD.hpp>
+#include <filesystem>
 #include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
+#include <Engine/Geometry/SkinnedMesh.hpp>
+#include <Engine/Animation/Skeleton.hpp>
+#include <functional>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -76,6 +84,66 @@ namespace Desert::Editor
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
 
+        // Blender-style mode toggle (Object/Scene <-> Skeleton Edit). Drawn as a FLOATING overlay window
+        // anchored to the viewport's top-left so it sits ON TOP of the viewport image and never slips behind
+        // the editor toolbar. Only meaningful for a selected skinned mesh; disabled otherwise.
+        {
+            bool canEditSkeleton = false;
+            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+                if ( auto ref = m_Scene->FindEntityByID( *sel ); ref )
+                    canEditSkeleton = ref->get().HasComponent<ECS::SkinnedMeshComponent>();
+
+            if ( !canEditSkeleton )
+                Core::SkeletonEditMode::SetActive( false ); // auto-exit when the selection isn't a skinned mesh
+
+            const bool active = Core::SkeletonEditMode::IsActive();
+
+            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 10.0f,
+                                             m_ViewportData.ViewportPos.y + 10.0f ) );
+            ImGui::SetNextWindowBgAlpha( 0.55f );
+            const ImGuiWindowFlags overlayFlags =
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+            if ( ImGui::Begin( "##ViewportModeOverlay", nullptr, overlayFlags ) )
+            {
+                if ( !canEditSkeleton )
+                    ImGui::BeginDisabled();
+                if ( active )
+                    ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.85f, 0.45f, 0.1f, 1.0f ) );
+                if ( ImGui::Button( active ? ICON_MDI_BONE "  Skeleton Edit" : ICON_MDI_HUMAN "  Object Mode" ) )
+                    Core::SkeletonEditMode::Toggle();
+                if ( active )
+                    ImGui::PopStyleColor();
+                if ( !canEditSkeleton )
+                    ImGui::EndDisabled();
+
+                // In Skeleton Edit, a toggle for showing ALL bone names (default: only the selected bone, so
+                // dense rigs don't overlap every label into an unreadable blob).
+                if ( active )
+                {
+                    ImGui::SameLine();
+                    bool showNames = Core::SkeletonEditMode::ShowAllNames();
+                    if ( ImGui::Checkbox( "Names", &showNames ) )
+                        Core::SkeletonEditMode::SetShowAllNames( showNames );
+                }
+
+                // Editor fly-camera speed (only while the active camera IS the editor camera, i.e. not Play).
+                if ( auto cam = m_Scene->GetMainCamera().lock() )
+                {
+                    if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                    {
+                        float spd = editorCam->GetMovementSpeed();
+                        ImGui::SetNextItemWidth( 110.0f );
+                        if ( ImGui::SliderFloat( ICON_MDI_CAMERA "##CamSpeed", &spd, 0.1f, 10.0f, "%.2fx" ) )
+                            editorCam->SetMovementSpeed( spd );
+                        if ( ImGui::IsItemHovered() )
+                            ImGui::SetTooltip( "Editor camera speed" );
+                    }
+                }
+            }
+            ImGui::End();
+        }
+
         // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
         if ( ImGui::BeginDragDropTarget() )
         {
@@ -92,6 +160,23 @@ namespace Desert::Editor
                     if ( !prefab->IsReadyForUse() )
                         prefab->Load();
                     prefab->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                }
+            }
+
+            // Drag a mesh source (.obj/.fbx/.gltf/...) from the File Explorer onto the viewport to spawn it
+            // as a new entity. Cooks the source on demand (see MeshDnD).
+            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "MESH_ASSET" ); payload && m_AssetManager )
+            {
+                const std::string path( static_cast<const char*>( payload->Data ),
+                                        payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
+                auto&      mgr    = const_cast<Assets::AssetManager&>( *m_AssetManager );
+                const auto handle = MeshDnD::ResolveOrImport( mgr, path );
+                if ( !handle.IsNull() )
+                {
+                    const std::string name = std::filesystem::path( path ).stem().string();
+                    auto&             e    = m_Scene->CreateNewEntity( std::string( name ) );
+                    e.AddComponent<ECS::StaticMeshComponent>().MeshHandle = handle;
+                    Core::SelectionManager::SetSelected( e.GetComponent<ECS::UUIDComponent>().UUID );
                 }
             }
             ImGui::EndDragDropTarget();
@@ -116,7 +201,11 @@ namespace Desert::Editor
 
         // Handle gizmos
         m_GizmoHovered = false;
-        if ( m_GizmoType != GizmoType::None && !painting )
+        if ( Core::SkeletonEditMode::IsActive() )
+        {
+            RenderBoneGizmo(); // skeleton edit owns the gizmo (edits the selected bone, not the object)
+        }
+        else if ( m_GizmoType != GizmoType::None && !painting )
         {
             RenderGizmo();
         }
@@ -176,14 +265,38 @@ namespace Desert::Editor
             return;
 
         auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
-        auto  modelMatrix        = transformComponent.GetTransform();
 
-        float rw = static_cast<float>( ImGui::GetWindowWidth() );
-        float rh = static_cast<float>( ImGui::GetWindowHeight() );
+        // The gizmo must work in WORLD space. For a CHILD entity (e.g. a camera parented to the character),
+        // the world transform = parentWorld * local, and an edit must be converted back to LOCAL before
+        // writing. parentWorld = identity for a root entity (so this is a no-op there).
+        glm::mat4  parentWorld( 1.0f );
+        auto&      reg  = m_Scene->GetRegistry();
+        const auto self = selectedEntity.GetHandle();
+        if ( reg.has<ECS::RelationshipComponent>( self ) )
+        {
+            std::vector<entt::entity> chain; // [parent, grandparent, ... root]
+            entt::entity              cur = reg.get<ECS::RelationshipComponent>( self ).Parent;
+            while ( cur != entt::null )
+            {
+                chain.push_back( cur );
+                cur = reg.has<ECS::RelationshipComponent>( cur ) ? reg.get<ECS::RelationshipComponent>( cur ).Parent
+                                                                 : entt::null;
+            }
+            for ( auto it = chain.rbegin(); it != chain.rend(); ++it ) // root -> ... -> parent
+                if ( reg.has<ECS::TransformComponent>( *it ) )
+                    parentWorld = parentWorld * reg.get<ECS::TransformComponent>( *it ).GetTransform();
+        }
 
+        auto modelMatrix = parentWorld * transformComponent.GetTransform(); // world transform for the gizmo
+
+        // SetRect MUST match the rendered scene-image rect (content region), NOT the raw window rect —
+        // GetWindowPos()/GetWindowWidth() include the tab bar + padding, which would offset the gizmo from
+        // the object and throw the handle hit-test off (gizmo "drawn wrong" / won't grab). The image is drawn
+        // at m_ViewportData.ViewportPos with m_ViewportData.Size (see the Image() call), so use those.
         ImGuizmo::SetOrthographic( false );
         ImGuizmo::SetDrawlist();
-        ImGuizmo::SetRect( ImGui::GetWindowPos().x, ImGui::GetWindowPos().y, rw, rh );
+        ImGuizmo::SetRect( m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y, m_ViewportData.Size.x,
+                           m_ViewportData.Size.y );
 
         const auto& view = mainCamera->GetViewMatrix();
         const auto& proj = mainCamera->GetProjectionMatrix();
@@ -200,15 +313,94 @@ namespace Desert::Editor
                 m_GizmoHovered = true;
             }
 
-            // Decompose and update transform
+            // Convert the manipulated WORLD matrix back to the entity's LOCAL space (inverse parent) before
+            // decomposing — so dragging a child entity edits its local offset correctly.
+            const glm::mat4 localMatrix = glm::inverse( parentWorld ) * modelMatrix;
+
             glm::vec3 scale, translation, skew;
             glm::quat rotation;
             glm::vec4 perspective;
-            glm::decompose( modelMatrix, scale, rotation, translation, skew, perspective );
+            glm::decompose( localMatrix, scale, rotation, translation, skew, perspective );
 
             transformComponent.Translation = translation;
             transformComponent.Rotation    = glm::eulerAngles( rotation );
             transformComponent.Scale       = scale;
+        }
+    }
+
+    void ViewportPanel::RenderBoneGizmo()
+    {
+        const auto& mainCamera = m_Scene->GetMainCamera().lock();
+        if ( !mainCamera )
+            return;
+
+        const int boneIdx = Core::SkeletonEditMode::GetSelectedBone();
+        if ( boneIdx < 0 )
+            return;
+
+        const auto& selected = Core::SelectionManager::GetSelected();
+        if ( !selected )
+            return;
+        const auto& entOpt = m_Scene->FindEntityByID( *selected );
+        if ( !entOpt )
+            return;
+        auto& entity = entOpt->get();
+        if ( !entity.HasComponent<ECS::SkinnedMeshComponent>() )
+            return;
+
+        auto& smc  = entity.GetComponent<ECS::SkinnedMeshComponent>();
+        auto* mesh = Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
+        if ( !mesh || !mesh->IsSkinned() )
+            return;
+        auto* skeleton = static_cast<SkinnedMesh*>( mesh )->GetSkeletonMutable();
+        auto& bones    = skeleton->GetBonesMutable();
+        if ( boneIdx >= static_cast<int>( bones.size() ) )
+            return;
+
+        const glm::mat4 entityWorld = entity.GetComponent<ECS::TransformComponent>().GetTransform();
+
+        // Chain global bind per bone (parent chain of LocalBindTransform) — the SAME space the mesh is
+        // skinned in (bind matrix = chainGlobal * OffsetMatrix), so the gizmo sits on the bone as rendered.
+        std::vector<glm::mat4>             chainGlobal( bones.size(), glm::mat4( 1.0f ) );
+        std::vector<bool>                  done( bones.size(), false );
+        std::function<glm::mat4( size_t )> resolve = [&]( size_t i ) -> glm::mat4
+        {
+            if ( done[i] )
+                return chainGlobal[i];
+            glm::mat4 g = bones[i].LocalBindTransform;
+            if ( bones[i].ParentBoneID.has_value() && bones[i].ParentBoneID.value() < bones.size() )
+                g = resolve( bones[i].ParentBoneID.value() ) * bones[i].LocalBindTransform;
+            chainGlobal[i] = g;
+            done[i]        = true;
+            return g;
+        };
+
+        glm::mat4 gizmoWorld = entityWorld * resolve( static_cast<size_t>( boneIdx ) );
+
+        ImGuizmo::SetOrthographic( false );
+        ImGuizmo::SetDrawlist();
+        ImGuizmo::SetRect( m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y, m_ViewportData.Size.x,
+                           m_ViewportData.Size.y );
+
+        const auto& view = mainCamera->GetViewMatrix();
+        const auto& proj = mainCamera->GetProjectionMatrix();
+        // Scale on a bone's rest pose is rarely wanted; default None/Scale to Translate.
+        const auto op = ( m_GizmoType == GizmoType::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
+
+        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, ImGuizmo::WORLD, &gizmoWorld[0][0] ) )
+        {
+            m_GizmoHovered = ImGuizmo::IsOver();
+
+            // Edit ONLY this bone's LocalBindTransform (relative to its parent's unchanged chain global).
+            // Descendants follow automatically (their local is unchanged → their chain global shifts with the
+            // parent), and the mesh follows too (it is skinned with chainGlobal * OffsetMatrix). OffsetMatrix
+            // is the imported inverse-bind and is intentionally LEFT ALONE.
+            const glm::mat4 newGlobalMesh = glm::inverse( entityWorld ) * gizmoWorld;
+            glm::mat4       parentGlobal( 1.0f );
+            if ( bones[boneIdx].ParentBoneID.has_value() &&
+                 bones[boneIdx].ParentBoneID.value() < bones.size() )
+                parentGlobal = resolve( bones[boneIdx].ParentBoneID.value() );
+            bones[boneIdx].LocalBindTransform = glm::inverse( parentGlobal ) * newGlobalMesh;
         }
     }
 
@@ -372,7 +564,11 @@ namespace Desert::Editor
     {
         if ( component.MeshHandle )
             return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
-        return component.RuntimeMesh ? component.RuntimeMesh.get() : nullptr;
+        if ( component.RuntimeMesh )
+            return component.RuntimeMesh.get(); // edited geometry (per-entity)
+        if ( component.Primitive.has_value() )
+            return Geometry::PrimitiveMeshFactory::GetShared( component.Primitive.value() ); // shared primitive
+        return nullptr;
     }
 
     void ViewportPanel::DrawTerrainPaintOverlay( const ECS::Entity& terrainEntity )

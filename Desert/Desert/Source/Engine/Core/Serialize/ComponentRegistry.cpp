@@ -1,5 +1,7 @@
 #include "ComponentRegistry.hpp"
 
+#include <cstring>
+
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
@@ -361,6 +363,83 @@ namespace Desert::Core::Serialize
             Register( std::move( s ) );
         }
 
+        // ---- Instanced Static Mesh (UE-style ISM: asset/primitive mesh + N world matrices) ----
+        {
+            ComponentSerializer s;
+            s.Key = "InstancedStaticMesh";
+            s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::InstancedStaticMeshComponent>(); };
+
+            s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& assetManager ) -> rfl::Generic
+            {
+                const auto&                             ism = entity.GetComponent<ECS::InstancedStaticMeshComponent>();
+                Assets::InstancedStaticMeshComponentSer ser;
+
+                auto resolver = MakeAssetResolver( assetManager );
+                if ( ism.MeshHandle )
+                    if ( auto p = resolver.ToPath( static_cast<uint64_t>( ism.MeshHandle ), "StaticMeshAsset" );
+                         !p.empty() )
+                        ser.MeshPath = p;
+
+                if ( !ism.MaterialSlots.empty() )
+                {
+                    ser.MaterialPaths = std::vector<std::string>{};
+                    for ( auto handle : ism.MaterialSlots )
+                        ser.MaterialPaths->push_back(
+                             resolver.ToPath( static_cast<uint64_t>( handle ), "MaterialAsset" ) );
+                }
+                ser.Primitive = ism.Primitive;
+                if ( !ism.InstanceTransforms.empty() )
+                {
+                    std::vector<std::array<float, 16>> flat;
+                    flat.reserve( ism.InstanceTransforms.size() );
+                    for ( const auto& m : ism.InstanceTransforms )
+                    {
+                        std::array<float, 16> a{};
+                        std::memcpy( a.data(), &m[0][0], sizeof( float ) * 16 );
+                        flat.push_back( a );
+                    }
+                    ser.InstanceTransforms = std::move( flat );
+                }
+
+                return ToGeneric( ser );
+            };
+
+            s.Deserialize =
+                 []( ECS::Entity entity, const rfl::Generic& g, const Assets::AssetManager& assetManager )
+            {
+                auto parsed = FromGeneric<Assets::InstancedStaticMeshComponentSer>( g );
+                if ( !parsed.has_value() )
+                    return;
+                const auto& data = parsed.value();
+
+                auto& ism      = entity.AddComponent<ECS::InstancedStaticMeshComponent>();
+                auto  resolver = MakeAssetResolver( assetManager );
+
+                if ( data.MeshPath )
+                    ism.MeshHandle = Common::UUID( resolver.FromPath( *data.MeshPath, "StaticMeshAsset" ) );
+                if ( data.MaterialPaths.has_value() )
+                {
+                    ism.MaterialSlots.clear();
+                    for ( const auto& path : *data.MaterialPaths )
+                        ism.MaterialSlots.push_back( Common::UUID( resolver.FromPath( path, "MaterialAsset" ) ) );
+                }
+                ism.Primitive = data.Primitive;
+                if ( data.InstanceTransforms.has_value() )
+                {
+                    ism.InstanceTransforms.clear();
+                    ism.InstanceTransforms.reserve( data.InstanceTransforms->size() );
+                    for ( const auto& a : *data.InstanceTransforms )
+                    {
+                        glm::mat4 m( 1.0f );
+                        std::memcpy( &m[0][0], a.data(), sizeof( float ) * 16 );
+                        ism.InstanceTransforms.push_back( m );
+                    }
+                }
+            };
+
+            Register( std::move( s ) );
+        }
+
         // ---- Material (generic data-driven: shader name + param overrides + texture refs as paths) ----
         {
             ComponentSerializer s;
@@ -483,6 +562,12 @@ namespace Desert::Core::Serialize
              "SpotLight", "SpotLightData", &ECS::SpotLightComponent::Data ) );
         Register( MakeReflected<ECS::TerrainComponent, ECS::TerrainData>( "Terrain", "TerrainData",
                                                                           &ECS::TerrainComponent::Data ) );
+        Register( MakeReflected<ECS::ColliderComponent, ECS::ColliderData>( "Collider", "ColliderData",
+                                                                            &ECS::ColliderComponent::Data ) );
+        Register( MakeReflected<ECS::RigidBodyComponent, ECS::RigidBodyData>( "RigidBody", "RigidBodyData",
+                                                                              &ECS::RigidBodyComponent::Data ) );
+        Register( MakeReflected<ECS::CharacterControllerComponent, ECS::CharacterControllerData>(
+             "CharacterController", "CharacterControllerData", &ECS::CharacterControllerComponent::Data ) );
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its

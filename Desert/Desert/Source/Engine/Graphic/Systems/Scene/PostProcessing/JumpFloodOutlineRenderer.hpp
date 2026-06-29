@@ -57,6 +57,14 @@ namespace Desert::Graphic::System
         {
             m_Enabled = enabled;
         }
+        // When false (nothing selected) Execute() skips the ~log2(width) ping-pong STEP passes (it still
+        // runs the cheap Init so seed[0] stays valid/sampleable for the composite). Safe: the framebuffer
+        // render pass finalLayout is SHADER_READ_ONLY and EndRenderPass inserts a COLOR_WRITE->SHADER_READ
+        // barrier, so Init's write of seed[0] is laid-out + visible for the composite's sample.
+        void SetOutlineActive( bool active )
+        {
+            m_OutlineActive = active;
+        }
 
     private:
         bool CreateFramebuffers( uint32_t width, uint32_t height );
@@ -85,6 +93,7 @@ namespace Desert::Graphic::System
         glm::vec3 m_OutlineColor = glm::vec3( 1.0f, 0.5f, 0.0f );
         float     m_OutlineWidth = 4.0f;
         float     m_Smoothness   = 2.0f;
-        bool      m_Enabled      = true;
+        bool      m_Enabled       = true;
+        bool      m_OutlineActive = false; // per-frame: is anything selected/outlined? (MeshRenderer::HasOutline)
     };
 } // namespace Desert::Graphic::System

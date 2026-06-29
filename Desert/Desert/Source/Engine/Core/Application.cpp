@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 
 #include <Common/Core/EventRegistry.hpp>
+#include <Common/Core/Profiler.hpp>
 
 #include <GLFW/glfw3.h>
 
@@ -86,6 +87,10 @@ namespace Desert::Engine
         float m_LastFrameTime = 0.0f;
         while ( m_IsRunningApplication )
         {
+            // Frame boundary for the profiler (publishes last frame, flips Optick's frame). Placed at the
+            // very top so every scope below — acquire, update, UI, present — is attributed to this frame.
+            DESERT_PROFILE_FRAME( "Frame" );
+
             float    time     = (float)glfwGetTime();
             float    timestep = time - m_LastFrameTime;
             m_LastFrameTime   = time;
@@ -95,10 +100,16 @@ namespace Desert::Engine
             // 1. Pump GLFW events before touching any GPU resources.
             // Resize/close callbacks can destroy descriptor sets and framebuffers; they must
             // fire outside of a recording session, before PrepareNextFrame acquires the image.
-            m_Window->ProcessEvents();
+            {
+                DESERT_PROFILE_SCOPE( "ProcessEvents" );
+                m_Window->ProcessEvents();
+            }
 
-            // 2. Prepare Frame (Acquire next image)
-            m_Window->PrepareNextFrame();
+            // 2. Prepare Frame (Acquire next image) — CPU blocks here if the GPU is behind / vsync-gated.
+            {
+                DESERT_PROFILE_SCOPE( "PrepareNextFrame (Acquire)" );
+                m_Window->PrepareNextFrame();
+            }
 
             // 3. Start recording commands for this frame
             Graphic::Renderer::GetInstance().BeginFrame();
@@ -108,11 +119,17 @@ namespace Desert::Engine
                 layer->OnUpdate( Common::Timestep( timestep ) );
 
             // 5. UI Rendering
-            for ( Common::Layer* layer : m_LayerStack )
-                layer->OnImGuiRender();
+            {
+                DESERT_PROFILE_SCOPE( "ImGui Render" );
+                for ( Common::Layer* layer : m_LayerStack )
+                    layer->OnImGuiRender();
+            }
 
-            // 6. Submit all recorded commands and Present
-            m_Window->PresentFinalImage();
+            // 6. Submit all recorded commands and Present — CPU blocks here on submit/present (GPU-bound/vsync).
+            {
+                DESERT_PROFILE_SCOPE( "PresentFinalImage (Submit)" );
+                m_Window->PresentFinalImage();
+            }
         }
     }
 

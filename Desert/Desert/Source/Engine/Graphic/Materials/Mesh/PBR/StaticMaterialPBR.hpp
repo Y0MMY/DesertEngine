@@ -44,10 +44,24 @@ namespace Desert::Graphic
                                        Image2D* brdfLut );
 
     protected:
+        // Lets a derived variant bind a different shader (e.g. the instanced StaticMeshPBR_Instanced) while
+        // reusing all of StaticMaterialPBR's Update*/Bind/Data plumbing.
+        StaticMaterialPBR( std::string&& debugName, std::string&& shaderName );
+
         void OnBind( MaterialInstance* instance ) override;
 
     private:
         Assets::PBRMaterialData m_Data;
         uint32_t                m_MaterialIndex = 0;
+    };
+
+    // Instanced PBR material: identical to StaticMaterialPBR but bound to the StaticMeshPBR_Instanced shader,
+    // whose vertex stage reads each instance's model matrix from the InstanceTransforms SSBO (binding 16) by
+    // gl_InstanceIndex. Drawn via one instanced RenderMesh call (instanceCount = N) per mesh sub-group.
+    class StaticMaterialPBRInstanced : public StaticMaterialPBR
+    {
+    public:
+        StaticMaterialPBRInstanced();
+        ~StaticMaterialPBRInstanced() override = default;
     };
 } // namespace Desert::Graphic

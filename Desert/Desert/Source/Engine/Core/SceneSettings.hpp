@@ -109,6 +109,8 @@ namespace Desert::Core
         glm::vec3 BoundingBoxColor     = glm::vec3( 0.25f, 0.95f, 0.35f );
         PROPERTY( DisplayName( "BB Line Width" ), Category( "Debug" ), Range( 1.0f, 10.0f ) )
         float     BoundingBoxLineWidth = 1.5f;
+        PROPERTY( DisplayName( "Show Colliders" ), Category( "Debug" ) )
+        bool      ShowColliders        = true; // green physics-collider wireframes (editor aid, UE-style)
         PROPERTY( DisplayName( "Show Normals" ), Category( "Debug" ) )
         bool      ShowNormals          = false;
         PROPERTY( DisplayName( "Wireframe" ), Category( "Debug" ) )

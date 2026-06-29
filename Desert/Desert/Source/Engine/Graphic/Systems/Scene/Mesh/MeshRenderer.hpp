@@ -26,7 +26,10 @@ namespace Desert::Graphic::System
         class Mesh* Mesh;
         glm::mat4   Transform;
 
-        std::vector<MaterialInstance*> MaterialSlots;
+        // Pointer to the component's stable RuntimeSlotPtrs (valid for the frame) — passed by pointer through
+        // the whole submission chain so no per-mesh slot-vector copy happens (Debug-heavy: this was ~0.9ms
+        // of CmdBuffer ExecuteAll for 256 meshes).
+        const std::vector<MaterialInstance*>* MaterialSlots = nullptr;
 
         // optional
         std::vector<glm::mat4> BoneMatrices;
@@ -39,19 +42,31 @@ namespace Desert::Graphic::System
     public:
         struct StaticMeshRenderData
         {
-            class Desert::StaticMesh*      Mesh = nullptr;
-            glm::mat4                      Transform = glm::mat4( 1.0f );
-            std::vector<MaterialInstance*> MaterialSlots;
-            bool                           Outlined = false;
+            class Desert::StaticMesh* Mesh      = nullptr;
+            glm::mat4                 Transform = glm::mat4( 1.0f );
+            // Pointer into the component's stable RuntimeSlotPtrs (valid for the frame) — no per-mesh copy.
+            const std::vector<MaterialInstance*>* MaterialSlots = nullptr;
+            bool                                  Outlined      = false;
         };
 
         struct SkinnedMeshRenderData
         {
-            class Desert::SkinnedMesh*         Mesh;
-            glm::mat4                          Transform;
-            class Graphic::SkinnedMaterialPBR* Material;
-            std::vector<glm::mat4>             BoneMatrices;
+            class Desert::SkinnedMesh*         Mesh     = nullptr;
+            glm::mat4                          Transform = glm::mat4( 1.0f );
+            class Graphic::SkinnedMaterialPBR* Material  = nullptr; // parent material (for Bind/executor)
+            MaterialInstance*                  Instance  = nullptr; // instance applied during Bind
+            std::vector<glm::mat4>             BoneMatrices;        // animated pose, or bind pose (identity)
             bool                               Outlined = false;
+        };
+
+        // A UE-style Instanced Static Mesh: ONE mesh + ONE PBR material drawn N times. The transforms come
+        // straight from the component's array (pointer, stable for the frame) — no per-entity overhead.
+        // Rendered through the SAME instanced pipeline/SSBO as the auto-batched static meshes.
+        struct InstancedMeshRenderData
+        {
+            class Desert::StaticMesh*             Mesh      = nullptr;
+            MaterialInstance*                     Material  = nullptr; // slot 0 (PBR)
+            const std::vector<glm::mat4>*         Transforms = nullptr; // -> component's InstanceTransforms
         };
 
         // A static mesh drawn with a generic data-driven material (assigned via MaterialComponent with a
@@ -83,8 +98,25 @@ namespace Desert::Graphic::System
             return m_SilhouetteMaskFramebuffer;
         }
 
+        // True if any queued mesh is flagged for the selection outline this frame. The Jump Flood pass
+        // uses this to skip its (log2(width)) full-screen ping-pong passes when nothing is selected.
+        bool HasOutline() const
+        {
+            for ( const auto& d : m_StaticQueue )
+                if ( d.Outlined )
+                    return true;
+            for ( const auto& d : m_GenericQueue )
+                if ( d.Outlined )
+                    return true;
+            for ( const auto& d : m_SkinnedQueue )
+                if ( d.Outlined )
+                    return true;
+            return false;
+        }
+
         void SubmitMesh( const MeshRenderData& data );
         void SubmitGenericMesh( const GenericMeshRenderData& data );
+        void SubmitInstancedMesh( const InstancedMeshRenderData& data );
         void ClearQueues();
 
         // Debug wireframe toggle (SceneSettings.WireframeMode) — selects the line-polygon pipeline.
@@ -149,8 +181,16 @@ namespace Desert::Graphic::System
         // Static
         std::shared_ptr<GraphicsPipeline> m_StaticPipeline;
         std::shared_ptr<GraphicsPipeline> m_StaticWireframePipeline; // same spec, PolygonMode::Wireframe
+        std::shared_ptr<GraphicsPipeline> m_StaticInstancedPipeline; // reads per-instance transform from SSBO
         bool                              m_Wireframe = false;
         std::shared_ptr<Shader>   m_GeometryShader;
+        std::shared_ptr<Shader>   m_InstancedGeometryShader;
+
+        // Auto-batching: identical (same parent material + same Mesh*) static meshes are collapsed into one
+        // hardware-instanced draw via this shared material. Per-instance model matrices are packed into its
+        // InstanceTransforms SSBO; the shared scene data (camera/lights/shadow/env) is uploaded once/frame.
+        std::unique_ptr<Graphic::StaticMaterialPBRInstanced> m_StaticInstancedMaterial;
+        MaterialInstancePtr                                  m_StaticInstancedInstance;
 
         // Skinned
         std::shared_ptr<GraphicsPipeline> m_SkinnedPipeline;
@@ -161,6 +201,11 @@ namespace Desert::Graphic::System
         std::shared_ptr<Shader>             m_SilhouetteShader;
         std::unique_ptr<MaterialSilhouette> m_SilhouetteMaterial;
         std::shared_ptr<Framebuffer>        m_SilhouetteMaskFramebuffer;
+        // Skinned silhouette (selected skinned meshes -> outline). Skins by the Bones SSBO so the mask
+        // matches the posed/animated mesh. Optional — null if the Silhouette_Skinned shader is missing.
+        std::shared_ptr<GraphicsPipeline>          m_SilhouetteSkinnedPipeline;
+        std::shared_ptr<Shader>                    m_SilhouetteSkinnedShader;
+        std::unique_ptr<MaterialSilhouetteSkinned> m_SilhouetteSkinnedMaterial;
 
         // Cascaded directional shadow maps: one framebuffer + one MaterialShadow (its own light-matrix UB,
         // so the 4 cascade passes don't alias a shared UBO) per cascade. m_CascadeVP is recomputed each
@@ -169,6 +214,13 @@ namespace Desert::Graphic::System
         std::shared_ptr<Shader>           m_ShadowShader;
         std::unique_ptr<MaterialShadow>   m_ShadowMaterial[kNumCascades];
         std::shared_ptr<Framebuffer>      m_CascadeFB[kNumCascades];
+
+        // Instanced shadow caster: one pipeline + per-cascade instanced material (each owns the cascade's
+        // light matrix UBO + an InstanceTransforms SSBO). Batched casters of one mesh collapse to a single
+        // instanced draw per cascade. Optional — null if the Shadow_Instanced shader is missing.
+        std::shared_ptr<GraphicsPipeline>        m_ShadowInstancedPipeline;
+        std::shared_ptr<Shader>                  m_ShadowInstancedShader;
+        std::unique_ptr<MaterialShadowInstanced> m_ShadowInstancedMaterial[kNumCascades];
         glm::mat4                         m_CascadeVP[kNumCascades] = { glm::mat4( 1.0f ) };
         // World-space size of one shadow-map texel per cascade (2*radius/res) — drives a cascade-correct
         // normal-offset/bias in the PBR shader instead of the old fixed world-unit constants.
@@ -197,6 +249,10 @@ namespace Desert::Graphic::System
         // across all meshes of that shader; per-object data is the transform push-constant + overrides).
         std::vector<GenericMeshRenderData>                              m_GenericQueue;
         std::unordered_map<std::string, std::unique_ptr<DataDrivenMaterial>> m_GenericMaterials;
+
+        // UE-style Instanced Static Meshes (one entity = N instances). Folded into the shared instanced
+        // pipeline/SSBO alongside the auto-batched static meshes (geometry + shadow passes).
+        std::vector<InstancedMeshRenderData> m_InstancedQueue;
 
     private:
         // fallbacks

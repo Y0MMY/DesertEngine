@@ -174,26 +174,36 @@ namespace Desert::Graphic::System
         const auto& maskFramebuffer = m_MaskFramebuffer.lock();
         if ( m_Enabled && maskFramebuffer )
         {
-            // Init: silhouette mask -> seed[0].
+            // Init: silhouette mask -> seed[0]. ALWAYS run it (even with nothing selected) so seed[0] is
+            // written + transitioned to SHADER_READ_ONLY this frame and the composite below can safely
+            // sample it. (Skipping Init too leaves seed[0] in UNDEFINED layout on the first frame -> hazard.)
             m_MaterialInit->Bind( maskFramebuffer->GetColorAttachmentImage().get() );
             RunQuad( m_SeedFramebuffers[0], "JFA_Init", m_InitPipeline.get(),
                      m_MaterialInit->GetMaterialExecutor() );
 
-            // Ping-pong propagation steps with halving sample distance.
-            for ( uint32_t i = 0; i < m_StepCount; ++i )
+            // Ping-pong propagation steps with halving sample distance — the EXPENSIVE part (~log2(width)
+            // full-screen passes). Only needed when something is actually outlined; with an empty mask the
+            // composite passes the scene through (effectiveWidth == 0) and never needs the propagated seeds.
+            // Sync between Init and the composite is guaranteed by the render pass finalLayout
+            // (SHADER_READ_ONLY) + EndRenderPass's COLOR_WRITE->SHADER_READ barrier, NOT by these passes.
+            if ( m_OutlineActive )
             {
-                const int writeIndex = 1 - readIndex;
-                m_StepMaterials[i]->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
-                                          1 << ( m_StepCount - 1 - i ) );
-                RunQuad( m_SeedFramebuffers[writeIndex], "JFA_Step", m_StepPipeline.get(),
-                         m_StepMaterials[i]->GetMaterialExecutor() );
-                readIndex = writeIndex;
+                for ( uint32_t i = 0; i < m_StepCount; ++i )
+                {
+                    const int writeIndex = 1 - readIndex;
+                    m_StepMaterials[i]->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
+                                              1 << ( m_StepCount - 1 - i ) );
+                    RunQuad( m_SeedFramebuffers[writeIndex], "JFA_Step", m_StepPipeline.get(),
+                             m_StepMaterials[i]->GetMaterialExecutor() );
+                    readIndex = writeIndex;
+                }
             }
         }
 
         // Final composite -> output framebuffer. When disabled, width 0 makes the shader pass the
         // scene through unchanged (JFA_Final early-out).
-        const float effectiveWidth = m_Enabled ? m_OutlineWidth : 0.0f;
+        // No steps ran (nothing selected) -> width 0 makes JFA_Final pass the scene through unchanged.
+        const float effectiveWidth = ( m_Enabled && m_OutlineActive ) ? m_OutlineWidth : 0.0f;
         m_MaterialComposite->Bind( m_SeedFramebuffers[readIndex]->GetColorAttachmentImage().get(),
                                    sceneColor.get(),
                                    glm::vec4( m_OutlineColor, 1.0f ),

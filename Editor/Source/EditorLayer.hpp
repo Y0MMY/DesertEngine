@@ -49,7 +49,13 @@ namespace Desert::Editor
         void OnScenePlay();
         void OnSceneStop();
         void OnScenePauseToggle();
+
+        // Builds a ready-to-Play demo: a WASD character (Jolt CharacterVirtual) with a 3rd-person child
+        // camera, a ground floor, a sun light, and obstacles. (Remove the call in OnAttach for a blank scene.)
+        void BuildCharacterDemoScene();
+
         void DrawEngineStats();
+        void DrawProfilerWindow();
 
         // ===== Popups =====
         void DrawPopups();
@@ -75,6 +81,7 @@ namespace Desert::Editor
 
         EditorState m_EditorState;
         std::string m_PlaySnapshot; // serialized scene captured on Play, restored on Stop
+        bool        m_ShowProfiler = true; // View ▸ Profiler toggles the profiler window
 
     private:
         const Engine::Application* m_Application;
@@ -98,6 +105,11 @@ namespace Desert::Editor
         bool                                    m_OpenScenePopup     = false;
         bool                                    m_SaveSceneRequested = false;
         std::optional<Common::Filepath>         m_SceneLoadRequested;
+        // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run
+        // BETWEEN frames (like a scene load), never inline in the ImGui Stop-button handler — otherwise the
+        // next frame begins a render pass against a just-destroyed framebuffer (driver access violation in
+        // vkCmdBeginRenderPass). Deferred to the top of OnUpdate.
+        bool                                    m_PendingSceneStop = false;
         std::vector<Common::Filepath>           m_AvailableScenes;
         std::vector<Common::Filepath>           m_RecentScenes;
         int                                     m_SelectedSceneIndex = -1;

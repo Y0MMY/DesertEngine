@@ -35,9 +35,11 @@ project "Desert"
         includedirs { path }
     end
 
-    links { 
+    links {
         "Common",
         "ImGui",
+        "Jolt",
+        "Optick",
         deps.Common.Libraries.yaml_cpp
     }
     

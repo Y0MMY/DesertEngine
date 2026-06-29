@@ -253,7 +253,10 @@ namespace Desert::Animation
 
     const AnimationClip* Animator::GetCurrentClip() const
     {
-        return m_Current.Clip;
+        // While cross-fading, report the TARGET clip: callers (e.g. AnimationECSSystem's name re-sync) treat
+        // this as "the clip that should be playing", and seeing the old clip would make them Play() it and
+        // snap-cancel the blend.
+        return ( m_IsBlending && m_Next.IsValid() ) ? m_Next.Clip : m_Current.Clip;
     }
 
 } // namespace Desert::Animation

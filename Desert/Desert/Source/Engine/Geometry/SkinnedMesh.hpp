@@ -27,6 +27,14 @@ namespace Desert
             return *m_Skeleton;
         }
 
+        // Mutable skeleton for the in-editor skeleton editor. The underlying Skeleton is owned (non-const) by
+        // its SkeletonAsset and merely referenced here as const*, so the cast is safe. Edits affect every
+        // skinned mesh sharing this rig (correct — a rig is shared).
+        Animation::Skeleton* GetSkeletonMutable() const
+        {
+            return const_cast<Animation::Skeleton*>( m_Skeleton );
+        }
+
         [[nodiscard]] virtual Common::BoolResultWithCodes<MeshError> Invalidate() override;
 
     private:

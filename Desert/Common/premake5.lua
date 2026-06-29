@@ -19,7 +19,7 @@ project "Common"
         includedirs { path }
     end
     
-    links { deps.Common.Libraries.yaml_cpp }
+    links { deps.Common.Libraries.yaml_cpp, "Optick" }
     
     for _, define in ipairs(deps.Common.Defines) do
         defines { define }

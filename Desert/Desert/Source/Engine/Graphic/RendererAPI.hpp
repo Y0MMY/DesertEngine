@@ -40,8 +40,13 @@ namespace Desert::Graphic
         virtual Common::BoolResultStr BeginSwapChainRenderPass()                                       = 0;
         virtual Common::BoolResultStr EndRenderPass()                                                  = 0;
         
+        // @p instanceCount > 1 issues a hardware-instanced draw (the instanced pipeline's vertex shader
+        // reads the per-instance model matrix from an InstanceTransforms SSBO by gl_InstanceIndex).
+        // @p firstInstance offsets gl_InstanceIndex (== firstInstance + 0..instanceCount-1), so several
+        // mesh sub-groups can share ONE packed InstanceTransforms buffer (each draw reads its own slice).
         virtual void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
-                                 const MaterialExecutor* materialExecutor )                            = 0;
+                                 const MaterialExecutor* materialExecutor, uint32_t instanceCount = 1,
+                                 uint32_t                firstInstance = 0 ) = 0;
         
         virtual void SubmitFullscreenQuad( const GraphicsPipeline* pipeline,
                                            const MaterialExecutor* materialExecutor )                  = 0;

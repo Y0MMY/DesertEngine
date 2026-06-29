@@ -109,7 +109,16 @@ namespace Desert::Graphic
         if ( !shader )
             return nullptr;
 
-        const uint32_t mips = std::max( 1u, spec.MipLevels );
+        // The cube image's actual FACE size is Width/4 (VulkanImageCube stores a 4x3 cross as 6 faces of
+        // Width/4). The mip chain length is bounded by the FACE, not the cross width — requesting more
+        // (kMipsCount=11 on a 256 face) is an invalid vkCreateImage (VUID-...-00958) and asks the loop
+        // below for mip views that don't exist -> GPU fault / VK_ERROR_DEVICE_LOST. Clamp to the face chain.
+        // (PBR reads the count via textureQueryLevels, so fewer mips is safe — the roughness ramp adapts.)
+        const uint32_t faceSize = std::max( 1u, spec.Width / 4u );
+        uint32_t       maxMips  = 1u;
+        for ( uint32_t d = faceSize; d > 1u; d >>= 1 )
+            ++maxMips;
+        const uint32_t mips = std::clamp( spec.MipLevels, 1u, maxMips );
 
         Core::Formats::ImageCubeSpecification outputInfo = {
              .Tag        = spec.Tag,
@@ -133,7 +142,9 @@ namespace Desert::Graphic
         {
             const float    roughness = ( mips > 1 ) ? static_cast<float>( mip ) / static_cast<float>( mips - 1 )
                                                      : 0.0f;
-            const uint32_t mipSize   = std::max( 1u, spec.Width >> mip );
+            // Dispatch over the FACE size at this mip (the shader writes per-face and clamps to imageSize).
+            // Previously used the cross width (4x the face) -> 16x wasted threads per dispatch.
+            const uint32_t mipSize   = std::max( 1u, faceSize >> mip );
             const uint32_t groups    = ( mipSize + kWorkGroupSize - 1 ) / kWorkGroupSize;
 
             pipeline->SetInput( 0, radiance );

@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Common/Core/Profiler.hpp>
 
 #include <algorithm>
 #include <Engine/Graphic/API/Vulkan/VulkanRenderCommandBuffer.hpp>
@@ -183,8 +184,13 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     void VulkanRendererAPI::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh,
-                                        const glm::mat4 transform, const MaterialExecutor* materialExecutor )
+                                        const glm::mat4 transform, const MaterialExecutor* materialExecutor,
+                                        uint32_t instanceCount, uint32_t firstInstance )
     {
+        // Aggregate cost of EVERY mesh draw call across ALL passes (geometry + 4 shadow cascades +
+        // silhouette). The call-site scopes break it down per-pass; this row is the engine-wide total.
+        DESERT_PROFILE_FUNC();
+
         if ( !m_CurrentCommandBuffer )
             return;
         const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
@@ -194,6 +200,7 @@ namespace Desert::Graphic::API::Vulkan
         // Bind Descriptor Sets
         if ( materialExecutor )
         {
+            DESERT_PROFILE_SCOPE( "Vk::RenderMesh BindMaterial" );
             materialExecutor->Apply();
             auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
 
@@ -251,12 +258,13 @@ namespace Desert::Graphic::API::Vulkan
                     continue;
                 }
 
-                vkCmdDrawIndexed( m_CurrentCommandBuffer, submesh.IndexCount, 1, submesh.IndexOffset,
-                                  (int32_t)submesh.VertexOffset, 0 );
+                vkCmdDrawIndexed( m_CurrentCommandBuffer, submesh.IndexCount, instanceCount,
+                                  submesh.IndexOffset, (int32_t)submesh.VertexOffset, firstInstance );
             }
             else
             {
-                vkCmdDraw( m_CurrentCommandBuffer, submesh.VertexCount, 1, submesh.VertexOffset, 0 );
+                vkCmdDraw( m_CurrentCommandBuffer, submesh.VertexCount, instanceCount, submesh.VertexOffset,
+                           firstInstance );
             }
         }
     }

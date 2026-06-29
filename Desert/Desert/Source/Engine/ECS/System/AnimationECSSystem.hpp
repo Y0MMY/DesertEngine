@@ -4,6 +4,9 @@
 
 #include <Engine/ECS/Components.hpp>
 
+#include <chrono>
+#include <algorithm>
+
 namespace Desert::ECS
 {
     class AnimationECSSystem : public System
@@ -17,6 +20,16 @@ namespace Desert::ECS
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
         {
+            // Editor PREVIEW: the gameplay timestep is 0 in Edit mode (gameplay frozen), but animation should
+            // still preview when "Playing" is on. So advance by a real wall-clock delta when the gameplay ts
+            // is ~0; use the gameplay ts in Play mode. Clamped to avoid huge jumps after a stall.
+            const auto  now    = std::chrono::steady_clock::now();
+            float       realDt = m_HasLast ? std::chrono::duration<float>( now - m_LastTime ).count() : 0.0f;
+            m_LastTime         = now;
+            m_HasLast          = true;
+            realDt             = std::min( realDt, 0.1f );
+            const float effectiveSeconds = ts.GetSeconds() > 1e-6f ? ts.GetSeconds() : realDt;
+            const Common::Timestep animTs( effectiveSeconds );
             auto view = registry.view<ECS::SkinnedMeshComponent, ECS::AnimationComponent>();
 
             for ( auto entity : view )
@@ -83,7 +96,7 @@ namespace Desert::ECS
                     anim.Animator->SetLoop( anim.Loop );
                     anim.Animator->SetPlaybackSpeed( anim.PlaybackSpeed );
 
-                    anim.Animator->Update( ts );
+                    anim.Animator->Update( animTs );
 
                     if ( !anim.Loop && anim.Animator->IsFinished() )
                     {
@@ -94,6 +107,8 @@ namespace Desert::ECS
         }
 
     private:
-        Animation::AnimationLibrary* m_AnimationLibrary;
+        Animation::AnimationLibrary*          m_AnimationLibrary;
+        std::chrono::steady_clock::time_point m_LastTime;
+        bool                                  m_HasLast = false;
     };
 } // namespace Desert::ECS

@@ -235,7 +235,24 @@ namespace Desert::Editor
                 }
 
                 if ( ImGui::Selectable( "Camera" ) )
-                    scene->CreateNewEntity( "Camera" ).AddComponent<ECS::CameraComponent>();
+                {
+                    // Spawn at the editor viewpoint (UE "Create Camera Here") instead of the origin — a
+                    // camera at (0,0,0) sits on top of / behind the editor camera, so its gizmo would be
+                    // clipped at the near plane and look "missing". Placed a few units ahead of the eye so
+                    // its icon + frustum are immediately visible and frame the current view.
+                    auto camEntity = scene->CreateNewEntity( "Camera" );
+                    camEntity.AddComponent<ECS::CameraComponent>();
+                    if ( auto active = scene->GetActiveCamera() )
+                    {
+                        const glm::mat4 world = glm::inverse( active->GetViewMatrix() );
+                        const glm::vec3 eye   = glm::vec3( world[3] );
+                        const glm::vec3 fwd   = -glm::normalize( glm::vec3( world[2] ) );
+
+                        auto& tf       = camEntity.GetComponent<ECS::TransformComponent>();
+                        tf.Translation = eye + fwd * 4.0f;
+                        tf.Rotation = glm::eulerAngles( glm::quatLookAt( fwd, glm::vec3( 0.0f, 1.0f, 0.0f ) ) );
+                    }
+                }
 
                 if ( ImGui::Selectable( "Sprite" ) )
                 {

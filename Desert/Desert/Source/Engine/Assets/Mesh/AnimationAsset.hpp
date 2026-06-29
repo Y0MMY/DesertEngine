@@ -26,6 +26,15 @@ namespace Desert::Assets
             return m_SkeletonSignature;
         }
 
+        // Injects an in-memory clip (no file backing) — used for code-generated clips such as the procedural
+        // character locomotion ([[procedural-character]]). Create the asset with loadAfterCreate=false, then
+        // call this so it shows up in the AnimationLibrary / editor clip selector like a cooked clip.
+        void SetInMemoryClip( const Animation::AnimationClip& clip )
+        {
+            m_Clip              = clip;
+            m_SkeletonSignature = clip.SkeletonSignature;
+        }
+
         virtual bool IsReadyForUse() const
         {
             return true;

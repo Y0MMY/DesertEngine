@@ -2,12 +2,17 @@
 
 #include "EditorLayer.hpp"
 #include <Common/Core/Core.hpp>
+#include <Common/Core/Profiler.hpp>
+#include <Editor/Import/MeshDnD.hpp>
 
 // 1. Engine Core
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Geometry/ProceduralCharacterFactory.hpp>
+#include <Engine/Animation/ProceduralCharacterAnimations.hpp>
+#include <Engine/Assets/Mesh/AnimationAsset.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
 // 2. Editor Base & Infrastructure
@@ -39,6 +44,7 @@
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/SpotLightSystem.hpp>
 #include <Engine/ECS/System/AnimationECSSystem.hpp>
+#include <Engine/ECS/System/PhysicsECSSystem.hpp>
 
 namespace Desert::Editor
 {
@@ -107,6 +113,7 @@ namespace Desert::Editor
         m_MainScene->AddSystem<ECS::PointLightECSSystem>();
         m_MainScene->AddSystem<ECS::SpotLightECSSystem>();
         m_MainScene->AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
+        m_MainScene->AddSystem<ECS::PhysicsECSSystem>( m_MainScene.get() );
 
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
 
@@ -117,6 +124,11 @@ namespace Desert::Editor
 
             m_AnimationLibrary->Register( anim );
         }
+
+        // Engine-level locomotion clips (idle/walk/run/jump) for the procedural humanoid — registered into the
+        // AnimationLibrary so they show in the clip selector + AnimationECSSystem can auto-play. The editor
+        // just invokes the engine helper (the locomotion knowledge lives in the engine, not here).
+        Animation::ProceduralCharacterAnimations::RegisterClips( *m_AssetManager, *m_AnimationLibrary );
 
         m_MainScene->Init();
 
@@ -137,16 +149,29 @@ namespace Desert::Editor
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+
+        BuildCharacterDemoScene();
+
         return BOOLSUCCESS;
     }
 
     [[nodiscard]] Common::BoolResultStr EditorLayer::OnUpdate( const Common::Timestep& ts )
     {
+        DESERT_PROFILE_SCOPE( "Layer::OnUpdate" );
+
         if ( m_SceneLoadRequested )
         {
             auto path = m_SceneLoadRequested.value();
             m_SceneLoadRequested.reset();
             LoadSceneInternal( path );
+        }
+
+        // Stop is deferred here (between frames) so it never destroys/recreates render resources while a
+        // command buffer that references them is in flight — see m_PendingSceneStop.
+        if ( m_PendingSceneStop )
+        {
+            m_PendingSceneStop = false;
+            OnSceneStop();
         }
 
         // Apply any deferred panel state (e.g. viewport resize) before scene rendering.
@@ -155,16 +180,28 @@ namespace Desert::Editor
         for ( auto& panel : m_Panels )
             panel->OnPreUpdate();
 
-        const auto& beginResult = m_MainScene->BeginScene();
+        Common::BoolResultStr beginResult = BOOLSUCCESS;
+        {
+            DESERT_PROFILE_SCOPE( "Scene::BeginScene" );
+            beginResult = m_MainScene->BeginScene();
+        }
         if ( !beginResult )
         {
             return Common::MakeError( beginResult.GetError() );
         }
         m_RenderRegistry->Render();
 
-        m_MainScene->OnUpdate( ts );
+        {
+            DESERT_PROFILE_SCOPE( "Scene::OnUpdate" );
+            m_MainScene->OnUpdate( ts );
+        }
 
-        const auto& endResult = m_MainScene->EndScene();
+
+        Common::BoolResultStr endResult = BOOLSUCCESS;
+        {
+            DESERT_PROFILE_SCOPE( "Scene::EndScene" );
+            endResult = m_MainScene->EndScene();
+        }
 
         if ( !endResult )
         {
@@ -262,13 +299,18 @@ namespace Desert::Editor
                 ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
             }
             ImGui::Begin( panel->GetName().c_str() );
-            panel->OnUIRender();
+            {
+                DESERT_PROFILE_SCOPE_DYNAMIC( panel->GetName().c_str() );
+                panel->OnUIRender();
+            }
             if ( panel->GetName() == "Scene###scene" )
             {
                 ImGui::PopStyleVar();
             }
             ImGui::End();
         }
+
+        DrawProfilerWindow();
 
         ::ImGui::End(); // End dockspace
 
@@ -504,6 +546,75 @@ namespace Desert::Editor
         DrawPauseButton();
     }
 
+    void EditorLayer::DrawProfilerWindow()
+    {
+        namespace ImGui = ::ImGui;
+        auto&     prof  = ::Common::Profiling::Profiler::Get();
+
+        if ( !m_ShowProfiler )
+            return;
+
+        const double frameMs = prof.LastFrameMs();
+        const double fps     = frameMs > 0.0001 ? 1000.0 / frameMs : 0.0;
+
+        ImGui::SetNextWindowSize( ImVec2( 420, 460 ), ImGuiCond_FirstUseEver );
+        ImGui::SetNextWindowPos( ImVec2( 700, 120 ), ImGuiCond_FirstUseEver );
+        if ( !ImGui::Begin( "Profiler", &m_ShowProfiler ) ) // X button clears m_ShowProfiler
+        {
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Checkbox( "Enabled", &prof.Enabled() );
+        ImGui::SameLine();
+        ImGui::Checkbox( "Sort by time", &prof.SortByTime() );
+
+        ImGui::SetNextItemWidth( 160.0f );
+        ImGui::SliderFloat( "Avg window (s)", &prof.AvgWindowSeconds(), 0.1f, 2.0f, "%.1f" );
+
+        ImGui::Text( "Frame: %.3f ms  (%.0f FPS)   [avg]", frameMs, fps );
+        ImGui::SameLine();
+        if ( ImGui::Button( "Dump to Log" ) )
+        {
+            LOG_INFO( "[Profiler] Frame {:.3f} ms ({:.0f} FPS)", frameMs, fps );
+            for ( const auto& s : prof.LastFrame() )
+                LOG_INFO( "[Profiler]   {:<28} {:>8.3f} ms  x{}", s.Name, s.TotalMs, s.Calls );
+        }
+
+        ImGui::Separator();
+
+        if ( ImGui::BeginTable( "##prof", 4,
+                                ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp ) )
+        {
+            ImGui::TableSetupColumn( "Scope" );
+            ImGui::TableSetupColumn( "ms" );
+            ImGui::TableSetupColumn( "%" );
+            ImGui::TableSetupColumn( "calls" );
+            ImGui::TableHeadersRow();
+
+            for ( const auto& s : prof.LastFrame() )
+            {
+                const double pct = frameMs > 0.0001 ? ( s.TotalMs / frameMs ) * 100.0 : 0.0;
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted( s.Name.c_str() );
+                ImGui::TableNextColumn();
+                ImGui::Text( "%.3f", s.TotalMs );
+                ImGui::TableNextColumn();
+                // Tint hot scopes (>25% of the frame) red.
+                if ( pct > 25.0 )
+                    ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.35f, 1.0f ), "%.1f", pct );
+                else
+                    ImGui::Text( "%.1f", pct );
+                ImGui::TableNextColumn();
+                ImGui::Text( "%u", s.Calls );
+            }
+            ImGui::EndTable();
+        }
+
+        ImGui::End();
+    }
+
     void EditorLayer::DrawEngineStats()
     {
         namespace ImGui = ::ImGui;
@@ -551,6 +662,9 @@ namespace Desert::Editor
             ImGui::MenuItem( panel->GetName().c_str(), "", &panel->GetVisibility(), true );
         }
 
+        ImGui::Separator();
+        ImGui::MenuItem( "Profiler", "", &m_ShowProfiler, true );
+
         ImGui::EndMenu();
     }
 
@@ -578,7 +692,7 @@ namespace Desert::Editor
 
         m_MainScene->Init();
 
-        m_RenderRegistry.release();
+        // reset (not release) — assigning a new unique_ptr already destroys the old; release() leaked it.
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
 
         // Update recent scenes
@@ -666,7 +780,7 @@ namespace Desert::Editor
         if ( ImGui::Button( playing ? ICON_MDI_STOP : ICON_MDI_PLAY ) )
         {
             if ( playing )
-                OnSceneStop();
+                m_PendingSceneStop = true; // deferred to OnUpdate (between frames) — see m_PendingSceneStop
             else
                 OnScenePlay();
         }
@@ -700,6 +814,86 @@ namespace Desert::Editor
             ImGui::EndDisabled();
     }
 
+    void EditorLayer::BuildCharacterDemoScene()
+    {
+        using namespace ::Desert;
+
+        // --- Sun (directional light) — DirectionLight stores its DIRECTION in TransformComponent.Translation
+        {
+            auto& sun = m_MainScene->CreateNewEntity( "Sun" );
+            auto& dl  = sun.AddComponent<ECS::DirectionLightComponent>();
+            dl.Data.Color     = { 1.0f, 0.97f, 0.9f };
+            dl.Data.Intensity = 3.0f;
+            sun.GetComponent<ECS::TransformComponent>().Translation = { -0.4f, -1.0f, -0.5f }; // direction
+        }
+
+        // --- Ground: a flat static box the character stands on (mesh + Box collider + Static body)
+        {
+            auto& ground = m_MainScene->CreateNewEntity( "Ground" );
+            ground.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
+            auto& gt        = ground.GetComponent<ECS::TransformComponent>();
+            gt.Translation  = { 0.0f, -0.5f, 0.0f }; // top surface at y = 0
+            gt.Scale        = { 20.0f, 0.5f, 20.0f };
+            auto& gcol      = ground.AddComponent<ECS::ColliderComponent>();
+            gcol.Data.Shape       = Physics::ShapeType::Box;
+            gcol.Data.HalfExtents = { 20.0f, 0.5f, 20.0f }; // matches the scaled cube (world units)
+            ground.AddComponent<ECS::RigidBodyComponent>().Data.Type = Physics::BodyType::Static;
+        }
+
+        // --- A few static obstacle boxes to walk into / around
+        for ( int i = 0; i < 3; ++i )
+        {
+            auto& box = m_MainScene->CreateNewEntity( "Obstacle" + std::to_string( i ) );
+            box.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
+            auto& bt       = box.GetComponent<ECS::TransformComponent>();
+            bt.Translation = { -4.0f + i * 4.0f, 0.5f, -5.0f };
+            auto& bcol     = box.AddComponent<ECS::ColliderComponent>();
+            bcol.Data.Shape       = Physics::ShapeType::Box;
+            bcol.Data.HalfExtents = { 0.5f, 0.5f, 0.5f };
+            box.AddComponent<ECS::RigidBodyComponent>().Data.Type = Physics::BodyType::Static;
+        }
+
+        // --- Player: a Character Controller (the physics capsule). NO RigidBody/Collider — the controller
+        // IS the physics. The player entity is left UNSCALED so its children (visual body + camera) don't
+        // inherit a non-uniform scale (which would skew/displace a child camera and its gizmo). Starts above
+        // the ground so it drops on Play. By VALUE: creating children below can reallocate the entity store.
+        ECS::Entity player = m_MainScene->CreateNewEntity( "Player" );
+        {
+            auto& cc          = player.AddComponent<ECS::CharacterControllerComponent>();
+            cc.Data.Radius    = 0.3f;
+            cc.Data.Height    = 1.8f;
+            cc.Data.MoveSpeed = 5.0f;
+            cc.Data.JumpSpeed = 5.0f;
+            player.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 3.0f, 0.0f };
+        }
+
+        // --- Visual body: a CHILD holding the procedural skinned HUMANOID (head/torso/2 arms/2 legs). Its
+        // mesh origin is at the feet, so we drop it by the capsule half-height (~0.9) to stand on the capsule
+        // bottom. An AnimationComponent is attached so it animates once idle/walk/run clips are registered.
+        {
+            auto& body = m_MainScene->CreateNewEntity( "PlayerBody" );
+            body.AddComponent<ECS::SkinnedMeshComponent>().MeshHandle =
+                 Geometry::ProceduralCharacterFactory::GetHumanoidMesh();
+            body.AddComponent<ECS::AnimationComponent>();
+            body.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, -0.9f, 0.0f };
+            m_MainScene->Attach( player, body );
+        }
+
+        // --- Camera: a CHILD of the (unscaled) player. Offset behind+above = 3rd person; move it to ~(0,
+        // 0.7, 0) with rotation 0 for 1st person. Follows the player via the hierarchy (WORLD transform).
+        {
+            auto& cam = m_MainScene->CreateNewEntity( "PlayerCamera" );
+            auto& cd  = cam.AddComponent<ECS::CameraComponent>();
+            cd.Data.IsMainCamera = true;
+            auto& ct       = cam.GetComponent<ECS::TransformComponent>();
+            ct.Translation = { 0.0f, 1.5f, 7.0f };                   // behind (+Z) and above the player
+            ct.Rotation    = { glm::radians( -10.0f ), 0.0f, 0.0f }; // look slightly down at the player
+            m_MainScene->Attach( player, cam );
+        }
+
+        LOG_INFO( "[Demo] Character demo scene built — press Play, then WASD to move + Space to jump." );
+    }
+
     void EditorLayer::OnScenePlay()
     {
         using SceneState = ::Desert::Core::Scene::SceneState;
@@ -725,7 +919,7 @@ namespace Desert::Editor
         serializer.DeserializeFromJson( m_PlaySnapshot );
         m_MainScene->Init();
 
-        m_RenderRegistry.release();
+        // reset (not release) — assigning a new unique_ptr already destroys the old; release() leaked it.
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
 
         m_MainScene->SetState( SceneState::Edit );

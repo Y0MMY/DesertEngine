@@ -98,20 +98,37 @@ namespace Desert::Editor
         static const ImVec4 s_ColorWarning  = ImVec4( 0.95f, 0.85f, 0.20f, 1.0f );
         static const ImVec4 s_ColorError    = ImVec4( 0.95f, 0.35f, 0.35f, 1.0f );
 
-        for ( const auto& entry : m_Entries )
+        // Build the filtered subset, then render only the on-screen rows via a clipper. The old code issued
+        // an ImGui text item for EVERY log line every frame (O(n)) — with a large log that alone cost a few
+        // tenths of a ms ("Logs" was one of the priciest panels in the profiler). All rows are single-line
+        // (uniform height), so ImGuiListClipper is exact.
+        m_VisibleIndices.clear();
+        for ( int i = 0; i < static_cast<int>( m_Entries.size() ); ++i )
         {
-            if ( entry.Level == 0 && !m_ShowInfo )     continue;
-            if ( entry.Level == 1 && !m_ShowWarnings ) continue;
-            if ( entry.Level == 2 && !m_ShowErrors )   continue;
-
-            const ImVec4& color =
-                 ( entry.Level == 2 ) ? s_ColorError :
-                 ( entry.Level == 1 ) ? s_ColorWarning : s_ColorInfo;
-
-            ImGui::PushStyleColor( ImGuiCol_Text, color );
-            ImGui::TextUnformatted( entry.Text.c_str() );
-            ImGui::PopStyleColor();
+            const int lvl = m_Entries[i].Level;
+            if ( lvl == 0 && !m_ShowInfo )     continue;
+            if ( lvl == 1 && !m_ShowWarnings ) continue;
+            if ( lvl == 2 && !m_ShowErrors )   continue;
+            m_VisibleIndices.push_back( i );
         }
+
+        ImGuiListClipper clipper;
+        clipper.Begin( static_cast<int>( m_VisibleIndices.size() ) );
+        while ( clipper.Step() )
+        {
+            for ( int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row )
+            {
+                const auto&   entry = m_Entries[m_VisibleIndices[row]];
+                const ImVec4& color = ( entry.Level == 2 )   ? s_ColorError
+                                      : ( entry.Level == 1 ) ? s_ColorWarning
+                                                             : s_ColorInfo;
+
+                ImGui::PushStyleColor( ImGuiCol_Text, color );
+                ImGui::TextUnformatted( entry.Text.c_str() );
+                ImGui::PopStyleColor();
+            }
+        }
+        clipper.End();
 
         if ( m_ScrollToBottom )
         {

@@ -68,6 +68,7 @@ namespace
                     .Field( FieldInfo{ .Name = "ShowBoundingBoxes", .Type = FieldType::Bool, .Offset = offsetof( T, ShowBoundingBoxes ), .Size = sizeof( T::ShowBoundingBoxes ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Bounding Boxes", .Category = "Debug", } } )
                     .Field( FieldInfo{ .Name = "BoundingBoxColor", .Type = FieldType::Vec3, .Offset = offsetof( T, BoundingBoxColor ), .Size = sizeof( T::BoundingBoxColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "BB Color", .Category = "Debug", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "BoundingBoxLineWidth", .Type = FieldType::Float, .Offset = offsetof( T, BoundingBoxLineWidth ), .Size = sizeof( T::BoundingBoxLineWidth ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "BB Line Width", .Category = "Debug", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 10.0f, } } )
+                    .Field( FieldInfo{ .Name = "ShowColliders", .Type = FieldType::Bool, .Offset = offsetof( T, ShowColliders ), .Size = sizeof( T::ShowColliders ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Colliders", .Category = "Debug", } } )
                     .Field( FieldInfo{ .Name = "ShowNormals", .Type = FieldType::Bool, .Offset = offsetof( T, ShowNormals ), .Size = sizeof( T::ShowNormals ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Normals", .Category = "Debug", } } )
                     .Field( FieldInfo{ .Name = "WireframeMode", .Type = FieldType::Bool, .Offset = offsetof( T, WireframeMode ), .Size = sizeof( T::WireframeMode ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Wireframe", .Category = "Debug", } } )
                     .Field( FieldInfo{ .Name = "LightingDebug", .Type = FieldType::Bool, .Offset = offsetof( T, LightingDebug ), .Size = sizeof( T::LightingDebug ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Light Debug", .Category = "Debug", } } )
@@ -147,6 +148,38 @@ namespace
                     .Field( FieldInfo{ .Name = "CloudHeight", .Type = FieldType::Float, .Offset = offsetof( T, CloudHeight ), .Size = sizeof( T::CloudHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Cloud Height", .Category = "Clouds", .HasRange = true, .RangeMin = 100.0f, .RangeMax = 3000.0f, } } )
                     .Field( FieldInfo{ .Name = "CloudThickness", .Type = FieldType::Float, .Offset = offsetof( T, CloudThickness ), .Size = sizeof( T::CloudThickness ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Thickness", .Category = "Clouds", .HasRange = true, .RangeMin = 100.0f, .RangeMax = 2000.0f, } } )
                     .Field( FieldInfo{ .Name = "CloudWindSpeed", .Type = FieldType::Float, .Offset = offsetof( T, CloudWindSpeed ), .Size = sizeof( T::CloudWindSpeed ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Speed", .Category = "Clouds", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 50.0f, } } )
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::ColliderData;
+                TypeBuilder( "ColliderData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Shape", .Type = FieldType::Enum, .Offset = offsetof( T, Shape ), .Size = sizeof( T::Shape ), .TypeName = "Physics::ShapeType", .Meta = PropertyMetadata{ .DisplayName = "Shape", .Category = "Collider", }, .EnumValues = { EnumValue{ "Box", 0 }, EnumValue{ "Sphere", 1 }, EnumValue{ "Capsule", 2 }, } } )
+                    .Field( FieldInfo{ .Name = "HalfExtents", .Type = FieldType::Vec3, .Offset = offsetof( T, HalfExtents ), .Size = sizeof( T::HalfExtents ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Half Extents", .Category = "Collider", } } )
+                    .Field( FieldInfo{ .Name = "Radius", .Type = FieldType::Float, .Offset = offsetof( T, Radius ), .Size = sizeof( T::Radius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Radius", .Category = "Collider", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 50.0f, } } )
+                    .Field( FieldInfo{ .Name = "HalfHeight", .Type = FieldType::Float, .Offset = offsetof( T, HalfHeight ), .Size = sizeof( T::HalfHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Half Height", .Category = "Collider", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 50.0f, } } )
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::RigidBodyData;
+                TypeBuilder( "RigidBodyData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Type", .Type = FieldType::Enum, .Offset = offsetof( T, Type ), .Size = sizeof( T::Type ), .TypeName = "Physics::BodyType", .Meta = PropertyMetadata{ .DisplayName = "Type", .Category = "Rigid Body", }, .EnumValues = { EnumValue{ "Static", 0 }, EnumValue{ "Dynamic", 1 }, EnumValue{ "Kinematic", 2 }, } } )
+                    .Field( FieldInfo{ .Name = "Mass", .Type = FieldType::Float, .Offset = offsetof( T, Mass ), .Size = sizeof( T::Mass ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Mass", .Category = "Rigid Body", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1000.0f, } } )
+                    .Field( FieldInfo{ .Name = "Friction", .Type = FieldType::Float, .Offset = offsetof( T, Friction ), .Size = sizeof( T::Friction ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Friction", .Category = "Rigid Body", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 2.0f, } } )
+                    .Field( FieldInfo{ .Name = "Restitution", .Type = FieldType::Float, .Offset = offsetof( T, Restitution ), .Size = sizeof( T::Restitution ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Restitution", .Category = "Rigid Body", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::CharacterControllerData;
+                TypeBuilder( "CharacterControllerData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Radius", .Type = FieldType::Float, .Offset = offsetof( T, Radius ), .Size = sizeof( T::Radius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Radius", .Category = "Character", .HasRange = true, .RangeMin = 0.05f, .RangeMax = 5.0f, } } )
+                    .Field( FieldInfo{ .Name = "Height", .Type = FieldType::Float, .Offset = offsetof( T, Height ), .Size = sizeof( T::Height ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Height", .Category = "Character", .HasRange = true, .RangeMin = 0.2f, .RangeMax = 10.0f, } } )
+                    .Field( FieldInfo{ .Name = "MoveSpeed", .Type = FieldType::Float, .Offset = offsetof( T, MoveSpeed ), .Size = sizeof( T::MoveSpeed ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Move Speed", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 30.0f, } } )
+                    .Field( FieldInfo{ .Name = "JumpSpeed", .Type = FieldType::Float, .Offset = offsetof( T, JumpSpeed ), .Size = sizeof( T::JumpSpeed ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Jump Speed", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 30.0f, } } )
+                    .Field( FieldInfo{ .Name = "MaxSlopeDeg", .Type = FieldType::Float, .Offset = offsetof( T, MaxSlopeDeg ), .Size = sizeof( T::MaxSlopeDeg ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Max Slope", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 89.0f, } } )
+                    .Field( FieldInfo{ .Name = "MouseSensitivity", .Type = FieldType::Float, .Offset = offsetof( T, MouseSensitivity ), .Size = sizeof( T::MouseSensitivity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Mouse Sensitivity", .Category = "Camera", .HasRange = true, .RangeMin = 0.05f, .RangeMax = 5.0f, } } )
+                    .Field( FieldInfo{ .Name = "InvertY", .Type = FieldType::Bool, .Offset = offsetof( T, InvertY ), .Size = sizeof( T::InvertY ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Invert Y", .Category = "Camera", } } )
+                    .Field( FieldInfo{ .Name = "HoldRMBToLook", .Type = FieldType::Bool, .Offset = offsetof( T, HoldRMBToLook ), .Size = sizeof( T::HoldRMBToLook ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Hold RMB To Look", .Category = "Camera", } } )
+                    .Field( FieldInfo{ .Name = "PitchLimitDeg", .Type = FieldType::Float, .Offset = offsetof( T, PitchLimitDeg ), .Size = sizeof( T::PitchLimitDeg ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Pitch Limit", .Category = "Camera", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 89.0f, } } )
                     .Register();
             }
             ReflectionRegistry::Get().ResolveStructLinks();

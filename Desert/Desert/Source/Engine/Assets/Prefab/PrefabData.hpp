@@ -12,6 +12,7 @@
 #include <optional>
 #include <vector>
 #include <string>
+#include <array>
 #include <glm/glm.hpp>
 
 namespace Desert::Assets
@@ -41,6 +42,17 @@ namespace Desert::Assets
     {
         std::optional<std::string>              MeshPath;
         std::optional<std::vector<std::string>> MaterialPaths;
+    };
+
+    // UE-style Instanced Static Mesh mirror: one mesh (asset path OR primitive) + N per-instance world
+    // matrices, each flattened to 16 floats (column-major) so it serializes natively (no glm::mat4 reflector
+    // needed in this translation unit).
+    struct InstancedStaticMeshComponentSer
+    {
+        std::optional<std::string>                       MeshPath;
+        std::optional<std::vector<std::string>>          MaterialPaths;
+        std::optional<Geometry::PrimitiveType>           Primitive;
+        std::optional<std::vector<std::array<float, 16>>> InstanceTransforms;
     };
 
     // MaterialComponent (generic data-driven material) mirror. Param values reflect directly (glm::vec4 via

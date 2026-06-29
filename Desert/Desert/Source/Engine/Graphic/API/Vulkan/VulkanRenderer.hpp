@@ -26,7 +26,8 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] virtual Common::BoolResultStr EndRenderPass() override;
         
         virtual void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
-                                 const MaterialExecutor* materialExecutor ) override;
+                                 const MaterialExecutor* materialExecutor, uint32_t instanceCount = 1,
+                                 uint32_t firstInstance = 0 ) override;
 
         virtual void SubmitFullscreenQuad( const GraphicsPipeline*         pipeline,
                                            const MaterialExecutor* materialExecutor ) override;

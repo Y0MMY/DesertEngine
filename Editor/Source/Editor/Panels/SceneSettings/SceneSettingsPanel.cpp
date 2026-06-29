@@ -163,6 +163,9 @@ namespace Desert::Editor
             ImGui::ColorEdit3( "BB Color", glm::value_ptr( s.BoundingBoxColor ) );
             ImGui::SliderFloat( "BB Line Width", &s.BoundingBoxLineWidth, 1.0f, 10.0f, "%.1f" );
             ImGui::EndDisabled();
+            ImGui::Checkbox( "Show Colliders", &s.ShowColliders );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Draw green wireframes for physics colliders (Box/Sphere/Capsule)." );
             ImGui::Checkbox( "Show Normals", &s.ShowNormals );
             ImGui::Checkbox( "Light Debug", &s.LightingDebug );
             if ( ImGui::IsItemHovered() )

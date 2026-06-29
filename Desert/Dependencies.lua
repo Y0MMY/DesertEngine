@@ -72,12 +72,18 @@ Dependencies = {
             yaml_cpp = baseDir .. "/yaml-cpp/include",
             glm = baseDir .. "/glm",
             GLFW = baseDir .. "/GLFW/include",
+            optick = baseDir .. "/optick/src",
         },
         Libraries = {
             yaml_cpp = "yaml-cpp"
         },
         Defines = {
-            "YAML_CPP_STATIC_DEFINE"
+            "YAML_CPP_STATIC_DEFINE",
+            -- Optick: keep these identical to ThirdParty/optick/premake5.lua so optick.h compiles the same
+            -- way in every consumer (CPU profiling only).
+            "USE_OPTICK=1",
+            "OPTICK_ENABLE_GPU=0",
+            "OPTICK_ENABLE_TRACING=0",
         }
     },
     
@@ -100,6 +106,7 @@ Dependencies = {
             imgui = baseDir .. "/stb/ImGui",
             entt = baseDir .. "/entt/include",
             reflect_cpp = baseDir .. "/reflect-cpp/include",
+            jolt = baseDir .. "/JoltPhysics",
             Vulkan = vulkan_sdk and (vulkan_sdk .. "/Include") or nil,
             shaderc = vulkan_sdk and (vulkan_sdk .. "/Include/shaderc") or nil,
             spirv_cross = vulkan_sdk and (vulkan_sdk .. "/Include/spirv_cross") or nil,

@@ -58,6 +58,9 @@ namespace Desert::Editor
         void                    HandleObjectPicking();
         std::pair<float, float> GetMouseViewportSpace() const;
         void                    RenderGizmo();
+        // Skeleton Edit mode: ImGuizmo on the selected bone — edits its rest-pose LocalBindTransform
+        // (children follow), then recomputes the skeleton's OffsetMatrices. In-memory (Phase 2).
+        void                    RenderBoneGizmo();
 
         // --- Terrain splat painting (Stage 3b) ---
         void DrawTerrainPaintOverlay( const ECS::Entity& terrainEntity ); // brush UI when terrain selected

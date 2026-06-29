@@ -20,6 +20,8 @@
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/Animation/FSM/AnimationStateMachine.hpp>
 
+#include <Engine/Physics/PhysicsWorld.hpp>
+
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
 namespace Desert
@@ -81,6 +83,7 @@ namespace Desert::ECS
         Assets::AssetHandle                       MeshHandle;
         std::vector<Assets::AssetHandle>          MaterialSlots;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+        std::vector<Graphic::MaterialInstance*>   RuntimeSlotPtrs;          // Raw-pointer view of RuntimeMaterialInstances, rebuilt only when instances change so the per-frame render path passes a pointer instead of allocating+copying a slot vector every frame (Debug-heavy)
         std::optional<Geometry::PrimitiveType>    Primitive;                // Optional primitive type for dynamic generation
         std::shared_ptr<DynamicMesh>              RuntimeMesh;              // Unique mesh instance for modifications
         bool                                      OutlineDraw = false;
@@ -91,6 +94,24 @@ namespace Desert::ECS
         Assets::AssetHandle                       MeshHandle;
         std::vector<Assets::AssetHandle>          MaterialSlots;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+    };
+
+    // UE-style Instanced Static Mesh: ONE mesh + ONE material drawn N times (per-instance world transforms)
+    // as a single instanced draw call. The per-instance transforms live in a GPU storage buffer the
+    // instanced shader reads by gl_InstanceIndex, so 1000 instances cost ~1 draw + 1 material setup instead
+    // of N. Use for repeated static props / NPCs / buildings in the city.
+    struct InstancedStaticMeshComponent
+    {
+        Assets::AssetHandle                       MeshHandle;
+        std::vector<Assets::AssetHandle>          MaterialSlots;
+        std::vector<glm::mat4>                    InstanceTransforms; // per-instance world matrices
+
+        // Transient runtime state (not serialized): generated mesh for primitives, the material instance,
+        // and a dirty flag so the renderer re-uploads the instance SSBO only when the transforms change.
+        std::optional<Geometry::PrimitiveType>    Primitive;
+        std::shared_ptr<DynamicMesh>              RuntimeMesh;
+        std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances;
+        bool                                      InstancesDirty = true;
     };
 
     // Per-layer splat mode. Auto = weight from height/slope rules (in-shader); Manual = weight painted
@@ -375,5 +396,106 @@ namespace Desert::ECS
     {
         entt::entity              Parent = entt::null;
         std::vector<entt::entity> Children;
+    };
+
+    // --- Physics (Jolt) ---------------------------------------------------------------------------------
+    // A body's collision SHAPE (reflected -> Details UI + serialization). Paired with RigidBodyComponent
+    // to be simulated by PhysicsECSSystem.
+    struct ColliderData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Shape" ), Category( "Collider" ) )
+        Physics::ShapeType Shape = Physics::ShapeType::Box;
+
+        PROPERTY( DisplayName( "Half Extents" ), Category( "Collider" ) )
+        glm::vec3 HalfExtents = { 0.5f, 0.5f, 0.5f }; // Box
+
+        PROPERTY( DisplayName( "Radius" ), Category( "Collider" ), Range( 0.01f, 50.0f ) )
+        float Radius = 0.5f; // Sphere / Capsule
+
+        PROPERTY( DisplayName( "Half Height" ), Category( "Collider" ), Range( 0.01f, 50.0f ) )
+        float HalfHeight = 0.5f; // Capsule
+    };
+
+    struct ColliderComponent
+    {
+        ColliderData Data;
+    };
+
+    // Body simulation params (reflected -> Details UI + serialization).
+    struct RigidBodyData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Type" ), Category( "Rigid Body" ) )
+        Physics::BodyType Type = Physics::BodyType::Dynamic;
+
+        PROPERTY( DisplayName( "Mass" ), Category( "Rigid Body" ), Range( 0.0f, 1000.0f ) )
+        float Mass = 1.0f;
+
+        PROPERTY( DisplayName( "Friction" ), Category( "Rigid Body" ), Range( 0.0f, 2.0f ) )
+        float Friction = 0.5f;
+
+        PROPERTY( DisplayName( "Restitution" ), Category( "Rigid Body" ), Range( 0.0f, 1.0f ) )
+        float Restitution = 0.1f;
+    };
+
+    // Marks an entity as a physics body. Static = immovable, Dynamic = simulated, Kinematic = code-driven.
+    struct RigidBodyComponent
+    {
+        RigidBodyData Data;
+
+        // Transient: the live Jolt body (created on Play, cleared on Stop). Not reflected/serialized.
+        Physics::BodyHandle RuntimeBody = Physics::kInvalidBody;
+    };
+
+    // Playable character controller params (reflected -> Details UI + serialization). Drives a Jolt
+    // CharacterVirtual capsule (walks slopes/steps, blocked by world geometry) via WASD + jump.
+    struct CharacterControllerData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Radius" ), Category( "Character" ), Range( 0.05f, 5.0f ) )
+        float Radius = 0.3f;
+
+        PROPERTY( DisplayName( "Height" ), Category( "Character" ), Range( 0.2f, 10.0f ) )
+        float Height = 1.8f; // total capsule height (HalfHeight = (Height - 2*Radius) / 2)
+
+        PROPERTY( DisplayName( "Move Speed" ), Category( "Character" ), Range( 0.0f, 30.0f ) )
+        float MoveSpeed = 4.0f;
+
+        PROPERTY( DisplayName( "Jump Speed" ), Category( "Character" ), Range( 0.0f, 30.0f ) )
+        float JumpSpeed = 5.0f;
+
+        PROPERTY( DisplayName( "Max Slope" ), Category( "Character" ), Range( 0.0f, 89.0f ) )
+        float MaxSlopeDeg = 50.0f;
+
+        // ----- Mouse-look / camera config (Play only) -----
+        PROPERTY( DisplayName( "Mouse Sensitivity" ), Category( "Camera" ), Range( 0.05f, 5.0f ) )
+        float MouseSensitivity = 1.0f; // multiplier over the base rad/pixel rate
+
+        PROPERTY( DisplayName( "Invert Y" ), Category( "Camera" ) )
+        bool InvertY = false;
+
+        // false = always-on look, cursor is captured on Play (hold Left Alt to free it for the UI).
+        // true  = only look while holding the right mouse button (cursor stays free otherwise).
+        PROPERTY( DisplayName( "Hold RMB To Look" ), Category( "Camera" ) )
+        bool HoldRMBToLook = false;
+
+        PROPERTY( DisplayName( "Pitch Limit" ), Category( "Camera" ), Range( 1.0f, 89.0f ) )
+        float PitchLimitDeg = 85.0f; // clamp camera pitch to +/- this
+    };
+
+    // A WASD-driven player. The follow camera is NOT here — parent a child entity with a CameraComponent
+    // (offset behind = 3rd person, at the head = 1st person); it tracks the player via the hierarchy.
+    struct CharacterControllerComponent
+    {
+        CharacterControllerData Data;
+
+        // Transient (Play only): the live Jolt character + the integrated vertical velocity (gravity/jump).
+        Physics::CharacterHandle RuntimeCharacter = Physics::kInvalidCharacter;
+        float                    VerticalVelocity = 0.0f;
+        float                    CurrentSpeed     = 0.0f; // planar move speed this frame (drives locomotion anim)
     };
 } // namespace Desert::ECS

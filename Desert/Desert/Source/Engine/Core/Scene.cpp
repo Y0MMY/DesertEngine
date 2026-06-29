@@ -1,6 +1,9 @@
 #include <Engine/Core/Scene.hpp>
 
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Common/Core/Profiler.hpp>
+
+#include <typeinfo>
 
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
@@ -40,29 +43,45 @@ namespace Desert::Core
         // view). If Play has no camera entity, fall back to the editor camera so you still see the scene.
         if ( m_State == SceneState::Play )
         {
-            const ECS::CameraComponent*    mainCam = nullptr;
-            const ECS::TransformComponent* mainTf  = nullptr;
+            const ECS::CameraComponent* mainCam    = nullptr;
+            entt::entity                mainEntity = entt::null;
             auto camView = m_Registry.view<ECS::CameraComponent, ECS::TransformComponent>();
             for ( auto entity : camView )
             {
                 const auto& cc = camView.get<ECS::CameraComponent>( entity );
                 if ( !mainCam || cc.Data.IsMainCamera ) // prefer an IsMainCamera, else the first one
                 {
-                    mainCam = &cc;
-                    mainTf  = &camView.get<ECS::TransformComponent>( entity );
+                    mainCam    = &cc;
+                    mainEntity = entity;
                     if ( cc.Data.IsMainCamera )
                         break;
                 }
             }
 
-            if ( mainCam && mainTf )
+            if ( mainCam && mainEntity != entt::null )
             {
+                // WORLD transform of the camera entity (walk the parent chain), so a camera parented to a
+                // moving entity (e.g. a child of the character controller) follows it — 1st/3rd person is
+                // just the child's local offset.
+                glm::mat4    world = m_Registry.get<ECS::TransformComponent>( mainEntity ).GetTransform();
+                entt::entity cur   = mainEntity;
+                while ( m_Registry.has<ECS::RelationshipComponent>( cur ) )
+                {
+                    const auto& rel = m_Registry.get<ECS::RelationshipComponent>( cur );
+                    if ( rel.Parent == entt::null )
+                        break;
+                    cur = rel.Parent;
+                    if ( m_Registry.has<ECS::TransformComponent>( cur ) )
+                        world = m_Registry.get<ECS::TransformComponent>( cur ).GetTransform() * world;
+                }
+                const glm::vec3 worldPos   = glm::vec3( world[3] );
+                const glm::vec3 worldEuler = glm::eulerAngles( glm::quat_cast( world ) );
+
                 if ( !m_GameplayCamera )
                     m_GameplayCamera = std::make_shared<GameplayCamera>();
                 static_cast<GameplayCamera*>( m_GameplayCamera.get() )
-                     ->SetFromTransform( mainTf->Translation, mainTf->Rotation, mainCam->Data.FOV,
-                                         mainCam->Data.Near, mainCam->Data.Far, m_ViewportWidth,
-                                         m_ViewportHeight );
+                     ->SetFromTransform( worldPos, worldEuler, mainCam->Data.FOV, mainCam->Data.Near,
+                                         mainCam->Data.Far, m_ViewportWidth, m_ViewportHeight );
                 if ( m_ActiveCamera != m_GameplayCamera )
                     SetActiveCamera( m_GameplayCamera );
             }
@@ -85,11 +104,21 @@ namespace Desert::Core
         const Common::Timestep gameplayTs =
              ( m_State == SceneState::Play ) ? ts : Common::Timestep( 0.0f );
 
-        std::ranges::for_each( m_Systems, [&]( const auto& system )
-                               { system->Update( m_Registry, *m_CommandBuffer, gameplayTs ); } );
+        {
+            DESERT_PROFILE_SCOPE( "ECS Systems" );
+            std::ranges::for_each( m_Systems,
+                                   [&]( const auto& system )
+                                   {
+                                       // Per-system timing (named by the system's type) so every ECS system
+                                       // is individually visible in the profiler — no per-system edits.
+                                       DESERT_PROFILE_SCOPE_DYNAMIC( typeid( *system ).name() );
+                                       system->Update( m_Registry, *m_CommandBuffer, gameplayTs );
+                                   } );
+        }
 
         // Dir lights
         {
+            DESERT_PROFILE_SCOPE( "Scene: DirLights" );
             auto dirLightGroup =
                  m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
@@ -112,8 +141,14 @@ namespace Desert::Core
             mainCamera->OnUpdate( ts );
         }
 
-        m_CommandBuffer->ExecuteAll( *m_SceneRenderer );
-        m_CommandBuffer->Clear();
+        {
+            DESERT_PROFILE_SCOPE( "Scene: CmdBuffer ExecuteAll" );
+            m_CommandBuffer->ExecuteAll( *m_SceneRenderer );
+        }
+        {
+            DESERT_PROFILE_SCOPE( "Scene: CmdBuffer Clear" );
+            m_CommandBuffer->Clear();
+        }
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
     }
 
@@ -263,6 +298,9 @@ namespace Desert::Core
 
     void Scene::SetupRegistryCallbacks()
     {
+        // Disconnect first — Clear() calls this on every scene reload, and entt keeps signal connections
+        // across registry.clear(), so re-connecting without this accumulates duplicate handler invocations.
+        m_Registry.on_construct<ECS::CameraComponent>().disconnect( this );
         m_Registry.on_construct<ECS::CameraComponent>().connect<&Scene::OnEntityCreated_Camera>( this );
     }
 

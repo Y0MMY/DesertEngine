@@ -26,6 +26,7 @@ namespace Desert::Editor
 
     private:
         std::vector<LogEntry>                    m_Entries;
+        std::vector<int>                         m_VisibleIndices; // entries passing the level filter (reused each frame)
         std::filesystem::file_time_type          m_LastWriteTime{};
         bool                                     m_ScrollToBottom = true;
         bool                                     m_ShowInfo       = true;

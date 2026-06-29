@@ -6,8 +6,13 @@
 
 #include <Engine/ECS/Components.hpp>
 #include <Engine/ECS/Entity.hpp>
+#include <Engine/Geometry/Mesh.hpp>
+#include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Shader.hpp>
+#include <Editor/Import/MeshDnD.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <Engine/Core/Formats/ShaderProgramMeta.hpp>
 
 #include <ImGui/imgui.h>
@@ -21,6 +26,7 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <filesystem>
+#include <limits>
 
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::DirectionLightComponent, Data, "DirectionalLightData",
                                      "Directional Light" )
@@ -28,6 +34,11 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::PointLightComponent, Data, "
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::SpotLightComponent, Data, "SpotLightData", "Spot Light" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CameraComponent, Data, "CameraData", "Camera" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::TerrainComponent, Data, "TerrainData", "Terrain" )
+// Collider is registered as a CUSTOM component below (auto-fit to mesh bounds on add) instead of the
+// plain reflected one-liner — see MakeColliderEntry.
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::RigidBodyComponent, Data, "RigidBodyData", "Rigid Body" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CharacterControllerComponent, Data,
+                                     "CharacterControllerData", "Character Controller" )
 
 namespace Desert::Editor
 {
@@ -224,7 +235,162 @@ namespace Desert::Editor
             ::ImGui::EndDragDropTarget();
         }
     }
+
+    // Sizes a collider to the entity's mesh bounds (so the green wireframe wraps the visible object —
+    // UE auto-fits collision to the mesh instead of leaving a default 0.5 cube). HalfExtents/Radius are
+    // world units, so we multiply the local AABB by the entity's scale (PhysicsECSSystem feeds these to
+    // Jolt directly, ignoring the transform's scale).
+    static void FitColliderToMesh( ::Desert::ECS::Entity& entity, ::Desert::ECS::ColliderData& col )
+    {
+        if ( !entity.HasComponent<::Desert::ECS::StaticMeshComponent>() )
+            return;
+
+        const auto&    smc  = entity.GetComponent<::Desert::ECS::StaticMeshComponent>();
+        ::Desert::Mesh* mesh = nullptr;
+        if ( smc.MeshHandle )
+            mesh = ::Desert::Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
+        else if ( smc.RuntimeMesh )
+            mesh = smc.RuntimeMesh.get();
+        else if ( smc.Primitive.has_value() )
+            mesh = ::Desert::Geometry::PrimitiveMeshFactory::GetShared( smc.Primitive.value() );
+        if ( !mesh )
+            return;
+
+        glm::vec3 mn( std::numeric_limits<float>::max() );
+        glm::vec3 mx( std::numeric_limits<float>::lowest() );
+        for ( const auto& sm : mesh->GetSubmeshes() )
+        {
+            mn = glm::min( mn, sm.BoundingBox.Min );
+            mx = glm::max( mx, sm.BoundingBox.Max );
+        }
+        if ( mn.x > mx.x )
+            return; // no submeshes / empty mesh
+
+        const glm::vec3 scale = entity.GetComponent<::Desert::ECS::TransformComponent>().Scale;
+        const glm::vec3 half  = glm::abs( ( mx - mn ) * 0.5f * scale );
+
+        col.HalfExtents = half;
+        col.Radius      = glm::max( half.x, glm::max( half.y, half.z ) );
+        // Capsule cylinder half-height = total half-height minus the two hemispherical caps (radius).
+        col.HalfHeight  = glm::max( 0.01f, half.y - col.Radius );
+    }
+
+    // Collider editor: same auto-built reflected UI as the one-liner, PLUS a one-time auto-fit on Add and
+    // a manual "Fit to Mesh Bounds" button.
+    static ComponentEditorEntry MakeColliderEntry()
+    {
+        ComponentEditorEntry e;
+        e.Name      = "Collider";
+        e.CanRemove = true;
+        e.Has       = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<::Desert::ECS::ColliderComponent>(); };
+        e.Add       = []( ::Desert::ECS::Entity& en )
+        {
+            auto& c = en.AddComponent<::Desert::ECS::ColliderComponent>();
+            FitColliderToMesh( en, c.Data );
+        };
+        e.Remove = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<::Desert::ECS::ColliderComponent>(); };
+        e.Draw   = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<::Desert::ECS::ColliderComponent>();
+            PropertyEditorBuilder::Draw( &c.Data, "ColliderData", ctx.AssetMgr(), ctx.UIHelper );
+            if ( ::ImGui::Button( "Fit to Mesh Bounds", ImVec2( -1.0f, 0.0f ) ) )
+                FitColliderToMesh( en, c.Data );
+        };
+        return e;
+    }
+    // UE-style Instanced Static Mesh editor: pick a primitive (or drop an asset mesh) + add/clear instances.
+    // Instances are WORLD-space; all of them render as ONE instanced draw (+1 per shadow cascade).
+    static ComponentEditorEntry MakeInstancedStaticMeshEntry()
+    {
+        using ISMC = ::Desert::ECS::InstancedStaticMeshComponent;
+        ComponentEditorEntry e;
+        e.Name      = "Instanced Static Mesh";
+        e.CanRemove = true;
+        e.Has       = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<ISMC>(); };
+        e.Add       = []( ::Desert::ECS::Entity& en )
+        {
+            auto& c     = en.AddComponent<ISMC>();
+            c.Primitive = ::Desert::Geometry::PrimitiveType::Cube; // renders immediately
+            if ( c.InstanceTransforms.empty() )
+                c.InstanceTransforms.push_back( glm::mat4( 1.0f ) );
+        };
+        e.Remove = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<ISMC>(); };
+        e.Draw   = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<ISMC>();
+
+            // Mesh source: a built-in primitive, or an asset mesh dropped from the browser.
+            static const char* kPrims[] = { "Cube", "Sphere", "Plane", "Pyramid" };
+            int                cur      = c.Primitive.has_value() ? static_cast<int>( c.Primitive.value() ) : 0;
+            if ( !c.MeshHandle && ::ImGui::Combo( "Primitive", &cur, kPrims, IM_ARRAYSIZE( kPrims ) ) )
+            {
+                c.Primitive = static_cast<::Desert::Geometry::PrimitiveType>( cur );
+                c.RuntimeMesh.reset();
+            }
+
+            ::ImGui::Button( c.MeshHandle ? "Mesh: <asset> (drop to replace)"
+                                          : "Drop a .stmesh to use an asset mesh",
+                             ImVec2( -1.0f, 0.0f ) );
+            if ( ::ImGui::BeginDragDropTarget() )
+            {
+                if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( "MESH_ASSET" );
+                     pl && ctx.AssetMgr() )
+                {
+                    const std::string path( static_cast<const char*>( pl->Data ),
+                                            pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                    const auto handle = ::Desert::Editor::MeshDnD::ResolveOrImport( *ctx.AssetMgr(), path );
+                    if ( !handle.IsNull() )
+                    {
+                        c.MeshHandle = handle;
+                        c.Primitive.reset();
+                        c.RuntimeMesh.reset();
+                    }
+                }
+                ::ImGui::EndDragDropTarget();
+            }
+            if ( c.MeshHandle && ::ImGui::SmallButton( "Use Primitive Instead" ) )
+            {
+                c.MeshHandle = {};
+                c.Primitive  = ::Desert::Geometry::PrimitiveType::Cube;
+            }
+
+            ::ImGui::Separator();
+            ::ImGui::Text( "Instances: %d", static_cast<int>( c.InstanceTransforms.size() ) );
+
+            if ( ::ImGui::Button( "Add Instance" ) )
+            {
+                const float n = static_cast<float>( c.InstanceTransforms.size() );
+                c.InstanceTransforms.push_back( glm::translate( glm::mat4( 1.0f ), glm::vec3( n * 2.0f, 0, 0 ) ) );
+                c.InstancesDirty = true;
+            }
+            ::ImGui::SameLine();
+            if ( ::ImGui::Button( "Add 10x10 Grid" ) )
+            {
+                for ( int z = 0; z < 10; ++z )
+                    for ( int x = 0; x < 10; ++x )
+                        c.InstanceTransforms.push_back(
+                             glm::translate( glm::mat4( 1.0f ), glm::vec3( x * 2.0f, 0.0f, z * 2.0f ) ) );
+                c.InstancesDirty = true;
+            }
+            ::ImGui::SameLine();
+            if ( ::ImGui::Button( "Clear" ) )
+            {
+                c.InstanceTransforms.clear();
+                c.InstancesDirty = true;
+            }
+        };
+        return e;
+    }
 } // namespace Desert::Editor
+
+namespace
+{
+    const int _desert_collider_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeColliderEntry() );
+
+    const int _desert_ism_component_reg = ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
+         ::Desert::Editor::MakeInstancedStaticMeshEntry() );
+}
 
 DESERT_REGISTER_CUSTOM_COMPONENT(
      ::Desert::ECS::MaterialComponent, "Material", true,

@@ -8,6 +8,15 @@ namespace Desert::Graphic
     {
     }
 
+    MaterialShadow::MaterialShadow( std::string&& shaderName )
+         : Material( "MaterialShadowInstanced", std::move( shaderName ) )
+    {
+    }
+
+    MaterialShadowInstanced::MaterialShadowInstanced() : MaterialShadow( "Shadow_Instanced" )
+    {
+    }
+
     void MaterialShadow::SetLightMatrix( const glm::mat4& view, const glm::mat4& projection )
     {
         ShaderProtocols::Camera cameraUB;

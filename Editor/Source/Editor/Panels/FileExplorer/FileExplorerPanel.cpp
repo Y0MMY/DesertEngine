@@ -821,6 +821,8 @@ namespace Desert::Editor
                 type = "TEXTURE_ASSET";
             else if ( entry.Type == FileType::Material )
                 type = "MATERIAL_ASSET";
+            else if ( entry.Type == FileType::Model )
+                type = "MESH_ASSET";
 
             ImGui::SetDragDropPayload( type, assetPath.c_str(), assetPath.size() + 1 );
             // Drag preview: filename (the full path is long + reads as empty in a small tooltip).

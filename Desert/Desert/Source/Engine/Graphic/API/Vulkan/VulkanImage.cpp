@@ -129,16 +129,27 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.LayerCount = 1;
         m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        // Full mip chain requested: floor(log2(max(w,h)))+1 levels (generated from mip 0 below).
+        // The complete mip chain for these dimensions is floor(log2(max(w,h)))+1 levels.
+        uint32_t maxChainDim = std::max( m_Specification.Width, m_Specification.Height );
+        uint32_t maxMipLevels = 1;
+        while ( maxChainDim > 1 ) { maxChainDim >>= 1; ++maxMipLevels; }
+
+        // Full mip chain requested: use the whole chain (generated from mip 0 below).
         const bool generateMips = m_Specification.GenerateMips && Core::Formats::HasData( m_Specification.Data );
         if ( generateMips )
         {
-            uint32_t maxDim = std::max( m_Specification.Width, m_Specification.Height );
-            uint32_t levels = 1;
-            while ( maxDim > 1 ) { maxDim >>= 1; ++levels; }
-            m_Resource.MipLevels = levels;
+            m_Resource.MipLevels = maxMipLevels;
         }
-        
+
+        // Clamp to the chain length regardless of source. An over-specified Mips count (e.g. a small render
+        // target asking for more levels than its size allows) is an invalid vkCreateImage
+        // (VUID-VkImageCreateInfo-mipLevels-00958) and produces a broken image -> garbage / GPU faults on
+        // some drivers. Clamp defensively so the image is always valid.
+        if ( m_Resource.MipLevels > maxMipLevels )
+            m_Resource.MipLevels = maxMipLevels;
+        if ( m_Resource.MipLevels < 1 )
+            m_Resource.MipLevels = 1;
+
         VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
         VkImageCreateInfo info = {
@@ -413,6 +424,13 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED;
 
         uint32_t faceSize = m_Specification.Width / 4;
+
+        // NOTE: the cubemap's mipLevels can exceed the face's chain length (Mips is often derived from the
+        // full cross width, not the Width/4 face) -> a VUID-VkImageCreateInfo-mipLevels-00958 validation
+        // warning. NOT clamped here on purpose: the IBL prefilter writes a fixed number of roughness mips,
+        // and silently reducing the image's mip count would desync it (out-of-range mip access -> crash).
+        // Fixing this properly means deriving Mips from the FACE size at the IBL call sites — a separate,
+        // careful change in the IBL pipeline.
         VkImageLayout finalDefaultLayout = Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
         VkImageCreateInfo info = {

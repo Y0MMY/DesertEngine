@@ -3,6 +3,7 @@
 #include <glm/gtc/constants.hpp>
 #include <cmath>
 #include <vector>
+#include <unordered_map>
 
 #include <Engine/Geometry/MeshFactory.hpp>
 #include <Common/Core/Math/AABB.hpp>
@@ -24,6 +25,22 @@ namespace Desert::Geometry
             default:
                 return nullptr;
         }
+    }
+
+    DynamicMesh* PrimitiveMeshFactory::GetShared( PrimitiveType type )
+    {
+        // One shared, GPU-ready mesh per primitive type, created lazily on first use and kept alive for the
+        // process. Single-threaded engine, so no synchronization needed.
+        static std::unordered_map<PrimitiveType, std::shared_ptr<DynamicMesh>> s_Cache;
+
+        auto& mesh = s_Cache[type];
+        if ( !mesh )
+        {
+            mesh = Create( type );
+            if ( mesh )
+                mesh->Invalidate(); // build the GPU vertex/index buffers once
+        }
+        return mesh.get();
     }
 
     std::shared_ptr<DynamicMesh> PrimitiveMeshFactory::CreateCube()

@@ -57,6 +57,7 @@ namespace Desert::Editor
     {
         m_TextureImporter    = std::make_unique<TextureImporter>();
         m_Importers[".fbx"]  = std::make_unique<AssimpImporter>();
+        m_Importers[".obj"]  = std::make_unique<AssimpImporter>();
         m_Importers[".gltf"] = std::make_unique<AssimpImporter>();
         m_Importers[".glb"]  = std::make_unique<AssimpImporter>();
     }
