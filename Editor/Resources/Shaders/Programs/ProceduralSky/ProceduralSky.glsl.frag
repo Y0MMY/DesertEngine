@@ -27,6 +27,7 @@ layout(binding = 1) uniform SkyUB
     vec4 u_SunsetColor;  // rgb, w = sunsetIntensity
     vec4 u_GroundColor;  // rgb, w = starIntensity
     vec4 u_NightColor;   // rgb (night sky tint)
+    vec4 u_WindDir;      // xy = shared scene wind direction (normalized, ground XZ), zw unused
 };
 
 void main()
@@ -56,7 +57,8 @@ void main()
     {
         color = RenderClouds(color, dir, sunDir, sunI,
                              u_SkyParams.z, u_SkyParams.w,
-                             u_CloudParams.x, u_CloudParams.y, u_CloudParams.z, u_CloudParams.w);
+                             u_CloudParams.x, u_CloudParams.y, u_CloudParams.z, u_CloudParams.w,
+                             u_WindDir.xy);
     }
 
     // (Dithering is done at the FINAL 8-bit output in the composite/tonemap pass — doing it here in linear

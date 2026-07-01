@@ -16,27 +16,31 @@ namespace Desert::Editor
 
         ImGuiIO& io = ::ImGui::GetIO();
 
-        s_BoldFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 16.0F, nullptr,
-                                                   io.Fonts->GetGlyphRangesCyrillic() );
+        // Text fonts: horizontal oversampling (3x) + a light rasterizer boost so the UI text is crisp instead
+        // of the slightly-blurry look the default (no-config) load gave. PixelSnapH keeps single-line labels
+        // pin-sharp. The same config is shared by every text weight/size.
+        ImFontConfig textConfig;
+        textConfig.OversampleH       = 3;
+        textConfig.OversampleV       = 1;
+        textConfig.PixelSnapH        = true;
+        textConfig.RasterizerMultiply = 1.10f;
 
+        const ImWchar* cyrillic = io.Fonts->GetGlyphRangesCyrillic();
 
-        s_ExtraBoldFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 22.0F, nullptr,
-                                                   io.Fonts->GetGlyphRangesCyrillic() );
+        s_BoldFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 16.0F, &textConfig,
+                                                   cyrillic );
 
+        s_ExtraBoldFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Bold.ttf", 22.0F, &textConfig,
+                                                        cyrillic );
 
-        s_RegularFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Regular.ttf", 18.0F, nullptr,
-                                                         io.Fonts->GetGlyphRangesCyrillic() );
+        s_RegularFont = io.Fonts->AddFontFromFileTTF( "Resources/Fonts/Roboto-Regular.ttf", 18.0F, &textConfig,
+                                                      cyrillic );
 
         if ( !s_RegularFont)
         {
             s_RegularFont = io.Fonts->AddFontDefault();
         }
         io.FontDefault = s_RegularFont;
-
-        ImFontConfig fontConfig;
-        fontConfig.OversampleH = 2;
-        fontConfig.OversampleV = 2;
-        fontConfig.PixelSnapH  = true;
 
         static const ImWchar iconsRanges[] = { ICON_MIN_MDI, ICON_MAX_MDI, 0 };
 

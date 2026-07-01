@@ -90,6 +90,11 @@ namespace Desert::Core
             return m_Registry;
         }
 
+        [[nodiscard]] const auto& GetRegistry() const
+        {
+            return m_Registry;
+        }
+
         [[nodiscard]] auto& GetSceneName()
         {
             return m_SceneName;

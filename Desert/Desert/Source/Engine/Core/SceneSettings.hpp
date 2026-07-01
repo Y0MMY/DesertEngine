@@ -123,5 +123,29 @@ namespace Desert::Core
         float Gravity         = 9.81f; // For physics simulation
         PROPERTY( DisplayName( "Pause Simulation" ), Category( "Physics" ) )
         bool  PauseSimulation = false;
+
+        // Wind — a SHARED environment force, deliberately scene-global (like Gravity), NOT owned by the
+        // Skybox. It is the single source of truth for the wind that drives grass/foliage sway today and
+        // cloud drift, hair and cloth next. Consumers read it via SceneRenderer::GetWind() (renderers) so
+        // one direction/strength moves everything coherently.
+        PROPERTY( DisplayName( "Wind Direction" ), Category( "Wind" ), Range( 0.0f, 360.0f ) )
+        float WindDirection  = 20.0f; // compass heading on the ground (XZ) plane, degrees
+        PROPERTY( DisplayName( "Wind Strength" ), Category( "Wind" ), Range( 0.0f, 1.0f ) )
+        float WindStrength   = 0.15f; // base force / foliage sway amplitude
+        PROPERTY( DisplayName( "Wind Turbulence" ), Category( "Wind" ), Range( 0.0f, 3.0f ) )
+        float WindTurbulence = 1.0f;  // gustiness (reserved for foliage/hair/cloth response)
+
+        // Time of Day — an OPT-IN day/night cycle (default off, so existing scenes are untouched). When on,
+        // the DayNightSystem drives the scene's directional light (the "sun"): its DIRECTION follows the hour
+        // and its INTENSITY fades to 0 at night (peak = SunPeakIntensity). The procedural sky already reacts
+        // to the sun's elevation, so day/sunset/night colours follow for free.
+        PROPERTY( DisplayName( "Enable Day/Night" ), Category( "Time of Day" ) )
+        bool  EnableDayNight   = false;
+        PROPERTY( DisplayName( "Time of Day" ), Category( "Time of Day" ), Range( 0.0f, 24.0f ) )
+        float TimeOfDay        = 12.0f; // hours [0,24); 12 = noon
+        PROPERTY( DisplayName( "Day Length (s)" ), Category( "Time of Day" ), Range( 0.0f, 600.0f ) )
+        float DayLengthSeconds = 0.0f;  // real seconds for a full 24h cycle; 0 = frozen (manual scrub)
+        PROPERTY( DisplayName( "Sun Peak Intensity" ), Category( "Time of Day" ), Range( 0.0f, 10.0f ) )
+        float SunPeakIntensity = 3.0f;  // noon directional intensity (scaled down toward night)
     };
 } // namespace Desert::Core

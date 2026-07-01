@@ -4,6 +4,7 @@
 #include "Logger.hpp"
 #include "Constants.hpp"
 #include <Common/Core/UUID.hpp>
+#include <Common/Core/AssetHandle.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/ResultStr.hpp>
 #include <Common/Core/ResultWithCodes.hpp>
@@ -76,9 +77,8 @@ namespace Common
 namespace Common
 {
     using serialized_str = std::string;
-    class UUID;
-    using AssetHandle = UUID;
-    using Filepath    = std::filesystem::path;
+    // AssetHandle is a real class (see Common/Core/AssetHandle.hpp, included above), not an alias.
+    using Filepath = std::filesystem::path;
 } // namespace Common
 
 template <typename T, typename U>

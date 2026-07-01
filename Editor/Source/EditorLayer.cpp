@@ -19,6 +19,7 @@
 // 2. Editor Base & Infrastructure
 #include "Editor/Core/EditorResources.hpp"
 #include "Editor/Core/ThemeManager.hpp"
+#include "Editor/Core/GizmoState.hpp"
 #include "Editor/Core/ImGuiUtilities.hpp"
 #include <ImGui/imgui_internal.h>
 #include <ImGuizmo.h>
@@ -40,6 +41,7 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/ECS/System/DayNightSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -115,6 +117,9 @@ namespace Desert::Editor
 
         m_AssetPreloader->PreloadAllAssets();
 
+        // Day/night runs FIRST so the sun's direction + intensity are current before the sky and the mesh
+        // lighting read the directional light this frame. No-op unless SceneSettings::EnableDayNight is on.
+        m_MainScene->AddSystem<ECS::DayNightSystem>( m_MainScene.get() );
         m_MainScene->AddSystem<ECS::MeshECSSystem>();
         m_MainScene->AddSystem<ECS::SkyboxECSSystem>();
         m_MainScene->AddSystem<ECS::TerrainECSSystem>();
@@ -314,13 +319,23 @@ namespace Desert::Editor
         if ( opt_fullscreen )
             ::ImGui::PopStyleVar( 2 );
 
+        // Toolbar strip FIRST so it reserves its height at the top; the DockSpace below then fills the
+        // remaining area (drawing it after a full-height DockSpace(0,0) would push the bar off-screen).
+        DrawToolbar();
+
         // Submit the DockSpace
         ImGuiIO& io = ::ImGui::GetIO();
 
         if ( io.ConfigFlags & ImGuiConfigFlags_DockingEnable )
         {
+            // Reserve the bottom status-bar height so the DockSpace fills only the area between the toolbar
+            // and the status bar (a full-height DockSpace(0,0) would sit under the status bar).
+            const float  statusBarHeight = ::ImGui::GetFrameHeight() + 4.0f;
+            ImVec2       dockSize        = ::ImGui::GetContentRegionAvail();
+            dockSize.y                   = ( dockSize.y > statusBarHeight ) ? dockSize.y - statusBarHeight : 0.0f;
+
             ImGuiID dockspace_id = ::ImGui::GetID( "MyDockSpace" );
-            ::ImGui::DockSpace( dockspace_id, ImVec2( 0.0f, 0.0f ), dockspace_flags );
+            ::ImGui::DockSpace( dockspace_id, dockSize, dockspace_flags );
         }
 
         for ( const auto& panel : m_Panels )
@@ -349,6 +364,8 @@ namespace Desert::Editor
 
         DrawProfilerWindow();
 
+        DrawStatusBar();
+
         ::ImGui::End(); // End dockspace
 
 #ifdef EBABLE_IMGUI
@@ -373,7 +390,7 @@ namespace Desert::Editor
 
         DrawProjectSection();
         DrawSceneRenameSection();
-        DrawPlaybackControls();
+        // Play/Pause/Stop now live in the toolbar strip (DrawToolbar), not the menu bar.
         DrawEngineStats();
 
         ImGui::EndMainMenuBar();
@@ -574,16 +591,105 @@ namespace Desert::Editor
         }
     }
 
-    void EditorLayer::DrawPlaybackControls()
+    void EditorLayer::DrawStatusBar()
+    {
+        namespace ImGui  = ::ImGui;
+        using SceneState = ::Desert::Core::Scene::SceneState;
+
+        const auto state = m_MainScene->GetState();
+        const char* stateText = ( state == SceneState::Play )     ? ICON_MDI_PLAY " Play"
+                                : ( state == SceneState::Paused ) ? ICON_MDI_PAUSE " Paused"
+                                                                  : ICON_MDI_PENCIL " Edit";
+        const ImVec4 stateColor =
+             ( state == SceneState::Edit ) ? ThemeManager::GetIconColor() : ThemeManager::GetSelectedColor();
+
+        ImGui::PushStyleColor( ImGuiCol_ChildBg, ImVec4( 0.086f, 0.086f, 0.086f, 1.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 2.0f ) );
+        ImGui::BeginChild( "##StatusBar", ImVec2( 0.0f, 0.0f ), false,
+                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
+
+        // Left: scene state + current selection.
+        ImGui::PushStyleColor( ImGuiCol_Text, stateColor );
+        ImGui::TextUnformatted( stateText );
+        ImGui::PopStyleColor();
+
+        ImGui::SameLine( 0.0f, 16.0f );
+        if ( const auto sel = Core::SelectionManager::GetSelected() )
+        {
+            std::string selName = "Entity";
+            if ( auto e = m_MainScene->FindEntityByID( *sel ) )
+                selName = e->get().GetComponent<ECS::TagComponent>().Tag;
+            ImGui::TextDisabled( ICON_MDI_CURSOR_DEFAULT_OUTLINE " %s", selName.c_str() );
+        }
+        else
+        {
+            ImGui::TextDisabled( "No selection" );
+        }
+
+        // Right: frame rate + frame time.
+        const float fps    = ImGui::GetIO().Framerate;
+        char        stats[64];
+        std::snprintf( stats, sizeof( stats ), ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms", fps,
+                       fps > 0.0f ? 1000.0f / fps : 0.0f );
+        const float statsW = ImGui::CalcTextSize( stats ).x;
+        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - statsW );
+        ImGui::TextDisabled( "%s", stats );
+
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+    }
+
+    void EditorLayer::DrawToolbar()
     {
         namespace ImGui = ::ImGui;
+        using Op        = ::Desert::Editor::Core::GizmoState;
 
-        ImGui::SameLine( ( ImGui::GetWindowContentRegionMax().x * 0.5f ) -
-                         ( 1.5f * ( ImGui::GetFontSize() + ImGui::GetStyle().ItemSpacing.x ) ) );
+        // A comfortably tall strip so its buttons read as a real toolbar, not menu-bar afterthoughts.
+        const float barHeight = ImGui::GetFrameHeight() * 1.33f;
 
-        DrawPlayButton();
+        ImGui::PushStyleColor( ImGuiCol_ChildBg, ImVec4( 0.086f, 0.086f, 0.086f, 1.0f ) ); // #161616 strip
+        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 4.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 5.0f, 0.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 4.0f );
+        ImGui::BeginChild( "##Toolbar", ImVec2( 0.0f, barHeight ), false,
+                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
+
+        // Buttons fill the FULL height of the toolbar (minus the child's vertical padding) so they occupy the
+        // whole strip; slightly wider than tall for a chunky UE-style hit target.
+        const float  btnH = ImGui::GetContentRegionAvail().y;
+        const ImVec2 btnSize( btnH * 1.4f, btnH );
+
+        // ── Left: transform-gizmo mode toggles (mirror the viewport's Q/W/E/R; highlight the active one). ──
+        const auto modeButton = [&]( const char* icon, Op::Operation op, const char* tip )
+        {
+            const bool active = Op::Get() == op;
+            if ( active )
+                ImGui::PushStyleColor( ImGuiCol_Button, ThemeManager::GetSelectedColor() );
+            if ( ImGui::Button( icon, btnSize ) )
+                Op::Set( op );
+            if ( active )
+                ImGui::PopStyleColor();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%s", tip );
+            ImGui::SameLine();
+        };
+        modeButton( ICON_MDI_CURSOR_DEFAULT_OUTLINE, Op::Operation::None, "Select (Q)" );
+        modeButton( ICON_MDI_AXIS_ARROW, Op::Operation::Translate, "Move (W)" );
+        modeButton( ICON_MDI_ROTATE_ORBIT, Op::Operation::Rotate, "Rotate (E)" );
+        modeButton( ICON_MDI_ARROW_EXPAND_ALL, Op::Operation::Scale, "Scale (R)" );
+
+        // ── Centre: playback (Play/Stop toggle + Pause), same tall button size. ──
+        const float spacing    = ImGui::GetStyle().ItemSpacing.x;
+        const float playbackW  = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
+        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x * 0.5f - playbackW * 0.5f );
+        DrawPlayButton( btnSize );
         ImGui::SameLine();
-        DrawPauseButton();
+        DrawPauseButton( btnSize );
+
+        ImGui::EndChild();
+        ImGui::PopStyleVar( 3 );
+        ImGui::PopStyleColor();
     }
 
     void EditorLayer::DrawProfilerWindow()
@@ -807,7 +913,7 @@ namespace Desert::Editor
         ImGui::EndMenu();
     }
 
-    void EditorLayer::DrawPlayButton()
+    void EditorLayer::DrawPlayButton( const ImVec2& size )
     {
         namespace ImGui    = ::ImGui;
         using SceneState   = ::Desert::Core::Scene::SceneState;
@@ -817,7 +923,7 @@ namespace Desert::Editor
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
 
         // One toggle: Play when editing, Stop (restore the snapshot) when playing/paused.
-        if ( ImGui::Button( playing ? ICON_MDI_STOP : ICON_MDI_PLAY ) )
+        if ( ImGui::Button( playing ? ICON_MDI_STOP : ICON_MDI_PLAY, size ) )
         {
             if ( playing )
                 m_PendingSceneStop = true; // deferred to OnUpdate (between frames) — see m_PendingSceneStop
@@ -831,7 +937,7 @@ namespace Desert::Editor
             ImGui::PopStyleColor();
     }
 
-    void EditorLayer::DrawPauseButton()
+    void EditorLayer::DrawPauseButton( const ImVec2& size )
     {
         namespace ImGui  = ::ImGui;
         using SceneState = ::Desert::Core::Scene::SceneState;
@@ -843,7 +949,7 @@ namespace Desert::Editor
         if ( paused )
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
 
-        if ( ImGui::Button( ICON_MDI_PAUSE ) )
+        if ( ImGui::Button( ICON_MDI_PAUSE, size ) )
             OnScenePauseToggle();
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( paused ? "Resume" : "Pause" );

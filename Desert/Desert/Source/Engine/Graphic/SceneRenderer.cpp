@@ -8,6 +8,9 @@
 
 #include <glm/glm.hpp>
 
+#include <chrono>
+#include <cmath>
+
 namespace Desert::Graphic
 {
     void SceneRenderer::Init()
@@ -129,6 +132,35 @@ namespace Desert::Graphic
         jumpFloodSystem->SetOutlineSmoothness( sceneSettings.OutlineSmoothness );
 
         m_AAMode = sceneSettings.AA;
+
+        // Evaluate the scene-global SHARED wind once per frame so every wind-driven renderer (grass now;
+        // clouds/hair/cloth next) reads one coherent direction + strength via GetWind(). Direction is a
+        // compass heading (degrees) on the XZ plane; Time is monotonic seconds so the sway keeps animating.
+        {
+            const float rad = glm::radians( sceneSettings.WindDirection );
+            static const auto windStart = std::chrono::steady_clock::now();
+            m_Wind.Direction  = glm::vec2( std::cos( rad ), std::sin( rad ) );
+            m_Wind.Strength   = sceneSettings.WindStrength;
+            m_Wind.Turbulence = sceneSettings.WindTurbulence;
+            m_Wind.Time =
+                 std::chrono::duration<float>( std::chrono::steady_clock::now() - windStart ).count();
+        }
+
+        // Grass interactor: the player character bends grass away as it moves. The shader takes ONE influencer,
+        // so use the first CharacterController entity (the player); a small array would extend this to NPCs.
+        // w = influence radius in metres (0 = disabled -> no bend).
+        {
+            constexpr float kGrassInteractRadius = 1.5f;
+            m_GrassInteractor                    = glm::vec4( 0.0f );
+            const auto& reg                      = scene.GetRegistry();
+            auto chars = reg.view<const ECS::CharacterControllerComponent, const ECS::TransformComponent>();
+            for ( auto e : chars )
+            {
+                const auto& tr    = chars.get<const ECS::TransformComponent>( e );
+                m_GrassInteractor = glm::vec4( tr.Translation, kGrassInteractRadius );
+                break;
+            }
+        }
 
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetParams( sceneSettings.Exposure, sceneSettings.Gamma );
@@ -386,8 +418,13 @@ namespace Desert::Graphic
                                           float sunDiskRadius, bool bakeNow, const CloudSettings& clouds,
                                           const SkySettings& sky )
     {
+        // Inject the SHARED scene wind direction into the cloud config so clouds drift the same heading as
+        // grass. The Skybox only authors the per-sky drift RATE (CloudWindSpeed); direction is scene-global.
+        CloudSettings windedClouds = clouds;
+        windedClouds.WindDir       = m_Wind.Direction;
+
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
-             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow, clouds, sky );
+             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow, windedClouds, sky );
     }
 
     const std::optional<Environment>& SceneRenderer::GetEnvironment()

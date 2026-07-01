@@ -41,9 +41,15 @@ namespace Desert::Editor
         // ===== Top Bar Sections =====
         void DrawProjectSection();
         void DrawSceneRenameSection();
-        void DrawPlaybackControls();
-        void DrawPlayButton();
-        void DrawPauseButton();
+        void DrawPlayButton( const ImVec2& size = ImVec2( 0.0f, 0.0f ) );
+        void DrawPauseButton( const ImVec2& size = ImVec2( 0.0f, 0.0f ) );
+
+        // UE5-style toolbar strip below the menu bar: transform-gizmo mode toggles (left) + Play/Pause/Stop
+        // (centre). Drawn inside the dockspace host window so it takes a fixed height above the docked panels.
+        void DrawToolbar();
+
+        // Bottom status bar: scene state (Edit/Play), scene name, current selection, and FPS/frame time.
+        void DrawStatusBar();
 
         // Play mode: snapshot the scene on Play, restore it on Stop (so play-time changes don't persist).
         void OnScenePlay();

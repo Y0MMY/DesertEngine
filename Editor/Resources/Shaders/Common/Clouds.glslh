@@ -55,14 +55,16 @@ float cl_fbm2( vec2 p )
 // skyColor = the sky behind the clouds; dir = normalized view ray; sunDir = toward sun.
 // coverage 0..1 (more = cloudier), density = opacity mult, tiling = cloud scale, brightness = cloud albedo.
 vec3 RenderClouds( vec3 skyColor, vec3 dir, vec3 sunDir, float sunI, float coverage, float density,
-                   float tiling, float brightness, float time, float windSpeed )
+                   float tiling, float brightness, float time, float windSpeed, vec2 windDir )
 {
     if ( dir.y <= 0.03 )
         return skyColor; // below the horizon: no clouds
 
-    // Flat-ceiling projection (stretches toward the horizon), tiled + wind drift.
+    // Flat-ceiling projection (stretches toward the horizon), tiled + wind drift. windDir is the SHARED
+    // scene wind (SceneSettings), so clouds drift the same way grass leans; windSpeed is the per-sky rate.
     vec2 uv = ( dir.xz / dir.y ) * ( 0.15 * max( tiling, 0.01 ) );
-    uv += vec2( time * windSpeed * 0.010, time * windSpeed * 0.006 );
+    vec2 wd = ( length( windDir ) > 0.001 ) ? normalize( windDir ) : vec2( 0.86, 0.51 );
+    uv += wd * ( time * windSpeed * 0.010 );
 
     // Domain warp for organic billows (moderate — a too-strong warp FOLDS the field and creates sharp creases
     // at the seams between blobs).

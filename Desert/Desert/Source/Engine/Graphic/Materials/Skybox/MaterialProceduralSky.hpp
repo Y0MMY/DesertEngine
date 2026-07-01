@@ -52,6 +52,7 @@ namespace Desert::Graphic
                 glm::vec4 SunsetColor;  // rgb, w = sunsetIntensity
                 glm::vec4 GroundColor;  // rgb, w = starIntensity
                 glm::vec4 NightColor;   // rgb (night tint)
+                glm::vec4 WindDir;      // xy = shared scene wind direction (normalized XZ), zw unused
             } sky;
             sky.SunDirection = glm::vec4( glm::normalize( sunDir ), sunIntensity );
             sky.SkyParams    = glm::vec4( sunDiskRadius, clouds.Enabled ? 1.0f : 0.0f, clouds.Coverage,
@@ -64,6 +65,7 @@ namespace Desert::Graphic
             sky.SunsetColor  = glm::vec4( skyCfg.SunsetColor, skyCfg.SunsetIntensity );
             sky.GroundColor  = glm::vec4( skyCfg.GroundColor, skyCfg.StarIntensity );
             sky.NightColor   = glm::vec4( skyCfg.NightColor, 0.0f );
+            sky.WindDir      = glm::vec4( clouds.WindDir, 0.0f, 0.0f );
             if ( auto* ub = Get<UniformBufferProperty>( "SkyUB" ) )
                 ub->SetRawData( reinterpret_cast<const std::byte*>( &sky ), sizeof( sky ) );
         }

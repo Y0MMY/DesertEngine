@@ -46,7 +46,8 @@ namespace Desert::Editor
         //auto handle        = materialAsset->GetMetadata().Handle;
 
         //Runtime::ResourceRegistry::GetMaterialService()->Register( materialAsset );
-        Assets::AssetHandle handle{};
+        // Stub: no material is actually created yet -> report "no material" (Null), not a random id.
+        Assets::AssetHandle handle = Assets::AssetHandle::Null();
 
         return handle;
     }

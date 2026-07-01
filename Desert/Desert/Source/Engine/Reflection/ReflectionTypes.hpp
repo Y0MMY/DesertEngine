@@ -87,5 +87,11 @@ namespace Desert::Reflection
         std::string            Name;
         std::size_t            Size = 0;
         std::vector<FieldInfo> Fields;
+
+        // Returns a pointer to a process-wide default-constructed instance of the type (member initializers
+        // give it the "factory defaults"), or nullptr if the codegen didn't provide one. Used by the editor's
+        // reset-to-default: a field's default value is `GetDefaultInstance() + field.Offset`. Set via
+        // TypeBuilder::WithDefault<T>() from the generated reflection code.
+        const void* ( *GetDefaultInstance )() = nullptr;
     };
 } // namespace Desert::Reflection

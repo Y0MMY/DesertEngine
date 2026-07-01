@@ -67,6 +67,10 @@ namespace Desert::Editor
 
         const bool isPrefab = entity.HasComponent<ECS::PrefabComponent>();
 
+        // Hidden entities (VisibilityComponent.Visible == false) render dimmed with an "eye-off" toggle.
+        const bool visible = !entity.HasComponent<ECS::VisibilityComponent>() ||
+                             entity.GetComponent<ECS::VisibilityComponent>().Visible;
+
         const char* icon = ICON_MDI_CUBE_OUTLINE;
         if ( entity.HasComponent<ECS::CameraComponent>() )
             icon = ICON_MDI_CAMERA;
@@ -118,18 +122,17 @@ namespace Desert::Editor
         }
 
         ImGui::SameLine();
-        // Prefab name gets the same teal tint; suffix tag is subtle
+        // Name colour: prefab teal, dimmed when hidden. Prefab tag stays subtle.
+        ImVec4 nameColor = isPrefab ? iconColor : ImGui::GetStyleColorVec4( ImGuiCol_Text );
+        if ( !visible )
+            nameColor = ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled );
+        ImGui::PushStyleColor( ImGuiCol_Text, nameColor );
+        ImGui::TextUnformatted( name.c_str() );
+        ImGui::PopStyleColor();
         if ( isPrefab )
         {
-            ImGui::PushStyleColor( ImGuiCol_Text, iconColor );
-            ImGui::TextUnformatted( name.c_str() );
-            ImGui::PopStyleColor();
             ImGui::SameLine();
             ImGui::TextDisabled( "[Prefab]" );
-        }
-        else
-        {
-            ImGui::TextUnformatted( name.c_str() );
         }
 
         bool deleteEntity = false;
@@ -152,8 +155,17 @@ namespace Desert::Editor
             ImGui::EndPopup();
         }
 
-        // Column 1: type label
+        // Column 1: inline visibility eye (UE5-style) + type label.
         ImGui::TableSetColumnIndex( 1 );
+        ImGui::PushStyleColor( ImGuiCol_Text, visible ? ThemeManager::GetIconColor()
+                                                      : ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+        ImGui::TextUnformatted( visible ? ICON_MDI_EYE_OUTLINE : ICON_MDI_EYE_OFF_OUTLINE );
+        ImGui::PopStyleColor();
+        if ( ImGui::IsItemClicked() )
+            m_Scene->SetVisibleRecursive( entity, !visible ); // toggles the entity + its subtree
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( visible ? "Hide" : "Show" );
+        ImGui::SameLine();
         ImGui::TextDisabled( "%s", GetEntityTypeName( entity ) );
 
         if ( nodeOpen )

@@ -37,6 +37,7 @@ namespace
                     .Field( FieldInfo{ .Name = "AOTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, AOTexture ), .Size = sizeof( T::AOTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "AO Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
                     .Field( FieldInfo{ .Name = "EmissiveTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, EmissiveTexture ), .Size = sizeof( T::EmissiveTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Emissive Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
                     .Field( FieldInfo{ .Name = "OpacityTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, OpacityTexture ), .Size = sizeof( T::OpacityTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Opacity Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -76,6 +77,14 @@ namespace
                     .Field( FieldInfo{ .Name = "LightingDebug", .Type = FieldType::Bool, .Offset = offsetof( T, LightingDebug ), .Size = sizeof( T::LightingDebug ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Light Debug", .Category = "Debug", } } )
                     .Field( FieldInfo{ .Name = "Gravity", .Type = FieldType::Float, .Offset = offsetof( T, Gravity ), .Size = sizeof( T::Gravity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Gravity", .Category = "Physics", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 50.0f, } } )
                     .Field( FieldInfo{ .Name = "PauseSimulation", .Type = FieldType::Bool, .Offset = offsetof( T, PauseSimulation ), .Size = sizeof( T::PauseSimulation ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Pause Simulation", .Category = "Physics", } } )
+                    .Field( FieldInfo{ .Name = "WindDirection", .Type = FieldType::Float, .Offset = offsetof( T, WindDirection ), .Size = sizeof( T::WindDirection ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Direction", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 360.0f, } } )
+                    .Field( FieldInfo{ .Name = "WindStrength", .Type = FieldType::Float, .Offset = offsetof( T, WindStrength ), .Size = sizeof( T::WindStrength ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Strength", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .Field( FieldInfo{ .Name = "WindTurbulence", .Type = FieldType::Float, .Offset = offsetof( T, WindTurbulence ), .Size = sizeof( T::WindTurbulence ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Turbulence", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 3.0f, } } )
+                    .Field( FieldInfo{ .Name = "EnableDayNight", .Type = FieldType::Bool, .Offset = offsetof( T, EnableDayNight ), .Size = sizeof( T::EnableDayNight ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Enable Day/Night", .Category = "Time of Day", } } )
+                    .Field( FieldInfo{ .Name = "TimeOfDay", .Type = FieldType::Float, .Offset = offsetof( T, TimeOfDay ), .Size = sizeof( T::TimeOfDay ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Time of Day", .Category = "Time of Day", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 24.0f, } } )
+                    .Field( FieldInfo{ .Name = "DayLengthSeconds", .Type = FieldType::Float, .Offset = offsetof( T, DayLengthSeconds ), .Size = sizeof( T::DayLengthSeconds ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Day Length (s)", .Category = "Time of Day", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 600.0f, } } )
+                    .Field( FieldInfo{ .Name = "SunPeakIntensity", .Type = FieldType::Float, .Offset = offsetof( T, SunPeakIntensity ), .Size = sizeof( T::SunPeakIntensity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Sun Peak Intensity", .Category = "Time of Day", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 10.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -85,6 +94,7 @@ namespace
                     .Field( FieldInfo{ .Name = "FOV", .Type = FieldType::Float, .Offset = offsetof( T, FOV ), .Size = sizeof( T::FOV ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Field of View", .Category = "Camera", .HasRange = true, .RangeMin = 10.0f, .RangeMax = 120.0f, } } )
                     .Field( FieldInfo{ .Name = "Near", .Type = FieldType::Float, .Offset = offsetof( T, Near ), .Size = sizeof( T::Near ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Near", .Category = "Camera", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 10.0f, } } )
                     .Field( FieldInfo{ .Name = "Far", .Type = FieldType::Float, .Offset = offsetof( T, Far ), .Size = sizeof( T::Far ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Far", .Category = "Camera", .HasRange = true, .RangeMin = 10.0f, .RangeMax = 10000.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -104,6 +114,7 @@ namespace
                     .Field( FieldInfo{ .Name = "GrassBladesPerClump", .Type = FieldType::Int, .Offset = offsetof( T, GrassBladesPerClump ), .Size = sizeof( T::GrassBladesPerClump ), .TypeName = "int", .Meta = PropertyMetadata{ .DisplayName = "Blades Per Clump", .Category = "Grass", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 12.0f, } } )
                     .Field( FieldInfo{ .Name = "GrassWidth", .Type = FieldType::Float, .Offset = offsetof( T, GrassWidth ), .Size = sizeof( T::GrassWidth ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Grass Width", .Category = "Grass", .HasRange = true, .RangeMin = 0.1f, .RangeMax = 5.0f, } } )
                     .Field( FieldInfo{ .Name = "GrassBrightness", .Type = FieldType::Float, .Offset = offsetof( T, GrassBrightness ), .Size = sizeof( T::GrassBrightness ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Grass Brightness", .Category = "Grass", .HasRange = true, .RangeMin = 0.2f, .RangeMax = 2.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -111,6 +122,7 @@ namespace
                 TypeBuilder( "DirectionalLightData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "Color", .Type = FieldType::Vec3, .Offset = offsetof( T, Color ), .Size = sizeof( T::Color ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Color", .Category = "Light", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "Intensity", .Type = FieldType::Float, .Offset = offsetof( T, Intensity ), .Size = sizeof( T::Intensity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Intensity", .Category = "Light", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 10.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -122,6 +134,7 @@ namespace
                     .Field( FieldInfo{ .Name = "MinRadius", .Type = FieldType::Float, .Offset = offsetof( T, MinRadius ), .Size = sizeof( T::MinRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Min Radius", .Category = "Light", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 100.0f, } } )
                     .Field( FieldInfo{ .Name = "Falloff", .Type = FieldType::Enum, .Offset = offsetof( T, Falloff ), .Size = sizeof( T::Falloff ), .TypeName = "LightFalloff", .Meta = PropertyMetadata{ .DisplayName = "Falloff", .Category = "Light", }, .EnumValues = { EnumValue{ "Linear", 0 }, EnumValue{ "Quadratic", 1 }, EnumValue{ "InverseSquare", 2 }, } } )
                     .Field( FieldInfo{ .Name = "ShowRadius", .Type = FieldType::Bool, .Offset = offsetof( T, ShowRadius ), .Size = sizeof( T::ShowRadius ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Radius", .Category = "Light", } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -134,6 +147,7 @@ namespace
                     .Field( FieldInfo{ .Name = "OuterConeAngle", .Type = FieldType::Float, .Offset = offsetof( T, OuterConeAngle ), .Size = sizeof( T::OuterConeAngle ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Outer Cone", .Category = "Light", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 90.0f, } } )
                     .Field( FieldInfo{ .Name = "Falloff", .Type = FieldType::Enum, .Offset = offsetof( T, Falloff ), .Size = sizeof( T::Falloff ), .TypeName = "LightFalloff", .Meta = PropertyMetadata{ .DisplayName = "Falloff", .Category = "Light", }, .EnumValues = { EnumValue{ "Linear", 0 }, EnumValue{ "Quadratic", 1 }, EnumValue{ "InverseSquare", 2 }, } } )
                     .Field( FieldInfo{ .Name = "ShowCone", .Type = FieldType::Bool, .Offset = offsetof( T, ShowCone ), .Size = sizeof( T::ShowCone ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Cone", .Category = "Light", } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -161,6 +175,7 @@ namespace
                     .Field( FieldInfo{ .Name = "CloudTiling", .Type = FieldType::Float, .Offset = offsetof( T, CloudTiling ), .Size = sizeof( T::CloudTiling ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Tiling", .Category = "Clouds", .HasRange = true, .RangeMin = 0.2f, .RangeMax = 10.0f, } } )
                     .Field( FieldInfo{ .Name = "CloudBrightness", .Type = FieldType::Float, .Offset = offsetof( T, CloudBrightness ), .Size = sizeof( T::CloudBrightness ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Brightness", .Category = "Clouds", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 3.0f, } } )
                     .Field( FieldInfo{ .Name = "CloudWindSpeed", .Type = FieldType::Float, .Offset = offsetof( T, CloudWindSpeed ), .Size = sizeof( T::CloudWindSpeed ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Speed", .Category = "Clouds", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 50.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -170,6 +185,7 @@ namespace
                     .Field( FieldInfo{ .Name = "HalfExtents", .Type = FieldType::Vec3, .Offset = offsetof( T, HalfExtents ), .Size = sizeof( T::HalfExtents ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Half Extents", .Category = "Collider", } } )
                     .Field( FieldInfo{ .Name = "Radius", .Type = FieldType::Float, .Offset = offsetof( T, Radius ), .Size = sizeof( T::Radius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Radius", .Category = "Collider", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 50.0f, } } )
                     .Field( FieldInfo{ .Name = "HalfHeight", .Type = FieldType::Float, .Offset = offsetof( T, HalfHeight ), .Size = sizeof( T::HalfHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Half Height", .Category = "Collider", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 50.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -179,6 +195,7 @@ namespace
                     .Field( FieldInfo{ .Name = "Mass", .Type = FieldType::Float, .Offset = offsetof( T, Mass ), .Size = sizeof( T::Mass ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Mass", .Category = "Rigid Body", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1000.0f, } } )
                     .Field( FieldInfo{ .Name = "Friction", .Type = FieldType::Float, .Offset = offsetof( T, Friction ), .Size = sizeof( T::Friction ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Friction", .Category = "Rigid Body", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 2.0f, } } )
                     .Field( FieldInfo{ .Name = "Restitution", .Type = FieldType::Float, .Offset = offsetof( T, Restitution ), .Size = sizeof( T::Restitution ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Restitution", .Category = "Rigid Body", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             {
@@ -187,6 +204,7 @@ namespace
                     .Field( FieldInfo{ .Name = "Radius", .Type = FieldType::Float, .Offset = offsetof( T, Radius ), .Size = sizeof( T::Radius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Radius", .Category = "Character", .HasRange = true, .RangeMin = 0.05f, .RangeMax = 5.0f, } } )
                     .Field( FieldInfo{ .Name = "Height", .Type = FieldType::Float, .Offset = offsetof( T, Height ), .Size = sizeof( T::Height ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Height", .Category = "Character", .HasRange = true, .RangeMin = 0.2f, .RangeMax = 10.0f, } } )
                     .Field( FieldInfo{ .Name = "MaxSlopeDeg", .Type = FieldType::Float, .Offset = offsetof( T, MaxSlopeDeg ), .Size = sizeof( T::MaxSlopeDeg ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Max Slope", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 89.0f, } } )
+                    .WithDefault<T>()
                     .Register();
             }
             ReflectionRegistry::Get().ResolveStructLinks();

@@ -211,12 +211,6 @@ namespace Desert::Graphic::System
             return Image2D::Create( spec, nullptr );
         }
 
-        // Seconds since first frame — drives the grass wind sway (a future global WindComponent replaces it).
-        float GrassTime()
-        {
-            static const auto start = std::chrono::steady_clock::now();
-            return std::chrono::duration<float>( std::chrono::steady_clock::now() - start ).count();
-        }
     } // namespace
 
     Common::BoolResultStr TerrainRenderer::Initialize()
@@ -395,9 +389,15 @@ namespace Desert::Graphic::System
                  ub.Params     = glm::vec4( gt->Size, gt->GrassParams.w, gt->HeightScale, gt->NoiseFrequency );
                  ub.Params2    = glm::vec4( static_cast<float>( gt->Seed ), static_cast<float>( grassGrid ),
                                             gt->GrassParams.z, kGrassMaxDist );
-                 ub.Wind       = glm::vec4( 1.0f, 0.35f, 0.15f, GrassTime() );
+                 // Shared scene wind (SceneSettings -> SceneRenderer::GetWind()): xy = normalized ground
+                 // direction, z = strength, w = animation time. No longer a per-terrain hardcode — the same
+                 // wind that will drive clouds/hair/cloth drives the grass, so the field moves coherently.
+                 const auto& wind = m_SceneRenderer->GetWind();
+                 ub.Wind          = glm::vec4( wind.Direction.x, wind.Direction.y, wind.Strength, wind.Time );
                  ub.CameraPos  = glm::vec4( camera->GetPosition(), 0.0f );
-                 ub.Interactor = glm::vec4( 0.0f ); // actor trample hook (future global wind/interaction)
+                 // Player character bends grass away as it walks through (xyz world pos, w radius). Sourced
+                 // from SceneRenderer (set each BeginScene from the first CharacterController); 0 = no actor.
+                 ub.Interactor = m_SceneRenderer->GetGrassInteractor();
                  GetSun( m_SceneRenderer, ub.SunDir, ub.SunColor );
                  // GrassTint channel packs (x=brightness, y=bladesPerClump). The shader wants a uniform
                  // brightness in rgb, so broadcast .x; blades only drives the CPU vertex count below.

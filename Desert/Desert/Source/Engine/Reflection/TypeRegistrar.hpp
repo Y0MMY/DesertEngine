@@ -28,6 +28,19 @@ namespace Desert::Reflection
             return *this;
         }
 
+        // Records a provider for a process-wide default-constructed instance of T (its member initializers =
+        // the "factory defaults"), so the editor can offer reset-to-default. Called by generated code.
+        template <typename T>
+        TypeBuilder& WithDefault()
+        {
+            m_Info.GetDefaultInstance = []() -> const void*
+            {
+                static const T s_Default{};
+                return &s_Default;
+            };
+            return *this;
+        }
+
         const TypeInfo* Register()
         {
             return ReflectionRegistry::Get().Register( std::move( m_Info ) );

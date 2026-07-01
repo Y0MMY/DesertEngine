@@ -1,8 +1,10 @@
 #pragma once
 
+#include <Common/Core/AssetHandle.hpp>
+
 namespace Desert::Assets
 {
-    using AssetHandle = Common::UUID;
+    using AssetHandle = Common::AssetHandle;
 
     template <typename T>
     using Asset = std::shared_ptr<T>;

@@ -9,6 +9,7 @@
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/CloudSettings.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
+#include <Engine/Graphic/WindEnv.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/PipelineCache.hpp>
@@ -106,6 +107,21 @@ namespace Desert::Graphic
             return m_DirectionLights;
         }
 
+        // Scene-global SHARED wind (authored in SceneSettings, refreshed each BeginScene). Renderers that
+        // respond to wind (grass/foliage now; clouds/hair/cloth next) read it from here so one direction +
+        // strength animate the whole world coherently.
+        const WindEnv& GetWind() const
+        {
+            return m_Wind;
+        }
+
+        // Grass "interactor": a single actor (the player character) that bends grass away as it moves.
+        // xyz = world position, w = influence radius in metres (0 = disabled). Refreshed each BeginScene.
+        const glm::vec4& GetGrassInteractor() const
+        {
+            return m_GrassInteractor;
+        }
+
         // CSM debug: the per-cascade shadow depth maps (for the editor's cascade viewer).
         std::shared_ptr<Image2D> GetShadowCascadeImage( uint32_t cascade );
         uint32_t                 GetShadowCascadeCount();
@@ -167,6 +183,11 @@ namespace Desert::Graphic
         ShaderProtocols::DirectionLight m_DirectionLights;
         ShaderProtocols::PointLight     m_PointLight;
         ShaderProtocols::SpotLight      m_SpotLight;
+
+        WindEnv m_Wind; // scene-global shared wind, refreshed from SceneSettings each BeginScene
+
+        // Player-character grass interactor (xyz world pos, w radius), refreshed each BeginScene.
+        glm::vec4 m_GrassInteractor{ 0.0f };
 
         // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
         Core::AntiAliasingMode m_AAMode      = Core::AntiAliasingMode::FXAA;

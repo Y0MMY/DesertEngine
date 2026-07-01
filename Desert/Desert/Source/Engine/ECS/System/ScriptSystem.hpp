@@ -27,9 +27,22 @@ namespace Desert::ECS
         {
         }
 
+        ~ScriptSystem() override
+        {
+            // Don't leave a dangling on_destroy listener pointing at this (freed) system.
+            if ( m_HookedRegistry )
+                m_HookedRegistry->on_destroy<ScriptComponent>().disconnect( this );
+        }
+
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer&,
                      const Common::Timestep& ts ) override
         {
+            // Release an entity's Lua envs the instant its ScriptComponent dies (entity destroyed, component
+            // removed, or scene cleared). Without this the env map leaks AND — since entt recycles entity ids
+            // — a NEW entity could inherit a destroyed one's stale env. Event-driven (entt keeps the connection
+            // across registry.clear(), so wire it once; re-arm only if the registry object itself changes).
+            EnsureDestroyHook( registry );
+
             using SceneState = Core::Scene::SceneState;
             const bool playing = m_Scene && m_Scene->GetState() == SceneState::Play;
 
@@ -123,8 +136,27 @@ namespace Desert::ECS
         }
 
     private:
+        // Connects the on_destroy<ScriptComponent> listener to `registry` once (re-arms if the registry object
+        // changes, e.g. a brand-new scene). Cheap no-op on every subsequent frame.
+        void EnsureDestroyHook( entt::registry& registry )
+        {
+            if ( m_HookedRegistry == &registry )
+                return;
+            if ( m_HookedRegistry )
+                m_HookedRegistry->on_destroy<ScriptComponent>().disconnect( this );
+            registry.on_destroy<ScriptComponent>().connect<&ScriptSystem::OnScriptComponentDestroyed>( this );
+            m_HookedRegistry = &registry;
+        }
+
+        void OnScriptComponentDestroyed( entt::registry&, entt::entity entity )
+        {
+            m_Engine.Release( static_cast<uint32_t>( entity ) );
+        }
+
+    private:
         Core::Scene*            m_Scene = nullptr;
         Scripting::ScriptEngine m_Engine;
+        entt::registry*         m_HookedRegistry = nullptr; // registry our on_destroy listener is wired to
 
         glm::vec2 m_LastMouse{ 0.0f, 0.0f };
         bool      m_CursorLocked  = false;

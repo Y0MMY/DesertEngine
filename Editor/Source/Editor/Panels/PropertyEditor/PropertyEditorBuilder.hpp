@@ -36,7 +36,10 @@ namespace Desert::Editor
                           const Assets::AssetManager* assetMgr = nullptr, UI::UIHelper* uiHelper = nullptr );
 
     private:
+        // `defaultObject` (optional) points at a default-constructed instance of the OWNING type so a per-field
+        // "reset to default" affordance can appear when a value differs from its default.
         static bool DrawField( void* object, const Reflection::FieldInfo& field,
-                               const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper );
+                               const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
+                               const void* defaultObject = nullptr );
     };
 } // namespace Desert::Editor

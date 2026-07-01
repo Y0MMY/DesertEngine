@@ -2,7 +2,6 @@
 #include <Common/Core/Serialization/GlmReflection.hpp>
 
 #include <Engine/Assets/Serialization/Mesh.hpp>
-#include <Engine/Assets/AssetId.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
 
@@ -16,7 +15,7 @@ namespace Desert::Assets
     {
         // Path-derived handle in the ctor (see StaticMeshAsset) so a not-yet-loaded registry shell is keyed
         // correctly. Load re-derives the same value.
-        m_Metadata.Handle = StableAssetId( m_Metadata.Filepath.lexically_normal().generic_string() );
+        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
     }
 
     Common::BoolResultStr SkinnedMeshAsset::Load()
@@ -39,7 +38,7 @@ namespace Desert::Assets
 
         // Stable, path-derived handle (see StaticMeshAsset::Load) — survives re-cooks + lets the registry
         // compute it from the path without parsing the mesh payload.
-        m_Metadata.Handle = StableAssetId( m_Metadata.Filepath.lexically_normal().generic_string() );
+        m_Metadata.Handle = Common::AssetHandle::FromCookedPath( m_Metadata.Filepath );
 
         m_Vertices.clear();
         m_Indices.clear();

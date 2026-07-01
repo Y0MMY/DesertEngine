@@ -9,6 +9,8 @@
 #include <Engine/Graphic/Image.hpp>
 
 #include <Editor/Core/CommandHistory.hpp>
+#include <Editor/Core/ThemeManager.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Import/TextureDnD.hpp>
 
@@ -77,7 +79,8 @@ namespace Desert::Editor
     } // namespace
 
     bool PropertyEditorBuilder::DrawField( void* object, const FieldInfo& field,
-                                           const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper )
+                                           const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
+                                           const void* defaultObject )
     {
         if ( field.Meta.Hidden )
             return false;
@@ -85,6 +88,10 @@ namespace Desert::Editor
         void*       p     = FieldPtr( object, field );
         const auto& label = field.DisplayName();
         bool        changed = false;
+
+        // The default value of THIS field, if the owning type provided a default instance.
+        const void* defFieldPtr =
+             defaultObject ? static_cast<const std::byte*>( defaultObject ) + field.Offset : nullptr;
 
         // Nested reflected struct: draw its fields recursively under a collapsible node.
         if ( field.Type == FieldType::Struct )
@@ -96,7 +103,7 @@ namespace Desert::Editor
                 {
                     for ( const auto& sub : field.StructType->Fields )
                     {
-                        if ( DrawField( p, sub, assetMgr, uiHelper ) )
+                        if ( DrawField( p, sub, assetMgr, uiHelper, defFieldPtr ) )
                             changed = true;
                     }
                     ImGui::TreePop();
@@ -128,6 +135,33 @@ namespace Desert::Editor
         ImGui::SetColumnWidth( 0, 150.0f );
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted( label.c_str() );
+        // Hover the label to reveal the underlying C++ field name (useful when the DisplayName is a friendlier
+        // alias or the row is narrow) — a small UE-style affordance.
+        if ( ImGui::IsItemHovered() && field.Name != label )
+            ImGui::SetTooltip( "%s", field.Name.c_str() );
+
+        // Reset-to-default: for trivially-copyable value fields (not strings/structs/containers) that DIFFER
+        // from their default, show a revert button right-aligned in the label column (UE-style). memcpy is
+        // safe here because these field types own no heap.
+        const bool resettable = defFieldPtr && !field.Meta.ReadOnly && !field.IsContainer &&
+                                field.Type != FieldType::String && field.Type != FieldType::Struct &&
+                                field.Size > 0;
+        if ( resettable && std::memcmp( p, defFieldPtr, field.Size ) != 0 )
+        {
+            const float bw = ImGui::GetFrameHeight();
+            ImGui::SameLine( ImGui::GetColumnWidth() - bw - 2.0f );
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
+            if ( ImGui::SmallButton( ICON_MDI_BACKUP_RESTORE ) )
+            {
+                std::memcpy( p, defFieldPtr, field.Size );
+                changed = true;
+            }
+            ImGui::PopStyleColor( 2 );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Reset to default" );
+        }
+
         ImGui::NextColumn();
         ImGui::PushItemWidth( -1 );
 
@@ -375,9 +409,11 @@ namespace Desert::Editor
 
             if ( ImGui::CollapsingHeader( catName.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
             {
+                // The type's default-constructed instance (member initializers) — powers reset-to-default.
+                const void* defaultObject = type.GetDefaultInstance ? type.GetDefaultInstance() : nullptr;
                 for ( const auto* field : fields )
                 {
-                    if ( DrawField( object, *field, assetMgr, uiHelper ) )
+                    if ( DrawField( object, *field, assetMgr, uiHelper, defaultObject ) )
                         anyChanged = true;
                 }
             }

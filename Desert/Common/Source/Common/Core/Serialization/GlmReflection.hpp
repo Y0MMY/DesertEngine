@@ -9,6 +9,7 @@
 #include <glm/gtx/compatibility.hpp>
 
 #include <Common/Core/UUID.hpp>
+#include <Common/Core/AssetHandle.hpp>
 #include <Common/Core/Math/AABB.hpp>
 
 namespace rfl
@@ -47,6 +48,23 @@ namespace rfl
         }
 
         static inline ReflType from( const Common::UUID& value )
+        {
+            return static_cast<uint64_t>( value );
+        }
+    };
+
+    // AssetHandle is a distinct type from UUID -> needs its own reflector. Same bare-uint64 wire form.
+    template <>
+    struct Reflector<Common::AssetHandle>
+    {
+        using ReflType = uint64_t;
+
+        static inline Common::AssetHandle to( const ReflType& value ) noexcept
+        {
+            return Common::AssetHandle{ value };
+        }
+
+        static inline ReflType from( const Common::AssetHandle& value )
         {
             return static_cast<uint64_t>( value );
         }

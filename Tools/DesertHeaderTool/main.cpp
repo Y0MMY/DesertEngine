@@ -768,6 +768,8 @@ namespace
                     EmitContainerLambdas( o, f );
                 o << " } )\n";
             }
+            // Capture a default-constructed instance so the editor can offer reset-to-default per field.
+            o << "                    .WithDefault<T>()\n";
             o << "                    .Register();\n";
             o << "            }\n";
         }

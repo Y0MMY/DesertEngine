@@ -74,8 +74,9 @@ namespace Desert::Editor::Tools
         const auto& view = mainCamera->GetViewMatrix();
         const auto& proj = mainCamera->GetProjectionMatrix();
 
-        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( m_Op ),
-                                   ImGuizmo::WORLD, &modelMatrix[0][0] ) )
+        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0],
+                                   static_cast<ImGuizmo::OPERATION>( Core::GizmoState::Get() ), ImGuizmo::WORLD,
+                                   &modelMatrix[0][0] ) )
         {
             if ( ImGuizmo::IsOver() )
                 m_Hovered = true;
@@ -151,7 +152,8 @@ namespace Desert::Editor::Tools
         const auto& view = mainCamera->GetViewMatrix();
         const auto& proj = mainCamera->GetProjectionMatrix();
         // Scale on a bone's rest pose is rarely wanted; default None/Scale to Translate.
-        const auto op = ( m_Op == Operation::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
+        const auto op =
+             ( Core::GizmoState::Get() == Operation::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
 
         if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, ImGuizmo::WORLD, &gizmoWorld[0][0] ) )
         {
