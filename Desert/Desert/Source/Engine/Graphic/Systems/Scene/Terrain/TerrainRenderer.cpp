@@ -328,12 +328,12 @@ namespace Desert::Graphic::System
 
                      // Material params: reset to #pragma defaults, then apply this entity's overrides by name.
                      m_Material->ApplyDefaults();
-                     for ( const auto& [name, value] : t.ParamOverrides )
+                     for ( const auto& [name, value] : t.Overrides.Params )
                          m_Material->SetParamRaw( name, value );
 
                      // Texture overrides: resolve asset handle -> runtime Image2D and bind by sampler name.
                      // Unset samplers keep the backend white fallback, so this is purely additive.
-                     for ( const auto& [name, handle] : t.TextureOverrides )
+                     for ( const auto& [name, handle] : t.Overrides.Textures )
                      {
                          if ( handle == 0 )
                              continue;

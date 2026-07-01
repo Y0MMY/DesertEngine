@@ -1,4 +1,5 @@
 #include "PropertyEditorBuilder.hpp"
+#include <Editor/Core/DragPayloads.hpp>
 
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Assets/AssetManager.hpp>
@@ -229,7 +230,7 @@ namespace Desert::Editor
 
                 if ( ImGui::BeginDragDropTarget() )
                 {
-                    if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "TEXTURE_ASSET" ) )
+                    if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::TextureAsset ) )
                     {
                         const std::string path( static_cast<const char*>( payload->Data ),
                                                 payload->DataSize > 0 ? payload->DataSize - 1 : 0 );

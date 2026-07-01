@@ -1,114 +1,102 @@
 #include "SkyboxComponent.hpp"
+#include <Editor/Core/DragPayloads.hpp>
 
 #include <ImGui/imgui.h>
 
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
+#include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
+#include <Engine/ECS/Components.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Skybox/SkyboxAsset.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    SkyboxComponentWidget::SkyboxComponentWidget( const std::weak_ptr<Assets::AssetManager>& assetManager )
-         : ComponentWidget( "Skybox" ), m_AssetManager( assetManager )
-    {
-    }
-
-    void SkyboxComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
-    {
-        const auto assetManager = m_AssetManager.lock();
-        auto       skyboxAssets = assetManager->FindAllByType<Assets::SkyboxAsset>();
-
-        auto&       skybox                = entity.GetComponent<ECS::SkyboxComponent>();
-        const auto& currentSelectedSkybox = assetManager->FindByHandle<Assets::SkyboxAsset>( skybox.SkyboxHandle );
-        std::string currentSkyboxName =
-             currentSelectedSkybox
-                  ? Common::Utils::FileSystem::GetFileName( currentSelectedSkybox->GetMetadata().Filepath )
-                  : "None";
-
-        if ( ImGui::Button( currentSkyboxName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
-        {
-            ImGui::OpenPopup( "skybox_selector" );
-        }
-
-        if ( ImGui::BeginPopup( "skybox_selector" ) )
-        {
-            static ImGuiTextFilter skyboxFilter;
-            skyboxFilter.Draw( "##Search", 200 );
-            ImGui::Separator();
-
-            for ( const auto& [handle, meshAsset] : skyboxAssets )
-            {
-                const std::string& skyboxName =
-                     Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
-                if ( skyboxFilter.PassFilter( skyboxName.c_str() ) )
-                {
-                    bool isSelected = ( skybox.SkyboxHandle == handle );
-                    if ( ImGui::Selectable( skyboxName.c_str(), isSelected ) )
-                    {
-                        if ( handle != skybox.SkyboxHandle )
-                        {
-                            auto& skyboxService = *Runtime::ResourceRegistry::GetSkyboxService();
-                            if ( !skyboxService.Get( handle ) )
-                            {
-                                Graphic::Renderer::GetInstance().WaitDeviceIdle();
-                                skyboxService.Register( meshAsset );
-                            }
-                            skybox.SkyboxHandle = handle;
-                        }
-                    }
-
-                    if ( isSelected )
-                    {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-            }
-
-            if ( skyboxAssets.empty() )
-            {
-                ImGui::TextDisabled( "No skybox assets available" );
-            }
-
-            ImGui::EndPopup();
-        }
-
-        ImGui::Dummy( ImVec2( 0, 8 ) );
-        ImGui::Separator();
-        ImGui::Text( "Procedural Sky" );
-
-        // Engine-generated atmosphere (no HDR asset). The sun follows the scene's directional light.
-        ImGui::Checkbox( "Procedural", &skybox.Procedural );
-        ImGui::BeginDisabled( !skybox.Procedural );
-        ImGui::SliderFloat( "Sun Intensity", &skybox.SunIntensity, 1.0f, 50.0f );
-        ImGui::SliderFloat( "Sun Disk Size", &skybox.SunDiskRadius, 0.002f, 0.1f, "%.3f" );
-
-        // Sky IBL is baked once when Procedural is first enabled; moving the sun does NOT auto-rebake
-        // (it's a heavy device-idle operation). Press Bake to rebuild ambient/reflections from the
-        // current sun direction + parameters.
-        if ( ImGui::Button( "Bake Sky IBL", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
-            skybox.RequestBake = true;
-
-        // Engine-generated volumetric clouds (raymarched in the sky pass; visual only — not baked into IBL).
-        ImGui::Dummy( ImVec2( 0, 6 ) );
-        ImGui::Separator();
-        ImGui::Checkbox( "Volumetric Clouds", &skybox.EnableClouds );
-        ImGui::BeginDisabled( !skybox.EnableClouds );
-        ImGui::SliderFloat( "Coverage", &skybox.CloudCoverage, 0.0f, 1.0f );
-        ImGui::SliderFloat( "Density", &skybox.CloudDensity, 0.0f, 3.0f );
-        ImGui::SliderFloat( "Cloud Height", &skybox.CloudHeight, 100.0f, 3000.0f );
-        ImGui::SliderFloat( "Thickness", &skybox.CloudThickness, 100.0f, 2000.0f );
-        ImGui::SliderFloat( "Wind Speed", &skybox.CloudWindSpeed, 0.0f, 50.0f );
-        ImGui::EndDisabled();
-        ImGui::EndDisabled();
-
-        if ( skybox.Procedural )
-            ImGui::TextDisabled( "HDR cubemap above is ignored while Procedural is on." );
-    }
-
+    // Most of the Skybox component's Details UI is AUTO-GENERATED from its REFLECT()/PROPERTY() metadata
+    // (PropertyEditorBuilder). The ONE hand-drawn part is the HDR SkyboxAsset picker (a dropdown of loaded
+    // skyboxes + drag-drop), because the generic reflected asset slot is texture-oriented and doesn't resolve
+    // SkyboxAssets — so SkyboxHandle is marked Hidden and drawn here. Plus the "Bake Sky IBL" action button.
     DESERT_REGISTER_CUSTOM_COMPONENT(
          ECS::SkyboxComponent, "Skybox", false,
-         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
-           { SkyboxComponentWidget( ctx.AssetManager ).Render( e, s ); } ) )
+         ( []( ECS::Entity& entity, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+           {
+               auto* assetManager = ctx.AssetMgr();
+               if ( !assetManager )
+                   return;
+               auto& skybox = entity.GetComponent<ECS::SkyboxComponent>();
+
+               auto bindSkybox = [&]( const Assets::AssetHandle& handle )
+               {
+                   if ( handle == skybox.SkyboxHandle )
+                       return;
+                   auto& svc = *Runtime::ResourceRegistry::GetSkyboxService();
+                   if ( !svc.Get( handle ) )
+                   {
+                       if ( auto a = assetManager->FindByHandle<Assets::SkyboxAsset>( handle ) )
+                       {
+                           Graphic::Renderer::GetInstance().WaitDeviceIdle();
+                           svc.Register( a );
+                       }
+                   }
+                   skybox.SkyboxHandle = handle;
+               };
+
+               // --- HDR skybox picker (dropdown of loaded SkyboxAssets) ---
+               const auto  current     = assetManager->FindByHandle<Assets::SkyboxAsset>( skybox.SkyboxHandle );
+               std::string currentName = current ? Common::Utils::FileSystem::GetFileName(
+                                                        current->GetMetadata().Filepath )
+                                                  : "None";
+               ImGui::TextUnformatted( "Skybox (HDR)" );
+               if ( ImGui::Button( currentName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+                   ImGui::OpenPopup( "skybox_selector" );
+
+               // --- drag-drop a skybox/texture file from the File Explorer ---
+               if ( ImGui::BeginDragDropTarget() )
+               {
+                   const char* types[] = { ::Desert::Editor::DragPayloads::SkyboxAsset, ::Desert::Editor::DragPayloads::TextureAsset, "AssetFile" };
+                   for ( const char* t : types )
+                   {
+                       if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( t ) )
+                       {
+                           const std::string path( static_cast<const char*>( p->Data ) );
+                           if ( auto a = assetManager->FindByPath<Assets::SkyboxAsset>( path ) )
+                               bindSkybox( a->GetMetadata().Handle );
+                           break;
+                       }
+                   }
+                   ImGui::EndDragDropTarget();
+               }
+
+               if ( ImGui::BeginPopup( "skybox_selector" ) )
+               {
+                   static ImGuiTextFilter filter;
+                   filter.Draw( "##Search", 200 );
+                   ImGui::Separator();
+                   auto skyboxes = assetManager->FindAllByType<Assets::SkyboxAsset>();
+                   for ( const auto& [handle, asset] : skyboxes )
+                   {
+                       const std::string name =
+                            Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath );
+                       if ( filter.PassFilter( name.c_str() ) &&
+                            ImGui::Selectable( name.c_str(), handle == skybox.SkyboxHandle ) )
+                           bindSkybox( handle );
+                   }
+                   if ( skyboxes.empty() )
+                       ImGui::TextDisabled( "No skybox assets available" );
+                   ImGui::EndPopup();
+               }
+
+               // --- the rest of the fields, auto-built from reflection (Intensity / Procedural / Sky Color /
+               //     Sun & Sky / Clouds). SkyboxHandle is Hidden so it isn't drawn twice. ---
+               PropertyEditorBuilder::Draw( &skybox, "SkyboxComponent", assetManager, ctx.UIHelper );
+
+               ImGui::Spacing();
+               if ( ImGui::Button( "Bake Sky IBL", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+                   skybox.RequestBake = true;
+           } ) )
 
 } // namespace Desert::Editor

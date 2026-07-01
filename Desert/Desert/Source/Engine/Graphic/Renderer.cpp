@@ -52,7 +52,8 @@ namespace Desert::Graphic
         // (e.g. EnvironmentManager). The bare "PBR/BRDF_LUT.tga" resolved to <cwd>/PBR/... → not found →
         // null texture → the split-sum LUT bind fell back to the white dummy (IBL specular too bright).
         m_BRDFTexture =
-             Texture2D::Create( spec, Common::Filepath( "Resources/Textures" ) / "PBR/BRDF_LUT.tga" ).ExtractValue();
+             Texture2D::Create( spec, Common::Filepath( "Resources/Assets/Textures" ) / "PBR/BRDF_LUT.tga" )
+                  .ExtractValue();
         if ( !m_BRDFTexture )
             LOG_ERROR( "Failed to load BRDF LUT (Resources/Textures/PBR/BRDF_LUT.tga) — IBL specular will be wrong" );
 
@@ -181,9 +182,10 @@ namespace Desert::Graphic
 
     void Renderer::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                const MaterialExecutor* materialExecutor, uint32_t instanceCount,
-                               uint32_t firstInstance )
+                               uint32_t firstInstance, uint64_t hiddenSubmeshMask )
     {
-        s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor, instanceCount, firstInstance );
+        s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor, instanceCount, firstInstance,
+                                   hiddenSubmeshMask );
     }
 
     const std::shared_ptr<Desert::Graphic::Texture2D>& Renderer::GetBRDFTexture() const

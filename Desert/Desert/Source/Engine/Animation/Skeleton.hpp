@@ -22,6 +22,18 @@ namespace Desert::Animation
             return m_Bones;
         }
 
+        // Finds a bone by name (case-sensitive). The returned index matches the Pose::BoneMatrices index, so
+        // sockets/attachments can look up "hand_r" once and then read its matrix from the animator's pose.
+        [[nodiscard]] std::optional<uint32_t> FindBoneIndex( const std::string& name ) const
+        {
+            for ( size_t i = 0; i < m_Bones.size(); ++i )
+            {
+                if ( m_Bones[i].Name == name )
+                    return static_cast<uint32_t>( i );
+            }
+            return std::nullopt;
+        }
+
         // Mutable access for the in-editor skeleton editor (rest-pose editing). The signature is intentionally
         // NOT recomputed on edit so the SkinnedMeshAsset->SkeletonAsset dependency link (matched by signature)
         // stays intact. After changing LocalBindTransforms, call RecomputeOffsetMatrices().

@@ -6,6 +6,7 @@
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialProceduralSky.hpp>
 #include <Engine/Graphic/CloudSettings.hpp>
+#include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
 
@@ -27,13 +28,14 @@ namespace Desert::Graphic::System
         // When enabled, the Sky pass renders the engine-generated procedural atmosphere instead of the
         // HDR cubemap. The sun direction is the directional light's (toward-sun) direction.
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                               bool bakeNow, const CloudSettings& clouds )
+                               bool bakeNow, const CloudSettings& clouds, const SkySettings& sky )
         {
             m_UseProceduralSky = enabled;
             m_SunDir           = sunDir;
             m_SunIntensity     = sunIntensity;
             m_SunDiskRadius    = sunDiskRadius;
             m_Clouds           = clouds;
+            m_Sky              = sky;
 
             // Bake the sky IBL on FIRST enable (so the scene isn't unlit by default) or on an explicit
             // Bake request from the editor. Moving the sun no longer auto-rebakes — the user controls it
@@ -80,6 +82,7 @@ namespace Desert::Graphic::System
         float     m_SunIntensity     = 22.0f;
         float     m_SunDiskRadius    = 0.02f;
         CloudSettings m_Clouds;
+        SkySettings   m_Sky;
 
         // Baked sky IBL (radiance/irradiance/prefiltered cubes) generated from the procedural atmosphere.
         Environment m_ProceduralEnv;

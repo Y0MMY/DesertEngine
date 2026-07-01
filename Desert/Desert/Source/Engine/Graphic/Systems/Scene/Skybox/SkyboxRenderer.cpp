@@ -1,5 +1,6 @@
 #include "SkyboxRenderer.hpp"
 #include <Engine/Graphic/Renderer.hpp>
+#include <Common/Core/Logger.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -84,7 +85,8 @@ namespace Desert::Graphic::System
         // skybox-swap path) since we're recreating GPU images that prior frames may have referenced.
         Renderer::GetInstance().WaitDeviceIdle();
 
-        Environment baked = EnvironmentManager::CreateProcedural( m_SunDir, m_SunIntensity, m_SunDiskRadius );
+        Environment baked =
+             EnvironmentManager::CreateProcedural( m_SunDir, m_SunIntensity, m_SunDiskRadius, m_Sky );
         if ( !baked )
         {
             m_EnvDirty = false; // bake failed (e.g. shader missing) — keep prior env; user can retry via Bake.
@@ -124,7 +126,8 @@ namespace Desert::Graphic::System
         // Engine-generated procedural atmosphere (no HDR asset needed).
         if ( m_UseProceduralSky && m_ProceduralPipeline && m_ProceduralMaterial && m_ActiveCamera )
         {
-            m_ProceduralMaterial->Update( m_ActiveCamera, m_SunDir, m_SunIntensity, m_SunDiskRadius, m_Clouds );
+            m_ProceduralMaterial->Update( m_ActiveCamera, m_SunDir, m_SunIntensity, m_SunDiskRadius, m_Clouds,
+                                          m_Sky );
             renderer.SubmitFullscreenQuad( m_ProceduralPipeline.get(),
                                            m_ProceduralMaterial->GetMaterialExecutor() );
             return;

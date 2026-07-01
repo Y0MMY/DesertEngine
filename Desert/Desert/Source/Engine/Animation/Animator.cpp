@@ -42,8 +42,29 @@ namespace Desert::Animation
 
     Animator::Animator( const Skeleton& skeleton ) : m_Skeleton( skeleton )
     {
-        const auto& bones = skeleton.GetBones();
-        m_CurrentPose.BoneMatrices.resize( bones.size(), glm::mat4( 1.0f ) );
+        ComputeBindPose(); // valid rest pose before any clip plays (identity would collapse the mesh)
+    }
+
+    void Animator::ComputeBindPose()
+    {
+        const auto& bones = m_Skeleton.GetBones();
+        m_CurrentPose.BoneMatrices.assign( bones.size(), glm::mat4( 1.0f ) );
+
+        std::vector<glm::mat4>             global( bones.size(), glm::mat4( 1.0f ) );
+        std::vector<bool>                  done( bones.size(), false );
+        std::function<glm::mat4( size_t )> resolve = [&]( size_t i ) -> glm::mat4
+        {
+            if ( done[i] )
+                return global[i];
+            glm::mat4 m = bones[i].LocalBindTransform;
+            if ( bones[i].ParentBoneID.has_value() && bones[i].ParentBoneID.value() < bones.size() )
+                m = resolve( bones[i].ParentBoneID.value() ) * bones[i].LocalBindTransform;
+            global[i] = m;
+            done[i]   = true;
+            return m;
+        };
+        for ( size_t i = 0; i < bones.size(); ++i )
+            m_CurrentPose.BoneMatrices[i] = resolve( i ) * bones[i].OffsetMatrix;
     }
 
     // ============================================================
@@ -182,6 +203,33 @@ namespace Desert::Animation
         }
     }
 
+    const BoneTrack* Animator::ResolveTrack( const AnimationClip* clip, uint32_t boneIndex ) const
+    {
+        if ( !clip )
+            return nullptr;
+
+        auto& binding = m_TrackBinding[clip];
+        if ( binding.empty() )
+        {
+            const auto& bones = m_Skeleton.GetBones();
+            binding.assign( bones.size(), nullptr );
+
+            std::unordered_map<std::string, const BoneTrack*> byName;
+            for ( const auto& track : clip->Tracks )
+                if ( !track.BoneName.empty() )
+                    byName[track.BoneName] = &track;
+
+            for ( size_t i = 0; i < bones.size(); ++i )
+            {
+                auto it = byName.find( bones[i].Name );
+                if ( it != byName.end() )
+                    binding[i] = it->second;
+            }
+        }
+
+        return ( boneIndex < binding.size() ) ? binding[boneIndex] : nullptr;
+    }
+
     void Animator::CalculateBoneTransform( const ClipPlayback& playback, uint32_t boneIndex,
                                            const glm::mat4& parentTransform )
     {
@@ -190,13 +238,11 @@ namespace Desert::Animation
 
         glm::mat4 localTransform = bone.LocalBindTransform;
 
-        if ( playback.Clip && boneIndex < playback.Clip->Tracks.size() )
+        if ( const BoneTrack* track = ResolveTrack( playback.Clip, boneIndex ) )
         {
-            const auto& track = playback.Clip->Tracks[boneIndex];
-
-            if ( !track.PositionKeys.empty() || !track.RotationKeys.empty() || !track.ScaleKeys.empty() )
+            if ( !track->PositionKeys.empty() || !track->RotationKeys.empty() || !track->ScaleKeys.empty() )
             {
-                localTransform = track.GetTransform( playback.Time );
+                localTransform = track->GetTransform( playback.Time );
             }
         }
 

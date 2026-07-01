@@ -1,0 +1,51 @@
+#include "MeshMaterial.hpp"
+
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
+#include <Common/Core/UUID.hpp>
+
+#include <filesystem>
+
+namespace Desert::Editor::MeshMaterial
+{
+    Assets::AssetHandle ResolveSidecar( Assets::AssetManager& mgr, const std::string& meshSourcePath )
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path  mesh( meshSourcePath );
+        const fs::path  dir = mesh.parent_path();
+
+        auto firstDematIn = [&]( const fs::path& d ) -> fs::path
+        {
+            if ( d.empty() || !fs::exists( d, ec ) )
+                return {};
+            for ( const auto& f : fs::directory_iterator( d, ec ) )
+                if ( f.path().extension() == ".demat" )
+                    return f.path();
+            return {};
+        };
+
+        // 1) <stem>.demat next to the mesh  2) any .demat in the mesh folder  3) any .demat in the parent.
+        fs::path matPath = dir / ( mesh.stem().string() + ".demat" );
+        if ( !fs::exists( matPath, ec ) )
+            matPath = firstDematIn( dir );
+        if ( matPath.empty() )
+            matPath = firstDematIn( dir.parent_path() );
+        if ( matPath.empty() )
+            return Common::UUID::Null();
+
+        const std::string matStr = matPath.generic_string();
+        auto              asset  = mgr.FindByPath<Assets::PBRMaterialAsset>( matStr );
+        if ( !asset )
+            asset = mgr.CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, matStr );
+        if ( !asset )
+            return Common::UUID::Null();
+
+        const auto h = asset->GetMetadata().Handle;
+        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( h ) )
+            Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
+        return h;
+    }
+} // namespace Desert::Editor::MeshMaterial

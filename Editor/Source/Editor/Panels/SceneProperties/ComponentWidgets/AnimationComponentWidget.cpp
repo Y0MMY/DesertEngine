@@ -1,5 +1,8 @@
 #include "AnimationComponentWidget.hpp"
 
+#include <string>
+#include <unordered_set>
+
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
@@ -58,7 +61,12 @@ namespace Desert::Editor
 
         if ( cachedSig != sig )
         {
-            cached    = m_AnimationLibrary->GetBySkeleton( sig );
+            // Match by bone NAME (tolerant): a Mixamo "without skin" animation has fewer bones than the skinned
+            // character (no leaf/end bones), so its signature differs — but it still drives this skeleton.
+            std::unordered_set<std::string> boneNames;
+            for ( const auto& bone : skeleton.GetBones() )
+                boneNames.insert( bone.Name );
+            cached    = m_AnimationLibrary->GetForSkeletonBones( boneNames );
             cachedSig = sig;
         }
 

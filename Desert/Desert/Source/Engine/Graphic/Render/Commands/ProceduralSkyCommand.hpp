@@ -2,6 +2,7 @@
 
 #include "../RenderCommand.hpp"
 #include <Engine/Graphic/CloudSettings.hpp>
+#include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
 
@@ -17,17 +18,18 @@ namespace Desert::Graphic::Render
         float         SunDiskRadius;
         bool          BakeNow; // one-shot: editor Bake button requested an IBL rebuild this frame
         CloudSettings Clouds;
+        SkySettings   Sky;
 
         ProceduralSkyCommand( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                              bool bakeNow, const CloudSettings& clouds )
+                              bool bakeNow, const CloudSettings& clouds, const SkySettings& sky )
              : Enabled( enabled ), SunDir( sunDir ), SunIntensity( sunIntensity ),
-               SunDiskRadius( sunDiskRadius ), BakeNow( bakeNow ), Clouds( clouds )
+               SunDiskRadius( sunDiskRadius ), BakeNow( bakeNow ), Clouds( clouds ), Sky( sky )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
-            renderer.SetProceduralSky( Enabled, SunDir, SunIntensity, SunDiskRadius, BakeNow, Clouds );
+            renderer.SetProceduralSky( Enabled, SunDir, SunIntensity, SunDiskRadius, BakeNow, Clouds, Sky );
         }
     };
 } // namespace Desert::Graphic::Render

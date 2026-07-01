@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <optional>
 
 #include <Engine/Assets/Common.hpp>          // Desert::Assets::AssetHandle
 #include <Engine/Reflection/ReflectionMacros.hpp>
@@ -32,6 +33,11 @@ namespace Desert::Assets
         PROPERTY( DisplayName( "Emissive Intensity" ), Category( "Surface" ), Range( 0.0f, 100.0f ) )
         float EmissiveIntensity = 1.0f;
 
+        // Alpha cutout (foliage/cards): 0 = disabled (opaque). When > 0, fragments whose Opacity Map value is
+        // below this threshold are discarded — required for grass/leaves on alpha-mapped quads.
+        PROPERTY( DisplayName( "Alpha Cutoff" ), Category( "Surface" ), Range( 0.0f, 1.0f ) )
+        float AlphaCutoff = 0.0f;
+
         PROPERTY( DisplayName( "Albedo Map" ), Category( "Textures" ), Asset<TextureAsset>, Thumbnail )
         AssetHandle AlbedoTexture{ 0ULL };
 
@@ -49,5 +55,21 @@ namespace Desert::Assets
 
         PROPERTY( DisplayName( "Emissive Map" ), Category( "Textures" ), Asset<TextureAsset>, Thumbnail )
         AssetHandle EmissiveTexture{ 0ULL };
+
+        PROPERTY( DisplayName( "Opacity Map" ), Category( "Textures" ), Asset<TextureAsset>, Thumbnail )
+        AssetHandle OpacityTexture{ 0ULL };
+
+        // Stable, persisted material identity = the "external" handle a mesh's submeshes reference to find
+        // their default material (resolved via MaterialService::GetAssetHandleByExternal). NOT editor-exposed
+        // (no PROPERTY). std::optional so .demat files written before this field existed still parse (absent
+        // -> nullopt). Set deterministically at import / on editor-create so it survives re-cooks & renames.
+        std::optional<Common::UUID> MaterialId;
+
+        // UV tiling: the surface UVs are multiplied by this before sampling albedo/normal/opacity, so a
+        // texture repeats N times across the surface (the "natygivanie/tiling" control — like UE). std::optional
+        // so older .demat still parse (absent -> {1,1} = no tiling). Drawn via a manual widget in the Materials
+        // panel (optional fields aren't auto-handled by the reflected PropertyEditor), uploaded to the GPU
+        // material (PBRGpuMaterial::ExtraParams), and used in PBR.glsl.frag.
+        std::optional<glm::vec2> UVTiling;
     };
 } // namespace Desert::Assets

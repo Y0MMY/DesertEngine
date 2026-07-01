@@ -78,7 +78,11 @@ namespace Desert::Assets
         // Current flat format.
         if ( const auto parsed = rfl::json::read<PBRMaterialData>( raw ); parsed.has_value() )
         {
-            m_Data        = parsed.value();
+            m_Data = parsed.value();
+            // Adopt the persisted stable id as the external handle the mesh submeshes resolve against. Older
+            // .demat files have none -> keep the (random) default; they're assigned by internal handle anyway.
+            if ( m_Data.MaterialId )
+                m_MaterialUUID = *m_Data.MaterialId;
             m_ReadyForUse = true;
             return BOOLSUCCESS;
         }

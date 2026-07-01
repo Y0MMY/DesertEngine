@@ -21,6 +21,15 @@ namespace Desert::Editor
     }
     class ThumbnailCache;
     class AssetThumbnailRenderer;
+}
+
+namespace Desert::Core
+{
+    class Scene; // for "Capture Thumbnail from viewport" (reads the main scene's rendered final image)
+}
+
+namespace Desert::Editor
+{
 
     enum class FileType
     {
@@ -48,6 +57,7 @@ namespace Desert::Editor
         // SharedPtr<Graphics::Texture2D> Thumbnail = nullptr;
         FileType Type;
         uint64_t FileSize;
+        uint64_t LastWriteTime = 0; // filesystem mtime (for "sort by date"); cached so sorting needs no syscalls
         ImVec4   FileTypeColour;
 
         bool Hidden = false;
@@ -76,13 +86,22 @@ namespace Desert::Editor
     {
     public:
         explicit FileExplorerPanel( const std::filesystem::path& rootPath,
-                                    Assets::AssetManager*        assetManager = nullptr );
+                                    Assets::AssetManager*        assetManager  = nullptr,
+                                    std::weak_ptr<::Desert::Core::Scene> viewportScene = {} );
         ~FileExplorerPanel() override;
         void OnUIRender() override;
         void OnPreUpdate() override; // polls the current dir for external changes -> auto-refresh
         void OnEvent( Common::Event& e ) override; // OS file drop -> import into the current dir
 
         bool RenderFile( int dirIndex, bool folder, int shownIndex, bool gridView );
+        // Right-click context menu on a file/folder: Open (default app), Show in Explorer, Open folder, etc.
+        void DrawItemContextMenu( DirectoryInformation& entry );
+        // UE-style "Capture Thumbnail": grab the current main-viewport rendered image, center-crop to a
+        // square, downscale, and save it AS this asset's thumbnail (same DiskPath key the grid reads). Lets
+        // the user frame the asset in the scene and use that exact view as the preview.
+        void CaptureThumbnailFromViewport( const std::string& assetPath );
+        // Filtered (m_SearchBuf) + sorted (m_SortMode) child indices for the current directory.
+        std::vector<size_t> BuildDisplayOrder() const;
         void DrawFolder( DirectoryInformation* dirInfo, bool defaultOpen = false );
 
         void DestroyGraphicsResources()
@@ -127,6 +146,18 @@ namespace Desert::Editor
         int    m_GridItemsPerRow;
         float  m_GridSize = 360.0f;
 
+        // Asset filtering + sorting (toolbar).
+        enum class SortMode
+        {
+            Name = 0,
+            DateModified,
+            Type,
+            Size
+        };
+        char     m_SearchBuf[128] = { 0 };
+        SortMode m_SortMode        = SortMode::Name;
+        bool     m_SortDescending  = false;
+
         ImGuiTextFilter m_Filter;
 
         bool m_TextureCreated = false;
@@ -159,6 +190,7 @@ namespace Desert::Editor
         std::unique_ptr<UI::UIHelper>   m_UIHelper;
         std::unique_ptr<ThumbnailCache>          m_Thumbnails;
         std::unique_ptr<AssetThumbnailRenderer>  m_ThumbRenderer; // lazily created (needs the device ready)
+        std::weak_ptr<::Desert::Core::Scene>     m_ViewportScene; // for "Capture Thumbnail from viewport"
         std::unordered_set<std::string>          m_FailedThumbs;  // assets that failed to load -> show icon, no retry spam
 
         // File watcher: cheap throttled poll of the current dir's entry signature -> QueueRefresh on change.

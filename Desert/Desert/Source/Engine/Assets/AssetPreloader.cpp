@@ -11,7 +11,9 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_SKINNED_MESH_EXTENSIONS = { ".skmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_STATIC_MESH_EXTENSIONS  = { ".stmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKELETON_EXTENSIONS     = { ".skeleton" };
-    constexpr std::array<std::string_view, 1> SUPPORTED_MATERIAL_EXTENSIONS     = { ".mat" };
+    // ".mat" = legacy cooker output (read-compat via PBRMaterialAsset::Load); ".demat" = unified flat format
+    // (now written by import too). Both register as PBRMaterialAsset.
+    constexpr std::array<std::string_view, 2> SUPPORTED_MATERIAL_EXTENSIONS     = { ".mat", ".demat" };
     constexpr std::array<std::string_view, 1> SUPPORTED_ANIMATION_EXTENSIONS    = { ".anim" };
     constexpr std::array<std::string_view, 1> SUPPORTED_TEXTURE_EXTENSIONS      = { ".tex" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS       = { ".hdr" };
@@ -39,7 +41,11 @@ namespace Desert::Assets
         {
             namespace fs = std::filesystem;
 
-            for ( const auto& entry : fs::recursive_directory_iterator( rootPath ) )
+            std::error_code ec;
+            if ( !fs::exists( rootPath, ec ) ) // tolerate missing cooked dirs (clean/from-scratch project)
+                return;
+
+            for ( const auto& entry : fs::recursive_directory_iterator( rootPath, ec ) )
             {
                 if ( !entry.is_regular_file() )
                     continue;
@@ -57,7 +63,7 @@ namespace Desert::Assets
                     if ( useRootpath )
                     {
                         std::string       originalPath   = entry.path().string();
-                        const std::string prefixToRemove = "Resources/Textures/";
+                        const std::string prefixToRemove = "Resources/Assets/Textures/";
                         size_t            pos            = originalPath.find( prefixToRemove );
                         if ( pos != std::string::npos )
                         {
@@ -82,11 +88,16 @@ namespace Desert::Assets
 
     void AssetPreloader::PreloadMeshes()
     {
+        // Meshes are scanned as UNPARSED shells (loadAfterCreate=false): the handle is path-derived in the
+        // ctor, so the big .stmesh parse + GPU build are deferred to the first Get (lazy). Textures/materials
+        // are cheap to parse (small metadata) so they load now to expose their stored handle / external id,
+        // but their GPU build is still deferred (RegisterAsset, below).
         ProcessAssetFiles<StaticMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
-                                            SUPPORTED_STATIC_MESH_EXTENSIONS, m_AssetManager, AssetPriority::Low );
+                                            SUPPORTED_STATIC_MESH_EXTENSIONS, m_AssetManager, AssetPriority::Low,
+                                            /*loadAfterCreate=*/false );
 
-        ProcessAssetFiles<TextureAsset>( "Cooked/Textures/", false, SUPPORTED_TEXTURE_EXTENSIONS, m_AssetManager,
-                                         AssetPriority::Low );
+        ProcessAssetFiles<TextureAsset>( Common::Constants::Path::TEXTURE_PATH_COOKED, false,
+                                         SUPPORTED_TEXTURE_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
         ProcessAssetFiles<AnimationAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                            SUPPORTED_ANIMATION_EXTENSIONS, m_AssetManager, AssetPriority::Low );
@@ -94,35 +105,44 @@ namespace Desert::Assets
         ProcessAssetFiles<SkeletonAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                           SUPPORTED_SKELETON_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
+        // Materials are editable CONTENT (Resources/Assets/Materials/...): imported (per-mesh subfolders) and
+        // editor-created both land here. Also scan the cooked mesh tree for back-compat with any legacy
+        // ".mat"/".demat" that older imports wrote there.
+        ProcessAssetFiles<PBRMaterialAsset>( Common::Constants::Path::MATERIAL_PATH, false,
+                                             SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager, AssetPriority::Low );
+
         ProcessAssetFiles<PBRMaterialAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                              SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
         ProcessAssetFiles<SkinnedMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
                                              SUPPORTED_SKINNED_MESH_EXTENSIONS, m_AssetManager,
-                                             AssetPriority::Low );
+                                             AssetPriority::Low, /*loadAfterCreate=*/false );
 
         /* ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
                                           m_AssetManager, AssetPriority::Low );*/
 
         if ( auto manager = m_AssetManager.lock() )
         {
+            // Register SHELLS only — the GPU build (texture upload / mesh buffers / material instance) is
+            // deferred to the first Get (lazy, cascades from a spawned entity). Textures/materials are
+            // loaded first (cheap metadata) so their stored handle / external id is known for the map key.
             for ( const auto& [handle, textureAsset] : manager->FindAllByType<Assets::TextureAsset>() )
             {
                 if ( !textureAsset->IsReadyForUse() )
                     textureAsset->Load();
-                Runtime::ResourceRegistry::GetTextureService()->Register( textureAsset );
+                Runtime::ResourceRegistry::GetTextureService()->RegisterAsset( textureAsset );
             }
 
             for ( const auto& [handle, meshAsset] : manager->FindAllByType<Assets::MeshAsset>() )
             {
-                Runtime::ResourceRegistry::GetMeshService()->Register( meshAsset );
+                Runtime::ResourceRegistry::GetMeshService()->RegisterAsset( meshAsset ); // unparsed shell
             }
 
             for ( const auto& [handle, materialAsset] : manager->FindAllByType<Assets::MaterialAsset>() )
             {
                 if ( !materialAsset->IsReadyForUse() )
                     materialAsset->Load();
-                Runtime::ResourceRegistry::GetMaterialService()->Register( materialAsset );
+                Runtime::ResourceRegistry::GetMaterialService()->RegisterAsset( materialAsset );
             }
         }
     }

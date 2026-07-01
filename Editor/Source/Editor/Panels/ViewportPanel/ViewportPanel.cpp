@@ -1,10 +1,15 @@
 #include "ViewportPanel.hpp"
+#include <Editor/Core/DragPayloads.hpp>
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
+#include <Editor/Core/Selection/ViewportMode.hpp>
+#include <Editor/Core/Selection/FoliagePaint.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
 #include <Editor/Import/MeshDnD.hpp>
+#include <Editor/Import/MeshMaterial.hpp>
+#include <Editor/Import/AsyncMeshLoader.hpp>
 #include <filesystem>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
@@ -13,6 +18,9 @@
 #include <functional>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Image.hpp>
@@ -22,6 +30,11 @@
 
 #include <ImGuizmo.h>
 #include <glm/gtx/matrix_decompose.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
+#include <limits>
+#include <random>
 
 #include <cmath>
 #include <algorithm>
@@ -37,10 +50,70 @@ namespace Desert::Editor
         m_UIHelper->Init();
 
         m_LightGizmoRenderer = std::make_unique<LightGizmoRenderer>( scene );
+        m_AsyncLoader        = std::make_unique<AsyncMeshLoader>(); // starts the background cook worker
+    }
+
+    // Out-of-line so unique_ptr<AsyncMeshLoader> destroys with the complete type (joins the worker thread).
+    ViewportPanel::~ViewportPanel() = default;
+
+    void ViewportPanel::UpdateAsyncLoads()
+    {
+        if ( !m_AsyncLoader || !m_AssetManager )
+            return;
+
+        auto& mgr = const_cast<Assets::AssetManager&>( *m_AssetManager );
+        for ( const auto& done : m_AsyncLoader->PollCompleted() )
+        {
+            // The cook finished on the worker -> the main-thread register is now fast (already cooked). Spawn
+            // the matching component: a rigged source becomes a SkinnedMesh (+ Animation) so a character can be
+            // animated; everything else stays a StaticMesh + gets the pack's sidecar material.
+            const auto resolved = MeshDnD::ResolveOrImportMesh( mgr, done.SourcePath );
+            if ( resolved.Handle.IsNull() )
+                continue;
+            if ( auto ref = m_Scene->FindEntityByID( Common::UUID( done.UserData ) ); ref )
+            {
+                ECS::Entity e = ref->get(); // Entity is a lightweight value handle -> copy to operate mutably
+                if ( resolved.Skinned )
+                {
+                    // Swap the pending StaticMeshComponent for a skinned one + an Animator, so the rig renders
+                    // and its clips can be picked in Details immediately.
+                    if ( e.HasComponent<ECS::StaticMeshComponent>() )
+                        e.RemoveComponent<ECS::StaticMeshComponent>();
+                    if ( !e.HasComponent<ECS::SkinnedMeshComponent>() )
+                        e.AddComponent<ECS::SkinnedMeshComponent>();
+                    e.GetComponent<ECS::SkinnedMeshComponent>().MeshHandle = resolved.Handle;
+                    if ( !e.HasComponent<ECS::AnimationComponent>() )
+                        e.AddComponent<ECS::AnimationComponent>();
+                }
+                else
+                {
+                    if ( e.HasComponent<ECS::StaticMeshComponent>() )
+                        e.GetComponent<ECS::StaticMeshComponent>().MeshHandle = resolved.Handle;
+                    ApplySidecarMaterial( e, done.SourcePath );
+                }
+            }
+        }
+
+        // Progress overlay while background cooks are in flight (top-left of the viewport).
+        if ( m_AsyncLoader->IsBusy() )
+        {
+            ImGui::SetNextWindowBgAlpha( 0.85f );
+            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 14.0f,
+                                             m_ViewportData.ViewportPos.y + 14.0f ) );
+            ImGui::Begin( "##AsyncLoadOverlay", nullptr,
+                          ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                              ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing );
+            ImGui::Text( "Loading meshes  %d / %d", m_AsyncLoader->Done2(), m_AsyncLoader->Total() );
+            ImGui::ProgressBar( m_AsyncLoader->Progress(), ImVec2( 220.0f, 0.0f ) );
+            ImGui::End();
+        }
     }
 
     void ViewportPanel::OnUIRender()
     {
+        UpdateAsyncLoads(); // spawn any meshes whose background cook just finished (+ progress bar)
+
         const auto& mainCamera = m_Scene->GetMainCamera().lock();
         if ( !mainCamera )
         {
@@ -84,70 +157,99 @@ namespace Desert::Editor
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
 
-        // Blender-style mode toggle (Object/Scene <-> Skeleton Edit). Drawn as a FLOATING overlay window
-        // anchored to the viewport's top-left so it sits ON TOP of the viewport image and never slips behind
-        // the editor toolbar. Only meaningful for a selected skinned mesh; disabled otherwise.
+        // UE5-style viewport toolbar (floating overlay, top-left): a MODE dropdown (Select / Foliage), the
+        // contextual Skeleton-Edit toggle (Select mode + skinned mesh only), and a gear popup for the editor
+        // camera settings (speed). Replaces the old single "Object Mode" button + always-on speed slider.
         {
             bool canEditSkeleton = false;
             if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
                 if ( auto ref = m_Scene->FindEntityByID( *sel ); ref )
                     canEditSkeleton = ref->get().HasComponent<ECS::SkinnedMeshComponent>();
 
-            if ( !canEditSkeleton )
-                Core::SkeletonEditMode::SetActive( false ); // auto-exit when the selection isn't a skinned mesh
+            // Skeleton edit only makes sense in Select mode on a skinned mesh.
+            if ( !canEditSkeleton || Core::ViewportMode::Get() != Core::EditorMode::Select )
+                Core::SkeletonEditMode::SetActive( false );
 
-            const bool active = Core::SkeletonEditMode::IsActive();
-
-            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 10.0f,
-                                             m_ViewportData.ViewportPos.y + 10.0f ) );
-            ImGui::SetNextWindowBgAlpha( 0.55f );
+            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 12.0f,
+                                             m_ViewportData.ViewportPos.y + 12.0f ) );
             const ImGuiWindowFlags overlayFlags =
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+
+            // Polished, rounded, padded toolbar (a flat semi-auto-resized box read as "crude" before).
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowRounding, 6.0f );
+            ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 5.0f );
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 7.0f, 5.0f ) );
+            ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 6.0f, 4.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_WindowBg, ImVec4( 0.10f, 0.10f, 0.12f, 0.88f ) );
+            ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0.18f, 0.18f, 0.21f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.18f, 0.18f, 0.21f, 1.0f ) );
+
             if ( ImGui::Begin( "##ViewportModeOverlay", nullptr, overlayFlags ) )
             {
-                if ( !canEditSkeleton )
-                    ImGui::BeginDisabled();
-                if ( active )
-                    ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.85f, 0.45f, 0.1f, 1.0f ) );
-                if ( ImGui::Button( active ? ICON_MDI_BONE "  Skeleton Edit" : ICON_MDI_HUMAN "  Object Mode" ) )
-                    Core::SkeletonEditMode::Toggle();
-                if ( active )
-                    ImGui::PopStyleColor();
-                if ( !canEditSkeleton )
-                    ImGui::EndDisabled();
+                // --- Mode dropdown ---
+                const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage" };
+                int         mode     = static_cast<int>( Core::ViewportMode::Get() );
+                ImGui::SetNextItemWidth( 128.0f );
+                if ( ImGui::Combo( "##ViewportMode", &mode, kModes, IM_ARRAYSIZE( kModes ) ) )
+                    Core::ViewportMode::Set( static_cast<Core::EditorMode>( mode ) );
 
-                // In Skeleton Edit, a toggle for showing ALL bone names (default: only the selected bone, so
-                // dense rigs don't overlap every label into an unreadable blob).
-                if ( active )
+                // --- Select mode: contextual Skeleton-Edit toggle (skinned mesh only) ---
+                if ( Core::ViewportMode::Get() == Core::EditorMode::Select && canEditSkeleton )
                 {
+                    const bool active = Core::SkeletonEditMode::IsActive();
                     ImGui::SameLine();
-                    bool showNames = Core::SkeletonEditMode::ShowAllNames();
-                    if ( ImGui::Checkbox( "Names", &showNames ) )
-                        Core::SkeletonEditMode::SetShowAllNames( showNames );
+                    if ( active )
+                        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.85f, 0.45f, 0.1f, 1.0f ) );
+                    if ( ImGui::Button( ICON_MDI_BONE "  Skeleton" ) )
+                        Core::SkeletonEditMode::Toggle();
+                    if ( active )
+                        ImGui::PopStyleColor();
+                    if ( active )
+                    {
+                        ImGui::SameLine();
+                        bool showNames = Core::SkeletonEditMode::ShowAllNames();
+                        if ( ImGui::Checkbox( "Names", &showNames ) )
+                            Core::SkeletonEditMode::SetShowAllNames( showNames );
+                    }
                 }
 
-                // Editor fly-camera speed (only while the active camera IS the editor camera, i.e. not Play).
-                if ( auto cam = m_Scene->GetMainCamera().lock() )
+                // --- Editor camera settings (speed) behind a gear button ---
+                ImGui::SameLine();
+                if ( ImGui::Button( ICON_MDI_COG "##CamSettings" ) )
+                    ImGui::OpenPopup( "##EditorCameraSettings" );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Editor camera settings" );
+                if ( ImGui::BeginPopup( "##EditorCameraSettings" ) )
                 {
-                    if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                    ImGui::TextUnformatted( "Editor Camera" );
+                    ImGui::Separator();
+                    if ( auto cam = m_Scene->GetMainCamera().lock() )
                     {
-                        float spd = editorCam->GetMovementSpeed();
-                        ImGui::SetNextItemWidth( 110.0f );
-                        if ( ImGui::SliderFloat( ICON_MDI_CAMERA "##CamSpeed", &spd, 0.1f, 10.0f, "%.2fx" ) )
-                            editorCam->SetMovementSpeed( spd );
-                        if ( ImGui::IsItemHovered() )
-                            ImGui::SetTooltip( "Editor camera speed" );
+                        if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                        {
+                            float spd = editorCam->GetMovementSpeed();
+                            ImGui::SetNextItemWidth( 160.0f );
+                            if ( ImGui::SliderFloat( "Speed", &spd, 0.1f, 10.0f, "%.2fx" ) )
+                                editorCam->SetMovementSpeed( spd );
+                        }
+                        else
+                        {
+                            ImGui::TextDisabled( "(only in editor view, not Play)" );
+                        }
                     }
+                    ImGui::EndPopup();
                 }
             }
             ImGui::End();
+            ImGui::PopStyleColor( 3 );
+            ImGui::PopStyleVar( 4 );
         }
 
         // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
         if ( ImGui::BeginDragDropTarget() )
         {
-            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "PREFAB_FILE" ); payload && m_AssetManager )
+            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::PrefabFile ); payload && m_AssetManager )
             {
                 const std::string path( static_cast<const char*>( payload->Data ),
                                         payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
@@ -165,19 +267,19 @@ namespace Desert::Editor
 
             // Drag a mesh source (.obj/.fbx/.gltf/...) from the File Explorer onto the viewport to spawn it
             // as a new entity. Cooks the source on demand (see MeshDnD).
-            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "MESH_ASSET" ); payload && m_AssetManager )
+            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MeshAsset ); payload && m_AssetManager )
             {
                 const std::string path( static_cast<const char*>( payload->Data ),
                                         payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
-                auto&      mgr    = const_cast<Assets::AssetManager&>( *m_AssetManager );
-                const auto handle = MeshDnD::ResolveOrImport( mgr, path );
-                if ( !handle.IsNull() )
-                {
-                    const std::string name = std::filesystem::path( path ).stem().string();
-                    auto&             e    = m_Scene->CreateNewEntity( std::string( name ) );
-                    e.AddComponent<ECS::StaticMeshComponent>().MeshHandle = handle;
-                    Core::SelectionManager::SetSelected( e.GetComponent<ECS::UUIDComponent>().UUID );
-                }
+
+                // ASYNC spawn: create the (empty) entity NOW and cook the mesh on a worker thread so a heavy
+                // FBX doesn't hitch the editor. UpdateAsyncLoads() assigns the mesh once the cook finishes.
+                const std::string name = std::filesystem::path( path ).stem().string();
+                auto&             e    = m_Scene->CreateNewEntity( std::string( name ) );
+                e.AddComponent<ECS::StaticMeshComponent>(); // pending: no MeshHandle until the cook completes
+                const auto uuid = e.GetComponent<ECS::UUIDComponent>().UUID;
+                Core::SelectionManager::SetSelected( uuid );
+                m_AsyncLoader->Request( path, static_cast<uint64_t>( uuid ) );
             }
             ImGui::EndDragDropTarget();
         }
@@ -195,30 +297,65 @@ namespace Desert::Editor
             }
         }
         if ( terrainEntity )
-            DrawTerrainPaintOverlay( *terrainEntity );
+            m_TerrainTool.DrawOverlay( *terrainEntity );
 
-        const bool painting = terrainEntity && m_TerrainBrush.Enabled;
+        const bool painting = terrainEntity && m_TerrainTool.BrushEnabled();
 
-        // Handle gizmos
-        m_GizmoHovered = false;
-        if ( Core::SkeletonEditMode::IsActive() )
+        const bool foliageMode = Core::ViewportMode::Get() == Core::EditorMode::Foliage;
+
+        // Handle gizmos (Select mode only — Foliage mode uses LMB to paint, not to gizmo/pick).
+        m_Gizmo.ResetHovered();
+        if ( !foliageMode )
         {
-            RenderBoneGizmo(); // skeleton edit owns the gizmo (edits the selected bone, not the object)
-        }
-        else if ( m_GizmoType != GizmoType::None && !painting )
-        {
-            RenderGizmo();
+            if ( Core::SkeletonEditMode::IsActive() )
+            {
+                // skeleton edit owns the gizmo (edits the selected bone, not the object)
+                m_Gizmo.RenderBone( *m_Scene, m_ViewportData.ViewportPos, m_ViewportData.Size );
+            }
+            else if ( m_Gizmo.IsActive() && !painting )
+            {
+                m_Gizmo.RenderObject( *m_Scene, m_ViewportData.ViewportPos, m_ViewportData.Size );
+            }
         }
 
         if ( painting && m_ViewportData.IsHovered )
         {
             // Replace the OS pointer with the brush: hide the arrow and draw the world-space radius ring.
             ImGui::SetMouseCursor( ImGuiMouseCursor_None );
-            DrawBrushRing( *terrainEntity );
+            if ( const auto& camera = m_Scene->GetMainCamera().lock() )
+            {
+                auto [mx, my]  = GetMouseViewportSpace();
+                const auto ray = Common::Math::Ray::FromScreenPosition(
+                     { mx, my }, camera->GetProjectionMatrix(), camera->GetViewMatrix(),
+                     camera->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
+                     static_cast<uint32_t>( m_ViewportData.Size.y ) );
+                const glm::mat4 viewProj = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+                m_TerrainTool.DrawRing( ray, *terrainEntity, viewProj, m_ViewportData.Size,
+                                        m_ViewportData.ViewportPos );
 
-            if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) &&
-                 !ImGui::IsAnyItemActive() ) // don't paint while dragging the brush sliders
-                PaintTerrainAtCursor( *terrainEntity );
+                if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) &&
+                     !ImGui::IsAnyItemActive() ) // don't paint while dragging the brush sliders
+                    m_TerrainTool.Paint( ray, *terrainEntity );
+            }
+        }
+
+        // --- Foliage paint mode: type panel + LMB scatter/erase (FoliagePaintTool) ---
+        if ( foliageMode )
+        {
+            m_FoliageTool.DrawPanel( *m_Scene, m_AssetManager, m_ViewportData.ViewportPos );
+            if ( m_ViewportData.IsHovered && Core::FoliagePaint::HasActive() &&
+                 ImGui::IsMouseDown( ImGuiMouseButton_Left ) && !ImGui::IsAnyItemActive() )
+            {
+                if ( const auto& camera = m_Scene->GetMainCamera().lock() )
+                {
+                    auto [mx, my]  = GetMouseViewportSpace();
+                    const auto ray = Common::Math::Ray::FromScreenPosition(
+                         { mx, my }, camera->GetProjectionMatrix(), camera->GetViewMatrix(),
+                         camera->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
+                         static_cast<uint32_t>( m_ViewportData.Size.y ) );
+                    m_FoliageTool.Paint( *m_Scene, ray );
+                }
+            }
         }
 
         // Editor gizmos (light/camera icons + frustums) are authoring aids — hide them in Play/Paused so the
@@ -238,273 +375,12 @@ namespace Desert::Editor
 
         // Re-upload edited splat maps here (before any recording) so we never release a GPU image that is
         // still bound to an in-flight command buffer.
-        UploadDirtySplatMaps();
-    }
-
-    void ViewportPanel::RenderGizmo()
-    {
-        // NOTE: ImGuizmo::BeginFrame() is issued once per frame by EditorLayer, before any panel runs.
-        const auto& mainCamera = m_Scene->GetMainCamera().lock();
-        if ( !mainCamera )
-            return;
-
-        const auto& selected = Core::SelectionManager::GetSelected();
-        if ( !selected )
-            return;
-
-        const auto& selectedEntityOpt = m_Scene->FindEntityByID( *selected );
-        if ( !selectedEntityOpt )
-            return;
-
-        auto& selectedEntity = selectedEntityOpt->get();
-
-        // If the Mesh Editor is open and editing this entity, vertex editing owns the (global) ImGuizmo
-        // interaction — drawing the object gizmo here would steal the drag and move the whole object.
-        if ( auto* meshEditor = MeshEditorPanel::GetInstance();
-             meshEditor && meshEditor->IsActivelyEditing( selectedEntity ) )
-            return;
-
-        auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
-
-        // The gizmo must work in WORLD space. For a CHILD entity (e.g. a camera parented to the character),
-        // the world transform = parentWorld * local, and an edit must be converted back to LOCAL before
-        // writing. parentWorld = identity for a root entity (so this is a no-op there).
-        glm::mat4  parentWorld( 1.0f );
-        auto&      reg  = m_Scene->GetRegistry();
-        const auto self = selectedEntity.GetHandle();
-        if ( reg.has<ECS::RelationshipComponent>( self ) )
-        {
-            std::vector<entt::entity> chain; // [parent, grandparent, ... root]
-            entt::entity              cur = reg.get<ECS::RelationshipComponent>( self ).Parent;
-            while ( cur != entt::null )
-            {
-                chain.push_back( cur );
-                cur = reg.has<ECS::RelationshipComponent>( cur ) ? reg.get<ECS::RelationshipComponent>( cur ).Parent
-                                                                 : entt::null;
-            }
-            for ( auto it = chain.rbegin(); it != chain.rend(); ++it ) // root -> ... -> parent
-                if ( reg.has<ECS::TransformComponent>( *it ) )
-                    parentWorld = parentWorld * reg.get<ECS::TransformComponent>( *it ).GetTransform();
-        }
-
-        auto modelMatrix = parentWorld * transformComponent.GetTransform(); // world transform for the gizmo
-
-        // SetRect MUST match the rendered scene-image rect (content region), NOT the raw window rect —
-        // GetWindowPos()/GetWindowWidth() include the tab bar + padding, which would offset the gizmo from
-        // the object and throw the handle hit-test off (gizmo "drawn wrong" / won't grab). The image is drawn
-        // at m_ViewportData.ViewportPos with m_ViewportData.Size (see the Image() call), so use those.
-        ImGuizmo::SetOrthographic( false );
-        ImGuizmo::SetDrawlist();
-        ImGuizmo::SetRect( m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y, m_ViewportData.Size.x,
-                           m_ViewportData.Size.y );
-
-        const auto& view = mainCamera->GetViewMatrix();
-        const auto& proj = mainCamera->GetProjectionMatrix();
-
-        // Vertex-level editing now lives entirely in the Mesh Editor panel's own viewport; the main
-        // viewport only manipulates whole objects.
-
-        // --- STANDARD OBJECT GIZMO ---
-        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( m_GizmoType ),
-                                   ImGuizmo::WORLD, &modelMatrix[0][0] ) )
-        {
-            if ( ImGuizmo::IsOver() )
-            {
-                m_GizmoHovered = true;
-            }
-
-            // Convert the manipulated WORLD matrix back to the entity's LOCAL space (inverse parent) before
-            // decomposing — so dragging a child entity edits its local offset correctly.
-            const glm::mat4 localMatrix = glm::inverse( parentWorld ) * modelMatrix;
-
-            glm::vec3 scale, translation, skew;
-            glm::quat rotation;
-            glm::vec4 perspective;
-            glm::decompose( localMatrix, scale, rotation, translation, skew, perspective );
-
-            transformComponent.Translation = translation;
-            transformComponent.Rotation    = glm::eulerAngles( rotation );
-            transformComponent.Scale       = scale;
-        }
-    }
-
-    void ViewportPanel::RenderBoneGizmo()
-    {
-        const auto& mainCamera = m_Scene->GetMainCamera().lock();
-        if ( !mainCamera )
-            return;
-
-        const int boneIdx = Core::SkeletonEditMode::GetSelectedBone();
-        if ( boneIdx < 0 )
-            return;
-
-        const auto& selected = Core::SelectionManager::GetSelected();
-        if ( !selected )
-            return;
-        const auto& entOpt = m_Scene->FindEntityByID( *selected );
-        if ( !entOpt )
-            return;
-        auto& entity = entOpt->get();
-        if ( !entity.HasComponent<ECS::SkinnedMeshComponent>() )
-            return;
-
-        auto& smc  = entity.GetComponent<ECS::SkinnedMeshComponent>();
-        auto* mesh = Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
-        if ( !mesh || !mesh->IsSkinned() )
-            return;
-        auto* skeleton = static_cast<SkinnedMesh*>( mesh )->GetSkeletonMutable();
-        auto& bones    = skeleton->GetBonesMutable();
-        if ( boneIdx >= static_cast<int>( bones.size() ) )
-            return;
-
-        const glm::mat4 entityWorld = entity.GetComponent<ECS::TransformComponent>().GetTransform();
-
-        // Chain global bind per bone (parent chain of LocalBindTransform) — the SAME space the mesh is
-        // skinned in (bind matrix = chainGlobal * OffsetMatrix), so the gizmo sits on the bone as rendered.
-        std::vector<glm::mat4>             chainGlobal( bones.size(), glm::mat4( 1.0f ) );
-        std::vector<bool>                  done( bones.size(), false );
-        std::function<glm::mat4( size_t )> resolve = [&]( size_t i ) -> glm::mat4
-        {
-            if ( done[i] )
-                return chainGlobal[i];
-            glm::mat4 g = bones[i].LocalBindTransform;
-            if ( bones[i].ParentBoneID.has_value() && bones[i].ParentBoneID.value() < bones.size() )
-                g = resolve( bones[i].ParentBoneID.value() ) * bones[i].LocalBindTransform;
-            chainGlobal[i] = g;
-            done[i]        = true;
-            return g;
-        };
-
-        glm::mat4 gizmoWorld = entityWorld * resolve( static_cast<size_t>( boneIdx ) );
-
-        ImGuizmo::SetOrthographic( false );
-        ImGuizmo::SetDrawlist();
-        ImGuizmo::SetRect( m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y, m_ViewportData.Size.x,
-                           m_ViewportData.Size.y );
-
-        const auto& view = mainCamera->GetViewMatrix();
-        const auto& proj = mainCamera->GetProjectionMatrix();
-        // Scale on a bone's rest pose is rarely wanted; default None/Scale to Translate.
-        const auto op = ( m_GizmoType == GizmoType::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
-
-        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, ImGuizmo::WORLD, &gizmoWorld[0][0] ) )
-        {
-            m_GizmoHovered = ImGuizmo::IsOver();
-
-            // Edit ONLY this bone's LocalBindTransform (relative to its parent's unchanged chain global).
-            // Descendants follow automatically (their local is unchanged → their chain global shifts with the
-            // parent), and the mesh follows too (it is skinned with chainGlobal * OffsetMatrix). OffsetMatrix
-            // is the imported inverse-bind and is intentionally LEFT ALONE.
-            const glm::mat4 newGlobalMesh = glm::inverse( entityWorld ) * gizmoWorld;
-            glm::mat4       parentGlobal( 1.0f );
-            if ( bones[boneIdx].ParentBoneID.has_value() &&
-                 bones[boneIdx].ParentBoneID.value() < bones.size() )
-                parentGlobal = resolve( bones[boneIdx].ParentBoneID.value() );
-            bones[boneIdx].LocalBindTransform = glm::inverse( parentGlobal ) * newGlobalMesh;
-        }
+        m_TerrainTool.UploadDirtySplatMaps( *m_Scene );
     }
 
     std::pair<float, float> ViewportPanel::GetMouseViewportSpace() const
     {
         return { m_ViewportData.MousePosition.x, m_ViewportData.MousePosition.y };
-    }
-
-    void ViewportPanel::HandleObjectPicking()
-    {
-        const auto& mainCamera = m_Scene->GetMainCamera().lock();
-        if ( !mainCamera )
-        {
-            return;
-        }
-
-        if ( m_GizmoHovered )
-        {
-            return;
-        }
-
-        // not over viewport
-        if ( !m_ViewportData.IsHovered )
-        {
-            return;
-        }
-        auto [mouseX, mouseY] = GetMouseViewportSpace();
-        const auto ray        = Common::Math::Ray::FromScreenPosition(
-             { mouseX, mouseY }, mainCamera->GetProjectionMatrix(), mainCamera->GetViewMatrix(),
-             mainCamera->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
-             static_cast<uint32_t>( m_ViewportData.Size.y ) );
-
-        float        closestT = std::numeric_limits<float>::max();
-        Common::UUID selectedUUID;
-
-        const auto entities = m_Scene->GetAllEntities();
-        auto&      registry = m_Scene->GetRegistry();
-
-        std::vector<std::pair<Common::UUID, std::pair<glm::mat4, Desert::Mesh*>>> allMeshes;
-
-        for ( const auto& entity : entities )
-        {
-            if ( entity.HasComponent<ECS::StaticMeshComponent>() )
-            {
-                const auto mesh = GetMeshComponent( entity.GetComponent<ECS::StaticMeshComponent>() );
-                if ( !mesh )
-                {
-                    continue;
-                }
-
-                allMeshes.push_back( { entity.GetComponent<ECS::UUIDComponent>().UUID,
-                                       { entity.GetWorldTransform(), mesh } } );
-            }
-        }
-
-        for ( const auto& [uuid, meshData] : allMeshes )
-        {
-            const auto& [transform, mesh] = meshData;
-            float t                       = 0.0f;
-            auto  localRay                = ray.ToLocalSpace( transform );
-
-            for ( const auto& submesh : mesh->GetSubmeshes() )
-            {
-                if ( localRay.IntersectsAABB( submesh.BoundingBox, t ) )
-                {
-                    if ( t < closestT )
-                    {
-                        selectedUUID = uuid;
-                        closestT     = t;
-                    }
-                }
-            }
-        }
-
-        if ( closestT != std::numeric_limits<float>::max() )
-        {
-            // If the hit entity is a child of a prefab, select the prefab root so the
-            // entire prefab gets outlined instead of just one submesh.
-            auto hitEntityRef = m_Scene->FindEntityByID( selectedUUID );
-            if ( hitEntityRef )
-            {
-                const ECS::Entity& hitEntity = hitEntityRef->get();
-                if ( !hitEntity.HasComponent<ECS::PrefabComponent>() )
-                {
-                    entt::entity current = hitEntity.GetHandle();
-
-                    while ( registry.has<ECS::RelationshipComponent>( current ) )
-                    {
-                        const auto& rel = registry.get<ECS::RelationshipComponent>( current );
-                        if ( rel.Parent == entt::null )
-                            break;
-                        current = rel.Parent;
-                        if ( registry.has<ECS::PrefabComponent>( current ) &&
-                             registry.has<ECS::UUIDComponent>( current ) )
-                        {
-                            selectedUUID = registry.get<ECS::UUIDComponent>( current ).UUID;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            Core::SelectionManager::SetSelected( selectedUUID );
-        }
     }
 
     void ViewportPanel::OnEvent( Common::Event& e )
@@ -531,10 +407,12 @@ namespace Desert::Editor
 
     bool ViewportPanel::OnMousePressed( Common::MouseButtonPressedEvent& e )
     {
-        // While the terrain brush is active, LMB paints (handled in OnUIRender) — don't also pick/select.
-        if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainBrush.Enabled )
+        // LMB picks/selects ONLY in Select mode and when no brush is active (terrain brush / Foliage paint
+        // both consume LMB in OnUIRender instead).
+        if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() &&
+             Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered )
         {
-            HandleObjectPicking();
+            m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size, m_Gizmo.IsHovered() );
         }
 
         return false;
@@ -545,250 +423,42 @@ namespace Desert::Editor
         switch ( e.GetKeyCode() )
         {
             case Common::KeyCode::Escape:
-                m_GizmoType = GizmoType::None;
+                m_Gizmo.SetOperation( Tools::GizmoController::Operation::None );
                 break;
             case Common::KeyCode::T:
-                m_GizmoType = GizmoType::Translate;
+                m_Gizmo.SetOperation( Tools::GizmoController::Operation::Translate );
                 break;
             case Common::KeyCode::R:
-                m_GizmoType = GizmoType::Rotate;
+                m_Gizmo.SetOperation( Tools::GizmoController::Operation::Rotate );
                 break;
             case Common::KeyCode::C:
-                m_GizmoType = GizmoType::Scale;
+                m_Gizmo.SetOperation( Tools::GizmoController::Operation::Scale );
                 break;
         }
         return false;
     }
 
-    Desert::Mesh* ViewportPanel::GetMeshComponent( const ECS::StaticMeshComponent& component )
+    void ViewportPanel::ApplySidecarMaterial( ECS::Entity& entity, const std::string& meshSourcePath )
     {
-        if ( component.MeshHandle )
-            return Runtime::ResourceRegistry::GetMeshService()->Get( component.MeshHandle );
-        if ( component.RuntimeMesh )
-            return component.RuntimeMesh.get(); // edited geometry (per-entity)
-        if ( component.Primitive.has_value() )
-            return Geometry::PrimitiveMeshFactory::GetShared( component.Primitive.value() ); // shared primitive
-        return nullptr;
-    }
-
-    void ViewportPanel::DrawTerrainPaintOverlay( const ECS::Entity& terrainEntity )
-    {
-        auto& comp = terrainEntity.GetComponent<ECS::TerrainComponent>();
-
-        // Floating overlay anchored to the viewport's top-left corner. Generous padding + a size that fits
-        // all controls and the hint text without scrolling.
-        ImGui::SetCursorPos( ImVec2( ImGui::GetWindowContentRegionMin().x + 12.0f,
-                                     ImGui::GetWindowContentRegionMin().y + 12.0f ) );
-        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 12.0f, 12.0f ) );
-        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8.0f, 8.0f ) );
-        ImGui::BeginChild( "##TerrainPaint", ImVec2( 320.0f, 260.0f ), true );
-
-        ImGui::TextUnformatted( "Terrain Paint" );
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::Checkbox( "Enable Brush", &m_TerrainBrush.Enabled );
-
-        const char* layers[] = { "Grass (R)", "Rock (G)", "Snow (B)" };
-        ImGui::SetNextItemWidth( 180.0f );
-        ImGui::Combo( "Layer", &m_TerrainBrush.Layer, layers, 3 );
-        ImGui::SetNextItemWidth( 180.0f );
-        ImGui::SliderFloat( "Radius", &m_TerrainBrush.Radius, 0.5f, comp.Data.Size, "%.1f m" );
-        ImGui::SetNextItemWidth( 180.0f );
-        ImGui::SliderFloat( "Strength", &m_TerrainBrush.Strength, 0.0f, 1.0f );
-        ImGui::Checkbox( "Erase", &m_TerrainBrush.Erase );
-
-        ImGui::Spacing();
-        if ( ImGui::Button( "Clear Splat", ImVec2( 180.0f, 0.0f ) ) )
-        {
-            const uint32_t res = ECS::TerrainComponent::SplatResolution;
-            comp.SplatPixels.assign( static_cast<size_t>( res ) * res * 4, 0 );
-            comp.SplatDirty = true;
-        }
-
-        ImGui::Spacing();
-        ImGui::TextDisabled( "Set the layer to 'Manual' in Details" );
-        ImGui::TextDisabled( "to see painted weights. Hold LMB" );
-        ImGui::TextDisabled( "and drag to paint." );
-
-        ImGui::EndChild();
-        ImGui::PopStyleVar( 2 );
-    }
-
-    bool ViewportPanel::TerrainPickPoint( const ECS::Entity& terrainEntity, glm::vec3& outHit ) const
-    {
-        const auto& camera = m_Scene->GetMainCamera().lock();
-        if ( !camera )
-            return false;
-
-        const auto& tf = terrainEntity.GetComponent<ECS::TransformComponent>();
-
-        auto [mouseX, mouseY] = GetMouseViewportSpace();
-        const auto ray        = Common::Math::Ray::FromScreenPosition(
-             { mouseX, mouseY }, camera->GetProjectionMatrix(), camera->GetViewMatrix(),
-             camera->GetPosition(), static_cast<uint32_t>( m_ViewportData.Size.x ),
-             static_cast<uint32_t>( m_ViewportData.Size.y ) );
-
-        // Intersect with the horizontal plane at the terrain's base height. The splat map is XZ-indexed,
-        // so the plane hit (ignoring displacement) is a good-enough position for v1.
-        if ( std::abs( ray.Direction.y ) < 1e-5f )
-            return false;
-        const float t = ( tf.Translation.y - ray.Origin.y ) / ray.Direction.y;
-        if ( t <= 0.0f )
-            return false;
-        outHit = ray.GetPoint( t );
-        return true;
-    }
-
-    void ViewportPanel::PaintTerrainAtCursor( const ECS::Entity& terrainEntity )
-    {
-        auto& comp = terrainEntity.GetComponent<ECS::TerrainComponent>();
-        auto& tf   = terrainEntity.GetComponent<ECS::TransformComponent>();
-
-        const float    size = comp.Data.Size;
-        const uint32_t res  = ECS::TerrainComponent::SplatResolution;
-        if ( size <= 0.0f )
-            return;
-        if ( comp.SplatPixels.empty() )
-            comp.SplatPixels.assign( static_cast<size_t>( res ) * res * 4, 0 );
-
-        glm::vec3 hit;
-        if ( !TerrainPickPoint( terrainEntity, hit ) )
+        if ( !m_AssetManager )
             return;
 
-        // Terrain-local UV (matches the shader's splat UV: (worldXZ - modelTranslationXZ)/Size + 0.5).
-        const float u = ( hit.x - tf.Translation.x ) / size + 0.5f;
-        const float v = ( hit.z - tf.Translation.z ) / size + 0.5f;
-        if ( u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f )
+        const auto h = MeshMaterial::ResolveSidecar( const_cast<Assets::AssetManager&>( *m_AssetManager ),
+                                                     meshSourcePath );
+        if ( h.IsNull() )
             return;
 
-        const int   cx       = static_cast<int>( u * res );
-        const int   cy       = static_cast<int>( v * res );
-        const float radiusPx = ( m_TerrainBrush.Radius / size ) * res;
-        const int   channel  = std::clamp( m_TerrainBrush.Layer, 0, 2 ); // R=grass, G=rock, B=snow
-        const int   r        = static_cast<int>( std::ceil( radiusPx ) );
-        const float sign     = m_TerrainBrush.Erase ? -1.0f : 1.0f;
-
-        for ( int dy = -r; dy <= r; ++dy )
-        {
-            for ( int dx = -r; dx <= r; ++dx )
-            {
-                const int px = cx + dx;
-                const int py = cy + dy;
-                if ( px < 0 || py < 0 || px >= (int)res || py >= (int)res )
-                    continue;
-                const float dist = std::sqrt( static_cast<float>( dx * dx + dy * dy ) );
-                if ( dist > radiusPx )
-                    continue;
-                const float  falloff = 1.0f - dist / glm::max( radiusPx, 0.0001f );
-                const size_t idx     = ( static_cast<size_t>( py ) * res + px ) * 4 + channel;
-                const float  cur     = static_cast<float>( comp.SplatPixels[idx] );
-                // Builds up over the frames the button is held (not instant).
-                const float  delta   = sign * m_TerrainBrush.Strength * falloff * 60.0f;
-                comp.SplatPixels[idx] =
-                     static_cast<unsigned char>( glm::clamp( cur + delta, 0.0f, 255.0f ) );
-            }
-        }
-        comp.SplatDirty = true;
+        // Assign to every material slot (one per submesh).
+        auto&  smc   = entity.GetComponent<ECS::StaticMeshComponent>();
+        size_t count = 1;
+        if ( auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( smc.MeshHandle ) )
+            if ( const auto n = meshAsset->GetMaterialHandles().size(); n > 0 )
+                count = n;
+        smc.MaterialSlots.assign( count, h );
+        smc.RuntimeMaterialInstances.clear();
     }
 
-    void ViewportPanel::DrawBrushRing( const ECS::Entity& terrainEntity )
-    {
-        const auto& camera = m_Scene->GetMainCamera().lock();
-        if ( !camera )
-            return;
 
-        glm::vec3 center;
-        if ( !TerrainPickPoint( terrainEntity, center ) )
-            return;
 
-        const glm::mat4 mvp   = camera->GetProjectionMatrix() * camera->GetViewMatrix();
-        const float     w     = m_ViewportData.Size.x;
-        const float     h     = m_ViewportData.Size.y;
-        const glm::vec2 vpPos = m_ViewportData.ViewportPos;
-
-        const auto toScreen = [&]( const glm::vec3& world, ImVec2& out ) -> bool
-        {
-            const glm::vec4 clip = mvp * glm::vec4( world, 1.0f );
-            if ( clip.w <= 1e-4f )
-                return false;
-            const glm::vec3 ndc = glm::vec3( clip ) / clip.w;
-            out = ImVec2( vpPos.x + ( ndc.x * 0.5f + 0.5f ) * w,
-                          vpPos.y + ( 1.0f - ( ndc.y * 0.5f + 0.5f ) ) * h );
-            return true;
-        };
-
-        constexpr int N      = 48;
-        const float   radius = m_TerrainBrush.Radius;
-        ImVec2        pts[N];
-        for ( int i = 0; i < N; ++i )
-        {
-            const float a = static_cast<float>( i ) / N * 2.0f * 3.14159265f;
-            const glm::vec3 wp =
-                 center + glm::vec3( std::cos( a ) * radius, 0.0f, std::sin( a ) * radius );
-            if ( !toScreen( wp, pts[i] ) )
-                return; // part of the ring is behind the camera — skip this frame
-        }
-
-        auto*         dl  = ImGui::GetWindowDrawList();
-        const ImU32   col = IM_COL32( 255, 220, 60, 230 );
-        for ( int i = 0; i < N; ++i )
-            dl->AddLine( pts[i], pts[( i + 1 ) % N], col, 2.0f );
-
-        ImVec2 centerScreen;
-        if ( toScreen( center, centerScreen ) )
-            dl->AddCircleFilled( centerScreen, 3.0f, col );
-    }
-
-    void ViewportPanel::UploadDirtySplatMaps()
-    {
-        auto& registry = m_Scene->GetRegistry();
-        auto  view     = registry.view<ECS::TerrainComponent>();
-
-        bool any = false;
-        for ( auto e : view )
-        {
-            const auto& c = view.get<ECS::TerrainComponent>( e );
-            if ( c.SplatDirty && !c.SplatPixels.empty() )
-            {
-                any = true;
-                break;
-            }
-        }
-        if ( !any )
-            return;
-
-        // Releasing/recreating a sampled image must not race in-flight GPU work.
-        Graphic::Renderer::GetInstance().WaitDeviceIdle();
-
-        const uint32_t res = ECS::TerrainComponent::SplatResolution;
-        for ( auto e : view )
-        {
-            auto& c = view.get<ECS::TerrainComponent>( e );
-            if ( !c.SplatDirty || c.SplatPixels.empty() )
-                continue;
-
-            if ( !c.SplatMap )
-            {
-                ::Desert::Core::Formats::Image2DSpecification spec = {
-                     .Tag        = "TerrainSplatMap",
-                     .Width      = res,
-                     .Height     = res,
-                     .Format     = ::Desert::Core::Formats::ImageFormat::RGBA8F,
-                     .Mips       = 1,
-                     .Data       = c.SplatPixels,
-                     .Usage      = ::Desert::Core::Formats::Image2DUsage::Image2D,
-                     .Properties = ::Desert::Core::Formats::ImageProperties::Sample,
-                };
-                c.SplatMap = Graphic::Image2D::Create( spec, nullptr );
-            }
-            else
-            {
-                c.SplatMap->GetImageSpecification().Data = c.SplatPixels;
-                c.SplatMap->Invalidate();
-            }
-            c.SplatDirty = false;
-        }
-    }
 
 } // namespace Desert::Editor

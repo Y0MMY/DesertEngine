@@ -1,4 +1,5 @@
 #include "MaterialsPanelComponent.hpp"
+#include <Editor/Core/DragPayloads.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <ImGui/imgui.h>
@@ -7,6 +8,8 @@
 #include <Editor/Core/ImGuiUtilities.hpp>
 
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
+#include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Assets/AssetManager.hpp>
@@ -56,21 +59,28 @@ namespace Desert::Editor
         if ( !m_AssetManager )
             return {};
 
-        // Unique on-disk name so each created slot is an independent, persisted asset.
-        const std::string name = "Material_" + std::to_string( static_cast<uint64_t>( Common::UUID() ) ) +
-                                 Common::Constants::Extensions::MATERIAL_EXTENSION;
-        const Common::Filepath path = Common::Constants::Path::MATERIAL_PATH / name;
+        // Meaningful, human-readable filename (NO handle in the name): "Material", then "Material_1", ... —
+        // first free index in the material folder. The stable identity lives INSIDE the file (MaterialId).
+        const std::string         ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
+        std::error_code             ec;
+        std::filesystem::create_directories( dir, ec );
+
+        std::filesystem::path path = dir / ( "Material" + ext );
+        for ( int n = 1; std::filesystem::exists( path, ec ); ++n )
+            path = dir / ( "Material_" + std::to_string( n ) + ext );
 
         // loadAfterCreate = false: the file doesn't exist yet — creating with auto-load would try to read
         // a missing file and abort. The reflected data defaults are valid in memory; Save() writes them.
         auto asset = const_cast<Assets::AssetManager&>( *m_AssetManager )
-                          .CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, path, false );
+                          .CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High,
+                                                                  path.generic_string(), false );
         if ( !asset )
             return {};
 
-        // WriteContentToFile doesn't create parent dirs — make sure the material folder exists.
-        std::error_code ec;
-        std::filesystem::create_directories( asset->GetMetadata().Filepath.parent_path(), ec );
+        // Stamp a stable id so this material can be referenced externally (e.g. baked into a mesh later).
+        asset->Data().MaterialId = Common::UUID();
+
         Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath, asset->Save() );
         Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
         return asset->GetMetadata().Handle;
@@ -115,7 +125,7 @@ namespace Desert::Editor
         // count if there are none, then assign the dropped material to EVERY slot.
         if ( ImGui::BeginDragDropTarget() )
         {
-            if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( "MATERIAL_ASSET" ) )
+            if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
             {
                 const std::string path( static_cast<const char*>( p->Data ),
                                         p->DataSize > 0 ? p->DataSize - 1 : 0 );
@@ -131,6 +141,29 @@ namespace Desert::Editor
         if ( materialsOpen )
         {
             const size_t submeshCount = GetSubmeshCount( meshComp );
+
+            // --- Per-submesh visibility (its OWN section, separate from material slots) ---
+            // Toggles bit i of HiddenSubmeshes -> the renderer skips that submesh (independent of the
+            // whole-entity VisibilityComponent). Lives here in plain rows (NOT on the framed "Element" tree
+            // header) because a framed TreeNodeEx swallows the row click, so the eye SmallButton never fired
+            // (it only collapsed the node). Only shown when there's more than one submesh to toggle.
+            if ( submeshCount > 1 )
+            {
+                if ( ImGui::TreeNodeEx( "Submesh Visibility", ImGuiTreeNodeFlags_DefaultOpen ) )
+                {
+                    for ( size_t s = 0; s < submeshCount && s < 64; ++s )
+                    {
+                        ImGui::PushID( static_cast<int>( 1000 + s ) );
+                        const bool hidden = ( meshComp.HiddenSubmeshes >> s ) & 1ull;
+                        if ( ImGui::SmallButton( hidden ? ICON_MDI_EYE_OFF : ICON_MDI_EYE ) )
+                            meshComp.HiddenSubmeshes ^= ( 1ull << s );
+                        ImGui::SameLine();
+                        ImGui::Text( "Submesh %zu%s", s, hidden ? "  (hidden)" : "" );
+                        ImGui::PopID();
+                    }
+                    ImGui::TreePop();
+                }
+            }
 
             if ( meshComp.MaterialSlots.empty() )
             {
@@ -151,7 +184,7 @@ namespace Desert::Editor
                 }
                 if ( ImGui::BeginDragDropTarget() )
                 {
-                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( "MATERIAL_ASSET" ) )
+                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
                     {
                         const std::string path( static_cast<const char*>( p->Data ),
                                                 p->DataSize > 0 ? p->DataSize - 1 : 0 );
@@ -177,7 +210,7 @@ namespace Desert::Editor
                 // Drop an existing material asset onto this slot to assign it.
                 if ( ImGui::BeginDragDropTarget() )
                 {
-                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( "MATERIAL_ASSET" ) )
+                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
                     {
                         const std::string path( static_cast<const char*>( p->Data ),
                                                 p->DataSize > 0 ? p->DataSize - 1 : 0 );
@@ -192,8 +225,20 @@ namespace Desert::Editor
                     {
                         // Fully reflection-driven: the entire property UI is built from PBRMaterialData's
                         // PROPERTY() metadata — no per-parameter editor code here.
-                        const bool changed = PropertyEditorBuilder::Draw( &asset->Data(), "PBRMaterialData",
-                                                                          m_AssetManager, m_UIHelper.get() );
+                        bool changed = PropertyEditorBuilder::Draw( &asset->Data(), "PBRMaterialData",
+                                                                    m_AssetManager, m_UIHelper.get() );
+
+                        // UV Tiling — manual widget (the field is std::optional, so the reflected property UI
+                        // doesn't draw it). Multiplies the surface UVs before sampling albedo/normal/opacity,
+                        // so the texture repeats N times (e.g. a tiling brick/grass surface on a wall/terrain).
+                        {
+                            glm::vec2 tiling = asset->Data().UVTiling.value_or( glm::vec2( 1.0f ) );
+                            if ( ImGui::DragFloat2( "UV Tiling", &tiling.x, 0.05f, 0.01f, 256.0f ) )
+                            {
+                                asset->Data().UVTiling = tiling;
+                                changed                = true;
+                            }
+                        }
 
                         // Live edit -> viewport: push the edited asset data into the runtime material
                         // (one StaticMaterialPBR per asset handle, shared by all meshes using it).
@@ -208,11 +253,28 @@ namespace Desert::Editor
                         {
                             Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath,
                                                                            asset->Save() );
+                            // Drop ONLY this material's cached thumbnail so the asset browser re-renders it
+                            // with the new look immediately (no waiting on the modtime check; others untouched).
+                            std::error_code ec;
+                            std::filesystem::remove(
+                                 ThumbnailCache::DiskPath( asset->GetMetadata().Filepath.generic_string() ), ec );
                         }
                     }
                     else
                     {
                         ImGui::TextDisabled( "Unassigned material slot" );
+                        // Pre-existing-but-empty slot (e.g. a mesh with no embedded material): let the user
+                        // create a fresh editable material right here (the "Add Material" button above only
+                        // shows when there are FEWER slots than submeshes). Also accepts a dropped .demat.
+                        if ( ImGui::Button( "Create Material",
+                                            ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                        {
+                            if ( const auto h = CreateAndRegisterMaterial() )
+                            {
+                                meshComp.MaterialSlots[i] = h;
+                                meshComp.RuntimeMaterialInstances.clear();
+                            }
+                        }
                     }
                     ImGui::TreePop();
                 }

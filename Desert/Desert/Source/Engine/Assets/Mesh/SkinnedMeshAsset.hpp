@@ -73,7 +73,12 @@ namespace Desert::Assets
 
             if ( !m_SkeletonDependency.IsValid() )
             {
-                LOG_ERROR( "Failed to resolve SkeletonAsset dependency." );
+                // Common + harmless during preload: a lazy mesh shell hasn't loaded its signature yet (it's 0)
+                // — it gets re-resolved when finalized (drop/first use). Only a non-zero, still-unresolved
+                // signature is a real mismatch.
+                if ( m_SkeletonSignature != 0 )
+                    LOG_WARN( "SkinnedMeshAsset '{}': skeleton sig {} not found among {} skeletons.",
+                              m_Metadata.Filepath.string(), m_SkeletonSignature, allSKeletons.size() );
             }
         }
 

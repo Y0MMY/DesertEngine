@@ -59,5 +59,14 @@ void main()
 	vec3 mappedColor = (mappedLuminance / (luminance + 0.0001)) * color;
 
 	// Gamma correction.
-	oColor = vec4(pow(mappedColor, vec3(1.0 / u_Gamma)), 1.0);
+	vec3 mapped = pow(mappedColor, vec3(1.0 / u_Gamma));
+
+	// Ordered dithering on the FINAL 8-bit output to break gradient banding. Without it, smooth gradients
+	// (esp. the procedural sky) quantize into 8-bit steps; under camera motion those steps sweep across the
+	// screen and read as a "lighter/darker" shimmer. Keyed on gl_FragCoord so the pattern is stationary on
+	// screen (never crawls). +/- ~0.5 LSB is enough to randomize the rounding and is invisible otherwise.
+	float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+	mapped += (dither - 0.5) / 255.0;
+
+	oColor = vec4(mapped, 1.0);
 }

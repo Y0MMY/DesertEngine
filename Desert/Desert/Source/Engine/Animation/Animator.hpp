@@ -28,6 +28,18 @@ namespace Desert::Animation
 
         [[nodiscard]] const Pose& GetPose() const;
 
+        // The model-space (mesh-local) transform of a bone in the CURRENT pose. The pose stores the skinning
+        // matrix (global * offset), so the bone's actual placement is recovered by undoing the inverse-bind:
+        // global = skinMatrix * inverse(offset). Multiply by the entity's world matrix for a world socket.
+        // Returns identity if the index is out of range. (Bone index from Skeleton::FindBoneIndex.)
+        [[nodiscard]] glm::mat4 GetBoneModelMatrix( uint32_t boneIndex ) const
+        {
+            const auto& bones = m_Skeleton.GetBones();
+            if ( boneIndex >= bones.size() || boneIndex >= m_CurrentPose.BoneMatrices.size() )
+                return glm::mat4( 1.0f );
+            return m_CurrentPose.BoneMatrices[boneIndex] * glm::inverse( bones[boneIndex].OffsetMatrix );
+        }
+
         [[nodiscard]] bool IsPlaying() const
         {
             return m_Current.Clip != nullptr;
@@ -76,8 +88,21 @@ namespace Desert::Animation
         void CalculateBoneTransform( const ClipPlayback& playback, uint32_t boneIndex,
                                      const glm::mat4& parentTransform );
 
+        // Fills m_CurrentPose with the skeleton's REST/BIND pose (chainGlobal * OffsetMatrix per bone). This is
+        // the correct idle pose — an all-identity pose would skin the RAW authored vertices and collapse the
+        // mesh. Computed at construction so GetPose() is valid before any clip plays.
+        void ComputeBindPose();
+
+        // Returns the clip track that drives skeleton bone `boneIndex`, matched by bone NAME (not by the clip's
+        // own bone index). This lets a clip authored against a differently-ordered or skinless export of the
+        // same rig still drive the correct bones. Built lazily per clip, cached for the animator's lifetime.
+        const BoneTrack* ResolveTrack( const AnimationClip* clip, uint32_t boneIndex ) const;
+
     private:
         const Skeleton& m_Skeleton;
+
+        // clip -> (skeleton bone index -> its track in that clip, or null). See ResolveTrack.
+        mutable std::unordered_map<const AnimationClip*, std::vector<const BoneTrack*>> m_TrackBinding;
 
         ClipPlayback m_Current;
         ClipPlayback m_Next;

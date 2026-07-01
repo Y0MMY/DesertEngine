@@ -30,6 +30,7 @@ group ""
 
 group "Tools"
 include "Tools/DesertHeaderTool/"
+include "Tools/FbxMeshSplitter/"
 group ""
 
 include "Desert/"

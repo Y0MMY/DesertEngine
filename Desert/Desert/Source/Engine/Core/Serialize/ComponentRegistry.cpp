@@ -78,6 +78,102 @@ namespace Desert::Core::Serialize
             return s;
         }
 
+        // ScriptComponent has no reflected data block (reflection can't do std::string/variant lists), so it
+        // gets a manual serializer via a reflect-cpp mirror: the .lua path + the exposed-property values.
+        struct ScriptPropSer
+        {
+            std::string Name;
+            int         Type = 0;
+            double      Number = 0.0;
+            bool        Bool = false;
+            std::string Str;
+        };
+        struct ScriptSlotSer
+        {
+            std::string                Path;
+            std::vector<ScriptPropSer> Props;
+        };
+        // One entity now runs a LIST of scripts. New files write `Scripts`; old files (single script) carry
+        // `Path`/`Props` at the top level — both fields stay optional here so either format deserializes.
+        struct ScriptCompSer
+        {
+            std::optional<std::vector<ScriptSlotSer>> Scripts; // new (multi-script) format
+            std::optional<std::string>                Path;    // legacy single-script
+            std::optional<std::vector<ScriptPropSer>> Props;   // legacy single-script
+        };
+
+        // Rebuild a ScriptSlot's properties from its serialized form.
+        auto loadProps = []( const std::vector<ScriptPropSer>& src )
+        {
+            std::vector<Scripting::ScriptProperty> out;
+            for ( const auto& p : src )
+            {
+                Scripting::ScriptProperty prop;
+                prop.Name   = p.Name;
+                prop.Type   = static_cast<Scripting::PropertyType>( p.Type );
+                prop.Number = p.Number;
+                prop.Bool   = p.Bool;
+                prop.Str    = p.Str;
+                out.push_back( prop );
+            }
+            return out;
+        };
+
+        ComponentSerializer MakeScript()
+        {
+            ComponentSerializer s;
+            s.Key = "Script";
+            s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::ScriptComponent>(); };
+
+            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            {
+                const auto&   sc = e.GetComponent<ECS::ScriptComponent>();
+                ScriptCompSer ser;
+                std::vector<ScriptSlotSer> slots;
+                for ( const auto& slot : sc.Scripts )
+                {
+                    ScriptSlotSer ss;
+                    ss.Path = slot.ScriptPath;
+                    for ( const auto& p : slot.Properties )
+                        ss.Props.push_back( { p.Name, static_cast<int>( p.Type ), p.Number, p.Bool, p.Str } );
+                    slots.push_back( std::move( ss ) );
+                }
+                ser.Scripts = std::move( slots );
+                return ToGeneric( ser );
+            };
+
+            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            {
+                auto ser = FromGeneric<ScriptCompSer>( g );
+                if ( !ser )
+                    return;
+                auto& sc = e.HasComponent<ECS::ScriptComponent>() ? e.GetComponent<ECS::ScriptComponent>()
+                                                                  : e.AddComponent<ECS::ScriptComponent>();
+                sc.Scripts.clear();
+                if ( ser->Scripts ) // new multi-script format
+                {
+                    for ( const auto& ss : *ser->Scripts )
+                    {
+                        ECS::ScriptSlot slot;
+                        slot.ScriptPath = ss.Path;
+                        slot.Started    = false;
+                        slot.Properties = loadProps( ss.Props );
+                        sc.Scripts.push_back( std::move( slot ) );
+                    }
+                }
+                else if ( ser->Path ) // legacy single-script format
+                {
+                    ECS::ScriptSlot slot;
+                    slot.ScriptPath = *ser->Path;
+                    slot.Started    = false;
+                    if ( ser->Props )
+                        slot.Properties = loadProps( *ser->Props );
+                    sc.Scripts.push_back( std::move( slot ) );
+                }
+            };
+            return s;
+        }
+
         // Resolves reflected AssetHandle fields to/from on-disk PATHS (backward-compatible with the old
         // per-component serializers). Dispatches by the field's PROPERTY(Asset<...>) type name. Only a few
         // asset types exist, so this is a small hand-written table (not codegen). Captures `mgr` by ref —
@@ -576,6 +672,9 @@ namespace Desert::Core::Serialize
         // reflected field is "SkyboxHandle", so an old HDR selection needs re-pick — procedural sky +
         // clouds carry over (those field names are unchanged).
         Register( MakeReflectedSelf<ECS::SkyboxComponent>( "Skybox", "SkyboxComponent" ) );
+
+        // ---- Script (manual: .lua path + exposed-property values) ----
+        Register( MakeScript() );
     }
 
     std::string SaveMaterialComponentToJson( const ECS::MaterialComponent& mc, const Assets::AssetManager& mgr )

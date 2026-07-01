@@ -14,7 +14,7 @@ namespace Desert::Graphic
              ".hdr" ) // TODO: move the logic to the SkyboxAsset and raw data
         {
             std::shared_ptr<Texture2D> imagePanorama =
-                 Texture2D::Create( { true }, Common::Filepath( "Resources/Textures" ) /
+                 Texture2D::Create( { true }, Common::Filepath( "Resources/Assets/Textures" ) /
                                                    skyboxAsset->GetMetadata().Filepath )
                       .ExtractValue();
 
@@ -82,13 +82,14 @@ namespace Desert::Graphic
         return ComputeImages::ProccessForImageCube( processingInfo );
     }
 
-    Environment EnvironmentManager::CreateProcedural( const glm::vec3& sunDir, float intensity, float diskRadius )
+    Environment EnvironmentManager::CreateProcedural( const glm::vec3& sunDir, float intensity, float diskRadius,
+                                                      const SkySettings& sky )
     {
         auto* imageService = Runtime::ResourceRegistry::GetImageService();
 
         // Bake the atmosphere into an equirect HDR panorama, then run the standard IBL pipeline on it.
         auto panorama = ComputeImages::BakeProceduralPanorama( kProceduralPanoramaW, kProceduralPanoramaH,
-                                                               sunDir, intensity, diskRadius );
+                                                               sunDir, intensity, diskRadius, sky );
         if ( !panorama )
             return {};
         const auto panoramaHandle =

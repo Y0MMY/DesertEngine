@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
+#include <Engine/Graphic/Materials/MaterialOverrides.hpp>
 #include <Engine/ShaderResources/StorageBuffer.hpp>
 
 #include <glm/glm.hpp>
@@ -36,13 +37,10 @@ namespace Desert::Graphic::System
         glm::vec4 GrassParams = glm::vec4( 0.0f );
         glm::vec3 GrassTint   = glm::vec3( 1.0f ); // RGB tint multiplier on the grass color
 
-        // Material param overrides from the entity's MaterialComponent (name -> value), applied generically
-        // to the DataDrivenMaterial by name (e.g. "Tint", "DetailTiling").
-        std::vector<std::pair<std::string, glm::vec4>> ParamOverrides;
-
-        // Texture overrides (sampler name -> asset handle); resolved to Image2D and bound by name. Unset
-        // samplers keep the backend white fallback. Drives the splat layers (u_GrassTex/u_RockTex/...).
-        std::vector<std::pair<std::string, uint64_t>> TextureOverrides;
+        // Material param + texture overrides from the entity's MaterialComponent, applied generically to the
+        // DataDrivenMaterial by name (params e.g. "Tint"/"DetailTiling"; textures = the splat layers
+        // u_GrassTex/u_RockTex/...). Unset samplers keep the backend white fallback.
+        Graphic::MaterialOverrides Overrides;
     };
 
     // GPU terrain renderer. Draws a tessellated patch grid into the scene framebuffer's Geometry phase

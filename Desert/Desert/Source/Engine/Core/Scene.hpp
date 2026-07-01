@@ -11,6 +11,7 @@
 #include <Common/Core/ResultStr.hpp>
 #include <Common/Core/Timestep.hpp>
 #include <Common/Core/UUID.hpp>
+#include <glm/glm.hpp>
 #include <cstdint>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -30,8 +31,23 @@ namespace Desert::Graphic
     class Environment;
 } // namespace Desert::Graphic
 
+namespace Common::Math
+{
+    class Ray;
+}
+
 namespace Desert::Core
 {
+    // Result of Scene::Raycast — nearest static-mesh hit (world space).
+    struct RaycastHit
+    {
+        bool         Hit      = false;
+        Common::UUID Entity;                       // hit entity's UUID (valid only when Hit)
+        glm::vec3    Point    = glm::vec3( 0.0f );  // world hit point
+        glm::vec3    Normal   = glm::vec3( 0.0f, 1.0f, 0.0f ); // world box-face normal
+        float        Distance = 0.0f;
+    };
+
     class Scene final
     {
     public:
@@ -86,6 +102,11 @@ namespace Desert::Core
 
         [[nodiscard]] std::optional<std::reference_wrapper<const ECS::Entity>>
         FindEntityByID( const Common::UUID& uuid ) const;
+
+        // Ray vs every StaticMeshComponent's submesh AABBs (world space). Returns the nearest hit
+        // (entity/point/normal). Engine-owned so picking AND tools (foliage placement, etc.) share ONE
+        // raycast + ONE mesh resolution (MeshHandle / RuntimeMesh / primitive) instead of duplicating both.
+        [[nodiscard]] bool Raycast( const Common::Math::Ray& ray, RaycastHit& outHit ) const;
 
         // Play-mode state. Edit = authoring (gameplay systems frozen); Play = running (gameplay ticks);
         // Paused = running but time frozen (ts forced to 0). The editor snapshots the scene on Play and

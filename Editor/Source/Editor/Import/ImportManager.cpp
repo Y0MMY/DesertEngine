@@ -2,6 +2,8 @@
 #include <Common/Core/Serialization/GlmReflection.hpp>
 
 #include "Assimp/AssimpImporter.hpp"
+#include "Blend/BlendImporter.hpp"
+#include "CookPaths.hpp"
 
 #include <Common/Core/Constants.hpp>
 
@@ -39,27 +41,21 @@ namespace Desert::Editor
     static std::filesystem::path BuildCookedPath( const std::filesystem::path& sourcePath,
                                                   const std::string&           extension )
     {
-        namespace fs = std::filesystem;
-
-        fs::path relative = fs::relative( sourcePath, Common::Constants::Path::MESH_PATH );
-
-        fs::path cookedRoot = "Cooked/Meshes";
-
-        fs::path result = cookedRoot / relative;
-        result.replace_extension( extension );
-
-        fs::create_directories( result.parent_path() );
-
+        // Path formula is shared (CookPaths::CookedMesh); this wrapper also ensures the dir exists for writing.
+        const auto result = Editor::CookPaths::CookedMesh( sourcePath, extension );
+        std::filesystem::create_directories( result.parent_path() );
         return result;
     }
 
     ImportManager::ImportManager()
     {
-        m_TextureImporter    = std::make_unique<TextureImporter>();
-        m_Importers[".fbx"]  = std::make_unique<AssimpImporter>();
-        m_Importers[".obj"]  = std::make_unique<AssimpImporter>();
-        m_Importers[".gltf"] = std::make_unique<AssimpImporter>();
-        m_Importers[".glb"]  = std::make_unique<AssimpImporter>();
+        m_TextureImporter     = std::make_unique<TextureImporter>();
+        m_Importers[".fbx"]   = std::make_unique<AssimpImporter>();
+        m_Importers[".obj"]   = std::make_unique<AssimpImporter>();
+        m_Importers[".gltf"]  = std::make_unique<AssimpImporter>();
+        m_Importers[".glb"]   = std::make_unique<AssimpImporter>();
+        // .blend is converted to FBX via Blender headless, then run through the Assimp path (see BlendImporter).
+        m_Importers[".blend"] = std::make_unique<BlendImporter>();
     }
 
     namespace
@@ -83,6 +79,7 @@ namespace Desert::Editor
     void ImportManager::Import( const std::filesystem::path& path, bool force )
     {
         auto ext = path.extension().string();
+        std::transform( ext.begin(), ext.end(), ext.begin(), ::tolower );
 
         if ( !m_Importers.contains( ext ) )
             return;
@@ -102,13 +99,23 @@ namespace Desert::Editor
     {
         namespace fs = std::filesystem;
 
-        for ( const auto& entry : fs::recursive_directory_iterator( root ) )
+        std::error_code ec;
+        if ( !fs::exists( root, ec ) ) // tolerate a missing source dir (e.g. clean/from-scratch project)
+            return;
+
+        for ( const auto& entry : fs::recursive_directory_iterator( root, ec ) )
         {
             if ( !entry.is_regular_file() )
                 continue;
 
             std::string ext = entry.path().extension().string();
             std::transform( ext.begin(), ext.end(), ext.begin(), ::tolower );
+
+            // .blend is converted via a (potentially multi-minute) headless Blender run — far too heavy to do
+            // for every file during a blocking bulk scan at boot. It's imported ON DEMAND instead (drag-drop
+            // goes through AsyncMeshLoader on a worker thread), so the editor never freezes on it.
+            if ( ext == ".blend" )
+                continue;
 
             if ( m_Importers.contains( ext ) )
             {
@@ -135,9 +142,9 @@ namespace Desert::Editor
             SerializeAnimationAsset( anim, sourcePath );
         }
 
-        for ( auto& anim : result.Material )
+        for ( auto& material : result.Materials )
         {
-            SerializeMaterialAsset( anim, sourcePath );
+            SerializeMaterialAsset( material, sourcePath );
         }
     }
 
@@ -170,11 +177,26 @@ namespace Desert::Editor
         WriteJsonToFile( data, cookedPath );
     }
 
-    void ImportManager::SerializeMaterialAsset( const Desert::Assets::Serialization::MaterialAssetData& data,
+    void ImportManager::SerializeMaterialAsset( const ImportedMaterial&      material,
                                                 const std::filesystem::path& sourcePath )
     {
-        auto path = BuildCookedPath( sourcePath, "_" + data.Name + ".mat" );
-        WriteJsonToFile( data, path );
+        // Imported materials are EDITABLE CONTENT, not cooked intermediates -> write them into the content
+        // tree at Resources/Assets/Materials/<meshStem>/<materialName>.demat (browsable + editable in the
+        // asset browser, reusable), like UE. Per-mesh subfolder avoids name collisions across imports.
+        // Meaningful name, NO handle in it (stable identity lives in the file: PBRMaterialData::MaterialId).
+        // Unified .demat schema (legacy ".mat" cooker output is gone; PBRMaterialAsset::Load still READS old).
+        static const std::regex illegal( R"([<>:"/\\|?*\s])" );
+        const std::string       safeName = std::regex_replace( material.Name, illegal, "_" );
+        const std::filesystem::path path =
+             Common::Constants::Path::MATERIAL_PATH / sourcePath.stem() /
+             ( safeName + Common::Constants::Extensions::MATERIAL_EXTENSION );
+
+        // Only write if MISSING: re-importing a mesh must NOT clobber the user's edits to its material (UE
+        // behaviour — re-import updates geometry, keeps the material asset). Delete the .demat to regenerate.
+        std::error_code ec;
+        if ( std::filesystem::exists( path, ec ) )
+            return;
+        WriteJsonToFile( material.Data, path );
     }
 
     Common::UUID ImportManager::ImportTexture( const std::filesystem::path& path )

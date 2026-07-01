@@ -28,3 +28,9 @@
 [submodule "ThirdParty/JoltPhysics"]
 	path = ThirdParty/JoltPhysics
 	url = https://github.com/jrouwe/JoltPhysics
+[submodule "ThirdParty/lua"]
+	path = ThirdParty/lua
+	url = https://github.com/lua/lua
+[submodule "ThirdParty/sol2"]
+	path = ThirdParty/sol2
+	url = https://github.com/ThePhD/sol2

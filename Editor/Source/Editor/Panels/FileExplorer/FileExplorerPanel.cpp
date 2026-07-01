@@ -5,9 +5,12 @@
 #define NOMINMAX
 
 #include "FileExplorerPanel.hpp"
+#include <Editor/Core/DragPayloads.hpp>
 #include "../../Core/EditorResources.hpp"
 
 #include <Editor/Import/TextureDnD.hpp>
+#include <Editor/Import/CookPaths.hpp>
+#include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/AssetThumbnailRenderer.hpp>
@@ -17,8 +20,15 @@
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Core/Scene.hpp>            // GetFinalImage (Capture Thumbnail from viewport)
+#include <Engine/Graphic/Renderer.hpp>      // WaitDeviceIdle before readback
+#include <Engine/Graphic/Image.hpp>         // Image2D::ReadPixelsRGBA8
 #include <Common/Core/Events/WindowEvents.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
+
+// STB_IMAGE_WRITE_IMPLEMENTATION lives in Desert.lib; just declare for the capture PNG write.
+#include <stb_image/stb_image_write.h>
 
 #include <ImGui/imgui_internal.h>
 
@@ -27,6 +37,11 @@
 #include <chrono>
 #include <filesystem>
 #include <system_error>
+
+#ifdef DESERT_PLATFORM_WINDOWS
+    #include <windows.h>
+    #include <shellapi.h>
+#endif
 
 namespace Desert::Editor
 {
@@ -43,6 +58,38 @@ namespace Desert::Editor
 #endif
 
             return false;
+        }
+
+        std::string ToLowerCopy( std::string s )
+        {
+            std::transform( s.begin(), s.end(), s.begin(),
+                            []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+            return s;
+        }
+
+        // --- Windows shell integration (no-ops elsewhere) -------------------------------------------------
+        void ShellOpenDefault( const std::string& path )
+        {
+#ifdef DESERT_PLATFORM_WINDOWS
+            std::error_code ec;
+            const auto      abs = std::filesystem::absolute( path, ec ).make_preferred().wstring();
+            ShellExecuteW( nullptr, L"open", abs.c_str(), nullptr, nullptr, SW_SHOWNORMAL );
+#else
+            (void)path;
+#endif
+        }
+
+        // Open Explorer with the item selected (file or folder highlighted in its parent).
+        void ShellRevealInExplorer( const std::string& path )
+        {
+#ifdef DESERT_PLATFORM_WINDOWS
+            std::error_code    ec;
+            const auto         abs    = std::filesystem::absolute( path, ec ).make_preferred().wstring();
+            const std::wstring params = L"/select,\"" + abs + L"\"";
+            ShellExecuteW( nullptr, L"open", L"explorer.exe", params.c_str(), nullptr, SW_SHOWNORMAL );
+#else
+            (void)path;
+#endif
         }
     } // namespace
 
@@ -62,6 +109,7 @@ namespace Desert::Editor
          { "bmp", FileType::Texture }, { "gif", FileType::Texture },    { "tga", FileType::Texture },
          { "ttf", FileType::Font },    { "hdr", FileType::Cubemap },    { "obj", FileType::Model },
          { "fbx", FileType::Model },   { "gltf", FileType::Model },     { "glb", FileType::Model },
+         { "blend", FileType::Model },
          { "mp3", FileType::Audio },   { "m4a", FileType::Audio },      { "wav", FileType::Audio },
          { "ogg", FileType::Audio },   { "lmat", FileType::Material },
          // Engine-native extensions (see Common::Constants::Extensions).
@@ -94,16 +142,18 @@ namespace Desert::Editor
     };
 
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath,
-                                          Assets::AssetManager*        assetManager )
+                                          Assets::AssetManager* assetManager,
+                                          std::weak_ptr<::Desert::Core::Scene> viewportScene )
          : IPanel( "Assets" ), m_CurrentPath( rootPath ), m_CurrentDir( nullptr ),
            m_BaseProjectDir( nullptr ), m_PreviousDirectory( nullptr ), m_GridSize( 120.0f ),
            m_MinGridSize( 40.0f ), m_MaxGridSize( 400.0f ), m_IsInListView( false ), m_IsDragging( false ),
            m_ShowHiddenFiles( false ), m_UpdateNavigationPath( true ), m_Refresh( false ),
-           m_AssetManager( assetManager )
+           m_AssetManager( assetManager ), m_ViewportScene( std::move( viewportScene ) )
     {
         m_UIHelper = std::make_unique<UI::UIHelper>();
         m_UIHelper->Init();
         m_Thumbnails = std::make_unique<ThumbnailCache>();
+        ThumbnailCache::PurgeOldVersions(); // drop stale-renderer thumbnails so they regenerate cleanly
 
 #ifdef DESERT_PLATFORM_WINDOWS
         m_Delimiter = std::string( "\\" );
@@ -303,6 +353,12 @@ namespace Desert::Editor
             directoryInfo->Type   = fileType;
             directoryInfo->FileSize =
                  std::filesystem::exists( stdPath ) ? std::filesystem::file_size( stdPath ) : 0;
+            {
+                std::error_code wec;
+                const auto      t = std::filesystem::last_write_time( stdPath, wec );
+                directoryInfo->LastWriteTime =
+                     wec ? 0 : static_cast<uint64_t>( t.time_since_epoch().count() );
+            }
             directoryInfo->Hidden = std::filesystem::exists( stdPath ) ? IsHidden( stdPath ) : true;
             directoryInfo->Opened = true;
             directoryInfo->Leaf   = true;
@@ -553,9 +609,24 @@ namespace Desert::Editor
                     ImGui::TextUnformatted( ICON_MDI_MAGNIFY );
                     ImGui::SameLine();
 
-                    // Replace with actual filter implementation
-                    // m_Filter.Draw("##Filter", ImGui::GetContentRegionAvail().x -
-                    // ImGui::GetStyle().IndentSpacing);
+                    // Name filter — substring match against filenames (see BuildDisplayOrder).
+                    ImGui::SetNextItemWidth( 180.0f );
+                    ImGui::InputTextWithHint( "##AssetSearch", "Filter by name...", m_SearchBuf,
+                                              sizeof( m_SearchBuf ) );
+                    ImGui::SameLine();
+
+                    // Sort mode + ascending/descending toggle.
+                    ImGui::SetNextItemWidth( 130.0f );
+                    const char* const sortNames[] = { "Name", "Date Modified", "Type", "Size" };
+                    int               sortIdx      = static_cast<int>( m_SortMode );
+                    if ( ImGui::Combo( "##AssetSort", &sortIdx, sortNames, IM_ARRAYSIZE( sortNames ) ) )
+                        m_SortMode = static_cast<SortMode>( sortIdx );
+                    ImGui::SameLine();
+                    if ( ImGui::Button( m_SortDescending ? ICON_MDI_SORT_DESCENDING : ICON_MDI_SORT_ASCENDING ) )
+                        m_SortDescending = !m_SortDescending;
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( m_SortDescending ? "Descending" : "Ascending" );
+                    ImGui::SameLine();
 
                     if ( ImGui::Button( ICON_MDI_ARROW_LEFT ) )
                     {
@@ -694,45 +765,16 @@ namespace Desert::Editor
 
                         // ImGuiUtilities::PushID();
 
-                        if ( m_IsInListView )
+                        // Filtered (search) + sorted (name/date/type/size) display order; both views share it.
+                        const std::vector<size_t> displayOrder = BuildDisplayOrder();
+                        for ( size_t idx : displayOrder )
                         {
-                            for ( size_t i = 0; i < m_CurrentDir->Children.size(); i++ )
-                            {
-                                if ( !m_ShowHiddenFiles && m_CurrentDir->Children[i]->Hidden )
-                                {
-                                    continue;
-                                }
-
-                                // Filter implementation would go here
-
-                                ImGui::TableNextColumn();
-                                bool doubleClicked = RenderFile( (int)i, !m_CurrentDir->Children[i]->IsFile,
-                                                                 shownIndex, !m_IsInListView );
-
-                                if ( doubleClicked )
-                                    break;
-                                shownIndex++;
-                            }
-                        }
-                        else
-                        {
-                            for ( size_t i = 0; i < m_CurrentDir->Children.size(); i++ )
-                            {
-                                if ( !m_ShowHiddenFiles && m_CurrentDir->Children[i]->Hidden )
-                                {
-                                    continue;
-                                }
-
-                                // Filter implementation would go here
-
-                                ImGui::TableNextColumn();
-                                bool doubleClicked = RenderFile( (int)i, !m_CurrentDir->Children[i]->IsFile,
-                                                                 shownIndex, !m_IsInListView );
-
-                                if ( doubleClicked )
-                                    break;
-                                shownIndex++;
-                            }
+                            ImGui::TableNextColumn();
+                            const bool doubleClicked = RenderFile(
+                                 (int)idx, !m_CurrentDir->Children[idx]->IsFile, shownIndex, !m_IsInListView );
+                            if ( doubleClicked )
+                                break;
+                            shownIndex++;
                         }
 
                         // ImGuiUtilities::PopID();
@@ -816,13 +858,13 @@ namespace Desert::Editor
             const std::string& assetPath = entry.AssetPath;
             const char*         type      = "AssetFile";
             if ( entry.Type == FileType::Prefab )
-                type = "PREFAB_FILE";
+                type = ::Desert::Editor::DragPayloads::PrefabFile;
             else if ( entry.Type == FileType::Texture )
-                type = "TEXTURE_ASSET";
+                type = ::Desert::Editor::DragPayloads::TextureAsset;
             else if ( entry.Type == FileType::Material )
-                type = "MATERIAL_ASSET";
+                type = ::Desert::Editor::DragPayloads::MaterialAsset;
             else if ( entry.Type == FileType::Model )
-                type = "MESH_ASSET";
+                type = ::Desert::Editor::DragPayloads::MeshAsset;
 
             ImGui::SetDragDropPayload( type, assetPath.c_str(), assetPath.size() + 1 );
             // Drag preview: filename (the full path is long + reads as empty in a small tooltip).
@@ -852,12 +894,8 @@ namespace Desert::Editor
         if ( !m_UIHelper || !m_Thumbnails || !m_AssetManager )
             return false;
 
-        // Cache PNG path: Cooked/Thumbnails/<sanitized source path>.png (persists across restarts).
-        std::string key = entry->AssetPath;
-        for ( char& c : key )
-            if ( !std::isalnum( static_cast<unsigned char>( c ) ) )
-                c = '_';
-        const std::string pngPath = "Cooked/Thumbnails/" + key + ".png";
+        // Cache PNG path: <versioned thumbnail dir>/<sanitized source path>.png (persists across restarts).
+        const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
 
         // Stale if the material was edited after the cached thumbnail was written (regenerate then).
         std::error_code ec;
@@ -906,7 +944,12 @@ namespace Desert::Editor
         if ( !m_ThumbRenderer )
             m_ThumbRenderer = std::make_unique<AssetThumbnailRenderer>();
         if ( !m_ThumbRenderer->HasPending() )
-            m_ThumbRenderer->RequestMaterial( a->GetMetadata().Handle, pngPath );
+        {
+            // Cutout/foliage materials (a grass-card atlas) wrap and garble on a sphere -> preview on a flat
+            // camera-facing card instead.
+            const bool flat = a->Data().AlphaCutoff > 0.0f;
+            m_ThumbRenderer->RequestMaterial( a->GetMetadata().Handle, pngPath, flat );
+        }
 
         // Until the PNG exists, show the albedo colour as a placeholder swatch.
         const glm::vec3 albedo = a->GetAlbedoColor().value_or( glm::vec3( 0.8f ) );
@@ -924,11 +967,7 @@ namespace Desert::Editor
         if ( m_FailedThumbs.count( entry->AssetPath ) ) // failed to load before -> icon, no per-frame retry
             return false;
 
-        std::string key = entry->AssetPath;
-        for ( char& c : key )
-            if ( !std::isalnum( static_cast<unsigned char>( c ) ) )
-                c = '_';
-        const std::string pngPath = "Cooked/Thumbnails/" + key + ".png";
+        const std::string pngPath = ThumbnailCache::DiskPath( entry->AssetPath );
 
         std::error_code ec;
         bool            haveFresh = std::filesystem::exists( pngPath, ec );
@@ -951,14 +990,11 @@ namespace Desert::Editor
             }
         }
 
-        // Meshes only load from the COOKED form (StaticMeshAsset::Load reads cooked JSON, not source FBX),
-        // so map the browsed source file -> its cooked .stmesh (Cooked/Meshes/<relative-to-MESH_PATH>). If it
-        // isn't cooked yet, fall back to the icon (don't try to parse the raw source -> it can't).
-        std::filesystem::path cooked =
-             Common::Constants::Path::MESH_PATH_COOKED /
-             std::filesystem::relative( entry->AssetPath, Common::Constants::Path::MESH_PATH, ec );
-        cooked.replace_extension( ".stmesh" );
-        const std::string cookedStr = cooked.generic_string();
+        // Meshes only load from the COOKED form (StaticMeshAsset::Load reads cooked JSON, not source FBX), so
+        // map the browsed source file -> its cooked .stmesh (shared CookPaths::CookedMesh). If it isn't cooked
+        // yet, fall back to the icon (don't try to parse the raw source -> it can't).
+        const std::filesystem::path cooked    = CookPaths::CookedMesh( entry->AssetPath, ".stmesh" );
+        const std::string           cookedStr = cooked.generic_string();
 
         if ( ec || !std::filesystem::exists( cooked ) )
         {
@@ -992,7 +1028,11 @@ namespace Desert::Editor
         if ( !m_ThumbRenderer )
             m_ThumbRenderer = std::make_unique<AssetThumbnailRenderer>();
         if ( !m_ThumbRenderer->HasPending() )
-            m_ThumbRenderer->RequestMesh( a->GetMetadata().Handle, pngPath );
+        {
+            // Show the mesh with its linked (sidecar) material if it has one.
+            const auto mat = MeshMaterial::ResolveSidecar( *m_AssetManager, entry->AssetPath );
+            m_ThumbRenderer->RequestMesh( a->GetMetadata().Handle, pngPath, mat );
+        }
 
         // No swatch for meshes — fall back to the type icon until the PNG is ready.
         return false;
@@ -1014,10 +1054,11 @@ namespace Desert::Editor
             return;
 
         // Copy into the current dir (assets must live under Resources/ so the cook paths stay project-relative).
-        std::filesystem::path destDir =
-             m_CurrentDir ? std::filesystem::path( m_CurrentDir->AssetPath ) : std::filesystem::path( "Resources/Textures" );
+        const std::filesystem::path texDir = Common::Constants::Path::TEXTUREDIR_PATH;
+        std::filesystem::path       destDir =
+             m_CurrentDir ? std::filesystem::path( m_CurrentDir->AssetPath ) : texDir;
         if ( !std::filesystem::is_directory( destDir ) )
-            destDir = "Resources/Textures";
+            destDir = texDir;
         std::filesystem::create_directories( destDir, ec );
 
         std::filesystem::path dest = destDir / src.filename();
@@ -1054,6 +1095,154 @@ namespace Desert::Editor
                      ImportExternalFile( path );
                  return true;
              } );
+    }
+
+    std::vector<size_t> FileExplorerPanel::BuildDisplayOrder() const
+    {
+        std::vector<size_t> order;
+        if ( !m_CurrentDir )
+            return order;
+        const auto& children = m_CurrentDir->Children;
+        order.reserve( children.size() );
+
+        const std::string search = ToLowerCopy( m_SearchBuf );
+        for ( size_t i = 0; i < children.size(); ++i )
+        {
+            const auto* c = children[i];
+            if ( !m_ShowHiddenFiles && c->Hidden )
+                continue;
+            if ( !search.empty() )
+            {
+                const std::string name =
+                     ToLowerCopy( std::filesystem::path( c->AssetPath ).filename().string() );
+                if ( name.find( search ) == std::string::npos )
+                    continue;
+            }
+            order.push_back( i );
+        }
+
+        const SortMode mode = m_SortMode;
+        const bool     desc = m_SortDescending;
+        std::sort( order.begin(), order.end(),
+                   [&]( size_t a, size_t b )
+                   {
+                       const auto* ca = children[a];
+                       const auto* cb = children[b];
+                       if ( ca->IsFile != cb->IsFile )
+                           return !ca->IsFile; // folders always first, regardless of sort
+                       int cmp = 0;
+                       switch ( mode )
+                       {
+                           case SortMode::DateModified:
+                               cmp = ( ca->LastWriteTime < cb->LastWriteTime )   ? -1
+                                     : ( ca->LastWriteTime > cb->LastWriteTime ) ? 1
+                                                                                 : 0;
+                               break;
+                           case SortMode::Type: cmp = static_cast<int>( ca->Type ) - static_cast<int>( cb->Type ); break;
+                           case SortMode::Size:
+                               cmp = ( ca->FileSize < cb->FileSize ) ? -1 : ( ca->FileSize > cb->FileSize ) ? 1 : 0;
+                               break;
+                           case SortMode::Name:
+                           default: break;
+                       }
+                       if ( cmp == 0 ) // Name mode + tiebreak: case-insensitive filename
+                       {
+                           const auto na = ToLowerCopy( std::filesystem::path( ca->AssetPath ).filename().string() );
+                           const auto nb = ToLowerCopy( std::filesystem::path( cb->AssetPath ).filename().string() );
+                           cmp           = na.compare( nb );
+                       }
+                       return desc ? cmp > 0 : cmp < 0;
+                   } );
+        return order;
+    }
+
+    void FileExplorerPanel::DrawItemContextMenu( DirectoryInformation& entry )
+    {
+        if ( !ImGui::BeginPopupContextItem( "##ItemContext" ) )
+            return;
+
+        m_CurrentSelected      = &entry;
+        const std::string name = std::filesystem::path( entry.AssetPath ).filename().string();
+        ImGui::TextDisabled( "%s", name.c_str() );
+        ImGui::Separator();
+
+        if ( entry.IsFile )
+        {
+            if ( ImGui::MenuItem( "Open" ) ) // default Windows app for this file type
+                ShellOpenDefault( entry.AssetPath );
+            if ( ImGui::MenuItem( "Show in Explorer" ) ) // reveal with the file selected
+                ShellRevealInExplorer( entry.AssetPath );
+            if ( ImGui::MenuItem( "Open Containing Folder" ) )
+                ShellOpenDefault( std::filesystem::path( entry.AssetPath ).parent_path().string() );
+
+            // UE-style: use the current viewport view as this asset's thumbnail (frame it in the scene first).
+            // Only meaningful for assets that show a rendered preview (meshes/materials).
+            if ( ( entry.Type == FileType::Model || entry.Type == FileType::Material ) &&
+                 !m_ViewportScene.expired() )
+            {
+                ImGui::Separator();
+                if ( ImGui::MenuItem( "Capture Thumbnail (from viewport)" ) )
+                    CaptureThumbnailFromViewport( entry.AssetPath );
+            }
+        }
+        else
+        {
+            if ( ImGui::MenuItem( "Open" ) )
+                ChangeDirectory( &entry );
+            if ( ImGui::MenuItem( "Show in Explorer" ) )
+                ShellRevealInExplorer( entry.AssetPath );
+        }
+
+        ImGui::Separator();
+        if ( ImGui::MenuItem( "Copy Path" ) )
+            ImGui::SetClipboardText(
+                 std::filesystem::absolute( entry.AssetPath ).make_preferred().string().c_str() );
+        if ( ImGui::MenuItem( "Copy Name" ) )
+            ImGui::SetClipboardText( name.c_str() );
+
+        ImGui::EndPopup();
+    }
+
+    void FileExplorerPanel::CaptureThumbnailFromViewport( const std::string& assetPath )
+    {
+        const auto scene = m_ViewportScene.lock();
+        if ( !scene )
+            return;
+        const auto img = scene->GetFinalImage(); // the main viewport's post-processed render
+        if ( !img )
+            return;
+
+        Graphic::Renderer::GetInstance().WaitDeviceIdle(); // readback after the GPU finished the frame
+        const std::vector<uint8_t> src = img->ReadPixelsRGBA8();
+        const uint32_t             W   = img->GetWidth();
+        const uint32_t             H   = img->GetHeight();
+        if ( W == 0 || H == 0 || src.size() != static_cast<size_t>( W ) * H * 4 )
+            return;
+
+        // Center-crop to a square, then downscale (nearest) to a square thumbnail — frame the asset in the
+        // viewport so the centered square captures it.
+        const uint32_t       side = ( W < H ) ? W : H; // (avoid std::min — windows.h min macro in this TU)
+        const uint32_t       ox   = ( W - side ) / 2;
+        const uint32_t       oy   = ( H - side ) / 2;
+        constexpr uint32_t   kOut = 512; // NOTE: not 'OUT' — that's a windows.h SAL macro in this TU
+        std::vector<uint8_t> out( static_cast<size_t>( kOut ) * kOut * 4 );
+        for ( uint32_t y = 0; y < kOut; ++y )
+            for ( uint32_t x = 0; x < kOut; ++x )
+            {
+                const uint32_t sx = ox + x * side / kOut;
+                const uint32_t sy = oy + y * side / kOut;
+                for ( uint32_t c = 0; c < 4; ++c )
+                    out[( ( y * kOut + x ) * 4 ) + c] = src[( ( sy * W + sx ) * 4 ) + c];
+            }
+
+        const std::string png = ThumbnailCache::DiskPath( assetPath ); // same key the grid reads
+        std::error_code   ec;
+        std::filesystem::create_directories( std::filesystem::path( png ).parent_path(), ec );
+        stbi_flip_vertically_on_write( 0 ); // viewport readback is already upright (same as the offscreen path)
+        stbi_write_png( png.c_str(), kOut, kOut, 4, out.data(), kOut * 4 );
+        if ( m_Thumbnails )
+            m_Thumbnails->Invalidate( png ); // drop the cached decode so the grid reloads the new image
+        LOG_INFO( "[Thumbnail] Captured from viewport -> {}", png );
     }
 
     bool FileExplorerPanel::RenderFile( int dirIndex, bool folder, int shownIndex, bool gridView )
@@ -1098,6 +1287,7 @@ namespace Desert::Editor
                 doubleClicked = true;
 
             EmitAssetDragSource( *entry );
+            DrawItemContextMenu( *entry );
 
             // Hover tooltip — but NOT while dragging, or it clobbers the drag-source preview (shows empty).
             if ( ImGui::IsItemHovered() && !ImGui::IsDragDropActive() )
@@ -1119,6 +1309,7 @@ namespace Desert::Editor
                     doubleClicked = true;
             }
             EmitAssetDragSource( *entry );
+            DrawItemContextMenu( *entry );
         }
 
         if ( doubleClicked && folder )

@@ -12,7 +12,7 @@ namespace Desert::Graphic
         UpdateSkinnedUB( info.instance, info.SkinnedUB );
 
         // Single-object material buffer (the skinned path draws one mesh at a time).
-        const PBRPushMaterial gpuMaterial = BuildPBRPushMaterial( m_Data );
+        const PBRGpuMaterial gpuMaterial = BuildPBRGpuMaterial( m_Data );
         if ( auto* sb = Get<StorageBufferProperty>( "Materials" ) )
             sb->SetRawData( &gpuMaterial, sizeof( gpuMaterial ) );
 

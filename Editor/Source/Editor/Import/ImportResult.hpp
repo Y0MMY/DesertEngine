@@ -7,15 +7,24 @@
 #include <Engine/Assets/Serialization/Mesh.hpp>
 #include <Engine/Assets/Serialization/Animation.hpp>
 #include <Engine/Assets/Serialization/Skeleton.hpp>
-#include <Engine/Assets/Serialization/Material.hpp>
+#include <Engine/Assets/Mesh/PBRMaterialData.hpp>
 
 namespace Desert::Editor
 {
+    // A material extracted from a source file, ready to cook into a .demat. Name is the human-readable
+    // source material name (-> the .demat filename, no handle in it). Data.MaterialId is the stable external
+    // handle the mesh submeshes reference.
+    struct ImportedMaterial
+    {
+        std::string             Name;
+        Assets::PBRMaterialData Data;
+    };
+
     struct ImportResult
     {
         std::optional<Desert::Assets::Serialization::MeshAssetData>     Mesh;
         std::optional<Desert::Assets::Serialization::SkeletonAssetData> Skeleton;
         std::vector<Desert::Assets::Serialization::AnimationAssetData>  Animations;
-        std::vector<Desert::Assets::Serialization::MaterialAssetData>   Material;
+        std::vector<ImportedMaterial>                                   Materials;
     };
 } // namespace Desert::Editor

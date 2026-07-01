@@ -17,7 +17,7 @@ namespace Desert::Graphic::System
         // Per-instance material override (MaterialPropertyBlock-style): start from the material's
         // reflected data and apply any overridden instance properties on top — generically, by name,
         // through reflection. Each drawn object thus gets its own effective material in the SSBO.
-        PBRPushMaterial BuildEffectiveMaterial( StaticMaterialPBR* material, MaterialInstance* instance )
+        PBRGpuMaterial BuildEffectiveMaterial( StaticMaterialPBR* material, MaterialInstance* instance )
         {
             Assets::PBRMaterialData data = material->Data();
 
@@ -69,7 +69,7 @@ namespace Desert::Graphic::System
                 }
             }
 
-            return BuildPBRPushMaterial( data );
+            return BuildPBRGpuMaterial( data );
         }
     } // namespace
 
@@ -207,12 +207,12 @@ namespace Desert::Graphic::System
             }
 
             material->ApplyDefaults();
-            for ( const auto& [name, value] : g.ParamOverrides )
+            for ( const auto& [name, value] : g.Overrides.Params )
                 material->SetParamRaw( name, value );
 
             // Texture overrides: resolve asset handle -> runtime Image2D and bind by sampler name.
             // Unset samplers keep the backend fallback texture, so this is purely additive.
-            for ( const auto& [name, handle] : g.TextureOverrides )
+            for ( const auto& [name, handle] : g.Overrides.Textures )
             {
                 if ( handle == 0 )
                     continue;
@@ -334,7 +334,7 @@ namespace Desert::Graphic::System
         const bool instancingOn = m_StaticInstancedPipeline && m_StaticInstancedMaterial &&
                                   m_StaticInstancedInstance && !m_Wireframe;
         std::vector<glm::mat4>       instTransforms;
-        std::vector<PBRPushMaterial> instMaterials;
+        std::vector<PBRGpuMaterial> instMaterials;
         struct InstancedDraw
         {
             Desert::StaticMesh* Mesh          = nullptr;
@@ -368,22 +368,33 @@ namespace Desert::Graphic::System
             std::vector<const StaticMeshRenderData*> singles;
             for ( auto& [mesh, bucket] : byMesh )
             {
-                if ( instancingOn && bucket.size() >= 2 )
+                // Objects with hidden submeshes can't share an instanced draw (the hidden mask is per-object,
+                // applied in RenderMesh) — force them onto the per-object path so the mask is honored.
+                std::vector<const StaticMeshRenderData*> batchable;
+                for ( const auto* obj : bucket )
+                {
+                    if ( obj->HiddenSubmeshes != 0 )
+                        singles.push_back( obj );
+                    else
+                        batchable.push_back( obj );
+                }
+
+                if ( instancingOn && batchable.size() >= 2 )
                 {
                     InstancedDraw d;
                     d.Mesh          = mesh;
-                    d.InstanceCount = static_cast<uint32_t>( bucket.size() );
+                    d.InstanceCount = static_cast<uint32_t>( batchable.size() );
                     d.FirstInstance = static_cast<uint32_t>( instTransforms.size() );
                     d.MaterialIndex = static_cast<uint32_t>( instMaterials.size() );
-                    for ( const auto* obj : bucket )
+                    for ( const auto* obj : batchable )
                         instTransforms.push_back( obj->Transform );
                     // v1: all instances of a batch share ONE material (the first object's effective material).
-                    instMaterials.push_back( BuildEffectiveMaterial( mat, ( *bucket[0]->MaterialSlots )[0] ) );
+                    instMaterials.push_back( BuildEffectiveMaterial( mat, ( *batchable[0]->MaterialSlots )[0] ) );
                     instDraws.push_back( d );
                 }
                 else
                 {
-                    for ( const auto* obj : bucket )
+                    for ( const auto* obj : batchable )
                         singles.push_back( obj );
                 }
             }
@@ -393,14 +404,14 @@ namespace Desert::Graphic::System
 
             // ---- Classic per-object path (singletons / wireframe) ----
             // Fill this material's per-object storage buffer (one GpuMaterial per drawn object).
-            std::vector<PBRPushMaterial> gpuMaterials;
+            std::vector<PBRGpuMaterial> gpuMaterials;
             gpuMaterials.reserve( singles.size() );
             for ( const auto* obj : singles )
                 gpuMaterials.push_back( BuildEffectiveMaterial( mat, ( *obj->MaterialSlots )[0] ) );
 
             if ( auto* sb = mat->Get<StorageBufferProperty>( "Materials" ) )
                 sb->SetRawData( gpuMaterials.data(),
-                                static_cast<uint32_t>( gpuMaterials.size() * sizeof( PBRPushMaterial ) ) );
+                                static_cast<uint32_t>( gpuMaterials.size() * sizeof( PBRGpuMaterial ) ) );
 
             // SHARED per-frame scene data (camera / lights / shadow / env) is written ONCE per material
             // group, NOT per mesh: these Update* all write the PARENT material's buffers (shared by every
@@ -439,7 +450,8 @@ namespace Desert::Graphic::System
                     auto* pipeline = ( m_Wireframe && m_StaticWireframePipeline )
                                           ? m_StaticWireframePipeline.get()
                                           : m_StaticPipeline.get();
-                    renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor() );
+                    renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor(), 1, 0,
+                                         obj->HiddenSubmeshes );
                 }
             }
         }
@@ -482,7 +494,7 @@ namespace Desert::Graphic::System
                                 static_cast<uint32_t>( instTransforms.size() * sizeof( glm::mat4 ) ) );
             if ( auto* sb = instMat->Get<StorageBufferProperty>( "Materials" ) )
                 sb->SetRawData( instMaterials.data(),
-                                static_cast<uint32_t>( instMaterials.size() * sizeof( PBRPushMaterial ) ) );
+                                static_cast<uint32_t>( instMaterials.size() * sizeof( PBRGpuMaterial ) ) );
 
             StaticMaterialPBR::UpdateCamera( instInst, camera );
             StaticMaterialPBR::UpdateLights( instInst, pointLights, spotLights, dirLights );
@@ -1127,10 +1139,11 @@ namespace Desert::Graphic::System
             case MeshType::Static:
             {
                 StaticMeshRenderData staticData;
-                staticData.Mesh          = static_cast<StaticMesh*>( data.Mesh );
-                staticData.Transform     = data.Transform;
-                staticData.MaterialSlots = data.MaterialSlots;
-                staticData.Outlined      = data.Outlined;
+                staticData.Mesh            = static_cast<StaticMesh*>( data.Mesh );
+                staticData.Transform       = data.Transform;
+                staticData.MaterialSlots   = data.MaterialSlots;
+                staticData.Outlined        = data.Outlined;
+                staticData.HiddenSubmeshes = data.HiddenSubmeshes;
 
                 m_StaticQueue.push_back( staticData );
                 break;

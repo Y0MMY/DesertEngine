@@ -14,7 +14,7 @@
 #include <Engine/Animation/Skeleton.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
 
-#include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Engine/Runtime/SelectionContext.hpp>
 
 namespace Desert::ECS
 {
@@ -37,7 +37,7 @@ namespace Desert::ECS
                 auto view = registry.view<StaticMeshComponent, TransformComponent>();
 
                 // Frame-constant: read the current selection ONCE, not per entity (256x/frame otherwise).
-                const auto selectedUUID = Editor::Core::SelectionManager::GetSelected();
+                const auto selectedUUID = Runtime::SelectionContext::Get();
 
                 view.each(
                      [&]( entt::entity entity, StaticMeshComponent& mesh,
@@ -196,14 +196,17 @@ namespace Desert::ECS
                                      texOverrides.emplace_back( t.Name, t.TextureHandle );
 
                                  renderCommandBuffer.Emplace<Graphic::Render::DrawGenericMeshCommand>(
-                                      targetMesh, worldTransform, matc.ShaderName, std::move( overrides ),
-                                      std::move( texOverrides ), isSelected );
+                                      targetMesh, worldTransform, matc.ShaderName,
+                                      Graphic::MaterialOverrides{ std::move( overrides ),
+                                                                  std::move( texOverrides ) },
+                                      isSelected );
                                  return; // skip the PBR path for this entity
                              }
                          }
 
                          renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
-                              targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, isSelected );
+                              targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, isSelected,
+                              mesh.HiddenSubmeshes );
                      } );
             }
 
@@ -339,7 +342,7 @@ namespace Desert::ECS
                          }
 
                          bool isSelected = false;
-                         if ( auto selected = Editor::Core::SelectionManager::GetSelected();
+                         if ( auto selected = Runtime::SelectionContext::Get();
                               selected.has_value() && registry.has<UUIDComponent>( entity ) )
                              isSelected = ( registry.get<UUIDComponent>( entity ).UUID == *selected );
 

@@ -7,8 +7,6 @@
 #include <Engine/Core/Input.hpp>
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
-#include <Engine/Geometry/ProceduralCharacterFactory.hpp>
-#include <Engine/Animation/ProceduralCharacterAnimations.hpp>
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
@@ -56,12 +54,6 @@ namespace Desert::ECS
                     m_World->Shutdown();
                     m_World.reset();
                 }
-                if ( m_CursorLocked ) // hand the cursor back when play ends
-                {
-                    Input::Mouse::Get().SetCursorMode( Input::MouseState::Visible );
-                    m_CursorLocked = false;
-                }
-                m_LookSuspended = false; // next Play starts captured again
                 return;
             }
 
@@ -92,8 +84,26 @@ namespace Desert::ECS
                 desc.Mass        = rb.Data.Mass;
                 desc.Friction    = rb.Data.Friction;
                 desc.Restitution = rb.Data.Restitution;
-                desc.Position    = transform.Translation;
-                desc.Rotation    = glm::quat( transform.Rotation );
+
+                // Use the WORLD pose (walk parents) so a collider on a CHILD entity (e.g. a wall inside a
+                // "House" prefab root) is created where it actually is, not at its local offset.
+                glm::mat4    world = transform.GetTransform();
+                entt::entity cur   = entity;
+                while ( registry.has<RelationshipComponent>( cur ) )
+                {
+                    const auto& rel = registry.get<RelationshipComponent>( cur );
+                    if ( rel.Parent == entt::null )
+                        break;
+                    cur = rel.Parent;
+                    if ( registry.has<TransformComponent>( cur ) )
+                        world = registry.get<TransformComponent>( cur ).GetTransform() * world;
+                }
+                desc.Position = glm::vec3( world[3] );
+                glm::mat3 basis( world ); // strip scale so quat_cast gives a clean rotation
+                if ( glm::length( basis[0] ) > 1e-6f ) basis[0] = glm::normalize( basis[0] );
+                if ( glm::length( basis[1] ) > 1e-6f ) basis[1] = glm::normalize( basis[1] );
+                if ( glm::length( basis[2] ) > 1e-6f ) basis[2] = glm::normalize( basis[2] );
+                desc.Rotation = glm::quat_cast( basis );
 
                 rb.RuntimeBody = m_World->CreateBody( desc );
             }
@@ -133,54 +143,14 @@ namespace Desert::ECS
                 transform.Rotation    = glm::eulerAngles( m_World->GetRotation( rb.RuntimeBody ) );
             }
 
-            // ---- Character controllers: WASD (camera-relative) + gravity + jump + mouse-look ----
+            // ---- Character controllers: the controller SCRIPT (e.g. player_controller.lua) sets the move
+            // INTENT each frame; the engine only resolves it against the camera and steps Jolt. Cursor
+            // capture, mouse delta and the WASD/sprint/look POLICY now live in the script (via ScriptSystem) —
+            // engine = mechanism, script = behavior. ----
             const float dt = ts.GetSeconds();
 
-            // Mouse-look. Config comes from the (first) character's CharacterControllerData (see the "Camera"
-            // category in Details). Two modes:
-            //   - Always-on (default): the cursor is CAPTURED on Play and the mouse always steers; press Left
-            //     Alt to TOGGLE the cursor free (so you can click Stop / the UI), press again to recapture.
-            //   - Hold-RMB: look only while the right mouse button is down; cursor stays free otherwise.
-            // Horizontal turns the CHARACTER (yaw — body, child camera and the camera-relative move basis all
-            // follow); vertical tilts the child camera only (pitch, clamped). m_LastMouse is refreshed every
-            // frame (like EditorCamera) so re-engaging look never produces a one-frame jump.
-            ECS::CharacterControllerData cfg{}; // defaults if there's no character this frame
-            if ( characters.begin() != characters.end() )
-                cfg = characters.get<CharacterControllerComponent>( *characters.begin() ).Data;
-
-            // Left Alt TOGGLES the cursor (edge-detected so a held key doesn't flip every frame).
-            const bool altDown = Input::Keyboard::IsKeyPressed( Common::KeyCode::LeftAlt );
-            if ( altDown && !m_AltPrev )
-                m_LookSuspended = !m_LookSuspended;
-            m_AltPrev = altDown;
-
-            const bool rmbHeld     = Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right );
-            const bool lookEnabled = cfg.HoldRMBToLook ? rmbHeld : !m_LookSuspended;
-
-            // Capture the cursor while looking (smooth, unbounded motion); release it otherwise.
-            const bool wantLock = lookEnabled;
-            bool       cursorJustToggled = false;
-            if ( wantLock != m_CursorLocked )
-            {
-                Input::Mouse::Get().SetCursorMode( wantLock ? Input::MouseState::Locked
-                                                            : Input::MouseState::Visible );
-                m_CursorLocked    = wantLock;
-                cursorJustToggled = true; // GLFW recenters on lock → skip this frame's delta to avoid a jump
-            }
-
-            const auto      mp = Input::Mouse::Get().GetMousePosition();
-            const glm::vec2 mouseNow( mp.first, mp.second );
-            const glm::vec2 mouseDelta =
-                 ( lookEnabled && !cursorJustToggled ) ? ( mouseNow - m_LastMouse ) : glm::vec2( 0.0f );
-            m_LastMouse = mouseNow;
-
-            const float lookSens   = 0.0035f * cfg.MouseSensitivity; // base radians/pixel * config multiplier
-            const float yawDelta   = -mouseDelta.x * lookSens;
-            const float pitchDelta = ( cfg.InvertY ? 1.0f : -1.0f ) * mouseDelta.y * lookSens;
-            const float pitchLimit = glm::radians( cfg.PitchLimitDeg );
-
-            // Movement basis from the active camera (flattened to the ground plane), so "forward" follows
-            // wherever the camera looks. The follow camera itself is a separate child entity.
+            // Movement basis from the active camera (flattened to the ground plane). The script's MoveInput is
+            // in local forward/right axes; resolving it here keeps "forward" following wherever the camera looks.
             glm::vec3 camFwd( 0.0f, 0.0f, -1.0f );
             glm::vec3 camRight( 1.0f, 0.0f, 0.0f );
             if ( auto cam = m_Scene->GetMainCamera().lock() )
@@ -189,22 +159,12 @@ namespace Desert::ECS
                 camFwd              = -glm::vec3( c2w[2] );
                 camRight            = glm::vec3( c2w[0] );
             }
-            camFwd.y = 0.0f;
+            camFwd.y   = 0.0f;
             camRight.y = 0.0f;
             if ( glm::length( camFwd ) > 1e-4f )
                 camFwd = glm::normalize( camFwd );
             if ( glm::length( camRight ) > 1e-4f )
                 camRight = glm::normalize( camRight );
-
-            glm::vec3 wish( 0.0f );
-            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::W ) ) wish += camFwd;
-            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::S ) ) wish -= camFwd;
-            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::D ) ) wish += camRight;
-            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::A ) ) wish -= camRight;
-            if ( glm::length( wish ) > 1e-4f )
-                wish = glm::normalize( wish );
-            const bool jumpHeld = Input::Keyboard::IsKeyPressed( Common::KeyCode::Space );
-            const bool sprint   = Input::Keyboard::IsKeyPressed( Common::KeyCode::LeftShift );
 
             for ( auto entity : characters )
             {
@@ -212,14 +172,34 @@ namespace Desert::ECS
                 if ( cc.RuntimeCharacter == Physics::kInvalidCharacter )
                     continue;
 
-                const bool onGround = m_World->IsCharacterOnGround( cc.RuntimeCharacter );
-                if ( onGround )
-                    cc.VerticalVelocity = jumpHeld ? cc.Data.JumpSpeed : -1.0f; // small stick-to-ground
-                else
-                    cc.VerticalVelocity -= 9.81f * dt;
+                // World move direction from the script's local intent (y = forward, x = strafe/right).
+                glm::vec3 wish = camFwd * cc.MoveInput.y + camRight * cc.MoveInput.x;
+                if ( glm::length( wish ) > 1e-4f )
+                    wish = glm::normalize( wish );
 
-                const float     moveSpeed = cc.Data.MoveSpeed * ( sprint ? 1.8f : 1.0f ); // LShift = sprint
-                const glm::vec3 horiz     = wish * moveSpeed;
+                const bool onGround = m_World->IsCharacterOnGround( cc.RuntimeCharacter );
+                cc.OnGround         = onGround; // exposed to scripts via self:isOnGround()
+                // Game gravity is ~2x real so the jump arc is SNAPPY (real 9.81 feels floaty / cartoonish).
+                constexpr float kGravity = 20.0f;
+                if ( onGround )
+                    cc.VerticalVelocity = cc.JumpRequested ? cc.JumpStrength : -1.0f; // jump (script) or stick
+                else
+                    cc.VerticalVelocity -= kGravity * dt;
+                cc.JumpRequested = false; // one-shot, consumed
+
+                // NO AIR CONTROL: on the ground the script's input steers (and we remember that horizontal
+                // velocity); in the air the takeoff velocity is locked, so a jump goes one direction and there's
+                // no bunny-hop strafing.
+                glm::vec3 horiz;
+                if ( onGround )
+                {
+                    horiz          = wish * cc.DesiredSpeed;
+                    cc.AirVelocity = { horiz.x, horiz.z }; // capture for the moment we leave the ground
+                }
+                else
+                {
+                    horiz = { cc.AirVelocity.x, 0.0f, cc.AirVelocity.y };
+                }
                 const glm::vec3 vel( horiz.x, cc.VerticalVelocity, horiz.z );
                 m_World->UpdateCharacter( cc.RuntimeCharacter, vel, dt );
 
@@ -228,98 +208,13 @@ namespace Desert::ECS
                 auto& transform       = characters.get<TransformComponent>( entity );
                 transform.Translation = m_World->GetCharacterPosition( cc.RuntimeCharacter );
 
-                // Yaw turns the character itself (CharacterVirtual doesn't rotate the capsule, so we own the
-                // yaw); the child camera inherits it through the hierarchy.
-                if ( yawDelta != 0.0f )
-                    transform.Rotation.y += yawDelta;
-
-                // Pitch lives on the child camera (look up/down without tilting the body). Find the direct
-                // child carrying a CameraComponent and clamp its X rotation to avoid gimbal flip.
-                if ( pitchDelta != 0.0f && registry.has<RelationshipComponent>( entity ) )
-                {
-                    for ( entt::entity child : registry.get<RelationshipComponent>( entity ).Children )
-                    {
-                        if ( !registry.has<CameraComponent>( child ) || !registry.has<TransformComponent>( child ) )
-                            continue;
-                        auto& camRot = registry.get<TransformComponent>( child ).Rotation;
-                        camRot.x     = glm::clamp( camRot.x + pitchDelta, -pitchLimit, pitchLimit );
-                        break;
-                    }
-                }
-
-                // Pick idle/walk/run (or jump while airborne) on the skinned child.
-                DriveLocomotion( registry, entity, cc.CurrentSpeed, cc.Data.MoveSpeed, onGround );
-            }
-        }
-
-        // Selects + plays the procedural locomotion clip on a character's skinned child (the one carrying the
-        // humanoid rig) based on its planar speed. The Animator is created/advanced by AnimationECSSystem; we
-        // only set which clip plays (and only on change, so it doesn't restart every frame). No-op for a
-        // non-humanoid rig (clip bone-tracks are indexed for that specific skeleton).
-        static void DriveLocomotion( entt::registry& registry, entt::entity character, float speed,
-                                     float baseMoveSpeed, bool onGround )
-        {
-            if ( !registry.has<RelationshipComponent>( character ) )
-                return;
-
-            for ( entt::entity child : registry.get<RelationshipComponent>( character ).Children )
-            {
-                if ( !registry.has<SkinnedMeshComponent>( child ) || !registry.has<AnimationComponent>( child ) )
-                    continue;
-
-                auto& anim = registry.get<AnimationComponent>( child );
-                if ( !anim.Animator )
-                    return; // created by AnimationECSSystem next frame
-
-                auto* base = Runtime::ResourceRegistry::GetMeshService()->Get(
-                     registry.get<SkinnedMeshComponent>( child ).MeshHandle );
-                if ( !base || !base->IsSkinned() )
-                    return;
-                if ( static_cast<SkinnedMesh*>( base )->GetSkeleton().GetSignature() !=
-                     Geometry::ProceduralCharacterFactory::GetHumanoidSkeletonSignature() )
-                    return; // a different rig — our procedural clips wouldn't map onto it
-
-                const Animation::AnimationClip* clip = nullptr;
-                const char*                     name = nullptr;
-                if ( !onGround )
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Jump();
-                    name = "Jump";
-                }
-                else if ( speed < 0.2f )
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Idle();
-                    name = "Idle";
-                }
-                else if ( speed <= baseMoveSpeed * 1.2f )
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Walk();
-                    name = "Walk";
-                }
-                else
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Run();
-                    name = "Run";
-                }
-
-                if ( anim.CurrentClip != name )
-                {
-                    // CrossFade (not Play) so idle<->walk<->run transitions blend smoothly instead of popping.
-                    anim.Animator->CrossFade( *clip, 0.18f, true );
-                    anim.CurrentClip = name;
-                    anim.Playing     = true;
-                    anim.Loop        = true;
-                }
-                return;
+                // NOTE: physics only PRODUCES state (cc.CurrentSpeed / cc.OnGround). Mapping that state to a
+                // locomotion clip is behaviour and lives in LocomotionSystem (runs after this), not here.
             }
         }
 
     private:
         Core::Scene*                           m_Scene = nullptr;
         std::unique_ptr<Physics::PhysicsWorld> m_World;
-        glm::vec2                              m_LastMouse{ 0.0f, 0.0f }; // for mouse-look frame delta
-        bool                                   m_CursorLocked  = false;   // is the OS cursor captured for look
-        bool                                   m_LookSuspended = false;   // toggled by Left Alt (cursor freed)
-        bool                                   m_AltPrev       = false;   // edge-detect the Left Alt toggle
     };
 } // namespace Desert::ECS

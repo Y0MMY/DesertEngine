@@ -14,18 +14,21 @@ namespace Desert::Graphic::Render
         // per entity through the submission chain (Debug-heavy).
         const std::vector<Graphic::MaterialInstance*>* MaterialSlots;
         glm::mat4                                      Transform;
-        bool                                           Outlined = false;
+        bool                                           Outlined        = false;
+        uint64_t                                       HiddenSubmeshes = 0; // bit i = submesh i hidden
 
         DrawStaticMeshCommand( Desert::Mesh* mesh, const std::vector<Graphic::MaterialInstance*>* materialSlots,
-                               const glm::mat4& transform, bool outlined = false )
-             : Mesh( mesh ), MaterialSlots( materialSlots ), Transform( transform ), Outlined( outlined )
+                               const glm::mat4& transform, bool outlined = false, uint64_t hiddenSubmeshes = 0 )
+             : Mesh( mesh ), MaterialSlots( materialSlots ), Transform( transform ), Outlined( outlined ),
+               HiddenSubmeshes( hiddenSubmeshes )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
             if ( MaterialSlots )
-                renderer.SubmitMesh( Mesh, *MaterialSlots, Transform, { .Outlined = Outlined } );
+                renderer.SubmitMesh( Mesh, *MaterialSlots, Transform,
+                                     { .Outlined = Outlined, .HiddenSubmeshes = HiddenSubmeshes } );
         }
     };
 

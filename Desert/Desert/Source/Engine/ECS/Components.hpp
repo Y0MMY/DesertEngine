@@ -21,6 +21,7 @@
 #include <Engine/Animation/FSM/AnimationStateMachine.hpp>
 
 #include <Engine/Physics/PhysicsWorld.hpp>
+#include <Engine/Scripting/ScriptProperty.hpp>
 
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
@@ -87,6 +88,9 @@ namespace Desert::ECS
         std::optional<Geometry::PrimitiveType>    Primitive;                // Optional primitive type for dynamic generation
         std::shared_ptr<DynamicMesh>              RuntimeMesh;              // Unique mesh instance for modifications
         bool                                      OutlineDraw = false;
+        // Per-submesh visibility: bit i set = submesh i is HIDDEN (skipped at draw). 0 = all visible. Up to
+        // 64 submeshes; edited per Element in the Materials panel.
+        uint64_t                                  HiddenSubmeshes = 0;
     };
 
     struct SkinnedMeshComponent
@@ -112,6 +116,23 @@ namespace Desert::ECS
         std::shared_ptr<DynamicMesh>              RuntimeMesh;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances;
         bool                                      InstancesDirty = true;
+    };
+
+    // A FOLIAGE type (UE5-style). Sits alongside an InstancedStaticMeshComponent (the mesh + per-instance
+    // WORLD transforms, drawn instanced). The Foliage paint tool scatters instances of this type onto surfaces
+    // (raycast brush). These are the per-type scatter params.
+    struct FoliageComponent
+    {
+        float Density       = 6.0f;   // instances scattered per paint dab (in the brush disk)
+        float ScaleMin      = 0.8f;
+        float ScaleMax      = 1.3f;
+        float ZOffsetMin    = 0.0f;   // sink(-)/raise(+) along world up, randomized per instance
+        float ZOffsetMax    = 0.0f;
+        float MaxPitchDeg   = 0.0f;   // random tilt off the up/normal axis (0 = upright)
+        float SlopeMinDeg   = 0.0f;   // only paint where the surface slope is within [min,max] degrees
+        float SlopeMaxDeg   = 90.0f;
+        bool  AlignToNormal = true;   // tilt instances to the surface normal
+        bool  RandomYaw     = true;   // random rotation about the up axis
     };
 
     // Per-layer splat mode. Auto = weight from height/slope rules (in-shader); Manual = weight painted
@@ -355,7 +376,9 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Skybox" ), Category( "Skybox" ), Asset<SkyboxAsset> )
+        // Hidden from the auto-generated Details (the widget draws a proper SkyboxAsset picker + DnD instead
+        // of the builder's texture-oriented asset slot). Still serialized — Hidden is editor-only.
+        PROPERTY( DisplayName( "Skybox" ), Category( "Skybox" ), Asset<SkyboxAsset>, Hidden )
         Assets::AssetHandle SkyboxHandle;
 
         PROPERTY( DisplayName( "Intensity" ), Category( "Skybox" ), Range( 0.0f, 10.0f ) )
@@ -369,17 +392,43 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Sun Disk Size" ), Category( "Skybox" ), Range( 0.002f, 0.1f ) )
         float SunDiskRadius = 0.02f;  // sun angular radius (radians)
 
-        // Engine-generated volumetric clouds (raymarched in the procedural-sky pass; visual only).
-        PROPERTY( DisplayName( "Volumetric Clouds" ), Category( "Clouds" ) )
+        // --- Artistic sky palette + scalars (the day/sunset/night look is driven by the sun elevation; these
+        // tune the colours/intensities). See ProceduralSky shader / Atmosphere.glslh SkyConfig. ---
+        PROPERTY( DisplayName( "Zenith Color" ), Category( "Sky Color" ), Color )
+        glm::vec3 ZenithColor = { 0.08f, 0.26f, 0.70f };
+        PROPERTY( DisplayName( "Horizon Color" ), Category( "Sky Color" ), Color )
+        glm::vec3 HorizonColor = { 0.50f, 0.66f, 0.92f };
+        PROPERTY( DisplayName( "Ground Color" ), Category( "Sky Color" ), Color )
+        glm::vec3 GroundColor = { 0.16f, 0.19f, 0.24f };
+        PROPERTY( DisplayName( "Night Color" ), Category( "Sky Color" ), Color )
+        glm::vec3 NightColor = { 0.010f, 0.020f, 0.050f };
+        PROPERTY( DisplayName( "Sky Brightness" ), Category( "Sky Color" ), Range( 0.0f, 4.0f ) )
+        float SkyBrightness = 1.0f;
+        PROPERTY( DisplayName( "Horizon Falloff" ), Category( "Sky Color" ), Range( 0.1f, 2.0f ) )
+        float HorizonFalloff = 0.85f;
+
+        PROPERTY( DisplayName( "Sun Color" ), Category( "Sun & Sky" ), Color )
+        glm::vec3 SunColor = { 1.00f, 0.96f, 0.88f };
+        PROPERTY( DisplayName( "Sun Glow" ), Category( "Sun & Sky" ), Range( 0.0f, 5.0f ) )
+        float SunGlow = 1.0f;
+        PROPERTY( DisplayName( "Sunset Color" ), Category( "Sun & Sky" ), Color )
+        glm::vec3 SunsetColor = { 1.00f, 0.42f, 0.18f };
+        PROPERTY( DisplayName( "Sunset Intensity" ), Category( "Sun & Sky" ), Range( 0.0f, 3.0f ) )
+        float SunsetIntensity = 1.0f;
+        PROPERTY( DisplayName( "Star Intensity" ), Category( "Sun & Sky" ), Range( 0.0f, 5.0f ) )
+        float StarIntensity = 1.0f;
+
+        // Procedural flat-layer clouds (e2gamedev-style; painted in the sky shader, visual only).
+        PROPERTY( DisplayName( "Clouds" ), Category( "Clouds" ) )
         bool  EnableClouds   = false;
         PROPERTY( DisplayName( "Coverage" ), Category( "Clouds" ), Range( 0.0f, 1.0f ) )
         float CloudCoverage  = 0.5f;   // 0 = clear sky, 1 = overcast
-        PROPERTY( DisplayName( "Density" ), Category( "Clouds" ), Range( 0.0f, 3.0f ) )
-        float CloudDensity   = 0.6f;   // opacity / extinction multiplier
-        PROPERTY( DisplayName( "Cloud Height" ), Category( "Clouds" ), Range( 100.0f, 3000.0f ) )
-        float CloudHeight    = 600.0f; // world-space altitude of the cloud layer base
-        PROPERTY( DisplayName( "Thickness" ), Category( "Clouds" ), Range( 100.0f, 2000.0f ) )
-        float CloudThickness = 500.0f; // vertical extent of the layer
+        PROPERTY( DisplayName( "Density" ), Category( "Clouds" ), Range( 0.0f, 2.0f ) )
+        float CloudDensity   = 1.0f;   // opacity multiplier
+        PROPERTY( DisplayName( "Tiling" ), Category( "Clouds" ), Range( 0.2f, 10.0f ) )
+        float CloudTiling    = 1.5f;   // cloud scale (bigger = smaller cells)
+        PROPERTY( DisplayName( "Brightness" ), Category( "Clouds" ), Range( 0.0f, 3.0f ) )
+        float CloudBrightness = 1.0f;  // cloud albedo multiplier
         PROPERTY( DisplayName( "Wind Speed" ), Category( "Clouds" ), Range( 0.0f, 50.0f ) )
         float CloudWindSpeed = 8.0f;   // horizontal drift speed (animation)
 
@@ -456,35 +505,16 @@ namespace Desert::ECS
     {
         REFLECT()
 
+        // PHYSICS / capsule only. The control FEEL (move/sprint/look/jump speed) lives in the controller
+        // SCRIPT's Properties — not here — so there's a single source of truth for behavior. See ScriptComponent.
         PROPERTY( DisplayName( "Radius" ), Category( "Character" ), Range( 0.05f, 5.0f ) )
         float Radius = 0.3f;
 
         PROPERTY( DisplayName( "Height" ), Category( "Character" ), Range( 0.2f, 10.0f ) )
         float Height = 1.8f; // total capsule height (HalfHeight = (Height - 2*Radius) / 2)
 
-        PROPERTY( DisplayName( "Move Speed" ), Category( "Character" ), Range( 0.0f, 30.0f ) )
-        float MoveSpeed = 4.0f;
-
-        PROPERTY( DisplayName( "Jump Speed" ), Category( "Character" ), Range( 0.0f, 30.0f ) )
-        float JumpSpeed = 5.0f;
-
         PROPERTY( DisplayName( "Max Slope" ), Category( "Character" ), Range( 0.0f, 89.0f ) )
         float MaxSlopeDeg = 50.0f;
-
-        // ----- Mouse-look / camera config (Play only) -----
-        PROPERTY( DisplayName( "Mouse Sensitivity" ), Category( "Camera" ), Range( 0.05f, 5.0f ) )
-        float MouseSensitivity = 1.0f; // multiplier over the base rad/pixel rate
-
-        PROPERTY( DisplayName( "Invert Y" ), Category( "Camera" ) )
-        bool InvertY = false;
-
-        // false = always-on look, cursor is captured on Play (hold Left Alt to free it for the UI).
-        // true  = only look while holding the right mouse button (cursor stays free otherwise).
-        PROPERTY( DisplayName( "Hold RMB To Look" ), Category( "Camera" ) )
-        bool HoldRMBToLook = false;
-
-        PROPERTY( DisplayName( "Pitch Limit" ), Category( "Camera" ), Range( 1.0f, 89.0f ) )
-        float PitchLimitDeg = 85.0f; // clamp camera pitch to +/- this
     };
 
     // A WASD-driven player. The follow camera is NOT here — parent a child entity with a CameraComponent
@@ -497,5 +527,66 @@ namespace Desert::ECS
         Physics::CharacterHandle RuntimeCharacter = Physics::kInvalidCharacter;
         float                    VerticalVelocity = 0.0f;
         float                    CurrentSpeed     = 0.0f; // planar move speed this frame (drives locomotion anim)
+
+        // Move INTENT, set by the controller SCRIPT each frame (the engine only executes the physics). This is
+        // the mechanism/behavior split: the script reads input + decides where to go; PhysicsECSSystem turns
+        // this into a camera-relative velocity and steps Jolt.
+        glm::vec2 MoveInput     = { 0.0f, 0.0f }; // x = strafe (right), y = forward; each -1..1
+        float     DesiredSpeed  = 0.0f;           // m/s the script asked for (sprint etc. is script policy)
+        bool      JumpRequested = false;          // set by script:jump(strength), consumed + cleared by physics
+        float     JumpStrength  = 5.0f;           // launch velocity the script passed to self:jump()
+        bool      OnGround       = false;         // last physics result, exposed to scripts (self:isOnGround())
+        glm::vec2 AirVelocity   = { 0.0f, 0.0f }; // horizontal velocity locked at takeoff (no air control)
+    };
+
+    // Attaches a Lua script to an entity. The ScriptSystem loads the file and calls its OnStart()/OnUpdate(dt);
+    // the script drives behavior through the bound API (self:move/jump/addYaw..., Input.*). See ScriptEngine.
+    // A behavior unit, like a UE ActorComponent: one .lua file + its exposed properties + lifecycle flag.
+    struct ScriptSlot
+    {
+        std::string ScriptPath; // .lua file, relative to the working dir (e.g. "Resources/Scripts/x.lua")
+
+        // Editor-exposed properties (from the script's `Properties` table): per-entity values, edited in
+        // Details and serialized. Written into the script env before it runs (so the script reads them).
+        std::vector<Scripting::ScriptProperty> Properties;
+
+        bool Started = false; // transient: OnStart already called for this instance
+    };
+
+    // One entity can run MANY scripts (EnTT allows only one component of a type per entity, so multiple
+    // behaviors live as a LIST of slots inside this one component — the same composition UE gets from
+    // multiple ActorComponents). Each slot is an independent sandbox (its own env + properties + lifecycle);
+    // all slots share the same `self` entity. ScriptSystem ticks every slot; entity:call() broadcasts to all.
+    struct ScriptComponent
+    {
+        std::vector<ScriptSlot> Scripts;
+    };
+
+    // UE-style SOCKET attachment: makes this entity follow a BONE of another (skinned) entity, not just its
+    // root. The hand is a bone inside a Skeleton — it has no entity, so RelationshipComponent can't parent to
+    // it. AttachmentSystem (after AnimationECSSystem) computes the bone's world transform from the target's
+    // animator pose and writes it (plus the local offset) into this entity's TransformComponent each frame.
+    // Used for weapons-in-hand, hats, backpacks, scope attachments, etc.
+    struct SocketAttachmentComponent
+    {
+        Common::UUID Target;   // the skinned-mesh entity whose bone we follow (invalid = detached)
+        std::string  BoneName; // bone/socket name on the target's skeleton (e.g. "mixamorig:RightHand")
+
+        // Grip alignment relative to the bone (the weapon almost never sits exactly on the bone origin).
+        glm::vec3 OffsetTranslation = { 0.0f, 0.0f, 0.0f };
+        glm::vec3 OffsetRotation    = { 0.0f, 0.0f, 0.0f }; // euler radians
+        glm::vec3 OffsetScale       = { 1.0f, 1.0f, 1.0f };
+    };
+
+    // A flying projectile (bullet/grenade/arrow): integrated each frame by ProjectileSystem (Play only). On a
+    // swept hit it delivers "OnHit" to the struck entity's script and is destroyed; it also dies on lifetime.
+    // Mechanism (movement + collision) is C++; the DECISION to fire + what a hit MEANS stay in Lua.
+    struct ProjectileComponent
+    {
+        glm::vec3    Velocity     = { 0.0f, 0.0f, 0.0f }; // world units/s
+        float        GravityScale = 0.0f;                 // 0 = straight line, 1 = full gravity (arc)
+        float        LifeRemaining = 5.0f;                // seconds before auto-despawn
+        float        Damage        = 10.0f;
+        Common::UUID Owner;                               // shooter (so we can skip self-hits)
     };
 } // namespace Desert::ECS

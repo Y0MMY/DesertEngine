@@ -10,6 +10,8 @@
 #include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <Common/Core/Logger.hpp>
+
 namespace Desert::Graphic
 {
     void MaterialFactory::ApplyPBRAsset( StaticMaterialPBR& material, const Assets::PBRMaterialAsset& asset )
@@ -32,13 +34,17 @@ namespace Desert::Graphic
         {
             if ( static_cast<uint64_t>( handle ) == 0 )
                 return;
-            if ( auto* img = resolveImage( handle ) )
+            auto* img = resolveImage( handle );
+            LOG_INFO( "[Mat][Bind] {} handle={} resolved={}", shaderName, static_cast<uint64_t>( handle ),
+                      img != nullptr );
+            if ( img )
                 if ( auto* prop = material.Get<Texture2DProperty>( shaderName ) )
                     prop->SetImage( img );
         };
 
         bindTexture( material.Data().AlbedoTexture, "u_AlbedoTexture" );
         bindTexture( material.Data().NormalTexture, "u_NormalTexture" );
+        bindTexture( material.Data().OpacityTexture, "u_OpacityTexture" );
     }
 
     std::shared_ptr<Material> MaterialFactory::CreateMaterial( const Assets::MaterialAsset* asset )

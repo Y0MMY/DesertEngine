@@ -24,8 +24,19 @@ namespace Desert::Editor
 
         void Clear();
 
+        // --- Shared rendered-thumbnail disk-cache layout (used by every panel that shows previews) ---------
+        // Rendered material/mesh thumbnails live in a VERSIONED folder. The per-asset staleness check only
+        // compares the source asset's modtime, so it can't notice when the thumbnail RENDERER improves — bump
+        // CacheVersion() to invalidate every old thumbnail at once, and call PurgeOldVersions() once at startup
+        // to delete the stale folders/files so they regenerate cleanly with the current renderer.
+        static int         CacheVersion();
+        static std::string DiskPath( const std::string& assetPath ); // versioned PNG path for an asset
+        static void        PurgeOldVersions();                        // drop everything except the current version
+
     private:
-        static constexpr int      kThumbMaxDim = 128;
+        // Display cap: the on-disk PNG can be large (1024), but the grid shows it tiny, so decode it into a
+        // small GPU texture (box-averaged downscale) to keep VRAM low. Storage res != display res.
+        static constexpr int      kThumbMaxDim = 256;
         static constexpr std::size_t kMaxEntries = 512; // bound VRAM/handles
 
         std::unordered_map<std::string, std::shared_ptr<Graphic::Image2D>> m_Cache;

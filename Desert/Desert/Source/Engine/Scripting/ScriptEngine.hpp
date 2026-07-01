@@ -1,0 +1,84 @@
+#pragma once
+
+#include <Common/Core/ResultStr.hpp>
+#include <Engine/Scripting/ScriptProperty.hpp>
+
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace Desert::Core
+{
+    class Scene;
+}
+
+namespace Desert::Assets
+{
+    class AssetManager;
+}
+
+namespace Desert::Scripting
+{
+    // Owns the embedded Lua runtime (via sol2). The concept: the engine exposes capabilities + lifecycle to
+    // scripts written in Lua, so game behavior lives in hot-reloadable .lua files instead of compiled C++.
+    // Engine = mechanism/hot-path; script = behavior/decisions.
+    //
+    // sol2/Lua headers are HEAVY and are confined entirely to ScriptEngine.cpp (PIMPL, like PhysicsWorld) so
+    // the rest of the engine never pays their compile cost and never sees Lua types.
+    class ScriptEngine
+    {
+    public:
+        // The scene is needed so the bound entity API (move/jump/transform/...) can touch components; the asset
+        // manager lets World.spawn(prefab) instantiate prefabs from script. assetManager may be null (spawn no-op).
+        explicit ScriptEngine( Core::Scene* scene, Assets::AssetManager* assetManager = nullptr );
+        ~ScriptEngine();
+
+        ScriptEngine( const ScriptEngine& )            = delete;
+        ScriptEngine& operator=( const ScriptEngine& ) = delete;
+
+        // Runs a chunk of Lua immediately (boot self-test / quick eval). Returns the Lua error on failure.
+        Common::BoolResultStr RunString( const std::string& code );
+
+        // Loads `path` into a fresh sandbox env (with `self` bound to the entity) for the entity's script SLOT.
+        // An entity may run several scripts; each slot is an independent env. Re-load replaces the slot's env
+        // (hot-reload). `entity` is the entt handle as a uint32; `slot` is the index in ScriptComponent.Scripts.
+        Common::BoolResultStr LoadEntityScript( uint32_t entity, uint32_t slot, const std::string& path );
+
+        // Calls a slot's OnStart() / OnUpdate(dt) if defined (no-op if not loaded).
+        void CallStart( uint32_t entity, uint32_t slot );
+        void CallUpdate( uint32_t entity, uint32_t slot, float dt );
+
+        // Writes the slot's editor-set property values into its env's `Properties` table, so the running
+        // script reads the overridden values. Call after LoadEntityScript, before OnStart.
+        void ApplyProperties( uint32_t entity, uint32_t slot, const std::vector<ScriptProperty>& props );
+
+        // Drops ALL of an entity's slot environments (entity destroyed / component removed).
+        void Release( uint32_t entity );
+
+        // Shrinks an entity's env list to `count` slots (drops envs for removed slots). No-op if already <=.
+        void TrimSlots( uint32_t entity, uint32_t count );
+
+        // Per-frame mouse delta the engine computed (cursor-capture aware), exposed to scripts as
+        // Input.mouseDelta(). Set once per frame before running scripts.
+        void SetFrameMouseDelta( float dx, float dy );
+
+        // Advances the edge-detection state for Input.wasPressed() (down THIS frame, up LAST frame). Call once
+        // per frame BEFORE running scripts so each key fires wasPressed() exactly on the press transition.
+        void NewInputFrame();
+
+        // A script may request cursor lock/unlock via Input.lockCursor()/showCursor(). ScriptSystem consumes the
+        // pending request after running scripts and applies it (so it cooperates with the Escape toggle). Returns
+        // nullopt if no script touched the cursor this frame; otherwise true=lock(capture), false=show(free).
+        std::optional<bool> ConsumeCursorLockRequest();
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> m_Impl;
+    };
+
+    // Reads a script's `Properties` table (the editor-exposed schema + defaults) WITHOUT running the game —
+    // loads the file in a throwaway Lua state. Used by the Details panel (Edit mode). Empty on error / none.
+    std::vector<ScriptProperty> ReadScriptProperties( const std::string& path );
+} // namespace Desert::Scripting

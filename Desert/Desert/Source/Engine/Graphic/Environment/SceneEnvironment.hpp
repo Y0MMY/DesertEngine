@@ -3,6 +3,7 @@
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Runtime/ImageHandle.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
+#include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
 
@@ -29,7 +30,8 @@ namespace Desert::Graphic
         // Builds an IBL environment from the engine-generated procedural atmosphere (no HDR asset): the
         // sky is baked into an equirect panorama, then run through the same radiance/irradiance/prefilter
         // pipeline. sunDir is the direction TOWARD the sun (normalized).
-        static Environment CreateProcedural( const glm::vec3& sunDir, float intensity, float diskRadius );
+        static Environment CreateProcedural( const glm::vec3& sunDir, float intensity, float diskRadius,
+                                             const SkySettings& sky );
 
     private:
         static std::shared_ptr<ImageCube>

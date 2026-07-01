@@ -3,6 +3,7 @@
 // reflected component in the editor, copy one line below.
 
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
+#include <Editor/Core/DragPayloads.hpp>
 
 #include <Engine/ECS/Components.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -23,8 +24,11 @@
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Core/Serialize/ComponentRegistry.hpp>
+#include <Engine/Scripting/ScriptEngine.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
+#include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <limits>
 
@@ -162,7 +166,7 @@ namespace Desert::Editor
                 ::ImGui::Button( ( disp + "##tex_" + p.Name ).c_str(), ImVec2( -1.0f, 0.0f ) );
                 if ( ::ImGui::BeginDragDropTarget() )
                 {
-                    if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( "TEXTURE_ASSET" ) )
+                    if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::TextureAsset ) )
                     {
                         const std::string path( static_cast<const char*>( pl->Data ),
                                                 pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
@@ -203,7 +207,7 @@ namespace Desert::Editor
 
         // --- Save / Load this material to a reusable .demat file (MVP; full asset integration later) ---
         ::ImGui::Separator();
-        static std::string s_matPath = "Resources/Assets/Material/MyMaterial.demat";
+        static std::string s_matPath = "Resources/Assets/Materials/MyMaterial.demat";
         Utils::ImGuiUtilities::InputText( s_matPath, "##matpath" );
         if ( ::ImGui::Button( "Save Material" ) && assetMgr )
         {
@@ -223,7 +227,7 @@ namespace Desert::Editor
         ::ImGui::Button( "  Drag a .demat here to load  ", ImVec2( -1.0f, 0.0f ) );
         if ( ::ImGui::BeginDragDropTarget() )
         {
-            if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( "MATERIAL_ASSET" ); pl && assetMgr )
+            if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ); pl && assetMgr )
             {
                 const std::string path( static_cast<const char*>( pl->Data ),
                                         pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
@@ -333,7 +337,7 @@ namespace Desert::Editor
                              ImVec2( -1.0f, 0.0f ) );
             if ( ::ImGui::BeginDragDropTarget() )
             {
-                if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( "MESH_ASSET" );
+                if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MeshAsset );
                      pl && ctx.AssetMgr() )
                 {
                     const std::string path( static_cast<const char*>( pl->Data ),
@@ -396,3 +400,130 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
      ::Desert::ECS::MaterialComponent, "Material", true,
      ( []( ::Desert::ECS::Entity& e, ::Desert::Core::Scene*, const ::Desert::Editor::ComponentEditContext& ctx )
        { ::Desert::Editor::DrawMaterialComponentWidget( e, ctx.AssetMgr() ); } ) )
+
+// Script component: an entity can run SEVERAL scripts (like UE ActorComponents), shown as a list of slots.
+// Per slot: pick the .lua from a dropdown OR drag one from the File Explorer, Reload (hot-reload), and edit
+// the script's exposed Properties. "+ Add Script" appends a slot; the X removes one.
+DESERT_REGISTER_CUSTOM_COMPONENT(
+     ::Desert::ECS::ScriptComponent, "Script", true,
+     ( []( ::Desert::ECS::Entity& e, ::Desert::Core::Scene*, const ::Desert::Editor::ComponentEditContext& )
+       {
+           namespace fs = std::filesystem;
+           auto& sc     = e.GetComponent<::Desert::ECS::ScriptComponent>();
+
+           int removeIndex = -1;
+           for ( size_t i = 0; i < sc.Scripts.size(); ++i )
+           {
+               ImGui::PushID( static_cast<int>( i ) );
+               auto& slot = sc.Scripts[i];
+
+               const std::string preview = slot.ScriptPath.empty()
+                                                ? "Select script..."
+                                                : fs::path( slot.ScriptPath ).filename().string();
+
+               ImGui::SetNextItemWidth( -60.0f ); // leave room for the remove button
+               if ( ImGui::BeginCombo( "##ScriptSel", preview.c_str() ) )
+               {
+                   std::error_code ec;
+                   if ( fs::exists( "Resources", ec ) )
+                   {
+                       for ( const auto& it : fs::recursive_directory_iterator( "Resources", ec ) )
+                       {
+                           if ( !it.is_regular_file() || it.path().extension() != ".lua" )
+                               continue;
+                           const std::string rel = it.path().generic_string();
+                           if ( ImGui::Selectable( it.path().filename().string().c_str(),
+                                                   slot.ScriptPath == rel ) )
+                           {
+                               slot.ScriptPath = rel;
+                               slot.Started    = false;
+                               slot.Properties.clear(); // re-seed from the new script's schema below
+                           }
+                       }
+                   }
+                   ImGui::EndCombo();
+               }
+
+               // Drag a .lua from the File Explorer onto the combo.
+               if ( ImGui::BeginDragDropTarget() )
+               {
+                   if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "AssetFile" ) )
+                   {
+                       const std::string dropped( static_cast<const char*>( payload->Data ) );
+                       if ( dropped.size() > 4 && dropped.substr( dropped.size() - 4 ) == ".lua" )
+                       {
+                           slot.ScriptPath = fs::path( dropped ).generic_string();
+                           slot.Started    = false;
+                           slot.Properties.clear();
+                       }
+                   }
+                   ImGui::EndDragDropTarget();
+               }
+
+               ImGui::SameLine();
+               if ( ImGui::Button( "X" ) )
+                   removeIndex = static_cast<int>( i );
+
+               if ( !slot.ScriptPath.empty() )
+               {
+                   ImGui::TextDisabled( "%s", slot.ScriptPath.c_str() );
+
+                   if ( ImGui::Button( "Reload" ) )
+                       slot.Started = false; // re-read on the next Play frame (hot-reload)
+
+                   // ---- Exposed properties (the script's `Properties` table) ----
+                   if ( slot.Properties.empty() )
+                       slot.Properties = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
+
+                   ImGui::SameLine();
+                   if ( ImGui::Button( "Refresh Props" ) )
+                   {
+                       // Re-read the schema, keeping existing values for properties that still exist.
+                       auto schema = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
+                       for ( auto& s : schema )
+                       {
+                           auto old = std::find_if( slot.Properties.begin(), slot.Properties.end(),
+                                                    [&]( const auto& p )
+                                                    { return p.Name == s.Name && p.Type == s.Type; } );
+                           if ( old != slot.Properties.end() )
+                               s = *old;
+                       }
+                       slot.Properties = std::move( schema );
+                   }
+
+                   for ( auto& p : slot.Properties )
+                   {
+                       switch ( p.Type )
+                       {
+                           case ::Desert::Scripting::PropertyType::Number:
+                           {
+                               float v = static_cast<float>( p.Number );
+                               if ( ImGui::DragFloat( p.Name.c_str(), &v, 0.01f ) )
+                                   p.Number = v;
+                               break;
+                           }
+                           case ::Desert::Scripting::PropertyType::Bool:
+                               ImGui::Checkbox( p.Name.c_str(), &p.Bool );
+                               break;
+                           case ::Desert::Scripting::PropertyType::String:
+                           {
+                               char buf[256] = { 0 };
+                               std::strncpy( buf, p.Str.c_str(), sizeof( buf ) - 1 );
+                               if ( ImGui::InputText( p.Name.c_str(), buf, sizeof( buf ) ) )
+                                   p.Str = buf;
+                               break;
+                           }
+                       }
+                   }
+               }
+
+               ImGui::Separator();
+               ImGui::PopID();
+           }
+
+           if ( removeIndex >= 0 )
+               sc.Scripts.erase( sc.Scripts.begin() + removeIndex );
+
+           if ( ImGui::Button( "+ Add Script" ) )
+               sc.Scripts.emplace_back();
+       } ) )

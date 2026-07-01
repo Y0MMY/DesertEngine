@@ -1,6 +1,7 @@
 #include "AssimpImporter.hpp"
 
 #include <limits>
+#include <functional>
 
 #include <assimp/Importer.hpp>
 #include <assimp/LogStream.hpp>
@@ -11,13 +12,15 @@
 #include <Engine/Assets/Serialization/Mesh.hpp>
 #include <Engine/Assets/Serialization/Skeleton.hpp>
 #include <Engine/Assets/Serialization/Animation.hpp>
-#include <Engine/Assets/Serialization/Material.hpp>
 
 #include <Common/Core/Logger.hpp>
+#include <Common/Core/UUID.hpp>
+#include <Common/Core/Constants.hpp>
 
 #include <Engine/Animation/Skeleton.hpp>
 
 #include <Editor/Import/ImportManager.hpp>
+#include <Editor/Import/ImportResult.hpp>
 
 struct aiNode;
 struct aiAnimation;
@@ -198,81 +201,166 @@ namespace Desert::Editor
         return def;
     }
 
-    static std::vector<MaterialAssetData>
-    ExtractMaterials( const aiScene* scene, const std::filesystem::path& basePath, ImportManager& manager )
+    // Deterministic 64-bit id (FNV-1a) from a stable key, as a Common::UUID. Re-importing the same source
+    // yields the SAME material id, so a mesh submesh's reference survives re-cooks (unlike a random UUID).
+    static Common::UUID StableMaterialId( const std::string& key )
     {
-        std::vector<MaterialAssetData> result;
+        uint64_t h = 1469598103934665603ull;
+        for ( unsigned char c : key )
+        {
+            h ^= c;
+            h *= 1099511628211ull;
+        }
+        if ( h == 0 )
+            h = 1; // never collide with the null handle
+        return Common::UUID( h );
+    }
+
+    // Extract every source material into the unified, reflected PBRMaterialData (the .demat schema). Recovers
+    // NORMAL + OPACITY maps the old MaterialAssetData path silently dropped, and stamps a stable MaterialId.
+    static std::vector<ImportedMaterial>
+    ExtractMaterials( const aiScene* scene, const std::filesystem::path& basePath, ImportManager& manager,
+                      const std::string& assetName )
+    {
+        std::vector<ImportedMaterial> result;
 
         for ( uint32_t i = 0; i < scene->mNumMaterials; ++i )
         {
             aiMaterial* mat = scene->mMaterials[i];
 
-            MaterialAssetData data;
-
-            aiString name;
+            ImportedMaterial out;
+            aiString         name;
             mat->Get( AI_MATKEY_NAME, name );
-            data.Name           = name.C_Str();
-            data.MaterialHandle = Common::UUID{};
+            out.Name = name.length > 0 ? std::string( name.C_Str() ) : ( "Material_" + std::to_string( i ) );
 
-            auto loadTex = [&]( aiTextureType type ) -> std::optional<TextureRef>
+            auto& d      = out.Data;
+            d.MaterialId = StableMaterialId( assetName + "::" + out.Name + "#" + std::to_string( i ) );
+
+            // Locate a material's texture FILE on disk. FBX/glTF often store an unusable path (the author's
+            // absolute build path, relativized to a long "../../.../mnt/prod/.../foo.jpg" that escapes the
+            // project), so we can't trust the stored path. Strategy: try it literally, then fall back to the
+            // FILENAME next to the source file + in a sibling "textures/" folder, with EXTENSION fallback
+            // (the gothic FBX asks for "..._nor_gl_4k.exr" but only the .jpg ships). Returns {} if not found.
+            auto findTextureFile = [&]( const std::filesystem::path& ref ) -> std::filesystem::path
+            {
+                namespace fs = std::filesystem;
+                std::error_code ec;
+
+                const fs::path literal =
+                     ref.is_absolute() ? ref : ( basePath / ref ).lexically_normal();
+                if ( fs::exists( literal, ec ) )
+                    return literal;
+
+                const std::string            stem = ref.stem().string();
+                const std::string            name = ref.filename().string();
+                const fs::path               dirs[] = { basePath, basePath / "textures" };
+                static const char*           exts[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".exr", ".hdr" };
+                for ( const auto& d : dirs )
+                {
+                    if ( fs::exists( d / name, ec ) ) // exact filename
+                        return d / name;
+                    for ( const char* e : exts ) // same stem, different extension
+                    {
+                        const fs::path cand = d / ( stem + e );
+                        if ( fs::exists( cand, ec ) )
+                            return cand;
+                    }
+                }
+                return {};
+            };
+
+            auto loadTex = [&]( aiTextureType type ) -> Assets::AssetHandle
             {
                 if ( mat->GetTextureCount( type ) == 0 )
-                    return std::nullopt;
+                    return Common::UUID::Null();
 
                 aiString path;
                 if ( mat->GetTexture( type, 0, &path ) != AI_SUCCESS )
-                    return std::nullopt;
+                    return Common::UUID::Null();
 
-                TextureRef            ref;
-                std::filesystem::path assimpPath = path.C_Str();
-                std::filesystem::path finalPath;
-
-                if ( !assimpPath.is_absolute() )
+                const std::filesystem::path found = findTextureFile( path.C_Str() );
+                if ( found.empty() )
                 {
-                    finalPath = ( basePath / assimpPath ).lexically_normal();
+                    LOG_WARN( "[Import][Tex] type={} fbxRef='{}' NOT FOUND under '{}'", static_cast<int>( type ),
+                              path.C_Str(), basePath.generic_string() );
+                    return Common::UUID::Null();
                 }
-                else
-                {
-                    finalPath = basePath / assimpPath.filename();
-                }
-
-                ref.Path   = finalPath.string();
-                ref.Handle = manager.ImportTexture( ref.Path );
-                return ref;
+                const Assets::AssetHandle h = manager.ImportTexture( found.string() );
+                LOG_INFO( "[Import][Tex] type={} fbxRef='{}' -> '{}' handle={}", static_cast<int>( type ),
+                          path.C_Str(), found.generic_string(), static_cast<uint64_t>( h ) );
+                return h;
             };
 
-            // TEXTURES
-            data.Albedo.Texture    = loadTex( aiTextureType_DIFFUSE );
-            data.Metallic.Texture  = loadTex( aiTextureType_METALNESS );
-            data.Roughness.Texture = loadTex( aiTextureType_DIFFUSE_ROUGHNESS );
-            data.AO.Texture        = loadTex( aiTextureType_AMBIENT_OCCLUSION );
-            data.Emissive.Texture  = loadTex( aiTextureType_EMISSIVE );
+            // TEXTURES (Normal + Opacity now included)
+            d.AlbedoTexture    = loadTex( aiTextureType_DIFFUSE );
+            d.NormalTexture    = loadTex( aiTextureType_NORMALS );
+            d.MetallicTexture  = loadTex( aiTextureType_METALNESS );
+            d.RoughnessTexture = loadTex( aiTextureType_DIFFUSE_ROUGHNESS );
+            d.AOTexture        = loadTex( aiTextureType_AMBIENT_OCCLUSION );
+            d.EmissiveTexture  = loadTex( aiTextureType_EMISSIVE );
+            d.OpacityTexture   = loadTex( aiTextureType_OPACITY );
 
-            data.Albedo.Value    = GetColor( mat, AI_MATKEY_COLOR_DIFFUSE, glm::vec4( 1.0f ) );
-            data.Metallic.Value  = GetFloat( mat, AI_MATKEY_METALLIC_FACTOR, 0.0f );
-            data.Roughness.Value = GetFloat( mat, AI_MATKEY_ROUGHNESS_FACTOR, 1.0f );
-            auto emissive        = GetColor( mat, AI_MATKEY_COLOR_EMISSIVE, glm::vec4( 0.0f ) );
-            data.Emissive.Value  = glm::vec3( emissive );
+            d.AlbedoColor     = GetColor( mat, AI_MATKEY_COLOR_DIFFUSE, glm::vec4( 1.0f ) );
+            d.MetallicFactor  = GetFloat( mat, AI_MATKEY_METALLIC_FACTOR, 0.0f );
+            d.RoughnessFactor = GetFloat( mat, AI_MATKEY_ROUGHNESS_FACTOR, 1.0f );
+            const glm::vec4 emissive = GetColor( mat, AI_MATKEY_COLOR_EMISSIVE, glm::vec4( 0.0f ) );
+            d.EmissiveColor          = glm::vec4( glm::vec3( emissive ), 1.0f );
 
-            result.push_back( data );
+            // An opacity map implies cutout (leaves/cards) -> enable by default; opaque materials keep 0.
+            d.AlphaCutoff = ( mat->GetTextureCount( aiTextureType_OPACITY ) > 0 ) ? 0.5f : 0.0f;
+
+            result.push_back( std::move( out ) );
         }
 
         return result;
     }
 
-    static ImportResult ProcessScene( const aiScene* scene, ImportManager& manager, const std::string& assetName )
+    static ImportResult ProcessScene( const aiScene* scene, ImportManager& manager,
+                                      const std::filesystem::path& sourcePath )
     {
         ImportResult result;
 
         MeshAssetData     meshData;
         SkeletonAssetData skeletonData;
 
-        const auto materialData =
-             ExtractMaterials( scene, ( std::filesystem::path( "Resources/Textures/" ) / assetName ), manager );
+        // Resolve the material's texture references RELATIVE TO THE SOURCE FILE's own folder (how FBX/glTF
+        // store them, e.g. Poly Haven's "textures/<name>.jpg" sits next to the .fbx). The old code looked in
+        // a hardcoded Resources/Assets/Textures/<assetName>/ and never found them. assetName (the file stem)
+        // is still the stable key for the material id.
+        const std::string assetName = sourcePath.stem().string();
+        const auto materialData = ExtractMaterials( scene, sourcePath.parent_path(), manager, assetName );
 
         std::unordered_map<std::string, uint32_t> boneMapping;
 
         bool hasBones = false;
+
+        // Map each mesh index -> its node's WORLD transform. FBX keeps the real orientation/placement (and the
+        // exporter's axis conversion, e.g. Blender's Z-up -> our Y-up) in the NODE hierarchy, NOT the raw
+        // vertices. We bake that world transform into STATIC vertices below so the prop faces the right way
+        // (without it a Blender FBX imports rotated ~90° about X — "looking at the floor"). Skinned meshes are
+        // NOT baked: their bind/bone hierarchy (BuildSkeletonHierarchy) already carries the same transforms.
+        std::vector<glm::mat4> meshWorld( scene->mNumMeshes, glm::mat4( 1.0f ) );
+        {
+            std::vector<bool> meshHasXf( scene->mNumMeshes, false );
+            std::function<void( const aiNode*, const glm::mat4& )> walk =
+                 [&]( const aiNode* node, const glm::mat4& parent )
+            {
+                const glm::mat4 world = parent * ConvertMatrix( node->mTransformation );
+                for ( unsigned i = 0; i < node->mNumMeshes; ++i )
+                {
+                    const unsigned mi = node->mMeshes[i];
+                    if ( mi < meshWorld.size() && !meshHasXf[mi] )
+                    {
+                        meshWorld[mi]  = world;
+                        meshHasXf[mi]  = true;
+                    }
+                }
+                for ( unsigned i = 0; i < node->mNumChildren; ++i )
+                    walk( node->mChildren[i], world );
+            };
+            if ( scene->mRootNode )
+                walk( scene->mRootNode, glm::mat4( 1.0f ) );
+        }
 
         // ============================
         // Mesh extraction
@@ -294,7 +382,8 @@ namespace Desert::Editor
             submesh.VertexCount    = mesh->mNumVertices;
             submesh.IndexCount     = mesh->mNumFaces * 3;
             submesh.Transform      = glm::mat4( 1.0f );
-            submesh.MaterialHandle = materialData[mesh->mMaterialIndex].MaterialHandle;
+            submesh.MaterialHandle = materialData[mesh->mMaterialIndex].Data.MaterialId.value_or(
+                 Common::UUID::Null() );
 
             // ============================
             // VERTICES
@@ -302,20 +391,31 @@ namespace Desert::Editor
 
             if ( !meshHasBones )
             {
-                // -------- STATIC --------
+                // -------- STATIC -------- (bake the node world transform so orientation/placement match the
+                // DCC tool; normals/tangents use the 3x3 part, renormalized to survive any scale.)
+                const glm::mat4 world     = meshWorld[meshIdx];
+                const glm::mat3 normalMat = glm::mat3( world );
+
                 for ( uint32_t i = 0; i < mesh->mNumVertices; ++i )
                 {
                     StaticVertexData v{};
 
-                    v.Position = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
+                    const glm::vec3 p = glm::vec3(
+                         world * glm::vec4( mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z, 1.0f ) );
+                    v.Position = { p.x, p.y, p.z };
 
                     if ( mesh->HasNormals() )
-                        v.Normal = { mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z };
+                        v.Normal = glm::normalize(
+                             normalMat * glm::vec3( mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z ) );
 
                     if ( mesh->HasTangentsAndBitangents() )
                     {
-                        v.Tangent   = { mesh->mTangents[i].x, mesh->mTangents[i].y, mesh->mTangents[i].z };
-                        v.Bitangent = { mesh->mBitangents[i].x, mesh->mBitangents[i].y, mesh->mBitangents[i].z };
+                        v.Tangent = glm::normalize( normalMat * glm::vec3( mesh->mTangents[i].x,
+                                                                           mesh->mTangents[i].y,
+                                                                           mesh->mTangents[i].z ) );
+                        v.Bitangent = glm::normalize( normalMat * glm::vec3( mesh->mBitangents[i].x,
+                                                                            mesh->mBitangents[i].y,
+                                                                            mesh->mBitangents[i].z ) );
                     }
 
                     if ( mesh->HasTextureCoords( 0 ) )
@@ -440,14 +540,20 @@ namespace Desert::Editor
 
             if ( mesh->mNumVertices > 0 )
             {
-                glm::vec3 aabbMin( std::numeric_limits<float>::max() );
-                glm::vec3 aabbMax( -std::numeric_limits<float>::max() );
+                // Compute the AABB from the SAME space the cooked vertices end up in: static meshes have the
+                // node world transform baked in (above), so the box must be baked too — otherwise it's stale
+                // (wrong size/position) and everything that frames by it (thumbnail FitTarget, picking, cull)
+                // misbehaves: the preview camera ends up inside/off the mesh. Skinned verts aren't baked.
+                const glm::mat4 boxXf = meshHasBones ? glm::mat4( 1.0f ) : meshWorld[meshIdx];
+                glm::vec3       aabbMin( std::numeric_limits<float>::max() );
+                glm::vec3       aabbMax( -std::numeric_limits<float>::max() );
 
                 for ( uint32_t i = 0; i < mesh->mNumVertices; ++i )
                 {
-                    const glm::vec3 pos = { mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z };
-                    aabbMin             = glm::min( aabbMin, pos );
-                    aabbMax             = glm::max( aabbMax, pos );
+                    const glm::vec3 pos = glm::vec3(
+                         boxXf * glm::vec4( mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z, 1.0f ) );
+                    aabbMin = glm::min( aabbMin, pos );
+                    aabbMax = glm::max( aabbMax, pos );
                 }
 
                 submesh.BoundingBox = { aabbMin, aabbMax };
@@ -476,6 +582,44 @@ namespace Desert::Editor
 
         if ( hasBones )
             result.Skeleton = skeletonData;
+
+        // ============================
+        // SKINLESS ANIMATION FILE (e.g. Mixamo "without skin"): no mesh -> no mesh bones, so the bone set
+        // above is empty and every animation channel would be dropped. Reconstruct the skeleton from the
+        // animation channels' node names + the node hierarchy, so the clips carry data and get a skeleton
+        // SIGNATURE that matches the character (the signature is order-independent + playback binds by NAME).
+        // ============================
+        if ( !hasBones && scene->mNumAnimations > 0 && scene->mRootNode )
+        {
+            for ( uint32_t i = 0; i < scene->mNumAnimations; ++i )
+            {
+                const aiAnimation* anim = scene->mAnimations[i];
+                for ( uint32_t c = 0; c < anim->mNumChannels; ++c )
+                {
+                    const std::string name = anim->mChannels[c]->mNodeName.C_Str();
+                    if ( name.empty() || boneMapping.contains( name ) )
+                        continue;
+                    if ( !FindNodeRecursive( scene->mRootNode, name ) )
+                        continue; // animated node must exist in the hierarchy
+
+                    const uint32_t idx = static_cast<uint32_t>( skeletonData.Bones.size() );
+                    boneMapping[name]  = idx;
+
+                    Desert::Animation::BoneInfo bone;
+                    bone.Name               = name;
+                    bone.BoneIndex          = idx;
+                    bone.OffsetMatrix       = glm::mat4( 1.0f ); // unused for playback (target skeleton's bind is used)
+                    bone.LocalBindTransform = glm::mat4( 1.0f ); // filled by BuildSkeletonHierarchy
+                    skeletonData.Bones.push_back( bone );
+                }
+            }
+
+            if ( !skeletonData.Bones.empty() )
+            {
+                BuildSkeletonHierarchy( scene->mRootNode, boneMapping, skeletonData );
+                skeletonData.Signature = Animation::Skeleton::ComputeSignature( skeletonData.Bones );
+            }
+        }
 
         // ============================
         // ANIMATIONS (��� ���������)
@@ -534,7 +678,7 @@ namespace Desert::Editor
             result.Animations.push_back( animData );
         }
 
-        result.Material = materialData;
+        result.Materials = materialData;
 
         return result;
     }
@@ -555,7 +699,7 @@ namespace Desert::Editor
             throw std::runtime_error( "Failed to import: " + path.string() );
         }
 
-        return ProcessScene( scene, manager, path.stem().string() );
+        return ProcessScene( scene, manager, path );
     }
 
 } // namespace Desert::Editor

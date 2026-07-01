@@ -1,8 +1,8 @@
 #include "SMAARenderer.hpp"
-#include "SMAASearchTexData.h" // exact SMAA SearchTex bytes (R8) — engine-owned copy
+#include "SMAAAreaTexData.h"   // exact SMAA AreaTex bytes (RG8)   — engine-owned copy (official iryoku/smaa)
+#include "SMAASearchTexData.h" // exact SMAA SearchTex bytes (R8)  — engine-owned copy
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
-#include <Engine/Core/IO/ImageReader.hpp>
 
 namespace Desert::Graphic::System
 {
@@ -69,31 +69,35 @@ namespace Desert::Graphic::System
 
     void SMAARenderer::LoadLUTs()
     {
-        // AreaTex: from PNG (it's a real RGBA8 image — loads exactly via stbi).
+        // AreaTex + SearchTex are precomputed, content-independent SMAA lookup tables — engine resources, not
+        // user assets. They're NOT cheaply regenerable (unlike the BRDF LUT), so we embed the EXACT official
+        // bytes (iryoku/smaa) as headers rather than ship loose image files that can go missing / not
+        // round-trip. AreaTex is RG8 (areaTexBytes), SearchTex is R8 — both expanded to RGBA8 here.
+
+        // AreaTex: RG8 -> RGBA8 (rg = lookup, b = 0, a = 255). The SMAA blend-weights/blend shaders sample .rg.
         {
-            auto img = Core::IO::ImageReader::Read( "Resources/Textures/SMAA/AreaTex.png", true );
-            if ( img.Width == 0 || img.Height == 0 )
+            constexpr size_t                 kPixels = static_cast<size_t>( AREATEX_WIDTH ) * AREATEX_HEIGHT;
+            std::vector<unsigned char> rgba( kPixels * 4, 0 );
+            for ( size_t i = 0; i < kPixels; ++i )
             {
-                LOG_ERROR( "SMAARenderer: failed to load AreaTex.png" );
+                rgba[i * 4 + 0] = areaTexBytes[i * 2 + 0];
+                rgba[i * 4 + 1] = areaTexBytes[i * 2 + 1];
+                rgba[i * 4 + 3] = 255;
             }
-            else
-            {
-                Core::Formats::Image2DSpecification spec{
-                     .Tag        = "SMAA_AreaTex",
-                     .Width      = img.Width,
-                     .Height     = img.Height,
-                     .Format     = Core::Formats::ImageFormat::RGBA8F,
-                     .Mips       = 1,
-                     .Data       = std::move( img.Data ),
-                     .Usage      = Core::Formats::Image2DUsage::Image2D,
-                     .Properties = Core::Formats::ImageProperties::Sample,
-                };
-                m_AreaTex = Image2D::Create( spec, nullptr );
-            }
+            Core::Formats::Image2DSpecification spec{
+                 .Tag        = "SMAA_AreaTex",
+                 .Width      = static_cast<uint32_t>( AREATEX_WIDTH ),
+                 .Height     = static_cast<uint32_t>( AREATEX_HEIGHT ),
+                 .Format     = Core::Formats::ImageFormat::RGBA8F,
+                 .Mips       = 1,
+                 .Data       = std::move( rgba ),
+                 .Usage      = Core::Formats::Image2DUsage::Image2D,
+                 .Properties = Core::Formats::ImageProperties::Sample,
+            };
+            m_AreaTex = Image2D::Create( spec, nullptr );
         }
 
-        // SearchTex: built from the EXACT embedded bytes (the .png is a 2-bit palette that doesn't
-        // round-trip reliably, and SMAA's search is very sensitive to it). R8 -> RGBA8 (value in .r).
+        // SearchTex: R8 -> RGBA8 (value in .r).
         {
             std::vector<unsigned char> rgba( static_cast<size_t>( SEARCHTEX_WIDTH ) * SEARCHTEX_HEIGHT * 4, 0 );
             for ( size_t i = 0; i < static_cast<size_t>( SEARCHTEX_WIDTH ) * SEARCHTEX_HEIGHT; ++i )

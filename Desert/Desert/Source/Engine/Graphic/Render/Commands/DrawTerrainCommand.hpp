@@ -1,13 +1,12 @@
 #pragma once
 
 #include "../RenderCommand.hpp"
+#include <Engine/Graphic/Materials/MaterialOverrides.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
-#include <string>
 #include <utility>
-#include <vector>
 
 namespace Desert::Graphic
 {
@@ -33,27 +32,23 @@ namespace Desert::Graphic::Render
         glm::vec4 GrassParams = glm::vec4( 0.0f ); // x=enable, y=density, z=height, w=width (Stage 7 grass)
         glm::vec3 GrassTint   = glm::vec3( 1.0f ); // RGB tint multiplier on grass color
 
-        std::vector<std::pair<std::string, glm::vec4>> ParamOverrides;
-        std::vector<std::pair<std::string, uint64_t>>  TextureOverrides;
+        Graphic::MaterialOverrides Overrides;
 
         DrawTerrainCommand( const glm::mat4& transform, float size, int resolution, float heightScale,
                             float noiseFrequency, int seed, const glm::vec3& layerModes = glm::vec3( 0.0f ),
                             Image2D* splatMap = nullptr, const glm::vec4& grassParams = glm::vec4( 0.0f ),
-                            const glm::vec3& grassTint = glm::vec3( 1.0f ),
-                            std::vector<std::pair<std::string, glm::vec4>> paramOverrides   = {},
-                            std::vector<std::pair<std::string, uint64_t>>  textureOverrides = {} )
+                            const glm::vec3&           grassTint = glm::vec3( 1.0f ),
+                            Graphic::MaterialOverrides overrides = {} )
              : Transform( transform ), Size( size ), Resolution( resolution ), HeightScale( heightScale ),
                NoiseFrequency( noiseFrequency ), Seed( seed ), LayerModes( layerModes ), SplatMap( splatMap ),
-               GrassParams( grassParams ), GrassTint( grassTint ), ParamOverrides( std::move( paramOverrides ) ),
-               TextureOverrides( std::move( textureOverrides ) )
+               GrassParams( grassParams ), GrassTint( grassTint ), Overrides( std::move( overrides ) )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
             renderer.SubmitTerrain( Transform, Size, Resolution, HeightScale, NoiseFrequency, Seed,
-                                    LayerModes, SplatMap, GrassParams, GrassTint, ParamOverrides,
-                                    TextureOverrides );
+                                    LayerModes, SplatMap, GrassParams, GrassTint, Overrides );
         }
     };
 } // namespace Desert::Graphic::Render

@@ -5,6 +5,7 @@
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/SkySettings.hpp>
 
 #include <algorithm>
 
@@ -33,7 +34,7 @@ namespace Desert::Graphic
 
     std::shared_ptr<Image2D> ComputeImages::BakeProceduralPanorama( uint32_t width, uint32_t height,
                                                                     const glm::vec3& sunDir, float intensity,
-                                                                    float diskRadius )
+                                                                    float diskRadius, const SkySettings& sky )
     {
         const auto shader = GetComputeShader( "BakeProceduralSky" );
         if ( !shader )
@@ -52,14 +53,27 @@ namespace Desert::Graphic
         if ( !output )
             return nullptr;
 
-        // Matches the push-constant block in BakeProceduralSky.glsl.comp.
+        // Matches the push-constant block in BakeProceduralSky.glsl.comp (8 vec4 = 128 bytes, the guaranteed
+        // push-constant minimum). Carries the artistic SkyConfig so the baked IBL matches the visible sky.
         struct PushData
         {
             glm::vec4 SunDirection; // xyz toward sun, w intensity
-            glm::vec4 SkyParams;    // x sun disk radius
+            glm::vec4 SkyParams;    // x radius, y skyBrightness, z horizonFalloff, w sunGlow
+            glm::vec4 Zenith;       // rgb, w sunsetIntensity
+            glm::vec4 Horizon;      // rgb, w starIntensity
+            glm::vec4 SunColor;     // rgb
+            glm::vec4 SunsetColor;  // rgb
+            glm::vec4 Ground;       // rgb
+            glm::vec4 Night;        // rgb
         } push;
         push.SunDirection = glm::vec4( glm::normalize( sunDir ), intensity );
-        push.SkyParams    = glm::vec4( diskRadius, 0.0f, 0.0f, 0.0f );
+        push.SkyParams    = glm::vec4( diskRadius, sky.SkyBrightness, sky.HorizonFalloff, sky.SunGlow );
+        push.Zenith       = glm::vec4( sky.ZenithColor, sky.SunsetIntensity );
+        push.Horizon      = glm::vec4( sky.HorizonColor, sky.StarIntensity );
+        push.SunColor     = glm::vec4( sky.SunColor, 0.0f );
+        push.SunsetColor  = glm::vec4( sky.SunsetColor, 0.0f );
+        push.Ground       = glm::vec4( sky.GroundColor, 0.0f );
+        push.Night        = glm::vec4( sky.NightColor, 0.0f );
 
         auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = "BakeProceduralSky" } );
         pipeline->Invalidate();

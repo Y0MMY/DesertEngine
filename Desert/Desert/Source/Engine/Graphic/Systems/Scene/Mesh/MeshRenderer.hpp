@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/Materials/MaterialOverrides.hpp>
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialSilhouette.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialShadow.hpp>
@@ -34,7 +35,8 @@ namespace Desert::Graphic::System
         // optional
         std::vector<glm::mat4> BoneMatrices;
 
-        bool Outlined = false;
+        bool     Outlined        = false;
+        uint64_t HiddenSubmeshes = 0; // bit i = submesh i hidden (static meshes)
     };
 
     class MeshRenderer final : public RenderSystem
@@ -45,8 +47,9 @@ namespace Desert::Graphic::System
             class Desert::StaticMesh* Mesh      = nullptr;
             glm::mat4                 Transform = glm::mat4( 1.0f );
             // Pointer into the component's stable RuntimeSlotPtrs (valid for the frame) — no per-mesh copy.
-            const std::vector<MaterialInstance*>* MaterialSlots = nullptr;
-            bool                                  Outlined      = false;
+            const std::vector<MaterialInstance*>* MaterialSlots   = nullptr;
+            bool                                  Outlined        = false;
+            uint64_t                              HiddenSubmeshes = 0; // bit i = submesh i hidden
         };
 
         struct SkinnedMeshRenderData
@@ -73,12 +76,11 @@ namespace Desert::Graphic::System
         // non-PBR shader). Rendered per-object (no SSBO batching) — additive to the PBR path.
         struct GenericMeshRenderData
         {
-            class Mesh*                                    Mesh = nullptr;
-            glm::mat4                                      Transform = glm::mat4( 1.0f );
-            std::string                                    ShaderName;
-            std::vector<std::pair<std::string, glm::vec4>> ParamOverrides;
-            std::vector<std::pair<std::string, uint64_t>>  TextureOverrides; // name -> texture asset handle
-            bool                                           Outlined = false; // selected -> JFA outline
+            class Mesh*               Mesh      = nullptr;
+            glm::mat4                 Transform = glm::mat4( 1.0f );
+            std::string               ShaderName;
+            Graphic::MaterialOverrides Overrides;
+            bool                      Outlined = false; // selected -> JFA outline
         };
 
         using RenderSystem::RenderSystem;

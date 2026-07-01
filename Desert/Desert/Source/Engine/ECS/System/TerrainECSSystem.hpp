@@ -58,7 +58,7 @@ namespace Desert::ECS
                      grassParams,
                      glm::vec3( terrain.GrassBrightness, static_cast<float>( terrain.GrassBladesPerClump ),
                                 0.0f ), // x=brightness, y=bladesPerClump (packed into the GrassTint channel)
-                     std::move( overrides ), std::move( textureOverrides ) );
+                     Graphic::MaterialOverrides{ std::move( overrides ), std::move( textureOverrides ) } );
             }
         }
     };

@@ -2,6 +2,7 @@
 
 #include "Image.hpp"
 #include <Engine/Runtime/ImageHandle.hpp>
+#include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
 
@@ -27,7 +28,7 @@ namespace Desert::Graphic
         // input image — the sky is generated in-shader from the sun direction/intensity/disk radius.
         static std::shared_ptr<Image2D>   BakeProceduralPanorama( uint32_t width, uint32_t height,
                                                                   const glm::vec3& sunDir, float intensity,
-                                                                  float diskRadius );
+                                                                  float diskRadius, const SkySettings& sky );
         // Single dispatch: samples spec.InputHandle (2D panorama OR source cubemap) -> a fresh output cube.
         static std::shared_ptr<ImageCube> ProccessForImageCube( const ComputeImagesSpecification& spec );
         // GGX prefilter: convolves spec.InputHandle (radiance cube) per mip (roughness = mip/(mips-1))

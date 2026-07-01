@@ -4,6 +4,7 @@
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/Camera.hpp>
 #include <Engine/Graphic/CloudSettings.hpp>
+#include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
 
@@ -22,7 +23,7 @@ namespace Desert::Graphic
         }
 
         void Update( const Core::Camera* camera, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                     const CloudSettings& clouds )
+                     const CloudSettings& clouds, const SkySettings& skyCfg )
         {
             if ( !camera )
                 return;
@@ -43,14 +44,26 @@ namespace Desert::Graphic
             {
                 glm::vec4 SunDirection; // xyz toward sun, w intensity
                 glm::vec4 SkyParams;    // x sun angular radius, y clouds enabled, z coverage, w density
-                glm::vec4 CloudParams;  // x height(base), y thickness, z time, w wind speed
+                glm::vec4 CloudParams;  // x tiling, y brightness, z time, w wind speed
                 glm::vec4 CameraPos;    // xyz world camera position
+                glm::vec4 ZenithColor;  // rgb, w = skyBrightness
+                glm::vec4 HorizonColor; // rgb, w = horizonFalloff
+                glm::vec4 SunColor;     // rgb, w = sunGlow
+                glm::vec4 SunsetColor;  // rgb, w = sunsetIntensity
+                glm::vec4 GroundColor;  // rgb, w = starIntensity
+                glm::vec4 NightColor;   // rgb (night tint)
             } sky;
             sky.SunDirection = glm::vec4( glm::normalize( sunDir ), sunIntensity );
             sky.SkyParams    = glm::vec4( sunDiskRadius, clouds.Enabled ? 1.0f : 0.0f, clouds.Coverage,
                                           clouds.Density );
-            sky.CloudParams  = glm::vec4( clouds.Height, clouds.Thickness, time, clouds.WindSpeed );
+            sky.CloudParams  = glm::vec4( clouds.Tiling, clouds.Brightness, time, clouds.WindSpeed );
             sky.CameraPos    = glm::vec4( camera->GetPosition(), 0.0f );
+            sky.ZenithColor  = glm::vec4( skyCfg.ZenithColor, skyCfg.SkyBrightness );
+            sky.HorizonColor = glm::vec4( skyCfg.HorizonColor, skyCfg.HorizonFalloff );
+            sky.SunColor     = glm::vec4( skyCfg.SunColor, skyCfg.SunGlow );
+            sky.SunsetColor  = glm::vec4( skyCfg.SunsetColor, skyCfg.SunsetIntensity );
+            sky.GroundColor  = glm::vec4( skyCfg.GroundColor, skyCfg.StarIntensity );
+            sky.NightColor   = glm::vec4( skyCfg.NightColor, 0.0f );
             if ( auto* ub = Get<UniformBufferProperty>( "SkyUB" ) )
                 ub->SetRawData( reinterpret_cast<const std::byte*>( &sky ), sizeof( sky ) );
         }

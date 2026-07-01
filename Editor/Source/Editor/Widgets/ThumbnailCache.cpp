@@ -5,11 +5,46 @@
 #include <stb_image/stb_image.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <vector>
 
 namespace Desert::Editor
 {
+    // Bump whenever the thumbnail render path changes so all old thumbnails regenerate. v2: sky-IBL ambient
+    // (old pre-IBL renders produced chrome/glass blobs that the source-modtime check never invalidated).
+    // v3: output bumped 128 -> 256 px (128 looked low-res / "240p" when shown larger than 128 in the grid).
+    // v4: PNG bumped to 1024 px (hi-res on disk, box-averaged down to kThumbMaxDim for the small grid display).
+    // v5: studio-gradient backdrop in the preview scene (was the dull default sky).
+    int ThumbnailCache::CacheVersion()
+    {
+        return 6; // v6: daylight sky backdrop + 180° mesh-facing fix
+    }
+
+    std::string ThumbnailCache::DiskPath( const std::string& assetPath )
+    {
+        std::string key = assetPath;
+        for ( char& c : key )
+            if ( !std::isalnum( static_cast<unsigned char>( c ) ) )
+                c = '_';
+        return "Cooked/Thumbnails/v" + std::to_string( CacheVersion() ) + "/" + key + ".png";
+    }
+
+    void ThumbnailCache::PurgeOldVersions()
+    {
+        std::error_code             ec;
+        const std::filesystem::path root( "Cooked/Thumbnails" );
+        if ( !std::filesystem::exists( root, ec ) )
+            return;
+        const std::string keep = "v" + std::to_string( CacheVersion() );
+        for ( const auto& entry : std::filesystem::directory_iterator( root, ec ) )
+        {
+            if ( entry.is_directory( ec ) && entry.path().filename() == keep )
+                continue;
+            std::filesystem::remove_all( entry.path(), ec );
+        }
+    }
+
     std::shared_ptr<Graphic::Image2D> ThumbnailCache::Get( const std::string& sourcePath )
     {
         if ( const auto it = m_Cache.find( sourcePath ); it != m_Cache.end() )
@@ -24,7 +59,8 @@ namespace Desert::Editor
         stbi_uc* pixels = stbi_load( sourcePath.c_str(), &w, &h, &ch, 4 );
         if ( pixels && w > 0 && h > 0 )
         {
-            // Nearest-neighbour downscale to <= kThumbMaxDim (bounds VRAM; quality is fine for a thumbnail).
+            // Box-average downscale to <= kThumbMaxDim. A large (1024) source PNG shown tiny needs averaging,
+            // not nearest-neighbour (which would alias / shimmer); this is effectively extra supersampling.
             const int maxSide = std::max( w, h );
             const int tw      = maxSide > kThumbMaxDim ? std::max( 1, w * kThumbMaxDim / maxSide ) : w;
             const int th      = maxSide > kThumbMaxDim ? std::max( 1, h * kThumbMaxDim / maxSide ) : h;
@@ -32,13 +68,28 @@ namespace Desert::Editor
             std::vector<unsigned char> dst( static_cast<size_t>( tw ) * th * 4 );
             for ( int y = 0; y < th; ++y )
             {
-                const int sy = y * h / th;
+                const int sy0 = y * h / th;
+                const int sy1 = std::max( sy0 + 1, ( y + 1 ) * h / th );
                 for ( int x = 0; x < tw; ++x )
                 {
-                    const int sx  = x * w / tw;
-                    const unsigned char* s = pixels + ( static_cast<size_t>( sy ) * w + sx ) * 4;
-                    unsigned char*       d = dst.data() + ( static_cast<size_t>( y ) * tw + x ) * 4;
-                    d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
+                    const int sx0 = x * w / tw;
+                    const int sx1 = std::max( sx0 + 1, ( x + 1 ) * w / tw );
+
+                    uint32_t acc[4] = { 0, 0, 0, 0 };
+                    uint32_t n      = 0;
+                    for ( int yy = sy0; yy < sy1; ++yy )
+                        for ( int xx = sx0; xx < sx1; ++xx )
+                        {
+                            const unsigned char* s = pixels + ( static_cast<size_t>( yy ) * w + xx ) * 4;
+                            acc[0] += s[0]; acc[1] += s[1]; acc[2] += s[2]; acc[3] += s[3];
+                            ++n;
+                        }
+                    const uint32_t   div = std::max( 1u, n );
+                    unsigned char*   d   = dst.data() + ( static_cast<size_t>( y ) * tw + x ) * 4;
+                    d[0] = static_cast<unsigned char>( acc[0] / div );
+                    d[1] = static_cast<unsigned char>( acc[1] / div );
+                    d[2] = static_cast<unsigned char>( acc[2] / div );
+                    d[3] = static_cast<unsigned char>( acc[3] / div );
                 }
             }
 

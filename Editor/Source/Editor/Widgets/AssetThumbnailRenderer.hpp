@@ -20,12 +20,17 @@ namespace Desert::Editor
     class AssetThumbnailRenderer
     {
     public:
-        // Queue a material (on a sphere) to be captured to outPng. No-op if a capture is already in flight
-        // (see HasPending). Drives forward via Tick().
-        void RequestMaterial( const Assets::AssetHandle& materialHandle, const std::string& outPng );
+        // Queue a material to be captured to outPng. No-op if a capture is already in flight (see HasPending).
+        // `flatPreview` previews on a camera-facing PLANE/card instead of a sphere — right for foliage/cutout
+        // materials (a grass card atlas wraps/garbles on a sphere). Drives forward via Tick().
+        void RequestMaterial( const Assets::AssetHandle& materialHandle, const std::string& outPng,
+                              bool flatPreview = false );
 
-        // Queue a mesh (must be registered in the MeshService), auto-framed by its bounds, to outPng.
-        void RequestMesh( const Assets::AssetHandle& meshHandle, const std::string& outPng );
+        // Queue a mesh (must be registered in the MeshService), auto-framed by its bounds, to outPng. If
+        // `material` is non-null it's applied to every slot (the mesh's linked/sidecar material) so the
+        // preview shows the real look; otherwise the default material is used.
+        void RequestMesh( const Assets::AssetHandle& meshHandle, const std::string& outPng,
+                          const Assets::AssetHandle& material = Assets::AssetHandle( static_cast<uint64_t>( 0 ) ) );
 
         // Is a capture in flight? Gates requests to one at a time.
         [[nodiscard]] bool HasPending() const { return m_Phase != 0; }
@@ -40,17 +45,23 @@ namespace Desert::Editor
         void RecordRender();
 
         std::unique_ptr<Graphic::SceneRenderer> m_Renderer;
-        std::shared_ptr<Core::Scene>            m_Scene;
+        // Fully qualified: a Desert::Editor::Core namespace also exists (ViewportMode/FoliagePaint), so an
+        // unqualified Core::Scene would wrongly resolve there in TUs that see it.
+        std::shared_ptr<::Desert::Core::Scene>  m_Scene;
         ECS::Entity                             m_Camera;
         ECS::Entity                             m_Target;
         bool                                    m_Inited = false;
 
         Assets::AssetHandle m_PendingHandle{ static_cast<uint64_t>( 0 ) };
+        Assets::AssetHandle m_PendingMaterial{ static_cast<uint64_t>( 0 ) }; // mesh's linked material (0 = default)
         std::string         m_PendingPng;
-        bool                m_PendingIsMesh = false; // false = material-on-sphere, true = mesh
+        bool                m_PendingIsMesh    = false; // false = material preview, true = mesh
+        bool                m_PendingFlatPreview = false; // material on a camera-facing plane (foliage/cutout)
         int                 m_Phase = 0; // 0 = idle, else = remaining render frames (capture on the last)
 
-        static constexpr uint32_t kSize         = 128;       // output PNG size
+        // High-res PNG on disk (crisp / reusable) — the grid loads it into a SMALL GPU texture for display
+        // (ThumbnailCache::kThumbMaxDim), so storage quality is decoupled from the tiny on-screen size.
+        static constexpr uint32_t kSize         = 1024;      // output PNG size (~1 MP square; was 256)
         static constexpr uint32_t kRenderSize   = kSize * 2; // offscreen render size (2x supersample -> kSize)
         static constexpr int      kRenderFrames = 5;         // warm-up render frames before the capture readback
     };

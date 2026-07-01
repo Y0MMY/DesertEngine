@@ -2,13 +2,93 @@
 
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Common/Core/Profiler.hpp>
+#include <Common/Core/Math/Ray.hpp>
 
+#include <Engine/ECS/Components.hpp>
+#include <Engine/Geometry/Mesh.hpp>
+#include <Engine/Geometry/PrimitiveMeshFactory.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
+#include <limits>
 #include <typeinfo>
 
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
 namespace Desert::Core
 {
+    namespace
+    {
+        // Resolve a static-mesh component to its renderable Mesh (handle / runtime-edited / shared primitive).
+        // This used to live in the editor's ViewportPanel (engine logic that leaked into the editor) — it
+        // belongs here, where Raycast and the mesh systems can share it.
+        ::Desert::Mesh* ResolveMesh( const ECS::StaticMeshComponent& c )
+        {
+            if ( c.MeshHandle )
+                return Runtime::ResourceRegistry::GetMeshService()->Get( c.MeshHandle );
+            if ( c.RuntimeMesh )
+                return c.RuntimeMesh.get();
+            if ( c.Primitive.has_value() )
+                return Geometry::PrimitiveMeshFactory::GetShared( c.Primitive.value() );
+            return nullptr;
+        }
+    } // namespace
+
+    bool Scene::Raycast( const Common::Math::Ray& ray, RaycastHit& outHit ) const
+    {
+        float              closest = std::numeric_limits<float>::max();
+        glm::mat4          bestXf( 1.0f );
+        Common::Math::AABB bestAABB;
+        Common::Math::Ray  bestLocal  = ray;
+        float              bestLocalT = 0.0f;
+        Common::UUID       bestUUID;
+        bool               hit = false;
+
+        for ( const auto& entity : GetAllEntities() )
+        {
+            if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+                continue;
+            auto* mesh = ResolveMesh( entity.GetComponent<ECS::StaticMeshComponent>() );
+            if ( !mesh )
+                continue;
+
+            const glm::mat4 xf       = entity.GetWorldTransform();
+            const auto      localRay = ray.ToLocalSpace( xf );
+            for ( const auto& sm : mesh->GetSubmeshes() )
+            {
+                float t = 0.0f;
+                if ( localRay.IntersectsAABB( sm.BoundingBox, t ) && t > 0.0f && t < closest )
+                {
+                    closest    = t;
+                    bestXf     = xf;
+                    bestAABB   = sm.BoundingBox;
+                    bestLocal  = localRay;
+                    bestLocalT = t;
+                    bestUUID   = entity.GetComponent<ECS::UUIDComponent>().UUID;
+                    hit        = true;
+                }
+            }
+        }
+
+        outHit.Hit = hit;
+        if ( !hit )
+            return false;
+
+        outHit.Entity   = bestUUID;
+        outHit.Distance = closest;
+        outHit.Point    = ray.GetPoint( closest );
+
+        // Box-face normal from the local hit (dominant axis of the offset from the AABB centre).
+        const glm::vec3 lp = bestLocal.GetPoint( bestLocalT );
+        const glm::vec3 c  = ( bestAABB.Min + bestAABB.Max ) * 0.5f;
+        const glm::vec3 he = glm::max( ( bestAABB.Max - bestAABB.Min ) * 0.5f, glm::vec3( 1e-4f ) );
+        const glm::vec3 dd = ( lp - c ) / he;
+        const glm::vec3 ad = glm::abs( dd );
+        const glm::vec3 ln = ( ad.x >= ad.y && ad.x >= ad.z ) ? glm::vec3( glm::sign( dd.x ), 0.0f, 0.0f )
+                             : ( ad.y >= ad.z )                ? glm::vec3( 0.0f, glm::sign( dd.y ), 0.0f )
+                                                               : glm::vec3( 0.0f, 0.0f, glm::sign( dd.z ) );
+        outHit.Normal = glm::normalize( glm::mat3( bestXf ) * ln );
+        return true;
+    }
     Scene::Scene( std::string&& sceneName, Graphic::SceneRenderer* sceneRenderer )
          : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( sceneRenderer )
     {

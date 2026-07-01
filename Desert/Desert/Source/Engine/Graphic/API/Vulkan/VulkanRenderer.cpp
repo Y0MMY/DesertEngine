@@ -185,7 +185,8 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanRendererAPI::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh,
                                         const glm::mat4 transform, const MaterialExecutor* materialExecutor,
-                                        uint32_t instanceCount, uint32_t firstInstance )
+                                        uint32_t instanceCount, uint32_t firstInstance,
+                                        uint64_t hiddenSubmeshMask )
     {
         // Aggregate cost of EVERY mesh draw call across ALL passes (geometry + 4 shadow cascades +
         // silhouette). The call-site scopes break it down per-pass; this row is the engine-wide total.
@@ -226,8 +227,13 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         const auto& submeshes = mesh->GetSubmeshes();
-        for ( const auto& submesh : submeshes )
+        for ( size_t si = 0; si < submeshes.size(); ++si )
         {
+            // Per-submesh visibility: bit si set = hidden -> skip the draw (and its push/transform work).
+            if ( si < 64 && ( ( hiddenSubmeshMask >> si ) & 1ull ) )
+                continue;
+
+            const auto&       submesh       = submeshes[si];
             MaterialExecutor* materialExec   = (MaterialExecutor*)materialExecutor;
             auto              finalTransform = transform * submesh.Transform;
             materialExec->PushConstant( &finalTransform, sizeof( glm::mat4 ) );

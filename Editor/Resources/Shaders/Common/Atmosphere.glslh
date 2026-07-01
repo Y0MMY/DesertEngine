@@ -1,111 +1,118 @@
-// Shared procedural-sky model: single-scattering Rayleigh + Mie atmosphere, raymarched from a view
-// ray and the sun direction (no HDR texture). Used by BOTH the screen sky pass
-// (ProceduralSky.glsl.frag) and the IBL bake (Compute/BakeProceduralSky.glsl.comp) so the visible sky
-// and the lighting it casts stay identical. Output is LINEAR HDR (tonemapped downstream).
+// Procedural ARTISTIC sky (gradient model). Driven by the view ray + sun direction; the whole look
+// (day / sunrise-sunset / night) is a function of the SUN ELEVATION (sunDir.y). Output is LINEAR HDR
+// (post-process tonemap applies exposure/gamma). Used by BOTH the screen sky pass (ProceduralSky.glsl.frag)
+// and the IBL bake (Compute/BakeProceduralSky.glsl.comp). The artistic palette/scalars come in via a
+// SkyConfig (the frag fills it from the editor's SkyboxComponent settings; the bake uses DefaultSkyConfig()).
 
 #ifndef ATMOSPHERE_GLSLH
 #define ATMOSPHERE_GLSLH
 
 const float ATM_PI = 3.141592653589793;
-const int   ATM_iSteps = 16; // primary (view) raymarch steps
-const int   ATM_jSteps = 8;  // secondary (toward-sun) raymarch steps
 
-// Ray vs. sphere (centred at origin). Returns near/far t; near>far means "miss".
-vec2 atm_raySphere(vec3 r0, vec3 rd, float sr)
+// Editor-tunable palette + scalars (see ECS::SkyboxComponent). Colours are LINEAR.
+struct SkyConfig
 {
-    float a = dot(rd, rd);
-    float b = 2.0 * dot(rd, r0);
-    float c = dot(r0, r0) - sr * sr;
-    float d = b * b - 4.0 * a * c;
-    if (d < 0.0) return vec2(1e5, -1e5);
-    d = sqrt(d);
-    return vec2((-b - d) / (2.0 * a), (-b + d) / (2.0 * a));
+    vec3  zenith;          // sky colour straight up (day)
+    vec3  horizon;         // sky colour at the horizon (day)
+    vec3  sunColor;        // sun disk/glow tint at noon
+    vec3  sunsetColor;     // warm horizon reddening near the sun at low angles
+    vec3  ground;          // hazy tone below the horizon (day)
+    vec3  night;           // night sky zenith tint
+    float skyBrightness;   // overall sky multiplier
+    float horizonFalloff;  // gradient reach (smaller = horizon colour hugs the bottom)
+    float sunGlow;         // sun glow strength
+    float sunsetIntensity; // sunset reddening strength
+    float starIntensity;   // night star brightness
+};
+
+SkyConfig DefaultSkyConfig()
+{
+    SkyConfig c;
+    c.zenith          = vec3( 0.08, 0.26, 0.70 );
+    c.horizon         = vec3( 0.50, 0.66, 0.92 );
+    c.sunColor        = vec3( 1.00, 0.96, 0.88 );
+    c.sunsetColor     = vec3( 1.00, 0.42, 0.18 );
+    c.ground          = vec3( 0.16, 0.19, 0.24 );
+    c.night           = vec3( 0.010, 0.020, 0.050 );
+    c.skyBrightness   = 1.0;
+    c.horizonFalloff  = 0.85;
+    c.sunGlow         = 1.0;
+    c.sunsetIntensity = 1.0;
+    c.starIntensity   = 1.0;
+    return c;
 }
 
-vec3 atm_Atmosphere(vec3 rayDir, vec3 rayOrigin, vec3 sunDir, float sunIntensity,
-                    float rPlanet, float rAtmos, vec3 kRlh, float kMie, float shRlh, float shMie, float g)
+float atm_hash13( vec3 p )
 {
-    sunDir = normalize(sunDir);
-    rayDir = normalize(rayDir);
+    p = fract( p * vec3( 443.897, 441.423, 437.195 ) );
+    p += dot( p, p.yzx + 19.19 );
+    return fract( ( p.x + p.y ) * p.z );
+}
 
-    // March only the segment of the ray inside the atmosphere shell.
-    vec2 p = atm_raySphere(rayOrigin, rayDir, rAtmos);
-    if (p.x > p.y) return vec3(0.0);
-    p.y = min(p.y, atm_raySphere(rayOrigin, rayDir, rPlanet).x);
-    float iStepSize = (p.y - p.x) / float(ATM_iSteps);
+// Full sky radiance along a world-space view direction. sunDir = direction TOWARD the sun (normalized).
+vec3 EvaluateSky( vec3 dir, vec3 sunDir, float sunIntensity, float sunDiskRadius, SkyConfig cfg )
+{
+    dir    = normalize( dir );
+    sunDir = normalize( sunDir );
 
-    float iTime = 0.0;
-    vec3  totalRlh = vec3(0.0);
-    vec3  totalMie = vec3(0.0);
-    float iOdRlh = 0.0;
-    float iOdMie = 0.0;
+    float up    = dir.y;
+    float sunUp = sunDir.y;
 
-    // Phase functions.
-    float mu   = dot(rayDir, sunDir);
-    float mumu = mu * mu;
-    float gg   = g * g;
-    float pRlh = 3.0 / (16.0 * ATM_PI) * (1.0 + mumu);
-    float pMie = 3.0 / (8.0 * ATM_PI) * ((1.0 - gg) * (mumu + 1.0)) /
-                 (pow(1.0 + gg - 2.0 * mu * g, 1.5) * (2.0 + gg));
+    // Day / night blend + sunset window from the sun elevation.
+    float day    = smoothstep( -0.10, 0.20, sunUp );
+    float night  = 1.0 - day;
+    float sunset = ( 1.0 - smoothstep( 0.0, 0.30, abs( sunUp ) ) ) * smoothstep( -0.25, 0.0, sunUp );
 
-    for (int i = 0; i < ATM_iSteps; i++)
+    // Day/night palettes (night derived from the night tint).
+    vec3 zenith  = mix( cfg.night, cfg.zenith, day );
+    vec3 horizon = mix( cfg.night * 1.6, cfg.horizon, day );
+
+    // ---- Sky Color: C1-smooth horizon->zenith gradient (smoothstep => no kink/Mach line at up=0) ----
+    vec3 sky = mix( horizon, zenith, smoothstep( 0.0, max( cfg.horizonFalloff, 0.05 ), up ) );
+
+    // ---- Sunset: warm reddening of the horizon band toward the sun azimuth ----
+    vec3  hd = vec3( dir.x, 0.0, dir.z );
+    vec3  hs = vec3( sunDir.x, 0.0, sunDir.z );
+    hd /= max( length( hd ), 1e-4 );
+    hs /= max( length( hs ), 1e-4 );
+    float sunAzim     = pow( clamp( dot( hd, hs ), 0.0, 1.0 ), 2.0 );
+    float horizonBand = exp( -up * up * 8.0 ); // Gaussian (smooth at up=0)
+    sky = mix( sky, cfg.sunsetColor, sunset * cfg.sunsetIntensity * horizonBand * ( 0.35 + 0.65 * sunAzim ) );
+
+    sky *= cfg.skyBrightness;
+
+    // ---- Sun: SOFT Gaussian disk (no hard edge) + a broad halo. A hard, ~sub-pixel disk aliases and seems
+    // to crawl/jitter under camera rotation without TAA; a soft core is visually stable. The sun is anchored
+    // to the WORLD sun direction, so it doesn't move as you turn. Warm at sunset, sunColor at noon. ----
+    float cd      = dot( dir, sunDir );
+    float ang     = acos( clamp( cd, -1.0, 1.0 ) );      // angular distance to the sun
+    float r       = max( sunDiskRadius, 0.001 );
+    float core    = exp( -( ang * ang ) / ( r * r ) );   // soft round sun (Gaussian)
+    float glow    = pow( max( cd, 0.0 ), 8.0 ) * 0.10;   // broad soft halo (no tight high-freq ring)
+    vec3  sunTint = mix( cfg.sunsetColor, cfg.sunColor, smoothstep( 0.0, 0.25, sunUp ) );
+    sky += ( core * sunIntensity * 0.06 + glow * cfg.sunGlow * day ) * sunTint;
+
+    // ---- Stars: STABLE soft points fixed in WORLD direction. Cells live in direction space; each star is a
+    // soft round falloff around its cell centre, so stars don't pop/move blockily as the camera rotates (the
+    // old per-cell threshold lit whole cells -> blocky, swimming "regenerating" look). ----
+    if ( night > 0.01 && up > 0.0 )
     {
-        vec3  iPos    = rayOrigin + rayDir * (iTime + iStepSize * 0.5);
-        float iHeight = length(iPos) - rPlanet;
-
-        float odStepRlh = exp(-iHeight / shRlh) * iStepSize;
-        float odStepMie = exp(-iHeight / shMie) * iStepSize;
-        iOdRlh += odStepRlh;
-        iOdMie += odStepMie;
-
-        // Optical depth from this sample toward the sun.
-        float jStepSize = atm_raySphere(iPos, sunDir, rAtmos).y / float(ATM_jSteps);
-        float jTime = 0.0;
-        float jOdRlh = 0.0;
-        float jOdMie = 0.0;
-        for (int j = 0; j < ATM_jSteps; j++)
+        vec3  sp = dir * 300.0;
+        vec3  id = floor( sp );
+        float h  = atm_hash13( id );
+        if ( h > 0.992 )
         {
-            vec3  jPos    = iPos + sunDir * (jTime + jStepSize * 0.5);
-            float jHeight = length(jPos) - rPlanet;
-            jOdRlh += exp(-jHeight / shRlh) * jStepSize;
-            jOdMie += exp(-jHeight / shMie) * jStepSize;
-            jTime += jStepSize;
+            float d    = length( fract( sp ) - 0.5 );          // distance from the cell centre
+            float star = smoothstep( 0.35, 0.0, d ) * h;
+            sky += star * night * cfg.starIntensity * smoothstep( 0.0, 0.25, up ) * vec3( 0.9, 0.95, 1.0 );
         }
-
-        vec3 attn = exp(-(kMie * (iOdMie + jOdMie) + kRlh * (iOdRlh + jOdRlh)));
-        totalRlh += odStepRlh * attn;
-        totalMie += odStepMie * attn;
-        iTime += iStepSize;
     }
 
-    return sunIntensity * (pRlh * kRlh * totalRlh + pMie * kMie * totalMie);
-}
+    // ---- Ground: hazy tone below the horizon, low-contrast + C1-smooth seam (no shimmer) ----
+    vec3 ground = mix( cfg.ground * 0.30, cfg.ground, day );
+    sky         = mix( sky, ground, smoothstep( 0.0, -0.35, up ) );
 
-// Full sky radiance along a world-space view direction: Earth-like atmosphere + crisp sun disk.
-// sunDir = direction TOWARD the sun (normalized). Camera sits ~1m above the planet surface.
-vec3 EvaluateSky(vec3 dir, vec3 sunDir, float sunIntensity, float sunDiskRadius)
-{
-    vec3 color = atm_Atmosphere(
-        dir,
-        vec3(0.0, 6372e3, 0.0),                  // ray origin (on the surface)
-        sunDir,
-        sunIntensity,                            // sun intensity
-        6371e3,                                  // planet radius
-        6471e3,                                  // atmosphere radius
-        vec3(5.5e-6, 13.0e-6, 22.4e-6),          // Rayleigh scattering (RGB)
-        21e-6,                                   // Mie scattering
-        8e3,                                     // Rayleigh scale height
-        1.2e3,                                   // Mie scale height
-        0.758                                    // Mie directionality
-    );
-
-    // Crisp sun disk on top of the Mie glow.
-    float sunRadius = max(sunDiskRadius, 0.0001);
-    float cd        = dot(normalize(dir), normalize(sunDir));
-    float disk      = smoothstep(cos(sunRadius * 2.0), cos(sunRadius), cd);
-    color += disk * sunIntensity * 0.04;
-
-    return color;
+    return max( sky, 0.0 );
 }
 
 #endif // ATMOSPHERE_GLSLH

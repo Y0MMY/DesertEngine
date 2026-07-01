@@ -20,6 +20,13 @@ layout(binding = 1) uniform SkyUB
     vec4 u_SkyParams;    // x = sun angular radius; y = clouds enabled (>0.5); z = coverage; w = density
     vec4 u_CloudParams;  // x = layer base altitude; y = thickness; z = time (s); w = wind speed
     vec4 u_CameraPos;    // xyz = world camera position
+    // --- artistic palette/scalars (from ECS::SkyboxComponent) ---
+    vec4 u_ZenithColor;  // rgb, w = skyBrightness
+    vec4 u_HorizonColor; // rgb, w = horizonFalloff
+    vec4 u_SunColor;     // rgb, w = sunGlow
+    vec4 u_SunsetColor;  // rgb, w = sunsetIntensity
+    vec4 u_GroundColor;  // rgb, w = starIntensity
+    vec4 u_NightColor;   // rgb (night sky tint)
 };
 
 void main()
@@ -28,15 +35,31 @@ void main()
     vec3  sunDir = normalize(u_SunDirection.xyz);
     float sunI   = u_SunDirection.w;
 
-    vec3 color = EvaluateSky(dir, sunDir, sunI, u_SkyParams.x);
+    SkyConfig cfg;
+    cfg.zenith          = u_ZenithColor.rgb;
+    cfg.horizon         = u_HorizonColor.rgb;
+    cfg.sunColor        = u_SunColor.rgb;
+    cfg.sunsetColor     = u_SunsetColor.rgb;
+    cfg.ground          = u_GroundColor.rgb;
+    cfg.night           = u_NightColor.rgb;
+    cfg.skyBrightness   = u_ZenithColor.w;
+    cfg.horizonFalloff  = u_HorizonColor.w;
+    cfg.sunGlow         = u_SunColor.w;
+    cfg.sunsetIntensity = u_SunsetColor.w;
+    cfg.starIntensity   = u_GroundColor.w;
 
-    // Engine-generated volumetric clouds (composited over the atmosphere).
+    vec3 color = EvaluateSky(dir, sunDir, sunI, u_SkyParams.x, cfg);
+
+    // Procedural flat-layer clouds (composited over the sky). CloudParams: x=tiling, y=brightness, z=time,
+    // w=wind. SkyParams: z=coverage, w=density.
     if (u_SkyParams.y > 0.5)
     {
-        color = RenderClouds(color, u_CameraPos.xyz, dir, sunDir, sunI,
+        color = RenderClouds(color, dir, sunDir, sunI,
                              u_SkyParams.z, u_SkyParams.w,
                              u_CloudParams.x, u_CloudParams.y, u_CloudParams.z, u_CloudParams.w);
     }
 
+    // (Dithering is done at the FINAL 8-bit output in the composite/tonemap pass — doing it here in linear
+    // HDR is lost through Reinhard+gamma. See SceneComposite.glsl.frag.)
     oColor = vec4(color, 1.0);
 }

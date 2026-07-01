@@ -161,8 +161,31 @@ namespace Desert::Geometry
 
     std::shared_ptr<DynamicMesh> PrimitiveMeshFactory::CreatePlane()
     {
-        // TODO: Implement actual plane vertex generation logic
-        return nullptr;
+        // Unit quad in the XY plane (normal +Z), centred at origin, extents [-0.5, 0.5]. UV (0,0) at the
+        // bottom-left -> (1,1) top-right. Used as a flat "card" (foliage/decal material previews, billboards).
+        constexpr glm::vec3 n( 0.0f, 0.0f, 1.0f );
+        constexpr glm::vec3 t( 1.0f, 0.0f, 0.0f );
+        const glm::vec3     b = glm::cross( n, t );
+
+        const std::vector<Vertex> vertices = {
+            { { -0.5f, -0.5f, 0.0f }, n, t, b, { 0.0f, 0.0f } },
+            { { 0.5f, -0.5f, 0.0f }, n, t, b, { 1.0f, 0.0f } },
+            { { 0.5f, 0.5f, 0.0f }, n, t, b, { 1.0f, 1.0f } },
+            { { -0.5f, 0.5f, 0.0f }, n, t, b, { 0.0f, 1.0f } },
+        };
+
+        // CCW when viewed from +Z (front face), matching the other primitives' winding.
+        const std::vector<Index> indices = { { 0, 1, 2 }, { 0, 2, 3 } };
+
+        Common::Math::AABB aabb;
+        aabb.Min = glm::vec3( -0.5f, -0.5f, 0.0f );
+        aabb.Max = glm::vec3( 0.5f, 0.5f, 0.0f );
+
+        std::vector<Submesh> submeshes = {
+            { "Plane", 0, (uint32_t)vertices.size(), 0, (uint32_t)indices.size() * 3, glm::mat4( 1.0f ), aabb }
+        };
+
+        return std::make_shared<DynamicMesh>( vertices, indices, submeshes );
     }
 
     std::shared_ptr<DynamicMesh> PrimitiveMeshFactory::CreatePyramid()

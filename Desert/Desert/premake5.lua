@@ -39,6 +39,7 @@ project "Desert"
         "Common",
         "ImGui",
         "Jolt",
+        "Lua",
         "Optick",
         deps.Common.Libraries.yaml_cpp
     }

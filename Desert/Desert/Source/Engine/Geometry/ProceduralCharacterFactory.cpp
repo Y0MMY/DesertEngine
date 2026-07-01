@@ -9,6 +9,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -70,78 +71,138 @@ namespace Desert::Geometry
             { "Foot.R", KneeR, { -0.09f, 0.06f, 0.0f } },
         };
 
-        // ---- A body-segment box, rigid-skinned 100% to one joint ----
-        struct BoxDef
+        // ---- Smooth body: TAPERED CAPSULES (limb/torso segments) + SPHERE joints, each rigid-skinned 100% to
+        // one joint. Replaces the old box mannequin so the character reads as ROUNDED, not blocky. The SKELETON
+        // is unchanged (same joints/signature), so the procedural idle/walk/run/jump clips still map onto it. ----
+        constexpr float kPi = 3.14159265358979323846f;
+
+        // A tapered cylinder between two joints (endpoints = their bind positions), rigid-skinned to SkinBone.
+        struct SegmentDef
         {
-            glm::vec3 Center;
-            glm::vec3 HalfExtents;
-            uint32_t  BoneID;
+            uint32_t JointA;   // start
+            uint32_t JointB;   // end
+            float    RadiusA;  // radius at JointA
+            float    RadiusB;  // radius at JointB
+            uint32_t SkinBone; // bone this segment skins to
         };
 
-        const std::array<BoxDef, 14> kBoxes = { {
-            { { 0.00f, 1.00f, 0.0f }, { 0.16f, 0.12f, 0.11f }, Hips },   // pelvis
-            { { 0.00f, 1.33f, 0.0f }, { 0.18f, 0.20f, 0.12f }, Chest },  // torso
-            { { 0.00f, 1.58f, 0.0f }, { 0.05f, 0.06f, 0.05f }, Neck },   // neck
-            { { 0.00f, 1.75f, 0.0f }, { 0.11f, 0.12f, 0.11f }, Head },   // head
+        constexpr std::array<SegmentDef, 12> kSegments = { {
+            { Hips, Spine, 0.15f, 0.15f, Hips },   // lower torso
+            { Spine, Chest, 0.15f, 0.18f, Chest }, // chest (widening)
+            { Chest, Neck, 0.14f, 0.055f, Chest }, // upper chest -> neck
+            { Neck, Head, 0.05f, 0.05f, Neck },    // neck
 
-            { { 0.18f, 1.30f, 0.0f }, { 0.06f, 0.16f, 0.06f }, ShoulderL }, // upper arm L
-            { { 0.18f, 1.015f, 0.0f }, { 0.05f, 0.15f, 0.05f }, ElbowL },   // forearm L
-            { { -0.18f, 1.30f, 0.0f }, { 0.06f, 0.16f, 0.06f }, ShoulderR }, // upper arm R
-            { { -0.18f, 1.015f, 0.0f }, { 0.05f, 0.15f, 0.05f }, ElbowR },   // forearm R
+            { ShoulderL, ElbowL, 0.058f, 0.05f, ShoulderL }, // upper arm L
+            { ElbowL, HandL, 0.048f, 0.04f, ElbowL },        // forearm L
+            { ShoulderR, ElbowR, 0.058f, 0.05f, ShoulderR }, // upper arm R
+            { ElbowR, HandR, 0.048f, 0.04f, ElbowR },        // forearm R
 
-            { { 0.09f, 0.71f, 0.0f }, { 0.075f, 0.22f, 0.075f }, HipL },  // thigh L
-            { { 0.09f, 0.28f, 0.0f }, { 0.06f, 0.22f, 0.06f }, KneeL },   // shin L
-            { { 0.09f, 0.04f, 0.08f }, { 0.06f, 0.04f, 0.12f }, FootL },  // foot L
-            { { -0.09f, 0.71f, 0.0f }, { 0.075f, 0.22f, 0.075f }, HipR }, // thigh R
-            { { -0.09f, 0.28f, 0.0f }, { 0.06f, 0.22f, 0.06f }, KneeR },  // shin R
-            { { -0.09f, 0.04f, 0.08f }, { 0.06f, 0.04f, 0.12f }, FootR }, // foot R
+            { HipL, KneeL, 0.09f, 0.07f, HipL },    // thigh L
+            { KneeL, FootL, 0.065f, 0.05f, KneeL }, // shin L
+            { HipR, KneeR, 0.09f, 0.07f, HipR },    // thigh R
+            { KneeR, FootR, 0.065f, 0.05f, KneeR }, // shin R
         } };
 
-        // Cube faces: outward normal + the 4 corner sign-triples in CCW order (verified by right-hand rule).
-        struct Face
+        // Spheres round off the joints (shoulders/elbows/knees/head/hips) so segments blend, not butt-join.
+        struct SphereDef
         {
-            glm::vec3                      Normal;
-            std::array<glm::vec3, 4>       Signs; // each component is -1 or +1
+            uint32_t Joint;
+            float    Radius;
         };
 
-        const std::array<Face, 6> kFaces = { {
-            { { 1, 0, 0 }, { { { 1, -1, 1 }, { 1, -1, -1 }, { 1, 1, -1 }, { 1, 1, 1 } } } },     // +X
-            { { -1, 0, 0 }, { { { -1, -1, -1 }, { -1, -1, 1 }, { -1, 1, 1 }, { -1, 1, -1 } } } }, // -X
-            { { 0, 1, 0 }, { { { -1, 1, 1 }, { 1, 1, 1 }, { 1, 1, -1 }, { -1, 1, -1 } } } },      // +Y
-            { { 0, -1, 0 }, { { { -1, -1, -1 }, { 1, -1, -1 }, { 1, -1, 1 }, { -1, -1, 1 } } } }, // -Y
-            { { 0, 0, 1 }, { { { -1, -1, 1 }, { 1, -1, 1 }, { 1, 1, 1 }, { -1, 1, 1 } } } },      // +Z
-            { { 0, 0, -1 }, { { { 1, -1, -1 }, { -1, -1, -1 }, { -1, 1, -1 }, { 1, 1, -1 } } } }, // -Z
+        constexpr std::array<SphereDef, 10> kJointSpheres = { {
+            { Hips, 0.155f }, { Chest, 0.175f }, { Head, 0.13f }, { Neck, 0.055f },
+            { ShoulderL, 0.062f }, { ElbowL, 0.05f }, { KneeL, 0.067f },
+            { ShoulderR, 0.062f }, { ElbowR, 0.05f }, { KneeR, 0.067f },
         } };
 
-        void AppendBox( std::vector<SkinnedVertex>& verts, std::vector<Index>& indices, const BoxDef& box )
+        glm::vec3 JointPos( uint32_t joint )
         {
-            constexpr glm::vec2 kUV[4] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+            return kJoints[joint].BindWorld;
+        }
 
-            for ( const Face& face : kFaces )
+        // A tapered cylinder (side surface) p0(radius r0) -> p1(radius r1), rigid-skinned to `bone`. Normals
+        // point radially outward; triangles are wound CCW-outward (matches the mesh convention).
+        void AppendCylinder( std::vector<SkinnedVertex>& verts, std::vector<Index>& indices, const glm::vec3& p0,
+                             const glm::vec3& p1, float r0, float r1, uint32_t bone, int radial = 12 )
+        {
+            glm::vec3   axis = p1 - p0;
+            const float len  = glm::length( axis );
+            if ( len < 1e-5f )
+                return;
+            axis /= len;
+
+            // Right-handed perpendicular basis (cross(u, w) == axis).
+            const glm::vec3 up = ( std::abs( axis.y ) < 0.99f ) ? glm::vec3( 0, 1, 0 ) : glm::vec3( 1, 0, 0 );
+            const glm::vec3 u  = glm::normalize( glm::cross( up, axis ) );
+            const glm::vec3 w  = glm::cross( axis, u );
+
+            const uint32_t base   = static_cast<uint32_t>( verts.size() );
+            const int      stride = radial + 1;
+            for ( int ring = 0; ring < 2; ++ring )
             {
-                const uint32_t base = static_cast<uint32_t>( verts.size() );
-
-                glm::vec3 corner0 = box.Center + face.Signs[0] * box.HalfExtents;
-                glm::vec3 corner1 = box.Center + face.Signs[1] * box.HalfExtents;
-                const glm::vec3 tangent = glm::normalize( corner1 - corner0 );
-                const glm::vec3 bitan   = glm::cross( face.Normal, tangent );
-
-                for ( int i = 0; i < 4; ++i )
+                const glm::vec3 c = ( ring == 0 ) ? p0 : p1;
+                const float     r = ( ring == 0 ) ? r0 : r1;
+                for ( int s = 0; s <= radial; ++s )
                 {
-                    SkinnedVertex v{};
-                    v.StaticVertex.Position  = box.Center + face.Signs[i] * box.HalfExtents;
-                    v.StaticVertex.Normal    = face.Normal;
-                    v.StaticVertex.Tangent   = tangent;
-                    v.StaticVertex.Bitangent = bitan;
-                    v.StaticVertex.TexCoord  = kUV[i];
-                    v.BoneIDs[0]             = box.BoneID;
+                    const float     a   = static_cast<float>( s ) / radial * 2.0f * kPi;
+                    const glm::vec3 dir = std::cos( a ) * u + std::sin( a ) * w;
+                    SkinnedVertex   v{};
+                    v.StaticVertex.Position  = c + r * dir;
+                    v.StaticVertex.Normal    = glm::normalize( dir );
+                    v.StaticVertex.Tangent   = axis;
+                    v.StaticVertex.Bitangent = glm::cross( v.StaticVertex.Normal, axis );
+                    v.StaticVertex.TexCoord  = { static_cast<float>( s ) / radial, static_cast<float>( ring ) };
+                    v.BoneIDs[0]             = bone;
                     v.BoneWeights[0]         = 1.0f;
                     verts.push_back( v );
                 }
-
-                indices.push_back( { base + 0, base + 1, base + 2 } );
-                indices.push_back( { base + 0, base + 2, base + 3 } );
             }
+
+            for ( int s = 0; s < radial; ++s )
+            {
+                const uint32_t a = base + s, b = base + s + 1;
+                const uint32_t c = base + stride + s, d = base + stride + s + 1;
+                indices.push_back( { a, d, c } ); // outward
+                indices.push_back( { a, b, d } ); // outward
+            }
+        }
+
+        // A UV sphere centered at `center`, rigid-skinned to `bone`. Outward normals + CCW-outward winding.
+        void AppendSphere( std::vector<SkinnedVertex>& verts, std::vector<Index>& indices,
+                           const glm::vec3& center, float radius, uint32_t bone, int stacks = 10, int slices = 14 )
+        {
+            const uint32_t base   = static_cast<uint32_t>( verts.size() );
+            const int      stride = slices + 1;
+            for ( int i = 0; i <= stacks; ++i )
+            {
+                const float theta = kPi * static_cast<float>( i ) / stacks; // 0 = +Y pole
+                for ( int j = 0; j <= slices; ++j )
+                {
+                    const float     phi = 2.0f * kPi * static_cast<float>( j ) / slices;
+                    const glm::vec3 n( std::sin( theta ) * std::cos( phi ), std::cos( theta ),
+                                       std::sin( theta ) * std::sin( phi ) );
+                    SkinnedVertex v{};
+                    v.StaticVertex.Position  = center + radius * n;
+                    v.StaticVertex.Normal    = n;
+                    v.StaticVertex.Tangent   = glm::vec3( -std::sin( phi ), 0.0f, std::cos( phi ) );
+                    v.StaticVertex.Bitangent = glm::cross( n, v.StaticVertex.Tangent );
+                    v.StaticVertex.TexCoord  = { static_cast<float>( j ) / slices,
+                                                 static_cast<float>( i ) / stacks };
+                    v.BoneIDs[0]             = bone;
+                    v.BoneWeights[0]         = 1.0f;
+                    verts.push_back( v );
+                }
+            }
+
+            for ( int i = 0; i < stacks; ++i )
+                for ( int j = 0; j < slices; ++j )
+                {
+                    const uint32_t a = base + i * stride + j, b = base + i * stride + j + 1;
+                    const uint32_t c = base + ( i + 1 ) * stride + j, d = base + ( i + 1 ) * stride + j + 1;
+                    indices.push_back( { a, b, d } ); // outward
+                    indices.push_back( { a, d, c } ); // outward
+                }
         }
 
         std::vector<Animation::BoneInfo> BuildBones()
@@ -179,8 +240,15 @@ namespace Desert::Geometry
 
             std::vector<SkinnedVertex> verts;
             std::vector<Index>         indices;
-            for ( const BoxDef& box : kBoxes )
-                AppendBox( verts, indices, box );
+            for ( const SegmentDef& seg : kSegments )
+                AppendCylinder( verts, indices, JointPos( seg.JointA ), JointPos( seg.JointB ), seg.RadiusA,
+                                seg.RadiusB, seg.SkinBone );
+            for ( const SphereDef& sph : kJointSpheres )
+                AppendSphere( verts, indices, JointPos( sph.Joint ), sph.Radius, sph.Joint );
+            // Feet: a short capsule from each ankle forward (+Z), skinned to the foot joint.
+            for ( uint32_t foot : { static_cast<uint32_t>( FootL ), static_cast<uint32_t>( FootR ) } )
+                AppendCylinder( verts, indices, JointPos( foot ),
+                                JointPos( foot ) + glm::vec3( 0.0f, -0.02f, 0.17f ), 0.055f, 0.045f, foot );
 
             // Single submesh covering the whole body.
             Submesh sub{};

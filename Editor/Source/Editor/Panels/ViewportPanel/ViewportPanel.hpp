@@ -9,14 +9,21 @@
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 
 #include "LightGizmoRenderer.hpp"
+#include "Tools/FoliagePaintTool.hpp"
+#include "Tools/TerrainPaintTool.hpp"
+#include "Tools/GizmoController.hpp"
+#include "Tools/PickingController.hpp"
 
 namespace Desert::Editor
 {
+    class AsyncMeshLoader; // async cook of dropped meshes (defined in Import/AsyncMeshLoader.hpp)
+
     class ViewportPanel : public IPanel, public Common::EventHandler
     {
     public:
         ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
                        const Assets::AssetManager*                 assetManager = nullptr );
+        ~ViewportPanel() override; // defined in the .cpp (unique_ptr<AsyncMeshLoader> needs the complete type)
         void OnUIRender() override;
         void OnPreUpdate() override;
 
@@ -28,19 +35,6 @@ namespace Desert::Editor
         bool OnKeyPressedEvent( Common::KeyPressedEvent& e );
 
     private:
-        // Gizmo functionality
-        enum class GizmoType
-        {
-            None      = -1,
-            Translate = 7,   // ImGuizmo::OPERATION::TRANSLATE
-            Rotate    = 120, // ImGuizmo::OPERATION::ROTATE
-            Scale     = 896, // ImGuizmo::OPERATION::SCALE
-        };
-        void SetGizmoType( GizmoType type )
-        {
-            m_GizmoType = type;
-        }
-
         // Viewport data access
         const glm::vec2& GetSize() const
         {
@@ -52,33 +46,13 @@ namespace Desert::Editor
         }
 
     private:
-        Mesh* GetMeshComponent( const ECS::StaticMeshComponent& component );
+        // On spawning a mesh, auto-assign a "sidecar" material so packs come with their look: looks for
+        // <stem>.demat next to the mesh, else any *.demat in the mesh's folder, else in the parent folder
+        // (the collection root). Assigns it to every material slot. No-op if none found.
+        void ApplySidecarMaterial( ECS::Entity& entity, const std::string& meshSourcePath );
 
     private:
-        void                    HandleObjectPicking();
         std::pair<float, float> GetMouseViewportSpace() const;
-        void                    RenderGizmo();
-        // Skeleton Edit mode: ImGuizmo on the selected bone — edits its rest-pose LocalBindTransform
-        // (children follow), then recomputes the skeleton's OffsetMatrices. In-memory (Phase 2).
-        void                    RenderBoneGizmo();
-
-        // --- Terrain splat painting (Stage 3b) ---
-        void DrawTerrainPaintOverlay( const ECS::Entity& terrainEntity ); // brush UI when terrain selected
-        void PaintTerrainAtCursor( const ECS::Entity& terrainEntity );    // ray->plane pick + stamp splat
-        void DrawBrushRing( const ECS::Entity& terrainEntity );           // world-space radius ring at cursor
-        void UploadDirtySplatMaps();                                      // safe GPU (re)upload (OnPreUpdate)
-        // Mouse ray x horizontal plane at the terrain's base height -> world hit point. false if no hit.
-        bool TerrainPickPoint( const ECS::Entity& terrainEntity, glm::vec3& outHit ) const;
-
-        struct TerrainBrush
-        {
-            bool  Enabled  = false;
-            int   Layer    = 0;    // 0 = grass (R), 1 = rock (G), 2 = snow (B)
-            float Radius   = 6.0f; // world meters
-            float Strength = 0.6f; // 0..1 per application
-            bool  Erase    = false;
-        };
-        TerrainBrush m_TerrainBrush;
 
         struct ViewportData
         {
@@ -90,8 +64,6 @@ namespace Desert::Editor
         };
 
         ViewportData m_ViewportData;
-        GizmoType    m_GizmoType    = GizmoType::None;
-        bool         m_GizmoHovered = false;
 
         // Resize is deferred from OnUIRender (within the recording window) to OnPreUpdate
         // (start of next frame, before any rendering) to avoid destroying descriptor set pools
@@ -102,5 +74,14 @@ namespace Desert::Editor
         const Assets::AssetManager*           m_AssetManager = nullptr; // for prefab drag-drop instantiate
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
         std::unique_ptr<LightGizmoRenderer>   m_LightGizmoRenderer;
+        Tools::FoliagePaintTool               m_FoliageTool; // UE5-style foliage painting (extracted)
+        Tools::TerrainPaintTool               m_TerrainTool; // terrain splat-layer painting (extracted)
+        Tools::GizmoController                m_Gizmo;       // object + bone transform gizmos (extracted)
+        Tools::PickingController              m_Picking;     // ray-pick + select (extracted)
+        std::unique_ptr<AsyncMeshLoader>      m_AsyncLoader; // background cook of dropped meshes (no hitch)
+
+        // Drain finished async cooks (main thread): register + assign the mesh to its pending entity. Called
+        // once per frame from OnUIRender. Also draws the loading progress bar while cooks are in flight.
+        void UpdateAsyncLoads();
     };
 } // namespace Desert::Editor

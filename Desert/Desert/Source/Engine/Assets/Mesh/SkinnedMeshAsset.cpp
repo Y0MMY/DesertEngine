@@ -2,6 +2,7 @@
 #include <Common/Core/Serialization/GlmReflection.hpp>
 
 #include <Engine/Assets/Serialization/Mesh.hpp>
+#include <Engine/Assets/AssetId.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
 
@@ -13,6 +14,9 @@ namespace Desert::Assets
     SkinnedMeshAsset::SkinnedMeshAsset( const AssetPriority priority, const Common::Filepath& filepath )
          : MeshAsset( priority, filepath, GetTypeID() )
     {
+        // Path-derived handle in the ctor (see StaticMeshAsset) so a not-yet-loaded registry shell is keyed
+        // correctly. Load re-derives the same value.
+        m_Metadata.Handle = StableAssetId( m_Metadata.Filepath.lexically_normal().generic_string() );
     }
 
     Common::BoolResultStr SkinnedMeshAsset::Load()
@@ -32,6 +36,10 @@ namespace Desert::Assets
         {
             return Common::MakeError( "SkinnedMeshAsset cannot load static mesh data." );
         }
+
+        // Stable, path-derived handle (see StaticMeshAsset::Load) — survives re-cooks + lets the registry
+        // compute it from the path without parsing the mesh payload.
+        m_Metadata.Handle = StableAssetId( m_Metadata.Filepath.lexically_normal().generic_string() );
 
         m_Vertices.clear();
         m_Indices.clear();

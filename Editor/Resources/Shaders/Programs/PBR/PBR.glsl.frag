@@ -35,6 +35,7 @@ struct GpuMaterial
 	vec4 AlbedoAO;           // rgb = albedo, a = ambient occlusion
 	vec4 MetalRoughEmission; // x = metallic, y = roughness, z = emission strength
 	vec4 EmissionColor;      // rgb = emission color
+	vec4 ExtraParams;        // xy = UV tiling, zw = reserved
 };
 
 layout( std430, binding = 2 ) readonly buffer Materials
@@ -160,6 +161,7 @@ layout (binding = 10) uniform sampler2D u_BRDFLUTTexture;
 
 layout(binding = 11) uniform sampler2D u_AlbedoTexture;
 layout(binding = 12) uniform sampler2D u_NormalTexture;
+layout(binding = 18) uniform sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
 
 struct Params
 {
@@ -238,8 +240,24 @@ void main() {
 
 	GpuMaterial mat = materials[pc.MaterialIndex];
 
+	// Tiled UV: surface UVs * material UV-tiling (ExtraParams.xy; default {1,1} = no tiling). Guard against 0
+	// (un-set / legacy material) so the texture never collapses to a single texel.
+	vec2 tiling = mat.ExtraParams.xy;
+	if (tiling.x <= 0.0) tiling.x = 1.0;
+	if (tiling.y <= 0.0) tiling.y = 1.0;
+	vec2 uv = inVertex.Texcoord * tiling;
+
+	// Alpha cutout (foliage/cards): discard transparent texels per the Opacity Map. MetalRoughEmission.w is
+	// the cutoff (0 = disabled, so opaque materials are unaffected). Done first to skip lighting on discards.
+	float alphaCutoff = mat.MetalRoughEmission.w;
+	if (alphaCutoff > 0.0 && texture(u_OpacityTexture, uv).r < alphaCutoff)
+		discard;
+
 	m_Params.AlbedoColor = mat.AlbedoAO.rgb;
-	m_Params.AlbedoColor *= texture(u_AlbedoTexture, inVertex.Texcoord).rgb;
+	// Albedo maps are authored in sRGB (gamma) space; lighting must run in LINEAR space. The engine loads
+	// 8-bit textures as UNORM (no hardware sRGB sampling yet), so convert here. Normal/roughness/metallic/AO
+	// are DATA maps and are intentionally NOT converted. (Proper fix later: hardware VK_FORMAT_*_SRGB.)
+	m_Params.AlbedoColor *= pow( texture(u_AlbedoTexture, uv).rgb, vec3(2.2) );
 
 	// Default: use the world-space normal from the vertex shader directly.
 	m_Params.Normal = normalize(inVertex.Normal);
@@ -248,7 +266,7 @@ void main() {
 	if(textureSize.x > 1 && textureSize.y > 1) // real normal map — not the 1x1 fallback
 	{
 		// Transform tangent-space normal to world space via TBN.
-		vec3 tangentNormal = normalize(2.0 * texture(u_NormalTexture, inVertex.Texcoord).rgb - 1.0);
+		vec3 tangentNormal = normalize(2.0 * texture(u_NormalTexture, uv).rgb - 1.0);
 		m_Params.Normal = normalize(inVertex.TBN * tangentNormal);
 	}
 	// Without a normal map the TBN transform is intentionally skipped:

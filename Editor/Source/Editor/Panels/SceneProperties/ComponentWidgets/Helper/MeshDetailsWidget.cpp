@@ -31,8 +31,18 @@ namespace Desert::Editor
                 {
                     int MeshIndex = 0;
 
-                    const auto& submeshes =
-                         Runtime::ResourceRegistry::GetMeshService()->Get( meshHandle )->GetSubmeshes();
+                    // The RUNTIME (GPU) mesh builds lazily and can be null (not built yet, or a skinned mesh
+                    // whose build hasn't run). Don't dereference it blindly — show submeshes only once it's up.
+                    auto* runtimeMesh = Runtime::ResourceRegistry::GetMeshService()->Get( meshHandle );
+                    if ( !runtimeMesh )
+                    {
+                        ImGui::TextDisabled( "Mesh not ready yet..." );
+                        ImGui::TreePop();
+                        ImGui::TreePop();
+                        return;
+                    }
+
+                    const auto& submeshes = runtimeMesh->GetSubmeshes();
                     for ( auto mesh : submeshes )
                     {
                         const std::string meshName = std::format( "Submesh {}", MeshIndex );

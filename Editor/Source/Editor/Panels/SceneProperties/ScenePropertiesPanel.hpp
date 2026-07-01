@@ -2,7 +2,6 @@
 
 #include <Engine/Desert.hpp>
 
-#include "MaterialsPanel.hpp"
 #include "../IPanel.hpp"
 
 namespace Desert::Editor
@@ -14,7 +13,7 @@ namespace Desert::Editor
                                        const std::shared_ptr<Assets::AssetManager>& assetManager,
                                        const Animation::AnimationLibrary*           animationLibrary )
              : IPanel( "Details" ), m_Scene( scene ), m_AssetManager( assetManager ),
-               m_AnimationLibrary( animationLibrary ), m_MaterialsPanel( std::make_shared<MaterialsPanel>() )
+               m_AnimationLibrary( animationLibrary )
         {
         }
         void OnUIRender() override;
@@ -25,7 +24,6 @@ namespace Desert::Editor
     private:
         std::shared_ptr<Desert::Core::Scene>        m_Scene;
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
-        const std::shared_ptr<MaterialsPanel>       m_MaterialsPanel;
         const Animation::AnimationLibrary*          m_AnimationLibrary;
         bool                                        m_DebugMode = false;
         std::string                                 m_PrefabSavePath = "Resources/Assets/Prefabs/";

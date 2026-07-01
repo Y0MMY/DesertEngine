@@ -6,20 +6,25 @@
 
 namespace Desert::Graphic
 {
-    // Per-object PBR material push-constant block. Layout must match the push_constant block in
-    // Static.glsl.vert / PBR.glsl.frag (placed right after the mat4 Transform, at offset 64).
-    struct PBRPushMaterial
+    // One per-object PBR material entry as it lives in the GPU `Materials[]` storage buffer (std430, binding 2
+    // in PBR.glsl.frag), indexed per draw by the push-constant `MaterialIndex`. NOTE: this is NOT a push
+    // constant itself (the push constant only carries Transform + MaterialIndex) — the name is historical.
+    // Layout must match `struct GpuMaterial` in PBR.glsl.frag.
+    struct PBRGpuMaterial
     {
         glm::vec4 AlbedoAO;           // rgb = albedo, a = ambient occlusion
-        glm::vec4 MetalRoughEmission; // x = metallic, y = roughness, z = emission strength
+        glm::vec4 MetalRoughEmission; // x = metallic, y = roughness, z = emission strength, w = alpha cutoff
         glm::vec4 EmissionColor;      // rgb = emission color
+        glm::vec4 ExtraParams;        // xy = UV tiling, zw = reserved
     };
 
-    // Packs the reflected material data into the push block — the single mapping data -> shader.
-    inline PBRPushMaterial BuildPBRPushMaterial( const Assets::PBRMaterialData& d )
+    // Packs the reflected material data into the GPU entry — the single mapping data -> shader.
+    inline PBRGpuMaterial BuildPBRGpuMaterial( const Assets::PBRMaterialData& d )
     {
+        const glm::vec2 tiling = d.UVTiling.value_or( glm::vec2( 1.0f ) ); // absent -> no tiling
         return { glm::vec4( glm::vec3( d.AlbedoColor ), d.AOStrength ),
-                 glm::vec4( d.MetallicFactor, d.RoughnessFactor, d.EmissiveIntensity, 0.0f ),
-                 glm::vec4( glm::vec3( d.EmissiveColor ), 0.0f ) };
+                 glm::vec4( d.MetallicFactor, d.RoughnessFactor, d.EmissiveIntensity, d.AlphaCutoff ),
+                 glm::vec4( glm::vec3( d.EmissiveColor ), 0.0f ),
+                 glm::vec4( tiling.x, tiling.y, 0.0f, 0.0f ) };
     }
 } // namespace Desert::Graphic

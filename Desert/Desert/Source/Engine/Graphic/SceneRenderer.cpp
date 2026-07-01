@@ -321,11 +321,12 @@ namespace Desert::Graphic
             return;
         }
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->SubmitMesh( { .Mesh          = (Mesh*)mesh,
-                             .Transform     = transform,
-                             .MaterialSlots = &materialSlots,
-                             .BoneMatrices  = extra.BoneMatrices,
-                             .Outlined      = extra.Outlined } );
+             ->SubmitMesh( { .Mesh            = (Mesh*)mesh,
+                             .Transform       = transform,
+                             .MaterialSlots   = &materialSlots,
+                             .BoneMatrices    = extra.BoneMatrices,
+                             .Outlined        = extra.Outlined,
+                             .HiddenSubmeshes = extra.HiddenSubmeshes } );
     }
 
     void SceneRenderer::SubmitTerrain( const glm::mat4& transform, float size, int resolution,
@@ -333,38 +334,33 @@ namespace Desert::Graphic
                                        const glm::vec3&                                      layerModes,
                                        Image2D*                                              splatMap,
                                        const glm::vec4&                                      grassParams,
-                                       const glm::vec3&                                      grassTint,
-                                       const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides,
-                                       const std::vector<std::pair<std::string, uint64_t>>& textureOverrides )
+                                       const glm::vec3&         grassTint,
+                                       const MaterialOverrides& overrides )
     {
         UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )
-             ->Submit( { .Transform        = transform,
-                         .Size             = size,
-                         .Resolution       = resolution,
-                         .HeightScale      = heightScale,
-                         .NoiseFrequency   = noiseFrequency,
-                         .Seed             = seed,
-                         .LayerModes       = layerModes,
-                         .SplatMap         = splatMap,
-                         .GrassParams      = grassParams,
-                         .GrassTint        = grassTint,
-                         .ParamOverrides   = paramOverrides,
-                         .TextureOverrides = textureOverrides } );
+             ->Submit( { .Transform      = transform,
+                         .Size           = size,
+                         .Resolution     = resolution,
+                         .HeightScale    = heightScale,
+                         .NoiseFrequency = noiseFrequency,
+                         .Seed           = seed,
+                         .LayerModes     = layerModes,
+                         .SplatMap       = splatMap,
+                         .GrassParams    = grassParams,
+                         .GrassTint      = grassTint,
+                         .Overrides      = overrides } );
     }
 
     void SceneRenderer::SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform,
-                                           const std::string&                                   shaderName,
-                                           const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides,
-                                           const std::vector<std::pair<std::string, uint64_t>>& textureOverrides,
-                                           bool                                                 outlined )
+                                           const std::string& shaderName, const MaterialOverrides& overrides,
+                                           bool outlined )
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->SubmitGenericMesh( { .Mesh             = const_cast<Mesh*>( mesh ),
-                                    .Transform        = transform,
-                                    .ShaderName       = shaderName,
-                                    .ParamOverrides   = paramOverrides,
-                                    .TextureOverrides = textureOverrides,
-                                    .Outlined         = outlined } );
+             ->SubmitGenericMesh( { .Mesh       = const_cast<Mesh*>( mesh ),
+                                    .Transform  = transform,
+                                    .ShaderName = shaderName,
+                                    .Overrides  = overrides,
+                                    .Outlined   = outlined } );
     }
 
     void SceneRenderer::SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
@@ -387,10 +383,11 @@ namespace Desert::Graphic
     }
 
     void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity,
-                                          float sunDiskRadius, bool bakeNow, const CloudSettings& clouds )
+                                          float sunDiskRadius, bool bakeNow, const CloudSettings& clouds,
+                                          const SkySettings& sky )
     {
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
-             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow, clouds );
+             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow, clouds, sky );
     }
 
     const std::optional<Environment>& SceneRenderer::GetEnvironment()

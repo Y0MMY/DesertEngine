@@ -13,6 +13,7 @@
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Engine/Animation/ProceduralCharacterAnimations.hpp>
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
+#include <Engine/Scripting/ScriptEngine.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 
 // 2. Editor Base & Infrastructure
@@ -33,6 +34,7 @@
 #include "Editor/Panels/MeshEditor/MeshEditorPanel.hpp"
 #include "Editor/Panels/SceneSettings/SceneSettingsPanel.hpp"
 #include "Editor/Panels/Logs/LogsPanel.hpp"
+#include "Editor/Panels/Collections/CollectionsPanel.hpp"
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
@@ -44,7 +46,10 @@
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/SpotLightSystem.hpp>
 #include <Engine/ECS/System/AnimationECSSystem.hpp>
+#include <Engine/ECS/System/AttachmentSystem.hpp>
 #include <Engine/ECS/System/PhysicsECSSystem.hpp>
+#include <Engine/ECS/System/LocomotionSystem.hpp>
+#include <Engine/ECS/System/ScriptSystem.hpp>
 
 namespace Desert::Editor
 {
@@ -57,8 +62,11 @@ namespace Desert::Editor
         m_AssetManager = std::make_shared<Assets::AssetManager>();
 
         m_ImportManager = std::make_unique<ImportManager>();
-        // Cook only what's missing/stale (skips the expensive Assimp re-parse on every launch).
-        m_ImportManager->ImportAllFromDirectory( "Resources/Mesh/" ); // TEMP path
+        // Cook only what's missing/stale (skips the expensive Assimp re-parse on every launch). Collections
+        // hold packs (a character + its animation FBXs), so they're cooked too — their outputs land under
+        // Cooked/Meshes/Collections/... where the preloader discovers them (see CookPaths::CookedMesh).
+        m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::MESH_PATH );
+        m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::COLLECTIONS_PATH );
 
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
@@ -113,7 +121,15 @@ namespace Desert::Editor
         m_MainScene->AddSystem<ECS::PointLightECSSystem>();
         m_MainScene->AddSystem<ECS::SpotLightECSSystem>();
         m_MainScene->AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
+        // AttachmentSystem runs right AFTER animation: weapons-in-hand follow the freshly-posed bone this frame.
+        m_MainScene->AddSystem<ECS::AttachmentSystem>( m_MainScene.get() );
+        // ScriptSystem runs BEFORE physics: scripts set the character's move intent (+ look) which
+        // PhysicsECSSystem then executes the same frame.
+        m_MainScene->AddSystem<ECS::ScriptSystem>( m_MainScene.get(), m_AssetManager.get() );
         m_MainScene->AddSystem<ECS::PhysicsECSSystem>( m_MainScene.get() );
+        // Maps character movement state (speed/onGround from physics) -> locomotion clip. Kept OUT of physics
+        // (mechanism vs behaviour); runs after it so it reads this frame's state.
+        m_MainScene->AddSystem<ECS::LocomotionSystem>( m_MainScene.get() );
 
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
 
@@ -139,18 +155,39 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() ) );
         {
-            auto fileExplorer   = std::make_unique<Editor::FileExplorerPanel>( "Resources/", m_AssetManager.get() );
+            auto fileExplorer =
+                 std::make_unique<Editor::FileExplorerPanel>( "Resources/Assets/", m_AssetManager.get(),
+                                                              m_MainScene );
             m_FileExplorerPanel = fileExplorer.get();
             m_Panels.emplace_back( std::move( fileExplorer ) );
         }
         m_Panels.emplace_back( std::make_unique<Editor::MeshEditorPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
+        m_Panels.emplace_back( std::make_unique<Editor::CollectionsPanel>( m_AssetManager.get() ) );
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
 
-        BuildCharacterDemoScene();
+        // Boot into an empty "New Scene" — the demo scene (procedural character/house + player_controller.lua)
+        // referenced assets that were cleared out for the from-scratch rebuild. Re-enable to get it back.
+        // BuildCharacterDemoScene();
+
+        // Default scene content: a sun + procedural sky (like UE's default level) so created meshes/primitives
+        // are LIT and have a backdrop (an empty scene with no light renders everything ~black).
+        {
+            using namespace ::Desert;
+            auto& sun = m_MainScene->CreateNewEntity( "Sun" );
+            auto& dl  = sun.AddComponent<ECS::DirectionLightComponent>();
+            dl.Data.Color     = { 1.0f, 0.97f, 0.9f };
+            dl.Data.Intensity = 3.0f;
+            sun.GetComponent<ECS::TransformComponent>().Translation = { -0.4f, -1.0f, -0.5f };
+
+            auto& skyEnt   = m_MainScene->CreateNewEntity( "Skybox" );
+            auto& sky      = skyEnt.AddComponent<ECS::SkyboxComponent>();
+            sky.Procedural  = true;
+            sky.RequestBake = true;
+        }
 
         return BOOLSUCCESS;
     }
@@ -399,7 +436,10 @@ namespace Desert::Editor
         Graphic::Renderer::GetInstance().WaitDeviceIdle();
 
         if ( m_ImportManager )
-            m_ImportManager->ImportAllFromDirectory( "Resources/Mesh/", /*force=*/true );
+        {
+            m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::MESH_PATH, /*force=*/true );
+            m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::COLLECTIONS_PATH, /*force=*/true );
+        }
 
         if ( m_AssetPreloader )
             m_AssetPreloader->ReloadCooked();
@@ -814,6 +854,54 @@ namespace Desert::Editor
             ImGui::EndDisabled();
     }
 
+    namespace
+    {
+        // One static box = mesh (Cube primitive) + Box collider + Static body, as a child of `parent`.
+        // The Cube primitive spans 2 units, so the visual size is 2*scale and the collider half-extents == scale
+        // (matches the demo ground). Child colliders are placed at their WORLD pose by PhysicsECSSystem.
+        void AddHousePart( ::Desert::Core::Scene* scene, ::Desert::ECS::Entity parent, const char* name,
+                           const glm::vec3& localPos, const glm::vec3& scale )
+        {
+            using namespace ::Desert;
+            auto& e = scene->CreateNewEntity( std::string( name ) );
+            e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
+            auto& t       = e.GetComponent<ECS::TransformComponent>();
+            t.Translation = localPos;
+            t.Scale       = scale;
+            auto& col           = e.AddComponent<ECS::ColliderComponent>();
+            col.Data.Shape       = Physics::ShapeType::Box;
+            col.Data.HalfExtents = scale; // 2-unit cube -> half-extents == scale
+            e.AddComponent<ECS::RigidBodyComponent>().Data.Type = Physics::BodyType::Static;
+            scene->Attach( parent, e );
+        }
+    }
+
+    // Builds a walkable greybox HOUSE (floor-less; sits on the demo ground): 4 walls (front wall has a
+    // doorway) + a flat roof, each a static collider so the character walks in through the door and is blocked
+    // by walls. All parented under one "House" root (a ready prefab root). 2-unit-cube convention: dims = 2*scale.
+    void EditorLayer::BuildHouse( const glm::vec3& origin )
+    {
+        using namespace ::Desert;
+
+        // By VALUE: creating the wall children below reallocates the entity store; a reference would dangle.
+        ECS::Entity house = m_MainScene->CreateNewEntity( "House" );
+        house.GetComponent<ECS::TransformComponent>().Translation = origin;
+
+        // Interior ~8x8 m, walls 3 m tall, 0.2 m thick. Half-sizes (= scale, since the cube is 2 units):
+        AddHousePart( m_MainScene.get(), house, "Wall_Back", { 0.0f, 1.5f, -4.0f }, { 4.0f, 1.5f, 0.1f } );
+        AddHousePart( m_MainScene.get(), house, "Wall_Left", { -4.0f, 1.5f, 0.0f }, { 0.1f, 1.5f, 4.0f } );
+        AddHousePart( m_MainScene.get(), house, "Wall_Right", { 4.0f, 1.5f, 0.0f }, { 0.1f, 1.5f, 4.0f } );
+        // Front wall with a centered doorway (1.2 m wide, 2.2 m tall): two side segments + a lintel above.
+        AddHousePart( m_MainScene.get(), house, "Wall_FrontL", { -2.3f, 1.5f, 4.0f }, { 1.7f, 1.5f, 0.1f } );
+        AddHousePart( m_MainScene.get(), house, "Wall_FrontR", { 2.3f, 1.5f, 4.0f }, { 1.7f, 1.5f, 0.1f } );
+        AddHousePart( m_MainScene.get(), house, "Door_Lintel", { 0.0f, 2.6f, 4.0f }, { 0.6f, 0.4f, 0.1f } );
+        // Flat roof (slight overhang).
+        AddHousePart( m_MainScene.get(), house, "Roof", { 0.0f, 3.1f, 0.0f }, { 4.2f, 0.1f, 4.2f } );
+
+        LOG_INFO( "[Demo] House built at ({}, {}, {}) — walk in through the +Z doorway.", origin.x, origin.y,
+                  origin.z );
+    }
+
     void EditorLayer::BuildCharacterDemoScene()
     {
         using namespace ::Desert;
@@ -859,12 +947,17 @@ namespace Desert::Editor
         // the ground so it drops on Play. By VALUE: creating children below can reallocate the entity store.
         ECS::Entity player = m_MainScene->CreateNewEntity( "Player" );
         {
-            auto& cc          = player.AddComponent<ECS::CharacterControllerComponent>();
-            cc.Data.Radius    = 0.3f;
-            cc.Data.Height    = 1.8f;
-            cc.Data.MoveSpeed = 5.0f;
-            cc.Data.JumpSpeed = 5.0f;
+            auto& cc       = player.AddComponent<ECS::CharacterControllerComponent>();
+            cc.Data.Radius = 0.3f;
+            cc.Data.Height = 1.8f;
+            // Move/jump/look speeds are the SCRIPT's Properties now (Details ▸ Script), not the controller.
             player.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 3.0f, 0.0f };
+            // Movement + mouse-look are now a Lua SCRIPT (engine only executes the physics it asks for).
+            {
+                ECS::ScriptSlot slot;
+                slot.ScriptPath = "Resources/Assets/Scripts/player_controller.lua";
+                player.AddComponent<ECS::ScriptComponent>().Scripts.push_back( std::move( slot ) );
+            }
         }
 
         // --- Visual body: a CHILD holding the procedural skinned HUMANOID (head/torso/2 arms/2 legs). Its
@@ -890,6 +983,8 @@ namespace Desert::Editor
             ct.Rotation    = { glm::radians( -10.0f ), 0.0f, 0.0f }; // look slightly down at the player
             m_MainScene->Attach( player, cam );
         }
+
+        BuildHouse( { 12.0f, 0.0f, 0.0f } ); // a walkable greybox house off to the side
 
         LOG_INFO( "[Demo] Character demo scene built — press Play, then WASD to move + Space to jump." );
     }

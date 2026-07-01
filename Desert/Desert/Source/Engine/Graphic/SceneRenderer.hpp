@@ -4,9 +4,11 @@
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/MaterialExecutor.hpp>
+#include <Engine/Graphic/Materials/MaterialOverrides.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/CloudSettings.hpp>
+#include <Engine/Graphic/SkySettings.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/PipelineCache.hpp>
@@ -50,7 +52,8 @@ namespace Desert::Graphic
         struct RenderSubmissionExtra
         {
             std::vector<glm::mat4> BoneMatrices; // optional
-            bool                   Outlined = false;
+            bool                   Outlined        = false;
+            uint64_t               HiddenSubmeshes = 0; // bit i = submesh i hidden (static meshes)
         };
 
         ~SceneRenderer() = default;
@@ -72,15 +75,12 @@ namespace Desert::Graphic
         void SubmitTerrain( const glm::mat4& transform, float size, int resolution, float heightScale,
                             float noiseFrequency, int seed, const glm::vec3& layerModes = glm::vec3( 0.0f ),
                             Image2D* splatMap = nullptr, const glm::vec4& grassParams = glm::vec4( 0.0f ),
-                            const glm::vec3& grassTint = glm::vec3( 1.0f ),
-                            const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides   = {},
-                            const std::vector<std::pair<std::string, uint64_t>>&  textureOverrides = {} );
+                            const glm::vec3&          grassTint = glm::vec3( 1.0f ),
+                            const MaterialOverrides& overrides = {} );
 
         // Submit a mesh drawn with a generic data-driven material (MaterialComponent with a non-PBR shader).
         void SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform, const std::string& shaderName,
-                                const std::vector<std::pair<std::string, glm::vec4>>& paramOverrides,
-                                const std::vector<std::pair<std::string, uint64_t>>&  textureOverrides = {},
-                                bool                                                  outlined = false );
+                                const MaterialOverrides& overrides, bool outlined = false );
 
         // UE-style Instanced Static Mesh: one mesh + one PBR material drawn for every transform in
         // @p transforms (a pointer to the component's stable per-frame array — not copied).
@@ -94,7 +94,7 @@ namespace Desert::Graphic
         // Procedural sky configuration (from the SkyboxComponent + directional light via the ECS).
         // bakeNow = one-shot request from the editor's Bake button (rebuild the sky IBL).
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                               bool bakeNow, const CloudSettings& clouds );
+                               bool bakeNow, const CloudSettings& clouds, const SkySettings& sky );
 
         const auto& GetMainCamera() const
         {

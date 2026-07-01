@@ -1,7 +1,9 @@
 #include "SceneHierarchyPanel.hpp"
+#include <Editor/Core/DragPayloads.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/EditorResources.hpp>
 #include <Editor/Core/ThemeManager.hpp>
@@ -98,14 +100,14 @@ namespace Desert::Editor
 
         if ( ImGui::BeginDragDropSource() )
         {
-            ImGui::SetDragDropPayload( "ENTITY_RELATIONSHIP", &UUID, sizeof( Common::UUID ) );
+            ImGui::SetDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship, &UUID, sizeof( Common::UUID ) );
             ImGui::TextUnformatted( name.c_str() );
             ImGui::EndDragDropSource();
         }
 
         if ( ImGui::BeginDragDropTarget() )
         {
-            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "ENTITY_RELATIONSHIP" ) )
+            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
             {
                 Common::UUID childUUID     = *(const Common::UUID*)payload->Data;
                 auto         childEntityRef = m_Scene->FindEntityByID( childUUID );
@@ -227,6 +229,17 @@ namespace Desert::Editor
                 {
                     auto entity = scene->CreateNewEntity( "Skinned Model" );
                     entity.AddComponent<ECS::SkinnedMeshComponent>();
+                    entity.AddComponent<ECS::AnimationComponent>();
+                }
+
+                // Code-generated rounded humanoid mannequin (no import needed). Renders in its bind/A-pose;
+                // pick Idle/Walk/Run/Jump in Details ▸ Animation, or parent it to a Character Controller so
+                // LocomotionSystem drives it from movement.
+                if ( ImGui::Selectable( "Character (Procedural)" ) )
+                {
+                    auto entity = scene->CreateNewEntity( "Character" );
+                    entity.AddComponent<ECS::SkinnedMeshComponent>().MeshHandle =
+                         Geometry::ProceduralCharacterFactory::GetHumanoidMesh();
                     entity.AddComponent<ECS::AnimationComponent>();
                 }
 
@@ -396,7 +409,7 @@ namespace Desert::Editor
 
             if ( ImGui::BeginDragDropTargetCustom( windowRect, ImGui::GetCurrentWindow()->ID ) )
             {
-                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "ENTITY_RELATIONSHIP" ) )
+                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
                 {
                     Common::UUID uuid      = *(const Common::UUID*)payload->Data;
                     auto         entityRef = m_Scene->FindEntityByID( uuid );
@@ -406,7 +419,7 @@ namespace Desert::Editor
                     }
                 }
 
-                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "PREFAB_FILE" ) )
+                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::PrefabFile ) )
                 {
                     std::string path( static_cast<const char*>( payload->Data ),
                                       static_cast<size_t>( payload->DataSize ) - 1 );

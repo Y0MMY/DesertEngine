@@ -53,6 +53,8 @@ namespace Desert::Editor
         // Builds a ready-to-Play demo: a WASD character (Jolt CharacterVirtual) with a 3rd-person child
         // camera, a ground floor, a sun light, and obstacles. (Remove the call in OnAttach for a blank scene.)
         void BuildCharacterDemoScene();
+        // Builds a walkable greybox house (walls + doorway + roof, static colliders) parented under one root.
+        void BuildHouse( const glm::vec3& origin );
 
         void DrawEngineStats();
         void DrawProfilerWindow();

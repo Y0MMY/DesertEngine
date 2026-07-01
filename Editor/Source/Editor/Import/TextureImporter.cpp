@@ -1,5 +1,6 @@
 #include <variant>
 #include "TextureImporter.hpp"
+#include "CookPaths.hpp"
 
 #include <Common/Core/Serialization/GlmReflection.hpp>
 #include <regex>
@@ -38,17 +39,9 @@ namespace Desert::Editor
     static std::filesystem::path BuildCookedPath( const std::filesystem::path& sourcePath,
                                                   const std::string&           extension )
     {
-        namespace fs = std::filesystem;
-
-        fs::path relative = fs::relative( sourcePath, "Resources/Textures/" );
-
-        fs::path cookedRoot = "Cooked/Textures";
-
-        fs::path result = cookedRoot / relative;
-        result.replace_extension( extension );
-
-        fs::create_directories( result.parent_path() );
-
+        // Path formula is shared (CookPaths::CookedTexture); this wrapper ensures the dir exists for writing.
+        const auto result = Editor::CookPaths::CookedTexture( sourcePath, extension );
+        std::filesystem::create_directories( result.parent_path() );
         return result;
     }
 
@@ -56,6 +49,26 @@ namespace Desert::Editor
     {
         return BuildCookedPath( source, ".tex" );
     }
+
+    namespace
+    {
+        // Deterministic 64-bit id (FNV-1a) from a stable key -> Common::UUID. Used so a texture's handle is
+        // DERIVED from its source path, not random: deleting Cooked/ and re-cooking yields the SAME handle, so
+        // every material/.demat/scene reference keyed by it still resolves (random handles broke on a Cooked
+        // wipe). Mirrors AssimpImporter::StableMaterialId.
+        Common::UUID StableTextureId( const std::string& key )
+        {
+            uint64_t h = 1469598103934665603ull;
+            for ( unsigned char c : key )
+            {
+                h ^= c;
+                h *= 1099511628211ull;
+            }
+            if ( h == 0 )
+                h = 1; // never collide with the null handle
+            return Common::UUID( h );
+        }
+    } // namespace
 
     Common::UUID TextureImporter::Import( const std::filesystem::path& path )
     {
@@ -68,9 +81,10 @@ namespace Desert::Editor
 
         const auto meta = BuildCookedPath( path, ".tex" );
 
-        // Stable handles: if this texture was cooked before, reuse the handle stored in the existing .tex
-        // (so material/scene references survive re-cooks). If the .tex is also up-to-date, skip rewriting.
-        Common::UUID    handle{};
+        // Deterministic default so the handle survives a Cooked/ wipe (re-cook -> same id). If a .tex already
+        // exists, PRESERVE whatever handle it stored (back-compat with older random-handle cooks); if it's
+        // also up-to-date, skip rewriting.
+        Common::UUID    handle = StableTextureId( abs );
         std::error_code ec;
         if ( std::filesystem::exists( meta, ec ) )
         {
