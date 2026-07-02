@@ -29,6 +29,9 @@
 #include "Systems/Scene/PostProcessing/SMAARenderer.hpp"
 #include "Systems/Scene/PostProcessing/BloomRenderer.hpp"
 #include "Systems/Scene/PostProcessing/AutoExposureRenderer.hpp"
+#include "Systems/Scene/Deferred/DeferredLightingRenderer.hpp"
+#include "Systems/Scene/Deferred/SSAORenderer.hpp"
+#include "Systems/Scene/Deferred/CopyRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
 
@@ -132,6 +135,18 @@ namespace Desert::Graphic
             return m_TargetFramebuffer;
         }
 
+        // Deferred G-buffer (Albedo+Metallic / Normal+Roughness / depth). Populated only in the Deferred path.
+        const std::shared_ptr<Framebuffer>& GetGBuffer() const
+        {
+            return m_GBuffer;
+        }
+
+        // Active rendering path, refreshed from SceneSettings each BeginScene.
+        Core::RenderPath GetRenderPath() const
+        {
+            return m_RenderPath;
+        }
+
         // Shared GraphicsPipeline cache (keyed by shader + target + render-state). Renderers request
         // pipelines from here instead of creating their own; cleared on Init (full rebuild).
         PipelineCache& GetPipelineCache()
@@ -195,6 +210,13 @@ namespace Desert::Graphic
 
     private:
         std::shared_ptr<Framebuffer>                                    m_TargetFramebuffer;
+        std::shared_ptr<Framebuffer>                                    m_GBuffer; // deferred G-buffer (MRT)
+        std::shared_ptr<Framebuffer>                                    m_SSAOBuffer; // deferred SSAO (AO factor)
+        std::shared_ptr<Framebuffer>                                    m_SceneColorCopy; // scene snapshot for glass refraction
+        Core::RenderPath m_RenderPath = Core::RenderPath::Forward; // refreshed from SceneSettings each BeginScene
+        Core::DeferredDebugMode m_DeferredDebug = Core::DeferredDebugMode::Off; // G-buffer debug view (deferred)
+        bool m_EnableSSAO = true; // deferred SSAO pass on/off (refreshed from SceneSettings)
+        bool m_EnableSSGI = true; // deferred SSGI (indirect bounce) on/off
         RenderGraphBuilder                                              m_RenderGraphBuilder;
         std::unordered_map<std::string, std::shared_ptr<IRenderSystem>> m_RenderSystems;
         PipelineCache                                                  m_PipelineCache;

@@ -101,6 +101,12 @@ namespace Desert::Graphic::API::Vulkan
             // the new frame's JFA_Final can start overwriting the image while the previous
             // frame's Tonemap is still sampling it, causing every-other-frame flickering.
             // srcAccessMask flushes prior writes so they are coherent on re-use.
+            // dstAccessMask includes COLOR_ATTACHMENT_READ so this render pass is also correct when begun with
+            // LOAD_OP_LOAD (the load reads the existing content): m_RenderPassLoad reuses these exact
+            // dependencies for render-pass COMPATIBILITY (VUID-00904), so they must satisfy BOTH the clear and
+            // load cases. READ here is a superset for the clear case (harmless) and required for the load case
+            // (without it, LOAD-based accumulate passes read stale/uninitialised content — e.g. the sky colour
+            // bleeding through what should be shadowed forward geometry).
             VkSubpassDependency& dependency = dependencies.emplace_back();
             dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
             dependency.dstSubpass    = 0;
@@ -108,7 +114,7 @@ namespace Desert::Graphic::API::Vulkan
                                      | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
             dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
             dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         }
 
         if ( hasDepth )
@@ -117,9 +123,9 @@ namespace Desert::Graphic::API::Vulkan
             dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
             dependency.dstSubpass    = 0;
             dependency.srcStageMask  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-            dependency.srcAccessMask = 0;
+            dependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
             dependency.dstStageMask  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-            dependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            dependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         }
 
         VkRenderPassCreateInfo renderPassInfo = {};
@@ -149,36 +155,14 @@ namespace Desert::Graphic::API::Vulkan
             for ( const auto& d : attachmentDescriptions )
                 loadDescs.push_back( makeLoadAttachment( d ) );
 
-            // LOAD passes require srcAccessMask to include the previous write so the GPU flushes
-            // its attachment cache before reading the existing content (without this, the driver
-            // is NOT required to make the previous render pass's writes visible and the result is
-            // non-deterministic — manifests as every-other-frame flickering with 2 frames in flight).
-            std::vector<VkSubpassDependency> loadDeps;
-            if ( !colorAttachmentReferences.empty() )
-            {
-                auto& dep         = loadDeps.emplace_back();
-                dep.srcSubpass    = VK_SUBPASS_EXTERNAL;
-                dep.dstSubpass    = 0;
-                dep.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-                dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-                dep.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-                dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-            }
-            if ( hasDepth )
-            {
-                auto& dep         = loadDeps.emplace_back();
-                dep.srcSubpass    = VK_SUBPASS_EXTERNAL;
-                dep.dstSubpass    = 0;
-                dep.srcStageMask  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-                dep.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-                dep.dstStageMask  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-                dep.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-            }
-
+            // The load RP MUST reuse the clear RP's exact subpass dependencies. Vulkan render-pass
+            // compatibility (VUID-VkRenderPassBeginInfo-renderPass-00904) is checked by the validation layer
+            // including the dependency structure, and the VkFramebuffer below is created with the clear RP;
+            // beginning it with a load RP whose dependencies differ is flagged incompatible. Identical
+            // dependencies keep the two render passes compatible so a pass (e.g. deferred lighting) can LOAD
+            // and composite over the already-rendered forward scene. Only loadOp/initialLayout differ.
             VkRenderPassCreateInfo loadInfo  = renderPassInfo;
             loadInfo.pAttachments            = loadDescs.data();
-            loadInfo.dependencyCount         = static_cast<uint32_t>( loadDeps.size() );
-            loadInfo.pDependencies           = loadDeps.data();
 
             VK_CHECK_RESULT( vkCreateRenderPass( vkDevice, &loadInfo, nullptr, &m_RenderPassLoad ) );
         }

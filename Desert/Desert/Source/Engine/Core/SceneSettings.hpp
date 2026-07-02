@@ -35,6 +35,27 @@ namespace Desert::Core
         Anisotropic = 3,
     };
 
+    // Rendering path. Forward = the classic one-pass lit shading (default, always works). Deferred = a
+    // G-buffer pass + a screen-space lighting pass, which scales to many dynamic lights (city lamps/windows)
+    // and unlocks screen-space GI/AO. Built incrementally behind this toggle so Forward stays the safe path.
+    enum class RenderPath : int
+    {
+        Forward  = 0,
+        Deferred = 1,
+    };
+
+    // Deferred G-buffer debug visualization (UE-style buffer view). Off = normal lit; the others fill the
+    // screen with a raw G-buffer channel so the deferred passes can be inspected. Only used in the Deferred path.
+    enum class DeferredDebugMode : int
+    {
+        Off       = 0,
+        Albedo    = 1,
+        Normal    = 2,
+        Metallic  = 3,
+        Roughness = 4,
+        AO        = 5,
+    };
+
     // Reflected (REFLECT/PROPERTY) so the whole block (de)serializes generically via the reflection
     // serializer (no hand-written mirror) and the editor can build its panel from the same metadata.
     struct SceneSettings
@@ -50,6 +71,20 @@ namespace Desert::Core
         float     OutlineSmoothness = 2.0f;
         PROPERTY( DisplayName( "Enable Outline" ), Category( "Outline" ) )
         bool      EnableOutline     = true;
+
+        // Rendering path (Forward default; Deferred is built incrementally behind this toggle).
+        PROPERTY( DisplayName( "Render Path" ), Category( "Rendering" ) )
+        RenderPath RenderingPath = RenderPath::Deferred;
+
+        PROPERTY( DisplayName( "Deferred Debug" ), Category( "Rendering" ) )
+        DeferredDebugMode DeferredDebug = DeferredDebugMode::Off;
+
+        // Deferred screen-space effects (Deferred path only). Both cost a full-screen multi-sample pass —
+        // turn off for maximum FPS.
+        PROPERTY( DisplayName( "Enable SSAO" ), Category( "Rendering" ) )
+        bool EnableSSAO = true;
+        PROPERTY( DisplayName( "Enable SSGI" ), Category( "Rendering" ) )
+        bool EnableSSGI = true;
 
         // Environment settings
         PROPERTY( DisplayName( "Env Map Intensity" ), Category( "Environment" ), Range( 0.0f, 10.0f ) )
@@ -134,6 +169,14 @@ namespace Desert::Core
         float WindStrength   = 0.15f; // base force / foliage sway amplitude
         PROPERTY( DisplayName( "Wind Turbulence" ), Category( "Wind" ), Range( 0.0f, 3.0f ) )
         float WindTurbulence = 1.0f;  // gustiness (reserved for foliage/hair/cloth response)
+
+        // Water: a scene-global water surface level. The character-controller script reads it (World.waterLevel)
+        // and switches to swimming (buoyancy) when the body drops below it. A visible water plane can be
+        // spawned via World.spawnWater(level, size).
+        PROPERTY( DisplayName( "Water Enabled" ), Category( "Water" ) )
+        bool  WaterEnabled = false;
+        PROPERTY( DisplayName( "Water Level" ), Category( "Water" ), Range( -100.0f, 100.0f ) )
+        float WaterLevel   = 0.0f;
 
         // Time of Day — an OPT-IN day/night cycle (default off, so existing scenes are untouched). When on,
         // the DayNightSystem drives the scene's directional light (the "sun"): its DIRECTION follows the hour

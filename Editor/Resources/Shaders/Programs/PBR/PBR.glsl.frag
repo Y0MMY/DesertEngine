@@ -35,7 +35,8 @@ struct GpuMaterial
 	vec4 AlbedoAO;           // rgb = albedo, a = ambient occlusion
 	vec4 MetalRoughEmission; // x = metallic, y = roughness, z = emission strength
 	vec4 EmissionColor;      // rgb = emission color
-	vec4 ExtraParams;        // xy = UV tiling, zw = reserved
+	vec4 ExtraParams;        // xy = UV tiling, z = IOR, w = reserved
+	vec4 GlassTint;          // rgb = glass tint, a = transmission (opaque path ignores it)
 };
 
 layout( std430, binding = 2 ) readonly buffer Materials

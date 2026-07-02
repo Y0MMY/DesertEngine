@@ -38,6 +38,22 @@ namespace Desert::Assets
         PROPERTY( DisplayName( "Alpha Cutoff" ), Category( "Surface" ), Range( 0.0f, 1.0f ) )
         float AlphaCutoff = 0.0f;
 
+        // --- Glass / transparency (UE-style) ---
+        // Transmission > 0 makes the surface TRANSPARENT: it is skipped by the opaque (deferred G-buffer) path
+        // and drawn instead in a forward transparent pass over the composited scene (alpha blend + Fresnel edge
+        // + screen-space refraction of the scene behind it). 0 = opaque.
+        PROPERTY( DisplayName( "Transmission" ), Category( "Glass" ), Range( 0.0f, 1.0f ) )
+        float Transmission = 0.0f;
+
+        // Index of refraction (glass ~1.5, water ~1.33) — drives how much the background bends behind the glass
+        // and the strength of the grazing-angle Fresnel reflection.
+        PROPERTY( DisplayName( "IOR" ), Category( "Glass" ), Range( 1.0f, 2.5f ) )
+        float IOR = 1.5f;
+
+        // Colour of the transmitted light (coloured/tinted glass). White = clear glass.
+        PROPERTY( DisplayName( "Glass Tint" ), Category( "Glass" ), Color )
+        glm::vec4 GlassTint = glm::vec4( 1.0f );
+
         PROPERTY( DisplayName( "Albedo Map" ), Category( "Textures" ), Asset<TextureAsset>, Thumbnail )
         AssetHandle AlbedoTexture{ 0ULL };
 

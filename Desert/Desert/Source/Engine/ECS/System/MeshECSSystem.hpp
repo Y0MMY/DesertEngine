@@ -130,6 +130,38 @@ namespace Desert::ECS
                              mesh.RuntimeSlotPtrs.reserve( mesh.RuntimeMaterialInstances.size() );
                              for ( const auto& inst : mesh.RuntimeMaterialInstances )
                                  mesh.RuntimeSlotPtrs.push_back( inst.get() );
+
+                             // Tint/roughen a batched PBR primitive straight from a MaterialComponent (no
+                             // material asset needed) — e.g. the Cornell Box GI test colours its walls this
+                             // way. Applied when instances are (re)built; the override persists and
+                             // BuildEffectiveMaterial honours it. Empty/"StaticMeshPBR" shader = still PBR.
+                             if ( registry.has<MaterialComponent>( entity ) && !mesh.RuntimeMaterialInstances.empty() )
+                             {
+                                 const auto& matc = registry.get<MaterialComponent>( entity );
+                                 if ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" )
+                                 {
+                                     auto& inst = mesh.RuntimeMaterialInstances[0];
+                                     for ( const auto& p : matc.Params )
+                                     {
+                                         if ( p.Name == "AlbedoColor" )
+                                             inst->SetVec4( "AlbedoColor", p.Value );
+                                         else if ( p.Name == "MetallicFactor" )
+                                             inst->SetFloat( "MetallicFactor", p.Value.x );
+                                         else if ( p.Name == "RoughnessFactor" )
+                                             inst->SetFloat( "RoughnessFactor", p.Value.x );
+                                         else if ( p.Name == "EmissiveColor" )
+                                             inst->SetVec4( "EmissiveColor", p.Value );
+                                         else if ( p.Name == "EmissiveIntensity" )
+                                             inst->SetFloat( "EmissiveIntensity", p.Value.x );
+                                         else if ( p.Name == "Transmission" )
+                                             inst->SetFloat( "Transmission", p.Value.x );
+                                         else if ( p.Name == "IOR" )
+                                             inst->SetFloat( "IOR", p.Value.x );
+                                         else if ( p.Name == "GlassTint" )
+                                             inst->SetVec4( "GlassTint", p.Value );
+                                     }
+                                 }
+                             }
                          }
 
                          glm::mat4 worldTransform = transform.GetTransform();

@@ -44,6 +44,34 @@ namespace Desert::Graphic
         m_TargetFramebuffer = Graphic::Framebuffer::Create( fbSpec );
         m_TargetFramebuffer->Resize( width, height );
 
+        // Deferred G-buffer (populated only when SceneSettings::RenderPath == Deferred; allocated always so the
+        // toggle is live). GBufferA = Albedo.rgb + Metallic.a (RGBA8F); GBufferB = Normal.rgb + Roughness.a
+        // (RGBA32F for banding-free normals — the format enum has no RGBA16F yet); GBufferC = world position.xyz
+        // (RGBA32F) so the lighting pass gets point/spot-light distances directly (bulletproof vs depth
+        // reconstruction, which is error-prone under the GL-on-Vulkan depth conventions); shared depth.
+        FramebufferSpecification gbufferSpec;
+        gbufferSpec.DebugName = "GBuffer";
+        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );  // GBufferA Albedo+Metallic
+        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // GBufferB Normal+Roughness
+        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // GBufferC WorldPosition.xyz
+        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
+        m_GBuffer = Graphic::Framebuffer::Create( gbufferSpec );
+        m_GBuffer->Resize( width, height );
+
+        // SSAO target: a single-channel-ish AO factor (RGBA8F, AO in .r) the deferred lighting reads.
+        FramebufferSpecification ssaoSpec;
+        ssaoSpec.DebugName = "SSAO";
+        ssaoSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );
+        m_SSAOBuffer = Graphic::Framebuffer::Create( ssaoSpec );
+        m_SSAOBuffer->Resize( width, height );
+
+        // Scene-colour snapshot (same format as the target) the glass pass samples for refraction.
+        FramebufferSpecification copySpec;
+        copySpec.DebugName = "SceneColorCopy";
+        copySpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+        m_SceneColorCopy = Graphic::Framebuffer::Create( copySpec );
+        m_SceneColorCopy->Resize( width, height );
+
         // Scene systems render into the shared target framebuffer; post-process systems form an
         // explicit chain (Mesh silhouette mask -> Jump Flood outline -> Tonemap).
         RegisterSystem<System::SkyboxRenderer>( "SkyboxSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
@@ -89,6 +117,24 @@ namespace Desert::Graphic
         const auto& bloomSystem = SP_CAST( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
         if ( !bloomSystem->Initialize() )
             DESERT_VERIFY( false );
+
+        // SSAO (fullscreen G-buffer -> AO factor). Its target is the dedicated SSAO buffer; deferred lighting
+        // reads the result. Runs in the manual chain only when Deferred. Non-fatal.
+        RegisterSystem<System::SSAORenderer>( "SSAOSystem", this, m_SSAOBuffer, m_RenderGraphBuilder );
+        if ( !SP_CAST( System::SSAORenderer, m_RenderSystems["SSAOSystem"] )->Initialize() )
+            LOG_WARN( "[SceneRenderer] SSAO system unavailable." );
+
+        RegisterSystem<System::CopyRenderer>( "SceneColorCopySystem", this, m_SceneColorCopy, m_RenderGraphBuilder );
+        if ( !SP_CAST( System::CopyRenderer, m_RenderSystems["SceneColorCopySystem"] )->Initialize() )
+            LOG_WARN( "[SceneRenderer] Scene-color copy system unavailable (glass refraction off)." );
+
+        // Deferred lighting (fullscreen G-buffer shade + debug view). Runs in the manual chain, only when
+        // RenderPath == Deferred. Non-fatal if it fails to init (deferred path is simply unavailable).
+        RegisterSystem<System::DeferredLightingRenderer>( "DeferredLightingSystem", this, m_TargetFramebuffer,
+                                                          m_RenderGraphBuilder );
+        if ( !SP_CAST( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
+                  ->Initialize() )
+            LOG_WARN( "[SceneRenderer] Deferred lighting system unavailable." );
         tonemapSystem->SetBloomImage( bloomSystem->GetBloomImage() );
 
         // Auto-exposure measures the HDR scene luminance into a 1x1 buffer that tonemap reads.
@@ -131,7 +177,11 @@ namespace Desert::Graphic
         jumpFloodSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
         jumpFloodSystem->SetOutlineSmoothness( sceneSettings.OutlineSmoothness );
 
-        m_AAMode = sceneSettings.AA;
+        m_AAMode       = sceneSettings.AA;
+        m_RenderPath   = sceneSettings.RenderingPath;
+        m_DeferredDebug = sceneSettings.DeferredDebug;
+        m_EnableSSAO    = sceneSettings.EnableSSAO;
+        m_EnableSSGI    = sceneSettings.EnableSSGI;
 
         // Evaluate the scene-global SHARED wind once per frame so every wind-driven renderer (grass now;
         // clouds/hair/cloth next) reads one coherent direction + strength via GetWind(). Direction is a
@@ -242,6 +292,74 @@ namespace Desert::Graphic
             ExecuteRenderGraph();
         }
 
+        // Deferred: fill the G-buffer (manual pass, outside the graph) then shade it (or show a debug channel)
+        // into the scene target before the post chain.
+        if ( m_RenderPath == Core::RenderPath::Deferred && m_GBuffer )
+        {
+            DESERT_PROFILE_SCOPE( "Deferred: Lighting" );
+
+            auto* meshRenderer = UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] );
+            meshRenderer->RenderGBufferManual();
+
+            glm::vec4 lightDir( 0.0f, -1.0f, 0.0f, 0.0f );
+            glm::vec4 lightColor( 1.0f, 0.98f, 0.92f, 3.0f );
+            if ( const auto& dl = m_DirectionLights.DirectionLights; !dl.empty() )
+            {
+                lightDir   = dl[0].Direction;
+                lightColor = dl[0].ColorIntensity;
+            }
+            glm::vec4 cameraPos( 0.0f );
+            glm::mat4 viewProj( 1.0f );
+            if ( const auto* cam = GetMainCamera() )
+            {
+                cameraPos = glm::vec4( cam->GetPosition(), 1.0f );
+                viewProj  = cam->GetProjectionMatrix() * cam->GetViewMatrix();
+            }
+
+            // SSAO first (reads the G-buffer world pos + normal into the AO buffer); the lighting pass below
+            // multiplies its ambient term by this. Skipped when disabled (the shader uses AO=1 then).
+            std::shared_ptr<Image2D> aoImage;
+            if ( m_EnableSSAO )
+                if ( auto* ssao = UNIQUE_GET_AS( System::SSAORenderer, m_RenderSystems["SSAOSystem"] ) )
+                {
+                    ssao->Execute( m_GBuffer, viewProj, cameraPos, /*radius*/ 0.5f, /*bias*/ 0.025f,
+                                   /*power*/ 1.5f, /*samples*/ 16 );
+                    aoImage = ssao->GetAOImage();
+                }
+
+            // Gather the same CSM data the forward material uses so the deferred sun casts identical shadows.
+            DeferredShadowInput shadow;
+            if ( meshRenderer )
+            {
+                shadow.CascadeVP            = meshRenderer->GetCascadeViewProj();
+                shadow.Count                = System::MeshRenderer::GetCascadeCount();
+                shadow.Bias                 = meshRenderer->GetShadowBias();
+                shadow.Enabled              = meshRenderer->AreShadowsEnabled();
+                shadow.CascadeWorldPerTexel = meshRenderer->GetCascadeWorldPerTexel();
+                for ( uint32_t c = 0; c < shadow.Count && c < 4u; ++c )
+                {
+                    const auto img    = meshRenderer->GetCascadeShadowImage( c );
+                    shadow.CascadeMaps[c] = img ? img.get() : nullptr;
+                }
+            }
+
+            UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
+                 ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
+                            GetPointLights(), GetSpotLights(), shadow, aoImage,
+                            m_EnableSSGI ? 2.0f : 0.0f, m_EnableSSAO );
+
+            // Snapshot the composited opaque scene, then draw the transparent (glass) meshes over it. The
+            // snapshot lets the glass sample the scene BEHIND it for refraction without a read+write feedback
+            // loop on the target. Uses a dedicated glass material (no double-written per-frame UB ring).
+            std::shared_ptr<Image2D> sceneCopy;
+            if ( auto* copy = UNIQUE_GET_AS( System::CopyRenderer, m_RenderSystems["SceneColorCopySystem"] ) )
+            {
+                copy->Execute( m_TargetFramebuffer->GetColorAttachmentImage( 0 ) );
+                sceneCopy = copy->GetImage();
+            }
+            meshRenderer->RenderGlassManual( sceneCopy );
+        }
+
         // Explicit post-process chain (runs after the scene graph has produced the scene color and
         // the silhouette mask): Jump Flood outline -> Tonemap.
         {
@@ -314,6 +432,12 @@ namespace Desert::Graphic
         renderer.WaitDeviceIdle();
         renderer.ResizeWindowEvent( width, height );
         m_TargetFramebuffer->Resize( width, height );
+        if ( m_GBuffer )
+            m_GBuffer->Resize( width, height );
+        if ( m_SSAOBuffer )
+            m_SSAOBuffer->Resize( width, height );
+        if ( m_SceneColorCopy )
+            m_SceneColorCopy->Resize( width, height );
 
         // Keep the post-process chain framebuffers in lock-step with the scene target.
         if ( const auto& maskFb =

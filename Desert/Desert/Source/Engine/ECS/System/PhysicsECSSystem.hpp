@@ -181,24 +181,41 @@ namespace Desert::ECS
                 cc.OnGround         = onGround; // exposed to scripts via self:isOnGround()
                 // Game gravity is ~2x real so the jump arc is SNAPPY (real 9.81 feels floaty / cartoonish).
                 constexpr float kGravity = 20.0f;
-                if ( onGround )
-                    cc.VerticalVelocity = cc.JumpRequested ? cc.JumpStrength : -1.0f; // jump (script) or stick
-                else
-                    cc.VerticalVelocity -= kGravity * dt;
-                cc.JumpRequested = false; // one-shot, consumed
 
-                // NO AIR CONTROL: on the ground the script's input steers (and we remember that horizontal
-                // velocity); in the air the takeoff velocity is locked, so a jump goes one direction and there's
-                // no bunny-hop strafing.
                 glm::vec3 horiz;
-                if ( onGround )
+                if ( cc.Swimming )
                 {
-                    horiz          = wish * cc.DesiredSpeed;
-                    cc.AirVelocity = { horiz.x, horiz.z }; // capture for the moment we leave the ground
+                    // BUOYANCY: no hard gravity. Vertical follows the swim intent (up/down); when neutral the
+                    // body drifts gently up toward the surface. Full 3D control, but slower than on land.
+                    const float targetV = cc.SwimVertical * cc.DesiredSpeed;
+                    cc.VerticalVelocity = glm::mix( cc.VerticalVelocity, targetV, 0.15f );
+                    if ( glm::abs( cc.SwimVertical ) < 0.01f )
+                        cc.VerticalVelocity += 2.5f * dt; // gentle rise (float up)
+                    cc.JumpRequested = false;
+
+                    horiz          = wish * ( cc.DesiredSpeed * 0.6f ); // water drag
+                    cc.AirVelocity = { horiz.x, horiz.z };
                 }
                 else
                 {
-                    horiz = { cc.AirVelocity.x, 0.0f, cc.AirVelocity.y };
+                    if ( onGround )
+                        cc.VerticalVelocity = cc.JumpRequested ? cc.JumpStrength : -1.0f; // jump (script) or stick
+                    else
+                        cc.VerticalVelocity -= kGravity * dt;
+                    cc.JumpRequested = false; // one-shot, consumed
+
+                    // NO AIR CONTROL: on the ground the script's input steers (and we remember that horizontal
+                    // velocity); in the air the takeoff velocity is locked, so a jump goes one direction and
+                    // there's no bunny-hop strafing.
+                    if ( onGround )
+                    {
+                        horiz          = wish * cc.DesiredSpeed;
+                        cc.AirVelocity = { horiz.x, horiz.z }; // capture for the moment we leave the ground
+                    }
+                    else
+                    {
+                        horiz = { cc.AirVelocity.x, 0.0f, cc.AirVelocity.y };
+                    }
                 }
                 const glm::vec3 vel( horiz.x, cc.VerticalVelocity, horiz.z );
                 m_World->UpdateCharacter( cc.RuntimeCharacter, vel, dt );

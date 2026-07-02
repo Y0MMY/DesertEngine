@@ -172,5 +172,57 @@ namespace Desert::Editor
                 ImGui::SetTooltip( "Tint surfaces by which light reaches them (a distinct color per source;\n"
                                    "brightness = light strength). Unlit areas are black." );
         }
+
+        if ( ImGui::CollapsingHeader( "Rendering", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            const char* paths[] = { "Forward", "Deferred" };
+            int         cur     = static_cast<int>( s.RenderingPath );
+            if ( ImGui::Combo( "Render Path", &cur, paths, IM_ARRAYSIZE( paths ) ) )
+                s.RenderingPath = static_cast<Core::RenderPath>( cur );
+
+            // Deferred G-buffer debug view (UE-style buffer visualization) — only meaningful in Deferred.
+            ImGui::BeginDisabled( s.RenderingPath != Core::RenderPath::Deferred );
+            const char* dbg[]  = { "Lit", "Albedo", "Normal", "Metallic", "Roughness", "AO" };
+            int         dbgCur = static_cast<int>( s.DeferredDebug );
+            if ( ImGui::Combo( "Deferred Debug", &dbgCur, dbg, IM_ARRAYSIZE( dbg ) ) )
+                s.DeferredDebug = static_cast<Core::DeferredDebugMode>( dbgCur );
+            ImGui::Checkbox( "Enable SSAO", &s.EnableSSAO );
+            ImGui::Checkbox( "Enable SSGI", &s.EnableSSGI );
+            ImGui::EndDisabled();
+            ImGui::TextDisabled( "Deferred: static meshes only, directional light (WIP)." );
+        }
+
+        // Shared wind — a scene-global environment force (not owned by the Skybox). Drives grass + cloud
+        // drift now; hair/cloth later. Consumed via SceneRenderer::GetWind().
+        if ( ImGui::CollapsingHeader( "Wind", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::SliderFloat( "Direction (deg)", &s.WindDirection, 0.0f, 360.0f );
+            ImGui::SliderFloat( "Strength", &s.WindStrength, 0.0f, 1.0f );
+            ImGui::SliderFloat( "Turbulence", &s.WindTurbulence, 0.0f, 3.0f );
+            ImGui::TextDisabled( "Shared: one direction moves grass AND clouds." );
+        }
+
+        // Opt-in day/night cycle: drives the sun (directional light) from the hour; the sky follows its
+        // elevation. Default off leaves any hand-placed sun untouched.
+        if ( ImGui::CollapsingHeader( "Time of Day", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::Checkbox( "Enable Day/Night", &s.EnableDayNight );
+            ImGui::BeginDisabled( !s.EnableDayNight );
+            ImGui::SliderFloat( "Time of Day (h)", &s.TimeOfDay, 0.0f, 24.0f );
+            ImGui::SliderFloat( "Day Length (s)", &s.DayLengthSeconds, 0.0f, 600.0f );
+            ImGui::SliderFloat( "Sun Peak Intensity", &s.SunPeakIntensity, 0.0f, 10.0f );
+            ImGui::EndDisabled();
+            ImGui::TextDisabled( "Day Length 0 = frozen (scrub the hour by hand)." );
+        }
+
+        // Water: the swim system reads WaterLevel/WaterEnabled from here (World.waterLevel/waterEnabled in Lua).
+        if ( ImGui::CollapsingHeader( "Water", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            ImGui::Checkbox( "Water Enabled", &s.WaterEnabled );
+            ImGui::BeginDisabled( !s.WaterEnabled );
+            ImGui::SliderFloat( "Water Level", &s.WaterLevel, -100.0f, 100.0f, "%.1f" );
+            ImGui::EndDisabled();
+            ImGui::TextDisabled( "Below this Y the character swims. Spawn a surface: World.spawnWater(level,size)." );
+        }
     }
 } // namespace Desert::Editor

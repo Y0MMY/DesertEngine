@@ -287,6 +287,56 @@ namespace Desert::Editor
                 {
                 }
 
+                // Popular GI test scene: white floor/back + RED left wall + GREEN right wall (open top so the
+                // directional sun reaches the interior), plus a white sphere + tall box in the middle. With
+                // SSGI on (deferred path), the coloured walls bleed onto the white centre objects.
+                if ( ImGui::Selectable( "Cornell Box (GI Test)" ) )
+                {
+                    auto mkBox = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec4 albedo )
+                    {
+                        auto  e  = scene->CreateNewEntity( name );
+                        e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
+                        auto& tf       = e.GetComponent<ECS::TransformComponent>();
+                        tf.Translation = pos;
+                        tf.Scale       = scale;
+                        auto& mc       = e.AddComponent<ECS::MaterialComponent>();
+                        mc.ShaderName  = "StaticMeshPBR"; // stays on the batched PBR (G-buffer) path
+                        mc.Params.push_back( ECS::MaterialParamOverride{ "AlbedoColor", albedo } );
+                        mc.Params.push_back( ECS::MaterialParamOverride{ "RoughnessFactor", glm::vec4( 0.9f ) } );
+                    };
+                    const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1.0f );
+                    const glm::vec4 red( 0.85f, 0.10f, 0.10f, 1.0f );
+                    const glm::vec4 green( 0.10f, 0.70f, 0.15f, 1.0f );
+                    mkBox( "CB_Floor", { 0.0f, 0.0f, 0.0f }, { 4.0f, 0.1f, 4.0f }, white );
+                    mkBox( "CB_Back", { 0.0f, 2.0f, -2.0f }, { 4.0f, 4.0f, 0.1f }, white );
+                    mkBox( "CB_LeftRed", { -2.0f, 2.0f, 0.0f }, { 0.1f, 4.0f, 4.0f }, red );
+                    mkBox( "CB_RightGreen", { 2.0f, 2.0f, 0.0f }, { 0.1f, 4.0f, 4.0f }, green );
+
+                    auto mkWhite = [&]( const char* name, Geometry::PrimitiveType prim, glm::vec3 pos, glm::vec3 scale )
+                    {
+                        auto  e  = scene->CreateNewEntity( name );
+                        e.AddComponent<ECS::StaticMeshComponent>().Primitive = prim;
+                        auto& tf       = e.GetComponent<ECS::TransformComponent>();
+                        tf.Translation = pos;
+                        tf.Scale       = scale;
+                    };
+                    mkWhite( "CB_Sphere", Geometry::PrimitiveType::Sphere, { -0.8f, 0.9f, 0.4f }, glm::vec3( 0.9f ) );
+                    mkWhite( "CB_TallBox", Geometry::PrimitiveType::Cube, { 0.8f, 1.2f, -0.6f }, { 1.0f, 2.4f, 1.0f } );
+
+                    // Sun tilted toward the RED wall (a parallel light can only light a vertical face that
+                    // shares its X direction) so at least one coloured wall is lit and bleeds; flip its X to
+                    // test the green side. (Symmetric both-wall bleed needs point-light GI — a follow-up.)
+                    // ONLY add a sun if the scene has none — the engine supports a single directional light
+                    // (DirectionLightsUB is one struct, not an array); a 2nd overflows its UB and crashes.
+                    if ( scene->GetRegistry().view<ECS::DirectionLightComponent>().size() == 0 )
+                    {
+                        auto sun = scene->CreateNewEntity( "CB_Sun" );
+                        sun.AddComponent<ECS::DirectionLightComponent>();
+                        sun.GetComponent<ECS::TransformComponent>().Translation =
+                             glm::normalize( glm::vec3( -0.6f, -1.0f, -0.2f ) );
+                    }
+                }
+
                 if ( ImGui::BeginMenu( "Primitive" ) )
                 {
                     if ( ImGui::MenuItem( "Cube" ) )

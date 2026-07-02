@@ -327,9 +327,9 @@ namespace Desert::Graphic::API::Vulkan
             throw std::runtime_error( "Framebuffer is required for pipeline creation" );
         }
 
+        const auto vkFb = std::static_pointer_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer );
         VkRenderPass renderPass =
-             std::static_pointer_cast<API::Vulkan::VulkanFramebuffer>( m_Specification.Framebuffer )
-                  ->GetVKRenderPass();
+             m_Specification.UseLoadRenderPass ? vkFb->GetVKRenderPassLoad() : vkFb->GetVKRenderPass();
 
         // Tessellation: patch-list topology needs a tessellation state (control points per patch).
         VkPipelineTessellationStateCreateInfo tessellationState = {

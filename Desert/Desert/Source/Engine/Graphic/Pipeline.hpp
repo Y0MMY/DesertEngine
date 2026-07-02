@@ -112,6 +112,11 @@ namespace Desert::Graphic
         // Standard src-alpha / one-minus-src-alpha blending (transparency overlays, e.g. the scene grid).
         bool           BlendEnable       = false;
 
+        // Build the pipeline against the target framebuffer's LOAD render pass instead of the CLEAR one, so
+        // the pass can be begun with clearFrame=false (preserve existing content) without a render-pass
+        // incompatibility. Used by the deferred lighting pass to composite over the forward-rendered scene.
+        bool           UseLoadRenderPass = false;
+
         float                LineWidth   = 1.0F;
         PrimitiveTopology    Topology    = PrimitiveTopology::Triangles;
         PrimitivePolygonMode PolygonMode = PrimitivePolygonMode::Solid;

@@ -9,6 +9,7 @@
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Core/Input.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Geometry/PrimitiveType.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 
@@ -201,6 +202,24 @@ namespace Desert::Scripting
                 return cc ? cc->OnGround : false;
             }
 
+            // Swimming (buoyancy): the script toggles this when the body crosses the water surface. `vertical`
+            // is the swim up/down intent (+1 up, -1 down) applied while swimming.
+            void SetSwimming( bool on )
+            {
+                if ( auto* cc = Character() )
+                    cc->Swimming = on;
+            }
+            void Swim( float vertical )
+            {
+                if ( auto* cc = Character() )
+                    cc->SwimVertical = vertical;
+            }
+            bool IsSwimming() const
+            {
+                auto* cc = Character();
+                return cc ? cc->Swimming : false;
+            }
+
             // Yaw turns the whole entity (body + child camera follow through the hierarchy).
             void AddYaw( float radians )
             {
@@ -271,7 +290,10 @@ namespace Desert::Scripting
              &ScriptEntity::SetRotation,
              // character controller (no-op without the component)
              "move", &ScriptEntity::Move, "jump", &ScriptEntity::Jump, "isOnGround", &ScriptEntity::IsOnGround,
-             "addYaw", &ScriptEntity::AddYaw, "addCameraPitch", &ScriptEntity::AddCameraPitch );
+             "addYaw", &ScriptEntity::AddYaw, "addCameraPitch", &ScriptEntity::AddCameraPitch,
+             // swimming
+             "setSwimming", &ScriptEntity::SetSwimming, "swim", &ScriptEntity::Swim, "isSwimming",
+             &ScriptEntity::IsSwimming );
 
         // The `Input` table: keyboard state + per-frame mouse delta + cursor control.
         sol::table input    = lua.create_named_table( "Input" );
@@ -292,6 +314,16 @@ namespace Desert::Scripting
         input["mouseDelta"]  = [impl]() { return std::make_tuple( impl->MouseDx, impl->MouseDy ); };
         input["lockCursor"]  = [impl]() { impl->CursorLockRequest = true; };  // capture (gameplay look)
         input["showCursor"]  = [impl]() { impl->CursorLockRequest = false; }; // free (click UI)
+        // Raw mouse-button held state ("left"/"right"/"middle"). Edge-detect in-script if you need one-shot.
+        input["isMouseDown"] = []( const std::string& name )
+        {
+            Common::MouseButton b = Common::MouseButton::Left;
+            if ( name == "right" )
+                b = Common::MouseButton::Right;
+            else if ( name == "middle" )
+                b = Common::MouseButton::Middle;
+            return Input::Mouse::Get().IsMouseButtonPressed( b );
+        };
 
         // The `World` table: scene-wide queries the engine performs on the script's behalf.
         sol::table world = lua.create_named_table( "World" );
@@ -373,6 +405,46 @@ namespace Desert::Scripting
             const glm::vec3 pos( x, y, z );
             ECS::Entity     root = prefab->Instantiate( impl->Scene, *impl->Assets, &pos );
             return impl->MakeEntity( root ? root.GetHandle() : entt::null );
+        };
+
+        // Spawn a small solid-colour marker sphere at a world position (e.g. a bullet-impact "red spot").
+        // Uses the data-driven Unlit shader so the colour shows regardless of scene lighting. Returns the
+        // new Entity (call :destroy() to remove it, e.g. after a lifetime).
+        world["spawnMarker"] = [impl]( float x, float y, float z, float scale, float r, float g,
+                                       float b ) -> ScriptEntity
+        {
+            ECS::Entity e = impl->Scene->CreateNewEntity( "Marker" );
+            e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Sphere;
+
+            auto& t       = e.GetComponent<ECS::TransformComponent>();
+            t.Translation = glm::vec3( x, y, z );
+            t.Scale       = glm::vec3( scale <= 0.0f ? 0.15f : scale );
+
+            auto& mc      = e.AddComponent<ECS::MaterialComponent>();
+            mc.ShaderName = "Unlit";
+            mc.Params.push_back( ECS::MaterialParamOverride{ "Color", glm::vec4( r, g, b, 1.0f ) } );
+
+            return impl->MakeEntity( e.GetHandle() );
+        };
+
+        // Water: the scene-global water level (SceneSettings) the swim logic reads, + a helper to drop a
+        // visible water plane at a level.
+        world["waterLevel"]   = [impl]() { return impl->Scene->GetSettings().WaterLevel; };
+        world["waterEnabled"] = [impl]() { return impl->Scene->GetSettings().WaterEnabled; };
+        world["spawnWater"]   = [impl]( float level, float size ) -> ScriptEntity
+        {
+            ECS::Entity e = impl->Scene->CreateNewEntity( "Water" );
+            e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Plane;
+
+            auto& t       = e.GetComponent<ECS::TransformComponent>();
+            t.Translation = glm::vec3( 0.0f, level, 0.0f );
+            t.Scale       = glm::vec3( size <= 0.0f ? 100.0f : size, 1.0f, size <= 0.0f ? 100.0f : size );
+
+            auto& mc      = e.AddComponent<ECS::MaterialComponent>();
+            mc.ShaderName = "Unlit";
+            mc.Params.push_back( ECS::MaterialParamOverride{ "Color", glm::vec4( 0.10f, 0.35f, 0.60f, 0.6f ) } );
+
+            return impl->MakeEntity( e.GetHandle() );
         };
     }
 

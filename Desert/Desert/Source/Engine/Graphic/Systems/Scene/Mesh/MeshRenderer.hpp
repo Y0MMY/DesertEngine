@@ -95,6 +95,14 @@ namespace Desert::Graphic::System
 
         // Silhouette mask of the currently outlined meshes (white on the framebuffer clear color).
         // Consumed by JumpFloodOutlineRenderer to build the outline.
+        // Deferred: renders the static-mesh queue into the scene renderer's G-buffer via a MANUAL render pass
+        // (outside the graph — see the note in RegisterPasses). No-op unless the deferred pipeline exists.
+        // Called by SceneRenderer when RenderPath == Deferred, before the deferred lighting pass.
+        void RenderGBufferManual();
+        // Forward transparent (glass) pass: draws meshes with material Transmission > 0 over the composited
+        // scene. sceneColor = a snapshot of the opaque scene the glass samples for refraction (may be null).
+        void RenderGlassManual( const std::shared_ptr<Image2D>& sceneColor );
+
         const std::shared_ptr<Framebuffer>& GetSilhouetteMaskFramebuffer() const
         {
             return m_SilhouetteMaskFramebuffer;
@@ -150,6 +158,9 @@ namespace Desert::Graphic::System
         }
         bool  AreShadowsEnabled() const { return m_ShadowsEnabled; }
         float GetShadowBias() const     { return m_ShadowBias; }
+        // CSM data the deferred lighting pass needs to shadow the sun (same source the forward material uses).
+        const glm::mat4* GetCascadeViewProj() const        { return m_CascadeVP; }
+        const glm::vec4& GetCascadeWorldPerTexel() const   { return m_CascadeWorldPerTexel; }
 
         // Debug visualizations (Scene Settings -> Debug): per-pixel normals (PBR shader) + AABB wireframes.
         void SetDebugView( bool showNormals, bool showBoundingBoxes, const glm::vec3& bbColor,
@@ -164,6 +175,8 @@ namespace Desert::Graphic::System
 
     private:
         bool SetupGeometryPass();
+        bool SetupGBufferPass(); // deferred: static-mesh G-buffer write pipeline
+        bool SetupGlassPass();   // forward transparent: static-mesh glass pipeline (blend, composites over scene)
         bool SetupSkinnedGeometryPass();
         bool SetupSilhouettePass();
         bool SetupShadowPass();
@@ -185,6 +198,21 @@ namespace Desert::Graphic::System
         std::shared_ptr<GraphicsPipeline> m_StaticWireframePipeline; // same spec, PolygonMode::Wireframe
         std::shared_ptr<GraphicsPipeline> m_StaticInstancedPipeline; // reads per-instance transform from SSBO
         bool                              m_Wireframe = false;
+
+        // Deferred G-buffer geometry pipeline (static): writes Albedo+Metallic / Normal+Roughness into the
+        // scene renderer's MRT G-buffer instead of shading. Same vertex layout + material bindings as the
+        // forward static pipeline, so the same StaticMaterialPBR data binds. Null if the shader is missing.
+        std::shared_ptr<Shader>           m_StaticGBufferShader;
+        std::shared_ptr<GraphicsPipeline> m_StaticGBufferPipeline;
+        bool                              m_DeferredGeometry = false; // set true only while drawing the G-buffer pass
+        std::shared_ptr<Shader>           m_StaticGlassShader;
+        std::shared_ptr<GraphicsPipeline> m_StaticGlassPipeline;
+        bool                              m_GlassPass = false; // set true only while drawing the transparent glass pass
+        // DEDICATED glass material (never drawn by the opaque passes) so its per-frame UB ring is written ONCE
+        // per frame in the glass pass — sharing an opaque material across two passes/frame hangs the GPU.
+        std::unique_ptr<StaticMaterialPBR> m_GlassMaterial;
+        MaterialInstancePtr                m_GlassInstance;
+
         std::shared_ptr<Shader>   m_GeometryShader;
         std::shared_ptr<Shader>   m_InstancedGeometryShader;
 

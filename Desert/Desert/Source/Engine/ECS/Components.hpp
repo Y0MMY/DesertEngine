@@ -537,6 +537,12 @@ namespace Desert::ECS
         float     JumpStrength  = 5.0f;           // launch velocity the script passed to self:jump()
         bool      OnGround       = false;         // last physics result, exposed to scripts (self:isOnGround())
         glm::vec2 AirVelocity   = { 0.0f, 0.0f }; // horizontal velocity locked at takeoff (no air control)
+
+        // Swimming (set by the controller SCRIPT when it detects the body is below the water level). While
+        // swimming, PhysicsECSSystem replaces gravity with buoyancy, gives full 3D control, and drives the
+        // vertical from SwimVertical (+1 = up, -1 = down) instead of jump/gravity.
+        bool  Swimming     = false;
+        float SwimVertical = 0.0f; // -1..1 swim up/down intent (script)
     };
 
     // Attaches a Lua script to an entity. The ScriptSystem loads the file and calls its OnStart()/OnUpdate(dt);

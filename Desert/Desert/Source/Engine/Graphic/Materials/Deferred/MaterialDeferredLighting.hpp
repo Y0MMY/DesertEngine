@@ -1,0 +1,145 @@
+#pragma once
+
+#include <Engine/Graphic/Materials/Material.hpp>
+#include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
+
+#include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
+#include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
+#include <Engine/Graphic/ShaderProtocols/Metadata.hpp>
+
+#include <glm/glm.hpp>
+
+#include <unordered_set>
+
+namespace Desert::Graphic
+{
+    // CSM data the deferred lighting pass needs to shadow the sun (mirrors MaterialPBRBase::UpdateShadow).
+    struct DeferredShadowInput
+    {
+        const glm::mat4* CascadeVP            = nullptr; // [Count] light view-proj matrices
+        Image2D*         CascadeMaps[4]       = { nullptr, nullptr, nullptr, nullptr };
+        uint32_t         Count                = 0;
+        float            Bias                 = 0.005f;
+        bool             Enabled              = true;
+        glm::vec4        CascadeWorldPerTexel = glm::vec4( 1.0f );
+    };
+
+    // Fullscreen deferred-lighting material: binds the scene renderer's G-buffer color targets (albedo/metallic,
+    // normal/roughness, world-position) + the sun (+ its CSM shadow maps) + ALL point & spot lights (uploaded
+    // into the shared SSBO layout the mesh PBR shader also uses) + a debug-mode selector, driving
+    // DeferredLighting.glsl.frag. Header-only (no new .cpp -> no premake regen).
+    class MaterialDeferredLighting final : public Material
+    {
+    public:
+        MaterialDeferredLighting() : Material( "MaterialDeferredLighting", "DeferredLighting" )
+        {
+            m_GBufferA = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferA" ).get();
+            m_GBufferB = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferB" ).get();
+            m_GBufferC = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferC" ).get();
+            m_SSAO     = m_MaterialExecutor->GetTexture2DProperty( "u_SSAO" ).get();
+        }
+
+        // gA = Albedo+Metallic, gB = Normal+Roughness, gC = WorldPosition; lightDir.xyz = direction the sun
+        // travels; lightColor.rgb/.a = colour/intensity; cameraPos.xyz = camera world pos (view vector);
+        // debugMode 0=Lit,1=Albedo,2=Normal,3=Metallic,4=Roughness; point/spot = the scene's dynamic lights.
+        void Bind( const std::shared_ptr<Image2D>& gA, const std::shared_ptr<Image2D>& gB,
+                   const std::shared_ptr<Image2D>& gC, const glm::vec4& lightDir, const glm::vec4& lightColor,
+                   const glm::vec4& cameraPos, int debugMode, const ShaderProtocols::PointLight& pointLights,
+                   const ShaderProtocols::SpotLight& spotLights, const DeferredShadowInput& shadow,
+                   const std::shared_ptr<Image2D>& aoImage, float giIntensity, bool ssaoEnabled )
+        {
+            if ( m_GBufferA && gA )
+                m_GBufferA->SetImage( gA.get() );
+            if ( m_GBufferB && gB )
+                m_GBufferB->SetImage( gB.get() );
+            if ( m_GBufferC && gC )
+                m_GBufferC->SetImage( gC.get() );
+            if ( m_SSAO && aoImage )
+                m_SSAO->SetImage( aoImage.get() );
+
+            SetLightDir( lightDir );
+            SetLightColor( lightColor );
+            SetCameraPos( cameraPos );
+            // u_Params: x = debug mode, y = SSGI intensity (0 = off), z = SSAO enabled (else shader uses AO=1).
+            SetParams( glm::vec4( static_cast<float>( debugMode ), giIntensity, ssaoEnabled ? 1.0f : 0.0f, 0.0f ) );
+
+            UploadShadow( shadow );
+
+            // Upload the dynamic lights into the same SSBO/UB layout the mesh PBR shader uses (bindings 6/16/4).
+            // Empty is fine — the shader loops 0..count, so an untouched buffer is simply never read; but the
+            // metadata counts must always be current.
+            if ( !pointLights.PointLights.empty() )
+            {
+                if ( auto* sb = Get<StorageBufferProperty>( ShaderProtocols::PointLight::Name ) )
+                    sb->SetRawData( (std::byte*)pointLights.PointLights.data(),
+                                    static_cast<uint32_t>( pointLights.PointLights.size() *
+                                                           sizeof( ShaderProtocols::PointLightPayload ) ) );
+            }
+            if ( !spotLights.SpotLights.empty() )
+            {
+                if ( auto* sb = Get<StorageBufferProperty>( ShaderProtocols::SpotLight::Name ) )
+                    sb->SetRawData( (std::byte*)spotLights.SpotLights.data(),
+                                    static_cast<uint32_t>( spotLights.SpotLights.size() *
+                                                           sizeof( ShaderProtocols::SpotLightPayload ) ) );
+            }
+
+            const uint32_t counts[3] = { 0u, static_cast<uint32_t>( pointLights.PointLights.size() ),
+                                         static_cast<uint32_t>( spotLights.SpotLights.size() ) };
+            if ( auto* meta = Get<UniformBufferProperty>( ShaderProtocols::LightsMetadata::Name ) )
+                meta->SetRawData( (std::byte*)counts, sizeof( counts ) );
+
+            std::unordered_set<UniformBufferProperty*> dirty;
+            UploadRegisteredProperties( dirty );
+            for ( const auto& [ubName, idx] : m_MaterialExecutor->GetUniformBufferProperties() )
+            {
+                auto ub = m_MaterialExecutor->GetUniformBufferProperty( ubName );
+                if ( ub && ub->HasDirtyFields() )
+                    ub->UpdateFields();
+            }
+        }
+
+        // Uploads the CSM data into ShadowUB + binds the cascade maps (u_ShadowMap0..3) — mirrors
+        // MaterialPBRBase::UpdateShadow so the SAME sun shadows appear in the deferred path.
+        void UploadShadow( const DeferredShadowInput& shadow )
+        {
+            struct ShadowUBData
+            {
+                glm::mat4 LightViewProj[4];
+                glm::vec4 Params;            // x = bias, y = enabled, z = debug mode, w = cascade count
+                glm::vec4 DebugParams;
+                glm::vec4 CascadeTexelWorld;
+            } data;
+
+            const uint32_t n = shadow.Count < 4u ? shadow.Count : 4u;
+            for ( uint32_t i = 0; i < 4u; ++i )
+                data.LightViewProj[i] = ( i < n && shadow.CascadeVP ) ? shadow.CascadeVP[i] : glm::mat4( 1.0f );
+            data.Params = glm::vec4( shadow.Bias, shadow.Enabled ? 1.0f : 0.0f, 0.0f, static_cast<float>( n ) );
+            data.DebugParams       = glm::vec4( 0.0f );
+            data.CascadeTexelWorld = shadow.CascadeWorldPerTexel;
+
+            if ( auto* ub = Get<UniformBufferProperty>( "ShadowUB" ) )
+                ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), sizeof( data ) );
+
+            static const char* kNames[4] = { "u_ShadowMap0", "u_ShadowMap1", "u_ShadowMap2", "u_ShadowMap3" };
+            for ( uint32_t i = 0; i < 4u; ++i )
+            {
+                Image2D* img = ( i < n ) ? shadow.CascadeMaps[i] : nullptr;
+                if ( img )
+                    if ( auto* tex = Get<Texture2DProperty>( kNames[i] ) )
+                        tex->SetImage( img );
+            }
+        }
+
+        MPROPERTY( glm::vec4, LightDir,   "u_LightDir",   ( glm::vec4( 0.0f, -1.0f, 0.0f, 0.0f ) ) )
+        MPROPERTY( glm::vec4, LightColor, "u_LightColor", ( glm::vec4( 1.0f, 1.0f, 1.0f, 3.0f ) ) )
+        MPROPERTY( glm::vec4, Params,     "u_Params",     ( glm::vec4( 0.0f ) ) )
+        MPROPERTY( glm::vec4, CameraPos,  "u_CameraPos",  ( glm::vec4( 0.0f ) ) )
+
+    private:
+        Texture2DProperty* m_GBufferA = nullptr;
+        Texture2DProperty* m_GBufferB = nullptr;
+        Texture2DProperty* m_GBufferC = nullptr;
+        Texture2DProperty* m_SSAO     = nullptr;
+    };
+} // namespace Desert::Graphic

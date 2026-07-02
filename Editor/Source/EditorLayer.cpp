@@ -9,6 +9,7 @@
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Geometry/PrimitiveType.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Engine/Animation/ProceduralCharacterAnimations.hpp>
@@ -20,6 +21,11 @@
 #include "Editor/Core/EditorResources.hpp"
 #include "Editor/Core/ThemeManager.hpp"
 #include "Editor/Core/GizmoState.hpp"
+
+#include <Engine/Graphic/Image.hpp> // Image2D::ReadPixelsRGBA8 (debug frame dump)
+#include <Engine/Core/Input.hpp>
+#include <Common/Core/KeyCodes.hpp>
+#include <stb_image/stb_image_write.h>
 #include "Editor/Core/ImGuiUtilities.hpp"
 #include <ImGui/imgui_internal.h>
 #include <ImGuizmo.h>
@@ -136,6 +142,53 @@ namespace Desert::Editor
         // (mechanism vs behaviour); runs after it so it reads this frame's state.
         m_MainScene->AddSystem<ECS::LocomotionSystem>( m_MainScene.get() );
 
+        // Persistent Cornell-Box GI + glass showcase (loads by default). Red/green walls bleed onto the white
+        // objects (SSGI); a clear glass sphere sits in front of an orange cube (visible THROUGH the glass); a
+        // point light sits BEHIND the objects. Uses the scene's existing sun (adding a 2nd directional light
+        // overflows the single-light UB — see [[deferred-rendering-wip]]).
+        {
+            auto tinted = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec4 albedo )
+            {
+                auto& e = m_MainScene->CreateNewEntity( std::string( name ) );
+                e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
+                auto& tf       = e.GetComponent<ECS::TransformComponent>();
+                tf.Translation = pos;
+                tf.Scale       = scale;
+                auto& mc       = e.AddComponent<ECS::MaterialComponent>();
+                mc.ShaderName  = "StaticMeshPBR";
+                mc.Params.push_back( ECS::MaterialParamOverride{ "AlbedoColor", albedo } );
+                mc.Params.push_back( ECS::MaterialParamOverride{ "RoughnessFactor", glm::vec4( 0.9f ) } );
+            };
+            const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1 ), red( 0.85f, 0.10f, 0.10f, 1 ),
+                 green( 0.10f, 0.70f, 0.15f, 1 );
+            tinted( "CB_Floor", { 0, 0, 0 }, { 6, 0.2f, 6 }, white );
+            tinted( "CB_Back", { 0, 3, -3 }, { 6, 6, 0.2f }, white );
+            tinted( "CB_LeftRed", { -3, 3, 0 }, { 0.2f, 6, 6 }, red );
+            tinted( "CB_RightGreen", { 3, 3, 0 }, { 0.2f, 6, 6 }, green );
+            // Orange opaque cube directly behind the glass sphere (seen through it).
+            tinted( "CB_OrangeCube", { 0, 1.3f, -1.2f }, { 1.4f, 1.4f, 1.4f }, glm::vec4( 0.95f, 0.5f, 0.08f, 1 ) );
+
+            // Clear glass sphere in front of the cube.
+            auto& glass = m_MainScene->CreateNewEntity( std::string( "CB_GlassSphere" ) );
+            glass.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Sphere;
+            auto& gtf       = glass.GetComponent<ECS::TransformComponent>();
+            gtf.Translation = { 0.0f, 1.5f, 0.7f };
+            gtf.Scale       = glm::vec3( 1.6f );
+            auto& gmc       = glass.AddComponent<ECS::MaterialComponent>();
+            gmc.ShaderName  = "StaticMeshPBR";
+            gmc.Params.push_back( ECS::MaterialParamOverride{ "Transmission", glm::vec4( 0.9f ) } );
+            gmc.Params.push_back( ECS::MaterialParamOverride{ "IOR", glm::vec4( 1.5f ) } );
+            gmc.Params.push_back( ECS::MaterialParamOverride{ "GlassTint", glm::vec4( 0.75f, 0.9f, 1.0f, 1 ) } );
+
+            // Point light BEHIND the objects (backlight / rim).
+            auto& pl = m_MainScene->CreateNewEntity( std::string( "CB_BackLight" ) );
+            auto& pld = pl.AddComponent<ECS::PointLightComponent>().Data;
+            pld.Color     = glm::vec3( 1.0f, 0.85f, 0.6f );
+            pld.Intensity = 8.0f;
+            pld.Radius    = 12.0f;
+            pl.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.5f, -2.5f };
+        }
+
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
 
         for ( const auto& [handle, anim] : animations )
@@ -236,6 +289,30 @@ namespace Desert::Editor
         {
             DESERT_PROFILE_SCOPE( "Scene::OnUpdate" );
             m_MainScene->OnUpdate( ts );
+        }
+
+        // DEBUG: press F9 to dump the final rendered viewport image to F:/DesertEngine/frame_dump.png. Useful
+        // because external GDI/PrintWindow capture returns white for the Vulkan surface — this reads the actual
+        // rendered frame back from the GPU. Edge-detected so one press = one dump.
+        {
+            static bool s_f9Prev = false;
+            const bool  f9       = Input::Keyboard::IsKeyPressed( Common::KeyCode::F9 );
+            if ( f9 && !s_f9Prev )
+            {
+                Graphic::Renderer::GetInstance().WaitDeviceIdle();
+                if ( auto img = m_MainScene->GetFinalImage() )
+                {
+                    const std::vector<uint8_t> px = img->ReadPixelsRGBA8();
+                    const uint32_t             w = img->GetWidth(), h = img->GetHeight();
+                    if ( px.size() == static_cast<size_t>( w ) * h * 4 )
+                    {
+                        stbi_flip_vertically_on_write( 0 );
+                        stbi_write_png( "F:/DesertEngine/frame_dump.png", w, h, 4, px.data(), w * 4 );
+                        LOG_INFO( "[Dump] final frame -> frame_dump.png ({}x{})", w, h );
+                    }
+                }
+            }
+            s_f9Prev = f9;
         }
 
 

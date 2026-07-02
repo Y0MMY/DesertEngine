@@ -3,6 +3,7 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
+#include <Engine/Graphic/Materials/Mesh/PBR/MaterialGlass.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Common/Core/Profiler.hpp>
 
@@ -81,6 +82,13 @@ namespace Desert::Graphic::System
 
         if ( !SetupGeometryPass() )
             return Common::MakeError( "Failed to setup static geometry pass" );
+
+        // Deferred G-buffer pipeline (optional; forward path is unaffected if it fails to set up). Creating it
+        // here compiles the deferred shader + validates the MRT pipeline at startup.
+        if ( !SetupGBufferPass() )
+            LOG_WARN( "[MeshRenderer] Deferred G-buffer pipeline not set up (deferred path unavailable)." );
+        if ( !SetupGlassPass() )
+            LOG_WARN( "[MeshRenderer] Glass pipeline not set up (transparent materials won't draw)." );
 
         if ( !SetupSkinnedGeometryPass() )
             return Common::MakeError( "Failed to setup skinned geometry pass" );
@@ -239,6 +247,12 @@ namespace Desert::Graphic::System
         builder.AddPass( "MeshGeometryPass", RenderPhase::Geometry,
                          [this]()
                          {
+                             // Forward path only. In Deferred, meshes are drawn into the G-buffer by
+                             // MeshGBufferPass instead (this target keeps sky/grid/terrain for compositing).
+                             if ( m_SceneRenderer->GetRenderPath() == Core::RenderPath::Deferred &&
+                                  m_StaticGBufferPipeline )
+                                 return;
+
                              const auto camera = m_SceneRenderer->GetMainCamera();
                              if ( !camera )
                                  return;
@@ -253,11 +267,130 @@ namespace Desert::Graphic::System
                          m_StaticPipeline->GetSpecification(), targetFb,
                          { RenderPassDependency( RenderPhase::DepthPrePass ) } );
 
+        // NOTE: the deferred G-buffer geometry is NOT a graph pass — it's rendered MANUALLY via
+        // RenderGBufferManual() (called from SceneRenderer when Deferred). A graph pass targeting the G-buffer
+        // would sit between the forward-target passes and break the graph's "consecutive same-framebuffer =
+        // clear once" grouping, causing a spurious re-clear that wipes the sky/meshes in the scene target.
+
         // The silhouette mask is always produced (and cleared) so the Jump Flood outline has a
         // fresh input every frame. Outline visibility is controlled by JumpFloodOutlineRenderer.
         RegisterSilhouettePass( builder );
         RegisterShadowPass( builder );
         RegisterDebugPass( builder );
+    }
+
+    void MeshRenderer::RenderGBufferManual()
+    {
+        if ( !m_StaticGBufferPipeline )
+            return;
+        const auto& gbuffer = m_SceneRenderer ? m_SceneRenderer->GetGBuffer() : nullptr;
+        if ( !gbuffer || !m_SceneRenderer->GetMainCamera() )
+            return;
+
+        auto& renderer = Renderer::GetInstance();
+        // Clear the G-buffer to ZERO (not the default 0.1 grey) so empty texels have a zero normal — the
+        // lighting pass uses dot(normal,normal) to tell geometry from sky, and 0.1 would read as "geometry".
+        RenderPassSpecification rpSpec;
+        rpSpec.TargetFramebuffer = gbuffer;
+        rpSpec.DebugName         = "DeferredGBufferPass";
+        rpSpec.ClearColor.Color  = glm::vec4( 0.0f, 0.0f, 0.0f, 0.0f );
+        auto rp                  = RenderPass::Create( rpSpec );
+
+        renderer.BeginRenderPass( rp.get() );
+        m_DeferredGeometry = true;
+        DrawStaticMeshes();
+        m_DeferredGeometry = false;
+        renderer.EndRenderPass();
+    }
+
+    void MeshRenderer::RenderGlassManual( const std::shared_ptr<Image2D>& sceneColor )
+    {
+        if ( !m_StaticGlassPipeline || !m_GlassMaterial || !m_GlassInstance || m_StaticQueue.empty() )
+            return;
+        const auto& target = m_SceneRenderer ? m_SceneRenderer->GetTargetFramebuffer() : nullptr;
+        const auto  camera = m_SceneRenderer ? m_SceneRenderer->GetMainCamera() : nullptr;
+        if ( !target || !camera )
+            return;
+
+        // Collect the transparent (Transmission > 0) objects + their effective GPU material entries. Uses a
+        // DEDICATED material so the opaque passes' per-frame UBs are untouched (the double-write-per-frame that
+        // hung the GPU).
+        std::vector<const StaticMeshRenderData*> glassObjs;
+        std::vector<PBRGpuMaterial>              gpuMats;
+        for ( const auto& data : m_StaticQueue )
+        {
+            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() || !( *data.MaterialSlots )[0] )
+                continue;
+            auto* mat = static_cast<StaticMaterialPBR*>( ( *data.MaterialSlots )[0]->GetParentMaterial() );
+            if ( !mat )
+                continue;
+            PBRGpuMaterial gm = BuildEffectiveMaterial( mat, ( *data.MaterialSlots )[0] );
+            if ( gm.GlassTint.a <= 0.001f )
+                continue; // opaque -> drawn by the opaque pass, not here
+            glassObjs.push_back( &data );
+            gpuMats.push_back( gm );
+        }
+        if ( glassObjs.empty() )
+            return;
+
+        auto& renderer = Renderer::GetInstance();
+
+        // --- One-time shared setup on the dedicated glass material (written ONCE per frame) ---
+        if ( auto* sb = m_GlassMaterial->Get<StorageBufferProperty>( "Materials" ) )
+            sb->SetRawData( gpuMats.data(),
+                            static_cast<uint32_t>( gpuMats.size() * sizeof( PBRGpuMaterial ) ) );
+
+        MaterialInstance* gi = m_GlassInstance.get();
+        StaticMaterialPBR::UpdateCamera( gi, camera );
+        StaticMaterialPBR::UpdateLights( gi, m_SceneRenderer->GetPointLights(), m_SceneRenderer->GetSpotLights(),
+                                         m_SceneRenderer->GetDirectionLights() );
+        Image2D* cascadeMaps[kNumCascades];
+        for ( uint32_t c = 0; c < kNumCascades; ++c )
+            cascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
+        StaticMaterialPBR::UpdateShadow( gi, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
+                                         m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals,
+                                         m_CascadeWorldPerTexel, m_LightingDebug );
+
+        // Resolve IBL so the env cube bindings (8/9) + BRDF (10) are valid (glass epsilon-touches them).
+        ImageCube* iblIrradiance = nullptr, *iblPrefiltered = nullptr;
+        Image2D*   iblBrdfLut    = nullptr;
+        {
+            auto* imageService = Runtime::ResourceRegistry::GetImageService();
+            if ( const auto& env = m_SceneRenderer->GetEnvironment(); env.has_value() )
+            {
+                if ( env->IrradianceMap.IsValid() )
+                    iblIrradiance = static_cast<ImageCube*>( imageService->Resolve( env->IrradianceMap ) );
+                if ( env->PreFilteredMap.IsValid() )
+                    iblPrefiltered = static_cast<ImageCube*>( imageService->Resolve( env->PreFilteredMap ) );
+            }
+            if ( const auto& brdf = Renderer::GetInstance().GetBRDFTexture();
+                 brdf && brdf->GetImageHandle().IsValid() )
+                iblBrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
+        }
+        StaticMaterialPBR::UpdateEnvironment( gi, iblIrradiance, iblPrefiltered, iblBrdfLut );
+
+        // Bind the scene snapshot the glass samples for refraction (binding 19, glass-shader-only).
+        if ( sceneColor )
+            if ( auto tex = m_GlassMaterial->GetMaterialExecutor()->GetTexture2DProperty( "u_SceneColor" ) )
+                tex->SetImage( sceneColor.get() );
+
+        // --- Draw the glass over the composited scene (LOAD + blend) ---
+        RenderPassSpecification rpSpec;
+        rpSpec.TargetFramebuffer = target;
+        rpSpec.DebugName         = "GlassPass";
+        auto rp                  = RenderPass::Create( rpSpec );
+
+        renderer.BeginRenderPass( rp.get(), false ); // LOAD: composite over the opaque scene
+        for ( uint32_t i = 0; i < static_cast<uint32_t>( glassObjs.size() ); ++i )
+        {
+            const auto* obj = glassObjs[i];
+            StaticMaterialPBR::UpdateTransform( gi, obj->Transform );
+            m_GlassMaterial->SetMaterialIndex( i );
+            m_GlassMaterial->Bind( gi );
+            renderer.RenderMesh( m_StaticGlassPipeline.get(), obj->Mesh, obj->Transform,
+                                 m_GlassMaterial->GetMaterialExecutor(), 1, 0, obj->HiddenSubmeshes );
+        }
+        renderer.EndRenderPass();
     }
 
     void MeshRenderer::UpdateGlobalUniforms( const Core::Camera*                    camera,
@@ -331,8 +464,10 @@ namespace Desert::Graphic::System
         // next batch before the GPU executes the recorded draws (last-write-wins). Each instanced draw then
         // reads its own transform slice via firstInstance (gl_InstanceIndex) and its own material via the
         // MaterialIndex push constant (push constants ARE snapshotted per draw, so they stay correct).
+        // Instancing is disabled in the deferred G-buffer pass (its instanced variant isn't built yet) — all
+        // statics take the per-object path with m_StaticGBufferPipeline.
         const bool instancingOn = m_StaticInstancedPipeline && m_StaticInstancedMaterial &&
-                                  m_StaticInstancedInstance && !m_Wireframe;
+                                  m_StaticInstancedInstance && !m_Wireframe && !m_DeferredGeometry;
         std::vector<glm::mat4>       instTransforms;
         std::vector<PBRGpuMaterial> instMaterials;
         struct InstancedDraw
@@ -362,8 +497,17 @@ namespace Desert::Graphic::System
                 byMesh.emplace_back( mesh, std::vector<const StaticMeshRenderData*>{} );
                 return byMesh.back().second;
             };
+            // Transparency split (per-object so instance-level Transmission overrides are honoured): a material
+            // with Transmission > 0 is GLASS — skipped by every opaque pass (forward + deferred G-buffer) and
+            // drawn ONLY by the glass pass (m_GlassPass), which composites forward over the scene with blending.
             for ( const auto* obj : objects )
+            {
+                const bool objIsGlass =
+                     BuildEffectiveMaterial( mat, ( *obj->MaterialSlots )[0] ).GlassTint.a > 0.001f;
+                if ( objIsGlass != m_GlassPass )
+                    continue;
                 bucketFor( obj->Mesh ).push_back( obj );
+            }
 
             std::vector<const StaticMeshRenderData*> singles;
             for ( auto& [mesh, bucket] : byMesh )
@@ -447,9 +591,15 @@ namespace Desert::Graphic::System
                 {
                     // The actual draw call (bind pipeline + descriptor sets + vkCmdDrawIndexed).
                     DESERT_PROFILE_SCOPE( "Mesh: RenderMesh (draw)" );
-                    auto* pipeline = ( m_Wireframe && m_StaticWireframePipeline )
-                                          ? m_StaticWireframePipeline.get()
-                                          : m_StaticPipeline.get();
+                    // Deferred: the same material data binds, but the pipeline writes the G-buffer (MRT) instead
+                    // of shading. Otherwise forward (wireframe variant when enabled).
+                    auto* pipeline = ( m_GlassPass && m_StaticGlassPipeline )
+                                          ? m_StaticGlassPipeline.get()
+                                          : ( m_DeferredGeometry && m_StaticGBufferPipeline )
+                                                ? m_StaticGBufferPipeline.get()
+                                                : ( m_Wireframe && m_StaticWireframePipeline )
+                                                      ? m_StaticWireframePipeline.get()
+                                                      : m_StaticPipeline.get();
                     renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor(), 1, 0,
                                          obj->HiddenSubmeshes );
                 }
@@ -602,6 +752,74 @@ namespace Desert::Graphic::System
         }
 
         return true;
+    }
+
+    bool MeshRenderer::SetupGBufferPass()
+    {
+        // Optional: only present when the deferred G-buffer shader exists and the scene renderer has a
+        // G-buffer. Failure here does NOT fail Initialize — the forward path stays fully functional.
+        m_StaticGBufferShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "StaticMeshGBuffer" );
+        if ( !m_StaticGBufferShader )
+            return false;
+
+        const auto& gbuffer = m_SceneRenderer ? m_SceneRenderer->GetGBuffer() : nullptr;
+        if ( !gbuffer )
+            return false;
+
+        GraphicsPipelineSpecification spec;
+        spec.DebugName      = "StaticMeshGBuffer";
+        spec.Layout         = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+        spec.DepthCompareOp = CompareOp::LessOrEqual;
+        spec.CullMode       = CullMode::Back;
+        spec.Shader         = m_StaticGBufferShader;
+        spec.Framebuffer    = gbuffer; // 2 color attachments -> the shader's 2 MRT outputs
+
+        m_StaticGBufferPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        return m_StaticGBufferPipeline != nullptr;
+    }
+
+    bool MeshRenderer::SetupGlassPass()
+    {
+        // Optional (like the G-buffer pass): needs the glass shader + the scene target. Failure leaves the
+        // rest fully functional — glass just won't draw.
+        m_StaticGlassShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "StaticMeshGlass" );
+        if ( !m_StaticGlassShader )
+            return false;
+
+        const auto& target = m_SceneRenderer ? m_SceneRenderer->GetTargetFramebuffer() : nullptr;
+        if ( !target )
+            return false;
+
+        GraphicsPipelineSpecification spec;
+        spec.DebugName         = "StaticMeshGlass";
+        spec.Layout            = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                   { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                   { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                   { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                   { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+        spec.Shader            = m_StaticGlassShader;
+        spec.Framebuffer       = target;
+        spec.DepthCompareOp    = CompareOp::LessOrEqual;
+        spec.DepthWriteEnabled = false;      // transparent: don't occlude later fragments / itself
+        spec.CullMode          = CullMode::Back;
+        spec.BlendEnable       = true;       // src-alpha over the composited scene
+        spec.UseLoadRenderPass = true;       // begun with clearFrame=false to preserve the opaque scene
+
+        m_StaticGlassPipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
+        if ( !m_StaticGlassPipeline )
+            return false;
+
+        // A dedicated material (+ one instance) owns the glass pass's per-frame UBs / Materials SSBO. It is
+        // descriptor-layout-compatible with the glass pipeline because Glass.glsl.frag declares the same
+        // bindings as StaticMeshPBR. Being separate from every opaque material, its per-frame ring is written
+        // exactly once per frame (here) — no double-update hang.
+        m_GlassMaterial = std::make_unique<MaterialGlass>();
+        m_GlassInstance = m_GlassMaterial->CreateInstance();
+        return m_GlassMaterial && m_GlassInstance;
     }
 
     bool MeshRenderer::SetupSkinnedGeometryPass()
