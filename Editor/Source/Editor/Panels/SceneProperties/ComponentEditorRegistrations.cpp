@@ -46,6 +46,8 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CameraComponent, Data, "Came
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::RigidBodyComponent, Data, "RigidBodyData", "Rigid Body" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CharacterControllerComponent, Data,
                                      "CharacterControllerData", "Character Controller" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, "AudioSourceData",
+                                     "Audio Source" )
 
 namespace Desert::Editor
 {

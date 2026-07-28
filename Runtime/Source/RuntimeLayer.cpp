@@ -21,6 +21,7 @@
 #include <Engine/ECS/System/ScriptSystem.hpp>
 #include <Engine/ECS/System/PhysicsECSSystem.hpp>
 #include <Engine/ECS/System/LocomotionSystem.hpp>
+#include <Engine/ECS/System/AudioECSSystem.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Logger.hpp>
@@ -70,6 +71,7 @@ namespace Desert::Player
         m_Scene->AddSystem<ECS::ScriptSystem>( m_Scene.get(), m_AssetManager.get() );
         m_Scene->AddSystem<ECS::PhysicsECSSystem>( m_Scene.get() );
         m_Scene->AddSystem<ECS::LocomotionSystem>( m_Scene.get() );
+        m_Scene->AddSystem<ECS::AudioECSSystem>( m_Scene.get() );
 
         if ( const auto init = m_Scene->Init(); !init )
             return init;

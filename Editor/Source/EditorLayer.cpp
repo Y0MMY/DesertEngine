@@ -68,6 +68,7 @@
 #include <Engine/ECS/System/PhysicsECSSystem.hpp>
 #include <Engine/ECS/System/LocomotionSystem.hpp>
 #include <Engine/ECS/System/ScriptSystem.hpp>
+#include <Engine/ECS/System/AudioECSSystem.hpp>
 
 namespace Desert::Editor
 {
@@ -194,6 +195,7 @@ namespace Desert::Editor
         // Maps character movement state (speed/onGround from physics) -> locomotion clip. Kept OUT of physics
         // (mechanism vs behaviour); runs after it so it reads this frame's state.
         m_MainScene->AddSystem<ECS::LocomotionSystem>( m_MainScene.get() );
+        m_MainScene->AddSystem<ECS::AudioECSSystem>( m_MainScene.get() );
 
         // Persistent Cornell-Box GI + glass showcase (loads by default). Red/green walls bleed onto the white
         // objects (SSGI); a clear glass sphere sits in front of an orange cube (visible THROUGH the glass); a

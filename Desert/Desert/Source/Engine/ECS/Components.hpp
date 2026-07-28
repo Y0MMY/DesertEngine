@@ -472,6 +472,35 @@ namespace Desert::ECS
         ColliderData Data;
     };
 
+    // --- Audio (miniaudio) ------------------------------------------------------------------------------
+    // A sound emitter (reflected -> Details UI + serialization). AudioECSSystem creates the runtime
+    // source in Play mode (AutoPlay), positions spatial sources at the entity's world transform, and
+    // stops everything on the Play->Edit transition.
+    struct AudioSourceData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Clip" ), Category( "Audio" ) )
+        std::string Clip; // audio file (wav/mp3/flac), absolute or Assets-relative
+
+        PROPERTY( DisplayName( "Volume" ), Category( "Audio" ), Range( 0.0f, 2.0f ) )
+        float Volume = 1.0f;
+
+        PROPERTY( DisplayName( "Loop" ), Category( "Audio" ) )
+        bool Loop = false;
+
+        PROPERTY( DisplayName( "Auto Play" ), Category( "Audio" ) )
+        bool AutoPlay = true; // start when the scene enters Play
+
+        PROPERTY( DisplayName( "3D Spatial" ), Category( "Audio" ) )
+        bool Spatial = true; // attenuate/pan from the entity position vs. the listener (camera)
+    };
+
+    struct AudioSourceComponent
+    {
+        AudioSourceData Data;
+    };
+
     // Body simulation params (reflected -> Details UI + serialization).
     struct RigidBodyData
     {

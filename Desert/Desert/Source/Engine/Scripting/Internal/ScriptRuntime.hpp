@@ -425,4 +425,5 @@ namespace Desert::Scripting
     void RegisterTimerBindings( ScriptEngine::Impl& impl );     // Timer.after scheduler
     void RegisterWorldBindings( ScriptEngine::Impl& impl );     // World table (find/spawn/raycast/water)
     void RegisterReflectionBindings( ScriptEngine::Impl& impl ); // auto component access from reflection
+    void RegisterAudioBindings( ScriptEngine::Impl& impl );      // Audio.play / Audio.stopAll
 } // namespace Desert::Scripting

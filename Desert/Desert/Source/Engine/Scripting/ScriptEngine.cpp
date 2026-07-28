@@ -24,6 +24,7 @@ namespace Desert::Scripting
         RegisterTimerBindings( *m_Impl );
         RegisterWorldBindings( *m_Impl );
         RegisterReflectionBindings( *m_Impl ); // after EntityCore: extends the Entity usertype
+        RegisterAudioBindings( *m_Impl );
     }
 
     ScriptEngine::~ScriptEngine() = default;

@@ -174,6 +174,17 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::AudioSourceData;
+                TypeBuilder( "AudioSourceData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Clip", .Type = FieldType::String, .Offset = offsetof( T, Clip ), .Size = sizeof( T::Clip ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Clip", .Category = "Audio", } } )
+                    .Field( FieldInfo{ .Name = "Volume", .Type = FieldType::Float, .Offset = offsetof( T, Volume ), .Size = sizeof( T::Volume ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Volume", .Category = "Audio", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 2.0f, } } )
+                    .Field( FieldInfo{ .Name = "Loop", .Type = FieldType::Bool, .Offset = offsetof( T, Loop ), .Size = sizeof( T::Loop ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Loop", .Category = "Audio", } } )
+                    .Field( FieldInfo{ .Name = "AutoPlay", .Type = FieldType::Bool, .Offset = offsetof( T, AutoPlay ), .Size = sizeof( T::AutoPlay ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Auto Play", .Category = "Audio", } } )
+                    .Field( FieldInfo{ .Name = "Spatial", .Type = FieldType::Bool, .Offset = offsetof( T, Spatial ), .Size = sizeof( T::Spatial ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "3D Spatial", .Category = "Audio", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::RigidBodyData;
                 TypeBuilder( "RigidBodyData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "Type", .Type = FieldType::Enum, .Offset = offsetof( T, Type ), .Size = sizeof( T::Type ), .TypeName = "Physics::BodyType", .Meta = PropertyMetadata{ .DisplayName = "Type", .Category = "Rigid Body", }, .EnumValues = { EnumValue{ "Static", 0 }, EnumValue{ "Dynamic", 1 }, EnumValue{ "Kinematic", 2 }, } } )

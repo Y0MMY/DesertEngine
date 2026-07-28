@@ -753,6 +753,8 @@ namespace Desert::Core::Serialize
                                                                               &ECS::RigidBodyComponent::Data ) );
         Register( MakeReflected<ECS::CharacterControllerComponent, ECS::CharacterControllerData>(
              "CharacterController", "CharacterControllerData", &ECS::CharacterControllerComponent::Data ) );
+        Register( MakeReflected<ECS::AudioSourceComponent, ECS::AudioSourceData>(
+             "AudioSource", "AudioSourceData", &ECS::AudioSourceComponent::Data ) );
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its
