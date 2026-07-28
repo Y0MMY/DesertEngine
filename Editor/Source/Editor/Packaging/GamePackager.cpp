@@ -5,6 +5,7 @@
 #include <Common/Core/Constants.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
+#include <Common/Utilities/PakFile.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -70,6 +71,43 @@ namespace Desert::Editor
             return true;
         }
 
+        // Streams every file under `from` into the pak as "<keyPrefix>/<relative>". Same filter
+        // semantics as CopyTree.
+        bool AddTreeToPak( Common::Utils::PakWriter& pak, const fs::path& from,
+                           const std::string& keyPrefix, bool skipRawMeshSources, CopyStats& stats,
+                           std::string& error )
+        {
+            std::error_code ec;
+            if ( !fs::exists( from, ec ) )
+                return true; // nothing to pack is fine (e.g. no Cooked/ yet)
+
+            for ( auto it = fs::recursive_directory_iterator( from, ec );
+                  it != fs::recursive_directory_iterator(); it.increment( ec ) )
+            {
+                if ( ec )
+                {
+                    error = "walk failed under " + from.string() + ": " + ec.message();
+                    return false;
+                }
+                const fs::path& src = it->path();
+                if ( !it->is_regular_file() )
+                    continue;
+                if ( skipRawMeshSources && IsRawMeshSource( src ) )
+                    continue;
+
+                const fs::path rel = fs::relative( src, from, ec );
+                const std::string key = keyPrefix + "/" + rel.generic_string();
+                if ( !pak.AddFile( key, src ) )
+                {
+                    error = "pak write failed for " + src.string();
+                    return false;
+                }
+                ++stats.Files;
+                stats.Bytes += fs::file_size( src, ec );
+            }
+            return true;
+        }
+
         std::string SanitizeName( std::string name )
         {
             for ( auto& ch : name )
@@ -116,18 +154,25 @@ namespace Desert::Editor
                          ec );
         ++stats.Files;
 
-        // 3) Project content (raw mesh sources stripped) + cooked cache.
+        // 3) ALL content goes into ONE Content.dpak (UE .pak model): project assets (raw mesh sources
+        // stripped — the runtime reads cooked meshes only), the cooked cache and the engine shaders.
+        // The Runtime mounts the archive at startup; every content read resolves through the VFS.
         namespace P = Common::Constants::Path;
-        if ( !CopyTree( P::ASSETS_PATH, pkgDir / "Assets", /*skipRawMeshSources=*/true, stats, error ) )
-            return { false, error, "" };
-        if ( !CopyTree( P::COOKED_PATH, pkgDir / "Cooked", /*skipRawMeshSources=*/false, stats, error ) )
-            return { false, error, "" };
+        {
+            Common::Utils::PakWriter pak( pkgDir / "Content.dpak" );
+            if ( !pak.IsOpen() )
+                return { false, "Cannot create Content.dpak in " + pkgDir.string(), "" };
 
-        // 4) Engine resources the runtime needs (shaders are compiled at startup; fonts for ImGui).
-        if ( !CopyTree( P::SHADERDIR_PATH, pkgDir / "Resources" / "Shaders", false, stats, error ) )
-            return { false, error, "" };
-        if ( !CopyTree( P::FONTS_PATH, pkgDir / "Resources" / "Fonts", false, stats, error ) )
-            return { false, error, "" };
+            if ( !AddTreeToPak( pak, P::ASSETS_PATH, "Assets", /*skipRawMeshSources=*/true, stats, error ) )
+                return { false, error, "" };
+            if ( !AddTreeToPak( pak, P::COOKED_PATH, "Cooked", false, stats, error ) )
+                return { false, error, "" };
+            if ( !AddTreeToPak( pak, P::SHADERDIR_PATH, "Resources/Shaders", false, stats, error ) )
+                return { false, error, "" };
+
+            if ( pak.Finalize() == 0 )
+                return { false, "Failed to finalize Content.dpak (no entries?)", "" };
+        }
 
         // 5) Regenerated .deproj: content now lives under Assets/ next to the binary. The DefaultScene
         // moves with it when it pointed inside the old assets root.

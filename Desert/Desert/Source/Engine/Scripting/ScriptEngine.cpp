@@ -1,5 +1,8 @@
 #include "Internal/ScriptRuntime.hpp"
 
+#include <Common/Utilities/FileSystem.hpp>
+#include <filesystem>
+
 namespace Desert::Scripting
 {
     ScriptEngine::ScriptEngine( Core::Scene* scene, Assets::AssetManager* assetManager )
@@ -62,8 +65,17 @@ namespace Desert::Scripting
         sol::environment env( m_Impl->Lua, sol::create, m_Impl->Lua.globals() );
         env["self"] = m_Impl->MakeEntity( static_cast<entt::entity>( entity ) );
 
+        // Disk scripts load via sol's file path (dev / hot-reload); a packaged game reads the source
+        // out of the mounted .dpak and loads it as a string chunk.
         sol::protected_function_result r =
-             m_Impl->Lua.safe_script_file( path, env, sol::script_pass_on_error );
+             std::filesystem::exists( path )
+                  ? m_Impl->Lua.safe_script_file( path, env, sol::script_pass_on_error )
+                  : m_Impl->Lua.safe_script( Common::Utils::FileSystem::Exists( path )
+                                                  ? Common::Utils::FileSystem::ReadFileContent( path )
+                                                  : std::string( "error('script not found: " )
+                                                         .append( path )
+                                                         .append( "')" ),
+                                             env, sol::script_pass_on_error );
         if ( !r.valid() )
         {
             sol::error err = r;
@@ -200,7 +212,13 @@ namespace Desert::Scripting
         // file's top level just sets locals / Properties / defines functions (no engine calls at load time).
         sol::state lua;
         lua.open_libraries( sol::lib::base, sol::lib::math );
-        sol::protected_function_result r = lua.safe_script_file( path, sol::script_pass_on_error );
+        sol::protected_function_result r =
+             std::filesystem::exists( path )
+                  ? lua.safe_script_file( path, sol::script_pass_on_error )
+                  : lua.safe_script( Common::Utils::FileSystem::Exists( path )
+                                          ? Common::Utils::FileSystem::ReadFileContent( path )
+                                          : std::string( "" ),
+                                     sol::script_pass_on_error );
         if ( !r.valid() )
             return out;
 

@@ -1,4 +1,6 @@
 #include "AssetPreloader.hpp"
+#include <Common/Utilities/VFS.hpp>
+#include <unordered_set>
 
 #include "Shader/ShaderAsset.hpp"
 #include "Mesh/StaticMeshAsset.hpp"
@@ -41,16 +43,30 @@ namespace Desert::Assets
         {
             namespace fs = std::filesystem;
 
-            std::error_code ec;
-            if ( !fs::exists( rootPath, ec ) ) // tolerate missing cooked dirs (clean/from-scratch project)
-                return;
-
-            for ( const auto& entry : fs::recursive_directory_iterator( rootPath, ec ) )
+            // Candidates = the loose files on disk PLUS everything a mounted .dpak holds under this
+            // root (packaged game: the disk dirs typically do not exist at all). Deduplicated by
+            // normalized path — a loose file overrides its pak twin.
+            std::vector<fs::path>           candidates;
+            std::unordered_set<std::string> seen;
+            auto push = [&]( const fs::path& p )
             {
-                if ( !entry.is_regular_file() )
-                    continue;
+                if ( seen.insert( p.lexically_normal().generic_string() ).second )
+                    candidates.push_back( p );
+            };
 
-                std::string ext = entry.path().extension().string();
+            std::error_code ec;
+            if ( fs::exists( rootPath, ec ) ) // tolerate missing cooked dirs (clean/from-scratch project)
+            {
+                for ( const auto& entry : fs::recursive_directory_iterator( rootPath, ec ) )
+                    if ( entry.is_regular_file() )
+                        push( entry.path() );
+            }
+            for ( const auto& packed : Common::Utils::VFS::ListFiles( rootPath ) )
+                push( packed );
+
+            for ( const auto& candidate : candidates )
+            {
+                std::string ext = candidate.extension().string();
                 std::transform( ext.begin(), ext.end(), ext.begin(), ::tolower );
 
                 if ( std::find( supportedExtensions.begin(), supportedExtensions.end(), ext ) ==
@@ -63,7 +79,7 @@ namespace Desert::Assets
                     // "strip the Textures/ prefix for skyboxes" hack forced every consumer to re-glue
                     // the prefix back (SceneEnvironment did) — path composition belongs to the asset
                     // layer, not to engine draw code.
-                    const Common::Filepath path = entry.path();
+                    const Common::Filepath path = candidate;
                     auto asset = manager->CreateAsset<AssetType>( priority, path, std::forward<Args>( args )... );
 
                     if ( !asset->GetMetadata().IsValid() )

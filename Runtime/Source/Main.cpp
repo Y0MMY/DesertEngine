@@ -9,6 +9,10 @@
 #include <Engine/EntryPoint.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 
+#include <Common/Utilities/VFS.hpp>
+
+#include <filesystem>
+
 #include "RuntimeLayer.hpp"
 
 #include <cstdio>
@@ -63,6 +67,16 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
     {
         std::fprintf( stderr, "Usage: Runtime --project <path/to/.deproj> [--scene <path/to/.desce>]\n" );
         std::exit( 1 );
+    }
+
+    // Packaged game: all content lives in Content.dpak next to the .deproj — mount it so every engine
+    // read (scenes, cooked meshes, textures, shaders, scripts) resolves through the VFS. In a dev
+    // project the archive simply does not exist and reads stay plain disk reads.
+    {
+        const auto pak = std::filesystem::path( Desert::Project::ProjectContext::Directory() ) /
+                         "Content.dpak";
+        if ( std::filesystem::exists( pak ) )
+            Common::Utils::VFS::MountPak( pak );
     }
 
     ApplicationInfo appInfo;

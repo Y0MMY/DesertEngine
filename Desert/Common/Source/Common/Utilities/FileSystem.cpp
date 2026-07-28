@@ -1,4 +1,5 @@
 #include <Common/Utilities/FileSystem.hpp>
+#include "VFS.hpp"
 
 #if defined( DESERT_PLATFORM_WINDOWS )
 #include <Common/Platform/Windows/WindowsFileSystem.hpp>
@@ -53,12 +54,12 @@ namespace Common::Utils
 
     bool FileSystem::Exists( const std::filesystem::path& filepath )
     {
-        return fs::exists( filepath );
+        return fs::exists( filepath ) || VFS::Exists( filepath );
     }
 
     bool FileSystem::Exists( const std::string& filepath )
     {
-        return fs::exists( fs::path( filepath ) );
+        return Exists( fs::path( filepath ) );
     }
 
     const std::string FileSystem::GetFileName( const std::filesystem::path& filepath )
@@ -96,7 +97,16 @@ namespace Common::Utils
     const std::string FileSystem::ReadFileContent( const std::filesystem::path& filepath )
     {
         std::ifstream in( filepath, std::ios::in | std::ios::binary );
-        DESERT_VERIFY( in, "Could not read file! {}", filepath.string().c_str() );
+        if ( !in )
+        {
+            // Not on disk: a packaged game serves content from the mounted .dpak (disk first so loose
+            // files can still override archive entries while debugging a package).
+            if ( auto packed = VFS::ReadFile( filepath ) )
+                return std::move( *packed );
+
+            DESERT_VERIFY( in, "Could not read file! {}", filepath.string().c_str() );
+            return {};
+        }
 
         std::string fileContent;
 
@@ -147,7 +157,14 @@ namespace Common::Utils
     std::vector<uint8_t> FileSystem::ReadByteFileContent( const std::filesystem::path& filepath )
     {
         std::ifstream file( filepath, std::ios::in | std::ios::binary );
-        DESERT_VERIFY( file, "Could not open file! {}", filepath.string().c_str() );
+        if ( !file )
+        {
+            if ( auto packed = VFS::ReadFile( filepath ) )
+                return std::vector<uint8_t>( packed->begin(), packed->end() );
+
+            DESERT_VERIFY( file, "Could not open file! {}", filepath.string().c_str() );
+            return {};
+        }
 
         file.seekg( 0, std::ios::end );
         std::streamsize fileSize = file.tellg();
@@ -185,7 +202,12 @@ namespace Common::Utils
 
     const uint32_t FileSystem::GetFileSize( const std::filesystem::path& filepath )
     {
-        return fs::file_size( filepath );
+        std::error_code ec;
+        if ( fs::exists( filepath, ec ) )
+            return (uint32_t)fs::file_size( filepath, ec );
+        if ( auto packed = VFS::FileSize( filepath ) )
+            return (uint32_t)*packed;
+        return 0;
     }
 
     const void FileSystem::WriteContentToFile( const std::filesystem::path& filepath, const std::string& content )

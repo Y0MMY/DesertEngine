@@ -1,5 +1,7 @@
 #include "ShaderIncluder.hpp"
 
+#include <Common/Utilities/FileSystem.hpp>
+
 namespace Desert::Core
 {
 
@@ -29,18 +31,14 @@ namespace Desert::Core
             fullPath = ( shaderRoot / requested_source ).lexically_normal();
         }
 
-        if ( !std::filesystem::exists( fullPath ) )
+        // FileSystem is VFS-aware: shader includes resolve from disk in dev and from the mounted
+        // .dpak in a packaged game.
+        if ( !Common::Utils::FileSystem::Exists( fullPath ) )
         {
             return CreateErrorIncludeResult( std::format( "Cannot open include file: {}", fullPath.string() ) );
         }
 
-        std::ifstream file( fullPath );
-        if ( !file.is_open() )
-        {
-            return CreateErrorIncludeResult( std::format( "Failed to open include file: {}", fullPath.string() ) );
-        }
-
-        std::string content( ( std::istreambuf_iterator<char>( file ) ), std::istreambuf_iterator<char>() );
+        std::string content = Common::Utils::FileSystem::ReadFileContent( fullPath );
 
         auto result = new shaderc_include_result;
 

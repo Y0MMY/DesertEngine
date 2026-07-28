@@ -1,4 +1,5 @@
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 
 #include <sstream>
@@ -224,14 +225,12 @@ namespace Desert::Core::Preprocess
 
             std::filesystem::path stagePath = ( basePath.parent_path() / fileStr ).lexically_normal();
 
-            DESERT_VERIFY( std::filesystem::exists( stagePath ), "Shader stage file not found: {}",
-                           stagePath.string() );
+            // FileSystem is VFS-aware: stage sources resolve from disk in dev and from the mounted
+            // .dpak in a packaged game.
+            DESERT_VERIFY( Common::Utils::FileSystem::Exists( stagePath ),
+                           "Shader stage file not found: {}", stagePath.string() );
 
-            std::ifstream file( stagePath );
-            DESERT_VERIFY( file.is_open(), "Failed to open shader stage file: {}", stagePath.string() );
-
-            std::string stageSource( ( std::istreambuf_iterator<char>( file ) ),
-                                     std::istreambuf_iterator<char>() );
+            std::string stageSource = Common::Utils::FileSystem::ReadFileContent( stagePath );
 
             DESERT_VERIFY( programStages.find( stage ) == programStages.end(),
                            "Duplicate shader stage in program: {}", Shader::GetStringShaderStage( stage ) );

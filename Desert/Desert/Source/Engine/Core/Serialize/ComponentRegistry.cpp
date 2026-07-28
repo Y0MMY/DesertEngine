@@ -1,4 +1,5 @@
 #include "ComponentRegistry.hpp"
+#include <Common/Utilities/FileSystem.hpp>
 
 #include <cstring>
 
@@ -217,10 +218,10 @@ namespace Desert::Core::Serialize
                     // LEGACY scenes stored skybox paths RELATIVE to the textures dir (the old registration
                     // stripped the prefix). Normalize those to the full form new registrations use.
                     std::string resolvedPath = path;
-                    if ( !std::filesystem::exists( resolvedPath ) )
+                    if ( !Common::Utils::FileSystem::Exists( resolvedPath ) ) // VFS-aware (packaged game)
                     {
                         const auto legacy = Common::Constants::Path::TEXTUREDIR_PATH / path;
-                        if ( std::filesystem::exists( legacy ) )
+                        if ( Common::Utils::FileSystem::Exists( legacy ) )
                             resolvedPath = legacy.string();
                     }
 

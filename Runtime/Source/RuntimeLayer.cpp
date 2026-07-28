@@ -79,7 +79,7 @@ namespace Desert::Player
         if ( scenePath.empty() )
             scenePath = Project::ProjectContext::DefaultScenePath();
 
-        if ( !scenePath.empty() && std::filesystem::exists( scenePath ) )
+        if ( !scenePath.empty() && Common::Utils::FileSystem::Exists( scenePath ) ) // VFS-aware
         {
             Core::SceneSerializer serializer( m_Scene.get(), m_AssetManager.get() );
             serializer.DeserializeFromJson( Common::Utils::FileSystem::ReadFileContent( scenePath ) );
