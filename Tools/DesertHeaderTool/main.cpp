@@ -34,6 +34,8 @@ namespace
     {
         std::string displayName;
         std::string category;
+        std::string tooltip;
+        std::string header;
         bool        hasRange = false;
         std::string rangeMin = "0.0f";
         std::string rangeMax = "0.0f";
@@ -419,6 +421,8 @@ namespace
 
             if ( tok.rfind( "DisplayName", 0 ) == 0 )      m.displayName = ExtractStringLiteral( tok );
             else if ( tok.rfind( "Category", 0 ) == 0 )    m.category    = ExtractStringLiteral( tok );
+            else if ( tok.rfind( "Tooltip", 0 ) == 0 )     m.tooltip     = ExtractStringLiteral( tok );
+            else if ( tok.rfind( "Header", 0 ) == 0 )      m.header      = ExtractStringLiteral( tok );
             else if ( tok.rfind( "Range", 0 ) == 0 )
             {
                 auto a = tok.find( '(' ), b = tok.rfind( ')' );
@@ -664,6 +668,9 @@ namespace
         o << "PropertyMetadata{ ";
         if ( !m.displayName.empty() ) o << ".DisplayName = \"" << m.displayName << "\", ";
         if ( !m.category.empty() )    o << ".Category = \"" << m.category << "\", ";
+        // Designated initializers must follow declaration order (DisplayName, Category, Tooltip, Header, ...).
+        if ( !m.tooltip.empty() )     o << ".Tooltip = \"" << m.tooltip << "\", ";
+        if ( !m.header.empty() )      o << ".Header = \"" << m.header << "\", ";
         if ( m.hasRange ) o << ".HasRange = true, .RangeMin = " << m.rangeMin << ", .RangeMax = " << m.rangeMax << ", ";
         if ( m.isColor )  o << ".IsColor = true, ";
         if ( m.isAsset )  o << ".IsAsset = true, .AssetType = \"" << m.assetType << "\", ";

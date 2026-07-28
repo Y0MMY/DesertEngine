@@ -86,6 +86,14 @@ namespace Desert::Editor
         if ( field.Meta.Hidden )
             return false;
 
+        // PROPERTY(Header("...")) — a labelled section break drawn above this field.
+        if ( !field.Meta.Header.empty() )
+        {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextDisabled( "%s", field.Meta.Header.c_str() );
+        }
+
         void*       p     = FieldPtr( object, field );
         const auto& label = field.DisplayName();
         bool        changed = false;
@@ -136,10 +144,15 @@ namespace Desert::Editor
         ImGui::SetColumnWidth( 0, 150.0f );
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted( label.c_str() );
-        // Hover the label to reveal the underlying C++ field name (useful when the DisplayName is a friendlier
-        // alias or the row is narrow) — a small UE-style affordance.
-        if ( ImGui::IsItemHovered() && field.Name != label )
-            ImGui::SetTooltip( "%s", field.Name.c_str() );
+        // Hover the label for help: PROPERTY(Tooltip("...")) when authored, otherwise fall back to
+        // revealing the underlying C++ field name (useful when DisplayName is a friendlier alias).
+        if ( ImGui::IsItemHovered() )
+        {
+            if ( !field.Meta.Tooltip.empty() )
+                ImGui::SetTooltip( "%s", field.Meta.Tooltip.c_str() );
+            else if ( field.Name != label )
+                ImGui::SetTooltip( "%s", field.Name.c_str() );
+        }
 
         // Reset-to-default: for trivially-copyable value fields (not strings/structs/containers) that DIFFER
         // from their default, show a revert button right-aligned in the label column (UE-style). memcpy is

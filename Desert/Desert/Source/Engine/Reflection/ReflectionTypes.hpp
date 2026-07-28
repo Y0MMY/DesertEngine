@@ -34,6 +34,8 @@ namespace Desert::Reflection
     {
         std::string DisplayName; // PROPERTY(DisplayName("..."))  — empty → use field name
         std::string Category;    // PROPERTY(Category("..."))     — empty → "Default"
+        std::string Tooltip;     // PROPERTY(Tooltip("..."))      — hover help on the field row
+        std::string Header;      // PROPERTY(Header("..."))       — section label drawn above the field
 
         bool  HasRange = false;  // PROPERTY(Range(min,max))
         float RangeMin = 0.0f;

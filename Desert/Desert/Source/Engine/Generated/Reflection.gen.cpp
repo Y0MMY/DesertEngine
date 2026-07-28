@@ -76,9 +76,9 @@ namespace
                 using T = ::Desert::ECS::CameraData;
                 TypeBuilder( "CameraData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "IsMainCamera", .Type = FieldType::Bool, .Offset = offsetof( T, IsMainCamera ), .Size = sizeof( T::IsMainCamera ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Main Camera", .Category = "Camera", } } )
-                    .Field( FieldInfo{ .Name = "FOV", .Type = FieldType::Float, .Offset = offsetof( T, FOV ), .Size = sizeof( T::FOV ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Field of View", .Category = "Camera", .HasRange = true, .RangeMin = 10.0f, .RangeMax = 120.0f, } } )
-                    .Field( FieldInfo{ .Name = "Near", .Type = FieldType::Float, .Offset = offsetof( T, Near ), .Size = sizeof( T::Near ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Near", .Category = "Camera", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 10.0f, } } )
-                    .Field( FieldInfo{ .Name = "Far", .Type = FieldType::Float, .Offset = offsetof( T, Far ), .Size = sizeof( T::Far ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Far", .Category = "Camera", .HasRange = true, .RangeMin = 10.0f, .RangeMax = 10000.0f, } } )
+                    .Field( FieldInfo{ .Name = "FOV", .Type = FieldType::Float, .Offset = offsetof( T, FOV ), .Size = sizeof( T::FOV ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Field of View", .Category = "Camera", .Tooltip = "Vertical field of view, in degrees.", .Header = "Projection", .HasRange = true, .RangeMin = 10.0f, .RangeMax = 120.0f, } } )
+                    .Field( FieldInfo{ .Name = "Near", .Type = FieldType::Float, .Offset = offsetof( T, Near ), .Size = sizeof( T::Near ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Near", .Category = "Camera", .Tooltip = "Near clip plane distance. Anything closer is not drawn.", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 10.0f, } } )
+                    .Field( FieldInfo{ .Name = "Far", .Type = FieldType::Float, .Offset = offsetof( T, Far ), .Size = sizeof( T::Far ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Far", .Category = "Camera", .Tooltip = "Far clip plane distance. Anything beyond is not drawn.", .HasRange = true, .RangeMin = 10.0f, .RangeMax = 10000.0f, } } )
                     .WithDefault<T>()
                     .Register();
             }

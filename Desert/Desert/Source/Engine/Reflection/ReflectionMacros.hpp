@@ -17,7 +17,7 @@
 //   };
 //
 // Supported attribute tokens (parsed by the tool, never compiled):
-//   DisplayName("..."), Category("..."), Range(min,max), Color,
+//   DisplayName("..."), Category("..."), Tooltip("..."), Header("..."), Range(min,max), Color,
 //   Asset<TypeName>, Thumbnail, ReadOnly, Hidden
 //
 // REFLECT() marks a struct/class for reflection. PROPERTY(...) marks the field that follows it.

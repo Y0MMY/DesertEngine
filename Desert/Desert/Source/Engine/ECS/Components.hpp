@@ -58,13 +58,16 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Main Camera" ), Category( "Camera" ) )
         bool IsMainCamera = true;
 
-        PROPERTY( DisplayName( "Field of View" ), Category( "Camera" ), Range( 10.0f, 120.0f ) )
+        PROPERTY( DisplayName( "Field of View" ), Category( "Camera" ), Range( 10.0f, 120.0f ),
+                  Header( "Projection" ), Tooltip( "Vertical field of view, in degrees." ) )
         float FOV = 45.0f;
 
-        PROPERTY( DisplayName( "Near" ), Category( "Camera" ), Range( 0.01f, 10.0f ) )
+        PROPERTY( DisplayName( "Near" ), Category( "Camera" ), Range( 0.01f, 10.0f ),
+                  Tooltip( "Near clip plane distance. Anything closer is not drawn." ) )
         float Near = 0.1f;
 
-        PROPERTY( DisplayName( "Far" ), Category( "Camera" ), Range( 10.0f, 10000.0f ) )
+        PROPERTY( DisplayName( "Far" ), Category( "Camera" ), Range( 10.0f, 10000.0f ),
+                  Tooltip( "Far clip plane distance. Anything beyond is not drawn." ) )
         float Far = 1000.0f;
     };
 
