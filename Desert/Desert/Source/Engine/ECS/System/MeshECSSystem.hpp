@@ -29,6 +29,12 @@ namespace Desert::ECS
             m_DefaultSkinnedMaterial = std::make_shared<Graphic::SkinnedMaterialPBR>();
         }
 
+        // Render-data collector (only touches mesh components' runtime caches) — safe to run concurrently with the other collectors.
+        bool CanRunParallel() const override
+        {
+            return true;
+        }
+
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
         {

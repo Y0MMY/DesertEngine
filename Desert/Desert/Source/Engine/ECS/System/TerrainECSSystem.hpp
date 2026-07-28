@@ -14,6 +14,12 @@ namespace Desert::ECS
     public:
         using System::System;
 
+        // Render-data collector (read-only terrain collection) — safe to run concurrently with the other collectors.
+        bool CanRunParallel() const override
+        {
+            return true;
+        }
+
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
         {

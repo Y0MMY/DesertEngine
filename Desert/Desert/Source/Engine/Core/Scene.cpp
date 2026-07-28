@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Common/Core/Profiler.hpp>
+#include <Common/Core/JobSystem.hpp>
 #include <Common/Core/Math/Ray.hpp>
 
 #include <Engine/ECS/Components.hpp>
@@ -93,7 +94,6 @@ namespace Desert::Core
          : m_SceneName( std::move( sceneName ) ), m_SceneRenderer( sceneRenderer )
     {
         SetupRegistryCallbacks();
-        m_CommandBuffer = std::make_unique<Graphic::Render::RenderCommandBuffer>();
     }
 
     NO_DISCARD Common::BoolResultStr Scene::BeginScene()
@@ -186,14 +186,7 @@ namespace Desert::Core
 
         {
             DESERT_PROFILE_SCOPE( "ECS Systems" );
-            std::ranges::for_each( m_Systems,
-                                   [&]( const auto& system )
-                                   {
-                                       // Per-system timing (named by the system's type) so every ECS system
-                                       // is individually visible in the profiler — no per-system edits.
-                                       DESERT_PROFILE_SCOPE_DYNAMIC( typeid( *system ).name() );
-                                       system->Update( m_Registry, *m_CommandBuffer, gameplayTs );
-                                   } );
+            ExecuteSystems( gameplayTs );
         }
 
         // Dir lights
@@ -223,13 +216,60 @@ namespace Desert::Core
 
         {
             DESERT_PROFILE_SCOPE( "Scene: CmdBuffer ExecuteAll" );
-            m_CommandBuffer->ExecuteAll( *m_SceneRenderer );
+            // Registration order — NOT completion order — so the frame's submission order is identical
+            // to the old single-buffer sequential path.
+            for ( const auto& buffer : m_SystemCommandBuffers )
+                buffer->ExecuteAll( *m_SceneRenderer );
         }
         {
             DESERT_PROFILE_SCOPE( "Scene: CmdBuffer Clear" );
-            m_CommandBuffer->Clear();
+            for ( const auto& buffer : m_SystemCommandBuffers )
+                buffer->Clear();
         }
         m_SceneRenderer->OnUpdate( std::move( sceneRendererInfo ) );
+    }
+
+    void Scene::ExecuteSystems( const Common::Timestep& gameplayTs )
+    {
+        // One command buffer per system, created on first use (AddSystem is a header template — the
+        // buffers are built here where the type is complete).
+        while ( m_SystemCommandBuffers.size() < m_Systems.size() )
+            m_SystemCommandBuffers.emplace_back( std::make_unique<Graphic::Render::RenderCommandBuffer>() );
+
+        const auto runOne = [&]( size_t index )
+        {
+            const auto& system = m_Systems[index];
+            // Per-system timing (named by the system's type) so every ECS system is individually
+            // visible in the profiler — no per-system edits.
+            DESERT_PROFILE_SCOPE_DYNAMIC( typeid( *system ).name() );
+            system->Update( m_Registry, *m_SystemCommandBuffers[index], gameplayTs );
+        };
+
+        // Sequential systems run in registration order; a maximal RUN of CanRunParallel() systems is
+        // one parallel group (they have no cross-dependencies by contract — see System::CanRunParallel).
+        // ParallelFor blocks until the group finishes, so the following sequential system still sees
+        // every effect of the group — the schedule is semantically identical to the sequential loop.
+        size_t i = 0;
+        while ( i < m_Systems.size() )
+        {
+            if ( !m_Systems[i]->CanRunParallel() )
+            {
+                runOne( i );
+                ++i;
+                continue;
+            }
+
+            size_t groupEnd = i + 1;
+            while ( groupEnd < m_Systems.size() && m_Systems[groupEnd]->CanRunParallel() )
+                ++groupEnd;
+
+            if ( const size_t count = groupEnd - i; count == 1 )
+                runOne( i );
+            else
+                Common::JobSystem::Get().ParallelFor( count,
+                                                      [&]( size_t local ) { runOne( i + local ); } );
+            i = groupEnd;
+        }
     }
 
     NO_DISCARD Common::BoolResultStr Scene::EndScene()

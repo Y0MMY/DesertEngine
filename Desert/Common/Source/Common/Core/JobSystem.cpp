@@ -1,5 +1,7 @@
 #include "JobSystem.hpp"
 
+#include <optick.h>
+
 #include <algorithm>
 #include <atomic>
 
@@ -29,6 +31,9 @@ namespace Common
 
     void JobSystem::WorkerLoop()
     {
+        // Register with Optick so job scopes (e.g. parallel ECS systems) show on their own timeline
+        // rows instead of being silently dropped for an unknown thread.
+        OPTICK_THREAD( "JobSystem Worker" );
         for ( ;; )
         {
             std::function<void()> job;

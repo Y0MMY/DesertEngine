@@ -184,6 +184,11 @@ namespace Desert::Core
 
         void SetupRegistryCallbacks();
 
+        // Runs the ECS systems: sequential by default, but maximal runs of CanRunParallel() systems
+        // execute concurrently on the JobSystem — each system writes its OWN command buffer, so no
+        // system ever contends on the (single-threaded) arena allocator.
+        void ExecuteSystems( const Common::Timestep& gameplayTs );
+
     private:
         entt::registry m_Registry;
 
@@ -202,7 +207,10 @@ namespace Desert::Core
         mutable uint32_t              m_ViewportHeight = 720;
         SceneState                    m_State = SceneState::Edit;
 
-        std::unique_ptr<Graphic::Render::RenderCommandBuffer> m_CommandBuffer;
+        // One command buffer PER system (index-matched to m_Systems): parallel systems record without
+        // sharing the arena; buffers are executed in registration order, so the frame's draw order is
+        // identical to the old single-buffer sequential path.
+        std::vector<std::unique_ptr<Graphic::Render::RenderCommandBuffer>> m_SystemCommandBuffers;
 
         SceneSettings m_Settings;
         std::string   m_SceneName;

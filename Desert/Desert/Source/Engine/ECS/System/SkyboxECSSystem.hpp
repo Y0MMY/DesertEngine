@@ -18,6 +18,12 @@ namespace Desert::ECS
     public:
         using System::System;
 
+        // Render-data collector (only touches SkyboxComponent state) — safe to run concurrently with the other collectors.
+        bool CanRunParallel() const override
+        {
+            return true;
+        }
+
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
         {

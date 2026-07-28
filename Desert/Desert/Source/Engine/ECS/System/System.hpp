@@ -21,6 +21,16 @@ namespace Desert::ECS
 
         virtual void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                              const Common::Timestep& ts ) = 0;
+
+        // Systems that only READ the registry (no structural changes, no writes another system reads
+        // within the frame) and emit render commands may return true: the scene runs consecutive
+        // parallel-capable systems concurrently on the JobSystem, each with its OWN command buffer
+        // (buffers execute in registration order afterwards, so draw order stays deterministic).
+        // Anything touching Lua, input, physics, or components other systems consume must stay false.
+        virtual bool CanRunParallel() const
+        {
+            return false;
+        }
     };
 
 } // namespace Desert::ECS
