@@ -6,6 +6,7 @@
 
 #include "FileExplorerPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Panels/NodeGraph/NodeGraphPanel.hpp>
 #include "../../Core/EditorResources.hpp"
 
 #include <Editor/Import/TextureDnD.hpp>
@@ -108,6 +109,7 @@ namespace Desert::Editor
          { FileType::Script, "Script" },   { FileType::Shader, "Shader" },     { FileType::Texture, "Texture" },
          { FileType::Font, "Font" },       { FileType::Cubemap, "Cubemap" },   { FileType::Model, "Model" },
          { FileType::Audio, "Audio" },     { FileType::Material, "Material" },
+         { FileType::ShaderGraph, "Shader Graph" },
     };
 
     static const std::unordered_map<std::string, FileType> s_FileTypes = {
@@ -124,6 +126,7 @@ namespace Desert::Editor
          { "ogg", FileType::Audio },   { "lmat", FileType::Material },
          // Engine-native extensions (see Common::Constants::Extensions).
          { "demat", FileType::Material }, { "desce", FileType::Scene }, { "demesh", FileType::Model },
+         { "dgraph", FileType::ShaderGraph },
     };
 
     static const std::unordered_map<FileType, ImVec4> s_TypeColors = {
@@ -136,6 +139,7 @@ namespace Desert::Editor
          { FileType::Cubemap, { 0.82f, 0.18f, 0.30f, 1.00f } },
          { FileType::Model, { 0.18f, 0.82f, 0.76f, 1.00f } },
          { FileType::Audio, { 0.20f, 0.80f, 0.50f, 1.00f } },
+         { FileType::ShaderGraph, { 0.55f, 0.35f, 0.85f, 1.00f } },
     };
 
     static const std::unordered_map<FileType, const char*> s_FileTypesToIcon = {
@@ -149,6 +153,7 @@ namespace Desert::Editor
          { FileType::Cubemap, ICON_MDI_IMAGE_FILTER_HDR },
          { FileType::Model, ICON_MDI_VECTOR_POLYGON },
          { FileType::Audio, ICON_MDI_MICROPHONE },
+         { FileType::ShaderGraph, ICON_MDI_GRAPH },
     };
 
     FileExplorerPanel::FileExplorerPanel( const std::filesystem::path& rootPath,
@@ -1334,6 +1339,8 @@ namespace Desert::Editor
 
         if ( doubleClicked && folder )
             ChangeDirectory( entry );
+        else if ( doubleClicked && entry->Type == FileType::ShaderGraph )
+            NodeGraphPanel::RequestOpen( entry->AssetPath ); // opens the Node Graph panel with this graph
 
         ImGui::PopID();
         return doubleClicked;

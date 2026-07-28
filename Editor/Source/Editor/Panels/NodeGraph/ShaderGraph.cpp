@@ -54,6 +54,13 @@ namespace Desert::Editor::ShaderGraph
             { "MultiplyFloat", "Multiply (Float)", IM_COL32( 80, 120, 80, 255 ),
               { { "A", ValueType::Float }, { "B", ValueType::Float } },
               { { "Out", ValueType::Float } } },
+            { "Saturate", "Saturate", IM_COL32( 110, 110, 110, 255 ),
+              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } } },
+            { "Power", "Power", IM_COL32( 90, 90, 120, 255 ),
+              { { "In", ValueType::Color }, { "Exp", ValueType::Float } },
+              { { "Out", ValueType::Color } } },
+            { "Sine", "Sine (Float)", IM_COL32( 80, 120, 80, 255 ),
+              { { "In", ValueType::Float } }, { { "Out", ValueType::Float } } },
         };
         return s_Specs;
     }
@@ -202,6 +209,14 @@ namespace Desert::Editor::ShaderGraph
                 else if ( node.Kind == "MultiplyFloat" )
                     decl = std::format( "float {} = {} * {};", var, InputExpr( node, 0, "1.0" ),
                                         InputExpr( node, 1, "1.0" ) );
+                else if ( node.Kind == "Saturate" )
+                    decl = std::format( "vec4 {} = clamp( {}, vec4( 0.0 ), vec4( 1.0 ) );", var,
+                                        InputExpr( node, 0, "vec4( 0.0 )" ) );
+                else if ( node.Kind == "Power" )
+                    decl = std::format( "vec4 {} = pow( max( {}, vec4( 0.0 ) ), vec4( {} ) );", var,
+                                        InputExpr( node, 0, "vec4( 0.0 )" ), InputExpr( node, 1, "1.0" ) );
+                else if ( node.Kind == "Sine" )
+                    decl = std::format( "float {} = sin( {} );", var, InputExpr( node, 0, "0.0" ) );
                 else
                 {
                     error = std::format( "unknown node kind '{}'", node.Kind );

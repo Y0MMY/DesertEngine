@@ -38,6 +38,11 @@ namespace Desert::Editor
         }
 
         void OnUIRender() override;
+        void OnPreUpdate() override;
+
+        // Cross-panel inbox: File Explorer double-click on a .dgraph lands here; the panel opens
+        // itself and loads the graph on the next OnPreUpdate (which runs even while hidden).
+        static void RequestOpen( const std::string& dgraphPath );
 
     private:
         void NewGraph();
@@ -45,6 +50,7 @@ namespace Desert::Editor
         void DrawCanvas();
         void SaveGraph();
         void LoadGraph( const std::string& fileName );
+        void LoadGraphFromPath( const std::string& fullPath );
         void Compile();
 
         const ShaderGraph::Pin* FindPin( uint64_t id ) const;

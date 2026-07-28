@@ -131,11 +131,15 @@ namespace Desert::Editor
 
     void NodeGraphPanel::LoadGraph( const std::string& fileName )
     {
-        const auto path = GraphsDirectory() / fileName;
-        if ( !std::filesystem::exists( path ) )
+        LoadGraphFromPath( ( GraphsDirectory() / fileName ).string() );
+    }
+
+    void NodeGraphPanel::LoadGraphFromPath( const std::string& fullPath )
+    {
+        if ( !std::filesystem::exists( fullPath ) )
             return;
 
-        auto parsed = SG::Deserialize( Common::Utils::FileSystem::ReadFileContent( path ) );
+        auto parsed = SG::Deserialize( Common::Utils::FileSystem::ReadFileContent( fullPath ) );
         if ( !parsed )
         {
             m_Status        = parsed.GetError();
@@ -144,8 +148,25 @@ namespace Desert::Editor
         }
         m_Doc            = parsed.GetValue();
         m_ApplyPositions = true;
-        m_Status         = "Loaded " + fileName;
+        m_Status         = "Loaded " + std::filesystem::path( fullPath ).filename().string();
         m_StatusIsError  = false;
+    }
+
+    // One pending request is plenty — the last double-click wins.
+    static std::string s_PendingOpenRequest;
+
+    void NodeGraphPanel::RequestOpen( const std::string& dgraphPath )
+    {
+        s_PendingOpenRequest = dgraphPath;
+    }
+
+    void NodeGraphPanel::OnPreUpdate()
+    {
+        if ( s_PendingOpenRequest.empty() )
+            return;
+        LoadGraphFromPath( s_PendingOpenRequest );
+        s_PendingOpenRequest.clear();
+        GetVisibility() = true; // double-click opens the panel even if it was hidden
     }
 
     void NodeGraphPanel::Compile()

@@ -43,6 +43,7 @@ namespace Desert::Editor
         Cubemap,
         Model,
         Material,
+        ShaderGraph,
         Project,
         Ini,
         Font
