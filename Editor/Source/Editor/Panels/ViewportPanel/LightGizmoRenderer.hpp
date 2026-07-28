@@ -21,9 +21,6 @@ namespace Desert::Editor
         // Camera entities (CameraComponent): billboard icon + wireframe view frustum.
         void RenderCameras( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,
                             float xpos, float ypos );
-        // Physics colliders (ColliderComponent): green Box/Sphere/Capsule wireframes (UE-style).
-        void RenderColliders( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,
-                              float xpos, float ypos );
         // Skeleton Edit mode: draw the selected skinned mesh's bind-pose skeleton (bone heads + parent->child
         // links) as an overlay, with the bone-tree-selected bone highlighted. Read-only (Phase 1).
         void RenderSkeleton( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,

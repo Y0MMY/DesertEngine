@@ -2,6 +2,7 @@
 
 #include "IRender.hpp"
 #include "Passes/EditorGridPass.hpp"
+#include "Passes/EditorColliderPass.hpp"
 
 namespace Desert::Editor::Render
 {
@@ -20,6 +21,7 @@ namespace Desert::Editor::Render
     private:
         std::weak_ptr<Core::Scene> m_Scene;
 
-        std::unique_ptr<EditorGridPass> m_GridPass;
+        std::unique_ptr<EditorGridPass>     m_GridPass;
+        std::unique_ptr<EditorColliderPass> m_ColliderPass;
     };
 } // namespace Desert::Editor::Render

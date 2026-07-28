@@ -10,6 +10,13 @@ namespace Desert::Editor::Render
             LOG_WARN( "[RenderRegistry] {}", result.GetError() );
             m_GridPass.reset();
         }
+
+        m_ColliderPass = std::make_unique<EditorColliderPass>();
+        if ( const auto result = m_ColliderPass->Install( scene ); !result )
+        {
+            LOG_WARN( "[RenderRegistry] {}", result.GetError() );
+            m_ColliderPass.reset();
+        }
     }
 
     void RenderRegistry::Render()

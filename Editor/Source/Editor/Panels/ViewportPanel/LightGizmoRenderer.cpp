@@ -49,8 +49,7 @@ namespace Desert::Editor
         RenderSpotLights( camera, width, height, xpos, ypos );
         RenderCameras( camera, width, height, xpos, ypos );
 
-        if ( m_Scene->GetSettings().ShowColliders )
-            RenderColliders( camera, width, height, xpos, ypos );
+        // Collider wireframes moved to EditorColliderPass (true 3D, depth-tested) via the Editor Pass API.
 
         if ( Core::SkeletonEditMode::IsActive() )
             RenderSkeleton( camera, width, height, xpos, ypos );
@@ -286,112 +285,6 @@ namespace Desert::Editor
         };
 
         drawList->AddLine( toScreen( ca ), toScreen( cb ), color, thickness );
-    }
-
-    void LightGizmoRenderer::RenderColliders( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
-                                              float height, float xpos, float ypos )
-    {
-        auto         entities  = m_Scene->GetAllEntities();
-        const ImVec2 windowPos = ImGui::GetWindowPos();
-        const auto   mvp       = camera->GetProjectionMatrix() * camera->GetViewMatrix();
-        ImDrawList*  drawList  = ImGui::GetWindowDrawList();
-
-        // UE-style green. Colliders are authored in WORLD units (HalfExtents/Radius/HalfHeight), positioned
-        // at the entity's translation+rotation — NOT scaled by TransformComponent.Scale — to exactly match
-        // the shape PhysicsECSSystem feeds Jolt.
-        const ImU32 col = IM_COL32( 70, 230, 90, 230 );
-
-        for ( auto entity : entities )
-        {
-            if ( !entity.HasComponent<ECS::ColliderComponent>() )
-                continue;
-
-            const auto& collider  = entity.GetComponent<ECS::ColliderComponent>().Data;
-            const auto& transform = entity.GetComponent<ECS::TransformComponent>();
-
-            const glm::mat3 R      = glm::mat3_cast( glm::quat( transform.Rotation ) );
-            const glm::vec3 axisX  = R[0];
-            const glm::vec3 axisY  = R[1];
-            const glm::vec3 axisZ  = R[2];
-            const glm::vec3 center = transform.Translation;
-
-            switch ( collider.Shape )
-            {
-                case Physics::ShapeType::Box:
-                {
-                    const glm::vec3 he = collider.HalfExtents;
-                    // 8 corners (sign bits = x | y<<1 | z<<2) in the rotated local frame.
-                    glm::vec3 c[8];
-                    for ( int i = 0; i < 8; ++i )
-                    {
-                        const float sx = ( i & 1 ) ? 1.0f : -1.0f;
-                        const float sy = ( i & 2 ) ? 1.0f : -1.0f;
-                        const float sz = ( i & 4 ) ? 1.0f : -1.0f;
-                        c[i] = center + axisX * ( sx * he.x ) + axisY * ( sy * he.y ) + axisZ * ( sz * he.z );
-                    }
-                    static const int kEdges[12][2] = { { 0, 1 }, { 1, 3 }, { 3, 2 }, { 2, 0 },
-                                                       { 4, 5 }, { 5, 7 }, { 7, 6 }, { 6, 4 },
-                                                       { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
-                    for ( const auto& e : kEdges )
-                        DrawWorldLine( drawList, c[e[0]], c[e[1]], mvp, width, height, windowPos.x, windowPos.y,
-                                       col );
-                    break;
-                }
-                case Physics::ShapeType::Sphere:
-                {
-                    const float r = collider.Radius;
-                    DrawAxisAlignedCircle( drawList, center, r, 32, axisX, axisZ, mvp, width, height, windowPos.x,
-                                           windowPos.y, col );
-                    DrawAxisAlignedCircle( drawList, center, r, 32, axisX, axisY, mvp, width, height, windowPos.x,
-                                           windowPos.y, col );
-                    DrawAxisAlignedCircle( drawList, center, r, 32, axisY, axisZ, mvp, width, height, windowPos.x,
-                                           windowPos.y, col );
-                    break;
-                }
-                case Physics::ShapeType::Capsule:
-                {
-                    const float     r   = collider.Radius;
-                    const float     hh  = collider.HalfHeight; // half-height of the cylinder section
-                    const glm::vec3 top = center + axisY * hh;
-                    const glm::vec3 bot = center - axisY * hh;
-
-                    // Cylinder end rings (perpendicular to the Y axis).
-                    DrawAxisAlignedCircle( drawList, top, r, 32, axisX, axisZ, mvp, width, height, windowPos.x,
-                                           windowPos.y, col );
-                    DrawAxisAlignedCircle( drawList, bot, r, 32, axisX, axisZ, mvp, width, height, windowPos.x,
-                                           windowPos.y, col );
-
-                    // 4 vertical seam lines.
-                    for ( const glm::vec3& d : { axisX, -axisX, axisZ, -axisZ } )
-                        DrawWorldLine( drawList, top + d * r, bot + d * r, mvp, width, height, windowPos.x,
-                                       windowPos.y, col );
-
-                    // Hemisphere cap arcs (semicircles in the two axis-aligned vertical planes).
-                    const int kArc = 16;
-                    for ( const glm::vec3& side : { axisX, axisZ } )
-                    {
-                        glm::vec3 prevTop = top + side * r;
-                        glm::vec3 prevBot = bot + side * r;
-                        for ( int i = 1; i <= kArc; ++i )
-                        {
-                            const float t   = glm::pi<float>() * i / kArc; // 0..pi
-                            const float cs  = glm::cos( t );
-                            const float sn  = glm::sin( t );
-                            // Top cap bulges along +axisY, bottom along -axisY.
-                            glm::vec3 curTop = top + side * ( r * cs ) + axisY * ( r * sn );
-                            glm::vec3 curBot = bot + side * ( r * cs ) - axisY * ( r * sn );
-                            DrawWorldLine( drawList, prevTop, curTop, mvp, width, height, windowPos.x,
-                                           windowPos.y, col );
-                            DrawWorldLine( drawList, prevBot, curBot, mvp, width, height, windowPos.x,
-                                           windowPos.y, col );
-                            prevTop = curTop;
-                            prevBot = curBot;
-                        }
-                    }
-                    break;
-                }
-            }
-        }
     }
 
     void LightGizmoRenderer::RenderSkeleton( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
