@@ -237,12 +237,16 @@ namespace Desert::Graphic::API::Vulkan
         pipelineLayoutCreateInfo.setLayoutCount = static_cast<uint32_t>( descriptorSetLayouts.size() );
         pipelineLayoutCreateInfo.pSetLayouts    = descriptorSetLayouts.data();
 
+        // Must outlive vkCreatePipelineLayout: pPushConstantRanges is read at the call below, so this
+        // cannot live inside the if-block (a dangling stack pointer here reads garbage sizes in Release).
+        VkPushConstantRange vulkanPushConstantRange{};
+
         const auto& pushConstantRange = vulkanShader->GetShaderPushConstant();
         if ( pushConstantRange )
         {
-            VkPushConstantRange vulkanPushConstantRange{ .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-                                                         .offset     = pushConstantRange->Offset,
-                                                         .size       = pushConstantRange->Size };
+            vulkanPushConstantRange = { .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                        .offset     = pushConstantRange->Offset,
+                                        .size       = pushConstantRange->Size };
 
             pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
             pipelineLayoutCreateInfo.pPushConstantRanges    = &vulkanPushConstantRange;

@@ -70,7 +70,10 @@ namespace Desert::Editor
 
         ImDrawList*  dl     = ImGui::GetWindowDrawList();
         const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const ImVec2 avail  = ImGui::GetContentRegionAvail();
+        // Clamp to >= 1px: a collapsed/undocked-tiny panel reports 0 avail, and InvisibleButton
+        // asserts on zero-sized rects.
+        const ImVec2 availRaw = ImGui::GetContentRegionAvail();
+        const ImVec2 avail    = ImVec2( std::max( availRaw.x, 1.0f ), std::max( availRaw.y, 1.0f ) );
 
         // canvas -> screen
         auto toScreen = [&]( const ImVec2& p )

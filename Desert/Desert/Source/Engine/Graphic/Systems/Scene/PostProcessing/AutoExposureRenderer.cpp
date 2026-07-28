@@ -131,8 +131,8 @@ namespace Desert::Graphic::System
         m_HistogramPipeline->SetInput( 0, sceneColor );
         m_HistogramPipeline->SetStorageBuffer( 1, m_Histogram.get() );
         m_HistogramPipeline->SetPushConstants( &hp, sizeof( hp ) );
-        renderer.DispatchComputeInFrame( m_HistogramPipeline.get(), GroupCount( sceneW ), GroupCount( sceneH ),
-                                         1 );
+        renderer.DispatchComputeInFrame( m_HistogramPipeline.get(), GroupCount( sceneW ),
+                                         GroupCount( sceneH ), 1 );
 
         // 3) Resolve: percentile-clipped weighted average + temporal adaptation -> newLum (1x1).
         AveragePush ap{ kDeltaTime,  m_AdaptSpeed,  m_MinLuma,    m_MaxLuma,
