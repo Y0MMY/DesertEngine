@@ -26,11 +26,12 @@ namespace Desert::Editor
 
     private:
         std::vector<LogEntry>                    m_Entries;
-        std::vector<int>                         m_VisibleIndices; // entries passing the level filter (reused each frame)
         std::filesystem::file_time_type          m_LastWriteTime{};
         bool                                     m_ScrollToBottom = true;
         bool                                     m_ShowInfo       = true;
         bool                                     m_ShowWarnings   = true;
         bool                                     m_ShowErrors     = true;
+        bool                                     m_Collapse       = true; // fold consecutive duplicates
+        char                                     m_Filter[128]    = {};   // case-insensitive search
     };
 } // namespace Desert::Editor
