@@ -1,5 +1,6 @@
 #include "ViewportPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/EditorPreferences.hpp>
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
@@ -411,6 +412,10 @@ namespace Desert::Editor
         if ( m_Scene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
             m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y,
                                           m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y );
+
+        // Perf HUD (View -> Perf HUD): FPS + frame graph + top CPU scopes, useful in Play too.
+        if ( EditorPreferences::Get().ShowPerfHud )
+            m_PerfHud.Draw( viewportMin, viewportMax );
     }
 
     void ViewportPanel::OnPreUpdate()

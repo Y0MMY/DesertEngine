@@ -14,7 +14,8 @@ namespace Desert::Editor
         float RotateSnapDeg    = 15.0f; // degrees
         float ScaleSnap        = 0.1f;
         bool  PersistentSnap   = false;
-        int   AutosaveMinutes  = 5; // 0 = autosave off
+        int   AutosaveMinutes  = 5;     // 0 = autosave off
+        bool  ShowPerfHud      = false; // in-viewport FPS / frame-graph / top-scopes overlay
 
         static EditorPreferences& Get();
 

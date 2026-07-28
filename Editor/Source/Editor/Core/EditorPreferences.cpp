@@ -51,7 +51,10 @@ namespace Desert::Editor
         const std::string raw = Common::Utils::FileSystem::ReadFileContent( PrefsFile() );
         if ( !raw.empty() )
         {
-            if ( auto parsed = rfl::json::read<EditorPreferences>( raw ); parsed.has_value() )
+            // DefaultIfMissing: prefs written by older builds (fewer fields) keep loading — new
+            // fields just take their in-struct defaults instead of failing the whole file.
+            if ( auto parsed = rfl::json::read<EditorPreferences, rfl::DefaultIfMissing>( raw );
+                 parsed.has_value() )
                 Get() = parsed.value();
             else
                 LOG_WARN( "[Prefs] editor.json is corrupt, using defaults: {}", parsed.error().what() );

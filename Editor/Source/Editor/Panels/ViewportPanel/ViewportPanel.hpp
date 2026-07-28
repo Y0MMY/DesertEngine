@@ -9,6 +9,7 @@
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 
 #include "LightGizmoRenderer.hpp"
+#include "PerfHudOverlay.hpp"
 #include "Tools/FoliagePaintTool.hpp"
 #include "Tools/TerrainPaintTool.hpp"
 #include "Tools/GizmoController.hpp"
@@ -74,6 +75,7 @@ namespace Desert::Editor
         const Assets::AssetManager*           m_AssetManager = nullptr; // for prefab drag-drop instantiate
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
         std::unique_ptr<LightGizmoRenderer>   m_LightGizmoRenderer;
+        PerfHudOverlay                        m_PerfHud; // View -> Perf HUD viewport overlay
         Tools::FoliagePaintTool               m_FoliageTool; // UE5-style foliage painting (extracted)
         Tools::TerrainPaintTool               m_TerrainTool; // terrain splat-layer painting (extracted)
         Tools::GizmoController                m_Gizmo;       // object + bone transform gizmos (extracted)

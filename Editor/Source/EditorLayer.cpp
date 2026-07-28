@@ -1273,6 +1273,8 @@ namespace Desert::Editor
 
         ImGui::Separator();
         ImGui::MenuItem( "Profiler", "", &m_ShowProfiler, true );
+        if ( ImGui::MenuItem( "Perf HUD", "", &EditorPreferences::Get().ShowPerfHud, true ) )
+            EditorPreferences::Save(); // persist the toggle like the rest of the user prefs
 
         ImGui::EndMenu();
     }
