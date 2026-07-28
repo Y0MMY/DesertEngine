@@ -8,6 +8,7 @@
 #include <Common/Core/Profiler.hpp>
 
 #include <variant>
+#include <chrono>
 #include <cmath>
 #include <algorithm>
 
@@ -249,6 +250,36 @@ namespace Desert::Graphic::System
                 const size_t sz =
                      std::min( sizeof( cam ), static_cast<size_t>( camUB->GetUniform()->GetSize() ) );
                 camUB->SetRawData( reinterpret_cast<const std::byte*>( &cam ), sz );
+            }
+
+            // Engine-filled TimeUB (opt-in: any shader declaring `uniform TimeUB { vec4 TimeData; }`
+            // gets it — the shader-graph Time node relies on this). x = seconds since engine start.
+            if ( auto* timeUB = material->Get<UniformBufferProperty>( "TimeUB" ) )
+            {
+                static const auto s_TimeOrigin = std::chrono::steady_clock::now();
+                const float       seconds      = std::chrono::duration<float>(
+                                             std::chrono::steady_clock::now() - s_TimeOrigin )
+                                             .count();
+                const glm::vec4 timeData( seconds, 0.0f, 0.0f, 0.0f );
+                const size_t    sz = std::min( sizeof( timeData ),
+                                               static_cast<size_t>( timeUB->GetUniform()->GetSize() ) );
+                timeUB->SetRawData( reinterpret_cast<const std::byte*>( &timeData ), sz );
+            }
+
+            // Engine-filled DirectionLightsUB (opt-in, same PBR payload layout): generic shaders that
+            // want lighting (the shader graph's Lit mode) declare the UB and receive the scene's
+            // directional light — previously only PBR materials got light data.
+            if ( auto* lightsUB =
+                      material->Get<UniformBufferProperty>( ShaderProtocols::DirectionLight::Name ) )
+            {
+                const auto& dirLights = m_SceneRenderer->GetDirectionLights().DirectionLights;
+                if ( !dirLights.empty() )
+                {
+                    const size_t sz = std::min(
+                         dirLights.size() * sizeof( ShaderProtocols::DirectionLightPayload ),
+                         static_cast<size_t>( lightsUB->GetUniform()->GetSize() ) );
+                    lightsUB->SetRawData( reinterpret_cast<const std::byte*>( dirLights.data() ), sz );
+                }
             }
 
             if ( !g.SlotMaterial )

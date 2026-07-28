@@ -1,0 +1,38 @@
+// Shared VERTEX stage for shader-graph (and other generic surface) shaders: the generic-mesh
+// contract — fixed vertex layout, CameraUB at binding 0, Transform push constant.
+//
+// The including stage configures it with defines BEFORE the #include:
+//   #define GRAPH_LIT 1        — also pass the world-space normal (location 1)
+//   #define GRAPH_DEPTH_ONLY 1 — no varyings at all (shadow/depth pass)
+
+layout( location = 0 ) in vec3 a_Position;
+layout( location = 1 ) in vec3 a_Normal;
+layout( location = 2 ) in vec3 a_Tangent;
+layout( location = 3 ) in vec3 a_Bitangent;
+layout( location = 4 ) in vec2 a_TextureCoord;
+
+#include "CameraUB.glslh"
+
+layout( push_constant ) uniform PushConstants
+{
+    mat4 Transform;
+}
+m_PushConstants;
+
+#ifndef GRAPH_DEPTH_ONLY
+layout( location = 0 ) out vec2 v_UV;
+#ifdef GRAPH_LIT
+layout( location = 1 ) out vec3 v_Normal;
+#endif
+#endif
+
+void main()
+{
+#ifndef GRAPH_DEPTH_ONLY
+    v_UV = a_TextureCoord;
+#ifdef GRAPH_LIT
+    v_Normal = mat3( m_PushConstants.Transform ) * a_Normal;
+#endif
+#endif
+    gl_Position = cameraUB.Projection * cameraUB.View * m_PushConstants.Transform * vec4( a_Position, 1.0 );
+}

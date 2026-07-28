@@ -32,6 +32,10 @@ namespace Desert::Editor
         void RequestMesh( const Assets::AssetHandle& meshHandle, const std::string& outPng,
                           const Assets::AssetHandle& material = Assets::AssetHandle( static_cast<uint64_t>( 0 ) ) );
 
+        // Queue a sphere rendered with a REGISTERED shader by name (the generic/data-driven
+        // material path: MaterialComponent.ShaderName). The shader-graph editor's live preview.
+        void RequestShader( const std::string& shaderName, const std::string& outPng );
+
         // Is a capture in flight? Gates requests to one at a time.
         [[nodiscard]] bool HasPending() const { return m_Phase != 0; }
 
@@ -55,6 +59,7 @@ namespace Desert::Editor
         Assets::AssetHandle m_PendingHandle{ static_cast<uint64_t>( 0 ) };
         Assets::AssetHandle m_PendingMaterial{ static_cast<uint64_t>( 0 ) }; // mesh's linked material (0 = default)
         std::string         m_PendingPng;
+        std::string         m_PendingShaderName; // non-empty = shader-by-name preview (generic path)
         bool                m_PendingIsMesh    = false; // false = material preview, true = mesh
         bool                m_PendingFlatPreview = false; // material on a camera-facing plane (foliage/cutout)
         int                 m_Phase = 0; // 0 = idle, else = remaining render frames (capture on the last)

@@ -53,6 +53,7 @@ namespace Desert::Editor
         {
             std::string       Name   = "GraphShader";
             uint64_t          NextId = 1;
+            bool              Lit    = false; // Lambert shading from the scene's directional light
             std::vector<Node> Nodes;
             std::vector<Link> Links;
         };

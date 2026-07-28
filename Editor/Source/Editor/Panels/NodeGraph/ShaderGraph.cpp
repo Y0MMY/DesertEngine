@@ -61,6 +61,8 @@ namespace Desert::Editor::ShaderGraph
               { { "Out", ValueType::Color } } },
             { "Sine", "Sine (Float)", IM_COL32( 80, 120, 80, 255 ),
               { { "In", ValueType::Float } }, { { "Out", ValueType::Float } } },
+            { "Time", "Time", IM_COL32( 60, 140, 150, 255 ), {},
+              { { "Seconds", ValueType::Float } } },
         };
         return s_Specs;
     }
@@ -217,6 +219,8 @@ namespace Desert::Editor::ShaderGraph
                                         InputExpr( node, 0, "vec4( 0.0 )" ), InputExpr( node, 1, "1.0" ) );
                 else if ( node.Kind == "Sine" )
                     decl = std::format( "float {} = sin( {} );", var, InputExpr( node, 0, "0.0" ) );
+                else if ( node.Kind == "Time" )
+                    decl = std::format( "float {} = timeUB.TimeData.x;", var );
                 else
                 {
                     error = std::format( "unknown node kind '{}'", node.Kind );
@@ -313,76 +317,58 @@ namespace Desert::Editor::ShaderGraph
 
         out << "    State\n    {\n        Cull Back\n        ZTest LEqual\n        ZWrite On\n    }\n\n";
 
-        // Vertex stage + depth pass mirror Unlit.shader — the generic-mesh contract (fixed vertex
-        // layout, CameraUB at binding 0, Transform push constant).
-        static const char* kVertex = R"(    Vertex
-    {
-        layout( location = 0 ) in vec3 a_Position;
-        layout( location = 1 ) in vec3 a_Normal;
-        layout( location = 2 ) in vec3 a_Tangent;
-        layout( location = 3 ) in vec3 a_Bitangent;
-        layout( location = 4 ) in vec2 a_TextureCoord;
+        const bool usesTime = std::any_of( doc.Nodes.begin(), doc.Nodes.end(),
+                                           []( const Node& n ) { return n.Kind == "Time"; } );
 
-        #include "../../Common/CameraUB.glslh"
-
-        layout( push_constant ) uniform PushConstants
-        {
-            mat4 Transform;
-        }
-        m_PushConstants;
-
-        layout( location = 0 ) out vec2 v_UV;
-
-        void main()
-        {
-            v_UV        = a_TextureCoord;
-            gl_Position = cameraUB.Projection * cameraUB.View * m_PushConstants.Transform * vec4( a_Position, 1.0 );
-        }
-    }
-)";
-        out << kVertex << "\n";
+        // NO GLSL boilerplate lives in this compiler: the vertex contract and the engine-filled UB
+        // declarations are shared .glslh includes (Resources/Shaders/Common/), configured with
+        // defines — hand-written shaders reuse the same files. The generated file only contains the
+        // structure and the graph's own fragment expressions.
+        out << "    Vertex\n    {\n";
+        if ( doc.Lit )
+            out << "        #define GRAPH_LIT 1\n";
+        out << "        #include \"../../Common/GraphVertex.glslh\"\n";
+        out << "    }\n\n";
 
         out << "    Fragment\n    {\n";
         out << "        layout( location = 0 ) in vec2 v_UV;\n";
-        out << "        layout( location = 0 ) out vec4 o_Color;\n\n";
-        out << "        void main()\n        {\n";
+        if ( doc.Lit )
+            out << "        layout( location = 1 ) in vec3 v_Normal;\n";
+        out << "        layout( location = 0 ) out vec4 o_Color;\n";
+        if ( usesTime )
+            out << "\n        #include \"../../Common/TimeUB.glslh\"\n";
+        if ( doc.Lit )
+            out << "\n        #include \"../../Common/DirectionLightsUB.glslh\"\n";
+        out << "\n        void main()\n        {\n";
         out << compiler.body.str();
         out << std::format( "            vec4 albedo = {};\n", albedo );
-        out << std::format( "            o_Color = vec4( albedo.rgb + ( {} ).rgb, albedo.a * ( {} ) );\n",
-                            emission, alpha );
+        if ( doc.Lit )
+        {
+            out << "            vec3 N = normalize( v_Normal );\n";
+            out << "            vec3 L = normalize( -directionLights.directionLights.Direction.xyz );\n";
+            out << "            vec3 lightCol = directionLights.directionLights.ColorIntensity.rgb *\n"
+                   "                            directionLights.directionLights.ColorIntensity.a;\n";
+            out << "            vec3 shaded = albedo.rgb * ( vec3( 0.12 ) + max( dot( N, L ), 0.0 ) * "
+                   "lightCol );\n";
+            out << std::format(
+                 "            o_Color = vec4( shaded + ( {} ).rgb, albedo.a * ( {} ) );\n", emission,
+                 alpha );
+        }
+        else
+        {
+            out << std::format(
+                 "            o_Color = vec4( albedo.rgb + ( {} ).rgb, albedo.a * ( {} ) );\n", emission,
+                 alpha );
+        }
         out << "        }\n    }\n\n";
 
-        static const char* kDepthPass = R"(    Pass "Depth"
-    {
-        State
-        {
-            Cull Front
-        }
-
-        Vertex
-        {
-            layout( location = 0 ) in vec3 a_Position;
-            layout( location = 1 ) in vec3 a_Normal;
-            layout( location = 2 ) in vec3 a_Tangent;
-            layout( location = 3 ) in vec3 a_Bitangent;
-            layout( location = 4 ) in vec2 a_TextureCoord;
-
-            #include "../../Common/CameraUB.glslh"
-
-            layout( push_constant ) uniform PushConstants
-            {
-                mat4 Transform;
-            }
-            m_PushConstants;
-
-            void main()
-            {
-                gl_Position = cameraUB.Projection * cameraUB.View * m_PushConstants.Transform * vec4( a_Position, 1.0 );
-            }
-        }
-    }
-)";
-        out << kDepthPass;
+        // Depth-only variant for shadow rendering, addressable as "<Name>/Depth".
+        out << "    Pass \"Depth\"\n    {\n";
+        out << "        State\n        {\n            Cull Front\n        }\n\n";
+        out << "        Vertex\n        {\n";
+        out << "            #define GRAPH_DEPTH_ONLY 1\n";
+        out << "            #include \"../../Common/GraphVertex.glslh\"\n";
+        out << "        }\n    }\n";
         out << "}\n";
 
         return Common::MakeSuccess( out.str() );

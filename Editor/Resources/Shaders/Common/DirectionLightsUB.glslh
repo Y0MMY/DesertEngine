@@ -1,0 +1,14 @@
+// Scene directional light in the shared PBR payload layout (two vec4s). Engine-filled by
+// reflection name: PBR materials get it through MaterialPBRBase, generic/data-driven materials
+// through MeshRenderer::DrawGenericMeshes — declare the block and receive the light.
+struct DirectionLight
+{
+    vec4 Direction;      // xyz = normalized direction (from the light)
+    vec4 ColorIntensity; // rgb = color, a = intensity
+};
+
+layout( binding = 14 ) uniform DirectionLightsUB
+{
+    DirectionLight directionLights;
+}
+directionLights;

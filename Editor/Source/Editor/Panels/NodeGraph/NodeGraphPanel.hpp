@@ -3,6 +3,8 @@
 #include "../IPanel.hpp"
 #include "ShaderGraph.hpp"
 
+#include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +17,17 @@ namespace ax::NodeEditor
 namespace Desert::Assets
 {
     class AssetManager;
+}
+
+namespace Desert::Editor
+{
+    class AssetThumbnailRenderer;
+    class ThumbnailCache;
+}
+
+namespace Desert::Graphic
+{
+    class Image2D;
 }
 
 namespace Desert::Editor
@@ -56,6 +69,8 @@ namespace Desert::Editor
         const ShaderGraph::Pin* FindPin( uint64_t id ) const;
         bool                    IsInputPin( uint64_t id ) const;
 
+        void DrawPreviewColumn();
+
         std::shared_ptr<Assets::AssetManager> m_AssetManager;
         ax::NodeEditor::EditorContext*        m_Context = nullptr;
 
@@ -63,5 +78,15 @@ namespace Desert::Editor
         bool                  m_ApplyPositions = true; // push Node.X/Y into the canvas next frame
         std::string           m_Status;                // last save/compile result line
         bool                  m_StatusIsError = false;
+
+        // Live preview: after a successful Compile the shader is rendered on a sphere by the
+        // thumbnail renderer (own offscreen scene, lazily created on first use) and shown beside
+        // the canvas.
+        std::unique_ptr<AssetThumbnailRenderer> m_PreviewRenderer;
+        std::unique_ptr<ThumbnailCache>         m_PreviewCache;
+        std::shared_ptr<Graphic::Image2D>       m_PreviewImage;
+        std::unique_ptr<UI::UIHelper>           m_UIHelper;
+        bool                                    m_PreviewRequested = false; // compile succeeded -> queue render
+        bool                                    m_PreviewWaiting   = false; // render in flight -> collect PNG
     };
 } // namespace Desert::Editor

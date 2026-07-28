@@ -130,6 +130,7 @@ namespace Desert::Editor
             return;
         m_PendingHandle      = materialHandle;
         m_PendingPng         = outPng;
+        m_PendingShaderName.clear();
         m_PendingIsMesh      = false;
         m_PendingFlatPreview = flatPreview;
         // Render for several frames before reading back: the first renders after init aren't "warm" yet
@@ -147,8 +148,21 @@ namespace Desert::Editor
         m_PendingHandle   = meshHandle;
         m_PendingMaterial = material;
         m_PendingPng      = outPng;
+        m_PendingShaderName.clear();
         m_PendingIsMesh   = true;
         m_Phase           = kRenderFrames;
+    }
+
+    void AssetThumbnailRenderer::RequestShader( const std::string& shaderName, const std::string& outPng )
+    {
+        if ( shaderName.empty() || m_Phase != 0 )
+            return;
+        m_PendingHandle     = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+        m_PendingShaderName = shaderName;
+        m_PendingPng        = outPng;
+        m_PendingIsMesh     = false;
+        m_PendingFlatPreview = false;
+        m_Phase             = kRenderFrames;
     }
 
     void AssetThumbnailRenderer::Tick()
@@ -158,7 +172,26 @@ namespace Desert::Editor
         EnsureInit();
 
         auto& smc = m_Target.GetComponent<ECS::StaticMeshComponent>();
-        if ( m_PendingIsMesh )
+
+        // The generic (shader-by-name) path is driven by MaterialComponent.ShaderName: set it for
+        // shader previews, clear it otherwise so material/mesh previews go back to the PBR path.
+        {
+            if ( !m_Target.HasComponent<ECS::MaterialComponent>() )
+                m_Target.AddComponent<ECS::MaterialComponent>();
+            m_Target.GetComponent<ECS::MaterialComponent>().ShaderName = m_PendingShaderName;
+        }
+
+        if ( !m_PendingShaderName.empty() )
+        {
+            // Sphere with the named shader (DataDrivenMaterial built by the renderer from the name).
+            smc.MeshHandle = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
+            smc.Primitive  = Geometry::PrimitiveType::Sphere;
+            smc.MaterialSlots.clear();
+            smc.RuntimeMaterialInstances.clear();
+            smc.RuntimeMesh.reset();
+            FitTarget( glm::vec3( 0.0f ), 1.0f );
+        }
+        else if ( m_PendingIsMesh )
         {
             // Asset mesh, auto-framed by its bounds. Apply the mesh's linked (sidecar) material to every slot
             // if one was provided, so the preview shows the real look instead of a flat default gray.

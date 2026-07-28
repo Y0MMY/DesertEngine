@@ -1,5 +1,8 @@
 #include "NodeGraphPanel.hpp"
 
+#include <Editor/Widgets/AssetThumbnailRenderer.hpp>
+#include <Editor/Widgets/ThumbnailCache.hpp>
+
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Shader/ShaderAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -44,6 +47,11 @@ namespace Desert::Editor
         std::filesystem::path CompiledShaderPath( const std::string& name )
         {
             return Common::Constants::Path::SHADERDIR_PATH / "Programs" / "Graph" / ( name + ".shader" );
+        }
+
+        std::filesystem::path PreviewPngPath( const std::string& name )
+        {
+            return Common::Constants::Path::COOKED_PATH / "GraphPreviews" / ( name + ".png" );
         }
     } // namespace
 
@@ -190,6 +198,7 @@ namespace Desert::Editor
             // Already registered: the overwrite is picked up by the shader hot-reload poll.
             m_Status        = m_Doc.Name + ".shader recompiled — hot reload applies it";
             m_StatusIsError = false;
+            m_PreviewRequested = true;
             return;
         }
 
@@ -210,6 +219,7 @@ namespace Desert::Editor
         }
         m_Status        = m_Doc.Name + " compiled + registered — pick it in Material \\ Shader";
         m_StatusIsError = false;
+        m_PreviewRequested = true; // render the fresh shader on the preview sphere
     }
 
     void NodeGraphPanel::DrawToolbar()
@@ -246,6 +256,10 @@ namespace Desert::Editor
                 ImGui::TextDisabled( "no saved graphs" );
             ImGui::EndPopup();
         }
+
+        ImGui::SameLine();
+        // Lambert from the scene's directional light (DirectionLightsUB) vs. pure unlit output.
+        ImGui::Checkbox( "Lit", &m_Doc.Lit );
 
         ImGui::SameLine();
         if ( ImGui::Button( "Compile" ) )
@@ -460,9 +474,73 @@ namespace Desert::Editor
         ed::SetCurrentEditor( nullptr );
     }
 
+    void NodeGraphPanel::DrawPreviewColumn()
+    {
+        ImGui::TextDisabled( "Preview" );
+        constexpr float kPreviewSize = 128.0f;
+
+        if ( m_PreviewImage && m_UIHelper )
+            m_UIHelper->Image( m_PreviewImage, ImVec2( kPreviewSize, kPreviewSize ) );
+        else
+        {
+            // Placeholder box until the first successful Compile.
+            ImDrawList*  dl = ImGui::GetWindowDrawList();
+            const ImVec2 p0 = ImGui::GetCursorScreenPos();
+            dl->AddRectFilled( p0, ImVec2( p0.x + kPreviewSize, p0.y + kPreviewSize ),
+                               IM_COL32( 30, 30, 34, 255 ), 4.0f );
+            dl->AddRect( p0, ImVec2( p0.x + kPreviewSize, p0.y + kPreviewSize ),
+                         IM_COL32( 255, 255, 255, 25 ), 4.0f );
+            ImGui::Dummy( ImVec2( kPreviewSize, kPreviewSize ) );
+        }
+        if ( m_PreviewWaiting || ( m_PreviewRenderer && m_PreviewRenderer->HasPending() ) )
+            ImGui::TextDisabled( "rendering..." );
+        else if ( !m_PreviewImage )
+            ImGui::TextDisabled( "Compile to render" );
+    }
+
     void NodeGraphPanel::OnUIRender()
     {
         DrawToolbar();
+
+        // Preview pipeline: request after a successful Compile, tick the offscreen render, and
+        // pick up the finished PNG. All lazy — zero cost until the first Compile.
+        if ( m_PreviewRequested )
+        {
+            if ( !m_PreviewRenderer )
+            {
+                m_PreviewRenderer = std::make_unique<AssetThumbnailRenderer>();
+                m_PreviewCache    = std::make_unique<ThumbnailCache>();
+                m_UIHelper        = std::make_unique<UI::UIHelper>();
+                m_UIHelper->Init();
+            }
+            if ( !m_PreviewRenderer->HasPending() )
+            {
+                const auto png = PreviewPngPath( m_Doc.Name );
+                std::error_code ec;
+                std::filesystem::create_directories( png.parent_path(), ec );
+                m_PreviewRenderer->RequestShader( m_Doc.Name, png.string() );
+                m_PreviewRequested = false;
+                m_PreviewWaiting   = true;
+            }
+        }
+        if ( m_PreviewRenderer )
+            m_PreviewRenderer->Tick();
+        if ( m_PreviewWaiting && m_PreviewRenderer && !m_PreviewRenderer->HasPending() )
+        {
+            const auto png = PreviewPngPath( m_Doc.Name ).string();
+            m_PreviewCache->Invalidate( png );
+            m_PreviewImage   = m_PreviewCache->Get( png );
+            m_PreviewWaiting = false;
+        }
+
+        constexpr float kPreviewColumnW = 144.0f;
+        ImGui::BeginChild( "##graphCanvasRegion", ImVec2( -kPreviewColumnW, 0.0f ) );
         DrawCanvas();
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        DrawPreviewColumn();
+        ImGui::EndGroup();
     }
 } // namespace Desert::Editor
