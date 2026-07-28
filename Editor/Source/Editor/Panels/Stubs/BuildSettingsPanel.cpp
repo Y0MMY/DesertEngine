@@ -91,8 +91,30 @@ namespace Desert::Editor
         }
         ImGui::EndDisabled();
         if ( ImGui::IsItemHovered() && !building )
-            ImGui::SetTooltip( "Bakes the project into a self-contained game folder:\n"
-                               "Runtime + Assets (raw mesh sources stripped) + Cooked + shaders + run.sh" );
+            ImGui::SetTooltip( "Bakes the project into a self-contained game:\n"
+                               "Runtime + Content.dpak (+ .app bundle with MoltenVK on macOS)" );
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( building );
+        if ( ImGui::Button( ICON_MDI_ARCHIVE "  Build pak only", ImVec2( 160.0f, 0.0f ) ) )
+        {
+            m_Building.store( true );
+            m_HasResult.store( false );
+            Common::JobSystem::Get().Submit(
+                 [this]
+                 {
+                     const auto result = BuildContentPak();
+                     m_LastSuccess     = result.Success;
+                     m_LastMessage     = result.Message;
+                     m_LastPackageDir  = result.PackageDir;
+                     m_HasResult.store( true );
+                     m_Building.store( false );
+                 } );
+        }
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered() && !building )
+            ImGui::SetTooltip( "Rebuilds ONLY Content.dpak next to the .deproj (no Runtime copy).\n"
+                               "Also doable from scripts/CI via Tools/PakTool." );
 
         if ( m_HasResult.load() )
         {

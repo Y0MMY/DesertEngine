@@ -36,4 +36,9 @@ namespace Desert::Editor
     // dependencies (MoltenVK/Vulkan loader via Homebrew) are NOT bundled; run.sh resolves them the
     // same way the dev scripts do.
     PackageResult PackageGame( const PackageOptions& options );
+
+    // Rebuilds ONLY the content archive (no Runtime copy, no bundle) — written next to the .deproj so
+    // the standalone Runtime can mount it for the CURRENT dev project. Loose files still override pak
+    // entries (disk-first VFS), so a stale archive can never shadow fresh edits in dev.
+    PackageResult BuildContentPak();
 } // namespace Desert::Editor

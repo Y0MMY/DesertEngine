@@ -21,6 +21,7 @@ include "Tools/DesertHeaderTool/"
 include "Tools/FbxMeshSplitter/"
 include "Tools/ProjectHub/"
 include "Tools/DShaderTool/"
+include "Tools/PakTool/"
 group ""
 
 include "Desert/"

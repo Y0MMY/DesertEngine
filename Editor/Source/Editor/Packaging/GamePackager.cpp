@@ -310,4 +310,37 @@ namespace Desert::Editor
         LOG_INFO( "[Package] {}", msg.str() );
         return { true, msg.str(), fs::absolute( root, ec ).string() };
     }
+    PackageResult BuildContentPak()
+    {
+        using Project::ProjectContext;
+        if ( !ProjectContext::HasProject() )
+            return { false, "No project is open.", "" };
+
+        namespace P = Common::Constants::Path;
+        std::error_code ec;
+        const fs::path pakPath = fs::path( ProjectContext::Directory() ) / "Content.dpak";
+
+        CopyStats   stats;
+        std::string error;
+
+        Common::Utils::PakWriter pak( pakPath );
+        if ( !pak.IsOpen() )
+            return { false, "Cannot create " + pakPath.string(), "" };
+
+        if ( !AddTreeToPak( pak, P::ASSETS_PATH, "Assets", /*skipRawMeshSources=*/true, stats, error ) )
+            return { false, error, "" };
+        if ( !AddTreeToPak( pak, P::COOKED_PATH, "Cooked", false, stats, error ) )
+            return { false, error, "" };
+        if ( !AddTreeToPak( pak, P::SHADERDIR_PATH, "Resources/Shaders", false, stats, error ) )
+            return { false, error, "" };
+
+        if ( pak.Finalize() == 0 )
+            return { false, "Failed to finalize " + pakPath.string() + " (no entries?)", "" };
+
+        std::ostringstream msg;
+        msg << "Content.dpak rebuilt: " << stats.Files << " file(s), " << ( stats.Bytes / ( 1024 * 1024 ) )
+            << " MB -> " << fs::absolute( pakPath, ec ).string();
+        LOG_INFO( "[Package] {}", msg.str() );
+        return { true, msg.str(), fs::absolute( pakPath, ec ).string() };
+    }
 } // namespace Desert::Editor
