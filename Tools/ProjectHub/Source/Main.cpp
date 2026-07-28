@@ -14,6 +14,8 @@
 
 #include <GLFW/glfw3.h>
 
+#include <Common/Core/Version.hpp>
+
 #ifdef __APPLE__
 #include <OpenGL/gl.h>
 #elif defined( _WIN32 )
@@ -379,7 +381,8 @@ namespace
         ImGui::Combo( "##config", &st.Config, configs, 2 );
 
         ImGui::SetCursorPosX( 24.0f );
-        ImGui::TextColored( kTextDim, "v0.1  |  dev" );
+        ImGui::TextColored( kTextDim, "%s | %s", Common::Version::Full(),
+                            Common::Version::Branch() );
 
         ImGui::EndChild();
         ImGui::PopStyleColor();

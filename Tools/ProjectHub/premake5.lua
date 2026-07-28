@@ -17,11 +17,15 @@ project "ProjectHub"
     includedirs {
         "%{wks.location}/ThirdParty/ImGui/",
         "%{wks.location}/ThirdParty/GLFW/include/",
+        -- Common: only for the shared build-version identity (Common::Version).
+        "%{wks.location}/Desert/Common/Source/",
+        "%{wks.location}/ThirdParty/spdlog/include/",
     }
 
     links {
         "ImGui",
         "GLFW",
+        "Common",
     }
 
     filter "configurations:Debug"
@@ -37,6 +41,7 @@ project "ProjectHub"
             "CoreFoundation.framework",
             "CoreVideo.framework",
             "OpenGL.framework",
+            "Foundation.framework",
         }
         -- The OpenGL2 backend uses the (deprecated but present) system GL — silence the warning spam.
         defines { "GL_SILENCE_DEPRECATION" }

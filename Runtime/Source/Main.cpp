@@ -10,6 +10,7 @@
 #include <Engine/Project/ProjectContext.hpp>
 
 #include <Common/Utilities/VFS.hpp>
+#include <Common/Core/Version.hpp>
 
 #include <filesystem>
 
@@ -78,6 +79,8 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
         if ( std::filesystem::exists( pak ) )
             Common::Utils::VFS::MountPak( pak );
     }
+
+    std::printf( "Desert Runtime %s\n", Common::Version::Full() );
 
     ApplicationInfo appInfo;
     appInfo.Title = Desert::Project::ProjectContext::Current().Name;

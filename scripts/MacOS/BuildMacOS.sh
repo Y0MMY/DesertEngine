@@ -30,6 +30,9 @@ if ! command -v premake5 >/dev/null 2>&1; then
     exit 1
 fi
 
+# Refresh the build identity (no-op when the version did not change).
+./scripts/GenVersion.sh || true
+
 echo "--- Generating Makefiles (premake5 gmake2)"
 premake5 gmake2 "${PREMAKE_ARGS[@]+"${PREMAKE_ARGS[@]}"}"
 

@@ -31,6 +31,7 @@
 #include <Engine/Graphic/Image.hpp> // Image2D::ReadPixelsRGBA8 (debug frame dump)
 #include <Engine/Core/Input.hpp>
 #include <Common/Core/KeyCodes.hpp>
+#include <Common/Core/Version.hpp>
 #include <stb_image/stb_image_write.h>
 #include "Editor/Core/ImGuiUtilities.hpp"
 #include <ImGui/imgui_internal.h>
@@ -113,6 +114,9 @@ namespace Desert::Editor
         // across loads — Clear() + deserialize — so this stays valid; the history itself is cleared on
         // load/Play/Stop instead).
         Commands::SetContext( m_MainScene.get(), m_AssetManager.get() );
+
+        LOG_INFO( "[Editor] Desert Engine {} ({} branch)", Common::Version::Full(),
+                  Common::Version::Branch() );
 
         // User prefs (snap steps, camera speed, autosave) from ~/.desertengine/editor.json. Snap values
         // apply immediately; the camera speed is applied on the first frame (the camera exists by then).
@@ -1003,9 +1007,9 @@ namespace Desert::Editor
         constexpr const char* kBuildConfig = "Release";
 #endif
         const float fps    = ImGui::GetIO().Framerate;
-        char        stats[80];
-        std::snprintf( stats, sizeof( stats ), "%s   " ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms",
-                       kBuildConfig, fps, fps > 0.0f ? 1000.0f / fps : 0.0f );
+        char        stats[160];
+        std::snprintf( stats, sizeof( stats ), "%s  %s   " ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms",
+                       Common::Version::Full(), kBuildConfig, fps, fps > 0.0f ? 1000.0f / fps : 0.0f );
         const float statsW = ImGui::CalcTextSize( stats ).x;
         ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - statsW );
         ImGui::TextDisabled( "%s", stats );
