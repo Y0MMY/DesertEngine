@@ -695,7 +695,19 @@ namespace Desert::Editor
             {
                 ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
             }
-            ImGui::Begin( panel->GetName().c_str() );
+
+            // First-ever open: give the panel its preferred size, centered on the main viewport —
+            // floating tools no longer pop up as tiny windows in a corner. imgui.ini keeps the
+            // user's layout afterwards (FirstUseEver never fights it).
+            if ( const ImVec2 defSize = panel->GetDefaultSize(); defSize.x > 0.0f && defSize.y > 0.0f )
+            {
+                ImGui::SetNextWindowSize( defSize, ImGuiCond_FirstUseEver );
+                const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+                ImGui::SetNextWindowPos( center, ImGuiCond_FirstUseEver, ImVec2( 0.5f, 0.5f ) );
+            }
+
+            // p_open: the title-bar X closes the panel and stays in sync with the View menu.
+            ImGui::Begin( panel->GetName().c_str(), &panel->GetVisibility() );
             {
                 DESERT_PROFILE_SCOPE_DYNAMIC( panel->GetName().c_str() );
                 panel->OnUIRender();

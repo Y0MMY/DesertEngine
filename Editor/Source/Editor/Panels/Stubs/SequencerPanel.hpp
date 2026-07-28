@@ -14,6 +14,11 @@ namespace Desert::Editor
     {
     public:
         SequencerPanel();
+
+        ImVec2 GetDefaultSize() const override
+        {
+            return ImVec2( 980.0f, 420.0f );
+        }
         void OnUIRender() override;
 
     private:

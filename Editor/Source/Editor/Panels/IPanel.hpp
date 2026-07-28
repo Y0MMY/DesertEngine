@@ -35,6 +35,15 @@ namespace Desert::Editor
             return m_SowPanel;
         }
 
+        // Preferred window size the FIRST time the panel ever opens (0,0 = let ImGui decide). Once
+        // the user moves/resizes it, imgui.ini remembers their layout instead. Floating tool windows
+        // (Node Graph, Sequencer, Build Settings) override this so they don't pop up as tiny
+        // arbitrarily-placed windows.
+        virtual ImVec2 GetDefaultSize() const
+        {
+            return ImVec2( 0.0f, 0.0f );
+        }
+
     protected:
         const std::string m_PanelName;
         bool              m_SowPanel;

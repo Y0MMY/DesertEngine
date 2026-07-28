@@ -34,3 +34,6 @@
 [submodule "ThirdParty/sol2"]
 	path = ThirdParty/sol2
 	url = https://github.com/ThePhD/sol2
+[submodule "ThirdParty/imgui-node-editor"]
+	path = ThirdParty/imgui-node-editor
+	url = https://github.com/thedmd/imgui-node-editor

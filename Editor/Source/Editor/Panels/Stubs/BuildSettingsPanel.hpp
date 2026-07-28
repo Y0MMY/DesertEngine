@@ -17,6 +17,12 @@ namespace Desert::Editor
         BuildSettingsPanel() : IPanel( "Build Settings", /*showPanel=*/false )
         {
         }
+
+        ImVec2 GetDefaultSize() const override
+        {
+            return ImVec2( 560.0f, 640.0f );
+        }
+
         void OnUIRender() override;
 
     private:
