@@ -16,6 +16,7 @@
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
 #include <Engine/Scripting/ScriptEngine.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
+#include "Editor/Core/CrashRecovery.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
@@ -135,6 +136,16 @@ namespace Desert::Editor
         }
 
         BuiltinMeshRegistry::Init( nullptr );
+
+        // Crash recovery: if the previous session left its lock behind (unclean exit) and an autosave
+        // exists, arm a prompt to reopen it. Then (re)arm the lock for THIS session; a clean shutdown
+        // (OnDetach) removes it.
+        if ( CrashRecovery::WasUncleanExit() )
+        {
+            m_RecoveryAutosave = CrashRecovery::LatestAutosave();
+            m_ShowRecoveryPrompt = !m_RecoveryAutosave.empty();
+        }
+        CrashRecovery::ArmSession();
 
         //LoadScene( "Resources/Assets/Scene/HouseDemo.desce" );
         }
@@ -731,6 +742,7 @@ namespace Desert::Editor
         DrawStatusBar();
 
         DrawCommandPalette();
+        DrawRecoveryPopup();
 
         ::ImGui::End(); // End dockspace
 
@@ -782,6 +794,45 @@ namespace Desert::Editor
 
         m_CommandPalette.SetCommands( std::move( commands ) );
         m_CommandPalette.Draw();
+    }
+
+    void EditorLayer::DrawRecoveryPopup()
+    {
+        namespace ImGui = ::ImGui;
+
+        if ( !m_ShowRecoveryPrompt )
+            return;
+
+        constexpr const char* kId = "Recover unsaved work?##recovery";
+        ImGui::OpenPopup( kId );
+
+        const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos( center, ImGuiCond_Appearing, ImVec2( 0.5f, 0.5f ) );
+
+        if ( ImGui::BeginPopupModal( kId, nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        {
+            ImGui::TextUnformatted( "The previous session ended unexpectedly." );
+            ImGui::Spacing();
+            ImGui::Text( "Reopen the latest autosave?\n%s",
+                         m_RecoveryAutosave.filename().string().c_str() );
+            ImGui::Spacing();
+            ImGui::TextDisabled( "It opens as an unsaved scene — Save to keep it." );
+            ImGui::Separator();
+
+            if ( ImGui::Button( "Reopen autosave", ImVec2( 150.0f, 0.0f ) ) )
+            {
+                LoadScene( m_RecoveryAutosave );
+                m_ShowRecoveryPrompt = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if ( ImGui::Button( "Ignore", ImVec2( 100.0f, 0.0f ) ) )
+            {
+                m_ShowRecoveryPrompt = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
     }
 
     void EditorLayer::DrawMenuBar()
@@ -1781,6 +1832,9 @@ namespace Desert::Editor
 
     Common::BoolResultStr EditorLayer::OnDetach()
     {
+        // Clean shutdown: drop the session lock so the next start doesn't think we crashed.
+        CrashRecovery::DisarmSession();
+
 #ifdef EBABLE_IMGUI
         m_Panels.clear();
         m_ImGuiLayer->OnDetach();

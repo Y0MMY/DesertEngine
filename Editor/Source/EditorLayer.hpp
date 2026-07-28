@@ -8,6 +8,8 @@
 #include "Editor/Core/CommandPalette.hpp"
 #include "Editor/RenderSystems/RenderRigistry.hpp"
 
+#include <filesystem>
+
 namespace Desert::Editor
 {
     class ImportManager;
@@ -57,6 +59,9 @@ namespace Desert::Editor
         // Ctrl+P "go to anything": builds the frame's commands (panels, entities, actions) and draws
         // the overlay. No-op unless the palette is open.
         void DrawCommandPalette();
+
+        // After an unclean exit, offers to reopen the newest autosave. No-op unless one was found.
+        void DrawRecoveryPopup();
 
         // Play mode: snapshot the scene on Play, restore it on Stop (so play-time changes don't persist).
         void OnScenePlay();
@@ -118,6 +123,10 @@ namespace Desert::Editor
         std::vector<std::unique_ptr<Editor::IPanel>> m_Panels;
 
         CommandPalette m_CommandPalette;
+
+        // Crash recovery: set at startup when the previous session crashed and an autosave was found.
+        bool                  m_ShowRecoveryPrompt = false;
+        std::filesystem::path m_RecoveryAutosave;
 #endif
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         bool                                    m_OpenScenePopup     = false;
