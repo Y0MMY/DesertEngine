@@ -86,9 +86,6 @@ namespace Desert::Graphic::API::Vulkan
                                VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
                                VkAccessFlags srcAccess, VkAccessFlags dstAccess );
 
-        // --- Legacy compatibility (TODO: remove) ---
-        [[nodiscard]] const VulkanImageResource& GetVulkanImageInfo() const { return m_Resource; }
-
         // --- Vulkan Specific ---
         Common::BoolResultStr RT_Invalidate();
 
@@ -133,9 +130,6 @@ namespace Desert::Graphic::API::Vulkan
         void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, uint32_t mip = 0 ) override;
         [[nodiscard]] VkImageView GetMipView( uint32_t level ) const override;
         void RecreateSampler() override;
-
-        // --- Legacy compatibility (TODO: remove) ---
-        [[nodiscard]] const VulkanImageResource& GetVulkanImageInfo() const { return m_Resource; }
 
         // --- Vulkan Specific ---
         Common::BoolResultStr RT_Invalidate();

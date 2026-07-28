@@ -329,13 +329,13 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::PushID();
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
-        // When a runtime override (script / legacy scene) bypasses the slots: say so loudly and
+        // When a runtime override (script) bypasses the slots: say so loudly and
         // start the section collapsed. Slots are the only AUTHORED source of truth.
         if ( !overriddenByShader.empty() )
         {
             ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ) );
-            ImGui::TextWrapped( "%s Runtime shader override active ('%s', set by a script or a legacy "
-                                "scene) — the material slots below are NOT used until it is cleared.",
+            ImGui::TextWrapped( "%s Runtime shader override active ('%s', set by a script) — "
+                                "the material slots below are NOT used until it is cleared.",
                                 ICON_MDI_ALERT, overriddenByShader.c_str() );
             ImGui::PopStyleColor();
         }

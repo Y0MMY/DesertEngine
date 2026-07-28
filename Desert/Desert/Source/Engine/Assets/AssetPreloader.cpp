@@ -13,9 +13,8 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_SKINNED_MESH_EXTENSIONS = { ".skmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_STATIC_MESH_EXTENSIONS  = { ".stmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKELETON_EXTENSIONS     = { ".skeleton" };
-    // ".mat" = legacy cooker output (read-compat via SurfaceMaterialAsset::Load); ".demat" = unified flat format
     // (now written by import too). Both register as SurfaceMaterialAsset.
-    constexpr std::array<std::string_view, 2> SUPPORTED_MATERIAL_EXTENSIONS     = { ".mat", ".demat" };
+    constexpr std::array<std::string_view, 1> SUPPORTED_MATERIAL_EXTENSIONS     = { ".demat" };
     constexpr std::array<std::string_view, 1> SUPPORTED_ANIMATION_EXTENSIONS    = { ".anim" };
     constexpr std::array<std::string_view, 1> SUPPORTED_TEXTURE_EXTENSIONS      = { ".tex" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKYBOX_EXTENSIONS       = { ".hdr" };
@@ -110,14 +109,11 @@ namespace Desert::Assets
         ProcessAssetFiles<SkeletonAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                           SUPPORTED_SKELETON_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
-        // Materials are editable CONTENT (Resources/Assets/Materials/...): imported (per-mesh subfolders) and
-        // editor-created both land here. Also scan the cooked mesh tree for back-compat with any legacy
-        // ".mat"/".demat" that older imports wrote there.
+        // Materials are editable CONTENT (the project's Materials/ dir): imported (per-mesh
+        // subfolders) and editor-created both land here, in the unified .demat format.
         ProcessAssetFiles<SurfaceMaterialAsset>( Common::Constants::Path::MATERIAL_PATH,
-                                             SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager, AssetPriority::Low );
-
-        ProcessAssetFiles<SurfaceMaterialAsset>( Common::Constants::Path::MESH_PATH_COOKED,
-                                             SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager, AssetPriority::Low );
+                                                 SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager,
+                                                 AssetPriority::Low );
 
         ProcessAssetFiles<SkinnedMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                              SUPPORTED_SKINNED_MESH_EXTENSIONS, m_AssetManager,

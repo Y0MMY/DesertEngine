@@ -94,13 +94,10 @@ namespace Desert::Core::Serialize
             std::string                Path;
             std::vector<ScriptPropSer> Props;
         };
-        // One entity now runs a LIST of scripts. New files write `Scripts`; old files (single script) carry
-        // `Path`/`Props` at the top level — both fields stay optional here so either format deserializes.
+        // One entity runs a LIST of scripts (single-script legacy format removed).
         struct ScriptCompSer
         {
-            std::optional<std::vector<ScriptSlotSer>> Scripts; // new (multi-script) format
-            std::optional<std::string>                Path;    // legacy single-script
-            std::optional<std::vector<ScriptPropSer>> Props;   // legacy single-script
+            std::optional<std::vector<ScriptSlotSer>> Scripts;
         };
 
         // Rebuild a ScriptSlot's properties from its serialized form.
@@ -151,7 +148,7 @@ namespace Desert::Core::Serialize
                 auto& sc = e.HasComponent<ECS::ScriptComponent>() ? e.GetComponent<ECS::ScriptComponent>()
                                                                   : e.AddComponent<ECS::ScriptComponent>();
                 sc.Scripts.clear();
-                if ( ser->Scripts ) // new multi-script format
+                if ( ser->Scripts )
                 {
                     for ( const auto& ss : *ser->Scripts )
                     {
@@ -161,15 +158,6 @@ namespace Desert::Core::Serialize
                         slot.Properties = loadProps( ss.Props );
                         sc.Scripts.push_back( std::move( slot ) );
                     }
-                }
-                else if ( ser->Path ) // legacy single-script format
-                {
-                    ECS::ScriptSlot slot;
-                    slot.ScriptPath = *ser->Path;
-                    slot.Started    = false;
-                    if ( ser->Props )
-                        slot.Properties = loadProps( *ser->Props );
-                    sc.Scripts.push_back( std::move( slot ) );
                 }
             };
             return s;
@@ -215,19 +203,9 @@ namespace Desert::Core::Serialize
 
                 if ( type == "SkyboxAsset" )
                 {
-                    // LEGACY scenes stored skybox paths RELATIVE to the textures dir (the old registration
-                    // stripped the prefix). Normalize those to the full form new registrations use.
-                    std::string resolvedPath = path;
-                    if ( !Common::Utils::FileSystem::Exists( resolvedPath ) ) // VFS-aware (packaged game)
-                    {
-                        const auto legacy = Common::Constants::Path::TEXTUREDIR_PATH / path;
-                        if ( Common::Utils::FileSystem::Exists( legacy ) )
-                            resolvedPath = legacy.string();
-                    }
-
-                    auto a = mgr.FindByPath<Assets::SkyboxAsset>( resolvedPath );
+                    auto a = mgr.FindByPath<Assets::SkyboxAsset>( path );
                     if ( !a )
-                        a = m.CreateAsset<Assets::SkyboxAsset>( Assets::AssetPriority::Medium, resolvedPath );
+                        a = m.CreateAsset<Assets::SkyboxAsset>( Assets::AssetPriority::Medium, path );
                     if ( a )
                     {
                         if ( !a->IsReadyForUse() )

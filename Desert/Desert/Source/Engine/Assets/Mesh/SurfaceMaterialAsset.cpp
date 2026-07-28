@@ -12,109 +12,6 @@
 
 namespace Desert::Assets
 {
-    namespace
-    {
-        // ── Migration-only readers (never written; Save() emits MaterialData only) ──────────
-
-        // Pre-protocol .demat layout: typed PBR fields at top level (+ the transitional optional
-        // canon of v3/v4 builds). Exists solely so old files parse; converted to MaterialData
-        // right after the read and the file is upgraded on disk.
-        struct LegacyTypedMaterial
-        {
-            glm::vec4 AlbedoColor       = glm::vec4( 1.0f );
-            float     MetallicFactor    = 0.0f;
-            float     RoughnessFactor   = 0.5f;
-            float     AOStrength        = 1.0f;
-            glm::vec4 EmissiveColor     = glm::vec4( 0.0f, 0.0f, 0.0f, 1.0f );
-            float     EmissiveIntensity = 1.0f;
-            float     AlphaCutoff       = 0.0f;
-            float     Transmission      = 0.0f;
-            float     IOR               = 1.5f;
-            glm::vec4 GlassTint         = glm::vec4( 1.0f );
-
-            AssetHandle AlbedoTexture{ 0ULL };
-            AssetHandle NormalTexture{ 0ULL };
-            AssetHandle MetallicTexture{ 0ULL };
-            AssetHandle RoughnessTexture{ 0ULL };
-            AssetHandle AOTexture{ 0ULL };
-            AssetHandle EmissiveTexture{ 0ULL };
-            AssetHandle OpacityTexture{ 0ULL };
-
-            std::optional<Common::UUID> MaterialId;
-            std::optional<glm::vec2>    UVTiling;
-
-            // Transitional canon written by v3/v4 builds.
-            std::optional<std::string>                        ShaderName;
-            std::optional<std::vector<MaterialShaderParam>>   ShaderParams;
-            std::optional<std::vector<MaterialShaderTexture>> ShaderTextures;
-        };
-
-        MaterialData FromLegacyTyped( const LegacyTypedMaterial& legacy )
-        {
-            // Transitional files already carry the canon — take it verbatim.
-            if ( legacy.ShaderParams || legacy.ShaderTextures )
-            {
-                MaterialData m;
-                m.ShaderName = legacy.ShaderName;
-                if ( legacy.ShaderParams )
-                    m.Params = *legacy.ShaderParams;
-                if ( legacy.ShaderTextures )
-                    m.Textures = *legacy.ShaderTextures;
-                m.MaterialId = legacy.MaterialId;
-                return m;
-            }
-
-            // Pure typed layout -> build the canon through the typed view.
-            PBRSurfaceParams p;
-            p.AlbedoColor       = legacy.AlbedoColor;
-            p.MetallicFactor    = legacy.MetallicFactor;
-            p.RoughnessFactor   = legacy.RoughnessFactor;
-            p.AOStrength        = legacy.AOStrength;
-            p.EmissiveColor     = legacy.EmissiveColor;
-            p.EmissiveIntensity = legacy.EmissiveIntensity;
-            p.AlphaCutoff       = legacy.AlphaCutoff;
-            p.Transmission      = legacy.Transmission;
-            p.IOR               = legacy.IOR;
-            p.GlassTint         = legacy.GlassTint;
-            p.AlbedoTexture     = legacy.AlbedoTexture;
-            p.NormalTexture     = legacy.NormalTexture;
-            p.MetallicTexture   = legacy.MetallicTexture;
-            p.RoughnessTexture  = legacy.RoughnessTexture;
-            p.AOTexture         = legacy.AOTexture;
-            p.EmissiveTexture   = legacy.EmissiveTexture;
-            p.OpacityTexture    = legacy.OpacityTexture;
-            p.UVTiling          = legacy.UVTiling;
-            p.MaterialId        = legacy.MaterialId;
-            return p.ToMaterialData();
-        }
-
-        // Ancient cooker format (.mat / Serialization::MaterialAssetData).
-        MaterialData FromAncient( const Serialization::MaterialAssetData& legacy )
-        {
-            PBRSurfaceParams p;
-            p.AlbedoColor     = legacy.Albedo.Value;
-            p.MetallicFactor  = legacy.Metallic.Value;
-            p.RoughnessFactor = legacy.Roughness.Value;
-
-            // The old cooker sometimes wrote garbage AO — keep it only if sane, else default to 1.
-            const float ao = legacy.AO.Value;
-            p.AOStrength    = ( ao >= 0.0f && ao <= 1.0f ) ? ao : 1.0f;
-            p.EmissiveColor = glm::vec4( legacy.Emissive.Value, 1.0f );
-
-            if ( legacy.Albedo.Texture )
-                p.AlbedoTexture = legacy.Albedo.Texture->Handle;
-            if ( legacy.Metallic.Texture )
-                p.MetallicTexture = legacy.Metallic.Texture->Handle;
-            if ( legacy.Roughness.Texture )
-                p.RoughnessTexture = legacy.Roughness.Texture->Handle;
-            if ( legacy.AO.Texture )
-                p.AOTexture = legacy.AO.Texture->Handle;
-            if ( legacy.Emissive.Texture )
-                p.EmissiveTexture = legacy.Emissive.Texture->Handle;
-            // The ancient format has no normal-map slot.
-            return p.ToMaterialData();
-        }
-    } // namespace
 
     SurfaceMaterialAsset::SurfaceMaterialAsset( AssetPriority priority, const Common::Filepath& filepath )
          : MaterialAsset( priority, filepath, AssetTypeID::Material )
@@ -188,36 +85,12 @@ namespace Desert::Assets
             return BOOLSUCCESS;
         }
 
-        // Canonical format. (Params is a required field, so pre-protocol files fail this parse
-        // and fall through to the migration readers below.)
+        // The unified MaterialData protocol is the ONLY on-disk format (pre-protocol migration
+        // readers were removed with the rest of the legacy paths).
         if ( const auto parsed = rfl::json::read<MaterialData>( raw ); parsed.has_value() )
         {
             m_Data = parsed.value();
             finalize();
-            return BOOLSUCCESS;
-        }
-
-        // Pre-protocol typed layout (incl. the transitional v3/v4 canon) — migrate + upgrade the
-        // file on disk so the legacy format disappears from the project on first touch.
-        if ( const auto legacy = rfl::json::read<LegacyTypedMaterial>( raw ); legacy.has_value() )
-        {
-            m_Data = FromLegacyTyped( legacy.value() );
-            finalize();
-            Common::Utils::FileSystem::WriteContentToFile( m_Metadata.Filepath, Save() );
-            LOG_INFO( "[Material] '{}' migrated to the unified protocol", m_Metadata.Filepath.string() );
-            return BOOLSUCCESS;
-        }
-
-        // Ancient cooker format.
-        if ( const auto legacy = rfl::json::read<Serialization::MaterialAssetData>( raw ); legacy.has_value() )
-        {
-            m_Data         = FromAncient( legacy.value() );
-            m_MaterialUUID = legacy.value().MaterialHandle;
-            if ( !m_Data.MaterialId )
-                m_Data.MaterialId = m_MaterialUUID;
-            finalize();
-            Common::Utils::FileSystem::WriteContentToFile( m_Metadata.Filepath, Save() );
-            LOG_INFO( "[Material] '{}' migrated to the unified protocol", m_Metadata.Filepath.string() );
             return BOOLSUCCESS;
         }
 
