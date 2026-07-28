@@ -28,7 +28,7 @@ project(test_name)
         defines { define }
     end
 
-    links { "Common" }
+    links { "Common", "Optick" } -- Commons JobSystem registers worker threads with Optick
 
     filter "system:not windows"
         links { "ReflectCpp" }

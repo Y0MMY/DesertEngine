@@ -28,7 +28,7 @@ project(test_name)
         defines { define }
     end
 
-    links { "Common" }
+    links { "Common", "Optick" } -- Commons JobSystem registers worker threads with Optick
 
     -- Common contains Objective-C (MacOSFileSystem file dialog) — pulled in here because this test
     -- references FileSystem, so the ObjC runtime + AppKit must link too.

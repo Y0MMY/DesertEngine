@@ -28,7 +28,7 @@ project(test_name)
         defines { define }
     end
 
-    links { "Common" }
+    links { "Common", "Optick" } -- Commons JobSystem registers worker threads with Optick
 
     -- gtest comes from Dependencies.lua (prebuilt .lib on Windows, Homebrew on macOS)
     filter "configurations:Debug"
