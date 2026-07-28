@@ -40,6 +40,68 @@ namespace Desert::Scripting
         return BOOLSUCCESS;
     }
 
+    Common::BoolResultStr ScriptEngine::EvalToString( const std::string& code, std::string& output )
+    {
+        auto& lua = m_Impl->Lua;
+        output.clear();
+
+        // Redirect print() into a table for the duration of this eval (this is the console's OWN VM, and
+        // print is restored right after).
+        lua.safe_script( "__repl_out = {}; __repl_old_print = print; "
+                         "function print(...) local t = {} for i = 1, select('#', ...) do "
+                         "t[i] = tostring(select(i, ...)) end "
+                         "__repl_out[#__repl_out + 1] = table.concat(t, '\\t') end",
+                         sol::script_pass_on_error );
+
+        // Try as an expression first ("2+2", "World.count()") so its value is shown; fall back to running
+        // it as a statement ("x = 5", "for ...") only when the expression form does not COMPILE — so a
+        // runtime error in a valid expression is reported once, not run twice.
+        sol::protected_function_result r;
+        bool                           ranAsExpr = false;
+        if ( sol::load_result exprChunk = lua.load( "return (" + code + ")" ); exprChunk.valid() )
+        {
+            sol::protected_function fn = exprChunk;
+            r                          = fn();
+            ranAsExpr                  = true;
+        }
+        else
+        {
+            r = lua.safe_script( code, sol::script_pass_on_error );
+        }
+
+        lua.safe_script( "print = __repl_old_print", sol::script_pass_on_error );
+
+        // Collect captured print() lines (array part, in order).
+        if ( sol::table out = lua["__repl_out"]; out.valid() )
+        {
+            const std::size_t n = out.size();
+            for ( std::size_t i = 1; i <= n; ++i )
+            {
+                output += out.get<std::string>( i );
+                output += '\n';
+            }
+        }
+
+        if ( !r.valid() )
+        {
+            sol::error err = r;
+            return Common::MakeError( err.what() );
+        }
+
+        // Append the expression's value, if it produced one.
+        if ( ranAsExpr && r.return_count() > 0 )
+        {
+            sol::object v = r[0];
+            if ( v.valid() && v.get_type() != sol::type::lua_nil )
+            {
+                const std::string s = lua["tostring"]( v );
+                output += s;
+                output += '\n';
+            }
+        }
+        return BOOLSUCCESS;
+    }
+
     // Returns the env for (entity, slot), or nullptr if not loaded. Grows the slot vector on demand when
     // `create` is set (used by LoadEntityScript so slots can be (re)loaded in any order).
     static sol::environment* SlotEnv( EnvMap& envs, uint32_t entity, uint32_t slot, bool create )

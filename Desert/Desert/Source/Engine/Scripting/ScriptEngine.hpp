@@ -41,6 +41,11 @@ namespace Desert::Scripting
         // Runs a chunk of Lua immediately (boot self-test / quick eval). Returns the Lua error on failure.
         Common::BoolResultStr RunString( const std::string& code );
 
+        // REPL eval for the editor Lua console: runs @p code (as an expression first, then as a
+        // statement), capturing everything it print()s AND the value of an expression into @p output.
+        // Returns the Lua error on failure (with whatever was captured before it).
+        Common::BoolResultStr EvalToString( const std::string& code, std::string& output );
+
         // Loads `path` into a fresh sandbox env (with `self` bound to the entity) for the entity's script SLOT.
         // An entity may run several scripts; each slot is an independent env. Re-load replaces the slot's env
         // (hot-reload). `entity` is the entt handle as a uint32; `slot` is the index in ScriptComponent.Scripts.

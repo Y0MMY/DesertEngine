@@ -52,6 +52,7 @@
 #include "Editor/Panels/Collections/CollectionsPanel.hpp"
 #include "Editor/Panels/NodeGraph/NodeGraphPanel.hpp"
 #include "Editor/Panels/AssetReferences/AssetReferencesPanel.hpp"
+#include "Editor/Panels/LuaConsole/LuaConsolePanel.hpp"
 #include "Editor/Panels/Stubs/SequencerPanel.hpp"
 #include "Editor/Panels/Stubs/BuildSettingsPanel.hpp"
 
@@ -295,6 +296,8 @@ namespace Desert::Editor
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
         m_Panels.emplace_back( std::make_unique<Editor::NodeGraphPanel>( m_AssetManager ) );
         m_Panels.emplace_back( std::make_unique<Editor::AssetReferencesPanel>() );
+        m_Panels.emplace_back(
+             std::make_unique<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::SequencerPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
 #endif // EBABLE_IMGUI
