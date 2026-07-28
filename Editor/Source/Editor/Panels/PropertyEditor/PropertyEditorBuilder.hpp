@@ -3,6 +3,7 @@
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
 #include <string>
+#include <vector>
 
 namespace Desert::Assets
 {
@@ -35,11 +36,22 @@ namespace Desert::Editor
         static bool Draw( void* object, const std::string& typeName,
                           const Assets::AssetManager* assetMgr = nullptr, UI::UIHelper* uiHelper = nullptr );
 
+        // Multi-select edit: draws @p primary as usual, marks fields whose value differs across
+        // @p others as "(mixed)", and broadcasts a POD field edit to every object in @p others so one
+        // tweak applies to the whole selection. With an empty @p others this behaves like Draw().
+        static bool DrawMulti( void* primary, const std::vector<void*>& others,
+                               const Reflection::TypeInfo& type, const Assets::AssetManager* assetMgr = nullptr,
+                               UI::UIHelper* uiHelper = nullptr );
+        static bool DrawMulti( void* primary, const std::vector<void*>& others, const std::string& typeName,
+                               const Assets::AssetManager* assetMgr = nullptr,
+                               UI::UIHelper* uiHelper = nullptr );
+
     private:
         // `defaultObject` (optional) points at a default-constructed instance of the OWNING type so a per-field
-        // "reset to default" affordance can appear when a value differs from its default.
+        // "reset to default" affordance can appear when a value differs from its default. `mixed` draws a
+        // marker beside the label when the value differs across a multi-selection.
         static bool DrawField( void* object, const Reflection::FieldInfo& field,
                                const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
-                               const void* defaultObject = nullptr );
+                               const void* defaultObject = nullptr, bool mixed = false );
     };
 } // namespace Desert::Editor

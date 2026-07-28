@@ -1,5 +1,6 @@
 #include "PropertyEditorBuilder.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/MultiEdit.hpp>
 
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Assets/AssetManager.hpp>
@@ -81,7 +82,7 @@ namespace Desert::Editor
 
     bool PropertyEditorBuilder::DrawField( void* object, const FieldInfo& field,
                                            const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
-                                           const void* defaultObject )
+                                           const void* defaultObject, bool mixed )
     {
         if ( field.Meta.Hidden )
             return false;
@@ -144,6 +145,12 @@ namespace Desert::Editor
         ImGui::SetColumnWidth( 0, 150.0f );
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted( label.c_str() );
+        // Multi-select: this field's value differs across the selected objects until the user edits it.
+        if ( mixed )
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled( "(mixed)" );
+        }
         // Hover the label for help: PROPERTY(Tooltip("...")) when authored, otherwise fall back to
         // revealing the underlying C++ field name (useful when DisplayName is a friendlier alias).
         if ( ImGui::IsItemHovered() )
@@ -448,5 +455,85 @@ namespace Desert::Editor
             return false;
         }
         return Draw( object, *type, assetMgr, uiHelper );
+    }
+
+    namespace
+    {
+        // A trivially-copyable value field can be compared/broadcast with memcmp/memcpy across the
+        // selection. Strings, nested structs and containers own heap and are excluded (edited on the
+        // primary only).
+        bool IsBroadcastable( const FieldInfo& field )
+        {
+            return !field.IsContainer && field.Type != FieldType::Struct &&
+                   field.Type != FieldType::String && field.Size > 0 && field.Size <= 64;
+        }
+    } // namespace
+
+    bool PropertyEditorBuilder::DrawMulti( void* primary, const std::vector<void*>& others,
+                                           const TypeInfo& type, const Assets::AssetManager* assetMgr,
+                                           UI::UIHelper* uiHelper )
+    {
+        if ( !primary )
+            return false;
+        if ( others.empty() )
+            return Draw( primary, type, assetMgr, uiHelper );
+
+        bool anyChanged = false;
+
+        // Same category grouping as Draw(), but each field is marked "(mixed)" when it differs across
+        // the selection, and a POD edit on the primary is broadcast to every other object.
+        std::vector<std::pair<std::string, std::vector<const FieldInfo*>>> categories;
+        auto bucket = [&]( const std::string& cat ) -> std::vector<const FieldInfo*>&
+        {
+            for ( auto& [name, vec] : categories )
+                if ( name == cat )
+                    return vec;
+            categories.emplace_back( cat, std::vector<const FieldInfo*>{} );
+            return categories.back().second;
+        };
+        for ( const auto& field : type.Fields )
+        {
+            if ( field.Meta.Hidden )
+                continue;
+            bucket( field.Meta.Category.empty() ? "Default" : field.Meta.Category ).push_back( &field );
+        }
+
+        for ( auto& [catName, fields] : categories )
+        {
+            if ( fields.empty() )
+                continue;
+            if ( !ImGui::CollapsingHeader( catName.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
+                continue;
+
+            for ( const auto* field : fields )
+            {
+                const bool broadcastable = IsBroadcastable( *field );
+                const bool mixed = broadcastable &&
+                                   AnyFieldDiffers( primary, others, field->Offset, field->Size );
+
+                const bool changed = DrawField( primary, *field, assetMgr, uiHelper, nullptr, mixed );
+                if ( changed )
+                {
+                    anyChanged = true;
+                    if ( broadcastable )
+                        BroadcastField( primary, others, field->Offset, field->Size );
+                }
+            }
+        }
+
+        return anyChanged;
+    }
+
+    bool PropertyEditorBuilder::DrawMulti( void* primary, const std::vector<void*>& others,
+                                           const std::string& typeName, const Assets::AssetManager* assetMgr,
+                                           UI::UIHelper* uiHelper )
+    {
+        const TypeInfo* type = ReflectionRegistry::Get().Find( typeName );
+        if ( !type )
+        {
+            ImGui::TextDisabled( "<type '%s' not reflected>", typeName.c_str() );
+            return false;
+        }
+        return DrawMulti( primary, others, *type, assetMgr, uiHelper );
     }
 } // namespace Desert::Editor

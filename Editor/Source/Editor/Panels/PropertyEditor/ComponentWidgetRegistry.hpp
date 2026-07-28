@@ -70,7 +70,15 @@ namespace Desert::Editor
         std::vector<ComponentEditorEntry> m_Entries;
     };
 
+    // Collects the field-pointers of the SAME reflected data block on every OTHER selected entity that
+    // has the component. @p fieldPtrOrNull maps an entity to its field pointer (or nullptr when the
+    // entity lacks the component). Defined in ComponentMultiEdit.cpp so this header stays light.
+    std::vector<void*> GatherSelectionFieldPtrs(
+         ::Desert::Core::Scene* scene, const ECS::Entity& primary,
+         const std::function<void*( const ECS::Entity& )>& fieldPtrOrNull );
+
     // Reflected component: ZERO UI code — the panel is auto-built from the data block's REFLECT() metadata.
+    // When several entities are selected, edits broadcast to all of them (multi-select Details).
     template <class ComponentT, class DataT>
     ComponentEditorEntry MakeReflectedComponentEntry( std::string name, std::string dataTypeName,
                                                       DataT ComponentT::*member, bool canRemove = true )
@@ -81,11 +89,22 @@ namespace Desert::Editor
         e.Has       = []( ECS::Entity& en ) { return en.HasComponent<ComponentT>(); };
         e.Add       = []( ECS::Entity& en ) { en.AddComponent<ComponentT>(); };
         e.Remove    = []( ECS::Entity& en ) { en.RemoveComponent<ComponentT>(); };
-        e.Draw      = [member, dataTypeName]( ECS::Entity& en, ::Desert::Core::Scene*,
+        e.Draw      = [member, dataTypeName]( ECS::Entity& en, ::Desert::Core::Scene* scene,
                                          const ComponentEditContext& ctx )
         {
             auto& comp = en.GetComponent<ComponentT>();
-            PropertyEditorBuilder::Draw( &( comp.*member ), dataTypeName, ctx.AssetMgr(), ctx.UIHelper );
+
+            const std::vector<void*> siblings = GatherSelectionFieldPtrs(
+                 scene, en,
+                 [member]( const ECS::Entity& other ) -> void*
+                 {
+                     if ( !other.HasComponent<ComponentT>() )
+                         return nullptr;
+                     return &( other.GetComponent<ComponentT>().*member );
+                 } );
+
+            PropertyEditorBuilder::DrawMulti( &( comp.*member ), siblings, dataTypeName, ctx.AssetMgr(),
+                                              ctx.UIHelper );
         };
         return e;
     }
