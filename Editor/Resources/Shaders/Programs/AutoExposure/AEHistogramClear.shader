@@ -1,3 +1,20 @@
-#pragma program AEHistogramClear
+Shader "AEHistogramClear"
+{
+    Compute
+    {
+        // Auto-exposure: zero the 256-bin luminance histogram before AEHistogram accumulates into it. Run as a
+        // GPU pass (256 threads) so there's no host<->device sync on the per-frame histogram buffer.
 
-#pragma use_stage compute "AEHistogramClear.glsl.comp"
+        layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+        layout(std430, binding = 1) buffer Histogram
+        {
+            uint u_Bins[256];
+        };
+
+        void main()
+        {
+            u_Bins[gl_GlobalInvocationID.x] = 0u;
+        }
+    }
+}

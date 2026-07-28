@@ -4,7 +4,7 @@
 //
 // Recursively collects *.shader under every argument, runs the ENGINE's DShaderParser over each and
 // reports every parse error with its file. Exit code 0 = all parsed, 1 = at least one failure.
-// Files in the legacy #pragma-program format (not DSL) are counted as skipped, not errors.
+// Non-DSL files are lint FAILURES: the engine dropped the legacy #pragma-program format.
 //
 // The parser is the same translation unit the engine/editor uses (compiled in via premake) — this
 // tool can never drift from what the runtime actually accepts.
@@ -68,7 +68,7 @@ int main( int argc, char** argv )
         return 2;
     }
 
-    int parsed = 0, skipped = 0, failed = 0;
+    int parsed = 0, failed = 0;
     for ( const auto& file : files )
     {
         const std::string source = ReadFile( file );
@@ -82,7 +82,11 @@ int main( int argc, char** argv )
         using Desert::Core::Preprocess::DShaderParser;
         if ( !DShaderParser::IsDShader( source ) )
         {
-            ++skipped; // legacy #pragma-program format — not DSL, nothing to lint here
+            // The legacy #pragma-program format was removed from the engine — a non-DSL .shader
+            // can never load, so it's a lint FAILURE now, not a skip.
+            std::printf( "FAIL  %s: not a DSL shader (legacy #pragma format is no longer supported)\n",
+                         file.string().c_str() );
+            ++failed;
             continue;
         }
 
@@ -98,7 +102,7 @@ int main( int argc, char** argv )
         }
     }
 
-    std::printf( "DShaderTool: %d parsed, %d skipped (legacy format), %d failed — %zu file(s) total\n",
-                 parsed, skipped, failed, files.size() );
+    std::printf( "DShaderTool: %d parsed, %d failed — %zu file(s) total\n", parsed, failed,
+                 files.size() );
     return failed == 0 ? 0 : 1;
 }

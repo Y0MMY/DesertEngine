@@ -27,7 +27,7 @@ Shader "Unlit"
         layout( location = 3 ) in vec3 a_Bitangent;
         layout( location = 4 ) in vec2 a_TextureCoord;
 
-        #include "../../Common/CameraUB.glslh"
+        #include <Common/CameraUB.glslh>
 
         layout( push_constant ) uniform PushConstants
         {
@@ -72,7 +72,7 @@ Shader "Unlit"
             layout( location = 3 ) in vec3 a_Bitangent;
             layout( location = 4 ) in vec2 a_TextureCoord;
 
-            #include "../../Common/CameraUB.glslh"
+            #include <Common/CameraUB.glslh>
 
             layout( push_constant ) uniform PushConstants
             {

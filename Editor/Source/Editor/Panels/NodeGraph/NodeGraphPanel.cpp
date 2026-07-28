@@ -160,6 +160,44 @@ namespace Desert::Editor
         m_StatusIsError  = false;
     }
 
+    std::string NodeGraphPanel::CreateNewGraphFile( const std::string& directory )
+    {
+        // Unique name: NewShaderGraph, NewShaderGraph1, ... (also used as the shader name, so it
+        // must stay a valid identifier).
+        std::string           name = "NewShaderGraph";
+        std::filesystem::path path;
+        for ( int i = 0; i < 256; ++i )
+        {
+            const std::string candidate = i == 0 ? name : name + std::to_string( i );
+            path                        = std::filesystem::path( directory ) / ( candidate + ".dgraph" );
+            if ( !std::filesystem::exists( path ) )
+            {
+                name = candidate;
+                break;
+            }
+        }
+
+        ShaderGraph::Document doc;
+        doc.Name = name;
+
+        auto param      = ShaderGraph::MakeNode( doc, "ColorParam" );
+        param.ParamName = "BaseColor";
+        param.Value     = { 0.8f, 0.4f, 0.1f, 1.0f };
+        param.X         = 0.0f;
+        param.Y         = 60.0f;
+
+        auto output = ShaderGraph::MakeNode( doc, "SurfaceOutput" );
+        output.X    = 320.0f;
+        output.Y    = 40.0f;
+
+        doc.Links.push_back( { doc.NextId++, param.Outputs[0].Id, output.Inputs[0].Id } );
+        doc.Nodes.push_back( std::move( param ) );
+        doc.Nodes.push_back( std::move( output ) );
+
+        Common::Utils::FileSystem::WriteContentToFile( path, ShaderGraph::Serialize( doc ) );
+        return path.string();
+    }
+
     // One pending request is plenty — the last double-click wins.
     static std::string s_PendingOpenRequest;
 

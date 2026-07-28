@@ -327,7 +327,7 @@ namespace Desert::Editor::ShaderGraph
         out << "    Vertex\n    {\n";
         if ( doc.Lit )
             out << "        #define GRAPH_LIT 1\n";
-        out << "        #include \"../../Common/GraphVertex.glslh\"\n";
+        out << "        #include <Common/GraphVertex.glslh>\n";
         out << "    }\n\n";
 
         out << "    Fragment\n    {\n";
@@ -336,9 +336,9 @@ namespace Desert::Editor::ShaderGraph
             out << "        layout( location = 1 ) in vec3 v_Normal;\n";
         out << "        layout( location = 0 ) out vec4 o_Color;\n";
         if ( usesTime )
-            out << "\n        #include \"../../Common/TimeUB.glslh\"\n";
+            out << "\n        #include <Common/TimeUB.glslh>\n";
         if ( doc.Lit )
-            out << "\n        #include \"../../Common/DirectionLightsUB.glslh\"\n";
+            out << "\n        #include <Common/DirectionLightsUB.glslh>\n";
         out << "\n        void main()\n        {\n";
         out << compiler.body.str();
         out << std::format( "            vec4 albedo = {};\n", albedo );
@@ -367,7 +367,7 @@ namespace Desert::Editor::ShaderGraph
         out << "        State\n        {\n            Cull Front\n        }\n\n";
         out << "        Vertex\n        {\n";
         out << "            #define GRAPH_DEPTH_ONLY 1\n";
-        out << "            #include \"../../Common/GraphVertex.glslh\"\n";
+        out << "            #include <Common/GraphVertex.glslh>\n";
         out << "        }\n    }\n";
         out << "}\n";
 

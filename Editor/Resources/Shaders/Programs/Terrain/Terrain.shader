@@ -1,20 +1,386 @@
-#pragma program Terrain
+Shader "Terrain"
+{
+    // Data-driven material metadata (consumed by the pipeline cache + generic material in later phases).
+    // Splat layers — drag textures onto these in Details; unassigned = white fallback (shows the base tint).
 
-#pragma use_stage vertex "Terrain.glsl.vert"
-#pragma use_stage tess_control "Terrain.glsl.tesc"
-#pragma use_stage tess_evaluation "Terrain.glsl.tese"
-#pragma use_stage fragment "Terrain.glsl.frag"
+    Domain Terrain
 
-// Data-driven material metadata (consumed by the pipeline cache + generic material in later phases).
-#pragma domain terrain
-#pragma state topology patches 4
-#pragma state cull none
-#pragma state depth less write on
+    Properties
+    {
+        Color       Tint ("Tint") = (1, 1, 1, 1)
+        Float       DetailTiling ("Texture Tiling (m)", Range(0.25,64)) = 4
+        Texture2D   u_GrassTex ("Grass Texture")
+        Texture2D   u_RockTex ("Rock Texture")
+        Texture2D   u_SnowTex ("Snow Texture")
+    }
 
-#pragma param color Tint "Tint" default(1,1,1,1)
-#pragma param float DetailTiling "Texture Tiling (m)" range(0.25,64) default(4)
+    State
+    {
+        Topology Patches 4
+        Cull None
+        ZTest Less
+        ZWrite On
+    }
 
-// Splat layers — drag textures onto these in Details; unassigned = white fallback (shows the base tint).
-#pragma param texture2D u_GrassTex "Grass Texture"
-#pragma param texture2D u_RockTex "Rock Texture"
-#pragma param texture2D u_SnowTex "Snow Texture"
+    Vertex
+    {
+        // GPU terrain — vertexless patch grid. A draw of (gridDim*gridDim*4) vertices synthesizes a grid of
+        // quad patches purely from gl_VertexIndex (no vertex buffer). This stage emits each patch corner as a
+        // world-space control point on the y=0 plane; the TES projects + (later) displaces it.
+
+        layout( binding = 0 ) uniform TerrainUB
+        {
+            mat4 View;
+            mat4 Projection;
+            mat4 Model;
+            vec4 Params;     // x = world size (m), y = gridDim (patches/side), z = heightScale, w = tessLevel
+            vec4 Params2;    // x = noiseFrequency, y = seed, z/w = spare
+            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
+            vec4 SunDir;     // xyz = normalized light direction (scene directional light)
+            vec4 SunColor;   // rgb = color, a = intensity
+        }
+        u;
+
+        layout( location = 0 ) out vec2 v_WorldXZ;
+
+        void main()
+        {
+            int gridDim = int( u.Params.y );
+            int patchId = gl_VertexIndex / 4;
+            int corner  = gl_VertexIndex % 4;
+
+            int gx = patchId % gridDim;
+            int gz = patchId / gridDim;
+
+            // Unit-quad corner offsets in CCW order: (0,0) (1,0) (1,1) (0,1).
+            vec2 off = vec2( ( corner == 1 || corner == 2 ) ? 1.0 : 0.0, ( corner == 2 || corner == 3 ) ? 1.0 : 0.0 );
+
+            float size = u.Params.x;
+            float cell = size / float( gridDim );
+            float x    = ( float( gx ) + off.x ) * cell - size * 0.5;
+            float z    = ( float( gz ) + off.y ) * cell - size * 0.5;
+
+            v_WorldXZ   = vec2( x, z );
+            gl_Position = vec4( x, 0.0, z, 1.0 ); // world-space control point (projection happens in the TES)
+        }
+    }
+
+    TessControl
+    {
+        // Tessellation control — one 4-vertex quad patch in, distance-based LOD out (Stage 4). Each edge's
+        // tessellation level is derived from its midpoint distance to the camera in VIEW space (the camera sits
+        // at the origin in view space, so no camera-position uniform is needed). Adjacent patches share an edge's
+        // two corner positions, so they compute the same midpoint -> the same edge tess level -> CRACK-FREE.
+        // Near patches get full detail (Params.w), far patches drop toward minTess.
+
+        layout( vertices = 4 ) out;
+
+        layout( binding = 0 ) uniform TerrainUB
+        {
+            mat4 View;
+            mat4 Projection;
+            mat4 Model;
+            vec4 Params;     // x = size, y = gridDim, z = heightScale, w = tessLevel (used here as MAX/near tess)
+            vec4 Params2;    // x = noiseFrequency, y = seed, z/w = spare
+            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
+            vec4 SunDir;
+            vec4 SunColor;
+        }
+        u;
+
+        layout( location = 0 ) in vec2 v_WorldXZ[];
+        layout( location = 0 ) out vec2 tc_WorldXZ[];
+
+        float TessForDistance( float d )
+        {
+            float maxTess = max( u.Params.w, 1.0 );
+            float minTess = 2.0;
+            // Distance band scales with terrain size so LOD adapts to small and large terrains alike.
+            float nearD = max( u.Params.x * 0.05, 2.0 );
+            float farD  = max( u.Params.x * 1.5, nearD + 1.0 );
+            float t     = clamp( ( farD - d ) / ( farD - nearD ), 0.0, 1.0 );
+            return mix( minTess, maxTess, t );
+        }
+
+        // Tessellation level for the edge between two control points, from its midpoint's view-space distance.
+        float EdgeTess( vec3 viewA, vec3 viewB )
+        {
+            return TessForDistance( length( ( viewA + viewB ) * 0.5 ) );
+        }
+
+        void main()
+        {
+            if ( gl_InvocationID == 0 )
+            {
+                // Control-point corners in view space (camera at origin). gl_in are the flat y=0 control points;
+                // displacement is small vs. the LOD distances, so using the flat positions is fine and stable.
+                mat4 mv = u.View * u.Model;
+                vec3 c0 = ( mv * gl_in[0].gl_Position ).xyz; // (u,v)=(0,0)
+                vec3 c1 = ( mv * gl_in[1].gl_Position ).xyz; // (1,0)
+                vec3 c2 = ( mv * gl_in[2].gl_Position ).xyz; // (1,1)
+                vec3 c3 = ( mv * gl_in[3].gl_Position ).xyz; // (0,1)
+
+                // Quad edge -> outer-tess mapping: [0]=u0 (c0-c3), [1]=v0 (c0-c1), [2]=u1 (c1-c2), [3]=v1 (c3-c2).
+                float e0 = EdgeTess( c0, c3 );
+                float e1 = EdgeTess( c0, c1 );
+                float e2 = EdgeTess( c1, c2 );
+                float e3 = EdgeTess( c3, c2 );
+
+                gl_TessLevelOuter[0] = e0;
+                gl_TessLevelOuter[1] = e1;
+                gl_TessLevelOuter[2] = e2;
+                gl_TessLevelOuter[3] = e3;
+
+                // Inner levels: horizontal (u) from the v=0/v=1 edges, vertical (v) from the u=0/u=1 edges.
+                gl_TessLevelInner[0] = max( e1, e3 );
+                gl_TessLevelInner[1] = max( e0, e2 );
+            }
+
+            gl_out[gl_InvocationID].gl_Position = gl_in[gl_InvocationID].gl_Position;
+            tc_WorldXZ[gl_InvocationID]         = v_WorldXZ[gl_InvocationID];
+        }
+    }
+
+    TessEval
+    {
+        // Tessellation evaluation — bilinearly interpolates the tessellated grid vertex across the patch, then
+        // displaces it along Y by a procedural fBm height field (Stage 2). Normals are derived analytically from
+        // the same height function via central differences, so the lit relief needs no normal map.
+        //
+        // The height source is isolated in TerrainHeight(): Stage 5 (sculpting) swaps the fBm for a sampled,
+        // editable heightmap texture without touching the displacement/normal math below.
+
+        layout( quads, equal_spacing, cw ) in;
+
+        layout( binding = 0 ) uniform TerrainUB
+        {
+            mat4 View;
+            mat4 Projection;
+            mat4 Model;
+            vec4 Params;     // x = size, y = gridDim, z = heightScale, w = tessLevel
+            vec4 Params2;    // x = noiseFrequency, y = seed, z/w = spare
+            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
+            vec4 SunDir;
+            vec4 SunColor;
+        }
+        u;
+
+        layout( location = 0 ) in vec2 tc_WorldXZ[];
+
+        layout( location = 0 ) out vec3 v_WorldPos;
+        layout( location = 1 ) out vec3 v_Normal;
+        layout( location = 2 ) out float v_Height01; // normalized height [0..1] for slope/height tinting
+
+        // --- Value-noise fBm -------------------------------------------------------------------------------
+
+        float Hash( vec2 p )
+        {
+            p = fract( p * vec2( 123.34, 456.21 ) );
+            p += dot( p, p + 45.32 );
+            return fract( p.x * p.y );
+        }
+
+        float ValueNoise( vec2 p )
+        {
+            vec2 i = floor( p );
+            vec2 f = fract( p );
+            vec2 u = f * f * ( 3.0 - 2.0 * f ); // smoothstep
+
+            float a = Hash( i + vec2( 0.0, 0.0 ) );
+            float b = Hash( i + vec2( 1.0, 0.0 ) );
+            float c = Hash( i + vec2( 0.0, 1.0 ) );
+            float d = Hash( i + vec2( 1.0, 1.0 ) );
+
+            return mix( mix( a, b, u.x ), mix( c, d, u.x ), u.y );
+        }
+
+        float FBm( vec2 p )
+        {
+            float sum = 0.0;
+            float amp = 0.5;
+            float freq = 1.0;
+            for ( int i = 0; i < 5; ++i )
+            {
+                sum += amp * ValueNoise( p * freq );
+                freq *= 2.0;
+                amp *= 0.5;
+            }
+            return sum; // ~[0..1]
+        }
+
+        // Returns terrain height (world units) at a world-space XZ position.
+        float TerrainHeight( vec2 worldXZ )
+        {
+            float freq = max( u.Params2.x, 0.0001 );
+            vec2  seed = vec2( u.Params2.y * 0.137, u.Params2.y * 0.911 );
+            float h    = FBm( worldXZ * freq + seed );
+            return ( h - 0.5 ) * 2.0 * u.Params.z; // center around 0, scale by heightScale
+        }
+
+        void main()
+        {
+            // Corners stored CCW: p0=(0,0) p1=(1,0) p2=(1,1) p3=(0,1). Bilerp over gl_TessCoord.
+            vec4 p0 = gl_in[0].gl_Position;
+            vec4 p1 = gl_in[1].gl_Position;
+            vec4 p2 = gl_in[2].gl_Position;
+            vec4 p3 = gl_in[3].gl_Position;
+
+            vec4 a   = mix( p0, p1, gl_TessCoord.x );
+            vec4 b   = mix( p3, p2, gl_TessCoord.x );
+            vec4 pos = mix( a, b, gl_TessCoord.y );
+
+            // Displace along Y by the height field (Stage 2).
+            pos.y = TerrainHeight( pos.xz );
+
+            // Analytic normal via central differences on the height field. Epsilon scales with the grid cell.
+            float eps = max( u.Params.x / max( u.Params.y, 1.0 ), 0.01 ) * 0.5;
+            float hL  = TerrainHeight( pos.xz - vec2( eps, 0.0 ) );
+            float hR  = TerrainHeight( pos.xz + vec2( eps, 0.0 ) );
+            float hD  = TerrainHeight( pos.xz - vec2( 0.0, eps ) );
+            float hU  = TerrainHeight( pos.xz + vec2( 0.0, eps ) );
+            vec3  n   = normalize( vec3( hL - hR, 2.0 * eps, hD - hU ) );
+
+            vec4 worldPos = u.Model * vec4( pos.xyz, 1.0 ); // apply the terrain entity's transform
+            v_WorldPos    = worldPos.xyz;
+            v_Normal      = normalize( mat3( u.Model ) * n );
+            v_Height01    = clamp( pos.y / max( u.Params.z, 0.0001 ) * 0.5 + 0.5, 0.0, 1.0 );
+
+            gl_Position = u.Projection * u.View * worldPos;
+        }
+    }
+
+    Fragment
+    {
+        // Stage 3 + 3a: textured terrain splatting with per-layer modes. Three layers (grass / rock / snow) are
+        // triplanar-mapped in world space. Each layer's weight comes from its mode: Auto = height/slope rules,
+        // Manual = the painted splat map channel (brush, Stage 3b), Off = 0. Each layer is modulated by a base
+        // tint so that with UNASSIGNED textures (white backend fallback) the result matches the Stage 2 relief.
+        // Lit with a directional key light using the analytic normal from the TES.
+
+        layout( location = 0 ) in vec3 v_WorldPos;
+        layout( location = 1 ) in vec3 v_Normal;
+        layout( location = 2 ) in float v_Height01;
+
+        layout( location = 0 ) out vec4 o_Color;
+
+        // Engine-filled terrain UB (binding 0) — used here for the per-layer modes.
+        layout( binding = 0 ) uniform TerrainUB
+        {
+            mat4 View;
+            mat4 Projection;
+            mat4 Model;
+            vec4 Params;
+            vec4 Params2;
+            vec4 LayerModes; // x = grass, y = rock, z = snow (0=Auto,1=Manual,2=Off), w = grassEnable
+            vec4 SunDir;     // xyz = normalized light direction (scene directional light)
+            vec4 SunColor;   // rgb = color, a = intensity
+        }
+        u;
+
+        // Data-driven material params (binding 1). Driven by MaterialComponent overrides.
+        layout( binding = 1 ) uniform MaterialUB
+        {
+            vec4  Tint;
+            float DetailTiling; // world-space size (meters) of one texture tile
+        }
+        u_Mat;
+
+        // Splat layers (texture2D #pragma params; unassigned => white fallback). Bindings follow MaterialUB.
+        layout( binding = 2 ) uniform sampler2D u_GrassTex;
+        layout( binding = 3 ) uniform sampler2D u_RockTex;
+        layout( binding = 4 ) uniform sampler2D u_SnowTex;
+        // Per-terrain splat map (R=grass, G=rock, B=snow weights), painted by the brush (Stage 3b). Engine-bound;
+        // unassigned => white fallback (Manual layers show everywhere until painted).
+        layout( binding = 5 ) uniform sampler2D u_SplatMap;
+
+        // Triplanar sample: project onto the three world planes and blend by the (squared) normal so steep faces
+        // don't stretch. scale = tiles per world unit.
+        vec3 Triplanar( sampler2D tex, vec3 wpos, vec3 n, float scale )
+        {
+            vec3 bw = abs( n );
+            bw      = pow( bw, vec3( 4.0 ) );
+            bw     /= max( bw.x + bw.y + bw.z, 0.0001 );
+
+            vec3 xa = texture( tex, wpos.yz * scale ).rgb;
+            vec3 ya = texture( tex, wpos.xz * scale ).rgb;
+            vec3 za = texture( tex, wpos.xy * scale ).rgb;
+            return xa * bw.x + ya * bw.y + za * bw.z;
+        }
+
+        // Resolve a layer's weight from its mode: 0=Auto (rule), 1=Manual (splat channel), 2=Off (0).
+        float LayerWeight( float mode, float autoWeight, float splatChannel )
+        {
+            if ( mode > 1.5 ) return 0.0;          // Off
+            if ( mode > 0.5 ) return splatChannel; // Manual
+            return autoWeight;                      // Auto
+        }
+
+        void main()
+        {
+            vec3 N = normalize( v_Normal );
+
+            // Slope = how far the normal tilts from straight up (0 = flat, 1 = vertical cliff).
+            float slope = clamp( 1.0 - N.y, 0.0, 1.0 );
+
+            // Base tints (placeholder until Stage 6 PBR textures). Under grass the ground is GREEN (a darker grass
+            // tone) so it fills the gaps between blades and the field reads as a continuous lawn (the instanced
+            // blades add the 3D fuzz on top). Non-grass ground is rock.
+            // Ground UNDER grass: a DARK olive that matches the lit blade tone, so the gaps between thin blades
+            // blend into a continuous lawn instead of glowing bright-green. (Flat ground catches full sun, so its
+            // albedo must be darker than the angled, AO'd blades to read at the same brightness.) + world variation.
+            // Params2.z carries the grass Brightness (engine-synced) so the lawn ground tracks the blades when
+            // you drag the Grass Brightness slider — they always read as one material.
+            float groundVar  = sin( v_WorldPos.x * 3.1 ) * sin( v_WorldPos.z * 2.7 ) * 0.5 + 0.5;
+            float grassBright = max( u.Params2.z, 0.05 );
+            vec3  grassCol   = vec3( 0.052, 0.10, 0.034 ) * ( 0.75 + 0.5 * groundVar ) * grassBright;
+            vec3  rockCol   = vec3( 0.40, 0.37, 0.33 ); // bare rock (default base)
+            vec3  snowCol   = vec3( 0.86, 0.88, 0.92 );
+
+            float scale  = 1.0 / max( u_Mat.DetailTiling, 0.001 );
+            vec3  grassT = Triplanar( u_GrassTex, v_WorldPos, N, scale ) * grassCol;
+            vec3  rockT  = Triplanar( u_RockTex, v_WorldPos, N, scale ) * rockCol;
+            vec3  snowT  = Triplanar( u_SnowTex, v_WorldPos, N, scale ) * snowCol;
+
+            // Splat-map weights. UV is terrain-local (subtract the Model translation) so painting matches
+            // regardless of where the terrain entity sits in the world.
+            vec2  splatUV  = ( v_WorldPos.xz - u.Model[3].xz ) / max( u.Params.x, 0.001 ) + 0.5;
+            vec4  splat    = texture( u_SplatMap, splatUV );
+            float rockAuto  = smoothstep( 0.25, 0.55, slope );
+            float grassAuto = 1.0 - rockAuto; // grass only on flat-ish ground
+            float snowAuto  = smoothstep( 0.75, 0.95, v_Height01 ) * ( 1.0 - smoothstep( 0.4, 0.7, slope ) );
+
+            // ROCK is the default ground. Where grass is enabled (LayerModes.w) on flat ground, the ground turns
+            // GREEN — a continuous lawn base that fills the gaps between the instanced blades. Full field (not
+            // splat-gated) so the user gets a lawn without painting; the splat only trims it (floor 0.4).
+            float wGrass = u.LayerModes.w * grassAuto * max( splat.r, 0.4 );
+            float wSnow  = LayerWeight( u.LayerModes.z, snowAuto, splat.b );
+
+            vec3 albedo = rockT;
+            albedo      = mix( albedo, grassT, clamp( wGrass, 0.0, 1.0 ) );
+            albedo      = mix( albedo, snowT, clamp( wSnow, 0.0, 1.0 ) );
+
+            // PBR-ish lighting using the SCENE directional light (dir/color/intensity). Camera position recovered
+            // from the inverse view matrix for the specular view vector.
+            vec3 camPos = inverse( u.View )[3].xyz;
+            vec3 V      = normalize( camPos - v_WorldPos );
+            vec3 L      = normalize( -u.SunDir.xyz );          // to-light (engine stores travel direction)
+            vec3 sun    = u.SunColor.rgb * max( u.SunColor.a, 0.0001 );
+            vec3 H      = normalize( L + V );
+
+            float ndl = max( dot( N, L ), 0.0 );
+
+            // Soft sky/ground ambient (hemisphere): brighter from above, cooler/darker from below.
+            vec3  skyCol  = vec3( 0.45, 0.52, 0.62 );
+            vec3  gndCol  = vec3( 0.20, 0.18, 0.14 );
+            vec3  ambient = mix( gndCol, skyCol, N.y * 0.5 + 0.5 ) * 0.5;
+
+            // Per-layer roughness: rock/grass matte, snow has a subtle sheen.
+            float gloss = mix( 0.0, 0.5, clamp( wSnow, 0.0, 1.0 ) );
+            float spec  = pow( max( dot( N, H ), 0.0 ), mix( 16.0, 90.0, gloss ) ) * gloss;
+
+            vec3 lit = albedo * ( ambient + sun * ndl ) + sun * spec * ndl;
+
+            o_Color = vec4( lit * u_Mat.Tint.rgb, 1.0 );
+        }
+    }
+}

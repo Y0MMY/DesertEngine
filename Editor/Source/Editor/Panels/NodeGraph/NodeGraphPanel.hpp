@@ -57,6 +57,10 @@ namespace Desert::Editor
         // itself and loads the graph on the next OnPreUpdate (which runs even while hidden).
         static void RequestOpen( const std::string& dgraphPath );
 
+        // Creates a starter .dgraph (unique name) in @p directory and returns its path — the File
+        // Explorer's "New Shader Graph" context action; pair with RequestOpen to jump right in.
+        static std::string CreateNewGraphFile( const std::string& directory );
+
     private:
         void NewGraph();
         void DrawToolbar();

@@ -832,6 +832,16 @@ namespace Desert::Editor
                                 QueueRefresh();
                             }
 
+                            if ( ImGui::Selectable( "New Shader Graph" ) )
+                            {
+                                // Creates a starter .dgraph here and opens it in the Node Graph panel
+                                // (no trip through the View menu).
+                                const auto path =
+                                     NodeGraphPanel::CreateNewGraphFile( m_CurrentDir->AssetPath );
+                                NodeGraphPanel::RequestOpen( path );
+                                QueueRefresh();
+                            }
+
                             if ( !m_IsInListView )
                             {
                                 ImGui::SliderFloat( "##GridSize", &m_GridSize, m_MinGridSize, m_MaxGridSize );
