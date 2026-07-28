@@ -5,6 +5,7 @@
 #include <imgui/imgui.h>
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include "Editor/Panels/IPanel.hpp"
+#include "Editor/Core/CommandPalette.hpp"
 #include "Editor/RenderSystems/RenderRigistry.hpp"
 
 namespace Desert::Editor
@@ -52,6 +53,10 @@ namespace Desert::Editor
 
         // Bottom status bar: scene state (Edit/Play), scene name, current selection, and FPS/frame time.
         void DrawStatusBar();
+
+        // Ctrl+P "go to anything": builds the frame's commands (panels, entities, actions) and draws
+        // the overlay. No-op unless the palette is open.
+        void DrawCommandPalette();
 
         // Play mode: snapshot the scene on Play, restore it on Stop (so play-time changes don't persist).
         void OnScenePlay();
@@ -111,6 +116,8 @@ namespace Desert::Editor
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
         std::vector<std::unique_ptr<Editor::IPanel>> m_Panels;
+
+        CommandPalette m_CommandPalette;
 #endif
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         bool                                    m_OpenScenePopup     = false;

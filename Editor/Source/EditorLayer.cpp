@@ -565,6 +565,11 @@ namespace Desert::Editor
                     LOG_INFO( "[Scene] Saved '{}' (Ctrl+S)", m_MainScene->GetSceneName() );
                 }
             }
+
+            // Command palette (Ctrl+P) — works in both edit and play modes, and even over a text field
+            // so it stays reachable; the palette grabs the keyboard once open.
+            if ( io.KeyCtrl && !io.KeyShift && ::ImGui::IsKeyPressed( ImGuiKey_P, false ) )
+                m_CommandPalette.Open();
         }
 
         static bool               dockspaceOpen  = true;
@@ -725,12 +730,58 @@ namespace Desert::Editor
 
         DrawStatusBar();
 
+        DrawCommandPalette();
+
         ::ImGui::End(); // End dockspace
 
 #ifdef EBABLE_IMGUI
         m_ImGuiLayer->End();
 #endif
         return BOOLSUCCESS;
+    }
+
+    void EditorLayer::DrawCommandPalette()
+    {
+        if ( !m_CommandPalette.IsOpen() )
+            return;
+
+        std::vector<PaletteCommand> commands;
+        commands.reserve( m_Panels.size() + 8 );
+
+        // Panels — jump to / reveal any tool window.
+        for ( const auto& panel : m_Panels )
+        {
+            IPanel*     p    = panel.get();
+            std::string name = p->GetName();
+            if ( const auto hash = name.find( "##" ); hash != std::string::npos )
+                name.erase( hash ); // drop the "###id" ImGui suffix for display
+            commands.push_back( { "Panel", "Open " + name, [p] { p->GetVisibility() = true; } } );
+        }
+
+        // Entities — select any object in the open scene.
+        if ( m_MainScene )
+        {
+            for ( const auto& entity : m_MainScene->GetAllEntities() )
+            {
+                if ( !entity.HasComponent<ECS::UUIDComponent>() )
+                    continue;
+                const Common::UUID uuid = entity.GetComponent<ECS::UUIDComponent>().UUID;
+                std::string        name = entity.HasComponent<ECS::TagComponent>()
+                                               ? entity.GetComponent<ECS::TagComponent>().Tag
+                                               : std::string( "Entity" );
+                commands.push_back( { "Entity", std::move( name ),
+                                      [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+            }
+        }
+
+        // Actions.
+        commands.push_back(
+             { "Action", "Save Scene", [this] { m_MainScene->Serialize( m_AssetManager.get() ); } } );
+        commands.push_back( { "Action", "Undo", [] { CommandHistory::Get().Undo(); } } );
+        commands.push_back( { "Action", "Redo", [] { CommandHistory::Get().Redo(); } } );
+
+        m_CommandPalette.SetCommands( std::move( commands ) );
+        m_CommandPalette.Draw();
     }
 
     void EditorLayer::DrawMenuBar()
