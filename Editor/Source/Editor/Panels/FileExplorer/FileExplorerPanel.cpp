@@ -832,14 +832,22 @@ namespace Desert::Editor
                                 QueueRefresh();
                             }
 
-                            if ( ImGui::Selectable( "New Shader Graph" ) )
+                            // Pick the domain up front (like Unreal's Material Domain / Godot's Mode):
+                            // it decides the output node, vertex contract and palette of the new graph.
+                            if ( ImGui::BeginMenu( "New Shader Graph" ) )
                             {
-                                // Creates a starter .dgraph here and opens it in the Node Graph panel
-                                // (no trip through the View menu).
-                                const auto path =
-                                     NodeGraphPanel::CreateNewGraphFile( m_CurrentDir->AssetPath );
-                                NodeGraphPanel::RequestOpen( path );
-                                QueueRefresh();
+                                auto createGraph = [&]( ShaderGraph::Domain domain )
+                                {
+                                    const auto path = NodeGraphPanel::CreateNewGraphFile(
+                                         m_CurrentDir->AssetPath, domain );
+                                    NodeGraphPanel::RequestOpen( path );
+                                    QueueRefresh();
+                                };
+                                if ( ImGui::MenuItem( "Surface" ) )
+                                    createGraph( ShaderGraph::Domain::Surface );
+                                if ( ImGui::MenuItem( "Post Process" ) )
+                                    createGraph( ShaderGraph::Domain::PostProcess );
+                                ImGui::EndMenu();
                             }
 
                             if ( !m_IsInListView )

@@ -53,6 +53,42 @@ namespace Desert::Editor
         {
             return Common::Constants::Path::COOKED_PATH / "GraphPreviews" / ( name + ".png" );
         }
+
+        // Fills @p doc with a minimal, compiles-as-is starter graph for the domain: Surface gets
+        // BaseColor -> Surface Output; PostProcess gets Scene Color -> Post Process Output (a
+        // passthrough). Shared by the "New" button and the File Explorer's create action.
+        void PopulateStarter( SG::Document& doc, SG::Domain domain )
+        {
+            if ( domain == SG::Domain::PostProcess )
+            {
+                auto scene = SG::MakeNode( doc, "SceneColor" );
+                scene.X    = 0.0f;
+                scene.Y    = 60.0f;
+
+                auto output = SG::MakeNode( doc, "PostProcessOutput" );
+                output.X    = 320.0f;
+                output.Y    = 60.0f;
+
+                doc.Links.push_back( { doc.NextId++, scene.Outputs[0].Id, output.Inputs[0].Id } );
+                doc.Nodes.push_back( std::move( scene ) );
+                doc.Nodes.push_back( std::move( output ) );
+                return;
+            }
+
+            auto param      = SG::MakeNode( doc, "ColorParam" );
+            param.ParamName = "BaseColor";
+            param.Value     = { 0.8f, 0.4f, 0.1f, 1.0f };
+            param.X         = 0.0f;
+            param.Y         = 60.0f;
+
+            auto output = SG::MakeNode( doc, "SurfaceOutput" );
+            output.X    = 320.0f;
+            output.Y    = 40.0f;
+
+            doc.Links.push_back( { doc.NextId++, param.Outputs[0].Id, output.Inputs[0].Id } );
+            doc.Nodes.push_back( std::move( param ) );
+            doc.Nodes.push_back( std::move( output ) );
+        }
     } // namespace
 
     NodeGraphPanel::NodeGraphPanel( const std::shared_ptr<Assets::AssetManager>& assetManager )
@@ -73,22 +109,57 @@ namespace Desert::Editor
 
     void NodeGraphPanel::NewGraph()
     {
-        m_Doc = {};
+        // A fresh graph keeps the domain you were working in.
+        const SG::Domain domain = m_Doc.DomainEnum();
+        m_Doc                   = {};
+        m_Doc.Domain            = static_cast<int>( domain );
+        PopulateStarter( m_Doc, domain );
 
-        // Starter graph: BaseColor param -> Surface Output — compiles as-is.
-        auto param = SG::MakeNode( m_Doc, "ColorParam" );
-        param.ParamName = "BaseColor";
-        param.Value     = { 0.8f, 0.4f, 0.1f, 1.0f };
-        param.X = 0.0f;
-        param.Y = 60.0f;
+        m_ApplyPositions = true;
+        m_Status.clear();
+    }
 
-        auto output = SG::MakeNode( m_Doc, "SurfaceOutput" );
-        output.X = 320.0f;
-        output.Y = 40.0f;
+    void NodeGraphPanel::ChangeDomain( SG::Domain domain )
+    {
+        if ( m_Doc.DomainEnum() == domain )
+            return;
+        m_Doc.Domain = static_cast<int>( domain );
 
-        m_Doc.Links.push_back( { m_Doc.NextId++, param.Outputs[0].Id, output.Inputs[0].Id } );
-        m_Doc.Nodes.push_back( std::move( param ) );
-        m_Doc.Nodes.push_back( std::move( output ) );
+        auto ownsPin = []( const SG::Node& n, uint64_t pin )
+        {
+            for ( const auto& p : n.Inputs )
+                if ( p.Id == pin )
+                    return true;
+            for ( const auto& p : n.Outputs )
+                if ( p.Id == pin )
+                    return true;
+            return false;
+        };
+
+        // Drop nodes that don't belong to the new domain (the old output, Scene Color, Tile UV, ...)
+        // and any links touching their pins; the shared core (math / Time / params) stays.
+        std::erase_if( m_Doc.Nodes,
+                       [&]( const SG::Node& n )
+                       {
+                           const SG::NodeSpec* spec = SG::FindSpec( n.Kind );
+                           const bool          drop = spec && !SG::SpecInDomain( *spec, domain );
+                           if ( drop )
+                               std::erase_if( m_Doc.Links, [&]( const SG::Link& l )
+                                              { return ownsPin( n, l.From ) || ownsPin( n, l.To ); } );
+                           return drop;
+                       } );
+
+        // Guarantee the graph still terminates in the new domain.
+        const char* outKind = SG::OutputKind( domain );
+        const bool  hasOut  = std::any_of( m_Doc.Nodes.begin(), m_Doc.Nodes.end(),
+                                           [&]( const SG::Node& n ) { return n.Kind == outKind; } );
+        if ( !hasOut )
+        {
+            auto output = SG::MakeNode( m_Doc, outKind );
+            output.X    = 320.0f;
+            output.Y    = 60.0f;
+            m_Doc.Nodes.push_back( std::move( output ) );
+        }
 
         m_ApplyPositions = true;
         m_Status.clear();
@@ -160,7 +231,7 @@ namespace Desert::Editor
         m_StatusIsError  = false;
     }
 
-    std::string NodeGraphPanel::CreateNewGraphFile( const std::string& directory )
+    std::string NodeGraphPanel::CreateNewGraphFile( const std::string& directory, SG::Domain domain )
     {
         // Unique name: NewShaderGraph, NewShaderGraph1, ... (also used as the shader name, so it
         // must stay a valid identifier).
@@ -178,21 +249,9 @@ namespace Desert::Editor
         }
 
         ShaderGraph::Document doc;
-        doc.Name = name;
-
-        auto param      = ShaderGraph::MakeNode( doc, "ColorParam" );
-        param.ParamName = "BaseColor";
-        param.Value     = { 0.8f, 0.4f, 0.1f, 1.0f };
-        param.X         = 0.0f;
-        param.Y         = 60.0f;
-
-        auto output = ShaderGraph::MakeNode( doc, "SurfaceOutput" );
-        output.X    = 320.0f;
-        output.Y    = 40.0f;
-
-        doc.Links.push_back( { doc.NextId++, param.Outputs[0].Id, output.Inputs[0].Id } );
-        doc.Nodes.push_back( std::move( param ) );
-        doc.Nodes.push_back( std::move( output ) );
+        doc.Name   = name;
+        doc.Domain = static_cast<int>( domain );
+        PopulateStarter( doc, domain );
 
         Common::Utils::FileSystem::WriteContentToFile( path, ShaderGraph::Serialize( doc ) );
         return path.string();
@@ -295,9 +354,20 @@ namespace Desert::Editor
             ImGui::EndPopup();
         }
 
+        // Domain picks the output node, the vertex contract and the palette (Material Domain / Mode).
         ImGui::SameLine();
-        // Lambert from the scene's directional light (DirectionLightsUB) vs. pure unlit output.
-        ImGui::Checkbox( "Lit", &m_Doc.Lit );
+        ImGui::SetNextItemWidth( 130.0f );
+        const char* kDomains[] = { "Surface", "Post Process" };
+        int         domainIdx  = m_Doc.Domain;
+        if ( ImGui::Combo( "##domain", &domainIdx, kDomains, 2 ) )
+            ChangeDomain( static_cast<SG::Domain>( domainIdx ) );
+
+        // Lambert from the scene's directional light (DirectionLightsUB) — Surface only.
+        if ( m_Doc.DomainEnum() == SG::Domain::Surface )
+        {
+            ImGui::SameLine();
+            ImGui::Checkbox( "Lit", &m_Doc.Lit );
+        }
 
         ImGui::SameLine();
         if ( ImGui::Button( "Compile" ) )
@@ -487,13 +557,17 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Add node" );
             ImGui::Separator();
 
-            const bool hasOutput =
+            const SG::Domain domain  = m_Doc.DomainEnum();
+            const char*      outKind = SG::OutputKind( domain );
+            const bool       hasOutput =
                  std::any_of( m_Doc.Nodes.begin(), m_Doc.Nodes.end(),
-                              []( const SG::Node& n ) { return n.Kind == "SurfaceOutput"; } );
+                              [&]( const SG::Node& n ) { return n.Kind == outKind; } );
 
             for ( const auto& spec : SG::Specs() )
             {
-                if ( spec.Kind == std::string( "SurfaceOutput" ) && hasOutput )
+                if ( !SG::SpecInDomain( spec, domain ) )
+                    continue; // only nodes valid in this domain
+                if ( spec.Kind == std::string( outKind ) && hasOutput )
                     continue; // exactly one output per graph
                 if ( ImGui::MenuItem( spec.Title ) )
                 {

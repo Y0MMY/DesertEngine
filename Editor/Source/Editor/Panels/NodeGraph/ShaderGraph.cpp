@@ -1,7 +1,5 @@
 #include "ShaderGraph.hpp"
 
-#include <ImGui/imgui.h>
-
 #include <rflcpp/rfl/json.hpp>
 #include <rflcpp/rfl/DefaultIfMissing.hpp>
 
@@ -14,55 +12,77 @@
 
 namespace Desert::Editor::ShaderGraph
 {
+    // Header colour packed exactly like Dear ImGui's IM_COL32 (R at bit 0). Kept local so this file —
+    // the graph SEMANTICS and compiler — stays free of any ImGui dependency and is unit-testable on
+    // its own; the panel reads NodeSpec::HeaderColor back as an ImU32.
+    static constexpr unsigned RGBA( unsigned r, unsigned g, unsigned b, unsigned a )
+    {
+        return ( a << 24 ) | ( b << 16 ) | ( g << 8 ) | r;
+    }
+
     // ---------------------------------------------------------------- node catalogue ----------
+    // Domain masks for the two families of nodes:
+    //   CORE    — math / textures / params / Time: valid in every domain.
+    //   SURFACE / POST — output nodes and domain-specific inputs, offered only in their own domain.
+    static constexpr unsigned CORE    = AllDomains;
+    static constexpr unsigned SURFACE = DomainBit( Domain::Surface );
+    static constexpr unsigned POST    = DomainBit( Domain::PostProcess );
+
     const std::vector<NodeSpec>& Specs()
     {
         static const std::vector<NodeSpec> s_Specs = {
-            { "SurfaceOutput", "Surface Output", IM_COL32( 150, 90, 60, 255 ),
+            // ---- domain-specific: outputs & special inputs ----
+            { "SurfaceOutput", "Surface Output", RGBA( 150, 90, 60, 255 ),
               { { "Albedo", ValueType::Color }, { "Emission", ValueType::Color }, { "Alpha", ValueType::Float } },
-              {} },
-            { "TextureSample", "Texture Sample", IM_COL32( 70, 110, 160, 255 ),
+              {}, false, false, false, SURFACE },
+            { "PostProcessOutput", "Post Process Output", RGBA( 150, 90, 60, 255 ),
+              { { "Color", ValueType::Color } }, {}, false, false, false, POST },
+            { "SceneColor", "Scene Color", RGBA( 70, 110, 160, 255 ), {},
+              { { "Color", ValueType::Color } }, false, false, false, POST },
+            // ---- core: valid everywhere ----
+            { "TextureSample", "Texture Sample", RGBA( 70, 110, 160, 255 ),
               { { "UV", ValueType::Vec2 } },
               { { "RGBA", ValueType::Color }, { "R", ValueType::Float } },
-              /*param*/ true },
-            { "ColorParam", "Color Param", IM_COL32( 160, 80, 90, 255 ), {},
-              { { "Color", ValueType::Color } }, /*param*/ true, /*color*/ true },
-            { "FloatParam", "Float Param", IM_COL32( 90, 140, 90, 255 ), {},
-              { { "Value", ValueType::Float } }, /*param*/ true, false, /*float*/ true },
-            { "ColorConst", "Color", IM_COL32( 120, 70, 80, 255 ), {},
-              { { "Color", ValueType::Color } }, false, /*color*/ true },
-            { "FloatConst", "Float", IM_COL32( 70, 110, 70, 255 ), {},
-              { { "Value", ValueType::Float } }, false, false, /*float*/ true },
-            { "UV", "UV", IM_COL32( 150, 130, 60, 255 ), {}, { { "UV", ValueType::Vec2 } } },
-            { "TileUV", "Tile UV", IM_COL32( 150, 130, 60, 255 ),
+              /*param*/ true, false, false, CORE },
+            { "ColorParam", "Color Param", RGBA( 160, 80, 90, 255 ), {},
+              { { "Color", ValueType::Color } }, /*param*/ true, /*color*/ true, false, CORE },
+            { "FloatParam", "Float Param", RGBA( 90, 140, 90, 255 ), {},
+              { { "Value", ValueType::Float } }, /*param*/ true, false, /*float*/ true, CORE },
+            { "ColorConst", "Color", RGBA( 120, 70, 80, 255 ), {},
+              { { "Color", ValueType::Color } }, false, /*color*/ true, false, CORE },
+            { "FloatConst", "Float", RGBA( 70, 110, 70, 255 ), {},
+              { { "Value", ValueType::Float } }, false, false, /*float*/ true, CORE },
+            { "UV", "UV", RGBA( 150, 130, 60, 255 ), {}, { { "UV", ValueType::Vec2 } },
+              false, false, false, CORE },
+            { "TileUV", "Tile UV", RGBA( 150, 130, 60, 255 ),
               { { "UV", ValueType::Vec2 }, { "Scale", ValueType::Float } },
-              { { "UV", ValueType::Vec2 } } },
-            { "Multiply", "Multiply", IM_COL32( 90, 90, 120, 255 ),
+              { { "UV", ValueType::Vec2 } }, false, false, false, /*mesh tiling*/ SURFACE },
+            { "Multiply", "Multiply", RGBA( 90, 90, 120, 255 ),
               { { "A", ValueType::Color }, { "B", ValueType::Color } },
-              { { "Out", ValueType::Color } } },
-            { "Scale", "Scale (Color x Float)", IM_COL32( 90, 90, 120, 255 ),
+              { { "Out", ValueType::Color } }, false, false, false, CORE },
+            { "Scale", "Scale (Color x Float)", RGBA( 90, 90, 120, 255 ),
               { { "Color", ValueType::Color }, { "Factor", ValueType::Float } },
-              { { "Out", ValueType::Color } } },
-            { "Add", "Add", IM_COL32( 90, 90, 120, 255 ),
+              { { "Out", ValueType::Color } }, false, false, false, CORE },
+            { "Add", "Add", RGBA( 90, 90, 120, 255 ),
               { { "A", ValueType::Color }, { "B", ValueType::Color } },
-              { { "Out", ValueType::Color } } },
-            { "Lerp", "Lerp", IM_COL32( 120, 90, 130, 255 ),
+              { { "Out", ValueType::Color } }, false, false, false, CORE },
+            { "Lerp", "Lerp", RGBA( 120, 90, 130, 255 ),
               { { "A", ValueType::Color }, { "B", ValueType::Color }, { "T", ValueType::Float } },
-              { { "Out", ValueType::Color } } },
-            { "OneMinus", "One Minus", IM_COL32( 110, 110, 110, 255 ),
-              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } } },
-            { "MultiplyFloat", "Multiply (Float)", IM_COL32( 80, 120, 80, 255 ),
+              { { "Out", ValueType::Color } }, false, false, false, CORE },
+            { "OneMinus", "One Minus", RGBA( 110, 110, 110, 255 ),
+              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } }, false, false, false, CORE },
+            { "MultiplyFloat", "Multiply (Float)", RGBA( 80, 120, 80, 255 ),
               { { "A", ValueType::Float }, { "B", ValueType::Float } },
-              { { "Out", ValueType::Float } } },
-            { "Saturate", "Saturate", IM_COL32( 110, 110, 110, 255 ),
-              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } } },
-            { "Power", "Power", IM_COL32( 90, 90, 120, 255 ),
+              { { "Out", ValueType::Float } }, false, false, false, CORE },
+            { "Saturate", "Saturate", RGBA( 110, 110, 110, 255 ),
+              { { "In", ValueType::Color } }, { { "Out", ValueType::Color } }, false, false, false, CORE },
+            { "Power", "Power", RGBA( 90, 90, 120, 255 ),
               { { "In", ValueType::Color }, { "Exp", ValueType::Float } },
-              { { "Out", ValueType::Color } } },
-            { "Sine", "Sine (Float)", IM_COL32( 80, 120, 80, 255 ),
-              { { "In", ValueType::Float } }, { { "Out", ValueType::Float } } },
-            { "Time", "Time", IM_COL32( 60, 140, 150, 255 ), {},
-              { { "Seconds", ValueType::Float } } },
+              { { "Out", ValueType::Color } }, false, false, false, CORE },
+            { "Sine", "Sine (Float)", RGBA( 80, 120, 80, 255 ),
+              { { "In", ValueType::Float } }, { { "Out", ValueType::Float } }, false, false, false, CORE },
+            { "Time", "Time", RGBA( 60, 140, 150, 255 ), {},
+              { { "Seconds", ValueType::Float } }, false, false, false, CORE },
         };
         return s_Specs;
     }
@@ -73,6 +93,16 @@ namespace Desert::Editor::ShaderGraph
             if ( kind == spec.Kind )
                 return &spec;
         return nullptr;
+    }
+
+    const char* OutputKind( Domain domain )
+    {
+        return domain == Domain::PostProcess ? "PostProcessOutput" : "SurfaceOutput";
+    }
+
+    bool SpecInDomain( const NodeSpec& spec, Domain domain )
+    {
+        return ( spec.Domains & DomainBit( domain ) ) != 0;
     }
 
     Node MakeNode( Document& doc, const std::string& kind )
@@ -187,6 +217,8 @@ namespace Desert::Editor::ShaderGraph
                     decl = std::format( "vec4 {} = {};", var, Vec4Lit( node.Value ) );
                 else if ( node.Kind == "FloatConst" )
                     decl = std::format( "float {} = {};", var, Lit( node.Value[0] ) );
+                else if ( node.Kind == "SceneColor" )
+                    decl = std::format( "vec4 {} = texture( u_SceneTexture, v_UV );", var );
                 else if ( node.Kind == "UV" )
                     decl = std::format( "vec2 {} = v_UV;", var );
                 else if ( node.Kind == "TileUV" )
@@ -249,17 +281,22 @@ namespace Desert::Editor::ShaderGraph
             return Common::MakeError<std::string>(
                  std::format( "'{}' is not a valid shader name (letters/digits/underscore)", doc.Name ) );
 
+        const Domain      domain   = doc.DomainEnum();
+        const char* const outKind  = OutputKind( domain );
+        const char* const outTitle = domain == Domain::PostProcess ? "Post Process Output" : "Surface Output";
+
         const Node* output = nullptr;
         for ( const auto& node : doc.Nodes )
         {
-            if ( node.Kind != "SurfaceOutput" )
+            if ( node.Kind != outKind )
                 continue;
             if ( output )
-                return Common::MakeError<std::string>( "graph has more than one Surface Output" );
+                return Common::MakeError<std::string>(
+                     std::format( "graph has more than one {}", outTitle ) );
             output = &node;
         }
         if ( !output )
-            return Common::MakeError<std::string>( "graph needs a Surface Output node" );
+            return Common::MakeError<std::string>( std::format( "graph needs a {} node", outTitle ) );
 
         // Exposed properties: dedupe by name, validate identifiers.
         std::vector<const Node*> textures, colorParams, floatParams;
@@ -285,16 +322,30 @@ namespace Desert::Editor::ShaderGraph
         }
 
         Compiler compiler( doc );
-        const std::string albedo   = compiler.InputExpr( *output, 0, "vec4( 0.8, 0.8, 0.8, 1.0 )" );
-        const std::string emission = compiler.InputExpr( *output, 1, "vec4( 0.0 )" );
-        const std::string alpha    = compiler.InputExpr( *output, 2, "1.0" );
+        std::string albedo, emission, alpha, sceneOut;
+        if ( domain == Domain::PostProcess )
+        {
+            sceneOut = compiler.InputExpr( *output, 0, "vec4( 0.0 )" );
+        }
+        else
+        {
+            albedo   = compiler.InputExpr( *output, 0, "vec4( 0.8, 0.8, 0.8, 1.0 )" );
+            emission = compiler.InputExpr( *output, 1, "vec4( 0.0 )" );
+            alpha    = compiler.InputExpr( *output, 2, "1.0" );
+        }
         if ( !compiler.error.empty() )
             return Common::MakeError<std::string>( compiler.error );
 
+        const bool usesTime = std::any_of( doc.Nodes.begin(), doc.Nodes.end(),
+                                           []( const Node& n ) { return n.Kind == "Time"; } );
+
         std::ostringstream out;
         out << "// GENERATED by the Desert Shader Graph editor — edit the .dgraph, not this file.\n";
-        out << "Shader \"" << doc.Name << "\"\n{\n    Domain Surface\n\n";
+        out << "Shader \"" << doc.Name << "\"\n{\n    Domain "
+            << ( domain == Domain::PostProcess ? "PostProcess" : "Surface" ) << "\n\n";
 
+        // Exposed properties block — shared across domains (post-process effects can expose params too).
+        // Scene texture (post-process) sits at set 0 / binding 0, so params start at Binding(1).
         if ( !textures.empty() || !colorParams.empty() || !floatParams.empty() )
         {
             out << "    Properties";
@@ -315,10 +366,37 @@ namespace Desert::Editor::ShaderGraph
             out << "    }\n\n";
         }
 
-        out << "    State\n    {\n        Cull Back\n        ZTest LEqual\n        ZWrite On\n    }\n\n";
+        // ---------------------------------------------------------- PostProcess domain ------------
+        // Full-screen triangle over the rendered scene color; no mesh, no normals, no depth pass.
+        if ( domain == Domain::PostProcess )
+        {
+            out << "    State\n    {\n        Cull None\n        ZTest Always\n        ZWrite Off\n    }\n\n";
 
-        const bool usesTime = std::any_of( doc.Nodes.begin(), doc.Nodes.end(),
-                                           []( const Node& n ) { return n.Kind == "Time"; } );
+            out << "    Vertex\n    {\n";
+            out << "        #include <Common/QuadPositions.glslh>\n";
+            out << "        #include <Common/QuadTextureCoords.glslh>\n\n";
+            out << "        layout( location = 0 ) out vec2 v_UV;\n\n";
+            out << "        void main()\n        {\n";
+            out << "            v_UV        = QUAD_TEXTURE_COORDINATES[gl_VertexIndex];\n";
+            out << "            gl_Position = vec4( QUAD_POSITIONS[gl_VertexIndex], 0.0, 1.0 );\n";
+            out << "        }\n    }\n\n";
+
+            out << "    Fragment\n    {\n";
+            out << "        layout( location = 0 ) in vec2 v_UV;\n";
+            out << "        layout( location = 0 ) out vec4 o_Color;\n";
+            out << "        layout( set = 0, binding = 0 ) uniform sampler2D u_SceneTexture;\n";
+            if ( usesTime )
+                out << "\n        #include <Common/TimeUB.glslh>\n";
+            out << "\n        void main()\n        {\n";
+            out << compiler.body.str();
+            out << std::format( "            o_Color = {};\n", sceneOut );
+            out << "        }\n    }\n";
+            out << "}\n";
+            return Common::MakeSuccess( out.str() );
+        }
+
+        // ---------------------------------------------------------- Surface domain ----------------
+        out << "    State\n    {\n        Cull Back\n        ZTest LEqual\n        ZWrite On\n    }\n\n";
 
         // NO GLSL boilerplate lives in this compiler: the vertex contract and the engine-filled UB
         // declarations are shared .glslh includes (Resources/Shaders/Common/), configured with
