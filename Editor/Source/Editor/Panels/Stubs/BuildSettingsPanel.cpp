@@ -7,12 +7,35 @@
 #include <Engine/Project/ProjectContext.hpp>
 
 #include <Common/Core/JobSystem.hpp>
+#include <Common/Core/Constants.hpp>
 
+#include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
+
+    void BuildSettingsPanel::RescanScenes()
+    {
+        m_Scenes.clear();
+        m_ScenesScanned = true;
+
+        if ( !::Desert::Project::ProjectContext::HasProject() )
+            return;
+
+        namespace fs              = std::filesystem;
+        const fs::path projectDir = ::Desert::Project::ProjectContext::Directory();
+        const fs::path assetsRoot = Common::Constants::Path::ASSETS_PATH;
+        std::error_code ec;
+        for ( const auto& entry : fs::recursive_directory_iterator( assetsRoot, ec ) )
+        {
+            if ( entry.is_regular_file() && entry.path().extension() == ".desce" )
+                m_Scenes.push_back( fs::relative( entry.path(), projectDir, ec ).generic_string() );
+        }
+        std::sort( m_Scenes.begin(), m_Scenes.end() );
+    }
 
     void BuildSettingsPanel::OnUIRender()
     {
@@ -51,17 +74,31 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::InputText( m_OutputDir, "##BuildOutputDir" );
 
         ImGui::Spacing();
-        ImGui::TextUnformatted( "Scenes in build" );
-        ImGui::BeginChild( "##buildScenes", ImVec2( 0.0f, 60.0f ), true );
+        ImGui::TextUnformatted( "Startup scene" );
+        if ( !m_ScenesScanned )
+            RescanScenes();
+
+        const std::string current = ::Desert::Project::ProjectContext::Current().DefaultScene;
+        ImGui::SetNextItemWidth( 320.0f );
+        if ( ImGui::BeginCombo( "##startupScene",
+                                current.empty() ? ICON_MDI_MOVIE_OPEN "  <none>" : current.c_str() ) )
         {
-            const auto& scene = ::Desert::Project::ProjectContext::Current().DefaultScene;
-            if ( scene.empty() )
-                ImGui::TextDisabled( ICON_MDI_MOVIE_OPEN "  No DefaultScene in the .deproj — the packaged "
-                                                         "game starts empty (or pass --scene)." );
-            else
-                ImGui::Text( ICON_MDI_MOVIE_OPEN "  %s (startup scene)", scene.c_str() );
+            if ( ImGui::Selectable( "<none>", current.empty() ) )
+                ::Desert::Project::ProjectContext::SetDefaultScene( "" );
+            for ( const auto& scene : m_Scenes )
+                if ( ImGui::Selectable( scene.c_str(), scene == current ) )
+                    ::Desert::Project::ProjectContext::SetDefaultScene( scene );
+            ImGui::EndCombo();
         }
-        ImGui::EndChild();
+        ImGui::SameLine();
+        if ( ImGui::SmallButton( ICON_MDI_REFRESH "  Rescan" ) )
+            RescanScenes();
+
+        if ( m_Scenes.empty() )
+            ImGui::TextDisabled( ICON_MDI_MOVIE_OPEN "  No .desce scenes under Assets — the packaged "
+                                                     "game starts empty (or pass --scene)." );
+        else if ( current.empty() )
+            ImGui::TextDisabled( "The packaged game boots to the chosen startup scene; saved to the .deproj." );
 
         ImGui::Spacing();
         const bool building = m_Building.load();

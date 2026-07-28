@@ -89,6 +89,24 @@ namespace Desert::Project
         return true;
     }
 
+    bool ProjectContext::Save()
+    {
+        if ( !s_Current || s_FilePath.empty() )
+            return false;
+        Common::Utils::FileSystem::WriteContentToFile( std::filesystem::path( s_FilePath ),
+                                                       rfl::json::write( *s_Current ) );
+        LOG_INFO( "[Project] Saved {}", s_FilePath );
+        return true;
+    }
+
+    bool ProjectContext::SetDefaultScene( const std::string& sceneRelPath )
+    {
+        if ( !s_Current )
+            return false;
+        s_Current->DefaultScene = sceneRelPath;
+        return Save();
+    }
+
     bool ProjectContext::HasProject()
     {
         return s_Current.has_value();

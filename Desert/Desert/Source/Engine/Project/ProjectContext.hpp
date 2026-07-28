@@ -25,6 +25,13 @@ namespace Desert::Project
         // file is missing/corrupt.
         static bool Open( const std::string& deprojPath );
 
+        // Persist the in-memory project back to its own .deproj. No-op (returns false) without a project.
+        static bool Save();
+
+        // Set the startup scene (path RELATIVE to the project directory, e.g. "Assets/Scenes/Main.desce")
+        // and persist. Pass "" to clear it. Returns false without a project.
+        static bool SetDefaultScene( const std::string& sceneRelPath );
+
         static bool HasProject();
         static const ProjectFile& Current();   // valid only when HasProject()
         static std::string        Directory(); // the folder the .deproj lives in

@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <string>
+#include <vector>
 
 namespace Desert::Editor
 {
@@ -26,6 +27,8 @@ namespace Desert::Editor
         void OnUIRender() override;
 
     private:
+        void RescanScenes(); // fills m_Scenes with project-relative .desce paths
+
         int         m_Platform  = 0;
         int         m_Config    = 1;
         bool        m_AppBundle = true; // macOS: .app with bundled MoltenVK/loader
@@ -37,5 +40,10 @@ namespace Desert::Editor
         bool              m_LastSuccess = false;
         std::string       m_LastMessage;    // guarded by the m_Building/m_HasResult handshake
         std::string       m_LastPackageDir;
+
+        // Startup-scene picker: the .desce scenes found under the project (relative to the project
+        // dir), scanned lazily on first render and via the Rescan button.
+        std::vector<std::string> m_Scenes;
+        bool                     m_ScenesScanned = false;
     };
 } // namespace Desert::Editor
