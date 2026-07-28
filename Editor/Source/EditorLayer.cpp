@@ -27,6 +27,7 @@
 #include "Editor/Core/Commands/SceneCommands.hpp"
 #include "Editor/Core/EditorPreferences.hpp"
 #include "Editor/Core/ProjectContext.hpp"
+#include "Editor/Build/GamePackager.hpp"
 
 #include <Engine/Graphic/Image.hpp> // Image2D::ReadPixelsRGBA8 (debug frame dump)
 #include <Engine/Core/Input.hpp>

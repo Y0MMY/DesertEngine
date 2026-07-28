@@ -119,6 +119,12 @@ namespace Desert::Editor::Tools
              ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( operation ),
                                    ImGuizmo::WORLD, &modelMatrix[0][0], nullptr, snap );
 
+        // Picking must stand down whenever the cursor is OVER the gizmo — not only mid-drag. Setting this
+        // only while manipulating meant a first click on a gizmo axis drawn over another mesh SELECTED
+        // that mesh instead of starting the manipulation.
+        if ( ImGuizmo::IsOver() || ImGuizmo::IsUsing() )
+            m_Hovered = true;
+
         // One undo entry per drag: when the drag STARTS this frame, capture the pre-drag TRS of every
         // selected top-level root NOW — before any of this frame's deltas are written below.
         const bool usingNow = ImGuizmo::IsUsing();
@@ -142,9 +148,6 @@ namespace Desert::Editor::Tools
 
         if ( manipulated )
         {
-            if ( ImGuizmo::IsOver() )
-                m_Hovered = true;
-
             // Convert the manipulated WORLD matrix back to the entity's LOCAL space (inverse parent) before
             // decomposing — so dragging a child entity edits its local offset correctly.
             const glm::mat4 localMatrix = glm::inverse( parentWorld ) * modelMatrix;
@@ -260,10 +263,15 @@ namespace Desert::Editor::Tools
         const auto op =
              ( Core::GizmoState::Get() == Operation::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
 
-        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, ImGuizmo::WORLD, &gizmoWorld[0][0] ) )
-        {
-            m_Hovered = ImGuizmo::IsOver();
+        const bool boneManipulated =
+             ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, ImGuizmo::WORLD, &gizmoWorld[0][0] );
 
+        // Same rule as the object gizmo: picking stands down on HOVER, not only mid-drag.
+        if ( ImGuizmo::IsOver() || ImGuizmo::IsUsing() )
+            m_Hovered = true;
+
+        if ( boneManipulated )
+        {
             // Edit ONLY this bone's LocalBindTransform (relative to its parent's unchanged chain global).
             const glm::mat4 newGlobalMesh = glm::inverse( entityWorld ) * gizmoWorld;
             glm::mat4       parentGlobal( 1.0f );

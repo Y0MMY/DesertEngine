@@ -2,13 +2,15 @@
 
 #include "../IPanel.hpp"
 
+#include <atomic>
 #include <string>
 
 namespace Desert::Editor
 {
-    // VISUAL STUB (no real functionality yet): the future "package the game" dialog — target platform,
-    // configuration, output folder, scene list. The Build button is disabled until a real packaging
-    // pipeline exists. Hidden by default; enable via View -> Build Settings.
+    // The "package the game" dialog. Build BAKES the open project into a self-contained game folder
+    // (Runtime binary + Assets + Cooked + engine shaders + run.sh) via GamePackager, on a JobSystem
+    // worker so the UI never stalls. Platform selection beyond the host is still a placeholder.
+    // Hidden by default; enable via View -> Build Settings.
     class BuildSettingsPanel final : public IPanel
     {
     public:
@@ -21,5 +23,12 @@ namespace Desert::Editor
         int         m_Platform  = 0;
         int         m_Config    = 1;
         std::string m_OutputDir = "Build/Output";
+
+        // Async packaging state (worker writes, UI reads).
+        std::atomic<bool> m_Building{ false };
+        std::atomic<bool> m_HasResult{ false };
+        bool              m_LastSuccess = false;
+        std::string       m_LastMessage;    // guarded by the m_Building/m_HasResult handshake
+        std::string       m_LastPackageDir;
     };
 } // namespace Desert::Editor

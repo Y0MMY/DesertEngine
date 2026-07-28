@@ -1,7 +1,14 @@
 #include "BuildSettingsPanel.hpp"
 
+#include <Editor/Build/GamePackager.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
+
+#include <Engine/Project/ProjectContext.hpp>
+
+#include <Common/Core/JobSystem.hpp>
+
+#include <cstdlib>
 
 namespace Desert::Editor
 {
@@ -9,7 +16,8 @@ namespace Desert::Editor
 
     void BuildSettingsPanel::OnUIRender()
     {
-        ImGui::TextDisabled( "Preview — the packaging pipeline is not implemented yet." );
+        ImGui::TextUnformatted(
+             ( "Project: " + ::Desert::Project::ProjectContext::Current().Name ).c_str() );
         ImGui::Separator();
 
         ImGui::Spacing();
@@ -38,15 +46,59 @@ namespace Desert::Editor
 
         ImGui::Spacing();
         ImGui::TextUnformatted( "Scenes in build" );
-        ImGui::BeginChild( "##buildScenes", ImVec2( 0.0f, 90.0f ), true );
-        ImGui::TextDisabled( ICON_MDI_MOVIE_OPEN "  <current scene>  (scene list wiring comes with the pipeline)" );
+        ImGui::BeginChild( "##buildScenes", ImVec2( 0.0f, 60.0f ), true );
+        {
+            const auto& scene = ::Desert::Project::ProjectContext::Current().DefaultScene;
+            if ( scene.empty() )
+                ImGui::TextDisabled( ICON_MDI_MOVIE_OPEN "  No DefaultScene in the .deproj — the packaged "
+                                                         "game starts empty (or pass --scene)." );
+            else
+                ImGui::Text( ICON_MDI_MOVIE_OPEN "  %s (startup scene)", scene.c_str() );
+        }
         ImGui::EndChild();
 
         ImGui::Spacing();
-        ImGui::BeginDisabled();
-        ImGui::Button( ICON_MDI_PACKAGE_VARIANT_CLOSED "  Build", ImVec2( 160.0f, 0.0f ) );
+        const bool building = m_Building.load();
+        ImGui::BeginDisabled( building );
+        if ( ImGui::Button( building ? ICON_MDI_PACKAGE_VARIANT_CLOSED "  Building..."
+                                     : ICON_MDI_PACKAGE_VARIANT_CLOSED "  Build",
+                            ImVec2( 160.0f, 0.0f ) ) )
+        {
+            // Snapshot the options on the UI thread; the copy work runs on a pool worker.
+            PackageOptions options;
+            options.OutputDir = m_OutputDir;
+            options.Config    = m_Config == 0 ? "Debug" : "Release";
+
+            m_Building.store( true );
+            m_HasResult.store( false );
+            Common::JobSystem::Get().Submit(
+                 [this, options]
+                 {
+                     const auto result = PackageGame( options );
+                     m_LastSuccess     = result.Success;
+                     m_LastMessage     = result.Message;
+                     m_LastPackageDir  = result.PackageDir;
+                     m_HasResult.store( true );
+                     m_Building.store( false );
+                 } );
+        }
         ImGui::EndDisabled();
-        if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
-            ImGui::SetTooltip( "Coming soon: cook assets + bundle the runtime for the selected platform." );
+        if ( ImGui::IsItemHovered() && !building )
+            ImGui::SetTooltip( "Bakes the project into a self-contained game folder:\n"
+                               "Runtime + Assets (raw mesh sources stripped) + Cooked + shaders + run.sh" );
+
+        if ( m_HasResult.load() )
+        {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos( 0.0f );
+            ImGui::TextColored( m_LastSuccess ? ImVec4( 0.5f, 0.9f, 0.5f, 1.0f )
+                                              : ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ),
+                                "%s", m_LastMessage.c_str() );
+            ImGui::PopTextWrapPos();
+#ifdef DESERT_PLATFORM_MACOS
+            if ( m_LastSuccess && ImGui::Button( ICON_MDI_FOLDER_OPEN "  Reveal in Finder" ) )
+                std::system( ( "open \"" + m_LastPackageDir + "\"" ).c_str() );
+#endif
+        }
     }
 } // namespace Desert::Editor
