@@ -51,6 +51,11 @@ jobs:
       - name: Run tests
         run: ./scripts/MacOS/RunTests.sh "$PWD" ${{ matrix.config }}
 
+      # Offline shader lint: every .shader parses with the SAME DShaderParser the engine uses —
+      # a broken shader fails the pipeline here instead of the editor at runtime.
+      - name: Lint shaders (DShaderTool)
+        run: ./build/Bin/${{ matrix.config }}/DShaderTool Editor/Resources/Shaders
+
       # Surface the test reports even when a step above failed.
       - name: Upload test reports
         if: always()

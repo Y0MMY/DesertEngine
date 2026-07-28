@@ -1,6 +1,6 @@
 #include "BuildSettingsPanel.hpp"
 
-#include <Editor/Build/GamePackager.hpp>
+#include <Editor/Packaging/GamePackager.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 
