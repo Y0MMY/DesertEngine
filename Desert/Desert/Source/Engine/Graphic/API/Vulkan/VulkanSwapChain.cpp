@@ -66,7 +66,24 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t numberOfSwapChainImages =
              std::clamp( desiredImageCount, surfCaps.minImageCount, maxImageCount );
 
-        VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;// VK_PRESENT_MODE_FIFO_KHR;
+        // Pick the present mode from what the surface ACTUALLY supports (hardcoding MAILBOX tripped a
+        // validation error on MoltenVK, which offers only FIFO + IMMEDIATE). Preference: MAILBOX
+        // (low-latency triple buffering) when available, else FIFO — the only mode the spec guarantees.
+        VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+        {
+            uint32_t presentModeCount = 0;
+            vkGetPhysicalDeviceSurfacePresentModesKHR( pDevice, m_Surface, &presentModeCount, nullptr );
+            std::vector<VkPresentModeKHR> presentModes( presentModeCount );
+            if ( presentModeCount > 0 )
+                vkGetPhysicalDeviceSurfacePresentModesKHR( pDevice, m_Surface, &presentModeCount,
+                                                           presentModes.data() );
+            for ( const auto mode : presentModes )
+                if ( mode == VK_PRESENT_MODE_MAILBOX_KHR )
+                {
+                    swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+                    break;
+                }
+        }
 
         VkSurfaceTransformFlagsKHR preTransform;
         if ( surfCaps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR )

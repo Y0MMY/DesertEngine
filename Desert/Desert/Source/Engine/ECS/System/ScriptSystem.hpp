@@ -57,6 +57,10 @@ namespace Desert::ECS
                 return;
             }
 
+            // Hot-reload: a saved .lua re-loads its slots live (same mtime-polling approach as
+            // the material/shader watcher). Throttled; scripts keep running between polls.
+            PollScriptFiles( registry, ts );
+
             // Advance edge-detection state so Input.wasPressed() fires exactly on the press transition.
             m_Engine.NewInputFrame();
 
@@ -121,6 +125,10 @@ namespace Desert::ECS
                 }
             }
 
+            // Fire due Timer.after callbacks (scheduled by OnStart/OnUpdate/earlier timers). Game
+            // time only — pausing Play pauses the timers because this Update early-outs above.
+            m_Engine.TickTimers( ts.GetSeconds() );
+
             // A script may have requested cursor lock/unlock (Input.lockCursor/showCursor). Apply it so it
             // cooperates with the Escape toggle (also keeps m_LookSuspended in sync for the next Escape press).
             if ( auto req = m_Engine.ConsumeCursorLockRequest() )
@@ -136,6 +144,46 @@ namespace Desert::ECS
         }
 
     private:
+        // Polls the mtimes of every script file referenced by a running slot; on change, flags
+        // the slot for re-load (Started=false -> next frame: fresh env + OnStart + properties).
+        // Errors surface through the normal load path (Logs panel) and never kill the session.
+        void PollScriptFiles( entt::registry& registry, const Common::Timestep& ts )
+        {
+            m_ScriptPollAccum += ts.GetSeconds();
+            if ( m_ScriptPollAccum < 0.7f )
+                return;
+            m_ScriptPollAccum = 0.0f;
+
+            auto view = registry.view<ScriptComponent>();
+            for ( auto entity : view )
+            {
+                auto& sc = view.get<ScriptComponent>( entity );
+                for ( auto& script : sc.Scripts )
+                {
+                    if ( script.ScriptPath.empty() )
+                        continue;
+
+                    std::error_code ec;
+                    const auto      mtime = std::filesystem::last_write_time( script.ScriptPath, ec );
+                    if ( ec )
+                        continue;
+
+                    auto it = m_ScriptTimes.find( script.ScriptPath );
+                    if ( it == m_ScriptTimes.end() )
+                    {
+                        m_ScriptTimes[script.ScriptPath] = mtime; // baseline
+                        continue;
+                    }
+                    if ( it->second == mtime )
+                        continue;
+                    it->second = mtime;
+
+                    script.Started = false; // re-load + OnStart on the next frame
+                    LOG_INFO( "[HotReload] Script '{}' reloading", script.ScriptPath );
+                }
+            }
+        }
+
         // Connects the on_destroy<ScriptComponent> listener to `registry` once (re-arms if the registry object
         // changes, e.g. a brand-new scene). Cheap no-op on every subsequent frame.
         void EnsureDestroyHook( entt::registry& registry )
@@ -162,5 +210,9 @@ namespace Desert::ECS
         bool      m_CursorLocked  = false;
         bool      m_LookSuspended = false;
         bool      m_AltPrev       = false;
+
+        // Script hot-reload state (mtime polling, throttled).
+        std::unordered_map<std::string, std::filesystem::file_time_type> m_ScriptTimes;
+        float                                                            m_ScriptPollAccum = 0.0f;
     };
 } // namespace Desert::ECS

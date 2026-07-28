@@ -66,6 +66,11 @@ namespace Desert::Core
         [[nodiscard]] float GetMovementSpeed() const { return m_MovementSpeed; }
         void                SetMovementSpeed( float speed ) { m_MovementSpeed = speed; }
 
+        // Set by the viewport panel every frame: keyboard/mouse input is only consumed while the
+        // viewport is hovered and no ImGui text field wants the keyboard. An RMB-look that started
+        // inside the viewport stays active until the button is released even if the cursor leaves.
+        void SetInputEnabled( bool enabled ) { m_InputEnabled = enabled; }
+
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
@@ -91,6 +96,9 @@ namespace Desert::Core
         float m_Pitch = 0.0f, m_PitchDelta = 0.0f;
         float m_Yaw = 0.0f, m_YawDelta = 0.0f;
         float m_MovementSpeed = 1.0f; // multiplies the base fly speed (user-adjustable)
+
+        bool m_InputEnabled = true;  // viewport hovered + no text input capture (see SetInputEnabled)
+        bool m_Flying       = false; // RMB-look session in progress (started inside the viewport)
     };
 
     // Camera driven by a scene entity (CameraComponent): view from the entity transform, projection from

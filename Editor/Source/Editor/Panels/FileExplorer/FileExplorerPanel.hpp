@@ -210,6 +210,14 @@ namespace Desert::Editor
         bool DrawRenderedMaterialThumbnail( DirectoryInformation* entry, const ImVec2& size );
         // Same, for a mesh entry (the mesh auto-framed by its bounds).
         bool DrawRenderedMeshThumbnail( DirectoryInformation* entry, const ImVec2& size );
+
+        // Bottom preview strip for the currently selected file: thumbnail (texture/material/mesh) or a
+        // text excerpt (scripts, .demat/.deprefab/.desce JSON), plus name/type/size.
+        void DrawPreviewPane();
+
+        // Text-excerpt cache for the preview pane (loaded once per selection change, capped size).
+        std::string m_PreviewTextPath;
+        std::string m_PreviewText;
     };
 
 } // namespace Desert::Editor

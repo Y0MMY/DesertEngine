@@ -88,10 +88,30 @@ namespace Desert::Core
 
         const bool mousePressed = Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Right );
 
-        if ( mousePressed )
+        // An RMB-look only STARTS inside the viewport, but stays active until release so the drag
+        // can leave the window. Keyboard movement works whenever the viewport is hovered — no RMB
+        // required (UE-style).
+        if ( mousePressed && m_InputEnabled )
+            m_Flying = true;
+        if ( !mousePressed )
+            m_Flying = false;
+
+        const bool allowKeyboard = m_InputEnabled || m_Flying;
+
+        if ( allowKeyboard )
         {
-            const float YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
-            const float cameraSpeed   = 0.0002f * m_MovementSpeed * timestep.GetMilliseconds();
+            const float YAWSign = GetUpDirection().y < 0 ? -1.0f : 1.0f;
+
+            // Shift = x4 boost, Ctrl = x0.25 precision crawl.
+            float speedScale = 1.0f;
+            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::LeftShift ) ||
+                 Input::Keyboard::IsKeyPressed( Common::KeyCode::RightShift ) )
+                speedScale *= 4.0f;
+            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::LeftControl ) ||
+                 Input::Keyboard::IsKeyPressed( Common::KeyCode::RightControl ) )
+                speedScale *= 0.25f;
+
+            const float cameraSpeed   = 0.0002f * m_MovementSpeed * speedScale * timestep.GetMilliseconds();
             const float rotationSpeed = 0.133f * timestep.GetMilliseconds();
 
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::S ) )
@@ -107,7 +127,24 @@ namespace Desert::Core
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::E ) )
                 m_LocationDelta += cameraSpeed * glm::vec3{ 0.f, YAWSign, 0.f };
 
-            constexpr float maxRate = 0.12f;
+            // Arrow keys rotate without touching the mouse: left/right = yaw, up/down = pitch.
+            constexpr float arrowRate = 0.0022f;
+            const float     arrowStep = arrowRate * rotationSpeed;
+            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::Left ) )
+                m_YawDelta -= arrowStep;
+            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::Right ) )
+                m_YawDelta += arrowStep;
+            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::Up ) )
+                m_PitchDelta -= arrowStep;
+            if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::Down ) )
+                m_PitchDelta += arrowStep;
+        }
+
+        if ( m_Flying )
+        {
+            const float     YAWSign       = GetUpDirection().y < 0 ? -1.0f : 1.0f;
+            const float     rotationSpeed = 0.133f * timestep.GetMilliseconds();
+            constexpr float maxRate       = 0.12f;
             m_YawDelta   += glm::clamp( YAWSign * MouseDelta.x * rotationSpeed, -maxRate, maxRate );
             m_PitchDelta += glm::clamp( MouseDelta.y * rotationSpeed, -maxRate, maxRate );
         }
@@ -123,7 +160,7 @@ namespace Desert::Core
         static constexpr float kMaxPitch = glm::radians( 89.0f );
         m_Pitch = glm::clamp( m_Pitch, -kMaxPitch, kMaxPitch );
 
-        if ( mousePressed )
+        if ( m_Flying )
         {
             const float distance = glm::distance( m_FocalPoint, m_Position );
             m_FocalPoint         = m_Position + GetForwardDirection() * distance;

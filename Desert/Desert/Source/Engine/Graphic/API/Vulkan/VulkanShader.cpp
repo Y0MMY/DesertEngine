@@ -24,11 +24,14 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
-    VulkanShader::VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines )
-        : m_ShaderAsset( asset )
+    VulkanShader::VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines,
+                                const std::string& passName )
+        : m_ShaderAsset( asset ), m_PassName( passName )
     {
         m_ShaderPath = asset->GetMetadata().Filepath;
         m_ShaderName = m_ShaderPath.stem().string();
+        if ( !m_PassName.empty() )
+            m_ShaderName += "/" + m_PassName;
 
         Reload();
     }
@@ -45,14 +48,16 @@ namespace Desert::Graphic::API::Vulkan
         auto asset = m_ShaderAsset.lock();
         if ( !asset ) return Common::MakeError( "Shader asset expired" );
 
-        m_ProgramMeta = Core::Preprocess::ShaderPreprocess::ParseProgramMeta( asset->GetShaderContent() );
+        m_ProgramMeta =
+             Core::Preprocess::ShaderPreprocess::ParseProgramMetaForPass( asset->GetShaderContent(), m_PassName );
         if ( m_ProgramMeta.HasParams() || m_ProgramMeta.State.Topology.has_value() )
         {
-            LOG_INFO( "Shader '{}': parsed {} param(s) + render-state from #pragma metadata", m_ShaderName,
+            LOG_INFO( "Shader '{}': parsed {} param(s) + render-state from shader metadata", m_ShaderName,
                       m_ProgramMeta.Params.size() );
         }
 
-        auto stages = Core::Preprocess::ShaderPreprocess::PreProcessProgram( asset->GetShaderContent(), m_ShaderPath );
+        auto stages = Core::Preprocess::ShaderPreprocess::PreProcessProgramPass( asset->GetShaderContent(),
+                                                                                 m_ShaderPath, m_PassName );
         return CompileProgram( stages );
     }
 
@@ -80,6 +85,11 @@ namespace Desert::Graphic::API::Vulkan
             VkShaderModule module;
             VK_CHECK_RESULT_BOOL( vkCreateShaderModule( device, &ci, nullptr, &module ) );
             m_ShaderModules.push_back( module );
+
+            // Debug name so RenderDoc/validation messages identify the module ("Unlit/Shadow [Vertex]").
+            VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_SHADER_MODULE,
+                                              m_ShaderName + " [" + GetStringShaderStage( stage ) + "]",
+                                              module );
 
             VkShaderStageFlagBits vkStage = (VkShaderStageFlagBits)ReflectionUtils::StageToVkStage( stage );
             m_PipelineShaderStageCreateInfos.push_back( { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = vkStage, .module = module, .pName = "main" } );

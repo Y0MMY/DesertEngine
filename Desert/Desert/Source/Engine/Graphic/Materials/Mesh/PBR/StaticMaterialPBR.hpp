@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Materials/Material.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialData.hpp>
+#include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
 
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
@@ -13,7 +13,7 @@ namespace Desert::Graphic
     class Image2D;
     class ImageCube;
 
-    // Runtime PBR material. Its parameters live entirely in the reflected PBRMaterialData (no per-
+    // Runtime PBR material. Its parameters live entirely in the reflected PBRSurfaceParams (no per-
     // parameter members or setters): MaterialFactory copies the data from the material asset, the
     // editor edits it via reflection, and the shader receives it automatically (see Bind()).
     class StaticMaterialPBR : public Material
@@ -24,8 +24,8 @@ namespace Desert::Graphic
 
         void Bind( const MaterialInstance* instance ) override;
 
-        Assets::PBRMaterialData&       Data()       { return m_Data; }
-        const Assets::PBRMaterialData& Data() const { return m_Data; }
+        Assets::PBRSurfaceParams&       Data()       { return m_Data; }
+        const Assets::PBRSurfaceParams& Data() const { return m_Data; }
 
         // Index into this material's per-object Materials[] storage buffer for the next Bind/draw.
         void SetMaterialIndex( uint32_t index ) { m_MaterialIndex = index; }
@@ -51,7 +51,7 @@ namespace Desert::Graphic
         void OnBind( MaterialInstance* instance ) override;
 
     private:
-        Assets::PBRMaterialData m_Data;
+        Assets::PBRSurfaceParams m_Data;
         uint32_t                m_MaterialIndex = 0;
     };
 

@@ -9,6 +9,8 @@
 #include <Engine/Graphic/Render/Commands/DrawMeshCommand.hpp>
 #include <Engine/Graphic/Render/Commands/DrawSkinnedMeshCommand.hpp>
 #include <Engine/Graphic/Render/Commands/DrawGenericMeshCommand.hpp>
+#include <Engine/Graphic/Render/Commands/DrawSlotMaterialMeshCommand.hpp>
+#include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Animation/Skeleton.hpp>
@@ -37,7 +39,7 @@ namespace Desert::ECS
                 auto view = registry.view<StaticMeshComponent, TransformComponent>();
 
                 // Frame-constant: read the current selection ONCE, not per entity (256x/frame otherwise).
-                const auto selectedUUID = Runtime::SelectionContext::Get();
+                const auto& selectedAll = Runtime::SelectionContext::GetAll();
 
                 view.each(
                      [&]( entt::entity entity, StaticMeshComponent& mesh,
@@ -131,35 +133,38 @@ namespace Desert::ECS
                              for ( const auto& inst : mesh.RuntimeMaterialInstances )
                                  mesh.RuntimeSlotPtrs.push_back( inst.get() );
 
-                             // Tint/roughen a batched PBR primitive straight from a MaterialComponent (no
-                             // material asset needed) — e.g. the Cornell Box GI test colours its walls this
-                             // way. Applied when instances are (re)built; the override persists and
-                             // BuildEffectiveMaterial honours it. Empty/"StaticMeshPBR" shader = still PBR.
-                             if ( registry.has<MaterialComponent>( entity ) && !mesh.RuntimeMaterialInstances.empty() )
+                         }
+
+                         // Tint/roughen a batched PBR primitive straight from a MaterialComponent (no
+                         // material asset needed) — the Cornell Box walls, and scripts animating
+                         // params live (self:setMaterialParam). Applied EVERY frame (not only on
+                         // instance rebuild) so runtime changes show immediately; cheap — a few
+                         // by-name writes only on entities that carry a MaterialComponent.
+                         // Empty/"StaticMeshPBR" shader = still PBR.
+                         if ( registry.has<MaterialComponent>( entity ) && !mesh.RuntimeMaterialInstances.empty() )
+                         {
+                             const auto& matc = registry.get<MaterialComponent>( entity );
+                             if ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" )
                              {
-                                 const auto& matc = registry.get<MaterialComponent>( entity );
-                                 if ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" )
+                                 auto& inst = mesh.RuntimeMaterialInstances[0];
+                                 for ( const auto& p : matc.Params )
                                  {
-                                     auto& inst = mesh.RuntimeMaterialInstances[0];
-                                     for ( const auto& p : matc.Params )
-                                     {
-                                         if ( p.Name == "AlbedoColor" )
-                                             inst->SetVec4( "AlbedoColor", p.Value );
-                                         else if ( p.Name == "MetallicFactor" )
-                                             inst->SetFloat( "MetallicFactor", p.Value.x );
-                                         else if ( p.Name == "RoughnessFactor" )
-                                             inst->SetFloat( "RoughnessFactor", p.Value.x );
-                                         else if ( p.Name == "EmissiveColor" )
-                                             inst->SetVec4( "EmissiveColor", p.Value );
-                                         else if ( p.Name == "EmissiveIntensity" )
-                                             inst->SetFloat( "EmissiveIntensity", p.Value.x );
-                                         else if ( p.Name == "Transmission" )
-                                             inst->SetFloat( "Transmission", p.Value.x );
-                                         else if ( p.Name == "IOR" )
-                                             inst->SetFloat( "IOR", p.Value.x );
-                                         else if ( p.Name == "GlassTint" )
-                                             inst->SetVec4( "GlassTint", p.Value );
-                                     }
+                                     if ( p.Name == "AlbedoColor" )
+                                         inst->SetVec4( "AlbedoColor", p.Value );
+                                     else if ( p.Name == "MetallicFactor" )
+                                         inst->SetFloat( "MetallicFactor", p.Value.x );
+                                     else if ( p.Name == "RoughnessFactor" )
+                                         inst->SetFloat( "RoughnessFactor", p.Value.x );
+                                     else if ( p.Name == "EmissiveColor" )
+                                         inst->SetVec4( "EmissiveColor", p.Value );
+                                     else if ( p.Name == "EmissiveIntensity" )
+                                         inst->SetFloat( "EmissiveIntensity", p.Value.x );
+                                     else if ( p.Name == "Transmission" )
+                                         inst->SetFloat( "Transmission", p.Value.x );
+                                     else if ( p.Name == "IOR" )
+                                         inst->SetFloat( "IOR", p.Value.x );
+                                     else if ( p.Name == "GlassTint" )
+                                         inst->SetVec4( "GlassTint", p.Value );
                                  }
                              }
                          }
@@ -181,11 +186,12 @@ namespace Desert::ECS
                          }
 
                          bool isSelected = false;
-                         if ( const auto& selected = selectedUUID )
+                         if ( !selectedAll.empty() )
                          {
-                             // Check this entity itself
+                             // Check this entity itself (multi-selection aware)
                              if ( registry.has<UUIDComponent>( entity ) &&
-                                  registry.get<UUIDComponent>( entity ).UUID == *selected )
+                                  Runtime::SelectionContext::Contains(
+                                       registry.get<UUIDComponent>( entity ).UUID ) )
                              {
                                  isSelected = true;
                              }
@@ -200,7 +206,8 @@ namespace Desert::ECS
                                          break;
                                      ancestor = rel.Parent;
                                      if ( registry.has<UUIDComponent>( ancestor ) &&
-                                          registry.get<UUIDComponent>( ancestor ).UUID == *selected )
+                                          Runtime::SelectionContext::Contains(
+                                               registry.get<UUIDComponent>( ancestor ).UUID ) )
                                      {
                                          isSelected = true;
                                          break;
@@ -236,9 +243,61 @@ namespace Desert::ECS
                              }
                          }
 
-                         renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
-                              targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, isSelected,
-                              mesh.HiddenSubmeshes );
+                         // ── v3 per-slot shader routing ──────────────────────────────────────
+                         // Submesh i uses slot min(i, slots-1). Submeshes whose slot material is
+                         // a custom-shader material (DataDrivenMaterial) leave the batched PBR
+                         // path and are drawn per-slot through the generic path; the PBR draw
+                         // masks them out. Materials are MaterialService-owned -> pointers are
+                         // stable for the frame.
+                         uint64_t customMask = 0;
+                         struct SlotDraw
+                         {
+                             Graphic::Material* Mat;
+                             uint64_t           Mask;
+                         };
+                         std::vector<SlotDraw> slotDraws;
+
+                         const size_t submeshCount =
+                              std::min<size_t>( targetMesh->GetSubmeshes().size(), 64 );
+                         const size_t materialSlotCount = mesh.RuntimeMaterialInstances.size();
+                         for ( size_t si = 0; si < submeshCount && materialSlotCount > 0; ++si )
+                         {
+                             const size_t slot = std::min( si, materialSlotCount - 1 );
+                             auto* inst = mesh.RuntimeMaterialInstances[slot].get();
+                             auto* parent = inst ? inst->GetParentMaterial() : nullptr;
+                             if ( !dynamic_cast<Graphic::DataDrivenMaterial*>( parent ) )
+                                 continue;
+
+                             customMask |= ( 1ull << si );
+                             bool merged = false;
+                             for ( auto& d : slotDraws )
+                                 if ( d.Mat == parent )
+                                 {
+                                     d.Mask |= ( 1ull << si );
+                                     merged = true;
+                                     break;
+                                 }
+                             if ( !merged )
+                                 slotDraws.push_back( { parent, 1ull << si } );
+                         }
+
+                         for ( const auto& d : slotDraws )
+                         {
+                             const uint64_t visible = d.Mask & ~mesh.HiddenSubmeshes;
+                             if ( visible )
+                                 renderCommandBuffer.Emplace<Graphic::Render::DrawSlotMaterialMeshCommand>(
+                                      targetMesh, worldTransform, d.Mat, visible, isSelected );
+                         }
+
+                         // PBR path draws the remaining submeshes (skip entirely when every
+                         // submesh went custom).
+                         const uint64_t allMask =
+                              submeshCount >= 64 ? ~0ull : ( ( 1ull << submeshCount ) - 1ull );
+                         const uint64_t pbrHidden = mesh.HiddenSubmeshes | customMask;
+                         if ( submeshCount == 0 || ( ~pbrHidden & allMask ) != 0 )
+                             renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
+                                  targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, isSelected,
+                                  pbrHidden );
                      } );
             }
 
@@ -285,9 +344,35 @@ namespace Desert::ECS
                          if ( ism.RuntimeMaterialInstances.empty() )
                              return;
 
+                         // ISM draws through the batched PBR instancing path — a custom-shader slot
+                         // material can't drive it. Use the first PBR slot; if none, warn once and
+                         // skip (per-instance generic draws would defeat the point of an ISM).
+                         Graphic::MaterialInstance* ismInstance = nullptr;
+                         for ( const auto& inst : ism.RuntimeMaterialInstances )
+                         {
+                             if ( inst && !dynamic_cast<Graphic::DataDrivenMaterial*>(
+                                               inst->GetParentMaterial() ) )
+                             {
+                                 ismInstance = inst.get();
+                                 break;
+                             }
+                         }
+                         if ( !ismInstance )
+                         {
+                             static bool s_WarnedCustomISM = false;
+                             if ( !s_WarnedCustomISM )
+                             {
+                                 LOG_WARN( "Instanced Static Mesh doesn't support custom-shader materials "
+                                           "(instancing is a PBR-path optimization) — entity skipped. "
+                                           "Assign a PBR material." );
+                                 s_WarnedCustomISM = true;
+                             }
+                             return;
+                         }
+
                          // InstanceTransforms are WORLD-space (the entity is a container); zero-copy pointer.
                          renderCommandBuffer.Emplace<Graphic::Render::DrawInstancedStaticMeshCommand>(
-                              targetMesh, ism.RuntimeMaterialInstances[0].get(), &ism.InstanceTransforms );
+                              targetMesh, ismInstance, &ism.InstanceTransforms );
                      } );
             }
 
@@ -373,10 +458,10 @@ namespace Desert::ECS
                                  boneMatrices[i] = resolve( i ) * bones[i].OffsetMatrix;
                          }
 
-                         bool isSelected = false;
-                         if ( auto selected = Runtime::SelectionContext::Get();
-                              selected.has_value() && registry.has<UUIDComponent>( entity ) )
-                             isSelected = ( registry.get<UUIDComponent>( entity ).UUID == *selected );
+                         bool isSelected =
+                              registry.has<UUIDComponent>( entity ) &&
+                              Runtime::SelectionContext::Contains(
+                                   registry.get<UUIDComponent>( entity ).UUID );
 
                          // WORLD transform (walk the parent chain) — a skinned mesh parented to e.g. the
                          // character controller must follow it; using the local transform left it behind at

@@ -10,7 +10,10 @@ project "Desert"
     -- annotations. The generated file is picked up by the Source/Engine/**.cpp glob below.
     dependson { "DesertHeaderTool" }
     prebuildcommands {
-        '"%{wks.location}/build/Bin/%{cfg.buildcfg}/DesertHeaderTool.exe" "%{wks.location}/Desert/Desert/Source" "%{wks.location}/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp" "Engine"'
+        DesertPlatform.BuiltToolPath("DesertHeaderTool")
+            .. ' "' .. _MAIN_SCRIPT_DIR .. '/Desert/Desert/Source"'
+            .. ' "' .. _MAIN_SCRIPT_DIR .. '/Desert/Desert/Source/Engine/Generated/Reflection.gen.cpp"'
+            .. ' "Engine"'
     }
 
     files { 
@@ -71,3 +74,13 @@ project "Desert"
             "Source/Platform/Windows/**.cpp",
             "Source/Platform/Windows/**.hpp",
         }
+
+    filter { "system:macosx" }
+        defines { "DESERT_PLATFORM_MACOS" }
+        files {
+            "Source/Platform/MacOS/**.cpp",
+            "Source/Platform/MacOS/**.hpp",
+            "Source/Platform/MacOS/**.mm",
+        }
+
+    filter {}

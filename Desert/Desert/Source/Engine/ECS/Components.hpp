@@ -49,7 +49,7 @@ namespace Desert::ECS
     };
 
     // "Reflected render-data block": editable, reflected fields the editor draws and the renderer maps
-    // to its GPU representation. This is the general concept — a surface Material (PBRMaterialData) is
+    // to its GPU representation. This is the general concept — a surface Material (PBRSurfaceParams) is
     // just ONE specialization; camera and lights are others. NOT a material, hence the member is `Data`.
     struct CameraData
     {

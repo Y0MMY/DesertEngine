@@ -2,8 +2,9 @@
 
 #include "ImportManager.hpp"
 
+#include <Common/Core/JobSystem.hpp>
+
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <queue>
@@ -13,14 +14,14 @@
 
 namespace Desert::Editor
 {
-    // Header-only async cooker. Dropping a heavy mesh used to HITCH the editor because the Assimp cook
-    // (parse FBX -> .stmesh/.tex) ran on the main thread. The cook is pure CPU + file I/O (NO GPU / no
-    // AssetManager / no ECS), so it is safe to run on a worker thread. This class owns ONE worker that pops
-    // cook jobs and runs them on its OWN ImportManager; the MAIN thread later drains completed cooks
-    // (PollCompleted) and does all the GPU/AssetManager/ECS work (register + spawn). Clean thread split:
-    //   - worker: m_Importer.Import(path)  (cook -> writes Cooked/*.stmesh + Cooked/Textures/*.tex)
-    //   - main:   PollCompleted() -> ResolveOrImport (now cooked -> fast) -> assign to the entity
-    // Progress (Total/Done) drives a UI bar; counters reset to 0 when everything has drained (idle).
+    // Header-only async cooker on the engine JobSystem (it used to own a dedicated std::thread). Dropping
+    // a heavy mesh must not HITCH the editor: the Assimp cook (parse FBX -> .stmesh/.tex) is pure CPU +
+    // file I/O (NO GPU / no AssetManager / no ECS), so it runs on a pool worker; the MAIN thread later
+    // drains completed cooks (PollCompleted) and does all the GPU/AssetManager/ECS work (register + spawn).
+    //
+    // Cooks stay ONE-AT-A-TIME (m_CookRunning gate): drag-dropped meshes may share textures, and the
+    // serialized order is the long-standing guarantee here. Bulk parallel cooking lives in
+    // ImportManager::ImportAllFromDirectory instead.
     class AsyncMeshLoader
     {
     public:
@@ -30,22 +31,27 @@ namespace Desert::Editor
             uint64_t    UserData;   // caller token (e.g. the pending entity's UUID)
         };
 
-        AsyncMeshLoader() : m_Worker( [this] { WorkerLoop(); } ) {} // m_Worker declared LAST -> starts last
+        AsyncMeshLoader() = default;
+
         ~AsyncMeshLoader()
         {
+            // Jobs capture `this` — wait out any cook still in flight before the members die.
+            for ( ;; )
             {
-                std::lock_guard<std::mutex> lk( m_Mutex );
-                m_Stop = true;
+                {
+                    std::lock_guard<std::mutex> lk( m_Mutex );
+                    m_ShuttingDown = true;
+                    if ( !m_CookRunning )
+                        break;
+                }
+                std::this_thread::yield();
             }
-            m_CV.notify_all();
-            if ( m_Worker.joinable() )
-                m_Worker.join();
         }
 
         AsyncMeshLoader( const AsyncMeshLoader& )            = delete;
         AsyncMeshLoader& operator=( const AsyncMeshLoader& ) = delete;
 
-        // Queue a cook (main thread). Returns immediately; the worker does the heavy parse in the background.
+        // Queue a cook (main thread). Returns immediately; a pool worker does the heavy parse.
         void Request( const std::string& sourcePath, uint64_t userData )
         {
             {
@@ -53,10 +59,10 @@ namespace Desert::Editor
                 m_Queue.push( { sourcePath, userData } );
             }
             ++m_Total;
-            m_CV.notify_one();
+            Pump();
         }
 
-        // Main thread, once per frame: take everything the worker has finished cooking.
+        // Main thread, once per frame: take everything the workers have finished cooking.
         std::vector<Done> PollCompleted()
         {
             std::vector<Done> out;
@@ -68,7 +74,7 @@ namespace Desert::Editor
                     m_Completed.pop();
                 }
                 // Idle (nothing queued, nothing cooking, nothing left to hand out) -> reset progress.
-                if ( m_Queue.empty() && !m_Active )
+                if ( m_Queue.empty() && !m_CookRunning )
                 {
                     m_Total = 0;
                     m_Done  = 0;
@@ -80,7 +86,7 @@ namespace Desert::Editor
         bool IsBusy() const
         {
             std::lock_guard<std::mutex> lk( m_Mutex );
-            return !m_Queue.empty() || m_Active || !m_Completed.empty();
+            return !m_Queue.empty() || m_CookRunning || !m_Completed.empty();
         }
         int   Total() const { return m_Total.load(); }
         int   Done2() const { return m_Done.load(); }
@@ -91,43 +97,44 @@ namespace Desert::Editor
         }
 
     private:
-        void WorkerLoop()
+        // Starts the next cook if none is running. Called with the queue freshly filled (Request) and
+        // after every finished cook (from the worker) — so the queue always drains, one job at a time.
+        void Pump()
         {
-            for ( ;; )
+            Done job;
             {
-                Done job;
-                {
-                    std::unique_lock<std::mutex> lk( m_Mutex );
-                    m_CV.wait( lk, [this] { return m_Stop || !m_Queue.empty(); } );
-                    if ( m_Stop )
-                        return;
-                    job      = m_Queue.front();
-                    m_Queue.pop();
-                    m_Active = true;
-                }
-
-                // The heavy part, OFF the main thread: parse the source + write the cooked files. No GPU,
-                // no AssetManager, no ECS — only this worker's own ImportManager + the filesystem.
-                m_Importer.Import( job.SourcePath );
-
-                {
-                    std::lock_guard<std::mutex> lk( m_Mutex );
-                    m_Completed.push( job );
-                    m_Active = false;
-                }
-                ++m_Done;
+                std::lock_guard<std::mutex> lk( m_Mutex );
+                if ( m_CookRunning || m_ShuttingDown || m_Queue.empty() )
+                    return;
+                job           = m_Queue.front();
+                m_Queue.pop();
+                m_CookRunning = true;
             }
+
+            Common::JobSystem::Get().Submit(
+                 [this, job]
+                 {
+                     // The heavy part, OFF the main thread. No GPU, no AssetManager, no ECS — only this
+                     // loader's own ImportManager + the filesystem.
+                     m_Importer.Import( job.SourcePath );
+
+                     {
+                         std::lock_guard<std::mutex> lk( m_Mutex );
+                         m_Completed.push( job );
+                         m_CookRunning = false;
+                     }
+                     ++m_Done;
+                     Pump(); // chain the next queued cook
+                 } );
         }
 
-        mutable std::mutex      m_Mutex;
-        std::condition_variable m_CV;
-        std::queue<Done>        m_Queue;     // pending cooks
-        std::queue<Done>        m_Completed; // cooked, awaiting main-thread spawn
-        bool                    m_Active = false;
-        bool                    m_Stop   = false;
-        std::atomic<int>        m_Total{ 0 };
-        std::atomic<int>        m_Done{ 0 };
-        ImportManager           m_Importer; // worker-only cooker (its own Assimp/texture importers)
-        std::thread             m_Worker;   // MUST be the last member (constructed after everything it uses)
+        mutable std::mutex m_Mutex;
+        std::queue<Done>   m_Queue;     // pending cooks
+        std::queue<Done>   m_Completed; // cooked, awaiting main-thread spawn
+        bool               m_CookRunning  = false;
+        bool               m_ShuttingDown = false;
+        std::atomic<int>   m_Total{ 0 };
+        std::atomic<int>   m_Done{ 0 };
+        ImportManager      m_Importer; // used by ONE in-flight cook at a time (m_CookRunning gate)
     };
 } // namespace Desert::Editor

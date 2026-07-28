@@ -14,5 +14,15 @@ namespace Desert::Core::Preprocess
         // Parses program-level `#pragma param` / `#pragma state` lines from the .shader source into the
         // data-driven material metadata. Additive: a shader with no such pragmas yields an empty meta.
         static Core::Formats::ShaderProgramMeta ParseProgramMeta( const std::string& source );
+
+        // Pass-aware variants for DSL multi-pass shaders. passName selects a `Pass "Name"` block;
+        // an empty name means the default program. The legacy #pragma format only has the default
+        // program — a non-empty passName on it is an error.
+        static std::unordered_map<Core::Formats::ShaderStage, std::string>
+        PreProcessProgramPass( const std::string& source, const std::filesystem::path& basePath,
+                               const std::string& passName );
+
+        static Core::Formats::ShaderProgramMeta ParseProgramMetaForPass( const std::string& source,
+                                                                         const std::string& passName );
     };
 } // namespace Desert::Core::Preprocess

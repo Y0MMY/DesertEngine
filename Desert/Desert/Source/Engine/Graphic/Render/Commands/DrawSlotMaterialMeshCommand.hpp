@@ -1,0 +1,38 @@
+#pragma once
+
+#include "../RenderCommand.hpp"
+#include <Engine/Geometry/Mesh.hpp>
+
+#include <glm/mat4x4.hpp>
+
+namespace Desert::Graphic
+{
+    class Material;
+}
+
+namespace Desert::Graphic::Render
+{
+    // v3 per-slot custom shaders: draws the submeshes of ONE material slot with the slot's own
+    // runtime material (a MaterialService-owned DataDrivenMaterial). The rest of the mesh stays
+    // on the batched PBR path — the two paths split the submesh set via masks.
+    struct DrawSlotMaterialMeshCommand : RenderCommand
+    {
+        Desert::Mesh*      Mesh;
+        glm::mat4          Transform;
+        Graphic::Material* SlotMaterial;
+        uint64_t           VisibleSubmeshMask;
+        bool               Outlined = false;
+
+        DrawSlotMaterialMeshCommand( Desert::Mesh* mesh, const glm::mat4& transform,
+                                     Graphic::Material* material, uint64_t visibleSubmeshMask, bool outlined )
+             : Mesh( mesh ), Transform( transform ), SlotMaterial( material ),
+               VisibleSubmeshMask( visibleSubmeshMask ), Outlined( outlined )
+        {
+        }
+
+        void Execute( SceneRenderer& renderer ) override
+        {
+            renderer.SubmitSlotMaterialMesh( Mesh, Transform, SlotMaterial, VisibleSubmeshMask, Outlined );
+        }
+    };
+} // namespace Desert::Graphic::Render

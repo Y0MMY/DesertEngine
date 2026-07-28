@@ -1,4 +1,5 @@
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
+#include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
 
 #include <sstream>
 #include <optional>
@@ -136,9 +137,61 @@ namespace Desert::Core::Preprocess
     } // namespace
 
     std::unordered_map<Desert::Core::Formats::ShaderStage, std::string>
+    ShaderPreprocess::PreProcessProgramPass( const std::string& source, const std::filesystem::path& basePath,
+                                             const std::string& passName )
+    {
+        if ( DShaderParser::IsDShader( source ) )
+        {
+            auto parsed = DShaderParser::Parse( source );
+            DESERT_VERIFY( parsed.IsSuccess(), "{} ({})", parsed.GetError(), basePath.string() );
+
+            const auto* pass = parsed.GetValue().FindPass( passName );
+            DESERT_VERIFY( pass, "Shader has no pass named '{}' ({})", passName, basePath.string() );
+            return pass->Stages;
+        }
+
+        DESERT_VERIFY( passName.empty(), "Legacy #pragma shaders have no passes (requested '{}', {})",
+                       passName, basePath.string() );
+        return PreProcessProgram( source, basePath );
+    }
+
+    Core::Formats::ShaderProgramMeta ShaderPreprocess::ParseProgramMetaForPass( const std::string& source,
+                                                                                const std::string& passName )
+    {
+        if ( DShaderParser::IsDShader( source ) )
+        {
+            auto parsed = DShaderParser::Parse( source );
+            DESERT_VERIFY( parsed.IsSuccess(), "{}", parsed.GetError() );
+
+            const auto& value = parsed.GetValue();
+            const auto* pass  = value.FindPass( passName );
+            DESERT_VERIFY( pass, "Shader has no pass named '{}'", passName );
+
+            // A pass program: same params/domain, its own render state, and no sub-passes of
+            // its own (so the ShaderService doesn't recurse when registering).
+            Core::Formats::ShaderProgramMeta meta = value.Meta;
+            meta.State                            = pass->State;
+            if ( !passName.empty() )
+                meta.PassNames.clear();
+            return meta;
+        }
+
+        DESERT_VERIFY( passName.empty(), "Legacy #pragma shaders have no passes (requested '{}')", passName );
+        return ParseProgramMeta( source );
+    }
+
+    std::unordered_map<Desert::Core::Formats::ShaderStage, std::string>
     ShaderPreprocess::PreProcessProgram( const std::string& source, const std::filesystem::path& basePath )
     {
         using namespace Desert::Core::Formats;
+
+        // Single-file DSL format (Shader "Name" { ... }) — stages are embedded blocks.
+        if ( DShaderParser::IsDShader( source ) )
+        {
+            auto parsed = DShaderParser::Parse( source );
+            DESERT_VERIFY( parsed.IsSuccess(), "{} ({})", parsed.GetError(), basePath.string() );
+            return std::move( parsed.GetValue().Stages );
+        }
 
         std::unordered_map<ShaderStage, std::string> programStages;
 
@@ -194,6 +247,14 @@ namespace Desert::Core::Preprocess
     Core::Formats::ShaderProgramMeta ShaderPreprocess::ParseProgramMeta( const std::string& source )
     {
         using namespace Desert::Core::Formats;
+
+        // Single-file DSL format — Properties/State/Domain come from the structured blocks.
+        if ( DShaderParser::IsDShader( source ) )
+        {
+            auto parsed = DShaderParser::Parse( source );
+            DESERT_VERIFY( parsed.IsSuccess(), "{}", parsed.GetError() );
+            return std::move( parsed.GetValue().Meta );
+        }
 
         ShaderProgramMeta meta;
 

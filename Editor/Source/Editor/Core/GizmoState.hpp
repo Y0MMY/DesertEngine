@@ -27,7 +27,54 @@ namespace Desert::Editor::Core
             s_Operation = op;
         }
 
+        // Snap increments. Snapping is active when the persistent toggle is ON, or while Ctrl is held —
+        // and Ctrl INVERTS the toggle (so with snap-always on, Ctrl gives a temporary free drag).
+        static float TranslateSnap()
+        {
+            return s_TranslateSnap;
+        }
+        static float RotateSnapDegrees()
+        {
+            return s_RotateSnapDeg;
+        }
+        static float ScaleSnap()
+        {
+            return s_ScaleSnap;
+        }
+        static void SetTranslateSnap( float v )
+        {
+            s_TranslateSnap = v;
+        }
+        static void SetRotateSnapDegrees( float v )
+        {
+            s_RotateSnapDeg = v;
+        }
+        static void SetScaleSnap( float v )
+        {
+            s_ScaleSnap = v;
+        }
+
+        static bool PersistentSnap()
+        {
+            return s_PersistentSnap;
+        }
+        static void SetPersistentSnap( bool on )
+        {
+            s_PersistentSnap = on;
+        }
+
+        // The effective "snap now?" answer given the current Ctrl state.
+        static bool SnapActive( bool ctrlHeld )
+        {
+            return s_PersistentSnap != ctrlHeld; // XOR: Ctrl temporarily inverts the toggle
+        }
+
     private:
         inline static Operation s_Operation = Operation::None;
+
+        inline static float s_TranslateSnap  = 0.5f;  // world units
+        inline static float s_RotateSnapDeg  = 15.0f; // degrees
+        inline static float s_ScaleSnap      = 0.1f;
+        inline static bool  s_PersistentSnap = false;
     };
 } // namespace Desert::Editor::Core

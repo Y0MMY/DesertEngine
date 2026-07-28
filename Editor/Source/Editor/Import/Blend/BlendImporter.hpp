@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Common/Core/Constants.hpp>
+
 #include "../IAssetImporter.hpp"
 #include "../Assimp/AssimpImporter.hpp"
 
@@ -39,7 +41,7 @@ namespace Desert::Editor
         static std::filesystem::path IntermediateFbx( const std::filesystem::path& blendPath )
         {
             const std::string stem = blendPath.stem().string();
-            return std::filesystem::path( "Cooked/BlendConvert" ) / stem / ( stem + ".fbx" );
+            return Common::Constants::Path::COOKED_PATH / "BlendConvert" / stem / ( stem + ".fbx" );
         }
 
         // Run Blender once to export <blend> -> <fbx>. Cached: if the FBX is already newer than the .blend we
@@ -153,7 +155,7 @@ namespace Desert::Editor
         static std::filesystem::path WriteConvertScript()
         {
             namespace fs        = std::filesystem;
-            const fs::path path = "Cooked/BlendConvert/_convert.py";
+            const fs::path path = Common::Constants::Path::COOKED_PATH / "BlendConvert/_convert.py";
             std::error_code ec;
             fs::create_directories( path.parent_path(), ec );
 

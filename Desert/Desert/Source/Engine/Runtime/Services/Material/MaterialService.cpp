@@ -1,6 +1,7 @@
 #include "MaterialService.hpp"
 
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 
 namespace Desert::Runtime
 {
@@ -54,6 +55,28 @@ namespace Desert::Runtime
 
     void MaterialService::Clear()
     {
+    }
+
+    void MaterialService::Invalidate( const Assets::AssetHandle& handle )
+    {
+        auto it = m_Materials.find( handle );
+        if ( it == m_Materials.end() )
+            return;
+        // Keep the material alive until CollectGarbage(): the frame being recorded (and frames
+        // in flight) may still reference its descriptor pools — destroying them now invalidates
+        // the command buffer (-> device lost).
+        m_Graveyard.push_back( std::move( it->second ) );
+        m_Materials.erase( it );
+    }
+
+    void MaterialService::CollectGarbage()
+    {
+        if ( m_Graveyard.empty() )
+            return;
+        // Safe point: no frame is being recorded (caller guarantees frame start) and idle-wait
+        // retires every in-flight frame that could reference the dying descriptor pools.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+        m_Graveyard.clear();
     }
 
     Graphic::Material* MaterialService::GetByExternalHandle( const Common::UUID& handle ) const

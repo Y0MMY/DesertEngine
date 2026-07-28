@@ -3,6 +3,7 @@
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
+#include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Core/Selection/ViewportMode.hpp>
 #include <Editor/Core/Selection/FoliagePaint.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
@@ -18,7 +19,7 @@
 #include <functional>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -154,6 +155,13 @@ namespace Desert::Editor
 
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
 
+        // Feed the fly-camera its input gate: WASD/QE/arrows work while the viewport is hovered
+        // and no text field owns the keyboard (otherwise typing "wasd" in a search box flies away).
+        if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( mainCamera.get() ) )
+        {
+            editorCam->SetInputEnabled( m_ViewportData.IsHovered && !ImGui::GetIO().WantTextInput );
+        }
+
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
 
@@ -214,6 +222,42 @@ namespace Desert::Editor
                     }
                 }
 
+                // --- Snap: magnet toggle (persistent) + right-click/arrow popup with the increments.
+                // Ctrl during a drag temporarily inverts the toggle.
+                {
+                    const bool snapOn = Core::GizmoState::PersistentSnap();
+                    ImGui::SameLine();
+                    if ( snapOn )
+                        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.95f, 1.0f ) );
+                    if ( ImGui::Button( ICON_MDI_MAGNET "##SnapToggle" ) )
+                        Core::GizmoState::SetPersistentSnap( !snapOn );
+                    if ( snapOn )
+                        ImGui::PopStyleColor();
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Snap %s (Ctrl inverts while dragging).\nRight-click: snap steps",
+                                           snapOn ? "ON" : "OFF" );
+                    if ( ImGui::IsItemClicked( ImGuiMouseButton_Right ) )
+                        ImGui::OpenPopup( "##SnapSettings" );
+                    if ( ImGui::BeginPopup( "##SnapSettings" ) )
+                    {
+                        ImGui::TextUnformatted( "Snap steps" );
+                        ImGui::Separator();
+                        float t = Core::GizmoState::TranslateSnap();
+                        float r = Core::GizmoState::RotateSnapDegrees();
+                        float s = Core::GizmoState::ScaleSnap();
+                        ImGui::SetNextItemWidth( 130.0f );
+                        if ( ImGui::DragFloat( "Move (m)", &t, 0.05f, 0.01f, 100.0f, "%.2f" ) )
+                            Core::GizmoState::SetTranslateSnap( t );
+                        ImGui::SetNextItemWidth( 130.0f );
+                        if ( ImGui::DragFloat( "Rotate (deg)", &r, 0.5f, 0.1f, 180.0f, "%.1f" ) )
+                            Core::GizmoState::SetRotateSnapDegrees( r );
+                        ImGui::SetNextItemWidth( 130.0f );
+                        if ( ImGui::DragFloat( "Scale", &s, 0.01f, 0.01f, 10.0f, "%.2f" ) )
+                            Core::GizmoState::SetScaleSnap( s );
+                        ImGui::EndPopup();
+                    }
+                }
+
                 // --- Editor camera settings (speed) behind a gear button ---
                 ImGui::SameLine();
                 if ( ImGui::Button( ICON_MDI_COG "##CamSettings" ) )
@@ -261,7 +305,9 @@ namespace Desert::Editor
                 {
                     if ( !prefab->IsReadyForUse() )
                         prefab->Load();
-                    prefab->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                    auto root = prefab->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                    if ( root )
+                        Commands::NotifyCreated( { root.GetComponent<ECS::UUIDComponent>().UUID } );
                 }
             }
 
@@ -279,6 +325,8 @@ namespace Desert::Editor
                 e.AddComponent<ECS::StaticMeshComponent>(); // pending: no MeshHandle until the cook completes
                 const auto uuid = e.GetComponent<ECS::UUIDComponent>().UUID;
                 Core::SelectionManager::SetSelected( uuid );
+                Commands::NotifyCreated( { uuid } ); // undo removes the pending entity; the async cook
+                                                     // no-ops when its target entity is gone
                 m_AsyncLoader->Request( path, static_cast<uint64_t>( uuid ) );
             }
             ImGui::EndDragDropTarget();
@@ -412,7 +460,8 @@ namespace Desert::Editor
         if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() &&
              Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered )
         {
-            m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size, m_Gizmo.IsHovered() );
+            m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size, m_Gizmo.IsHovered(),
+                            ::ImGui::GetIO().KeyCtrl );
         }
 
         return false;
@@ -423,7 +472,11 @@ namespace Desert::Editor
         switch ( e.GetKeyCode() )
         {
             case Common::KeyCode::Escape:
-                m_Gizmo.SetOperation( Tools::GizmoController::Operation::None );
+                // First Esc turns the gizmo off; a second Esc (gizmo already off) clears the selection.
+                if ( m_Gizmo.GetOperation() == Tools::GizmoController::Operation::None )
+                    Core::SelectionManager::ClearSelection();
+                else
+                    m_Gizmo.SetOperation( Tools::GizmoController::Operation::None );
                 break;
             case Common::KeyCode::T:
                 m_Gizmo.SetOperation( Tools::GizmoController::Operation::Translate );

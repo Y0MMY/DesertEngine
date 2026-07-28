@@ -34,8 +34,11 @@ namespace Desert::Graphic
         virtual const Core::Formats::ShaderProgramMeta& GetProgramMeta() const = 0;
 
         static std::string             GetStringShaderStage( const Core::Formats::ShaderStage stage );
+        // passName selects a `Pass "Name"` block of a DSL multi-pass shader; empty = the default
+        // program. Pass shaders are named "<Shader>/<Pass>".
         static std::shared_ptr<Shader> Create( const Assets::Asset<Assets::ShaderAsset>& asset,
-                                               const ShaderDefines&                      defines = {} );
+                                               const ShaderDefines&                      defines  = {},
+                                               const std::string&                        passName = {} );
     };
 
 } // namespace Desert::Graphic

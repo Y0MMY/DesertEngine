@@ -39,3 +39,7 @@ build
 .git-gitlab
 
 Radiant/Shaders/SPIRV/Bin/
+
+# ImGui saves the editor layout next to the working dir; it is per-user state
+Editor/imgui.ini
+imgui.ini

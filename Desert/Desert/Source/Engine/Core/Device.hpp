@@ -18,6 +18,9 @@ namespace Desert::Engine
         float    MaxLineWidth;
         bool     SupportsAnisotropy = false;
         float    MaxAnisotropy      = 1.0f;
+        // VK fillModeNonSolid: wireframe (VK_POLYGON_MODE_LINE) pipelines. Independent from wideLines —
+        // MoltenVK supports non-solid fill but NOT wide lines.
+        bool     SupportsNonSolidFill = false;
     };
 
     /**

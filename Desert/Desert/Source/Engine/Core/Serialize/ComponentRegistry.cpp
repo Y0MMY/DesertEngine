@@ -8,7 +8,7 @@
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
@@ -214,9 +214,19 @@ namespace Desert::Core::Serialize
 
                 if ( type == "SkyboxAsset" )
                 {
-                    auto a = mgr.FindByPath<Assets::SkyboxAsset>( path );
+                    // LEGACY scenes stored skybox paths RELATIVE to the textures dir (the old registration
+                    // stripped the prefix). Normalize those to the full form new registrations use.
+                    std::string resolvedPath = path;
+                    if ( !std::filesystem::exists( resolvedPath ) )
+                    {
+                        const auto legacy = Common::Constants::Path::TEXTUREDIR_PATH / path;
+                        if ( std::filesystem::exists( legacy ) )
+                            resolvedPath = legacy.string();
+                    }
+
+                    auto a = mgr.FindByPath<Assets::SkyboxAsset>( resolvedPath );
                     if ( !a )
-                        a = m.CreateAsset<Assets::SkyboxAsset>( Assets::AssetPriority::Medium, path );
+                        a = m.CreateAsset<Assets::SkyboxAsset>( Assets::AssetPriority::Medium, resolvedPath );
                     if ( a )
                     {
                         if ( !a->IsReadyForUse() )
@@ -235,7 +245,7 @@ namespace Desert::Core::Serialize
                         // Not preloaded (e.g. an editor .demat the preloader's .mat scan missed). Create +
                         // load + register from the path so materials survive a cold restart, not just an
                         // in-session reload.
-                        auto created = m.CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, path );
+                        auto created = m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, path );
                         if ( created )
                         {
                             if ( !created->IsReadyForUse() )
@@ -273,6 +283,49 @@ namespace Desert::Core::Serialize
                         }
                     }
                     return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+                }
+                return 0;
+            };
+
+            // Asset-database path: a stable GUID stored in the scene resolves directly through the
+            // AssetManager (assets adopt their persisted/path-derived handles on load), surviving
+            // file renames that break path references. Returns 0 for unknown GUIDs so the caller
+            // falls back to FromPath.
+            r.FromGuid = [&mgr]( uint64_t guid, const std::string& type ) -> uint64_t
+            {
+                if ( guid == 0 )
+                    return 0;
+                const Common::UUID handle( guid );
+
+                if ( type == "MaterialAsset" )
+                {
+                    auto a = mgr.FindByHandle<Assets::MaterialAsset>( handle );
+                    if ( !a )
+                        return 0;
+                    if ( auto* svc = Runtime::ResourceRegistry::GetMaterialService(); svc && !svc->Get( handle ) )
+                        svc->Register( a );
+                    return guid;
+                }
+                if ( type == "TextureAsset" )
+                {
+                    return mgr.FindByHandle<Assets::TextureAsset>( handle ) ? guid : 0;
+                }
+                if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
+                {
+                    auto a = mgr.FindByHandle<Assets::MeshAsset>( handle );
+                    if ( !a )
+                        return 0;
+                    if ( auto* svc = Runtime::ResourceRegistry::GetMeshService();
+                         svc && !svc->GetAsset( handle ) )
+                    {
+                        svc->Register( a );
+                        a->Load();
+                    }
+                    return guid;
+                }
+                if ( type == "SkyboxAsset" )
+                {
+                    return mgr.FindByHandle<Assets::SkyboxAsset>( handle ) ? guid : 0;
                 }
                 return 0;
             };
@@ -350,16 +403,24 @@ namespace Desert::Core::Serialize
                 // components), instead of duplicating FindByHandle/FindByPath here.
                 auto resolver = MakeAssetResolver( assetManager );
                 if ( smc.MeshHandle )
+                {
                     if ( auto p = resolver.ToPath( static_cast<uint64_t>( smc.MeshHandle ), "StaticMeshAsset" );
                          !p.empty() )
                         meshSer.MeshPath = p;
+                    // GUID = the stable handle itself (asset-database identity); rename-safe.
+                    meshSer.MeshGuid = static_cast<uint64_t>( smc.MeshHandle );
+                }
 
                 if ( !smc.MaterialSlots.empty() )
                 {
                     meshSer.MaterialPaths = std::vector<std::string>{};
+                    meshSer.MaterialGuids = std::vector<uint64_t>{};
                     for ( auto handle : smc.MaterialSlots )
+                    {
                         meshSer.MaterialPaths->push_back(
                              resolver.ToPath( static_cast<uint64_t>( handle ), "MaterialAsset" ) );
+                        meshSer.MaterialGuids->push_back( static_cast<uint64_t>( handle ) );
+                    }
                 }
                 meshSer.Primitive = smc.Primitive;
 
@@ -400,14 +461,31 @@ namespace Desert::Core::Serialize
                 auto& smc      = entity.AddComponent<ECS::StaticMeshComponent>();
                 auto  resolver = MakeAssetResolver( assetManager );
 
-                if ( meshData.MeshPath )
-                    smc.MeshHandle = Common::UUID( resolver.FromPath( *meshData.MeshPath, "StaticMeshAsset" ) );
+                // GUID first (rename-safe asset-database reference), path as fallback/back-compat.
+                uint64_t meshHandle = 0;
+                if ( meshData.MeshGuid && resolver.FromGuid )
+                    meshHandle = resolver.FromGuid( *meshData.MeshGuid, "StaticMeshAsset" );
+                if ( meshHandle == 0 && meshData.MeshPath )
+                    meshHandle = resolver.FromPath( *meshData.MeshPath, "StaticMeshAsset" );
+                if ( meshHandle != 0 )
+                    smc.MeshHandle = Common::UUID( meshHandle );
 
-                if ( meshData.MaterialPaths.has_value() )
+                const size_t slotCount = meshData.MaterialGuids
+                                              ? meshData.MaterialGuids->size()
+                                              : ( meshData.MaterialPaths ? meshData.MaterialPaths->size() : 0 );
+                if ( slotCount > 0 )
                 {
                     smc.MaterialSlots.clear();
-                    for ( const auto& path : *meshData.MaterialPaths )
-                        smc.MaterialSlots.push_back( Common::UUID( resolver.FromPath( path, "MaterialAsset" ) ) );
+                    for ( size_t i = 0; i < slotCount; ++i )
+                    {
+                        uint64_t h = 0;
+                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() &&
+                             resolver.FromGuid )
+                            h = resolver.FromGuid( ( *meshData.MaterialGuids )[i], "MaterialAsset" );
+                        if ( h == 0 && meshData.MaterialPaths && i < meshData.MaterialPaths->size() )
+                            h = resolver.FromPath( ( *meshData.MaterialPaths )[i], "MaterialAsset" );
+                        smc.MaterialSlots.push_back( Common::UUID( h ) );
+                    }
                 }
                 smc.Primitive = meshData.Primitive;
 
@@ -561,7 +639,8 @@ namespace Desert::Core::Serialize
                     auto                                    resolver = MakeAssetResolver( assetManager );
                     std::vector<Assets::MaterialTextureSer> ts;
                     for ( const auto& t : mc.Textures )
-                        ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ) } );
+                        ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ),
+                                        t.TextureHandle } );
                     ser.Textures = std::move( ts );
                 }
 
@@ -587,7 +666,15 @@ namespace Desert::Core::Serialize
                 {
                     auto resolver = MakeAssetResolver( assetManager );
                     for ( const auto& t : *data.Textures )
-                        mc.Textures.push_back( { t.Name, resolver.FromPath( t.Path, "TextureAsset" ) } );
+                    {
+                        // GUID first (rename-safe), then the legacy path.
+                        uint64_t h = ( t.Guid && resolver.FromGuid )
+                                          ? resolver.FromGuid( *t.Guid, "TextureAsset" )
+                                          : 0;
+                        if ( h == 0 )
+                            h = resolver.FromPath( t.Path, "TextureAsset" );
+                        mc.Textures.push_back( { t.Name, h } );
+                    }
                 }
             };
 
@@ -607,16 +694,23 @@ namespace Desert::Core::Serialize
 
                 auto resolver = MakeAssetResolver( assetManager );
                 if ( smc.MeshHandle )
+                {
                     if ( auto p = resolver.ToPath( static_cast<uint64_t>( smc.MeshHandle ), "SkinnedMeshAsset" );
                          !p.empty() )
                         meshSer.MeshPath = p;
+                    meshSer.MeshGuid = static_cast<uint64_t>( smc.MeshHandle );
+                }
 
                 if ( !smc.MaterialSlots.empty() )
                 {
                     meshSer.MaterialPaths = std::vector<std::string>{};
+                    meshSer.MaterialGuids = std::vector<uint64_t>{};
                     for ( auto handle : smc.MaterialSlots )
+                    {
                         meshSer.MaterialPaths->push_back(
                              resolver.ToPath( static_cast<uint64_t>( handle ), "MaterialAsset" ) );
+                        meshSer.MaterialGuids->push_back( static_cast<uint64_t>( handle ) );
+                    }
                 }
 
                 return ToGeneric( meshSer );
@@ -633,14 +727,30 @@ namespace Desert::Core::Serialize
                 auto& smc      = entity.AddComponent<ECS::SkinnedMeshComponent>();
                 auto  resolver = MakeAssetResolver( assetManager );
 
-                if ( meshData.MeshPath )
-                    smc.MeshHandle = Common::UUID( resolver.FromPath( *meshData.MeshPath, "SkinnedMeshAsset" ) );
+                uint64_t meshHandle = 0;
+                if ( meshData.MeshGuid && resolver.FromGuid )
+                    meshHandle = resolver.FromGuid( *meshData.MeshGuid, "SkinnedMeshAsset" );
+                if ( meshHandle == 0 && meshData.MeshPath )
+                    meshHandle = resolver.FromPath( *meshData.MeshPath, "SkinnedMeshAsset" );
+                if ( meshHandle != 0 )
+                    smc.MeshHandle = Common::UUID( meshHandle );
 
-                if ( meshData.MaterialPaths.has_value() )
+                const size_t slotCount = meshData.MaterialGuids
+                                              ? meshData.MaterialGuids->size()
+                                              : ( meshData.MaterialPaths ? meshData.MaterialPaths->size() : 0 );
+                if ( slotCount > 0 )
                 {
                     smc.MaterialSlots.clear();
-                    for ( const auto& path : *meshData.MaterialPaths )
-                        smc.MaterialSlots.push_back( Common::UUID( resolver.FromPath( path, "MaterialAsset" ) ) );
+                    for ( size_t i = 0; i < slotCount; ++i )
+                    {
+                        uint64_t h = 0;
+                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() &&
+                             resolver.FromGuid )
+                            h = resolver.FromGuid( ( *meshData.MaterialGuids )[i], "MaterialAsset" );
+                        if ( h == 0 && meshData.MaterialPaths && i < meshData.MaterialPaths->size() )
+                            h = resolver.FromPath( ( *meshData.MaterialPaths )[i], "MaterialAsset" );
+                        smc.MaterialSlots.push_back( Common::UUID( h ) );
+                    }
                 }
             };
 
@@ -694,7 +804,8 @@ namespace Desert::Core::Serialize
             auto                                    resolver = MakeAssetResolver( mgr );
             std::vector<Assets::MaterialTextureSer> ts;
             for ( const auto& t : mc.Textures )
-                ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ) } );
+                ts.push_back(
+                     { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ), t.TextureHandle } );
             ser.Textures = std::move( ts );
         }
         return rfl::json::write( ser );
@@ -720,7 +831,13 @@ namespace Desert::Core::Serialize
         {
             auto resolver = MakeAssetResolver( mgr );
             for ( const auto& t : *data.Textures )
-                mc.Textures.push_back( { t.Name, resolver.FromPath( t.Path, "TextureAsset" ) } );
+            {
+                uint64_t h =
+                     ( t.Guid && resolver.FromGuid ) ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
+                if ( h == 0 )
+                    h = resolver.FromPath( t.Path, "TextureAsset" );
+                mc.Textures.push_back( { t.Name, h } );
+            }
         }
         return true;
     }

@@ -1,0 +1,61 @@
+# Desert Engine CI — build (Debug + Release) and run the full test suite on Apple Silicon macOS.
+# Tests are auto-enabled on CI: Desert/premake5.lua checks the CI env var (GitHub always sets it).
+name: CI
+
+on:
+  push:
+    branches: [ dev, main, master ]
+  pull_request:
+  workflow_dispatch:
+
+# One run per branch: a new push cancels the previous in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.config }}
+    runs-on: macos-14 # Apple Silicon (arm64) — matches the supported platform
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('scripts/MacOS/Setup.sh') }}
+          restore-keys: brew-${{ runner.os }}-
+
+      # Idempotent: installs brew packages + fetches non-submodule third-party (optick, volk,
+      # reflect-cpp sources). Submodules are already in place from the checkout.
+      - name: Setup dependencies
+        run: ./scripts/MacOS/Setup.sh
+
+      - name: Build ${{ matrix.config }}
+        run: ./scripts/MacOS/BuildMacOS.sh ${{ matrix.config }}
+
+      - name: Run tests
+        run: ./scripts/MacOS/RunTests.sh "$PWD" ${{ matrix.config }}
+
+      # Surface the test reports even when a step above failed.
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.config }}
+          path: build/TestReports/
+          if-no-files-found: ignore

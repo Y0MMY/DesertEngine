@@ -1,28 +1,16 @@
--- Config file for Radiant Engine
+-- Config entry point for Desert Engine.
+-- Shared settings are split into BuildScripts/:
+--   Platform.lua        — platform detection helpers (DesertPlatform)
+--   Workspace.lua       — the workspace + settings common to every project
+--   Configurations.lua  — Debug / Release configurations
+--   PlatformWindows.lua — Windows-wide settings (x64)
+--   PlatformMacOS.lua   — macOS-wide settings (Apple Silicon / ARM64)
 
-workspace "Desert"
-    configurations { "Debug", "Release" }
-    architecture "x64"
-    startproject "Editor"
-
-    language "C++"
-	cppdialect "C++20"
-    targetdir "build/Bin/%{cfg.buildcfg}"
-	objdir "build/Intermediates/%{cfg.buildcfg}"
-
-	externalanglebrackets "On"
-	externalwarnings "Off"
-	warnings "Off"
-
-filter "configurations:Debug"
-    runtime "Debug"
-    symbols "On"
-
-filter "configurations:Release"
-    runtime "Release"
-    optimize "On"
-
-
+include "BuildScripts/Platform.lua"
+include "BuildScripts/Workspace.lua"
+include "BuildScripts/Configurations.lua"
+include "BuildScripts/PlatformWindows.lua"
+include "BuildScripts/PlatformMacOS.lua"
 
 group "ThirdParty"
 include "ThirdParty/"
@@ -31,8 +19,9 @@ group ""
 group "Tools"
 include "Tools/DesertHeaderTool/"
 include "Tools/FbxMeshSplitter/"
+include "Tools/ProjectHub/"
 group ""
 
 include "Desert/"
 include "Editor/"
-
+include "Runtime/"

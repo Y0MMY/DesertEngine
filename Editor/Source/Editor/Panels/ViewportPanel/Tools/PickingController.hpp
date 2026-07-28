@@ -12,7 +12,9 @@ namespace Desert::Editor::Tools
     class PickingController
     {
     public:
+        // additive = Ctrl held: toggles the hit entity in the multi-selection instead of replacing it.
+        // A miss with additive=false clears the selection (click empty space to deselect).
         void Pick( ::Desert::Core::Scene& scene, const glm::vec2& mouseViewport, const glm::vec2& viewportSize,
-                   bool gizmoHovered );
+                   bool gizmoHovered, bool additive = false );
     };
 } // namespace Desert::Editor::Tools

@@ -1,9 +1,11 @@
 #include "ComponentEditor.hpp"
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
 
 #include <Engine/ECS/Entity.hpp>
+#include <Engine/ECS/Components.hpp>
 
 namespace Desert::Editor
 {
@@ -68,7 +70,9 @@ namespace Desert::Editor
 
                 if ( ImGui::Selectable( entry.Name.c_str() ) && entry.Add )
                 {
-                    entry.Add( entity );
+                    // Undoable: Ctrl+Z removes the just-added component again.
+                    Commands::MutateEntityUndoable( entity.GetComponent<ECS::UUIDComponent>().UUID,
+                                                    [&] { entry.Add( entity ); } );
                 }
             }
 
@@ -109,7 +113,11 @@ namespace Desert::Editor
         if ( removed )
         {
             if ( entry.Remove )
-                entry.Remove( entity );
+            {
+                // Undoable: Ctrl+Z brings the component (with its data) back.
+                Commands::MutateEntityUndoable( entity.GetComponent<ECS::UUIDComponent>().UUID,
+                                                [&] { entry.Remove( entity ); } );
+            }
         }
         else if ( open )
         {

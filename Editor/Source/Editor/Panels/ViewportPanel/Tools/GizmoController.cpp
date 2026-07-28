@@ -2,7 +2,10 @@
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
+#include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
+
+#include <ImGui/imgui.h>
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
@@ -42,29 +45,54 @@ namespace Desert::Editor::Tools
             return;
 
         auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
+        auto& reg                = scene.GetRegistry();
 
         // The gizmo must work in WORLD space. For a CHILD entity (e.g. a camera parented to the character),
         // the world transform = parentWorld * local, and an edit must be converted back to LOCAL before
         // writing. parentWorld = identity for a root entity (so this is a no-op there).
-        glm::mat4  parentWorld( 1.0f );
-        auto&      reg  = scene.GetRegistry();
-        const auto self = selectedEntity.GetHandle();
-        if ( reg.has<ECS::RelationshipComponent>( self ) )
+        auto parentWorldOf = [&reg]( entt::entity e ) -> glm::mat4
         {
-            std::vector<entt::entity> chain; // [parent, grandparent, ... root]
-            entt::entity              cur = reg.get<ECS::RelationshipComponent>( self ).Parent;
-            while ( cur != entt::null )
+            glm::mat4 world( 1.0f );
+            if ( reg.has<ECS::RelationshipComponent>( e ) )
             {
-                chain.push_back( cur );
-                cur = reg.has<ECS::RelationshipComponent>( cur ) ? reg.get<ECS::RelationshipComponent>( cur ).Parent
-                                                                 : entt::null;
+                std::vector<entt::entity> chain; // [parent, grandparent, ... root]
+                entt::entity              cur = reg.get<ECS::RelationshipComponent>( e ).Parent;
+                while ( cur != entt::null )
+                {
+                    chain.push_back( cur );
+                    cur = reg.has<ECS::RelationshipComponent>( cur )
+                               ? reg.get<ECS::RelationshipComponent>( cur ).Parent
+                               : entt::null;
+                }
+                for ( auto it = chain.rbegin(); it != chain.rend(); ++it ) // root -> ... -> parent
+                    if ( reg.has<ECS::TransformComponent>( *it ) )
+                        world = world * reg.get<ECS::TransformComponent>( *it ).GetTransform();
             }
-            for ( auto it = chain.rbegin(); it != chain.rend(); ++it ) // root -> ... -> parent
-                if ( reg.has<ECS::TransformComponent>( *it ) )
-                    parentWorld = parentWorld * reg.get<ECS::TransformComponent>( *it ).GetTransform();
-        }
+            return world;
+        };
 
-        auto modelMatrix = parentWorld * transformComponent.GetTransform(); // world transform for the gizmo
+        // An entity with a selected ANCESTOR is carried by that ancestor's transform already — the group
+        // logic must skip it (else it would move twice).
+        auto coveredBySelection = [&reg]( entt::entity e )
+        {
+            entt::entity cur = e;
+            while ( reg.has<ECS::RelationshipComponent>( cur ) )
+            {
+                const auto parent = reg.get<ECS::RelationshipComponent>( cur ).Parent;
+                if ( parent == entt::null )
+                    break;
+                cur = parent;
+                if ( reg.has<ECS::UUIDComponent>( cur ) &&
+                     Core::SelectionManager::IsSelected( reg.get<ECS::UUIDComponent>( cur ).UUID ) )
+                    return true;
+            }
+            return false;
+        };
+
+        const glm::mat4 parentWorld = parentWorldOf( selectedEntity.GetHandle() );
+
+        auto            modelMatrix    = parentWorld * transformComponent.GetTransform(); // world, for the gizmo
+        const glm::mat4 oldModelMatrix = modelMatrix;
 
         // SetRect MUST match the rendered scene-image rect (content region), NOT the raw window rect.
         ImGuizmo::SetOrthographic( false );
@@ -74,9 +102,45 @@ namespace Desert::Editor::Tools
         const auto& view = mainCamera->GetViewMatrix();
         const auto& proj = mainCamera->GetProjectionMatrix();
 
-        if ( ImGuizmo::Manipulate( &view[0][0], &proj[0][0],
-                                   static_cast<ImGuizmo::OPERATION>( Core::GizmoState::Get() ), ImGuizmo::WORLD,
-                                   &modelMatrix[0][0] ) )
+        // Snap: grid for translate, fixed angles for rotate, increments for scale. Active when the
+        // toolbar's magnet toggle is on OR Ctrl is held (Ctrl inverts the toggle).
+        const auto  operation     = Core::GizmoState::Get();
+        float       snapValues[3] = { 0.0f, 0.0f, 0.0f };
+        const float snapUnit      = ( operation == Core::GizmoState::Operation::Rotate )
+                                         ? Core::GizmoState::RotateSnapDegrees()
+                                         : ( operation == Core::GizmoState::Operation::Scale )
+                                              ? Core::GizmoState::ScaleSnap()
+                                              : Core::GizmoState::TranslateSnap();
+        snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
+        const float* snap =
+             Core::GizmoState::SnapActive( ::ImGui::GetIO().KeyCtrl ) ? snapValues : nullptr;
+
+        const bool manipulated =
+             ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( operation ),
+                                   ImGuizmo::WORLD, &modelMatrix[0][0], nullptr, snap );
+
+        // One undo entry per drag: when the drag STARTS this frame, capture the pre-drag TRS of every
+        // selected top-level root NOW — before any of this frame's deltas are written below.
+        const bool usingNow = ImGuizmo::IsUsing();
+        if ( usingNow && !m_DragActive )
+        {
+            m_DragActive = true;
+            m_DragEntity = *selected;
+            m_DragSnapshots.clear();
+            for ( const auto& id : Core::SelectionManager::GetSelection() )
+            {
+                auto ref = scene.FindEntityByID( id );
+                if ( !ref )
+                    continue;
+                ECS::Entity e = ref->get();
+                if ( !e.HasComponent<ECS::TransformComponent>() || coveredBySelection( e.GetHandle() ) )
+                    continue;
+                const auto& tc = e.GetComponent<ECS::TransformComponent>();
+                m_DragSnapshots.push_back( { id, tc.Translation, tc.Rotation, tc.Scale } );
+            }
+        }
+
+        if ( manipulated )
         {
             if ( ImGuizmo::IsOver() )
                 m_Hovered = true;
@@ -93,6 +157,47 @@ namespace Desert::Editor::Tools
             transformComponent.Translation = translation;
             transformComponent.Rotation    = glm::eulerAngles( rotation );
             transformComponent.Scale       = scale;
+
+            // Group manipulation: apply the same WORLD-space delta to every other selected top-level root,
+            // so the whole selection moves/rotates/scales as one rigid group around the primary's gizmo.
+            const auto& allSelected = Core::SelectionManager::GetSelection();
+            if ( allSelected.size() > 1 )
+            {
+                const glm::mat4 delta = modelMatrix * glm::inverse( oldModelMatrix );
+                for ( const auto& id : allSelected )
+                {
+                    if ( id == *selected )
+                        continue;
+                    auto ref = scene.FindEntityByID( id );
+                    if ( !ref )
+                        continue;
+                    ECS::Entity e = ref->get();
+                    if ( !e.HasComponent<ECS::TransformComponent>() || coveredBySelection( e.GetHandle() ) )
+                        continue;
+
+                    auto&           tc       = e.GetComponent<ECS::TransformComponent>();
+                    const glm::mat4 pw       = parentWorldOf( e.GetHandle() );
+                    const glm::mat4 newLocal = glm::inverse( pw ) * ( delta * ( pw * tc.GetTransform() ) );
+
+                    glm::vec3 s, t, sk;
+                    glm::quat r;
+                    glm::vec4 persp;
+                    glm::decompose( newLocal, s, r, t, sk, persp );
+                    tc.Translation = t;
+                    tc.Rotation    = glm::eulerAngles( r );
+                    tc.Scale       = s;
+                }
+            }
+        }
+
+        // Commit old->current for the whole group on release. The UUID guard drops the pending capture if
+        // the selection changed mid-drag.
+        if ( !usingNow && m_DragActive )
+        {
+            m_DragActive = false;
+            if ( m_DragEntity == *selected )
+                Commands::RecordTransformEdits( m_DragSnapshots );
+            m_DragSnapshots.clear();
         }
     }
 

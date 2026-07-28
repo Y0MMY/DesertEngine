@@ -9,8 +9,10 @@
 
 #include <vulkan/vulkan.h>
 
+#if defined( DESERT_PLATFORM_WINDOWS )
 #ifndef VK_KHR_WIN32_SURFACE_EXTENSION_NAME
 #define VK_KHR_WIN32_SURFACE_EXTENSION_NAME "VK_KHR_win32_surface"
+#endif
 #endif
 
 namespace Desert::Graphic::API::Vulkan
@@ -54,13 +56,23 @@ namespace Desert::Graphic::API::Vulkan
         appInfo.engineVersion      = VK_MAKE_VERSION( 1, 3, 0 );
         appInfo.apiVersion         = VK_API_VERSION_1_3;
 
-        std::vector<const char*> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME,
-                                                        VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
+        std::vector<const char*> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
+#if defined( DESERT_PLATFORM_WINDOWS )
+        instanceExtensions.push_back( VK_KHR_WIN32_SURFACE_EXTENSION_NAME );
+#elif defined( DESERT_PLATFORM_MACOS )
+        // MoltenVK: the surface goes through Metal, and the implementation is a
+        // portability driver, so it must be enumerated explicitly.
+        instanceExtensions.push_back( "VK_EXT_metal_surface" );
+        instanceExtensions.push_back( "VK_KHR_portability_enumeration" );
+        instanceExtensions.push_back( VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );
+#endif
         if ( s_DebugValidation )
         {
             instanceExtensions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
             instanceExtensions.push_back( VK_EXT_DEBUG_REPORT_EXTENSION_NAME );
+#if !defined( DESERT_PLATFORM_MACOS ) // already added above
             instanceExtensions.push_back( VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME );
+#endif
         }
 
         VkInstanceCreateInfo createInfo{};
@@ -69,6 +81,9 @@ namespace Desert::Graphic::API::Vulkan
         createInfo.enabledExtensionCount   = (uint32_t)instanceExtensions.size();
         createInfo.ppEnabledExtensionNames = instanceExtensions.data();
         createInfo.enabledLayerCount       = 0;
+#if defined( DESERT_PLATFORM_MACOS )
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
         if ( s_DebugValidation )
         {

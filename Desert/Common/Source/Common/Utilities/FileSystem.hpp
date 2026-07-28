@@ -1,6 +1,8 @@
 #pragma once
 
 #include <iostream>
+
+#if defined( DESERT_PLATFORM_WINDOWS )
 #include <windows.h>
 
 // NOTE: This is a workaround for Microsoft macros so that
@@ -14,6 +16,7 @@
 #undef SetEnvironmentVariable
 #undef GetEnvironmentVariable
 #endif
+#endif // DESERT_PLATFORM_WINDOWS
 
 #include <functional>
 #include <filesystem>

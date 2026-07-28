@@ -9,6 +9,7 @@
 #include <Engine/Graphic/Image.hpp>
 
 #include <Editor/Core/CommandHistory.hpp>
+#include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
@@ -371,18 +372,20 @@ namespace Desert::Editor
 
         bool anyChanged = false;
 
-        // Undo/redo of reflected-property edits. Clear when the edited root object changes so stored
-        // field pointers never dangle past their owner.
-        static void* s_LastRoot = nullptr;
-        if ( object != s_LastRoot )
+        // Property byte-commands hold raw field pointers, so they must not outlive the object they edit.
+        // Drop them when the SELECTED ENTITY changes (several components of one entity draw through here
+        // each frame — keying on the object pointer cleared the history every frame). Structural commands
+        // are UUID-addressed and survive; Ctrl+Z/Y themselves are handled globally by EditorLayer.
         {
-            CommandHistory::Get().Clear();
-            s_LastRoot = object;
+            static uint64_t s_LastSelected = 0;
+            const auto&     sel            = Core::SelectionManager::GetSelected();
+            const uint64_t  current        = sel.has_value() ? static_cast<uint64_t>( *sel ) : 0;
+            if ( current != s_LastSelected )
+            {
+                CommandHistory::Get().DropVolatile();
+                s_LastSelected = current;
+            }
         }
-        if ( ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed( ImGuiKey_Z, false ) )
-            anyChanged |= CommandHistory::Get().Undo();
-        if ( ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed( ImGuiKey_Y, false ) )
-            anyChanged |= CommandHistory::Get().Redo();
 
         // Group by category, preserving first-seen order.
         std::vector<std::pair<std::string, std::vector<const FieldInfo*>>> categories;

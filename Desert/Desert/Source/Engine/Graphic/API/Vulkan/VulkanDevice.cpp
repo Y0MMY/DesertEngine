@@ -25,50 +25,56 @@ namespace Desert::Graphic::API::Vulkan
         vkEnumeratePhysicalDevices( instance, &deviceCount, devices.data() );
 
         VkPhysicalDevice           selectedPhysicalDevice = nullptr;
-        VkPhysicalDeviceProperties deviceProperties;
-        VkPhysicalDeviceFeatures   deviceFeatures;
+        VkPhysicalDeviceProperties deviceProperties{};
+        VkPhysicalDeviceFeatures   deviceFeatures{};
 
-        auto isDeviceSuitable = [&deviceProperties,
-                                 &deviceFeatures]( VkPhysicalDevice device )
-             -> bool
+        // Pick the BEST available GPU by type: discrete > integrated > virtual > anything. An
+        // integrated GPU is the NORMAL case on Apple Silicon (there is no discrete one), not a
+        // fallback — so this is a ranking, not a requirement, and it never warns. Geometry-shader
+        // support is NOT required: MoltenVK has none and nothing in the renderer uses them.
+        auto deviceScore = []( VkPhysicalDevice device )
         {
-            vkGetPhysicalDeviceProperties( device, &deviceProperties );
-            vkGetPhysicalDeviceFeatures( device, &deviceFeatures );
-
-            return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
-                   deviceFeatures.geometryShader;
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties( device, &props );
+            switch ( props.deviceType )
+            {
+                case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   return 4;
+                case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return 3;
+                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    return 2;
+                case VK_PHYSICAL_DEVICE_TYPE_CPU:            return 1;
+                default:                                     return 0;
+            }
         };
 
+        int bestScore = -1;
         for ( const auto& device : devices )
         {
-            if ( isDeviceSuitable( device ) )
+            const int score = deviceScore( device );
+            if ( score > bestScore )
             {
+                bestScore              = score;
                 selectedPhysicalDevice = device;
-
-                m_Capabilities.MaxStorageBufferSize   = deviceProperties.limits.maxStorageBufferRange;
-                m_Capabilities.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
-                m_Capabilities.SupportsWideLines      = deviceFeatures.wideLines == VK_TRUE;
-                m_Capabilities.MaxLineWidth           = deviceProperties.limits.lineWidthRange[1];
-                m_Capabilities.SupportsAnisotropy     = deviceFeatures.samplerAnisotropy == VK_TRUE;
-                m_Capabilities.MaxAnisotropy          = deviceProperties.limits.maxSamplerAnisotropy;
-
-                break;
             }
         }
 
-        if ( !selectedPhysicalDevice )
+        if ( selectedPhysicalDevice )
         {
-            LOG_WARN( "Could not find discrete GPU. Using fallback." );
-            selectedPhysicalDevice = devices.back();
             vkGetPhysicalDeviceProperties( selectedPhysicalDevice, &deviceProperties );
             vkGetPhysicalDeviceFeatures( selectedPhysicalDevice, &deviceFeatures );
-            
+
             m_Capabilities.MaxStorageBufferSize   = deviceProperties.limits.maxStorageBufferRange;
             m_Capabilities.StorageBufferAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment;
             m_Capabilities.SupportsWideLines      = deviceFeatures.wideLines == VK_TRUE;
             m_Capabilities.MaxLineWidth           = deviceProperties.limits.lineWidthRange[1];
             m_Capabilities.SupportsAnisotropy     = deviceFeatures.samplerAnisotropy == VK_TRUE;
             m_Capabilities.MaxAnisotropy          = deviceProperties.limits.maxSamplerAnisotropy;
+            m_Capabilities.SupportsNonSolidFill   = deviceFeatures.fillModeNonSolid == VK_TRUE;
+
+            const char* typeName =
+                 deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU     ? "discrete"
+                 : deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "integrated"
+                                                                                         : "other";
+            LOG_INFO( "[Vulkan] GPU: {} ({})", deviceProperties.deviceName, typeName );
         }
 
         // Publish anisotropy support to the low-level sampler-creation path (0 = unsupported -> no aniso).
@@ -196,7 +202,11 @@ namespace Desert::Graphic::API::Vulkan
         deviceFeatures.tessellationShader = VK_TRUE; // required for the terrain tessellation pipeline
         if ( m_PhysicalDevice->m_Capabilities.SupportsWideLines )
         {
-            deviceFeatures.wideLines        = VK_TRUE;
+            deviceFeatures.wideLines = VK_TRUE;
+        }
+        // Independent of wideLines: MoltenVK offers non-solid fill (wireframe) but no wide lines.
+        if ( m_PhysicalDevice->m_Capabilities.SupportsNonSolidFill )
+        {
             deviceFeatures.fillModeNonSolid = VK_TRUE;
         }
         if ( m_PhysicalDevice->m_Capabilities.SupportsAnisotropy )
@@ -211,6 +221,14 @@ namespace Desert::Graphic::API::Vulkan
         std::vector<const char*> deviceExtensions;
         DESERT_VERIFY( m_PhysicalDevice->IsExtensionSupported( VK_KHR_SWAPCHAIN_EXTENSION_NAME ) );
         deviceExtensions.push_back( VK_KHR_SWAPCHAIN_EXTENSION_NAME );
+#if defined( DESERT_PLATFORM_MACOS )
+        // The spec requires VK_KHR_portability_subset to be enabled when the
+        // implementation (MoltenVK) advertises it.
+        if ( m_PhysicalDevice->IsExtensionSupported( "VK_KHR_portability_subset" ) )
+        {
+            deviceExtensions.push_back( "VK_KHR_portability_subset" );
+        }
+#endif
 
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
         createInfo.enabledExtensionCount   = (uint32_t)deviceExtensions.size();
@@ -269,12 +287,26 @@ namespace Desert::Graphic::API::Vulkan
                     indices.ComputeFamily = i;
             }
 
+            if ( ( flags & VK_QUEUE_TRANSFER_BIT ) && !indices.TransferFamily )
+            {
+                if ( m_QueueFamilyProperties[i].queueFlags & VK_QUEUE_TRANSFER_BIT )
+                    indices.TransferFamily = i;
+            }
+
             if ( ( flags & VK_QUEUE_GRAPHICS_BIT ) && !indices.GraphicsFamily )
             {
                 if ( m_QueueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT )
                     indices.GraphicsFamily = i;
             }
         }
+
+        // Implementations without dedicated compute/transfer families (e.g. MoltenVK
+        // on Apple Silicon) still fully support those operations on the graphics
+        // family — fall back to it instead of leaving the index empty.
+        if ( ( flags & VK_QUEUE_COMPUTE_BIT ) && !indices.ComputeFamily )
+            indices.ComputeFamily = indices.GraphicsFamily;
+        if ( ( flags & VK_QUEUE_TRANSFER_BIT ) && !indices.TransferFamily )
+            indices.TransferFamily = indices.GraphicsFamily;
 
         return indices;
     }

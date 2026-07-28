@@ -81,6 +81,8 @@ namespace Desert::Graphic
             if ( !prop.bIsOverridden )
                 continue;
 
+            // Local alias: AppleClang 15 can't capture structured bindings in lambdas yet.
+            const auto& propName = name;
             std::visit(
                  [&]( auto&& val )
                  {
@@ -89,13 +91,13 @@ namespace Desert::Graphic
                      {
                          if ( val )
                          {
-                             if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( name ) )
+                             if ( auto texProp = m_MaterialExecutor->GetTexture2DProperty( propName ) )
                                  texProp->SetImage( static_cast<const Image2D*>( val ) );
                          }
                      }
                      else
                      {
-                         auto [ub, field] = FindFieldInAnyUB( name );
+                         auto [ub, field] = FindFieldInAnyUB( propName );
                          if ( field )
                          {
                              field->SetRawBytes( &val, sizeof( T ) );

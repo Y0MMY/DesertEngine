@@ -24,6 +24,9 @@ namespace Desert::Graphic::API::Vulkan
                                                                      bool              clearFrame ) override;
         virtual Common::BoolResultStr               BeginSwapChainRenderPass() override;
         [[nodiscard]] virtual Common::BoolResultStr EndRenderPass() override;
+
+        virtual void BeginDebugLabel( const char* name ) override;
+        virtual void EndDebugLabel() override;
         
         virtual void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                  const MaterialExecutor* materialExecutor, uint32_t instanceCount = 1,

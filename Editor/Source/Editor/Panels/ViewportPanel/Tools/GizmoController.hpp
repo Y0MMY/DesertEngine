@@ -2,8 +2,13 @@
 
 #include <Engine/Desert.hpp>
 #include <Editor/Core/GizmoState.hpp>
+#include <Editor/Core/Commands/SceneCommands.hpp>
+
+#include <Common/Core/UUID.hpp>
 
 #include <glm/glm.hpp>
+
+#include <vector>
 
 namespace Desert::Editor::Tools
 {
@@ -32,5 +37,11 @@ namespace Desert::Editor::Tools
 
     private:
         bool m_Hovered = false;
+
+        // One undo entry per gizmo drag: pre-drag TRS of every selected top-level root captured when the
+        // drag starts, committed as one (possibly composite) command on release.
+        bool                                     m_DragActive = false;
+        Common::UUID                             m_DragEntity = Common::UUID::Null(); // primary at drag start
+        std::vector<Commands::TransformSnapshot> m_DragSnapshots;
     };
 } // namespace Desert::Editor::Tools

@@ -4,6 +4,8 @@
 
 inline PFN_vkSetDebugUtilsObjectNameEXT
      fpSetDebugUtilsObjectNameEXT; // Making it static randomly sets it to nullptr for some reason.
+inline PFN_vkCmdBeginDebugUtilsLabelEXT fpCmdBeginDebugUtilsLabelEXT; // command-buffer regions (RenderDoc tree)
+inline PFN_vkCmdEndDebugUtilsLabelEXT   fpCmdEndDebugUtilsLabelEXT;
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -96,6 +98,21 @@ namespace Desert::Graphic::API::Vulkan
             nameInfo.pNext        = VK_NULL_HANDLE;
 
             VK_CHECK_RESULT( fpSetDebugUtilsObjectNameEXT( device, &nameInfo ) );
+        }
+
+        // Opens a named region in the command buffer — RenderDoc/Xcode show these as a tree of
+        // passes. Always paired with EndDebugLabel; no-ops when debug utils are unavailable.
+        inline static void BeginDebugLabel( VkCommandBuffer cmdBuffer, const char* name )
+        {
+            VkDebugUtilsLabelEXT label{};
+            label.sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+            label.pLabelName = name;
+            fpCmdBeginDebugUtilsLabelEXT( cmdBuffer, &label );
+        }
+
+        inline static void EndDebugLabel( VkCommandBuffer cmdBuffer )
+        {
+            fpCmdEndDebugUtilsLabelEXT( cmdBuffer );
         }
     } // namespace VKUtils
 

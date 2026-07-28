@@ -19,6 +19,10 @@ namespace Desert::Reflection
     {
         std::function<std::string( uint64_t handle, const std::string& assetType )>      ToPath;
         std::function<uint64_t( const std::string& path, const std::string& assetType )> FromPath;
+        // Asset-database resolution: validates a persisted stable GUID (ensuring the asset is
+        // loaded + registered in its service) and returns it, or 0 when unknown — the caller
+        // then falls back to FromPath. std::function is empty on legacy call sites.
+        std::function<uint64_t( uint64_t guid, const std::string& assetType )> FromGuid;
     };
 
     // Generic, reflection-driven (de)serialization. Walks a TypeInfo's fields and reads/writes the raw

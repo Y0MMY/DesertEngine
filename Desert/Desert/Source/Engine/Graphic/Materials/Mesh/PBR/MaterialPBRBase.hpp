@@ -17,7 +17,7 @@ namespace Desert::Graphic
 
     // Shared base for PBR materials: provides the per-frame scene-data uploads (camera + lights) into
     // the shared executor uniform buffers. Material parameters themselves live in the reflected
-    // Assets::PBRMaterialData and travel via push constants (see PBRPush.hpp), not through this base.
+    // Assets::PBRSurfaceParams and travel via push constants (see PBRPush.hpp), not through this base.
     class MaterialPBRBase : public Material
     {
     public:

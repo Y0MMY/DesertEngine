@@ -10,6 +10,9 @@
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <Common/Core/JobSystem.hpp>
+
+#include <chrono>
 #include <regex>
 
 namespace Desert::Editor
@@ -103,6 +106,11 @@ namespace Desert::Editor
         if ( !fs::exists( root, ec ) ) // tolerate a missing source dir (e.g. clean/from-scratch project)
             return;
 
+        // Gather first, cook in PARALLEL after: each source file is an independent CPU+disk job (that is
+        // exactly what AsyncMeshLoader relies on for single files). Each worker thread cooks on its OWN
+        // ImportManager (Assimp importers are not reentrant); shared cooked-texture writes are serialized
+        // inside TextureImporter.
+        std::vector<fs::path> files;
         for ( const auto& entry : fs::recursive_directory_iterator( root, ec ) )
         {
             if ( !entry.is_regular_file() )
@@ -118,10 +126,31 @@ namespace Desert::Editor
                 continue;
 
             if ( m_Importers.contains( ext ) )
-            {
-                Import( entry.path(), force );
-            }
+                files.push_back( entry.path() );
         }
+
+        if ( files.empty() )
+            return;
+
+        if ( files.size() == 1 )
+        {
+            Import( files.front(), force );
+            return;
+        }
+
+        const auto started = std::chrono::steady_clock::now();
+        Common::JobSystem::Get().ParallelFor( files.size(),
+                                              [&]( size_t i )
+                                              {
+                                                  // One cooker per worker thread, reused across files.
+                                                  thread_local ImportManager s_ThreadImporter;
+                                                  s_ThreadImporter.Import( files[i], force );
+                                              } );
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - started )
+                             .count();
+        LOG_INFO( "[Import] {} source file(s) checked/cooked in {} ms ({} workers)", files.size(), ms,
+                  Common::JobSystem::Get().WorkerCount() );
     }
 
     void ImportManager::CreateAssetsFromImport( const ImportResult&          result,
@@ -183,8 +212,8 @@ namespace Desert::Editor
         // Imported materials are EDITABLE CONTENT, not cooked intermediates -> write them into the content
         // tree at Resources/Assets/Materials/<meshStem>/<materialName>.demat (browsable + editable in the
         // asset browser, reusable), like UE. Per-mesh subfolder avoids name collisions across imports.
-        // Meaningful name, NO handle in it (stable identity lives in the file: PBRMaterialData::MaterialId).
-        // Unified .demat schema (legacy ".mat" cooker output is gone; PBRMaterialAsset::Load still READS old).
+        // Meaningful name, NO handle in it (stable identity lives in the file: PBRSurfaceParams::MaterialId).
+        // Unified .demat schema (legacy ".mat" cooker output is gone; SurfaceMaterialAsset::Load still READS old).
         static const std::regex illegal( R"([<>:"/\\|?*\s])" );
         const std::string       safeName = std::regex_replace( material.Name, illegal, "_" );
         const std::filesystem::path path =
@@ -196,7 +225,8 @@ namespace Desert::Editor
         std::error_code ec;
         if ( std::filesystem::exists( path, ec ) )
             return;
-        WriteJsonToFile( material.Data, path );
+        // Typed extraction -> unified canon (the only on-disk material format).
+        WriteJsonToFile( material.Data.ToMaterialData(), path );
     }
 
     Common::UUID ImportManager::ImportTexture( const std::filesystem::path& path )

@@ -42,6 +42,8 @@ decltype( auto ) initializeDefaultValue()
 
 #if defined( DESERT_PLATFORM_WINDOWS )
 #define DESERT_DEBUG_BREAK __debugbreak()
+#elif defined( DESERT_PLATFORM_MACOS )
+#define DESERT_DEBUG_BREAK __builtin_debugtrap()
 #elif defined( DESERT_PLATFORM_LINUX )
 #include <signal.h>
 #define DESERT_DEBUG_BREAK raise( SIGTRAP )

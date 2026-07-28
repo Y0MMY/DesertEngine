@@ -10,13 +10,24 @@
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Material/MaterialService.hpp>
+#include <Engine/Runtime/Services/Shader/ShaderService.hpp>
+#include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
+#include <Editor/Import/TextureDnD.hpp>
+#include <Engine/Assets/TextureAsset.hpp>
+
+// rfl serialization environment (same as SurfaceMaterialAsset.cpp) — used to write a fresh
+// material file with its stable GUID before the asset is created/registered.
+#include <Engine/Core/Serialize/GLMReflect.hpp>
+#include <Engine/Core/Serialize/CustomReflect.hpp>
+#include <rflcpp/rfl/json.hpp>
 
 #include <glm/gtc/type_ptr.hpp>
 
@@ -37,13 +48,47 @@ namespace Desert::Editor
     void MaterialComponentWidget::Render( ECS::Entity& entity )
     {
         auto& materialComp = entity.GetComponent<ECS::StaticMeshComponent>();
-        RenderMaterialProperties( materialComp );
+
+        // A Shader Override component with a custom (non-PBR) shader takes this mesh off the PBR
+        // path entirely — surface that here so the slots below don't look mysteriously dead.
+        std::string overriddenBy;
+        if ( entity.HasComponent<ECS::MaterialComponent>() )
+        {
+            const auto& matc = entity.GetComponent<ECS::MaterialComponent>();
+            if ( !matc.ShaderName.empty() && matc.ShaderName != "StaticMeshPBR" &&
+                 matc.ShaderName != "SkinnedMeshPBR" )
+                overriddenBy = matc.ShaderName;
+        }
+
+        RenderMaterialProperties( materialComp, overriddenBy );
+
+        // Quick way back to the PBR path without hunting for the Shader Override section.
+        if ( !overriddenBy.empty() )
+        {
+            if ( ImGui::Button( "Clear runtime override (use material slots)" ) )
+            {
+                auto& matc = entity.GetComponent<ECS::MaterialComponent>();
+                matc.ShaderName.clear();
+                matc.Params.clear();
+                matc.Textures.clear();
+            }
+        }
     }
 
     size_t MaterialComponentWidget::GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const
     {
+        // The ACTUAL submesh count of the mesh being rendered is the truth (the renderer maps
+        // submesh i -> slot min(i, slots-1)): edited RuntimeMesh first, then the built mesh.
+        if ( meshComp.RuntimeMesh && !meshComp.RuntimeMesh->GetSubmeshes().empty() )
+            return meshComp.RuntimeMesh->GetSubmeshes().size();
+
         if ( meshComp.MeshHandle )
         {
+            if ( auto* mesh = Runtime::ResourceRegistry::GetMeshService()->Get( meshComp.MeshHandle ) )
+                if ( !mesh->GetSubmeshes().empty() )
+                    return mesh->GetSubmeshes().size();
+
+            // Not built yet — fall back to the asset's imported material list.
             if ( auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( meshComp.MeshHandle ) )
             {
                 const size_t count = meshAsset->GetMaterialHandles().size();
@@ -70,18 +115,22 @@ namespace Desert::Editor
         for ( int n = 1; std::filesystem::exists( path, ec ); ++n )
             path = dir / ( "Material_" + std::to_string( n ) + ext );
 
-        // loadAfterCreate = false: the file doesn't exist yet — creating with auto-load would try to read
-        // a missing file and abort. The reflected data defaults are valid in memory; Save() writes them.
+        // Write the file FIRST (defaults + freshly stamped MaterialId), then create-with-load: the
+        // asset adopts its stable in-file GUID as the internal handle during Load, so the handle the
+        // AssetManager/MaterialService register under is the same one every future editor run gets.
+        {
+            Assets::MaterialData defaults;
+            defaults.MaterialId = Common::UUID();
+            Common::Utils::FileSystem::WriteContentToFile( path.generic_string(),
+                                                           rfl::json::write( defaults ) );
+        }
+
         auto asset = const_cast<Assets::AssetManager&>( *m_AssetManager )
-                          .CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High,
-                                                                  path.generic_string(), false );
+                          .CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
+                                                                  path.generic_string() );
         if ( !asset )
             return {};
 
-        // Stamp a stable id so this material can be referenced externally (e.g. baked into a mesh later).
-        asset->Data().MaterialId = Common::UUID();
-
-        Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath, asset->Save() );
         Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
         return asset->GetMetadata().Handle;
     }
@@ -92,10 +141,10 @@ namespace Desert::Editor
         if ( !m_AssetManager )
             return;
 
-        auto asset = m_AssetManager->FindByPath<Assets::PBRMaterialAsset>( assetPath );
+        auto asset = m_AssetManager->FindByPath<Assets::SurfaceMaterialAsset>( assetPath );
         if ( !asset )
             asset = const_cast<Assets::AssetManager&>( *m_AssetManager )
-                         .CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, assetPath );
+                         .CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, assetPath );
         if ( !asset )
             return;
 
@@ -113,13 +162,189 @@ namespace Desert::Editor
         meshComp.RuntimeMaterialInstances.clear();
     }
 
-    void MaterialComponentWidget::RenderMaterialProperties( ECS::StaticMeshComponent& meshComp )
+    bool MaterialComponentWidget::DrawShaderPicker( Assets::SurfaceMaterialAsset& asset )
+    {
+        auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
+        if ( !shaderService )
+            return false;
+
+        // No hardcoded entries: the picker lists every Surface-domain shader from the service —
+        // StaticMeshPBR (the standard shader with the batched backend) included, like any other.
+        const std::string current = asset.Data().EffectiveShaderName();
+
+        bool shaderChanged = false;
+        if ( ImGui::BeginCombo( "Shader", current.c_str() ) )
+        {
+            for ( const auto& name : shaderService->GetAllNames() )
+            {
+                auto candidate = shaderService->GetByName( name );
+                if ( !candidate ||
+                     candidate->GetProgramMeta().Domain != ::Desert::Core::Formats::ShaderDomain::Surface )
+                    continue;
+
+                const bool selected = ( name == current );
+                if ( ImGui::Selectable( name.c_str(), selected ) && !selected )
+                {
+                    // Params always belong to a shader's schema — a switch clears them; the
+                    // schema editor reseeds defaults on the next draw.
+                    asset.Data().ShaderName = name;
+                    asset.Data().Params.clear();
+                    asset.Data().Textures.clear();
+                    shaderChanged = true;
+                }
+                if ( selected )
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        return shaderChanged;
+    }
+
+    // Schema-driven editor for ANY material (PBR included — its schema lives in
+    // StaticMeshPBR.shader like every other shader's). Two-column rows: the label cell never
+    // overlaps the control, controls stretch to the full remaining width.
+    bool MaterialComponentWidget::DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset )
+    {
+        auto*             shaderService = Runtime::ResourceRegistry::GetShaderService();
+        const std::string shaderName    = asset.Data().EffectiveShaderName();
+        auto              shader        = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
+        if ( !shader )
+        {
+            ImGui::TextDisabled( "Shader '%s' not found", shaderName.c_str() );
+            return false;
+        }
+
+        const auto& schema = shader->GetProgramMeta();
+        if ( schema.Params.empty() )
+        {
+            ImGui::TextDisabled( "Shader exposes no properties" );
+            return false;
+        }
+
+        auto& data = asset.Data();
+
+        bool changed = false;
+
+        if ( !ImGui::BeginTable( "##material_params", 2,
+                                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
+            return false;
+        ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.38f );
+        ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.62f );
+
+        for ( const auto& p : schema.Params )
+        {
+            using W  = ::Desert::Core::Formats::ShaderParamWidget;
+            using VT = ::Desert::Core::Formats::ShaderValueType;
+
+            const char*       label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
+            const std::string hiddenId = "##mp_" + p.Name; // control id; label lives in its own cell
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted( label );
+            ImGui::TableNextColumn();
+            ImGui::PushItemWidth( -FLT_MIN );
+
+            if ( p.IsTexture )
+            {
+                std::string disp = "<drop texture>";
+                if ( const uint64_t h = data.GetTexture( p.Name ); h != 0 && m_AssetManager )
+                {
+                    if ( auto tex = m_AssetManager->FindByHandle<Assets::TextureAsset>( Common::UUID( h ) ) )
+                    {
+                        const auto& src  = tex->GetSourcePath();
+                        const auto  path = !src.empty() ? src : tex->GetMetadata().Filepath.string();
+                        disp             = std::filesystem::path( path ).filename().string();
+                    }
+                }
+
+                ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
+                if ( ImGui::BeginDragDropTarget() )
+                {
+                    if ( const ImGuiPayload* pl =
+                              ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::TextureAsset ) )
+                    {
+                        const std::string path( static_cast<const char*>( pl->Data ),
+                                                pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                        if ( m_AssetManager )
+                        {
+                            const auto resolved = ::Desert::Editor::TextureDnD::ResolveOrImport(
+                                 const_cast<Assets::AssetManager&>( *m_AssetManager ), path );
+                            if ( static_cast<uint64_t>( resolved ) != 0 )
+                            {
+                                data.SetTexture( p.Name, static_cast<uint64_t>( resolved ) );
+                                changed = true;
+                            }
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                ImGui::PopItemWidth();
+                continue;
+            }
+
+            // Seed the canon entry with the schema default the first time the param shows up.
+            glm::vec4 value = data.GetParam( p.Name, p.Default );
+            bool      edited = false;
+
+            if ( p.Widget == W::Color )
+            {
+                edited = ( p.Type == VT::Float3 ) ? ImGui::ColorEdit3( hiddenId.c_str(), &value.x )
+                                                  : ImGui::ColorEdit4( hiddenId.c_str(), &value.x );
+            }
+            else
+            {
+                const int comps = ( p.Type == VT::Float2 )   ? 2
+                                  : ( p.Type == VT::Float3 ) ? 3
+                                  : ( p.Type == VT::Float4 ) ? 4
+                                                             : 1;
+                if ( p.Min.has_value() && p.Max.has_value() )
+                {
+                    float mn = *p.Min, mx = *p.Max;
+                    edited = ImGui::SliderScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps,
+                                                   &mn, &mx );
+                }
+                else
+                {
+                    edited = ImGui::DragScalarN( hiddenId.c_str(), ImGuiDataType_Float, &value.x, comps, 0.01f );
+                }
+            }
+
+            if ( edited )
+            {
+                data.SetParam( p.Name, value );
+                changed = true;
+            }
+            ImGui::PopItemWidth();
+        }
+
+        ImGui::EndTable();
+        return changed;
+    }
+
+    void MaterialComponentWidget::RenderMaterialProperties( ECS::StaticMeshComponent& meshComp,
+                                                            const std::string&        overriddenByShader )
     {
         Utils::ImGuiUtilities::PushID();
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
-        const bool materialsOpen =
-             ImGui::TreeNodeEx( "Materials", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen );
+        // When a runtime override (script / legacy scene) bypasses the slots: say so loudly and
+        // start the section collapsed. Slots are the only AUTHORED source of truth.
+        if ( !overriddenByShader.empty() )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ) );
+            ImGui::TextWrapped( "%s Runtime shader override active ('%s', set by a script or a legacy "
+                                "scene) — the material slots below are NOT used until it is cleared.",
+                                ICON_MDI_ALERT, overriddenByShader.c_str() );
+            ImGui::PopStyleColor();
+        }
+
+        ImGuiTreeNodeFlags materialsFlags = ImGuiTreeNodeFlags_Framed;
+        if ( overriddenByShader.empty() )
+            materialsFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+
+        const bool materialsOpen = ImGui::TreeNodeEx( "Materials", materialsFlags );
 
         // Drop a .mat onto the Materials header (works open or collapsed): create slots up to the submesh
         // count if there are none, then assign the dropped material to EVERY slot.
@@ -200,7 +425,7 @@ namespace Desert::Editor
 
                 const auto  handle = meshComp.MaterialSlots[i];
                 const auto  asset  = m_AssetManager
-                                         ? m_AssetManager->FindByHandle<Assets::PBRMaterialAsset>( handle )
+                                         ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( handle )
                                          : nullptr;
 
                 const std::string title = "Element " + std::to_string( i );
@@ -223,30 +448,29 @@ namespace Desert::Editor
                 {
                     if ( asset )
                     {
-                        // Fully reflection-driven: the entire property UI is built from PBRMaterialData's
-                        // PROPERTY() metadata — no per-parameter editor code here.
-                        bool changed = PropertyEditorBuilder::Draw( &asset->Data(), "PBRMaterialData",
-                                                                    m_AssetManager, m_UIHelper.get() );
-
-                        // UV Tiling — manual widget (the field is std::optional, so the reflected property UI
-                        // doesn't draw it). Multiplies the surface UVs before sampling albedo/normal/opacity,
-                        // so the texture repeats N times (e.g. a tiling brick/grass surface on a wall/terrain).
+                        // ── Unity-style: the shader lives inside the material ──────────────
+                        if ( DrawShaderPicker( *asset ) )
                         {
-                            glm::vec2 tiling = asset->Data().UVTiling.value_or( glm::vec2( 1.0f ) );
-                            if ( ImGui::DragFloat2( "UV Tiling", &tiling.x, 0.05f, 0.01f, 256.0f ) )
-                            {
-                                asset->Data().UVTiling = tiling;
-                                changed                = true;
-                            }
+                            // A different shader means a different runtime material CLASS —
+                            // rebuild it from the asset and refresh the entity's instances.
+                            Runtime::ResourceRegistry::GetMaterialService()->Invalidate( handle );
+                            meshComp.RuntimeMaterialInstances.clear();
                         }
 
-                        // Live edit -> viewport: push the edited asset data into the runtime material
-                        // (one StaticMaterialPBR per asset handle, shared by all meshes using it).
+                        // ONE schema-driven editor for every shader — the PBR schema lives in
+                        // StaticMeshPBR.shader like any other shader's (single material protocol).
+                        const bool changed = DrawCustomShaderMaterial( *asset );
+
+                        // Live edit -> viewport: re-apply the canon onto the slot's runtime material.
                         if ( changed )
                         {
                             if ( auto* runtime = Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
-                                Graphic::MaterialFactory::ApplyPBRAsset(
-                                     *static_cast<Graphic::StaticMaterialPBR*>( runtime ), *asset );
+                            {
+                                if ( auto* pbr = dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) )
+                                    Graphic::MaterialFactory::ApplyPBRAsset( *pbr, *asset );
+                                else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
+                                    Graphic::MaterialFactory::ApplyShaderAsset( *ddm, *asset );
+                            }
                         }
 
                         if ( ImGui::Button( "Save", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )

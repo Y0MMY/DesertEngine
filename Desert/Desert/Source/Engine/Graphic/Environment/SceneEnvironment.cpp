@@ -6,6 +6,8 @@
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <Common/Core/Constants.hpp>
+
 namespace Desert::Graphic
 {
     Environment EnvironmentManager::Create( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset )
@@ -13,10 +15,10 @@ namespace Desert::Graphic
         if ( Common::Utils::FileSystem::GetFileExtension( skyboxAsset->GetMetadata().Filepath ) ==
              ".hdr" ) // TODO: move the logic to the SkyboxAsset and raw data
         {
+            // The asset's metadata carries the FULL path (registration owns path composition) — the
+            // engine draw layer never glues directory prefixes onto asset paths.
             std::shared_ptr<Texture2D> imagePanorama =
-                 Texture2D::Create( { true }, Common::Filepath( "Resources/Assets/Textures" ) /
-                                                   skyboxAsset->GetMetadata().Filepath )
-                      .ExtractValue();
+                 Texture2D::Create( { true }, skyboxAsset->GetMetadata().Filepath ).ExtractValue();
 
             auto* imageService = Runtime::ResourceRegistry::GetImageService();
 

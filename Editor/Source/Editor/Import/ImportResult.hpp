@@ -7,7 +7,7 @@
 #include <Engine/Assets/Serialization/Mesh.hpp>
 #include <Engine/Assets/Serialization/Animation.hpp>
 #include <Engine/Assets/Serialization/Skeleton.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialData.hpp>
+#include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
 
 namespace Desert::Editor
 {
@@ -17,7 +17,7 @@ namespace Desert::Editor
     struct ImportedMaterial
     {
         std::string             Name;
-        Assets::PBRMaterialData Data;
+        Assets::PBRSurfaceParams Data;
     };
 
     struct ImportResult

@@ -33,7 +33,8 @@ namespace Desert::Graphic::API::Vulkan
         };
 
     public:
-        VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines );
+        VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines,
+                      const std::string& passName = {} );
         ~VulkanShader();
 
         virtual void Use( BindUsage use = BindUsage::Bind ) const override
@@ -126,6 +127,7 @@ namespace Desert::Graphic::API::Vulkan
         std::vector<VkShaderModule>                  m_ShaderModules;
         std::filesystem::path                        m_ShaderPath;
         std::string                                  m_ShaderName;
+        std::string                                  m_PassName; // empty = default program
 
         Core::Formats::ShaderProgramMeta             m_ProgramMeta;
 

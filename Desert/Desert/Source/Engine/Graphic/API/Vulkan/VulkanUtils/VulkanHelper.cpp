@@ -145,6 +145,16 @@ namespace Desert::Graphic::API::Vulkan
         if ( fpSetDebugUtilsObjectNameEXT == nullptr )
             fpSetDebugUtilsObjectNameEXT = []( VkDevice device, const VkDebugUtilsObjectNameInfoEXT* pNameInfo )
             { return VK_SUCCESS; };
+
+        fpCmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)( vkGetInstanceProcAddr(
+             instance, "vkCmdBeginDebugUtilsLabelEXT" ) );
+        if ( fpCmdBeginDebugUtilsLabelEXT == nullptr )
+            fpCmdBeginDebugUtilsLabelEXT = []( VkCommandBuffer, const VkDebugUtilsLabelEXT* ) {};
+
+        fpCmdEndDebugUtilsLabelEXT =
+             (PFN_vkCmdEndDebugUtilsLabelEXT)( vkGetInstanceProcAddr( instance, "vkCmdEndDebugUtilsLabelEXT" ) );
+        if ( fpCmdEndDebugUtilsLabelEXT == nullptr )
+            fpCmdEndDebugUtilsLabelEXT = []( VkCommandBuffer ) {};
     }
 
 } // namespace Desert::Graphic::API::Vulkan

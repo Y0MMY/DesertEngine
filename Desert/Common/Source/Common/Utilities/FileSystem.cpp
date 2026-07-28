@@ -1,7 +1,9 @@
 #include <Common/Utilities/FileSystem.hpp>
 
-#if ( DESERT_PLATFORM_WINDOWS )
+#if defined( DESERT_PLATFORM_WINDOWS )
 #include <Common/Platform/Windows/WindowsFileSystem.hpp>
+#elif defined( DESERT_PLATFORM_MACOS )
+#include <Common/Platform/MacOS/MacOSFileSystem.hpp>
 #endif
 
 #include <Common/Core/Core.hpp>
@@ -9,7 +11,9 @@
 #include <filesystem>
 #include <fstream>
 
+#ifdef _MSC_VER
 #pragma warning( error : 4834 )
+#endif
 
 namespace fs = std::filesystem;
 
@@ -69,7 +73,14 @@ namespace Common::Utils
 
     std::filesystem::path FileSystem::OpenFileDialog( const char* filter )
     {
+#if defined( DESERT_PLATFORM_WINDOWS )
         return WindowsFileSystem::OpenFileDialog( filter );
+#elif defined( DESERT_PLATFORM_MACOS )
+        return MacOSFileSystem::OpenFileDialog( filter );
+#else
+        (void)filter;
+        return {};
+#endif
     }
 
     std::filesystem::path FileSystem::GetFileDirectory( const std::filesystem::path& filepath )

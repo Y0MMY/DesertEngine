@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Mesh/MeshAsset.hpp"
-#include "Mesh/PBRMaterialAsset.hpp"
+#include "Mesh/SurfaceMaterialAsset.hpp"
 #include "Skybox/SkyboxAsset.hpp"
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -20,7 +20,9 @@ namespace Desert::Assets
         // first and clear cached per-entity material instances after. Skips shaders/skyboxes (no IBL re-bake).
         void ReloadCooked();
 
-    private:
+        // Individual stages — public so the editor's staged startup loader can run them one per frame
+        // behind a progress overlay. ORDER MATTERS: shaders must be loaded before any render system is
+        // constructed (default PBR materials resolve their shader in the constructor).
         void PreloadMeshes();
         void PreloadSkyboxes();
         void PreloadShaders();

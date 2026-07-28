@@ -42,3 +42,20 @@ project "Common"
             "Source/Common/Platform/Windows/**.cpp",
             "Source/Common/Platform/Windows/**.hpp",
         }
+
+    -- The Source/Common/** glob above already picks the Windows platform sources
+    -- up on every OS — drop them when not targeting Windows.
+    filter { "system:not windows" }
+        removefiles {
+            "Source/Common/Platform/Windows/**",
+        }
+
+    filter { "system:macosx" }
+        defines { "DESERT_PLATFORM_MACOS" }
+        files {
+            "Source/Common/Platform/MacOS/**.cpp",
+            "Source/Common/Platform/MacOS/**.hpp",
+            "Source/Common/Platform/MacOS/**.mm",
+        }
+
+    filter {}

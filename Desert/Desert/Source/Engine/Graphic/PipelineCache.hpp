@@ -87,6 +87,19 @@ namespace Desert::Graphic
             m_Cache.clear();
         }
 
+        // Drops every pipeline built against @p shader — used by shader hot-reload so the next
+        // GetOrCreate() rebuilds with the freshly compiled modules. Caller must WaitDeviceIdle first.
+        void InvalidateByShader( const void* shader )
+        {
+            for ( auto it = m_Cache.begin(); it != m_Cache.end(); )
+            {
+                if ( it->first.Shader == shader )
+                    it = m_Cache.erase( it );
+                else
+                    ++it;
+            }
+        }
+
     private:
         struct Key
         {

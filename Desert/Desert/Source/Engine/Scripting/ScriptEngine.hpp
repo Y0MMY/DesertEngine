@@ -60,6 +60,11 @@ namespace Desert::Scripting
         // Shrinks an entity's env list to `count` slots (drops envs for removed slots). No-op if already <=.
         void TrimSlots( uint32_t entity, uint32_t count );
 
+        // Advances the Timer.after scheduler by dt and fires due callbacks (with the scheduling
+        // slot as the current owner, so a callback can re-arm itself). Call once per frame while
+        // playing, after the scripts ran.
+        void TickTimers( float dt );
+
         // Per-frame mouse delta the engine computed (cursor-capture aware), exposed to scripts as
         // Input.mouseDelta(). Set once per frame before running scripts.
         void SetFrameMouseDelta( float dx, float dy );
@@ -73,8 +78,13 @@ namespace Desert::Scripting
         // nullopt if no script touched the cursor this frame; otherwise true=lock(capture), false=show(free).
         std::optional<bool> ConsumeCursorLockRequest();
 
-    private:
+    public:
+        // Public FORWARD declaration only: the definition lives in Internal/ScriptRuntime.hpp,
+        // shared by the modular binding translation units (Register*Bindings). The rest of the
+        // engine still can't touch it (incomplete type).
         struct Impl;
+
+    private:
         std::unique_ptr<Impl> m_Impl;
     };
 

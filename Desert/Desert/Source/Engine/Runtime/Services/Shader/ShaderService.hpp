@@ -19,5 +19,8 @@ namespace Desert::Runtime
     private:
         std::unordered_map<Assets::AssetHandle, std::shared_ptr<Graphic::Shader>> m_Shaders;
         std::unordered_map<std::string, Assets::AssetHandle>                      m_NameToHandleMap;
+        // Named passes of multi-pass shaders, keyed "<Shader>/<Pass>". Kept separate from
+        // m_Shaders because several programs share one asset handle.
+        std::unordered_map<std::string, std::shared_ptr<Graphic::Shader>> m_PassShaders;
     };
 } // namespace Desert::Runtime

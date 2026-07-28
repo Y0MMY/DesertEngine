@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-#include <Engine/Assets/Mesh/PBRMaterialData.hpp>
+#include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
 
 namespace Desert::Graphic
 {
@@ -20,7 +20,7 @@ namespace Desert::Graphic
     };
 
     // Packs the reflected material data into the GPU entry — the single mapping data -> shader.
-    inline PBRGpuMaterial BuildPBRGpuMaterial( const Assets::PBRMaterialData& d )
+    inline PBRGpuMaterial BuildPBRGpuMaterial( const Assets::PBRSurfaceParams& d )
     {
         const glm::vec2 tiling = d.UVTiling.value_or( glm::vec2( 1.0f ) ); // absent -> no tiling
         return { glm::vec4( glm::vec3( d.AlbedoColor ), d.AOStrength ),

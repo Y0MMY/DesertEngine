@@ -204,16 +204,19 @@ namespace Common
         bool                      m_IsSuccess = false;
 
     private:
+        // Befriend the whole factory templates (not specific specializations):
+        // MSVC accepted the `Make...<U, E>` spelling, but standard C++ (clang/gcc)
+        // rejects it as a function template partial specialization.
         template <typename U, typename E>
-        friend ResultWithCodes<U, E> MakeErrorWithCodes<U, E>( std::initializer_list<E> errorCodes,
-                                                               const std::string&       message );
+        friend ResultWithCodes<U, E> MakeErrorWithCodes( std::initializer_list<E> errorCodes,
+                                                         const std::string&       message );
 
         template <typename U, typename E>
-        friend auto MakeSuccessWithCodes<U, E>( const U& value );
+        friend auto MakeSuccessWithCodes( const U& value );
 
         template <typename U, typename E, typename... Args>
-        friend ResultWithCodes<U, E> MakeFormattedErrorWithCodes<U, E>( std::initializer_list<E> errorCodes,
-                                                                        std::string_view format, Args&&... args );
+        friend ResultWithCodes<U, E> MakeFormattedErrorWithCodes( std::initializer_list<E> errorCodes,
+                                                                  std::string_view format, Args&&... args );
     };
 
     template <typename T, typename ErrorCodeType>

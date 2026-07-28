@@ -72,8 +72,11 @@ namespace Desert::Graphic::System
             const std::vector<glm::mat4>*         Transforms = nullptr; // -> component's InstanceTransforms
         };
 
-        // A static mesh drawn with a generic data-driven material (assigned via MaterialComponent with a
-        // non-PBR shader). Rendered per-object (no SSBO batching) — additive to the PBR path.
+        // A static mesh drawn with a generic data-driven material. Two producers:
+        //  - MaterialComponent (Shader Override) on the whole entity: ShaderName + Overrides drive a
+        //    shader-keyed shared material (SlotMaterial == nullptr, all submeshes).
+        //  - v3 per-slot materials: SlotMaterial points at the slot's own DataDrivenMaterial (asset
+        //    params already applied) and VisibleSubmeshMask limits the draw to that slot's submeshes.
         struct GenericMeshRenderData
         {
             class Mesh*               Mesh      = nullptr;
@@ -81,6 +84,9 @@ namespace Desert::Graphic::System
             std::string               ShaderName;
             Graphic::MaterialOverrides Overrides;
             bool                      Outlined = false; // selected -> JFA outline
+
+            Graphic::Material*        SlotMaterial      = nullptr; // owned by MaterialService (stable)
+            uint64_t                  VisibleSubmeshMask = ~0ull;  // bit i = submesh i drawn
         };
 
         using RenderSystem::RenderSystem;
@@ -102,6 +108,10 @@ namespace Desert::Graphic::System
         // Forward transparent (glass) pass: draws meshes with material Transmission > 0 over the composited
         // scene. sceneColor = a snapshot of the opaque scene the glass samples for refraction (may be null).
         void RenderGlassManual( const std::shared_ptr<Image2D>& sceneColor );
+        // Deferred path: draws the generic (custom-shader) meshes FORWARD over the deferred
+        // lighting composite in a LOAD render pass — they have no G-buffer variant, so without
+        // this they simply vanish in Deferred. Forward path draws them inside MeshGeometryPass.
+        void RenderGenericManual();
 
         const std::shared_ptr<Framebuffer>& GetSilhouetteMaskFramebuffer() const
         {
@@ -183,7 +193,7 @@ namespace Desert::Graphic::System
 
         void DrawStaticMeshes();
         void DrawSkinnedMeshes();
-        void DrawGenericMeshes(); // per-object data-driven materials (MaterialComponent on a mesh)
+        void DrawGenericMeshes( bool useLoadPass = false ); // per-object data-driven materials (v3 slots + overrides)
         void RegisterSilhouettePass( RenderGraphBuilder& builder );
         void RegisterShadowPass( RenderGraphBuilder& builder );
         bool SetupDebugLinePass();

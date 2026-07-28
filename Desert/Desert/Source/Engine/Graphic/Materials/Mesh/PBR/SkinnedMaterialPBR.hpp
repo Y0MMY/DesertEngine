@@ -8,7 +8,7 @@
 namespace Desert::Graphic
 {
     // Skinned PBR material. Like StaticMaterialPBR, its parameters live in the reflected
-    // Assets::PBRMaterialData and travel via push constants; additionally it uploads the bone matrices
+    // Assets::PBRSurfaceParams and travel via push constants; additionally it uploads the bone matrices
     // (real skinning data) through a storage buffer.
     class SkinnedMaterialPBR final : public MaterialPBRBase
     {
@@ -29,14 +29,14 @@ namespace Desert::Graphic
         {
         }
 
-        Assets::PBRMaterialData&       Data()       { return m_Data; }
-        const Assets::PBRMaterialData& Data() const { return m_Data; }
+        Assets::PBRSurfaceParams&       Data()       { return m_Data; }
+        const Assets::PBRSurfaceParams& Data() const { return m_Data; }
 
         void Bind( const UpdateSkinnedMaterialPBRInfo& info );
 
     private:
         void UpdateSkinnedUB( MaterialInstance* instance, const ShaderProtocols::SkinnedUB& skinnedUB );
 
-        Assets::PBRMaterialData m_Data;
+        Assets::PBRSurfaceParams m_Data;
     };
 } // namespace Desert::Graphic

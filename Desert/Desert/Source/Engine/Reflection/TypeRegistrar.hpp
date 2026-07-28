@@ -8,9 +8,9 @@ namespace Desert::Reflection
 {
     // Fluent helper used by generated reflection code to assemble and register a TypeInfo.
     //
-    //   TypeBuilder( "PBRMaterialData", sizeof( PBRMaterialData ) )
+    //   TypeBuilder( "PBRSurfaceParams", sizeof( PBRSurfaceParams ) )
     //       .Field( { .Name = "AlbedoColor", .Type = FieldType::Vec4,
-    //                 .Offset = offsetof( PBRMaterialData, AlbedoColor ),
+    //                 .Offset = offsetof( PBRSurfaceParams, AlbedoColor ),
     //                 .Size = sizeof( glm::vec4 ), .Meta = { .Category = "Surface", .IsColor = true } } )
     //       .Register();
     class TypeBuilder

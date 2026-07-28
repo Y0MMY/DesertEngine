@@ -32,6 +32,10 @@ namespace Desert::Graphic
         void BeginRenderPass( const RenderPass* renderPass, bool clearFrame = true );
         void BeginSwapChainRenderPass();
         void EndRenderPass();
+
+        // Named region in the current command buffer (RenderDoc pass tree). Pair Begin/End.
+        void BeginDebugLabel( const char* name );
+        void EndDebugLabel();
         void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                          const MaterialExecutor* materialExecutor, uint32_t instanceCount = 1,
                          uint32_t firstInstance = 0, uint64_t hiddenSubmeshMask = 0 );

@@ -9,7 +9,6 @@
 #include <type_traits>
 #include <vector>
 
-#include <Engine/Assets/Mesh/PBRMaterialData.hpp>
 #include <Engine/Core/SceneSettings.hpp>
 #include <Engine/ECS/Components.hpp>
 
@@ -20,29 +19,6 @@ namespace
         DesertReflectionAutoRegister()
         {
             using namespace ::Desert::Reflection;
-            {
-                using T = ::Desert::Assets::PBRMaterialData;
-                TypeBuilder( "PBRMaterialData", sizeof( T ) )
-                    .Field( FieldInfo{ .Name = "AlbedoColor", .Type = FieldType::Vec4, .Offset = offsetof( T, AlbedoColor ), .Size = sizeof( T::AlbedoColor ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Albedo", .Category = "Surface", .IsColor = true, } } )
-                    .Field( FieldInfo{ .Name = "MetallicFactor", .Type = FieldType::Float, .Offset = offsetof( T, MetallicFactor ), .Size = sizeof( T::MetallicFactor ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Metallic", .Category = "Surface", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "RoughnessFactor", .Type = FieldType::Float, .Offset = offsetof( T, RoughnessFactor ), .Size = sizeof( T::RoughnessFactor ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Roughness", .Category = "Surface", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "AOStrength", .Type = FieldType::Float, .Offset = offsetof( T, AOStrength ), .Size = sizeof( T::AOStrength ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Ambient Occlusion", .Category = "Surface", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "EmissiveColor", .Type = FieldType::Vec4, .Offset = offsetof( T, EmissiveColor ), .Size = sizeof( T::EmissiveColor ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Emissive", .Category = "Surface", .IsColor = true, } } )
-                    .Field( FieldInfo{ .Name = "EmissiveIntensity", .Type = FieldType::Float, .Offset = offsetof( T, EmissiveIntensity ), .Size = sizeof( T::EmissiveIntensity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Emissive Intensity", .Category = "Surface", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 100.0f, } } )
-                    .Field( FieldInfo{ .Name = "AlphaCutoff", .Type = FieldType::Float, .Offset = offsetof( T, AlphaCutoff ), .Size = sizeof( T::AlphaCutoff ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Alpha Cutoff", .Category = "Surface", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "Transmission", .Type = FieldType::Float, .Offset = offsetof( T, Transmission ), .Size = sizeof( T::Transmission ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Transmission", .Category = "Glass", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "IOR", .Type = FieldType::Float, .Offset = offsetof( T, IOR ), .Size = sizeof( T::IOR ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "IOR", .Category = "Glass", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 2.5f, } } )
-                    .Field( FieldInfo{ .Name = "GlassTint", .Type = FieldType::Vec4, .Offset = offsetof( T, GlassTint ), .Size = sizeof( T::GlassTint ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Glass Tint", .Category = "Glass", .IsColor = true, } } )
-                    .Field( FieldInfo{ .Name = "AlbedoTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, AlbedoTexture ), .Size = sizeof( T::AlbedoTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Albedo Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
-                    .Field( FieldInfo{ .Name = "NormalTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, NormalTexture ), .Size = sizeof( T::NormalTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Normal Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
-                    .Field( FieldInfo{ .Name = "MetallicTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, MetallicTexture ), .Size = sizeof( T::MetallicTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Metallic Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
-                    .Field( FieldInfo{ .Name = "RoughnessTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, RoughnessTexture ), .Size = sizeof( T::RoughnessTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Roughness Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
-                    .Field( FieldInfo{ .Name = "AOTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, AOTexture ), .Size = sizeof( T::AOTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "AO Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
-                    .Field( FieldInfo{ .Name = "EmissiveTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, EmissiveTexture ), .Size = sizeof( T::EmissiveTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Emissive Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
-                    .Field( FieldInfo{ .Name = "OpacityTexture", .Type = FieldType::AssetHandle, .Offset = offsetof( T, OpacityTexture ), .Size = sizeof( T::OpacityTexture ), .TypeName = "AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Opacity Map", .Category = "Textures", .IsAsset = true, .AssetType = "TextureAsset", .Thumbnail = true, } } )
-                    .WithDefault<T>()
-                    .Register();
-            }
             {
                 using T = ::Desert::Core::SceneSettings;
                 TypeBuilder( "SceneSettings", sizeof( T ) )

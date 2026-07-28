@@ -15,7 +15,8 @@
 #include <Editor/Import/ImportManager.hpp>
 
 #include <Engine/Assets/AssetManager.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/PBRSurfaceParams.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
@@ -34,8 +35,12 @@ namespace Desert::Editor
 
     namespace
     {
-        // Resources/Assets/Collections — see Common::Constants::Path::COLLECTIONS_PATH.
-        const std::string k_CollectionsRoot = Common::Constants::Path::COLLECTIONS_PATH.generic_string();
+        // Project collections root. A FUNCTION, not a static: the constant is remapped to the current
+        // project at startup, and a namespace-scope capture would run before that remap.
+        std::string CollectionsRoot()
+        {
+            return Common::Constants::Path::COLLECTIONS_PATH.generic_string();
+        }
 
         // On-disk manifest shape (collection.json). Optional fields tolerate missing keys.
         struct ManifestItem
@@ -128,7 +133,7 @@ namespace Desert::Editor
                     continue; // keep the existing (possibly user-edited) .demat; its handles already match
 
                 // loadAfterCreate=false: the file doesn't exist yet; reflected defaults are valid in memory.
-                auto asset = mgr.CreateAsset<Assets::PBRMaterialAsset>(
+                auto asset = mgr.CreateAsset<Assets::SurfaceMaterialAsset>(
                      Assets::AssetPriority::High, dematPath.generic_string(), false );
                 if ( !asset )
                 {
@@ -136,14 +141,17 @@ namespace Desert::Editor
                     continue;
                 }
 
-                auto& d            = asset->Data();
-                d.AlbedoTexture    = albedo;
-                d.NormalTexture    = normal;
-                d.RoughnessTexture = roughness;
-                d.MetallicTexture  = metallic;
-                d.AOTexture        = ao;
-                d.OpacityTexture   = opacity;
-                d.AlphaCutoff      = mat.AlphaCutoff.value_or( mat.Opacity ? 0.5f : 0.0f );
+                // Typed builder -> unified canon (single material protocol).
+                Assets::PBRSurfaceParams p;
+                p.AlbedoTexture    = albedo;
+                p.NormalTexture    = normal;
+                p.RoughnessTexture = roughness;
+                p.MetallicTexture  = metallic;
+                p.AOTexture        = ao;
+                p.OpacityTexture   = opacity;
+                p.AlphaCutoff      = mat.AlphaCutoff.value_or( mat.Opacity ? 0.5f : 0.0f );
+                p.MaterialId       = asset->Data().MaterialId;
+                asset->Data()      = p.ToMaterialData();
 
                 Common::Utils::FileSystem::WriteContentToFile( dematPath, asset->Save() );
                 Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
@@ -169,7 +177,7 @@ namespace Desert::Editor
         m_Categories.emplace_back( "All" );
 
         std::error_code ec;
-        const std::filesystem::path root( k_CollectionsRoot );
+        const std::filesystem::path root( CollectionsRoot() );
         if ( !std::filesystem::exists( root, ec ) )
             return;
 

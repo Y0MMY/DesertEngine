@@ -29,10 +29,15 @@ namespace Desert::Assets
     // extracted from the transient RuntimeMesh) and a std::optional primitive type. Asset references
     // (MeshPath / MaterialPaths) round-trip as paths through the shared AssetResolver — same code path the
     // reflected components use.
+    // Asset references persist BOTH ways (asset-database):
+    //   *Guid  — the stable asset handle (survives file renames/moves; preferred on load)
+    //   *Path  — human-readable fallback + back-compat with pre-GUID scenes
     struct StaticMeshComponentSer
     {
         std::optional<std::string>                  MeshPath;
+        std::optional<uint64_t>                     MeshGuid;
         std::optional<std::vector<std::string>>     MaterialPaths;
+        std::optional<std::vector<uint64_t>>        MaterialGuids;
         std::optional<Geometry::PrimitiveType>      Primitive;
         std::optional<std::vector<VertexSer>>       CustomVertices;
         std::optional<std::vector<uint32_t>>        CustomIndices;
@@ -41,7 +46,9 @@ namespace Desert::Assets
     struct SkinnedMeshComponentSer
     {
         std::optional<std::string>              MeshPath;
+        std::optional<uint64_t>                 MeshGuid;
         std::optional<std::vector<std::string>> MaterialPaths;
+        std::optional<std::vector<uint64_t>>    MaterialGuids;
     };
 
     // UE-style Instanced Static Mesh mirror: one mesh (asset path OR primitive) + N per-instance world
@@ -65,8 +72,9 @@ namespace Desert::Assets
 
     struct MaterialTextureSer
     {
-        std::string Name;
-        std::string Path;
+        std::string             Name;
+        std::string             Path;
+        std::optional<uint64_t> Guid; // stable texture handle (preferred on load; Path = fallback)
     };
 
     struct MaterialComponentSer

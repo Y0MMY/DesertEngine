@@ -16,11 +16,17 @@
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
 #include <Engine/Scripting/ScriptEngine.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
+#include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 
 // 2. Editor Base & Infrastructure
 #include "Editor/Core/EditorResources.hpp"
 #include "Editor/Core/ThemeManager.hpp"
 #include "Editor/Core/GizmoState.hpp"
+#include "Editor/Core/CommandHistory.hpp"
+#include "Editor/Core/Commands/SceneCommands.hpp"
+#include "Editor/Core/EditorPreferences.hpp"
+#include "Editor/Core/ProjectContext.hpp"
 
 #include <Engine/Graphic/Image.hpp> // Image2D::ReadPixelsRGBA8 (debug frame dump)
 #include <Engine/Core/Input.hpp>
@@ -42,6 +48,9 @@
 #include "Editor/Panels/SceneSettings/SceneSettingsPanel.hpp"
 #include "Editor/Panels/Logs/LogsPanel.hpp"
 #include "Editor/Panels/Collections/CollectionsPanel.hpp"
+#include "Editor/Panels/Stubs/NodeGraphPanel.hpp"
+#include "Editor/Panels/Stubs/SequencerPanel.hpp"
+#include "Editor/Panels/Stubs/BuildSettingsPanel.hpp"
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
@@ -63,6 +72,12 @@ namespace Desert::Editor
 {
     static constexpr uint32_t s_ShaderLibraryPanelIndex = 2;
 
+    // "Unsaved changes" marker: the CommandHistory revision at the last save/load. Compared against the
+    // current revision for the status-bar dirty dot; reset wherever the scene is (re)loaded or saved.
+    static uint64_t s_SavedRevision = 0;
+
+    static bool s_ShowPreferences = false; // Edit -> Preferences... window
+
     EditorLayer::EditorLayer( const Engine::Application* application, const std::string& layerName )
          : Common::Layer( layerName ), m_Application( application )
 
@@ -73,13 +88,45 @@ namespace Desert::Editor
         // Cook only what's missing/stale (skips the expensive Assimp re-parse on every launch). Collections
         // hold packs (a character + its animation FBXs), so they're cooked too — their outputs land under
         // Cooked/Meshes/Collections/... where the preloader discovers them (see CookPaths::CookedMesh).
-        m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::MESH_PATH );
-        m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::COLLECTIONS_PATH );
+        //
+        // STAGED: this used to run inline here and froze the window for seconds before the first frame.
+        // The stages now execute one-per-frame from OnUpdate while OnImGuiRender shows a loading overlay.
+        // NOTE: shaders are NOT staged — they load synchronously in OnAttach, because the render systems
+        // (MeshECSSystem's default PBR materials) resolve their shaders in their constructors.
+        m_StartupStages.push_back(
+             { "Cooking meshes...",
+               [this] { m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::MESH_PATH ); } } );
+        m_StartupStages.push_back(
+             { "Cooking collections...",
+               [this]
+               { m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::COLLECTIONS_PATH ); } } );
+        m_StartupStages.push_back( { "Preloading meshes...", [this] { m_AssetPreloader->PreloadMeshes(); } } );
+        m_StartupStages.push_back(
+             { "Preloading environments...", [this] { m_AssetPreloader->PreloadSkyboxes(); } } );
 
         m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
         m_SceneRenderer    = std::make_unique<Graphic::SceneRenderer>();
         m_MainScene        = std::make_shared<Desert::Core::Scene>( "New Scene", m_SceneRenderer.get() );
+
+        // The scene/asset-manager the undoable structural commands operate on (the scene OBJECT is reused
+        // across loads — Clear() + deserialize — so this stays valid; the history itself is cleared on
+        // load/Play/Stop instead).
+        Commands::SetContext( m_MainScene.get(), m_AssetManager.get() );
+
+        // User prefs (snap steps, camera speed, autosave) from ~/.desertengine/editor.json. Snap values
+        // apply immediately; the camera speed is applied on the first frame (the camera exists by then).
+        EditorPreferences::Load();
+
+        // Launched with --project (Project Hub): adopt the project's name and queue its default scene
+        // (loaded through the normal deferred path on the first frame, when the renderer is ready).
+        if ( ProjectContext::HasProject() )
+        {
+            m_MainScene->SetSceneName( ProjectContext::Current().Name );
+            if ( const auto scenePath = ProjectContext::DefaultScenePath();
+                 !scenePath.empty() && std::filesystem::exists( scenePath ) )
+                LoadScene( scenePath );
+        }
 
         BuiltinMeshRegistry::Init( nullptr );
 
@@ -121,7 +168,9 @@ namespace Desert::Editor
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
         }
 
-        m_AssetPreloader->PreloadAllAssets();
+        // Shaders must exist BEFORE the render systems below are constructed (their default materials
+        // resolve shaders in the ctor). Meshes/skyboxes are staged behind the loading overlay instead.
+        m_AssetPreloader->PreloadShaders();
 
         // Day/night runs FIRST so the sun's direction + intensity are current before the sky and the mesh
         // lighting read the directional light this frame. No-op unless SceneSettings::EnableDayNight is on.
@@ -214,7 +263,7 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() ) );
         {
             auto fileExplorer =
-                 std::make_unique<Editor::FileExplorerPanel>( "Resources/Assets/", m_AssetManager.get(),
+                 std::make_unique<Editor::FileExplorerPanel>( Common::Constants::Path::ASSETS_PATH, m_AssetManager.get(),
                                                               m_MainScene );
             m_FileExplorerPanel = fileExplorer.get();
             m_Panels.emplace_back( std::move( fileExplorer ) );
@@ -223,6 +272,12 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::CollectionsPanel>( m_AssetManager.get() ) );
+
+        // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
+        // functionality yet — they exist so the layouts/interactions can be iterated on early.
+        m_Panels.emplace_back( std::make_unique<Editor::NodeGraphPanel>() );
+        m_Panels.emplace_back( std::make_unique<Editor::SequencerPanel>() );
+        m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
 #endif // EBABLE_IMGUI
 
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
@@ -254,7 +309,26 @@ namespace Desert::Editor
     {
         DESERT_PROFILE_SCOPE( "Layer::OnUpdate" );
 
-        if ( m_SceneLoadRequested )
+
+        // Staged startup loading: run ONE heavy stage per frame — but only after at least one frame with
+        // the loading overlay has been PRESENTED (else the first cook would freeze a blank window anyway).
+        // While loading, the scene is NOT rendered at all (shaders/assets aren't there yet — rendering
+        // before the preload stage crashed on the missing StaticMeshPBR shader); the frame is ImGui-only.
+        if ( StartupLoading() )
+        {
+            if ( m_StartupFramesRendered >= 1 )
+            {
+                DESERT_PROFILE_SCOPE( "Startup stage" );
+                m_StartupStages[m_StartupNext].Run();
+                ++m_StartupNext;
+            }
+            return BOOLSUCCESS;
+        }
+
+
+
+        // Scene loads wait until the startup stages finished (a scene expects cooked/preloaded assets).
+        if ( m_SceneLoadRequested && !StartupLoading() )
         {
             auto path = m_SceneLoadRequested.value();
             m_SceneLoadRequested.reset();
@@ -269,11 +343,69 @@ namespace Desert::Editor
             OnSceneStop();
         }
 
+        // First-frame prefs application (needs a live camera) + autosave timer.
+        {
+            static bool s_CameraSpeedApplied = false;
+            if ( !s_CameraSpeedApplied )
+            {
+                if ( auto cam = m_MainScene->GetMainCamera().lock() )
+                    if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                    {
+                        editorCam->SetMovementSpeed( EditorPreferences::Get().CameraSpeed );
+                        s_CameraSpeedApplied = true;
+                    }
+            }
+
+            // Autosave: Edit mode only, only when something actually changed since the last autosave.
+            // Writes a SEPARATE file (Scene/Autosave/<name>_autosave.desce) — never touches the main save.
+            static float    s_AutosaveAccum        = 0.0f;
+            static uint64_t s_LastAutosaveRevision = 0;
+            const auto&     prefs                  = EditorPreferences::Get();
+            if ( prefs.AutosaveMinutes > 0 &&
+                 m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
+            {
+                s_AutosaveAccum += ts.GetSeconds();
+                if ( s_AutosaveAccum >= static_cast<float>( prefs.AutosaveMinutes ) * 60.0f )
+                {
+                    s_AutosaveAccum    = 0.0f;
+                    const uint64_t rev = CommandHistory::Get().Revision();
+                    if ( rev != s_LastAutosaveRevision )
+                    {
+                        s_LastAutosaveRevision = rev;
+                        Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
+                        std::string name = m_MainScene->GetSceneName();
+                        for ( auto& ch : name )
+                            if ( ch == ' ' )
+                                ch = '_';
+                        const auto dir = Common::Constants::Path::SCENE_PATH / "Autosave";
+                        std::error_code ec;
+                        std::filesystem::create_directories( dir, ec );
+                        const auto path = dir / ( name + "_autosave" +
+                                                  Common::Constants::Extensions::SCENE_EXTENSION );
+                        Common::Utils::FileSystem::WriteContentToFile( path, serializer.SerializeToJson() );
+                        LOG_INFO( "[Autosave] {}", path.string() );
+                    }
+                }
+            }
+        }
+
         // Apply any deferred panel state (e.g. viewport resize) before scene rendering.
         // Panels defer GPU-side resize from OnUIRender to here so descriptor set pools are
         // never destroyed while their DS are bound to the recording command buffer.
         for ( auto& panel : m_Panels )
             panel->OnPreUpdate();
+
+        // Asset hot-reload: pick up edited .demat/.shader files (runs BEFORE scene rendering so
+        // a shader-triggered pipeline invalidation never touches an in-recording frame).
+        if ( m_AssetManager )
+            m_AssetHotReload.Tick( ts, *m_AssetManager, m_MainScene.get() );
+
+        // Destroy invalidated runtime materials (shader switched in the editor / hot reload) at
+        // the only safe point: before any command recording, behind a device-idle wait. Doing it
+        // where Invalidate() is called (mid-UI, mid-recording) kills descriptor pools the current
+        // command buffer references -> device lost.
+        if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
+            materialService->CollectGarbage();
 
         Common::BoolResultStr beginResult = BOOLSUCCESS;
         {
@@ -339,6 +471,93 @@ namespace Desert::Editor
         // ImGuizmo is a single global per-frame state — begin it ONCE here, before any panel issues a
         // Manipulate(). Both the viewport's object gizmo and the Mesh Editor's vertex gizmo rely on this.
         ImGuizmo::BeginFrame();
+
+        // ---- Startup loading overlay (UI loader) ----
+        // Fullscreen dim + progress while the staged boot work (mesh cook / preload) runs in OnUpdate.
+        if ( StartupLoading() )
+        {
+            ++m_StartupFramesRendered;
+
+            const ImGuiViewport* vp = ::ImGui::GetMainViewport();
+            ::ImGui::SetNextWindowPos( vp->Pos );
+            ::ImGui::SetNextWindowSize( vp->Size );
+            ::ImGui::SetNextWindowBgAlpha( 0.92f );
+            ::ImGui::Begin( "##StartupLoader", nullptr,
+                            ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                                 ImGuiWindowFlags_NoDocking );
+
+            const float  cx    = vp->Size.x * 0.5f;
+            const float  cy    = vp->Size.y * 0.5f;
+            const float  barW  = 420.0f;
+            const size_t total = m_StartupStages.size();
+            const float  frac  = total ? (float)m_StartupNext / (float)total : 1.0f;
+            const char*  label = m_StartupNext < total ? m_StartupStages[m_StartupNext].Label.c_str() : "";
+
+            ::ImGui::SetCursorPos( ImVec2( cx - barW * 0.5f, cy - 60.0f ) );
+            ::ImGui::PushFont( EditorResources::GetBoldFont() );
+            ::ImGui::TextUnformatted( "DESERT ENGINE" );
+            ::ImGui::PopFont();
+
+            ::ImGui::SetCursorPos( ImVec2( cx - barW * 0.5f, cy - 24.0f ) );
+            ::ImGui::TextDisabled( "%s", label );
+
+            ::ImGui::SetCursorPos( ImVec2( cx - barW * 0.5f, cy ) );
+            ::ImGui::ProgressBar( frac, ImVec2( barW, 8.0f ), "" );
+
+            ::ImGui::SetCursorPos( ImVec2( cx - barW * 0.5f, cy + 20.0f ) );
+            ::ImGui::TextDisabled( "%zu / %zu", m_StartupNext, total );
+
+            ::ImGui::End();
+
+            // Loading frames are ImGui-only: no dockspace, no panels (the viewport panel would touch the
+            // not-yet-rendered scene image).
+#ifdef EBABLE_IMGUI
+            m_ImGuiLayer->End();
+#endif
+            return BOOLSUCCESS;
+        }
+
+        // ---- Global editing shortcuts ----
+        // Edit mode only (Play discards its changes on Stop anyway) and never while a text field owns the
+        // keyboard. Runs at frame start, before any panel iterates the scene.
+        {
+            ImGuiIO&   io       = ::ImGui::GetIO();
+            const bool editMode = m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit;
+            if ( editMode && !io.WantTextInput && io.KeyCtrl )
+            {
+                if ( ::ImGui::IsKeyPressed( ImGuiKey_Z, false ) )
+                {
+                    if ( io.KeyShift )
+                        CommandHistory::Get().Redo();
+                    else
+                        CommandHistory::Get().Undo();
+                }
+                if ( ::ImGui::IsKeyPressed( ImGuiKey_Y, false ) )
+                    CommandHistory::Get().Redo();
+
+                if ( ::ImGui::IsKeyPressed( ImGuiKey_D, false ) )
+                {
+                    if ( Core::SelectionManager::Count() > 0 )
+                        if ( auto dups = Commands::DuplicateEntities( Core::SelectionManager::GetSelection() );
+                             !dups.empty() )
+                            Core::SelectionManager::SetSelection( std::move( dups ) );
+                }
+
+                if ( ::ImGui::IsKeyPressed( ImGuiKey_C, false ) && Core::SelectionManager::Count() > 0 )
+                    Commands::CopySelectionToClipboard( Core::SelectionManager::GetSelection() );
+                if ( ::ImGui::IsKeyPressed( ImGuiKey_V, false ) )
+                    if ( auto pasted = Commands::PasteClipboard(); !pasted.empty() )
+                        Core::SelectionManager::SetSelection( std::move( pasted ) );
+
+                if ( ::ImGui::IsKeyPressed( ImGuiKey_S, false ) )
+                {
+                    m_MainScene->Serialize( m_AssetManager.get() );
+                    s_SavedRevision = CommandHistory::Get().Revision();
+                    LOG_INFO( "[Scene] Saved '{}' (Ctrl+S)", m_MainScene->GetSceneName() );
+                }
+            }
+        }
 
         static bool               dockspaceOpen  = true;
         static bool               opt_fullscreen = true;
@@ -412,7 +631,50 @@ namespace Desert::Editor
             dockSize.y                   = ( dockSize.y > statusBarHeight ) ? dockSize.y - statusBarHeight : 0.0f;
 
             ImGuiID dockspace_id = ::ImGui::GetID( "MyDockSpace" );
+
+            // First run (nothing saved in imgui.ini for this dockspace): lay the panels
+            // out into a sensible default instead of leaving them floating in a pile.
+            // Checked BEFORE DockSpace() — the call itself creates the node.
+            const bool buildDefaultLayout = ::ImGui::DockBuilderGetNode( dockspace_id ) == nullptr;
+
             ::ImGui::DockSpace( dockspace_id, dockSize, dockspace_flags );
+
+            if ( buildDefaultLayout )
+            {
+                ::ImGui::DockBuilderRemoveNode( dockspace_id );
+                ::ImGui::DockBuilderAddNode( dockspace_id, dockspace_flags | ImGuiDockNodeFlags_DockSpace );
+                ::ImGui::DockBuilderSetNodeSize( dockspace_id,
+                                                 ( dockSize.x > 0 && dockSize.y > 0 )
+                                                      ? dockSize
+                                                      : ::ImGui::GetMainViewport()->Size );
+
+                //  ┌───────────┬──────────────────────┬──────────────┐
+                //  │ Scene     │                      │ Details      │
+                //  │ Outliner  │   Scene (viewport)   ├──────────────┤
+                //  ├───────────┤                      │ SceneSettings│
+                //  │Collections├──────────────────────┤ / Profiler   │
+                //  │           │ Assets / Logs        │ / Foliage    │
+                //  └───────────┴──────────────────────┴──────────────┘
+                ImGuiID center      = dockspace_id;
+                ImGuiID right       = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Right, 0.20f, nullptr, &center );
+                ImGuiID left        = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Left, 0.22f, nullptr, &center );
+                ImGuiID bottom      = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Down, 0.28f, nullptr, &center );
+                ImGuiID leftBottom  = ::ImGui::DockBuilderSplitNode( left, ImGuiDir_Down, 0.40f, nullptr, &left );
+                ImGuiID rightBottom = ::ImGui::DockBuilderSplitNode( right, ImGuiDir_Down, 0.50f, nullptr, &right );
+
+                ::ImGui::DockBuilderDockWindow( "Scene###scene", center );
+                ::ImGui::DockBuilderDockWindow( "Scene Outliner", left );
+                ::ImGui::DockBuilderDockWindow( "Collections", leftBottom );
+                ::ImGui::DockBuilderDockWindow( "Details", right );
+                ::ImGui::DockBuilderDockWindow( "Scene Settings", rightBottom );
+                ::ImGui::DockBuilderDockWindow( "Profiler", rightBottom );
+                ::ImGui::DockBuilderDockWindow( "Foliage##FoliagePanel", rightBottom );
+                ::ImGui::DockBuilderDockWindow( "Assets", bottom );
+                ::ImGui::DockBuilderDockWindow( "Logs", bottom );
+                ::ImGui::DockBuilderDockWindow( "Shader Code", bottom );
+
+                ::ImGui::DockBuilderFinish( dockspace_id );
+            }
         }
 
         for ( const auto& panel : m_Panels )
@@ -484,9 +746,12 @@ namespace Desert::Editor
             return;
         }
 
-        if ( ImGui::MenuItem( "Open Project" ) )
-        {
-        }
+        // The editor is bound to ONE project per run (all content paths are remapped at startup).
+        // Switching projects = relaunching through the Project Hub, so the menu only SHOWS the project.
+        ImGui::MenuItem(
+             ( std::string( ICON_MDI_PACKAGE_VARIANT " " ) + Editor::ProjectContext::Current().Name ).c_str(),
+             nullptr, false, false );
+        ImGui::TextDisabled( "  switch projects via the Project Hub" );
         ImGui::Separator();
 
         if ( ImGui::MenuItem( "Open File" ) )
@@ -613,11 +878,20 @@ namespace Desert::Editor
         ImGui::Separator();
         ImGui::SameLine();
 
-        static const std::filesystem::path currentPath = std::filesystem::current_path();
-        static const std::string           projectName = currentPath.filename().string();
-        ImGui::TextUnformatted( projectName.c_str() );
+        // The PROJECT name (from the .deproj), not the working directory ("Editor" told you nothing).
+        ImGui::TextUnformatted( Editor::ProjectContext::Current().Name.c_str() );
+        Utils::ImGuiUtilities::Tooltip( Editor::ProjectContext::FilePath().c_str() );
 
-        Utils::ImGuiUtilities::Tooltip( currentPath.string().c_str() );
+        // Build configuration badge — you always want to know which binary you are looking at.
+#ifdef DESERT_CONFIG_DEBUG
+        constexpr const char* kConfig      = "DEBUG";
+        const ImVec4          configColour = ImVec4( 0.95f, 0.65f, 0.25f, 1.0f );
+#else
+        constexpr const char* kConfig      = "RELEASE";
+        const ImVec4          configColour = ImVec4( 0.35f, 0.85f, 0.45f, 1.0f );
+#endif
+        ImGui::SameLine();
+        ImGui::TextColored( configColour, "[%s]", kConfig );
 
         ImGui::SameLine();
         ImGui::Separator();
@@ -685,13 +959,29 @@ namespace Desert::Editor
         ImGui::BeginChild( "##StatusBar", ImVec2( 0.0f, 0.0f ), false,
                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
-        // Left: scene state + current selection.
+        // Left: scene state + scene name (with the unsaved-changes dot) + current selection.
         ImGui::PushStyleColor( ImGuiCol_Text, stateColor );
         ImGui::TextUnformatted( stateText );
         ImGui::PopStyleColor();
 
         ImGui::SameLine( 0.0f, 16.0f );
-        if ( const auto sel = Core::SelectionManager::GetSelected() )
+        {
+            const bool dirty = CommandHistory::Get().Revision() != s_SavedRevision;
+            if ( dirty )
+                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.25f, 1.0f ), "%s*",
+                                    m_MainScene->GetSceneName().c_str() );
+            else
+                ImGui::TextDisabled( "%s", m_MainScene->GetSceneName().c_str() );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( dirty ? "Unsaved changes (Ctrl+S to save)" : "All changes saved" );
+        }
+
+        ImGui::SameLine( 0.0f, 16.0f );
+        if ( const size_t selCount = Core::SelectionManager::Count(); selCount > 1 )
+        {
+            ImGui::TextDisabled( ICON_MDI_CURSOR_DEFAULT_OUTLINE " %zu selected", selCount );
+        }
+        else if ( const auto sel = Core::SelectionManager::GetSelected() )
         {
             std::string selName = "Entity";
             if ( auto e = m_MainScene->FindEntityByID( *sel ) )
@@ -703,11 +993,19 @@ namespace Desert::Editor
             ImGui::TextDisabled( "No selection" );
         }
 
-        // Right: frame rate + frame time.
+        ImGui::SameLine( 0.0f, 16.0f );
+        ImGui::TextDisabled( ICON_MDI_CUBE_OUTLINE " %zu entities", m_MainScene->GetAllEntities().size() );
+
+        // Right: build configuration + frame rate + frame time.
+#ifdef DESERT_CONFIG_DEBUG
+        constexpr const char* kBuildConfig = "Debug";
+#else
+        constexpr const char* kBuildConfig = "Release";
+#endif
         const float fps    = ImGui::GetIO().Framerate;
-        char        stats[64];
-        std::snprintf( stats, sizeof( stats ), ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms", fps,
-                       fps > 0.0f ? 1000.0f / fps : 0.0f );
+        char        stats[80];
+        std::snprintf( stats, sizeof( stats ), "%s   " ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms",
+                       kBuildConfig, fps, fps > 0.0f ? 1000.0f / fps : 0.0f );
         const float statsW = ImGui::CalcTextSize( stats ).x;
         ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - statsW );
         ImGui::TextDisabled( "%s", stats );
@@ -857,6 +1155,7 @@ namespace Desert::Editor
         DrawNewScenePopup();
         DrawReloadScenePopup();
         DrawProjectPopup();
+        DrawPreferencesWindow();
     }
 
     void EditorLayer::DrawEditMenu()
@@ -868,7 +1167,90 @@ namespace Desert::Editor
             return;
         }
 
+        const bool editMode     = m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit;
+        const bool hasSelection = Core::SelectionManager::Count() > 0;
+
+        if ( ImGui::MenuItem( "Undo", "Ctrl+Z", false, editMode ) )
+            CommandHistory::Get().Undo();
+        if ( ImGui::MenuItem( "Redo", "Ctrl+Shift+Z", false, editMode ) )
+            CommandHistory::Get().Redo();
+
+        ImGui::Separator();
+
+        if ( ImGui::MenuItem( "Copy", "Ctrl+C", false, editMode && hasSelection ) )
+            Commands::CopySelectionToClipboard( Core::SelectionManager::GetSelection() );
+        if ( ImGui::MenuItem( "Paste", "Ctrl+V", false, editMode && Commands::ClipboardHasContent() ) )
+        {
+            if ( auto pasted = Commands::PasteClipboard(); !pasted.empty() )
+                Core::SelectionManager::SetSelection( std::move( pasted ) );
+        }
+        if ( ImGui::MenuItem( "Duplicate", "Ctrl+D", false, editMode && hasSelection ) )
+        {
+            if ( auto dups = Commands::DuplicateEntities( Core::SelectionManager::GetSelection() );
+                 !dups.empty() )
+                Core::SelectionManager::SetSelection( std::move( dups ) );
+        }
+        if ( ImGui::MenuItem( "Delete", "Del", false, editMode && hasSelection ) )
+            Commands::DeleteEntities( Core::SelectionManager::GetSelection() );
+
+        ImGui::Separator();
+        if ( ImGui::MenuItem( "Preferences..." ) )
+            s_ShowPreferences = true;
+
         ImGui::EndMenu();
+    }
+
+    void EditorLayer::DrawPreferencesWindow()
+    {
+        namespace ImGui = ::ImGui;
+        if ( !s_ShowPreferences )
+            return;
+
+        ImGui::SetNextWindowSize( ImVec2( 380.0f, 0.0f ), ImGuiCond_Appearing );
+        if ( ImGui::Begin( "Preferences", &s_ShowPreferences, ImGuiWindowFlags_NoDocking ) )
+        {
+            auto& prefs = EditorPreferences::Get();
+
+            ImGui::Spacing();
+            ImGui::TextDisabled( "Editor Camera" );
+            ImGui::Separator();
+            if ( ImGui::SliderFloat( "Speed", &prefs.CameraSpeed, 0.1f, 10.0f, "%.2fx" ) )
+                if ( auto cam = m_MainScene->GetMainCamera().lock() )
+                    if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                        editorCam->SetMovementSpeed( prefs.CameraSpeed );
+
+            ImGui::Spacing();
+            ImGui::TextDisabled( "Gizmo Snap" );
+            ImGui::Separator();
+            bool snapChanged = false;
+            snapChanged |= ImGui::Checkbox( "Snap always on (Ctrl inverts)", &prefs.PersistentSnap );
+            snapChanged |= ImGui::DragFloat( "Move (m)", &prefs.TranslateSnap, 0.05f, 0.01f, 100.0f, "%.2f" );
+            snapChanged |= ImGui::DragFloat( "Rotate (deg)", &prefs.RotateSnapDeg, 0.5f, 0.1f, 180.0f, "%.1f" );
+            snapChanged |= ImGui::DragFloat( "Scale", &prefs.ScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f" );
+            if ( snapChanged )
+            {
+                Core::GizmoState::SetTranslateSnap( prefs.TranslateSnap );
+                Core::GizmoState::SetRotateSnapDegrees( prefs.RotateSnapDeg );
+                Core::GizmoState::SetScaleSnap( prefs.ScaleSnap );
+                Core::GizmoState::SetPersistentSnap( prefs.PersistentSnap );
+            }
+
+            ImGui::Spacing();
+            ImGui::TextDisabled( "Autosave" );
+            ImGui::Separator();
+            ImGui::SliderInt( "Interval (min)", &prefs.AutosaveMinutes, 0, 30, prefs.AutosaveMinutes == 0 ? "Off" : "%d min" );
+            ImGui::TextDisabled( "Autosaves land in Scene/Autosave/, the main file is never touched." );
+
+            ImGui::Spacing();
+            if ( ImGui::Button( "Save", ImVec2( 110.0f, 0.0f ) ) )
+            {
+                EditorPreferences::Save();
+                s_ShowPreferences = false;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled( "(persisted to ~/.desertengine/editor.json)" );
+        }
+        ImGui::End();
     }
 
     void EditorLayer::DrawViewMenu()
@@ -906,6 +1288,10 @@ namespace Desert::Editor
 
         // Wait for GPU to be idle before destroying resources mid-frame
         EngineContext::GetInstance().GetDevice()->WaitIdle();
+
+        // The undo history refers to entities of the OLD scene — none of it applies anymore.
+        CommandHistory::Get().Clear();
+        s_SavedRevision = CommandHistory::Get().Revision(); // a freshly loaded scene is "clean"
 
         m_MainScene->Clear();
 
@@ -1138,7 +1524,7 @@ namespace Desert::Editor
             // Movement + mouse-look are now a Lua SCRIPT (engine only executes the physics it asks for).
             {
                 ECS::ScriptSlot slot;
-                slot.ScriptPath = "Resources/Assets/Scripts/player_controller.lua";
+                slot.ScriptPath = ( Common::Constants::Path::SCRIPT_PATH / "player_controller.lua" ).string();
                 player.AddComponent<ECS::ScriptComponent>().Scripts.push_back( std::move( slot ) );
             }
         }
@@ -1180,6 +1566,9 @@ namespace Desert::Editor
         // Snapshot the authored scene so Stop can restore it exactly (play-time edits are discarded).
         Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
         m_PlaySnapshot = serializer.SerializeToJson();
+        // Play-time changes are discarded on Stop anyway, and the Stop restore recreates every entity —
+        // an undo stack recorded against the authored scene must not fire into either state.
+        CommandHistory::Get().Clear();
         m_MainScene->SetState( SceneState::Play );
         m_EditorState = EditorState::Play;
     }
@@ -1191,6 +1580,7 @@ namespace Desert::Editor
             return;
 
         EngineContext::GetInstance().GetDevice()->WaitIdle();
+        CommandHistory::Get().Clear(); // anything recorded during Play targets entities about to be rebuilt
         m_MainScene->Clear();
 
         Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
@@ -1282,6 +1672,7 @@ namespace Desert::Editor
 
         m_SaveSceneRequested = false;
         m_MainScene->Serialize( m_AssetManager.get() );
+        s_SavedRevision = CommandHistory::Get().Revision();
     }
 
     void EditorLayer::DrawNewScenePopup()
@@ -1294,6 +1685,9 @@ namespace Desert::Editor
 
     void EditorLayer::DrawProjectPopup()
     {
+        // Intentionally empty: the editor never opens/switches projects in-session. All content paths
+        // are remapped to the project at startup (--project), so switching would require re-initializing
+        // the asset manager, cooked caches and panels — relaunch through the Project Hub instead.
     }
 
     void EditorLayer::OnEvent( Common::Event& event )

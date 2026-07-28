@@ -18,7 +18,18 @@ namespace Desert::Editor
         void Render( ECS::Entity& entity );
 
     private:
-        void RenderMaterialProperties( ECS::StaticMeshComponent& materialComp );
+        // overriddenByShader: non-empty when the entity's Shader Override component routes the
+        // mesh off the PBR path — the slots are shown collapsed with a notice.
+        void RenderMaterialProperties( ECS::StaticMeshComponent& materialComp,
+                                       const std::string&        overriddenByShader );
+
+        // Unity-style shader picker inside the material (PBR (Standard) + Surface-domain DSL shaders).
+        // Returns true when the shader changed (the runtime material must be rebuilt).
+        bool DrawShaderPicker( Assets::SurfaceMaterialAsset& asset );
+
+        // Schema-driven parameter editor for a custom-shader material; edits are persisted in the
+        // asset's ShaderParams/ShaderTextures. Returns true when anything changed.
+        bool DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset );
 
         // Number of material slots the mesh expects (one per submesh; 1 for primitives).
         size_t GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const;

@@ -95,6 +95,30 @@ namespace Desert::Graphic
         return Common::MakeSuccess( texture );
     }
 
+    Common::ResultStr<std::shared_ptr<Texture2D>>
+    Texture2D::Create( const TextureSpecification& specification, const std::string& tag, uint32_t width,
+                       uint32_t height, Core::Formats::ImageFormat format,
+                       Core::Formats::ImagePixelData&& data )
+    {
+        auto texture      = std::make_shared<Texture2D>( specification, std::filesystem::path( tag ) );
+        texture->m_Width  = width;
+        texture->m_Height = height;
+
+        const Core::Formats::Image2DSpecification imageSpec = {
+            .Tag        = tag,
+            .Width      = width,
+            .Height     = height,
+            .Format     = format,
+            .Mips       = 1, // procedural data: single level (callers wanting mips can extend later)
+            .Data       = std::move( data ),
+            .Usage      = Core::Formats::Image2DUsage::Image2D,
+            .Properties = Core::Formats::Sample };
+
+        texture->m_Handle = Runtime::ResourceRegistry::GetImageService()->Register(
+             std::move( Image2D::Create( imageSpec, nullptr ) ), Runtime::ImageHandle::Type::Image2D );
+        return Common::MakeSuccess( texture );
+    }
+
     // ***************************************************************************************************************//
 
     TextureCube::TextureCube( const TextureSpecification& specification, const std::filesystem::path& path )
@@ -126,7 +150,7 @@ namespace Desert::Graphic
                                                                          const std::filesystem::path& path )
     {
         auto texture =
-             std::make_shared<TextureCube>( specification, Common::Constants::Path::TEXTUREDIR_PATH / path );
+             std::make_shared<TextureCube>( specification, path ); // path is FULL — no directory gluing here
         auto invResult = texture->Invalidate();
         if ( !invResult.IsSuccess() )
         {

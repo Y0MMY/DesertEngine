@@ -10,12 +10,17 @@ project "FbxMeshSplitter"
         "**.hpp",
     }
 
-    includedirs {
-        "%{wks.location}/Editor/ThirdParty/assimp/include",
-    }
-
     filter "configurations:Debug"
         symbols "On"
+
+    filter "configurations:Release"
+        optimize "On"
+
+    -- Assimp: prebuilt MSVC binaries on Windows, Homebrew's libassimp on macOS.
+    filter "system:windows"
+        includedirs { "%{wks.location}/Editor/ThirdParty/assimp/include" }
+
+    filter { "system:windows", "configurations:Debug" }
         libdirs { "%{wks.location}/Editor/ThirdParty/assimp/bin/Debug" }
         links   { "assimp-vc142-mtd" }
         -- project-relative (Tools/FbxMeshSplitter -> ../../ = workspace root); %{wks.location} misexpands here.
@@ -23,10 +28,15 @@ project "FbxMeshSplitter"
             '{COPYFILE} "../../Editor/ThirdParty/assimp/bin/Debug/assimp-vc142-mtd.dll" "%{cfg.targetdir}/assimp-vc142-mtd.dll"'
         }
 
-    filter "configurations:Release"
-        optimize "On"
+    filter { "system:windows", "configurations:Release" }
         libdirs { "%{wks.location}/Editor/ThirdParty/assimp/bin/Release" }
         links   { "assimp-vc142-mt" }
         postbuildcommands {
             '{COPYFILE} "../../Editor/ThirdParty/assimp/bin/Release/assimp-vc142-mt.dll" "%{cfg.targetdir}/assimp-vc142-mt.dll"'
         }
+
+    filter "system:macosx"
+        includedirs { (DesertPlatform.HomebrewPrefix or "/usr/local") .. "/include" }
+        links { "assimp" }
+
+    filter {}

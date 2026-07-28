@@ -5,7 +5,7 @@
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Assets/Mesh/SkinnedMeshAsset.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Common/Core/Constants.hpp>
@@ -67,7 +67,7 @@ namespace Desert::Editor::MeshDnD
         }
 
         // Create + register a freshly-imported mesh's materials so their stable external id
-        // (PBRMaterialData::MaterialId, baked into each submesh) resolves in MaterialService THIS session.
+        // (PBRSurfaceParams::MaterialId, baked into each submesh) resolves in MaterialService THIS session.
         // Without this the materials would only register on the NEXT launch (AssetPreloader scan) and a
         // just-imported mesh shows "Unassigned material slot". Import writes them as editable content at
         // Resources/Assets/Materials/<meshStem>/*.demat (see ImportManager::SerializeMaterialAsset).
@@ -86,9 +86,9 @@ namespace Desert::Editor::MeshDnD
                     continue;
 
                 const std::string matPath = f.path().generic_string();
-                auto asset = mgr.FindByPath<Assets::PBRMaterialAsset>( matPath );
+                auto asset = mgr.FindByPath<Assets::SurfaceMaterialAsset>( matPath );
                 if ( !asset )
-                    asset = mgr.CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, matPath );
+                    asset = mgr.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, matPath );
                 if ( !asset )
                     continue;
                 if ( !asset->IsReadyForUse() )

@@ -1,5 +1,12 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <list>
+#include <optional>
+#include <type_traits>
+#include <vector>
+
 template <typename T>
 struct is_container : std::false_type
 {

@@ -167,6 +167,9 @@ namespace Desert::Core
 
         void Attach( ECS::Entity parent, ECS::Entity child );
 
+        // Removes the child from its parent (if any) and makes it a root entity.
+        void Detach( ECS::Entity child );
+
         void DestroyEntity( ECS::Entity entity );
 
         // Sets VisibilityComponent on the entity and its entire subtree (UE-like hierarchical visibility).

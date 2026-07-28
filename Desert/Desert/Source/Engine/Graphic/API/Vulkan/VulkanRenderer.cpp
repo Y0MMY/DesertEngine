@@ -183,6 +183,18 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
+    void VulkanRendererAPI::BeginDebugLabel( const char* name )
+    {
+        if ( m_CurrentCommandBuffer )
+            VKUtils::BeginDebugLabel( m_CurrentCommandBuffer, name );
+    }
+
+    void VulkanRendererAPI::EndDebugLabel()
+    {
+        if ( m_CurrentCommandBuffer )
+            VKUtils::EndDebugLabel( m_CurrentCommandBuffer );
+    }
+
     void VulkanRendererAPI::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh,
                                         const glm::mat4 transform, const MaterialExecutor* materialExecutor,
                                         uint32_t instanceCount, uint32_t firstInstance,

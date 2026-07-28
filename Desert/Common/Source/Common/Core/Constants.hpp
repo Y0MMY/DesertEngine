@@ -3,35 +3,64 @@
 #include <filesystem>
 #include <string>
 
-namespace Common::Constants // TODO: should be merge from config
+namespace Common::Constants
 {
     namespace Path
     {
-        // Layout (UE-like): Resources/ is the root; Assets/ holds all USER CONTENT (the content browser root),
-        // while engine/editor resources (Shaders, Fonts) sit directly under Resources/ alongside it. Cooked/
-        // is a separate, generated intermediate tree (mirrors Assets/).
-        const std::filesystem::path RESOURCE_PATH         = "Resources/";
+        // Layout (UE-like): engine/editor resources (Shaders, Fonts) live under the shared Resources/
+        // tree next to the binary's working directory; all USER CONTENT lives under the PROJECT's assets
+        // root. By default (no project) the content paths point at Resources/Assets/ — the built-in
+        // sandbox; opening a .deproj calls SetProjectRoot() and REMAPS every content path (and the Cooked/
+        // intermediate tree) into the project folder. Engine resources are never remapped.
 
-        // --- Engine / editor resources (not user content) ---
-        const std::filesystem::path SHADERDIR_PATH        = "Resources/Shaders/";
-        const std::filesystem::path RESOURCE_SPIRV_BINARY = "Resources/Shaders/SPIRV/Bin/";
-        const std::filesystem::path FONTS_PATH            = "Resources/Fonts/";
+        // --- Engine / editor resources (SHARED, never remapped) ---
+        inline const std::filesystem::path RESOURCE_PATH         = "Resources/";
+        inline const std::filesystem::path SHADERDIR_PATH        = "Resources/Shaders/";
+        inline const std::filesystem::path RESOURCE_SPIRV_BINARY = "Resources/Shaders/SPIRV/Bin/";
+        inline const std::filesystem::path FONTS_PATH            = "Resources/Fonts/";
 
-        // --- User content (everything under Resources/Assets/) ---
-        const std::filesystem::path ASSETS_PATH           = "Resources/Assets/";
-        const std::filesystem::path MESH_PATH             = "Resources/Assets/Meshes/";
-        const std::filesystem::path MATERIAL_PATH         = "Resources/Assets/Materials/";
-        const std::filesystem::path TEXTUREDIR_PATH       = "Resources/Assets/Textures/";
-        const std::filesystem::path TEXTUREDIRENV_PATH    = "Resources/Assets/Textures/Cubes/";
-        const std::filesystem::path SKYBOX_PATH           = "Resources/Assets/Textures/HDR/";
-        const std::filesystem::path SCENE_PATH            = "Resources/Assets/Scenes/";
-        const std::filesystem::path PREFAB_PATH           = "Resources/Assets/Prefabs/";
-        const std::filesystem::path SCRIPT_PATH           = "Resources/Assets/Scripts/";
-        const std::filesystem::path COLLECTIONS_PATH      = "Resources/Assets/Collections/";
+        // --- User content (PROJECT-owned; defaults = built-in sandbox) ---
+        inline std::filesystem::path ASSETS_PATH        = "Resources/Assets/";
+        inline std::filesystem::path MESH_PATH          = "Resources/Assets/Meshes/";
+        inline std::filesystem::path MATERIAL_PATH      = "Resources/Assets/Materials/";
+        inline std::filesystem::path TEXTUREDIR_PATH    = "Resources/Assets/Textures/";
+        inline std::filesystem::path TEXTUREDIRENV_PATH = "Resources/Assets/Textures/Cubes/";
+        inline std::filesystem::path SKYBOX_PATH        = "Resources/Assets/Textures/HDR/";
+        inline std::filesystem::path SCENE_PATH         = "Resources/Assets/Scenes/";
+        inline std::filesystem::path PREFAB_PATH        = "Resources/Assets/Prefabs/";
+        inline std::filesystem::path SCRIPT_PATH        = "Resources/Assets/Scripts/";
+        inline std::filesystem::path COLLECTIONS_PATH   = "Resources/Assets/Collections/";
 
-        // --- Cooked / intermediate (generated) ---
-        const std::filesystem::path MESH_PATH_COOKED      = "Cooked/Meshes/";
-        const std::filesystem::path TEXTURE_PATH_COOKED   = "Cooked/Textures/";
+        // --- Cooked / intermediate (generated; PROJECT-owned) ---
+        inline std::filesystem::path COOKED_PATH         = "Cooked/";
+        inline std::filesystem::path MESH_PATH_COOKED    = "Cooked/Meshes/";
+        inline std::filesystem::path TEXTURE_PATH_COOKED = "Cooked/Textures/";
+
+        // Points every content path at <projectDir>/<assetsRoot>/... and the cooked tree at
+        // <projectDir>/Cooked/. Must be called BEFORE any subsystem reads the paths (the editor does it
+        // while parsing --project, before the engine spins up). assetsRoot comes from the .deproj — the
+        // built-in sandbox project uses "Resources/Assets" so the historical layout stays byte-identical.
+        inline void SetProjectRoot( const std::filesystem::path& projectDir,
+                                    const std::filesystem::path& assetsRoot )
+        {
+            const std::filesystem::path assets = ( projectDir / assetsRoot ).lexically_normal();
+
+            ASSETS_PATH        = assets / "";
+            MESH_PATH          = assets / "Meshes/";
+            MATERIAL_PATH      = assets / "Materials/";
+            TEXTUREDIR_PATH    = assets / "Textures/";
+            TEXTUREDIRENV_PATH = assets / "Textures/Cubes/";
+            SKYBOX_PATH        = assets / "Textures/HDR/";
+            SCENE_PATH         = assets / "Scenes/";
+            PREFAB_PATH        = assets / "Prefabs/";
+            SCRIPT_PATH        = assets / "Scripts/";
+            COLLECTIONS_PATH   = assets / "Collections/";
+
+            const std::filesystem::path cooked = ( projectDir / "Cooked" ).lexically_normal();
+            COOKED_PATH                        = cooked / "";
+            MESH_PATH_COOKED                   = cooked / "Meshes/";
+            TEXTURE_PATH_COOKED                = cooked / "Textures/";
+        }
     } // namespace Path
 
     namespace Extensions

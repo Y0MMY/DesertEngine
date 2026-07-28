@@ -386,16 +386,48 @@ namespace Desert::Core
 
     void Scene::Attach( ECS::Entity parent, ECS::Entity child )
     {
+        if ( !parent || !child || parent.GetHandle() == child.GetHandle() )
+            return;
+
+        // Refuse to attach an entity to its own descendant — that would make the hierarchy a cycle
+        // (every parent-chain walk in the engine would spin forever).
+        for ( entt::entity cur = parent.GetHandle(); cur != entt::null;
+              cur = m_Registry.has<ECS::RelationshipComponent>( cur )
+                        ? m_Registry.get<ECS::RelationshipComponent>( cur ).Parent
+                        : entt::null )
+        {
+            if ( cur == child.GetHandle() )
+                return;
+        }
+
         auto& parentRel = parent.GetComponent<ECS::RelationshipComponent>();
         auto& childRel  = child.GetComponent<ECS::RelationshipComponent>();
 
+        if ( childRel.Parent == parent.GetHandle() )
+            return;
         if ( childRel.Parent != entt::null )
-        {
-            //  Detach( child );
-        }
+            Detach( child ); // reparent: without this the old parent kept a stale Children entry
 
         childRel.Parent = parent.GetHandle();
         parentRel.Children.push_back( child.GetHandle() );
+    }
+
+    void Scene::Detach( ECS::Entity child )
+    {
+        if ( !child || !child.HasComponent<ECS::RelationshipComponent>() )
+            return;
+
+        auto& childRel = child.GetComponent<ECS::RelationshipComponent>();
+        if ( childRel.Parent == entt::null )
+            return;
+
+        if ( m_Registry.valid( childRel.Parent ) && m_Registry.has<ECS::RelationshipComponent>( childRel.Parent ) )
+        {
+            auto& siblings = m_Registry.get<ECS::RelationshipComponent>( childRel.Parent ).Children;
+            siblings.erase( std::remove( siblings.begin(), siblings.end(), child.GetHandle() ),
+                            siblings.end() );
+        }
+        childRel.Parent = entt::null;
     }
 
     void Scene::SetVisibleRecursive( ECS::Entity entity, bool visible )
@@ -454,7 +486,14 @@ namespace Desert::Core
         auto it = std::find_if( m_Entitys.begin(), m_Entitys.end(), [&]( const ECS::Entity& e ) { return e.GetHandle() == entity.GetHandle(); } );
         if ( it != m_Entitys.end() )
         {
+            // m_EntitysMap stores INDICES into m_Entitys — erasing from the middle shifts every entity
+            // after the erased one, so those stored indices must shift too (otherwise FindEntityByID
+            // silently returns the WRONG entity for every UUID registered after the deleted one).
+            const size_t removedIndex = static_cast<size_t>( it - m_Entitys.begin() );
             m_Entitys.erase( it );
+            for ( auto& [id, index] : m_EntitysMap )
+                if ( index > removedIndex )
+                    --index;
         }
 
         m_EntitysMap.erase( uuid );

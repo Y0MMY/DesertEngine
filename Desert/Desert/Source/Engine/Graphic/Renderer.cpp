@@ -1,3 +1,4 @@
+#include <Engine/Graphic/BRDFLut.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
 #include <Engine/Graphic/RendererContext.hpp>
@@ -46,16 +47,22 @@ namespace Desert::Graphic
             return Common::MakeError( init.GetError() );
         }
 
-        Graphic::TextureSpecification spec;
-        spec.GenerateMips = false;
-        // Path must be rooted at the resource-textures dir (CWD-relative), like every other texture load
-        // (e.g. EnvironmentManager). The bare "PBR/BRDF_LUT.tga" resolved to <cwd>/PBR/... → not found →
-        // null texture → the split-sum LUT bind fell back to the white dummy (IBL specular too bright).
-        m_BRDFTexture =
-             Texture2D::Create( spec, Common::Filepath( "Resources/Assets/Textures" ) / "PBR/BRDF_LUT.tga" )
-                  .ExtractValue();
-        if ( !m_BRDFTexture )
-            LOG_ERROR( "Failed to load BRDF LUT (Resources/Textures/PBR/BRDF_LUT.tga) — IBL specular will be wrong" );
+        // The split-sum BRDF LUT is GENERATED at init (Karis integration, multithreaded) — no texture
+        // file involved. The old on-disk BRDF_LUT.tga dependency was missing from the repo anyway, which
+        // silently degraded IBL specular to the white-dummy fallback on every run.
+        {
+            Graphic::TextureSpecification spec;
+            spec.GenerateMips = false;
+
+            constexpr uint32_t kLutSize    = 256;
+            constexpr uint32_t kLutSamples = 512;
+            m_BRDFTexture =
+                 Texture2D::Create( spec, "BRDF_LUT (generated)", kLutSize, kLutSize,
+                                    Core::Formats::ImageFormat::RGBA32F,
+                                    GenerateBRDFLutRGBA32F( kLutSize, kLutSamples ) )
+                      .ExtractValue();
+            LOG_INFO( "[Renderer] BRDF LUT generated ({}x{}, {} samples)", kLutSize, kLutSize, kLutSamples );
+        }
 
         return Common::MakeSuccess( true );
     }
@@ -150,6 +157,16 @@ namespace Desert::Graphic
     void Renderer::EndRenderPass()
     {
         s_RendererAPI->EndRenderPass();
+    }
+
+    void Renderer::BeginDebugLabel( const char* name )
+    {
+        s_RendererAPI->BeginDebugLabel( name );
+    }
+
+    void Renderer::EndDebugLabel()
+    {
+        s_RendererAPI->EndDebugLabel();
     }
 
     void Renderer::ResizeWindowEvent( uint32_t width, uint32_t height )

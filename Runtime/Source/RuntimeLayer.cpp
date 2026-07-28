@@ -1,0 +1,180 @@
+#include "RuntimeLayer.hpp"
+
+#include <Engine/Core/Scene.hpp>
+#include <Engine/Core/Serialize/SceneSerializer.hpp>
+#include <Engine/Project/ProjectContext.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/UICacheTexture.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/AssetPreloader.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
+#include <Engine/ECS/System/MeshECSSystem.hpp>
+#include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/ECS/System/DayNightSystem.hpp>
+#include <Engine/ECS/System/TerrainECSSystem.hpp>
+#include <Engine/ECS/System/PointLightSystem.hpp>
+#include <Engine/ECS/System/SpotLightSystem.hpp>
+#include <Engine/ECS/System/AnimationECSSystem.hpp>
+#include <Engine/ECS/System/AttachmentSystem.hpp>
+#include <Engine/ECS/System/ScriptSystem.hpp>
+#include <Engine/ECS/System/PhysicsECSSystem.hpp>
+#include <Engine/ECS/System/LocomotionSystem.hpp>
+
+#include <Common/Utilities/FileSystem.hpp>
+#include <Common/Core/Logger.hpp>
+
+#include <ImGui/imgui.h>
+
+#include <filesystem>
+
+namespace Desert::Player
+{
+    RuntimeLayer::RuntimeLayer( std::string scenePathOverride )
+         : Common::Layer( "RuntimeLayer" ), m_ScenePathOverride( std::move( scenePathOverride ) )
+    {
+        m_AssetManager     = std::make_shared<Assets::AssetManager>();
+        m_AssetPreloader   = std::make_unique<Assets::AssetPreloader>( m_AssetManager );
+        m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
+        m_SceneRenderer    = std::make_unique<Graphic::SceneRenderer>();
+        m_Scene            = std::make_shared<Core::Scene>( "Game", m_SceneRenderer.get() );
+    }
+
+    RuntimeLayer::~RuntimeLayer() = default;
+
+    Common::BoolResultStr RuntimeLayer::OnAttach()
+    {
+        // Minimal ImGui setup — the runtime uses it ONLY as the fullscreen presenter of the rendered frame.
+        ::ImGui::CreateContext();
+        m_ImGuiLayer = ::Desert::ImGui::ImGuiLayer::Create();
+        m_ImGuiLayer->OnAttach();
+
+        m_UITextureCache = Graphic::UICacheTexture::Create();
+
+        // The runtime does NOT cook: it plays what the editor cooked. Assets load from the project's
+        // Cooked/ tree (missing cooked content = open the project in the editor once).
+        m_AssetPreloader->PreloadShaders(); // MUST precede the render systems (ctors resolve shaders)
+        m_AssetPreloader->PreloadMeshes();
+        m_AssetPreloader->PreloadSkyboxes();
+
+        // Same system set + order as the editor's Play mode.
+        m_Scene->AddSystem<ECS::DayNightSystem>( m_Scene.get() );
+        m_Scene->AddSystem<ECS::MeshECSSystem>();
+        m_Scene->AddSystem<ECS::SkyboxECSSystem>();
+        m_Scene->AddSystem<ECS::TerrainECSSystem>();
+        m_Scene->AddSystem<ECS::PointLightECSSystem>();
+        m_Scene->AddSystem<ECS::SpotLightECSSystem>();
+        m_Scene->AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
+        m_Scene->AddSystem<ECS::AttachmentSystem>( m_Scene.get() );
+        m_Scene->AddSystem<ECS::ScriptSystem>( m_Scene.get(), m_AssetManager.get() );
+        m_Scene->AddSystem<ECS::PhysicsECSSystem>( m_Scene.get() );
+        m_Scene->AddSystem<ECS::LocomotionSystem>( m_Scene.get() );
+
+        if ( const auto init = m_Scene->Init(); !init )
+            return init;
+
+        // Scene: --scene override, else the project's default scene.
+        std::string scenePath = m_ScenePathOverride;
+        if ( scenePath.empty() )
+            scenePath = Project::ProjectContext::DefaultScenePath();
+
+        if ( !scenePath.empty() && std::filesystem::exists( scenePath ) )
+        {
+            Core::SceneSerializer serializer( m_Scene.get(), m_AssetManager.get() );
+            serializer.DeserializeFromJson( Common::Utils::FileSystem::ReadFileContent( scenePath ) );
+            if ( const auto init = m_Scene->Init(); !init )
+                return init;
+            LOG_INFO( "[Runtime] Scene loaded: {}", scenePath );
+        }
+        else
+        {
+            LOG_WARN( "[Runtime] No scene to load ('{}') — starting empty. Set DefaultScene in the "
+                      ".deproj or pass --scene <path>.",
+                      scenePath );
+        }
+
+        // Straight into gameplay: scripts tick, physics runs, the main CameraComponent drives the view.
+        m_Scene->SetState( Core::Scene::SceneState::Play );
+        return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr RuntimeLayer::OnDetach()
+    {
+        if ( m_ImGuiLayer )
+        {
+            m_ImGuiLayer->OnDetach();
+            m_ImGuiLayer.reset();
+        }
+        return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr RuntimeLayer::OnUpdate( const Common::Timestep& ts )
+    {
+        // Window-size changes resize the scene target here — before any recording starts (destroying
+        // framebuffers mid-frame is a device loss).
+        if ( m_PendingResize )
+        {
+            m_Scene->Resize( m_PendingResize->first, m_PendingResize->second );
+            if ( auto cam = m_Scene->GetMainCamera().lock() )
+                cam->UpdateProjectionMatrix( static_cast<float>( m_PendingResize->first ),
+                                             static_cast<float>( m_PendingResize->second ) );
+            m_PendingResize.reset();
+        }
+
+        // Same safe-point garbage collection as the editor (scripts can invalidate materials live).
+        if ( auto* materialService = ::Desert::Runtime::ResourceRegistry::GetMaterialService() )
+            materialService->CollectGarbage();
+
+        if ( const auto begin = m_Scene->BeginScene(); !begin )
+            return Common::MakeError( begin.GetError() );
+
+        m_Scene->OnUpdate( ts );
+
+        if ( const auto end = m_Scene->EndScene(); !end )
+            return Common::MakeError( end.GetError() );
+
+        return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr RuntimeLayer::OnImGuiRender()
+    {
+        m_ImGuiLayer->Begin();
+
+        // One chrome-less fullscreen window whose whole content is the scene's final image.
+        const ImGuiViewport* viewport = ::ImGui::GetMainViewport();
+        ::ImGui::SetNextWindowPos( viewport->Pos );
+        ::ImGui::SetNextWindowSize( viewport->Size );
+        ::ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
+        ::ImGui::PushStyleVar( ImGuiStyleVar_WindowBorderSize, 0.0f );
+        ::ImGui::Begin( "##game", nullptr,
+                        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                             ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground );
+
+        const uint32_t width  = static_cast<uint32_t>( viewport->Size.x );
+        const uint32_t height = static_cast<uint32_t>( viewport->Size.y );
+        if ( width > 0 && height > 0 && ( width != m_LastWidth || height != m_LastHeight ) )
+        {
+            m_LastWidth  = width;
+            m_LastHeight = height;
+            m_PendingResize = { width, height };
+        }
+
+        if ( const auto image = m_Scene->GetFinalImage() )
+        {
+            const auto* id = m_UITextureCache->AddTextureCache( image );
+            ::ImGui::Image( (ImTextureID)id, viewport->Size );
+        }
+
+        ::ImGui::End();
+        ::ImGui::PopStyleVar( 2 );
+
+        m_ImGuiLayer->End();
+        return BOOLSUCCESS;
+    }
+
+    void RuntimeLayer::OnEvent( Common::Event& )
+    {
+    }
+} // namespace Desert::Player

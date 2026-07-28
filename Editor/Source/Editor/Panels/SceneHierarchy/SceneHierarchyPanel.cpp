@@ -5,6 +5,7 @@
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Core/EditorResources.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
@@ -14,6 +15,7 @@
 
 #include <Editor/Builtin/BuiltinMeshRegistry.hpp>
 #include <Common/Core/Constants.hpp>
+#include <Common/Utilities/FileSystem.hpp>
 
 #include <filesystem>
 
@@ -56,8 +58,9 @@ namespace Desert::Editor
         bool        hasChildren  = entity.HasComponent<ECS::RelationshipComponent>() &&
                                    !entity.GetComponent<ECS::RelationshipComponent>().Children.empty();
 
-        const auto& selectedEntity = Core::SelectionManager::GetSelected();
-        const bool  isSelected     = selectedEntity.has_value() && *selectedEntity == UUID;
+        m_VisibleOrder.push_back( UUID ); // visible draw order (Shift+click range source)
+
+        const bool isSelected = Core::SelectionManager::IsSelected( UUID );
 
         ImGuiTreeNodeFlags nodeFlags = isSelected ? ImGuiTreeNodeFlags_Selected : 0;
         nodeFlags |= ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding |
@@ -100,7 +103,16 @@ namespace Desert::Editor
         ImGui::PopStyleColor();
 
         if ( ImGui::IsItemClicked() )
-            Core::SelectionManager::SetSelected( UUID );
+        {
+            // UE-style modifiers: Ctrl toggles, Shift extends the range from the primary, plain replaces.
+            ImGuiIO& io = ImGui::GetIO();
+            if ( io.KeyCtrl )
+                Core::SelectionManager::Toggle( UUID );
+            else if ( io.KeyShift )
+                SelectRangeTo( UUID );
+            else
+                Core::SelectionManager::SetSelected( UUID );
+        }
 
         if ( ImGui::BeginDragDropSource() )
         {
@@ -113,22 +125,50 @@ namespace Desert::Editor
         {
             if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
             {
-                Common::UUID childUUID     = *(const Common::UUID*)payload->Data;
-                auto         childEntityRef = m_Scene->FindEntityByID( childUUID );
-                if ( childEntityRef )
-                    m_Scene->Attach( entity, const_cast<ECS::Entity&>( childEntityRef.value().get() ) );
+                // Dragging a multi-selected entity drags the whole selection. Applied after iteration.
+                Common::UUID childUUID = *(const Common::UUID*)payload->Data;
+                m_PendingReparent      = { Core::SelectionManager::IsSelected( childUUID )
+                                                ? Core::SelectionManager::GetSelection()
+                                                : std::vector<Common::UUID>{ childUUID },
+                                           UUID };
             }
             ImGui::EndDragDropTarget();
         }
 
         ImGui::SameLine();
-        // Name colour: prefab teal, dimmed when hidden. Prefab tag stays subtle.
-        ImVec4 nameColor = isPrefab ? iconColor : ImGui::GetStyleColorVec4( ImGuiCol_Text );
-        if ( !visible )
-            nameColor = ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled );
-        ImGui::PushStyleColor( ImGuiCol_Text, nameColor );
-        ImGui::TextUnformatted( name.c_str() );
-        ImGui::PopStyleColor();
+        if ( m_RenamingEntity.has_value() && *m_RenamingEntity == UUID )
+        {
+            // Inline rename: commit on Enter/click-away, cancel on Escape.
+            ImGui::SetNextItemWidth( -FLT_MIN );
+            if ( m_RenameFocusPending )
+            {
+                ImGui::SetKeyboardFocusHere();
+                m_RenameFocusPending = false;
+            }
+            Utils::ImGuiUtilities::InputText( m_RenameBuffer, "##EntityRename" );
+            if ( ImGui::IsItemDeactivated() )
+            {
+                if ( !ImGui::IsKeyPressed( ImGuiKey_Escape, false ) )
+                    Commands::Rename( UUID, m_RenameBuffer ); // undoable; no-ops on empty/unchanged
+                m_RenamingEntity.reset();
+            }
+        }
+        else
+        {
+            // Name colour: prefab teal, dimmed when hidden. Prefab tag stays subtle.
+            ImVec4 nameColor = isPrefab ? iconColor : ImGui::GetStyleColorVec4( ImGuiCol_Text );
+            if ( !visible )
+                nameColor = ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled );
+            ImGui::PushStyleColor( ImGuiCol_Text, nameColor );
+            ImGui::TextUnformatted( name.c_str() );
+            ImGui::PopStyleColor();
+            if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+            {
+                m_RenamingEntity     = UUID;
+                m_RenameBuffer       = name;
+                m_RenameFocusPending = true;
+            }
+        }
         if ( isPrefab )
         {
             ImGui::SameLine();
@@ -138,7 +178,28 @@ namespace Desert::Editor
         bool deleteEntity = false;
         if ( ImGui::BeginPopupContextItem( uuidStr.c_str() ) )
         {
-            if ( ImGui::Selectable( "Delete" ) )
+            if ( ImGui::Selectable( "Rename" ) )
+            {
+                m_RenamingEntity     = UUID;
+                m_RenameBuffer       = name;
+                m_RenameFocusPending = true;
+            }
+            // An operation on a MULTI-selected entity applies to the whole selection (UE behavior).
+            auto targetSet = [&]() -> std::vector<Common::UUID>
+            {
+                if ( Core::SelectionManager::IsSelected( UUID ) )
+                    return Core::SelectionManager::GetSelection();
+                return { UUID };
+            };
+            if ( ImGui::Selectable( Core::SelectionManager::Count() > 1 &&
+                                             Core::SelectionManager::IsSelected( UUID )
+                                         ? "Duplicate (selection)"
+                                         : "Duplicate" ) )
+                m_PendingDuplicate = targetSet(); // deferred: cloning creates entities mid-iteration
+            if ( ImGui::Selectable( Core::SelectionManager::Count() > 1 &&
+                                             Core::SelectionManager::IsSelected( UUID )
+                                         ? "Delete (selection)"
+                                         : "Delete" ) )
                 deleteEntity = true;
 
             ImGui::Separator();
@@ -146,11 +207,36 @@ namespace Desert::Editor
             {
                 auto child = m_Scene->CreateNewEntity( "Child Entity" );
                 m_Scene->Attach( entity, child );
+                Commands::NotifyCreated( { child.GetComponent<ECS::UUIDComponent>().UUID } );
             }
 
             ImGui::Separator();
+            if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT " Save as Prefab..." ) )
+            {
+                // Default path from the entity's tag (spaces -> underscores).
+                std::string stem = name;
+                for ( auto& ch : stem )
+                    if ( ch == ' ' )
+                        ch = '_';
+                m_SavePrefabTarget = UUID;
+                m_SavePrefabPath   = "Resources/Assets/Prefabs/" + stem +
+                                   Common::Constants::Extensions::PREFAB_EXTENSION;
+                m_OpenSavePrefab = true; // deferred: OpenPopup at panel scope (see OnUIRender)
+            }
             if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )
                 m_OpenInstantiatePrefab = true; // deferred: OpenPopup at panel scope (see OnUIRender)
+
+            if ( isPrefab )
+            {
+                ImGui::Separator();
+                if ( ImGui::Selectable( ICON_MDI_PACKAGE_UP " Apply Instance Changes to Prefab..." ) )
+                {
+                    m_ApplyPrefabTarget = UUID;
+                    m_OpenApplyPrefab   = true; // confirmation modal (overwrites the source file)
+                }
+                if ( ImGui::Selectable( ICON_MDI_PACKAGE_DOWN " Revert Instance to Prefab" ) )
+                    m_PendingPrefabRevert = UUID; // deferred: replaces the subtree after iteration
+            }
 
             ImGui::EndPopup();
         }
@@ -186,21 +272,67 @@ namespace Desert::Editor
         // Deferred: destroying here would invalidate the entt view being iterated in OnUIRender
         // (deleting a parent destroys its whole subtree at once). Process after EndTable.
         if ( deleteEntity )
-            m_PendingDelete = UUID;
+        {
+            m_PendingDelete = Core::SelectionManager::IsSelected( UUID )
+                                   ? Core::SelectionManager::GetSelection()
+                                   : std::vector<Common::UUID>{ UUID };
+        }
 
         Utils::ImGuiUtilities::PopID();
     }
 
+    void SceneHierarchyPanel::SelectRangeTo( const Common::UUID& target )
+    {
+        // Range = [primary .. target] over the order the user SEES (last frame's visible tree order).
+        const auto& order   = m_VisibleOrderLast;
+        const auto& primary = Core::SelectionManager::GetSelected();
+
+        const auto find = [&]( const Common::UUID& id ) -> int
+        {
+            for ( size_t i = 0; i < order.size(); ++i )
+                if ( order[i] == id )
+                    return static_cast<int>( i );
+            return -1;
+        };
+
+        const int from = primary.has_value() ? find( *primary ) : -1;
+        const int to   = find( target );
+        if ( from < 0 || to < 0 )
+        {
+            Core::SelectionManager::SetSelected( target );
+            return;
+        }
+
+        std::vector<Common::UUID> range;
+        const int                 lo = std::min( from, to ), hi = std::max( from, to );
+        for ( int i = lo; i <= hi; ++i )
+            if ( order[i] != target )
+                range.push_back( order[i] );
+        range.push_back( target ); // clicked entity becomes the new primary
+        Core::SelectionManager::SetSelection( std::move( range ) );
+    }
+
     void SceneHierarchyPanel::OnUIRender()
     {
+        // Rotate the visible-order buffers: ranges act on what was drawn (and thus seen) last frame.
+        m_VisibleOrderLast = std::move( m_VisibleOrder );
+        m_VisibleOrder.clear();
+
         ImRect windowRect = { ImGui::GetWindowContentRegionMin(), ImGui::GetWindowContentRegionMax() };
 
         auto AddEntity = []( const std::shared_ptr<Desert::Core::Scene>& scene )
         {
+            // Every menu spawn is recorded as one undo step (Ctrl+Z removes what was just added).
+            auto track = []( ECS::Entity& e ) -> ECS::Entity&
+            {
+                Commands::NotifyCreated( { e.GetComponent<ECS::UUIDComponent>().UUID } );
+                return e;
+            };
+
             if ( ImGui::BeginMenu( "Add" ) )
             {
                 if ( ImGui::Selectable( "Empty Entity" ) )
-                    scene->CreateNewEntity( "Empty Entity" );
+                    track( scene->CreateNewEntity( "Empty Entity" ) );
 
                 if ( ImGui::BeginMenu( "Light" ) )
                 {
@@ -208,33 +340,37 @@ namespace Desert::Editor
                     {
                         auto entity = scene->CreateNewEntity( "Directional Light" );
                         entity.AddComponent<ECS::DirectionLightComponent>();
+                        track( entity );
                     }
                     if ( ImGui::Selectable( "Point Light" ) )
                     {
                         auto entity = scene->CreateNewEntity( "Point Light" );
                         entity.AddComponent<ECS::PointLightComponent>();
+                        track( entity );
                     }
                     if ( ImGui::Selectable( "Spot Light" ) )
                     {
                         auto entity = scene->CreateNewEntity( "Spot Light" );
                         entity.AddComponent<ECS::SpotLightComponent>();
+                        track( entity );
                     }
                     ImGui::EndMenu();
                 }
 
                 if ( ImGui::Selectable( "Skybox" ) )
-                    scene->CreateNewEntity( "Skybox" ).AddComponent<ECS::SkyboxComponent>();
+                    track( scene->CreateNewEntity( "Skybox" ) ).AddComponent<ECS::SkyboxComponent>();
 
                 if ( ImGui::Selectable( "Terrain" ) )
-                    scene->CreateNewEntity( "Terrain" ).AddComponent<ECS::TerrainComponent>();
+                    track( scene->CreateNewEntity( "Terrain" ) ).AddComponent<ECS::TerrainComponent>();
 
                 // NOTE: no standalone "Material" entity — a MaterialComponent is meaningless without
                 // geometry. It is added ONTO a renderable entity via Details -> Add Component.
 
                 if ( ImGui::Selectable( "3D Model" ) )
                 {
-                    scene->CreateNewEntity( "3D Model" ).AddComponent<ECS::StaticMeshComponent>().MeshHandle =
-                         Assets::AssetHandle{ 0 };
+                    track( scene->CreateNewEntity( "3D Model" ) )
+                         .AddComponent<ECS::StaticMeshComponent>()
+                         .MeshHandle = Assets::AssetHandle{ 0 };
                 }
 
                 if ( ImGui::Selectable( "Skinned Model" ) )
@@ -242,6 +378,7 @@ namespace Desert::Editor
                     auto entity = scene->CreateNewEntity( "Skinned Model" );
                     entity.AddComponent<ECS::SkinnedMeshComponent>();
                     entity.AddComponent<ECS::AnimationComponent>();
+                    track( entity );
                 }
 
                 // Code-generated rounded humanoid mannequin (no import needed). Renders in its bind/A-pose;
@@ -253,6 +390,7 @@ namespace Desert::Editor
                     entity.AddComponent<ECS::SkinnedMeshComponent>().MeshHandle =
                          Geometry::ProceduralCharacterFactory::GetHumanoidMesh();
                     entity.AddComponent<ECS::AnimationComponent>();
+                    track( entity );
                 }
 
                 if ( ImGui::Selectable( "Rigid Body" ) )
@@ -277,6 +415,7 @@ namespace Desert::Editor
                         tf.Translation = eye + fwd * 4.0f;
                         tf.Rotation = glm::eulerAngles( glm::quatLookAt( fwd, glm::vec3( 0.0f, 1.0f, 0.0f ) ) );
                     }
+                    track( camEntity );
                 }
 
                 if ( ImGui::Selectable( "Sprite" ) )
@@ -292,9 +431,12 @@ namespace Desert::Editor
                 // SSGI on (deferred path), the coloured walls bleed onto the white centre objects.
                 if ( ImGui::Selectable( "Cornell Box (GI Test)" ) )
                 {
+                    std::vector<Common::UUID> created; // the whole box = ONE undo step
+
                     auto mkBox = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec4 albedo )
                     {
                         auto  e  = scene->CreateNewEntity( name );
+                        created.push_back( e.GetComponent<ECS::UUIDComponent>().UUID );
                         e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
                         auto& tf       = e.GetComponent<ECS::TransformComponent>();
                         tf.Translation = pos;
@@ -315,6 +457,7 @@ namespace Desert::Editor
                     auto mkWhite = [&]( const char* name, Geometry::PrimitiveType prim, glm::vec3 pos, glm::vec3 scale )
                     {
                         auto  e  = scene->CreateNewEntity( name );
+                        created.push_back( e.GetComponent<ECS::UUIDComponent>().UUID );
                         e.AddComponent<ECS::StaticMeshComponent>().Primitive = prim;
                         auto& tf       = e.GetComponent<ECS::TransformComponent>();
                         tf.Translation = pos;
@@ -331,10 +474,13 @@ namespace Desert::Editor
                     if ( scene->GetRegistry().view<ECS::DirectionLightComponent>().size() == 0 )
                     {
                         auto sun = scene->CreateNewEntity( "CB_Sun" );
+                        created.push_back( sun.GetComponent<ECS::UUIDComponent>().UUID );
                         sun.AddComponent<ECS::DirectionLightComponent>();
                         sun.GetComponent<ECS::TransformComponent>().Translation =
                              glm::normalize( glm::vec3( -0.6f, -1.0f, -0.2f ) );
                     }
+
+                    Commands::NotifyCreated( created );
                 }
 
                 if ( ImGui::BeginMenu( "Primitive" ) )
@@ -343,7 +489,8 @@ namespace Desert::Editor
                     {
                         // Use the Primitive path (RuntimeMesh generated + Invalidated by MeshECSSystem) —
                         // it renders + serializes reliably, unlike the builtin procedural-handle path.
-                        auto& cubeMesh     = scene->CreateNewEntity( "Cube" ).AddComponent<ECS::StaticMeshComponent>();
+                        auto& cubeMesh =
+                             track( scene->CreateNewEntity( "Cube" ) ).AddComponent<ECS::StaticMeshComponent>();
                         cubeMesh.Primitive = Geometry::PrimitiveType::Cube;
                     }
                     if ( ImGui::MenuItem( "Sphere" ) )
@@ -433,19 +580,78 @@ namespace Desert::Editor
         }
         DrawInstantiatePrefabPopup();
 
-        // Delete key: remove the selected entity when the outliner is focused (not while typing in a field).
-        // Routed through the same deferred path (processed after the entt-view iteration below).
-        if ( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) &&
-             !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed( ImGuiKey_Delete, false ) )
+        if ( m_OpenSavePrefab )
         {
-            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
-                m_PendingDelete = *sel;
+            ImGui::OpenPopup( "SavePrefabPopup" );
+            m_OpenSavePrefab = false;
+        }
+        DrawSavePrefabPopup();
+
+        if ( m_OpenApplyPrefab )
+        {
+            ImGui::OpenPopup( "ApplyPrefabPopup" );
+            m_OpenApplyPrefab = false;
+        }
+        if ( ImGui::BeginPopupModal( "ApplyPrefabPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        {
+            ImGui::TextUnformatted( "Overwrite the source .deprefab file with this instance's current state?" );
+            ImGui::TextDisabled( "Other instances pick the changes up when they are (re)instantiated." );
+            ImGui::Spacing();
+            if ( ImGui::Button( "Apply", ImVec2( 120, 0 ) ) )
+            {
+                if ( m_ApplyPrefabTarget )
+                    Commands::ApplyPrefabInstance( *m_ApplyPrefabTarget ); // file write only (safe here)
+                m_ApplyPrefabTarget.reset();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if ( ImGui::Button( "Cancel", ImVec2( 90, 0 ) ) )
+            {
+                m_ApplyPrefabTarget.reset();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+
+        // Keyboard (outliner focused, not while typing in a field):
+        //   Delete — remove the whole selection; F2 — rename the primary; Esc — clear the selection.
+        if ( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) && !ImGui::IsAnyItemActive() )
+        {
+            if ( ImGui::IsKeyPressed( ImGuiKey_Delete, false ) && Core::SelectionManager::Count() > 0 )
+                m_PendingDelete = Core::SelectionManager::GetSelection();
+
+            if ( ImGui::IsKeyPressed( ImGuiKey_F2, false ) )
+            {
+                if ( const auto& sel = Core::SelectionManager::GetSelected() )
+                    if ( auto ref = m_Scene->FindEntityByID( *sel ) )
+                    {
+                        m_RenamingEntity     = *sel;
+                        m_RenameBuffer       = ref->get().GetComponent<ECS::TagComponent>().Tag;
+                        m_RenameFocusPending = true;
+                    }
+            }
+
+            if ( ImGui::IsKeyPressed( ImGuiKey_Escape, false ) && !m_RenamingEntity.has_value() )
+                Core::SelectionManager::ClearSelection();
+        }
+
+        // Entity / selection counters (compact, above the table).
+        {
+            const size_t total = m_Scene->GetAllEntities().size();
+            const size_t sel   = Core::SelectionManager::Count();
+            if ( sel > 0 )
+                ImGui::TextDisabled( "%zu entities, %zu selected", total, sel );
+            else
+                ImGui::TextDisabled( "%zu entities", total );
         }
 
         // Entity table
         {
-            constexpr ImGuiTableFlags tableFlags =
-                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
+            // Resizable: the Name|Type divider is draggable (long component-type names were unreadable
+            // behind the old fixed 110px column).
+            constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+                                                   ImGuiTableFlags_SizingStretchProp |
+                                                   ImGuiTableFlags_Resizable;
 
             ImGui::PushStyleVar( ImGuiStyleVar_CellPadding, ImVec2( 4.0f, 2.0f ) );
             if ( ImGui::BeginTable( "##outliner", 2, tableFlags ) )
@@ -473,12 +679,12 @@ namespace Desert::Editor
             {
                 if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
                 {
-                    Common::UUID uuid      = *(const Common::UUID*)payload->Data;
-                    auto         entityRef = m_Scene->FindEntityByID( uuid );
-                    if ( entityRef )
-                    {
-                        // Unparent to root — TODO: implement Scene::Detach
-                    }
+                    // Drop on empty space = unparent to scene root (undoable, applied after iteration).
+                    Common::UUID uuid = *(const Common::UUID*)payload->Data;
+                    m_PendingReparent = { Core::SelectionManager::IsSelected( uuid )
+                                               ? Core::SelectionManager::GetSelection()
+                                               : std::vector<Common::UUID>{ uuid },
+                                          Common::UUID::Null() };
                 }
 
                 if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::PrefabFile ) )
@@ -497,7 +703,9 @@ namespace Desert::Editor
                         {
                             if ( !prefabAsset->IsReadyForUse() )
                                 prefabAsset->Load();
-                            prefabAsset->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                            auto root = prefabAsset->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                            if ( root )
+                                Commands::NotifyCreated( { root.GetComponent<ECS::UUIDComponent>().UUID } );
                         }
                     }
                 }
@@ -506,21 +714,108 @@ namespace Desert::Editor
             }
         }
 
-        // Process deferred deletion AFTER the entt view iteration above (DestroyEntity is recursive
-        // and removes the whole subtree, which would corrupt the view if done mid-iteration).
-        if ( m_PendingDelete.has_value() )
+        // Process deferred structural edits AFTER the entt view iteration above (they create/destroy
+        // entities or edit the Children vectors the tree walk was iterating).
+        if ( !m_PendingDelete.empty() )
         {
-            auto entityRef = m_Scene->FindEntityByID( *m_PendingDelete );
-            if ( entityRef )
-            {
-                const auto& selected = Core::SelectionManager::GetSelected();
-                const bool  wasSelected = selected.has_value() && *selected == *m_PendingDelete;
-                m_Scene->DestroyEntity( const_cast<ECS::Entity&>( entityRef.value().get() ) );
-                if ( wasSelected )
-                    Core::SelectionManager::ClearSelection();
-            }
-            m_PendingDelete.reset();
+            Commands::DeleteEntities( m_PendingDelete ); // one undo step restores everything
+            m_PendingDelete.clear();
         }
+        if ( !m_PendingDuplicate.empty() )
+        {
+            if ( auto dups = Commands::DuplicateEntities( m_PendingDuplicate ); !dups.empty() )
+                Core::SelectionManager::SetSelection( std::move( dups ) );
+            m_PendingDuplicate.clear();
+        }
+        if ( m_PendingReparent.has_value() )
+        {
+            Commands::ReparentMany( m_PendingReparent->first, m_PendingReparent->second );
+            m_PendingReparent.reset();
+        }
+        if ( m_PendingPrefabRevert.has_value() )
+        {
+            Commands::RevertPrefabInstance( *m_PendingPrefabRevert ); // one undo step
+            m_PendingPrefabRevert.reset();
+        }
+    }
+
+    void SceneHierarchyPanel::DrawSavePrefabPopup()
+    {
+        if ( !ImGui::BeginPopupModal( "SavePrefabPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+            return;
+
+        static std::string s_error;
+
+        ImGui::TextUnformatted( "Save entity (with its whole subtree) as a prefab:" );
+        ImGui::SetNextItemWidth( 460.0f );
+        Utils::ImGuiUtilities::InputText( m_SavePrefabPath, "##SavePrefabPath" );
+        ImGui::TextDisabled( "An existing file at this path will be overwritten." );
+
+        if ( !s_error.empty() )
+            ImGui::TextColored( ImVec4( 1.0f, 0.4f, 0.4f, 1.0f ), "%s", s_error.c_str() );
+
+        ImGui::Spacing();
+
+        if ( ImGui::Button( "Save", ImVec2( 120, 0 ) ) && !m_SavePrefabPath.empty() )
+        {
+            namespace fs = std::filesystem;
+            const bool rightExt = fs::path( m_SavePrefabPath ).extension() ==
+                                  Common::Constants::Extensions::PREFAB_EXTENSION;
+            std::optional<std::reference_wrapper<const ECS::Entity>> entityRef;
+            if ( m_SavePrefabTarget )
+                entityRef = m_Scene->FindEntityByID( *m_SavePrefabTarget );
+
+            if ( !rightExt )
+            {
+                s_error = "Path must end with .deprefab";
+            }
+            else if ( !entityRef || !m_AssetManager )
+            {
+                s_error = "Entity no longer exists.";
+            }
+            else
+            {
+                std::error_code ec;
+                fs::create_directories( fs::path( m_SavePrefabPath ).parent_path(), ec );
+
+                auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( m_SavePrefabPath );
+                if ( !prefabAsset )
+                    prefabAsset = m_AssetManager->CreateAsset<Assets::PrefabAsset>(
+                         Assets::AssetPriority::High, m_SavePrefabPath,
+                         /*loadAfterCreate=*/false ); // the file does not exist yet — we are creating it
+
+                if ( !prefabAsset )
+                {
+                    s_error = "Could not create the prefab asset.";
+                }
+                else
+                {
+                    ECS::Entity root = entityRef->get();
+                    prefabAsset->CreateFromEntity( root, *m_AssetManager );
+                    Common::Utils::FileSystem::WriteContentToFile( Common::Filepath( m_SavePrefabPath ),
+                                                                   prefabAsset->Serialize() );
+
+                    // Mark the live entity as an instance of the prefab it was just saved as.
+                    if ( !root.HasComponent<ECS::PrefabComponent>() )
+                        root.AddComponent<ECS::PrefabComponent>();
+                    root.GetComponent<ECS::PrefabComponent>().Prefab = prefabAsset->GetMetadata().Handle;
+
+                    LOG_INFO( "[Prefab] Saved '{}' -> {}",
+                              root.GetComponent<ECS::TagComponent>().Tag, m_SavePrefabPath );
+                    s_error.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+        }
+
+        ImGui::SameLine();
+        if ( ImGui::Button( "Cancel", ImVec2( 90, 0 ) ) )
+        {
+            s_error.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
 
     void SceneHierarchyPanel::DrawInstantiatePrefabPopup()
@@ -571,7 +866,9 @@ namespace Desert::Editor
                     {
                         if ( !prefabAsset->IsReadyForUse() )
                             prefabAsset->Load();
-                        prefabAsset->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                        auto root = prefabAsset->Instantiate( m_Scene.get(), *m_AssetManager, nullptr );
+                        if ( root )
+                            Commands::NotifyCreated( { root.GetComponent<ECS::UUIDComponent>().UUID } );
                         ImGui::CloseCurrentPopup();
                     }
                     else

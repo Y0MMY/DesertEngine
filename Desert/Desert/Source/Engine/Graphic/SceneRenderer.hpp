@@ -86,6 +86,11 @@ namespace Desert::Graphic
         void SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform, const std::string& shaderName,
                                 const MaterialOverrides& overrides, bool outlined = false );
 
+        // v3 per-slot custom shaders: draw only @p visibleSubmeshMask submeshes of the mesh with the
+        // slot's own runtime material (a MaterialService-owned DataDrivenMaterial).
+        void SubmitSlotMaterialMesh( const Mesh* mesh, const glm::mat4& transform, Material* material,
+                                     uint64_t visibleSubmeshMask, bool outlined = false );
+
         // UE-style Instanced Static Mesh: one mesh + one PBR material drawn for every transform in
         // @p transforms (a pointer to the component's stable per-frame array — not copied).
         void SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
@@ -207,6 +212,7 @@ namespace Desert::Graphic
         // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
         Core::AntiAliasingMode m_AAMode      = Core::AntiAliasingMode::FXAA;
         bool                   m_BloomEnabled = false;
+        bool                   m_ScenePlaying = false; // set per frame in BeginScene (hides authoring aids)
 
     private:
         std::shared_ptr<Framebuffer>                                    m_TargetFramebuffer;

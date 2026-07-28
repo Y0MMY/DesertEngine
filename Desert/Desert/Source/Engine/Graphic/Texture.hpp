@@ -49,6 +49,12 @@ namespace Desert::Graphic
         static Common::ResultStr<std::shared_ptr<Texture2D>> Create( const TextureSpecification&  specification,
                                                                      const std::filesystem::path& path );
 
+        // Creates the texture from CPU-generated pixel data (no file involved) — e.g. the runtime
+        // BRDF LUT. `data` layout must match `format` (RGBA32F -> vector<float>, RGBA8F -> vector<uchar>).
+        static Common::ResultStr<std::shared_ptr<Texture2D>>
+        Create( const TextureSpecification& specification, const std::string& tag, uint32_t width,
+                uint32_t height, Core::Formats::ImageFormat format, Core::Formats::ImagePixelData&& data );
+
     private:
         Common::BoolResultStr Invalidate();
 

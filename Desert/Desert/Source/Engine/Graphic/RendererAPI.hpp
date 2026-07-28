@@ -39,6 +39,15 @@ namespace Desert::Graphic
         virtual Common::BoolResultStr BeginRenderPass( const RenderPass* renderPass, bool clearFrame ) = 0;
         virtual Common::BoolResultStr BeginSwapChainRenderPass()                                       = 0;
         virtual Common::BoolResultStr EndRenderPass()                                                  = 0;
+
+        // Named command-buffer region for graphics debuggers (RenderDoc shows these as a pass
+        // tree). Default no-op so non-debug backends don't have to care.
+        virtual void BeginDebugLabel( const char* name )
+        {
+        }
+        virtual void EndDebugLabel()
+        {
+        }
         
         // @p instanceCount > 1 issues a hardware-instanced draw (the instanced pipeline's vertex shader
         // reads the per-instance model matrix from an InstanceTransforms SSBO by gl_InstanceIndex).

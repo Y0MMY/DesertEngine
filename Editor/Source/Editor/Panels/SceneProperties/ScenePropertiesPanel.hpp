@@ -4,6 +4,8 @@
 
 #include "../IPanel.hpp"
 
+#include <Common/Core/Constants.hpp>
+
 namespace Desert::Editor
 {
     class ScenePropertiesPanel final : public IPanel
@@ -26,6 +28,6 @@ namespace Desert::Editor
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
         const Animation::AnimationLibrary*          m_AnimationLibrary;
         bool                                        m_DebugMode = false;
-        std::string                                 m_PrefabSavePath = "Resources/Assets/Prefabs/";
+        std::string m_PrefabSavePath = Common::Constants::Path::PREFAB_PATH.string(); // post-remap
     };
 } // namespace Desert::Editor

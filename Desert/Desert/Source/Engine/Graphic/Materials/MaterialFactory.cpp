@@ -7,18 +7,18 @@
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Core/Logger.hpp>
 
 namespace Desert::Graphic
 {
-    void MaterialFactory::ApplyPBRAsset( StaticMaterialPBR& material, const Assets::PBRMaterialAsset& asset )
+    void MaterialFactory::ApplyPBRAsset( StaticMaterialPBR& material, const Assets::SurfaceMaterialAsset& asset )
     {
-        // The reflected data IS the material parameters — copy it wholesale (color, metallic, roughness,
-        // AO, emissive, texture handles). No per-parameter setters.
-        material.Data() = asset.Data();
+        // Build the backend's typed view from the material canon (single protocol -> optimized
+        // hot-path struct). No per-parameter setters.
+        material.Data() = Assets::PBRSurfaceParams::FromMaterialData( asset.Data() );
 
         // Resolve texture handles to images and (re)bind them to the shader's sampler slots.
         auto resolveImage = []( Assets::AssetHandle handle ) -> Graphic::Image2D*
@@ -47,6 +47,29 @@ namespace Desert::Graphic
         bindTexture( material.Data().OpacityTexture, "u_OpacityTexture" );
     }
 
+    void MaterialFactory::ApplyShaderAsset( DataDrivenMaterial& material, const Assets::SurfaceMaterialAsset& asset )
+    {
+        // Seed schema defaults, then overlay the asset's persisted parameter values.
+        material.ApplyDefaults();
+
+        const auto& data = asset.Data();
+        for ( const auto& p : data.Params )
+            material.SetParamRaw( p.Name, p.Value );
+
+        for ( const auto& t : data.Textures )
+        {
+            if ( t.TextureHandle == 0 )
+                continue;
+            auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( t.TextureHandle ) );
+            if ( !tex )
+                continue;
+            auto* img = static_cast<Graphic::Image2D*>(
+                 Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+            if ( img )
+                material.SetTexture( t.Name, img );
+        }
+    }
+
     std::shared_ptr<Material> MaterialFactory::CreateMaterial( const Assets::MaterialAsset* asset )
     {
         if ( !asset )
@@ -60,12 +83,15 @@ namespace Desert::Graphic
         if ( shaderName.empty() || shaderName == "StaticMeshPBR" || shaderName == "SkinnedMeshPBR" )
         {
             auto pbrMaterial = std::make_shared<StaticMaterialPBR>();
-            if ( const auto* pbr = dynamic_cast<const Assets::PBRMaterialAsset*>( asset ) )
+            if ( const auto* pbr = dynamic_cast<const Assets::SurfaceMaterialAsset*>( asset ) )
                 ApplyPBRAsset( *pbrMaterial, *pbr );
             return pbrMaterial;
         }
 
-        return std::make_shared<DataDrivenMaterial>( shaderName );
+        auto ddm = std::make_shared<DataDrivenMaterial>( shaderName );
+        if ( const auto* pbr = dynamic_cast<const Assets::SurfaceMaterialAsset*>( asset ) )
+            ApplyShaderAsset( *ddm, *pbr );
+        return ddm;
     }
 
     std::shared_ptr<MaterialInstance> MaterialFactory::CreateMaterialInstance( const Assets::MaterialAsset* asset,

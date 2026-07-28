@@ -11,8 +11,8 @@ namespace Desert::Assets
     constexpr std::array<std::string_view, 1> SUPPORTED_SKINNED_MESH_EXTENSIONS = { ".skmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_STATIC_MESH_EXTENSIONS  = { ".stmesh" };
     constexpr std::array<std::string_view, 1> SUPPORTED_SKELETON_EXTENSIONS     = { ".skeleton" };
-    // ".mat" = legacy cooker output (read-compat via PBRMaterialAsset::Load); ".demat" = unified flat format
-    // (now written by import too). Both register as PBRMaterialAsset.
+    // ".mat" = legacy cooker output (read-compat via SurfaceMaterialAsset::Load); ".demat" = unified flat format
+    // (now written by import too). Both register as SurfaceMaterialAsset.
     constexpr std::array<std::string_view, 2> SUPPORTED_MATERIAL_EXTENSIONS     = { ".mat", ".demat" };
     constexpr std::array<std::string_view, 1> SUPPORTED_ANIMATION_EXTENSIONS    = { ".anim" };
     constexpr std::array<std::string_view, 1> SUPPORTED_TEXTURE_EXTENSIONS      = { ".tex" };
@@ -34,7 +34,7 @@ namespace Desert::Assets
     namespace
     {
         template <typename AssetType, typename Extensions, typename... Args>
-        void ProcessAssetFiles( const std::filesystem::path& rootPath, bool useRootpath,
+        void ProcessAssetFiles( const std::filesystem::path& rootPath,
                                 const Extensions&                  supportedExtensions,
                                 const std::weak_ptr<AssetManager>& assetManager, AssetPriority priority,
                                 Args&&... args )
@@ -59,22 +59,11 @@ namespace Desert::Assets
 
                 if ( auto manager = assetManager.lock() )
                 {
-                    Common::Filepath path;
-                    if ( useRootpath )
-                    {
-                        std::string       originalPath   = entry.path().string();
-                        const std::string prefixToRemove = "Resources/Assets/Textures/";
-                        size_t            pos            = originalPath.find( prefixToRemove );
-                        if ( pos != std::string::npos )
-                        {
-                            originalPath.erase( pos, prefixToRemove.length() );
-                        }
-                        path = originalPath;
-                    }
-                    else
-                    {
-                        path = entry.path();
-                    }
+                    // Assets are ALWAYS registered under their full (project-rooted) path. The old
+                    // "strip the Textures/ prefix for skyboxes" hack forced every consumer to re-glue
+                    // the prefix back (SceneEnvironment did) — path composition belongs to the asset
+                    // layer, not to engine draw code.
+                    const Common::Filepath path = entry.path();
                     auto asset = manager->CreateAsset<AssetType>( priority, path, std::forward<Args>( args )... );
 
                     if ( !asset->GetMetadata().IsValid() )
@@ -92,33 +81,33 @@ namespace Desert::Assets
         // ctor, so the big .stmesh parse + GPU build are deferred to the first Get (lazy). Textures/materials
         // are cheap to parse (small metadata) so they load now to expose their stored handle / external id,
         // but their GPU build is still deferred (RegisterAsset, below).
-        ProcessAssetFiles<StaticMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+        ProcessAssetFiles<StaticMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                             SUPPORTED_STATIC_MESH_EXTENSIONS, m_AssetManager, AssetPriority::Low,
                                             /*loadAfterCreate=*/false );
 
-        ProcessAssetFiles<TextureAsset>( Common::Constants::Path::TEXTURE_PATH_COOKED, false,
+        ProcessAssetFiles<TextureAsset>( Common::Constants::Path::TEXTURE_PATH_COOKED,
                                          SUPPORTED_TEXTURE_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
-        ProcessAssetFiles<AnimationAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+        ProcessAssetFiles<AnimationAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                            SUPPORTED_ANIMATION_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
-        ProcessAssetFiles<SkeletonAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+        ProcessAssetFiles<SkeletonAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                           SUPPORTED_SKELETON_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
         // Materials are editable CONTENT (Resources/Assets/Materials/...): imported (per-mesh subfolders) and
         // editor-created both land here. Also scan the cooked mesh tree for back-compat with any legacy
         // ".mat"/".demat" that older imports wrote there.
-        ProcessAssetFiles<PBRMaterialAsset>( Common::Constants::Path::MATERIAL_PATH, false,
+        ProcessAssetFiles<SurfaceMaterialAsset>( Common::Constants::Path::MATERIAL_PATH,
                                              SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
-        ProcessAssetFiles<PBRMaterialAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+        ProcessAssetFiles<SurfaceMaterialAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                              SUPPORTED_MATERIAL_EXTENSIONS, m_AssetManager, AssetPriority::Low );
 
-        ProcessAssetFiles<SkinnedMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED, false,
+        ProcessAssetFiles<SkinnedMeshAsset>( Common::Constants::Path::MESH_PATH_COOKED,
                                              SUPPORTED_SKINNED_MESH_EXTENSIONS, m_AssetManager,
                                              AssetPriority::Low, /*loadAfterCreate=*/false );
 
-        /* ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, false, SUPPORTED_MESH_EXTENSIONS,
+        /* ProcessAssetFiles<MaterialAsset>( Common::Constants::Path::MESH_PATH, SUPPORTED_MESH_EXTENSIONS,
                                           m_AssetManager, AssetPriority::Low );*/
 
         if ( auto manager = m_AssetManager.lock() )
@@ -157,7 +146,7 @@ namespace Desert::Assets
 
     void AssetPreloader::PreloadSkyboxes()
     {
-        ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, true, SUPPORTED_SKYBOX_EXTENSIONS,
+        ProcessAssetFiles<SkyboxAsset>( Common::Constants::Path::SKYBOX_PATH, SUPPORTED_SKYBOX_EXTENSIONS,
                                         m_AssetManager, AssetPriority::Medium );
 
         if ( auto manager = m_AssetManager.lock() )
@@ -175,7 +164,7 @@ namespace Desert::Assets
 
     void AssetPreloader::PreloadShaders()
     {
-        ProcessAssetFiles<ShaderAsset>( Common::Constants::Path::SHADERDIR_PATH, true,
+        ProcessAssetFiles<ShaderAsset>( Common::Constants::Path::SHADERDIR_PATH,
                                         SUPPORTED_SHADERS_EXTENSIONS, m_AssetManager, AssetPriority::Medium );
 
         if ( auto manager = m_AssetManager.lock() )

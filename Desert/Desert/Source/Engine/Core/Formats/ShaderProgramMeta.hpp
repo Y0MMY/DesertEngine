@@ -89,6 +89,11 @@ namespace Desert::Core::Formats
         ShaderRenderState        State;
         ShaderDomain             Domain = ShaderDomain::Unspecified;
 
+        // Additional named passes declared by the shader (DSL `Pass "Name" { ... }` blocks).
+        // Each is a separate program registered in the ShaderService as "<Shader>/<Pass>";
+        // empty for legacy single-program shaders.
+        std::vector<std::string> PassNames;
+
         bool HasParams() const
         {
             return !Params.empty();

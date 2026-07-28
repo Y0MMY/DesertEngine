@@ -16,7 +16,7 @@
 #include <Editor/Widgets/AssetThumbnailRenderer.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -67,26 +67,36 @@ namespace Desert::Editor
             return s;
         }
 
-        // --- Windows shell integration (no-ops elsewhere) -------------------------------------------------
+        // --- OS shell integration (no-ops on unsupported platforms) ---------------------------------------
         void ShellOpenDefault( const std::string& path )
         {
-#ifdef DESERT_PLATFORM_WINDOWS
+#if defined( DESERT_PLATFORM_WINDOWS )
             std::error_code ec;
             const auto      abs = std::filesystem::absolute( path, ec ).make_preferred().wstring();
             ShellExecuteW( nullptr, L"open", abs.c_str(), nullptr, nullptr, SW_SHOWNORMAL );
+#elif defined( DESERT_PLATFORM_MACOS )
+            std::error_code   ec;
+            const std::string abs = std::filesystem::absolute( path, ec ).string();
+            const std::string cmd = "open \"" + abs + "\"";
+            system( cmd.c_str() );
 #else
             (void)path;
 #endif
         }
 
-        // Open Explorer with the item selected (file or folder highlighted in its parent).
+        // Open Explorer/Finder with the item selected (file or folder highlighted in its parent).
         void ShellRevealInExplorer( const std::string& path )
         {
-#ifdef DESERT_PLATFORM_WINDOWS
+#if defined( DESERT_PLATFORM_WINDOWS )
             std::error_code    ec;
             const auto         abs    = std::filesystem::absolute( path, ec ).make_preferred().wstring();
             const std::wstring params = L"/select,\"" + abs + L"\"";
             ShellExecuteW( nullptr, L"open", L"explorer.exe", params.c_str(), nullptr, SW_SHOWNORMAL );
+#elif defined( DESERT_PLATFORM_MACOS )
+            std::error_code   ec;
+            const std::string abs = std::filesystem::absolute( path, ec ).string();
+            const std::string cmd = "open -R \"" + abs + "\"";
+            system( cmd.c_str() );
 #else
             (void)path;
 #endif
@@ -709,6 +719,11 @@ namespace Desert::Editor
                 }
 
                 {
+                    // Reserve a bottom strip for the asset preview pane when a file is selected.
+                    const float previewH =
+                         ( m_CurrentSelected && m_CurrentSelected->IsFile ) ? 175.0f : 0.0f;
+                    ImGui::BeginChild( "##assetBodyRegion", ImVec2( 0.0f, -previewH ), false );
+
                     int shownIndex = 0;
 
                     float xAvail = ImGui::GetContentRegionAvail().x;
@@ -822,6 +837,10 @@ namespace Desert::Editor
                         ImGui::EndTable();
                     }
                     ImGui::PopStyleVar();
+                    ImGui::EndChild();
+
+                    if ( previewH > 0.0f )
+                        DrawPreviewPane();
                 }
             }
 
@@ -927,10 +946,10 @@ namespace Desert::Editor
 
         // Resolve material -> handle (load + register so the offscreen render can use it; mirrors the
         // component deserializer's create-if-missing logic for cold start).
-        auto a = m_AssetManager->FindByPath<Assets::PBRMaterialAsset>( entry->AssetPath );
+        auto a = m_AssetManager->FindByPath<Assets::SurfaceMaterialAsset>( entry->AssetPath );
         if ( !a )
         {
-            a = m_AssetManager->CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High,
+            a = m_AssetManager->CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
                                                                        entry->AssetPath );
             if ( a && !a->IsReadyForUse() )
                 a->Load();
@@ -947,12 +966,13 @@ namespace Desert::Editor
         {
             // Cutout/foliage materials (a grass-card atlas) wrap and garble on a sphere -> preview on a flat
             // camera-facing card instead.
-            const bool flat = a->Data().AlphaCutoff > 0.0f;
+            const bool flat = a->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
             m_ThumbRenderer->RequestMaterial( a->GetMetadata().Handle, pngPath, flat );
         }
 
         // Until the PNG exists, show the albedo colour as a placeholder swatch.
-        const glm::vec3 albedo = a->GetAlbedoColor().value_or( glm::vec3( 0.8f ) );
+        const glm::vec3 albedo =
+             glm::vec3( a->Data().GetParam( "AlbedoColor", glm::vec4( 0.8f, 0.8f, 0.8f, 1.0f ) ) );
         ImGui::ColorButton( "##matswatch", ImVec4( albedo.r, albedo.g, albedo.b, 1.0f ),
                             ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop |
                                  ImGuiColorEditFlags_NoBorder,
@@ -1383,6 +1403,100 @@ namespace Desert::Editor
 
         assetPath    = thumbnailPath; // Simplified path conversion
         AbsolutePath = thumbnailPath; // Simplified path conversion
+    }
+
+    void FileExplorerPanel::DrawPreviewPane()
+    {
+        DirectoryInformation* entry = m_CurrentSelected;
+        if ( !entry || !entry->IsFile )
+            return;
+
+        ImGui::Separator();
+        ImGui::BeginChild( "##assetPreview", ImVec2( 0.0f, 0.0f ), false );
+
+        const std::filesystem::path path( entry->AssetPath );
+        const std::string           name = path.filename().string();
+
+        // Left: visual — a rendered thumbnail when one exists for the type, else the big type icon.
+        const ImVec2 thumbSize( 140.0f, 140.0f );
+        ImGui::BeginGroup();
+        bool drewThumb = false;
+        if ( entry->Type == FileType::Texture )
+            drewThumb = DrawTextureThumbnail( entry, thumbSize );
+        else if ( entry->Type == FileType::Material )
+            drewThumb = DrawRenderedMaterialThumbnail( entry, thumbSize );
+        else if ( entry->Type == FileType::Model )
+            drewThumb = DrawRenderedMeshThumbnail( entry, thumbSize );
+        if ( !drewThumb )
+        {
+            ImGui::PushStyleColor( ImGuiCol_ChildBg, ImVec4( 0.12f, 0.12f, 0.14f, 1.0f ) );
+            ImGui::BeginChild( "##previewIcon", thumbSize, true,
+                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
+            const char*  icon = IconForType( entry->Type );
+            const ImVec2 sz   = ImGui::CalcTextSize( icon );
+            ImGui::SetCursorPos(
+                 ImVec2( ( thumbSize.x - sz.x ) * 0.5f, ( thumbSize.y - sz.y ) * 0.5f ) );
+            ImGui::PushStyleColor( ImGuiCol_Text, entry->FileTypeColour );
+            ImGui::TextUnformatted( icon );
+            ImGui::PopStyleColor();
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        }
+        ImGui::EndGroup();
+
+        ImGui::SameLine();
+
+        // Right: name + type/size line + a text excerpt for text-like assets.
+        ImGui::BeginGroup();
+        ImGui::TextUnformatted( name.c_str() );
+        {
+            const auto  typeIt   = s_FileTypesToString.find( entry->Type );
+            const char* typeName = typeIt != s_FileTypesToString.end() ? typeIt->second.c_str() : "File";
+            if ( entry->FileSize >= 1024 * 1024 )
+                ImGui::TextDisabled( "%s  |  %.1f MB", typeName, entry->FileSize / ( 1024.0f * 1024.0f ) );
+            else
+                ImGui::TextDisabled( "%s  |  %.1f KB", typeName, entry->FileSize / 1024.0f );
+        }
+
+        const bool textual = entry->Type == FileType::Script || entry->Type == FileType::Material ||
+                             entry->Type == FileType::Prefab || entry->Type == FileType::Scene ||
+                             entry->Type == FileType::Shader || entry->Type == FileType::Ini;
+        if ( textual )
+        {
+            if ( m_PreviewTextPath != entry->AssetPath )
+            {
+                // Loaded once per selection change; excerpt only (previewing must never hitch the UI).
+                m_PreviewTextPath = entry->AssetPath;
+                m_PreviewText     = Common::Utils::FileSystem::ReadFileContent( entry->AssetPath );
+                constexpr size_t kMaxPreview = 2048;
+                if ( m_PreviewText.size() > kMaxPreview )
+                {
+                    m_PreviewText.resize( kMaxPreview );
+                    m_PreviewText += "\n...";
+                }
+            }
+
+            if ( entry->Type == FileType::Prefab )
+            {
+                // Cheap structural hint: every serialized entity carries one "Tag" key.
+                size_t entities = 0;
+                for ( size_t pos = 0; ( pos = m_PreviewText.find( "\"Tag\"", pos ) ) != std::string::npos;
+                      ++entities, ++pos )
+                    ;
+                if ( entities > 0 )
+                    ImGui::TextDisabled( "~%zu entities", entities );
+            }
+
+            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.65f, 0.65f, 0.65f, 1.0f ) );
+            ImGui::BeginChild( "##previewText", ImVec2( 0.0f, 0.0f ), false,
+                               ImGuiWindowFlags_HorizontalScrollbar );
+            ImGui::TextUnformatted( m_PreviewText.c_str() );
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        }
+        ImGui::EndGroup();
+
+        ImGui::EndChild();
     }
 
 } // namespace Desert::Editor

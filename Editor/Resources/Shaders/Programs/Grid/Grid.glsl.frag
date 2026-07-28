@@ -20,7 +20,9 @@ layout(location = 0) in vec3 v_Near;
 layout(location = 1) in vec3 v_Far;
 layout(location = 0) out vec4 o_Color;
 
-float log10( float x ) { return log( x ) / log( 10.0 ); }
+// Named gridLog10, not log10: MoltenVK translates GLSL to MSL, where log10 is a
+// Metal built-in and a user function with that name makes the call ambiguous.
+float gridLog10( float x ) { return log( x ) / log( 10.0 ); }
 float satf( float x ) { return clamp( x, 0.0, 1.0 ); }
 vec2  satv( vec2 v ) { return clamp( v, vec2( 0.0 ), vec2( 1.0 ) ); }
 float max2( vec2 v ) { return max( v.x, v.y ); }
@@ -28,7 +30,7 @@ float max2( vec2 v ) { return max( v.x, v.y ); }
 vec4 Grid( vec2 P, float baseCell )
 {
     vec2  dudv = vec2( length( vec2( dFdx( P.x ), dFdy( P.x ) ) ), length( vec2( dFdx( P.y ), dFdy( P.y ) ) ) );
-    float lod      = max( 0.0, log10( ( length( dudv ) * 2.0 ) / baseCell ) + 1.0 );
+    float lod      = max( 0.0, gridLog10( ( length( dudv ) * 2.0 ) / baseCell ) + 1.0 );
     float lodFade  = fract( lod );
     float l0       = baseCell * pow( 10.0, floor( lod ) );
     float l1       = l0 * 10.0;

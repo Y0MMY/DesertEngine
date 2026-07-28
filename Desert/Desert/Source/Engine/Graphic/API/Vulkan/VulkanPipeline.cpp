@@ -19,7 +19,14 @@ namespace Desert::Graphic::API::Vulkan
                 case PrimitivePolygonMode::Solid:
                     return VK_POLYGON_MODE_FILL;
                 case PrimitivePolygonMode::Wireframe:
-                    return VK_POLYGON_MODE_LINE;
+                    // LINE requires the fillModeNonSolid device feature — fall back to solid where the
+                    // device lacks it (spec violation + validation error otherwise).
+                    return EngineContext::GetInstance()
+                                     .GetDevice()
+                                     ->GetCapabilities()
+                                     .SupportsNonSolidFill
+                                ? VK_POLYGON_MODE_LINE
+                                : VK_POLYGON_MODE_FILL;
             }
             return VK_POLYGON_MODE_FILL;
         }
@@ -358,6 +365,13 @@ namespace Desert::Graphic::API::Vulkan
 
         VK_CHECK_RESULT(
              vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline ) );
+
+        // Debug name so RenderDoc/validation identify the pipeline by its spec name.
+        if ( !m_Specification.DebugName.empty() )
+        {
+            VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_PIPELINE, m_Specification.DebugName,
+                                              m_Pipeline );
+        }
     }
 
     std::pair<uint32_t, VkPushConstantRange> VulkanPipeline::SetUpPushConstantRange() const

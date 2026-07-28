@@ -20,57 +20,76 @@ namespace Desert::Graphic::System
         // through reflection. Each drawn object thus gets its own effective material in the SSBO.
         PBRGpuMaterial BuildEffectiveMaterial( StaticMaterialPBR* material, MaterialInstance* instance )
         {
-            Assets::PBRMaterialData data = material->Data();
+            Assets::PBRSurfaceParams data = material->Data();
 
-            const auto* type = Reflection::ReflectionRegistry::Get().Find( "PBRMaterialData" );
-            if ( instance && type )
+            if ( instance )
             {
+                // Apply instance overrides by schema name onto the typed hot-path view. The names
+                // are the StaticMeshPBR schema (single material protocol) — same ones the tint
+                // path (MeshECSSystem) and the material canon use.
+                const auto vec4Of = []( const auto& v, const glm::vec4& current ) -> glm::vec4
+                {
+                    if ( auto* v4 = std::get_if<glm::vec4>( &v ) )
+                        return *v4;
+                    if ( auto* v3 = std::get_if<glm::vec3>( &v ) )
+                        return glm::vec4( *v3, current.w );
+                    return current;
+                };
+                const auto floatOf = []( const auto& v, float current ) -> float
+                {
+                    if ( auto* f = std::get_if<float>( &v ) )
+                        return *f;
+                    return current;
+                };
+
                 for ( const auto& [name, prop] : instance->GetPropertySet().GetProperties() )
                 {
                     if ( !prop.bIsOverridden )
                         continue;
+                    const auto& v = prop.Value;
 
-                    const Reflection::FieldInfo* field = nullptr;
-                    for ( const auto& f : type->Fields )
-                        if ( f.Name == name ) { field = &f; break; }
-                    if ( !field )
-                        continue;
-
-                    void*       dst = static_cast<char*>( static_cast<void*>( &data ) ) + field->Offset;
-                    const auto& v   = prop.Value;
-                    using Reflection::FieldType;
-
-                    switch ( field->Type )
+                    if ( name == "AlbedoColor" )
+                        data.AlbedoColor = vec4Of( v, data.AlbedoColor );
+                    else if ( name == "MetallicFactor" )
+                        data.MetallicFactor = floatOf( v, data.MetallicFactor );
+                    else if ( name == "RoughnessFactor" )
+                        data.RoughnessFactor = floatOf( v, data.RoughnessFactor );
+                    else if ( name == "AOStrength" )
+                        data.AOStrength = floatOf( v, data.AOStrength );
+                    else if ( name == "EmissiveColor" )
+                        data.EmissiveColor = vec4Of( v, data.EmissiveColor );
+                    else if ( name == "EmissiveIntensity" )
+                        data.EmissiveIntensity = floatOf( v, data.EmissiveIntensity );
+                    else if ( name == "AlphaCutoff" )
+                        data.AlphaCutoff = floatOf( v, data.AlphaCutoff );
+                    else if ( name == "Transmission" )
+                        data.Transmission = floatOf( v, data.Transmission );
+                    else if ( name == "IOR" )
+                        data.IOR = floatOf( v, data.IOR );
+                    else if ( name == "GlassTint" )
+                        data.GlassTint = vec4Of( v, data.GlassTint );
+                    else if ( name == "UVTiling" )
                     {
-                        case FieldType::Float:
-                            if ( auto* f = std::get_if<float>( &v ) ) *static_cast<float*>( dst ) = *f;
-                            break;
-                        case FieldType::Int:
-                            if ( auto* i = std::get_if<int>( &v ) ) *static_cast<int*>( dst ) = *i;
-                            break;
-                        case FieldType::Bool:
-                            if ( auto* b = std::get_if<bool>( &v ) ) *static_cast<bool*>( dst ) = *b;
-                            break;
-                        case FieldType::Vec3:
-                            if ( auto* v3 = std::get_if<glm::vec3>( &v ) ) *static_cast<glm::vec3*>( dst ) = *v3;
-                            else if ( auto* v4 = std::get_if<glm::vec4>( &v ) )
-                                *static_cast<glm::vec3*>( dst ) = glm::vec3( *v4 );
-                            break;
-                        case FieldType::Vec4:
-                            if ( auto* v4 = std::get_if<glm::vec4>( &v ) ) *static_cast<glm::vec4*>( dst ) = *v4;
-                            else if ( auto* v3 = std::get_if<glm::vec3>( &v ) )
-                            {
-                                auto* d = static_cast<glm::vec4*>( dst );
-                                *d      = glm::vec4( *v3, d->w );
-                            }
-                            break;
-                        default:
-                            break; // AssetHandle/textures are per-material descriptors, not SSBO data.
+                        const glm::vec4 t = vec4Of( v, glm::vec4( data.UVTiling.value_or( glm::vec2( 1.0f ) ), 0, 0 ) );
+                        data.UVTiling     = glm::vec2( t );
                     }
+                    // Textures are per-material descriptors, not SSBO data — not overridable here.
                 }
             }
 
             return BuildPBRGpuMaterial( data );
+        }
+
+        // First slot instance whose parent is the batched PBR material. Slots holding a
+        // custom-shader material (DataDrivenMaterial, v3 per-slot shaders) belong to the
+        // generic path — they must never be fed into the PBR SSBO machinery. nullptr when
+        // the object has no PBR slot at all.
+        MaterialInstance* FirstPBRSlot( const std::vector<MaterialInstance*>& slots )
+        {
+            for ( auto* inst : slots )
+                if ( inst && dynamic_cast<StaticMaterialPBR*>( inst->GetParentMaterial() ) )
+                    return inst;
+            return nullptr;
         }
     } // namespace
 
@@ -147,7 +166,9 @@ namespace Desert::Graphic::System
 
     void MeshRenderer::SubmitGenericMesh( const GenericMeshRenderData& data )
     {
-        if ( data.Mesh && !data.ShaderName.empty() )
+        // Two valid shapes: an override draw (ShaderName set) or a per-slot draw (SlotMaterial
+        // set — the shader name comes from the material at draw time).
+        if ( data.Mesh && ( !data.ShaderName.empty() || data.SlotMaterial ) )
             m_GenericQueue.push_back( data );
     }
 
@@ -157,7 +178,7 @@ namespace Desert::Graphic::System
             m_InstancedQueue.push_back( data );
     }
 
-    void MeshRenderer::DrawGenericMeshes()
+    void MeshRenderer::DrawGenericMeshes( bool useLoadPass )
     {
         if ( m_GenericQueue.empty() )
             return;
@@ -187,19 +208,35 @@ namespace Desert::Graphic::System
 
         for ( const auto& g : m_GenericQueue )
         {
-            auto shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( g.ShaderName );
-            if ( !shader || !g.Mesh )
+            // Per-slot draws carry their own material (asset params already applied at build);
+            // Shader Override draws use a shader-keyed shared material + per-frame overrides.
+            DataDrivenMaterial* material   = nullptr;
+            std::string         shaderName = g.ShaderName;
+            if ( g.SlotMaterial )
+            {
+                material   = dynamic_cast<DataDrivenMaterial*>( g.SlotMaterial );
+                if ( material )
+                    shaderName = material->GetShaderName();
+            }
+
+            auto shader = Runtime::ResourceRegistry::GetShaderService()->GetByName( shaderName );
+            if ( !shader || !g.Mesh || ( g.SlotMaterial && !material ) )
                 continue;
 
-            auto& material = m_GenericMaterials[g.ShaderName];
             if ( !material )
-                material = std::make_unique<DataDrivenMaterial>( g.ShaderName );
+            {
+                auto& shared = m_GenericMaterials[shaderName];
+                if ( !shared )
+                    shared = std::make_unique<DataDrivenMaterial>( shaderName );
+                material = shared.get();
+            }
 
             GraphicsPipelineSpecification spec;
-            spec.DebugName   = "GenericMesh_" + g.ShaderName;
+            spec.DebugName   = "GenericMesh_" + shaderName;
             spec.Shader      = shader;
-            spec.Framebuffer = targetFb;
-            spec.Layout      = meshLayout;
+            spec.Framebuffer       = targetFb;
+            spec.Layout            = meshLayout;
+            spec.UseLoadRenderPass = useLoadPass; // deferred manual pass begins with LOAD
             ApplyShaderRenderState( spec, shader->GetProgramMeta().State );
             auto pipeline = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec );
             if ( !pipeline )
@@ -214,27 +251,31 @@ namespace Desert::Graphic::System
                 camUB->SetRawData( reinterpret_cast<const std::byte*>( &cam ), sz );
             }
 
-            material->ApplyDefaults();
-            for ( const auto& [name, value] : g.Overrides.Params )
-                material->SetParamRaw( name, value );
-
-            // Texture overrides: resolve asset handle -> runtime Image2D and bind by sampler name.
-            // Unset samplers keep the backend fallback texture, so this is purely additive.
-            for ( const auto& [name, handle] : g.Overrides.Textures )
+            if ( !g.SlotMaterial )
             {
-                if ( handle == 0 )
-                    continue;
-                auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( handle ) );
-                if ( !tex )
-                    continue;
-                auto* img = static_cast<Image2D*>(
-                     Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
-                if ( img )
-                    material->SetTexture( name, img );
+                material->ApplyDefaults();
+                for ( const auto& [name, value] : g.Overrides.Params )
+                    material->SetParamRaw( name, value );
+
+                // Texture overrides: resolve asset handle -> runtime Image2D and bind by sampler name.
+                // Unset samplers keep the backend fallback texture, so this is purely additive.
+                for ( const auto& [name, handle] : g.Overrides.Textures )
+                {
+                    if ( handle == 0 )
+                        continue;
+                    auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( Common::UUID( handle ) );
+                    if ( !tex )
+                        continue;
+                    auto* img = static_cast<Image2D*>(
+                         Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+                    if ( img )
+                        material->SetTexture( name, img );
+                }
             }
 
             Renderer::GetInstance().RenderMesh( pipeline.get(), g.Mesh, g.Transform,
-                                                material->GetMaterialExecutor() );
+                                                material->GetMaterialExecutor(), 1, 0,
+                                                ~g.VisibleSubmeshMask );
         }
     }
 
@@ -303,6 +344,26 @@ namespace Desert::Graphic::System
         renderer.EndRenderPass();
     }
 
+    void MeshRenderer::RenderGenericManual()
+    {
+        if ( m_GenericQueue.empty() )
+            return;
+        const auto& target = m_SceneRenderer ? m_SceneRenderer->GetTargetFramebuffer() : nullptr;
+        if ( !target || !m_SceneRenderer->GetMainCamera() )
+            return;
+
+        auto& renderer = Renderer::GetInstance();
+
+        RenderPassSpecification rpSpec;
+        rpSpec.TargetFramebuffer = target;
+        rpSpec.DebugName         = "GenericForwardPass";
+        auto rp                  = RenderPass::Create( rpSpec );
+
+        renderer.BeginRenderPass( rp.get(), false ); // LOAD: over the deferred lighting composite
+        DrawGenericMeshes( /*useLoadPass*/ true );
+        renderer.EndRenderPass();
+    }
+
     void MeshRenderer::RenderGlassManual( const std::shared_ptr<Image2D>& sceneColor )
     {
         if ( !m_StaticGlassPipeline || !m_GlassMaterial || !m_GlassInstance || m_StaticQueue.empty() )
@@ -319,12 +380,13 @@ namespace Desert::Graphic::System
         std::vector<PBRGpuMaterial>              gpuMats;
         for ( const auto& data : m_StaticQueue )
         {
-            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() || !( *data.MaterialSlots )[0] )
+            if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() )
                 continue;
-            auto* mat = static_cast<StaticMaterialPBR*>( ( *data.MaterialSlots )[0]->GetParentMaterial() );
-            if ( !mat )
+            MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots );
+            if ( !pbrInst )
                 continue;
-            PBRGpuMaterial gm = BuildEffectiveMaterial( mat, ( *data.MaterialSlots )[0] );
+            auto* mat = static_cast<StaticMaterialPBR*>( pbrInst->GetParentMaterial() );
+            PBRGpuMaterial gm = BuildEffectiveMaterial( mat, pbrInst );
             if ( gm.GlassTint.a <= 0.001f )
                 continue; // opaque -> drawn by the opaque pass, not here
             glassObjs.push_back( &data );
@@ -453,9 +515,13 @@ namespace Desert::Graphic::System
             if ( !data.Mesh || !data.MaterialSlots || data.MaterialSlots->empty() ||
                  !( *data.MaterialSlots )[0] )
                 continue;
-            if ( auto* mat =
-                      static_cast<StaticMaterialPBR*>( ( *data.MaterialSlots )[0]->GetParentMaterial() ) )
-                groupFor( mat ).push_back( &data );
+
+            // First PBR slot drives the batch. Slots holding a custom-shader material
+            // (DataDrivenMaterial) are not PBR — their submeshes were routed to the generic
+            // path at submit and are masked out of this draw; an object with NO PBR slot at
+            // all has nothing for this path to do.
+            if ( MaterialInstance* pbrInst = FirstPBRSlot( *data.MaterialSlots ) )
+                groupFor( static_cast<StaticMaterialPBR*>( pbrInst->GetParentMaterial() ) ).push_back( &data );
         }
 
         // Accumulators for the auto-instanced path (shared across ALL material groups). The shared instanced
@@ -503,7 +569,7 @@ namespace Desert::Graphic::System
             for ( const auto* obj : objects )
             {
                 const bool objIsGlass =
-                     BuildEffectiveMaterial( mat, ( *obj->MaterialSlots )[0] ).GlassTint.a > 0.001f;
+                     BuildEffectiveMaterial( mat, FirstPBRSlot( *obj->MaterialSlots ) ).GlassTint.a > 0.001f;
                 if ( objIsGlass != m_GlassPass )
                     continue;
                 bucketFor( obj->Mesh ).push_back( obj );
@@ -533,7 +599,7 @@ namespace Desert::Graphic::System
                     for ( const auto* obj : batchable )
                         instTransforms.push_back( obj->Transform );
                     // v1: all instances of a batch share ONE material (the first object's effective material).
-                    instMaterials.push_back( BuildEffectiveMaterial( mat, ( *batchable[0]->MaterialSlots )[0] ) );
+                    instMaterials.push_back( BuildEffectiveMaterial( mat, FirstPBRSlot( *batchable[0]->MaterialSlots ) ) );
                     instDraws.push_back( d );
                 }
                 else
@@ -551,7 +617,7 @@ namespace Desert::Graphic::System
             std::vector<PBRGpuMaterial> gpuMaterials;
             gpuMaterials.reserve( singles.size() );
             for ( const auto* obj : singles )
-                gpuMaterials.push_back( BuildEffectiveMaterial( mat, ( *obj->MaterialSlots )[0] ) );
+                gpuMaterials.push_back( BuildEffectiveMaterial( mat, FirstPBRSlot( *obj->MaterialSlots ) ) );
 
             if ( auto* sb = mat->Get<StorageBufferProperty>( "Materials" ) )
                 sb->SetRawData( gpuMaterials.data(),
@@ -563,7 +629,7 @@ namespace Desert::Graphic::System
             // constant), so it stays in the draw loop below.
             {
                 DESERT_PROFILE_SCOPE( "Mesh: SharedSceneSetup (1x/group)" );
-                MaterialInstance* anyInst = ( *singles[0]->MaterialSlots )[0];
+                MaterialInstance* anyInst = FirstPBRSlot( *singles[0]->MaterialSlots );
                 StaticMaterialPBR::UpdateCamera( anyInst, camera );
                 StaticMaterialPBR::UpdateLights( anyInst, pointLights, spotLights, dirLights );
                 Image2D* cascadeMaps[kNumCascades];
@@ -578,7 +644,7 @@ namespace Desert::Graphic::System
             for ( uint32_t i = 0; i < static_cast<uint32_t>( singles.size() ); ++i )
             {
                 const auto*       obj  = singles[i];
-                MaterialInstance* inst = ( *obj->MaterialSlots )[0];
+                MaterialInstance* inst = FirstPBRSlot( *obj->MaterialSlots );
 
                 {
                     // Per-object work: transform (push constant) + material index + descriptor bind.
@@ -1376,10 +1442,31 @@ namespace Desert::Graphic::System
                 skinnedData.Outlined     = data.Outlined;
                 if ( data.MaterialSlots && !data.MaterialSlots->empty() )
                 {
-                    skinnedData.Instance = ( *data.MaterialSlots )[0];
-                    if ( skinnedData.Instance )
-                        skinnedData.Material =
-                             static_cast<SkinnedMaterialPBR*>( skinnedData.Instance->GetParentMaterial() );
+                    // Custom-shader slot materials are not usable here: a skinned mesh needs the
+                    // skinning vertex stage, which generic DSL surface shaders don't have. Take
+                    // the first slot whose parent IS the skinned PBR material (mirrors the
+                    // static path's FirstPBRSlot guard); warn once so the fallback isn't silent.
+                    for ( auto* inst : *data.MaterialSlots )
+                    {
+                        if ( !inst )
+                            continue;
+                        if ( auto* pbr = dynamic_cast<SkinnedMaterialPBR*>( inst->GetParentMaterial() ) )
+                        {
+                            skinnedData.Instance = inst;
+                            skinnedData.Material = pbr;
+                            break;
+                        }
+                    }
+                    if ( !skinnedData.Material )
+                    {
+                        static bool s_WarnedCustomSkinned = false;
+                        if ( !s_WarnedCustomSkinned )
+                        {
+                            LOG_WARN( "Skinned meshes don't support custom-shader materials (no skinning "
+                                      "stage in surface shaders) — mesh skipped. Assign a PBR material." );
+                            s_WarnedCustomSkinned = true;
+                        }
+                    }
                 }
                 if ( skinnedData.Material && skinnedData.Instance )
                     m_SkinnedQueue.push_back( std::move( skinnedData ) );

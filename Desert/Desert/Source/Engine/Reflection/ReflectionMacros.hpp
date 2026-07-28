@@ -5,7 +5,7 @@
 // registration code into Source/Engine/Generated/Reflection.gen.cpp.
 //
 // Usage:
-//   struct PBRMaterialData
+//   struct PBRSurfaceParams
 //   {
 //       REFLECT()
 //

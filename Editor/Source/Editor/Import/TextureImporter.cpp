@@ -1,5 +1,7 @@
 #include <variant>
 #include "TextureImporter.hpp"
+
+#include <mutex>
 #include "CookPaths.hpp"
 
 #include <Common/Core/Serialization/GlmReflection.hpp>
@@ -72,6 +74,12 @@ namespace Desert::Editor
 
     Common::UUID TextureImporter::Import( const std::filesystem::path& path )
     {
+        // Bulk cooking runs mesh imports in PARALLEL; two meshes often share textures, and two threads
+        // writing the same cooked .tex would corrupt it. Texture cooking is cheap next to the Assimp
+        // parse, so one global lock here is the simplest safe answer.
+        static std::mutex           s_CookMutex;
+        std::lock_guard<std::mutex> cookLock( s_CookMutex );
+
         auto abs = std::filesystem::weakly_canonical( path ).string();
 
         if ( m_Cache.contains( abs ) )

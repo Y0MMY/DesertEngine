@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Desert.hpp>
+#include <Engine/Runtime/AssetHotReload.hpp>
 #include <imgui/imgui.h>
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include "Editor/Panels/IPanel.hpp"
@@ -37,6 +38,7 @@ namespace Desert::Editor
         // ===== Menu sections =====
         void DrawStyleSubmenu();
         void DrawOpenSceneMenuItem();
+        void DrawPreferencesWindow(); // Edit -> Preferences... (persisted to ~/.desertengine/editor.json)
 
         // ===== Top Bar Sections =====
         void DrawProjectSection();
@@ -98,6 +100,7 @@ namespace Desert::Editor
         std::unique_ptr<Assets::AssetPreloader>      m_AssetPreloader;
         std::unique_ptr<ImportManager>               m_ImportManager;
         std::unique_ptr<Animation::AnimationLibrary> m_AnimationLibrary;
+        Runtime::AssetHotReload                      m_AssetHotReload; // .demat/.shader live reload
 
         FileExplorerPanel* m_FileExplorerPanel = nullptr; // non-owning (lives in m_Panels)
 
@@ -112,6 +115,22 @@ namespace Desert::Editor
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         bool                                    m_OpenScenePopup     = false;
         bool                                    m_SaveSceneRequested = false;
+
+        // Staged startup loading (UI loader): the heavy boot work (mesh cooking, asset preload) runs one
+        // stage per frame from OnUpdate while OnImGuiRender shows a fullscreen progress overlay — instead
+        // of silently freezing the window for seconds before the first frame.
+        struct StartupStage
+        {
+            std::string           Label;
+            std::function<void()> Run;
+        };
+        std::vector<StartupStage> m_StartupStages;
+        size_t                    m_StartupNext           = 0;
+        int                       m_StartupFramesRendered = 0;
+        bool StartupLoading() const
+        {
+            return m_StartupNext < m_StartupStages.size();
+        }
         std::optional<Common::Filepath>         m_SceneLoadRequested;
         // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run
         // BETWEEN frames (like a scene load), never inline in the ImGui Stop-button handler — otherwise the

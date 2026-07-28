@@ -169,6 +169,8 @@ namespace Desert::Graphic
 
         skyboxSystem->PrepareCamera( m_SceneInfo.ActiveCamera );
 
+        m_ScenePlaying = scene.IsPlaying(); // grid & other authoring aids hide while the game runs
+
         const auto& sceneSettings    = scene.GetSettings();
         const auto& jumpFloodSystem  = UNIQUE_GET_AS( System::JumpFloodOutlineRenderer,
                                                      m_RenderSystems["JumpFloodSystem"] );
@@ -234,8 +236,10 @@ namespace Desert::Graphic
         if ( filterChanged || anisoChanged )
             Renderer::GetInstance().RecreateImageSamplers();
 
+        // The grid is an AUTHORING aid: honour the setting only while editing — never in Play (that
+        // includes the standalone Runtime player, which is permanently in Play).
         UNIQUE_GET_AS( System::GridRenderer, m_RenderSystems["GridSystem"] )
-             ->SetShowGrid( sceneSettings.ShowGrid );
+             ->SetShowGrid( sceneSettings.ShowGrid && !m_ScenePlaying );
 
         m_BloomEnabled = sceneSettings.EnableBloom;
         UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )
@@ -347,6 +351,10 @@ namespace Desert::Graphic
                  ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
                             GetPointLights(), GetSpotLights(), shadow, aoImage,
                             m_EnableSSGI ? 2.0f : 0.0f, m_EnableSSAO );
+
+            // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
+            // the deferred composite (before the glass snapshot so glass refracts them too).
+            meshRenderer->RenderGenericManual();
 
             // Snapshot the composited opaque scene, then draw the transparent (glass) meshes over it. The
             // snapshot lets the glass sample the scene BEHIND it for refraction without a read+write feedback
@@ -519,6 +527,18 @@ namespace Desert::Graphic
                                     .Outlined   = outlined } );
     }
 
+    void SceneRenderer::SubmitSlotMaterialMesh( const Mesh* mesh, const glm::mat4& transform,
+                                                Material* material, uint64_t visibleSubmeshMask,
+                                                bool outlined )
+    {
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SubmitGenericMesh( { .Mesh               = const_cast<Mesh*>( mesh ),
+                                    .Transform          = transform,
+                                    .Outlined           = outlined,
+                                    .SlotMaterial       = material,
+                                    .VisibleSubmeshMask = visibleSubmeshMask } );
+    }
+
     void SceneRenderer::SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
                                              const std::vector<glm::mat4>* transforms )
     {
@@ -652,7 +672,11 @@ namespace Desert::Graphic
             }
 
             DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
+
+            // Debug-utils region: RenderDoc/Xcode show every graph pass by name in the event tree.
+            renderer.BeginDebugLabel( pass.Name.c_str() );
             pass.ExecuteFunc();
+            renderer.EndDebugLabel();
         }
 
         if ( currentFb )

@@ -37,7 +37,10 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::DirectionLightComponent, Dat
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::PointLightComponent, Data, "PointLightData", "Point Light" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::SpotLightComponent, Data, "SpotLightData", "Spot Light" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CameraComponent, Data, "CameraData", "Camera" )
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::TerrainComponent, Data, "TerrainData", "Terrain" )
+// Terrain is a CUSTOM entry: reflected TerrainData UI + the terrain MATERIAL editor (terrain
+// has no mesh material slots, so its shader/params live on the entity's MaterialComponent —
+// edited HERE, inside the Terrain section, not as a separate confusing component).
+// See MakeTerrainEntry below.
 // Collider is registered as a CUSTOM component below (auto-fit to mesh bounds on add) instead of the
 // plain reflected one-liner — see MakeColliderEntry.
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::RigidBodyComponent, Data, "RigidBodyData", "Rigid Body" )
@@ -46,77 +49,79 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CharacterControllerComponent
 
 namespace Desert::Editor
 {
-    // Fully data-driven material editor: a shader picker + controls auto-built from the selected shader's
-    // #pragma param schema (no per-shader UI code). Overrides are stored by name in the MaterialComponent.
-    static void DrawMaterialComponentWidget( ::Desert::ECS::Entity& entity, ::Desert::Assets::AssetManager* assetMgr )
+    // Terrain material editor. TERRAIN has no mesh material slots, so its shader + params are
+    // authored on the entity's MaterialComponent — the ONE remaining authored use of that
+    // component (mesh entities author materials in their slots; there the component is only a
+    // runtime override channel for scripts). Schema-driven from the Terrain-domain shader, laid
+    // out as a two-column table (label cell never overlaps the control).
+    static void DrawTerrainMaterialWidget( ::Desert::ECS::Entity& entity,
+                                           ::Desert::Assets::AssetManager* assetMgr )
     {
-        auto& mat = entity.GetComponent<::Desert::ECS::MaterialComponent>();
-
-        // A material only does anything on a renderable. Warn (don't crash/hide) on non-renderables.
-        const bool hasRenderable = entity.HasComponent<::Desert::ECS::StaticMeshComponent>() ||
-                                   entity.HasComponent<::Desert::ECS::SkinnedMeshComponent>() ||
-                                   entity.HasComponent<::Desert::ECS::TerrainComponent>();
-        if ( !hasRenderable )
-        {
-            ::ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ) );
-            ::ImGui::TextWrapped( "%s Material has no effect: this entity has no renderable. Add a Mesh or "
-                                  "Terrain.",
-                                  ICON_MDI_ALERT );
-            ::ImGui::PopStyleColor();
-        }
+        namespace ImGui = ::ImGui;
+        auto& mat       = entity.GetComponent<::Desert::ECS::MaterialComponent>();
 
         auto* shaderService = ::Desert::Runtime::ResourceRegistry::GetShaderService();
         if ( !shaderService )
             return;
 
-        // --- Shader picker, filtered by the renderable's domain (mesh -> surface, terrain -> terrain).
-        // PBR shaders are NOT listed (PBR is specialized + uses the mesh's material slots, not this).
-        using Domain         = ::Desert::Core::Formats::ShaderDomain;
-        const Domain wanted  = entity.HasComponent<::Desert::ECS::TerrainComponent>() ? Domain::Terrain
-                                                                                      : Domain::Surface;
+        if ( !entity.HasComponent<::Desert::ECS::TerrainComponent>() )
+        {
+            // Not terrain: the component only exists as a runtime/script/legacy override here.
+            ImGui::TextWrapped( "Runtime shader override ('%s'). Authored materials live in the mesh's "
+                                "PBR Materials slots.",
+                                mat.ShaderName.empty() ? "<none>" : mat.ShaderName.c_str() );
+            if ( ImGui::Button( "Clear override (use material slots)" ) )
+            {
+                mat.ShaderName.clear();
+                mat.Params.clear();
+                mat.Textures.clear();
+            }
+            return;
+        }
+
+        // --- Terrain-domain shader picker ---
         const std::string preview = mat.ShaderName.empty() ? "<none>" : mat.ShaderName;
-        if ( ::ImGui::BeginCombo( "Shader", preview.c_str() ) )
+        if ( ImGui::BeginCombo( "Shader", preview.c_str() ) )
         {
             for ( const auto& name : shaderService->GetAllNames() )
             {
                 auto candidate = shaderService->GetByName( name );
-                if ( !candidate || candidate->GetProgramMeta().Domain != wanted )
+                if ( !candidate || candidate->GetProgramMeta().Domain !=
+                                        ::Desert::Core::Formats::ShaderDomain::Terrain )
                     continue;
-
                 const bool selected = ( name == mat.ShaderName );
-                if ( ::ImGui::Selectable( name.c_str(), selected ) && name != mat.ShaderName )
+                if ( ImGui::Selectable( name.c_str(), selected ) && !selected )
                 {
                     mat.ShaderName = name;
-                    mat.Params.clear(); // rebuilt from the new shader's schema below
+                    mat.Params.clear();
                 }
                 if ( selected )
-                    ::ImGui::SetItemDefaultFocus();
+                    ImGui::SetItemDefaultFocus();
             }
-            ::ImGui::EndCombo();
+            ImGui::EndCombo();
         }
 
         if ( mat.ShaderName.empty() )
         {
-            ::ImGui::TextDisabled( "No shader selected - pick one above, or remove this component." );
+            ImGui::TextDisabled( "Pick a terrain shader above." );
             return;
         }
 
         auto shader = shaderService->GetByName( mat.ShaderName );
         if ( !shader )
-        {
-            ::ImGui::TextDisabled( "Shader '%s' not found", mat.ShaderName.c_str() );
             return;
-        }
-
         const auto& schema = shader->GetProgramMeta();
         if ( schema.Params.empty() )
-        {
-            ::ImGui::TextDisabled( "Shader exposes no #pragma param" );
             return;
-        }
 
-        // Ensure an override entry exists for each schema param (seeded with its #pragma default).
-        auto findOrAdd = [&]( const ::Desert::Core::Formats::ShaderParam& p ) -> ::Desert::ECS::MaterialParamOverride&
+        if ( !ImGui::BeginTable( "##terrain_mat", 2,
+                                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )
+            return;
+        ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.38f );
+        ImGui::TableSetupColumn( "control", ImGuiTableColumnFlags_WidthStretch, 0.62f );
+
+        const auto findOrAdd =
+             [&]( const ::Desert::Core::Formats::ShaderParam& p ) -> ::Desert::ECS::MaterialParamOverride&
         {
             for ( auto& o : mat.Params )
                 if ( o.Name == p.Name )
@@ -125,17 +130,23 @@ namespace Desert::Editor
             return mat.Params.back();
         };
 
-        ::ImGui::Separator();
         for ( const auto& p : schema.Params )
         {
             using W  = ::Desert::Core::Formats::ShaderParamWidget;
             using VT = ::Desert::Core::Formats::ShaderValueType;
 
-            const char* label = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
+            const char*       label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
+            const std::string hiddenId = "##tp_" + p.Name;
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted( label );
+            ImGui::TableNextColumn();
+            ImGui::PushItemWidth( -FLT_MIN );
 
             if ( p.IsTexture )
             {
-                // Find/create the texture override entry for this sampler.
                 ::Desert::ECS::MaterialTextureOverride* texOv = nullptr;
                 for ( auto& t : mat.Textures )
                     if ( t.Name == p.Name )
@@ -155,89 +166,61 @@ namespace Desert::Editor
                     if ( auto tex = assetMgr->FindByHandle<::Desert::Assets::TextureAsset>(
                               ::Common::UUID( texOv->TextureHandle ) ) )
                     {
-                        const auto& src = tex->GetSourcePath();
+                        const auto& src  = tex->GetSourcePath();
                         const auto  path = !src.empty() ? src : tex->GetMetadata().Filepath.string();
                         disp             = std::filesystem::path( path ).filename().string();
                     }
                 }
-
-                ::ImGui::TextUnformatted( label );
-                ::ImGui::SameLine();
-                ::ImGui::Button( ( disp + "##tex_" + p.Name ).c_str(), ImVec2( -1.0f, 0.0f ) );
-                if ( ::ImGui::BeginDragDropTarget() )
+                ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
+                if ( ImGui::BeginDragDropTarget() )
                 {
-                    if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::TextureAsset ) )
+                    if ( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload(
+                              ::Desert::Editor::DragPayloads::TextureAsset ) )
                     {
                         const std::string path( static_cast<const char*>( pl->Data ),
                                                 pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
                         if ( assetMgr )
                         {
-                            const auto resolved = ::Desert::Editor::TextureDnD::ResolveOrImport( *assetMgr, path );
+                            const auto resolved =
+                                 ::Desert::Editor::TextureDnD::ResolveOrImport( *assetMgr, path );
                             if ( static_cast<uint64_t>( resolved ) != 0 )
                                 texOv->TextureHandle = static_cast<uint64_t>( resolved );
                         }
                     }
-                    ::ImGui::EndDragDropTarget();
+                    ImGui::EndDragDropTarget();
                 }
+                ImGui::PopItemWidth();
                 continue;
             }
 
             auto& ov = findOrAdd( p );
-
             if ( p.Widget == W::Color )
             {
                 if ( p.Type == VT::Float3 )
-                    ::ImGui::ColorEdit3( label, &ov.Value.x );
+                    ImGui::ColorEdit3( hiddenId.c_str(), &ov.Value.x );
                 else
-                    ::ImGui::ColorEdit4( label, &ov.Value.x );
-                continue;
-            }
-
-            int comps = ( p.Type == VT::Float2 ) ? 2 : ( p.Type == VT::Float3 ) ? 3 : ( p.Type == VT::Float4 ) ? 4 : 1;
-            if ( p.Min.has_value() && p.Max.has_value() )
-            {
-                float mn = *p.Min, mx = *p.Max;
-                ::ImGui::SliderScalarN( label, ImGuiDataType_Float, &ov.Value.x, comps, &mn, &mx );
+                    ImGui::ColorEdit4( hiddenId.c_str(), &ov.Value.x );
             }
             else
             {
-                ::ImGui::DragScalarN( label, ImGuiDataType_Float, &ov.Value.x, comps, 0.01f );
+                const int comps = ( p.Type == VT::Float2 )   ? 2
+                                  : ( p.Type == VT::Float3 ) ? 3
+                                  : ( p.Type == VT::Float4 ) ? 4
+                                                             : 1;
+                if ( p.Min.has_value() && p.Max.has_value() )
+                {
+                    float mn = *p.Min, mx = *p.Max;
+                    ImGui::SliderScalarN( hiddenId.c_str(), ImGuiDataType_Float, &ov.Value.x, comps, &mn,
+                                          &mx );
+                }
+                else
+                {
+                    ImGui::DragScalarN( hiddenId.c_str(), ImGuiDataType_Float, &ov.Value.x, comps, 0.01f );
+                }
             }
+            ImGui::PopItemWidth();
         }
-
-        // --- Save / Load this material to a reusable .demat file (MVP; full asset integration later) ---
-        ::ImGui::Separator();
-        static std::string s_matPath = "Resources/Assets/Materials/MyMaterial.demat";
-        Utils::ImGuiUtilities::InputText( s_matPath, "##matpath" );
-        if ( ::ImGui::Button( "Save Material" ) && assetMgr )
-        {
-            const std::string js =
-                 ::Desert::Core::Serialize::SaveMaterialComponentToJson( mat, *assetMgr );
-            ::Common::Utils::FileSystem::WriteContentToFile( s_matPath, js );
-        }
-        ::ImGui::SameLine();
-        if ( ::ImGui::Button( "Load (from path)" ) && assetMgr )
-        {
-            const std::string js = ::Common::Utils::FileSystem::ReadFileContent( s_matPath );
-            if ( !js.empty() )
-                ::Desert::Core::Serialize::LoadMaterialComponentFromJson( js, mat, *assetMgr );
-        }
-
-        // The obvious way to load: drag a .demat from the File Explorer onto this target.
-        ::ImGui::Button( "  Drag a .demat here to load  ", ImVec2( -1.0f, 0.0f ) );
-        if ( ::ImGui::BeginDragDropTarget() )
-        {
-            if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ); pl && assetMgr )
-            {
-                const std::string path( static_cast<const char*>( pl->Data ),
-                                        pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
-                const std::string js = ::Common::Utils::FileSystem::ReadFileContent( path );
-                // Only generic materials parse (PBR .demat lacks ShaderName -> load returns false, ignored).
-                if ( !js.empty() )
-                    ::Desert::Core::Serialize::LoadMaterialComponentFromJson( js, mat, *assetMgr );
-            }
-            ::ImGui::EndDragDropTarget();
-        }
+        ImGui::EndTable();
     }
 
     // Sizes a collider to the entity's mesh bounds (so the green wireframe wraps the visible object —
@@ -281,6 +264,37 @@ namespace Desert::Editor
 
     // Collider editor: same auto-built reflected UI as the one-liner, PLUS a one-time auto-fit on Add and
     // a manual "Fit to Mesh Bounds" button.
+    // Terrain: reflected TerrainData UI + the terrain MATERIAL (shader + schema params) in ONE
+    // section. Terrain has no mesh slots, so its material lives on a MaterialComponent that this
+    // entry manages implicitly — no separate component for the user to discover or confuse.
+    static ComponentEditorEntry MakeTerrainEntry()
+    {
+        ComponentEditorEntry e;
+        e.Name      = "Terrain";
+        e.CanRemove = true;
+        e.Has = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<::Desert::ECS::TerrainComponent>(); };
+        e.Add = []( ::Desert::ECS::Entity& en ) { en.AddComponent<::Desert::ECS::TerrainComponent>(); };
+        e.Remove = []( ::Desert::ECS::Entity& en )
+        {
+            en.RemoveComponent<::Desert::ECS::TerrainComponent>();
+            // The terrain's material rides along (it has no meaning without the terrain).
+            if ( en.HasComponent<::Desert::ECS::MaterialComponent>() )
+                en.RemoveComponent<::Desert::ECS::MaterialComponent>();
+        };
+        e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<::Desert::ECS::TerrainComponent>();
+            PropertyEditorBuilder::Draw( &c.Data, "TerrainData", ctx.AssetMgr(), ctx.UIHelper );
+
+            ::ImGui::Separator();
+            ::ImGui::TextDisabled( "Material" );
+            if ( !en.HasComponent<::Desert::ECS::MaterialComponent>() )
+                en.AddComponent<::Desert::ECS::MaterialComponent>();
+            DrawTerrainMaterialWidget( en, ctx.AssetMgr() );
+        };
+        return e;
+    }
+
     static ComponentEditorEntry MakeColliderEntry()
     {
         ComponentEditorEntry e;
@@ -391,16 +405,18 @@ namespace
 {
     const int _desert_collider_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeColliderEntry() );
+    const int _desert_terrain_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeTerrainEntry() );
 
     const int _desert_ism_component_reg = ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
          ::Desert::Editor::MakeInstancedStaticMeshEntry() );
 }
 
-DESERT_REGISTER_CUSTOM_COMPONENT(
-     ::Desert::ECS::MaterialComponent, "Material", true,
-     ( []( ::Desert::ECS::Entity& e, ::Desert::Core::Scene*, const ::Desert::Editor::ComponentEditContext& ctx )
-       { ::Desert::Editor::DrawMaterialComponentWidget( e, ctx.AssetMgr() ); } ) )
-
+// SINGLE SOURCE OF TRUTH: for MESH entities, materials (shader + params) are authored ONLY in
+// the material slots (PBR Materials -> Shader picker inside each material). The old standalone
+// "Shader Override" editor is gone; MaterialComponent remains (a) the RUNTIME override channel
+// for scripts / legacy scenes — surfaced by the PBR Materials banner with one-click clear —
+// and (b) the TERRAIN material holder (terrain has no mesh slots), edited below.
 // Script component: an entity can run SEVERAL scripts (like UE ActorComponents), shown as a list of slots.
 // Per slot: pick the .lua from a dropdown OR drag one from the File Explorer, Reload (hot-reload), and edit
 // the script's exposed Properties. "+ Add Script" appends a slot; the X removes one.

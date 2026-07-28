@@ -1,5 +1,7 @@
 #include "ThumbnailCache.hpp"
 
+#include <Common/Core/Constants.hpp>
+
 #include <Engine/Core/Formats/ImageFormat.hpp>
 
 #include <stb_image/stb_image.h>
@@ -27,13 +29,13 @@ namespace Desert::Editor
         for ( char& c : key )
             if ( !std::isalnum( static_cast<unsigned char>( c ) ) )
                 c = '_';
-        return "Cooked/Thumbnails/v" + std::to_string( CacheVersion() ) + "/" + key + ".png";
+        return ( Common::Constants::Path::COOKED_PATH / ( "Thumbnails/v" + std::to_string( CacheVersion() ) ) / ( key + ".png" ) ).string();
     }
 
     void ThumbnailCache::PurgeOldVersions()
     {
         std::error_code             ec;
-        const std::filesystem::path root( "Cooked/Thumbnails" );
+        const std::filesystem::path root( Common::Constants::Path::COOKED_PATH / "Thumbnails" );
         if ( !std::filesystem::exists( root, ec ) )
             return;
         const std::string keep = "v" + std::to_string( CacheVersion() );

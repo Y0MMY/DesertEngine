@@ -13,7 +13,7 @@ group "Tests"
         kind "Utility"
         targetdir "%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}"
         objdir "%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}"
-        
+
         for _, premake_file in ipairs(test_premake_files) do
             local test_dir = path.getdirectory(premake_file)
             local test_name = path.getname(test_dir)
@@ -22,10 +22,11 @@ group "Tests"
 
     project "RunAllTests"
         kind "Utility"
-        
+
+    if os.target() == "windows" then
         postbuildcommands {
             "if exist \"%{wks.location}\\run_tests.bat\" del \"%{wks.location}\\run_tests.bat\"",
-            
+
             "echo @echo off > \"%{wks.location}\\run_tests.bat\"",
             "echo setlocal enabledelayedexpansion >> \"%{wks.location}\\run_tests.bat\"",
             "echo set TEST_DIR=%{wks.location}\\build\\Bin\\Tests\\%{cfg.buildcfg}>> \"%{wks.location}\\run_tests.bat\"",
@@ -34,7 +35,7 @@ group "Tests"
             "echo set ERROR='0'>> \"%{wks.location}\\run_tests.bat\"",
             "echo echo ===== Starting Tests =====>> \"%{wks.location}\\run_tests.bat\"",
         }
-        
+
         for _, premake_file in ipairs(test_premake_files) do
             local test_dir = path.getdirectory(premake_file)
             local test_name = path.getname(test_dir)
@@ -52,7 +53,7 @@ group "Tests"
                 "echo )>> \"%{wks.location}\\run_tests.bat\"",
             }
         end
-        
+
         postbuildcommands {
             "echo echo ===== Test Results =====>> \"%{wks.location}\\run_tests.bat\"",
             "echo if !ERROR! == '0' (>> \"%{wks.location}\\run_tests.bat\"",
@@ -61,9 +62,16 @@ group "Tests"
             "echo   echo SOME TESTS FAILED>> \"%{wks.location}\\run_tests.bat\"",
             "echo )>> \"%{wks.location}\\run_tests.bat\"",
             "echo exit /b !ERROR!>> \"%{wks.location}\\run_tests.bat\"",
-            
+
             "call \"%{wks.location}\\run_tests.bat\""
         }
+    else
+        -- Unix-likes: one committed runner script does the same job as the
+        -- generated run_tests.bat above (runs every test binary, XML reports).
+        postbuildcommands {
+            'bash "%{wks.location}/scripts/MacOS/RunTests.sh" "%{wks.location}" "%{cfg.buildcfg}"'
+        }
+    end
 
 print("\n=== Test Configuration ===")
 print("Found test modules: " .. #test_premake_files)

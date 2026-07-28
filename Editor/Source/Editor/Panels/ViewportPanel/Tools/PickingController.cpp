@@ -7,7 +7,7 @@
 namespace Desert::Editor::Tools
 {
     void PickingController::Pick( ::Desert::Core::Scene& scene, const glm::vec2& mouseViewport,
-                                  const glm::vec2& viewportSize, bool gizmoHovered )
+                                  const glm::vec2& viewportSize, bool gizmoHovered, bool additive )
     {
         if ( gizmoHovered )
             return;
@@ -24,7 +24,11 @@ namespace Desert::Editor::Tools
         // Engine-owned ray cast vs scene meshes (shared with the foliage tool — one raycast, one resolution).
         ::Desert::Core::RaycastHit pick;
         if ( !scene.Raycast( ray, pick ) )
+        {
+            if ( !additive )
+                Core::SelectionManager::ClearSelection(); // click empty space = deselect
             return;
+        }
 
         Common::UUID selectedUUID = pick.Entity;
         auto&        registry     = scene.GetRegistry();
@@ -53,6 +57,9 @@ namespace Desert::Editor::Tools
             }
         }
 
-        Core::SelectionManager::SetSelected( selectedUUID );
+        if ( additive )
+            Core::SelectionManager::Toggle( selectedUUID );
+        else
+            Core::SelectionManager::SetSelected( selectedUUID );
     }
 } // namespace Desert::Editor::Tools

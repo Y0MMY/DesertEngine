@@ -1,7 +1,7 @@
 #include "MeshMaterial.hpp"
 
 #include <Engine/Assets/AssetManager.hpp>
-#include <Engine/Assets/Mesh/PBRMaterialAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Core/UUID.hpp>
@@ -37,9 +37,9 @@ namespace Desert::Editor::MeshMaterial
             return Common::UUID::Null();
 
         const std::string matStr = matPath.generic_string();
-        auto              asset  = mgr.FindByPath<Assets::PBRMaterialAsset>( matStr );
+        auto              asset  = mgr.FindByPath<Assets::SurfaceMaterialAsset>( matStr );
         if ( !asset )
-            asset = mgr.CreateAsset<Assets::PBRMaterialAsset>( Assets::AssetPriority::High, matStr );
+            asset = mgr.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, matStr );
         if ( !asset )
             return Common::UUID::Null();
 

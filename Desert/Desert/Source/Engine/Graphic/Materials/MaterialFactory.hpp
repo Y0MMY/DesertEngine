@@ -6,12 +6,13 @@
 
 namespace Desert::Assets
 {
-    class PBRMaterialAsset;
+    class SurfaceMaterialAsset;
 }
 
 namespace Desert::Graphic
 {
     class StaticMaterialPBR;
+    class DataDrivenMaterial;
 
     class MaterialFactory
     {
@@ -21,7 +22,11 @@ namespace Desert::Graphic
 
         // Copy a PBR asset's reflected data into a live runtime material and (re)bind its textures.
         // Used by CreateMaterial and by the editor for live edit -> viewport sync.
-        static void ApplyPBRAsset( StaticMaterialPBR& material, const Assets::PBRMaterialAsset& asset );
+        static void ApplyPBRAsset( StaticMaterialPBR& material, const Assets::SurfaceMaterialAsset& asset );
+
+        // Apply a custom-shader material asset (ShaderName/ShaderParams/ShaderTextures) onto its
+        // runtime DataDrivenMaterial. Counterpart of ApplyPBRAsset for the generic path.
+        static void ApplyShaderAsset( DataDrivenMaterial& material, const Assets::SurfaceMaterialAsset& asset );
 
         // Create material instance from asset (includes resolved textures)
         static std::shared_ptr<MaterialInstance> CreateMaterialInstance( const Assets::MaterialAsset* asset,
