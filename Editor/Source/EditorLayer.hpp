@@ -63,6 +63,9 @@ namespace Desert::Editor
         // After an unclean exit, offers to reopen the newest autosave. No-op unless one was found.
         void DrawRecoveryPopup();
 
+        // Modal for naming + saving the current docking layout (opened from View -> Layouts).
+        void DrawLayoutSavePopup();
+
         // Play mode: snapshot the scene on Play, restore it on Stop (so play-time changes don't persist).
         void OnScenePlay();
         void OnSceneStop();
@@ -127,6 +130,11 @@ namespace Desert::Editor
         // Crash recovery: set at startup when the previous session crashed and an autosave was found.
         bool                  m_ShowRecoveryPrompt = false;
         std::filesystem::path m_RecoveryAutosave;
+
+        // Saveable layouts: pending "reset to default docking" and the save-layout modal state.
+        bool m_ResetDefaultLayout  = false;
+        bool m_ShowSaveLayoutPopup = false;
+        char m_LayoutNameBuf[64]   = {};
 #endif
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         bool                                    m_OpenScenePopup     = false;

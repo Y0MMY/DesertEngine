@@ -17,6 +17,7 @@
 #include <Engine/Scripting/ScriptEngine.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include "Editor/Core/CrashRecovery.hpp"
+#include "Editor/Core/LayoutManager.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
@@ -661,8 +662,11 @@ namespace Desert::Editor
 
             // First run (nothing saved in imgui.ini for this dockspace): lay the panels
             // out into a sensible default instead of leaving them floating in a pile.
-            // Checked BEFORE DockSpace() — the call itself creates the node.
-            const bool buildDefaultLayout = ::ImGui::DockBuilderGetNode( dockspace_id ) == nullptr;
+            // Checked BEFORE DockSpace() — the call itself creates the node. "Reset to Default
+            // Layout" (View -> Layouts) forces the same rebuild on demand.
+            const bool buildDefaultLayout =
+                 ::ImGui::DockBuilderGetNode( dockspace_id ) == nullptr || m_ResetDefaultLayout;
+            m_ResetDefaultLayout = false;
 
             ::ImGui::DockSpace( dockspace_id, dockSize, dockspace_flags );
 
@@ -746,6 +750,7 @@ namespace Desert::Editor
 
         DrawCommandPalette();
         DrawRecoveryPopup();
+        DrawLayoutSavePopup();
 
         ::ImGui::End(); // End dockspace
 
@@ -832,6 +837,45 @@ namespace Desert::Editor
             if ( ImGui::Button( "Ignore", ImVec2( 100.0f, 0.0f ) ) )
             {
                 m_ShowRecoveryPrompt = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    void EditorLayer::DrawLayoutSavePopup()
+    {
+        namespace ImGui = ::ImGui;
+
+        if ( !m_ShowSaveLayoutPopup )
+            return;
+
+        constexpr const char* kId = "Save Layout##saveLayout";
+        ImGui::OpenPopup( kId );
+
+        const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos( center, ImGuiCond_Appearing, ImVec2( 0.5f, 0.5f ) );
+
+        if ( ImGui::BeginPopupModal( kId, nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        {
+            ImGui::TextUnformatted( "Layout name:" );
+            ImGui::SetNextItemWidth( 260.0f );
+            const bool submit = ImGui::InputText( "##layoutName", m_LayoutNameBuf, sizeof( m_LayoutNameBuf ),
+                                                  ImGuiInputTextFlags_EnterReturnsTrue );
+
+            const bool valid = !LayoutManager::Sanitize( m_LayoutNameBuf ).empty();
+            ImGui::BeginDisabled( !valid );
+            if ( ( ImGui::Button( "Save", ImVec2( 110.0f, 0.0f ) ) || submit ) && valid )
+            {
+                LayoutManager::Save( m_LayoutNameBuf );
+                m_ShowSaveLayoutPopup = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if ( ImGui::Button( "Cancel", ImVec2( 110.0f, 0.0f ) ) )
+            {
+                m_ShowSaveLayoutPopup = false;
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();
@@ -1396,6 +1440,29 @@ namespace Desert::Editor
         ImGui::MenuItem( "Profiler", "", &m_ShowProfiler, true );
         if ( ImGui::MenuItem( "Perf HUD", "", &EditorPreferences::Get().ShowPerfHud, true ) )
             EditorPreferences::Save(); // persist the toggle like the rest of the user prefs
+
+        ImGui::Separator();
+        if ( ImGui::BeginMenu( "Layouts" ) )
+        {
+            for ( const auto& name : LayoutManager::List() )
+            {
+                if ( ImGui::MenuItem( name.c_str() ) )
+                    LayoutManager::Load( name );
+                if ( ImGui::IsItemHovered() && ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
+                    LayoutManager::Delete( name ); // right-click removes it
+            }
+            ImGui::Separator();
+            if ( ImGui::MenuItem( "Save Current Layout..." ) )
+            {
+                m_LayoutNameBuf[0]    = '\0';
+                m_ShowSaveLayoutPopup = true;
+            }
+            if ( ImGui::MenuItem( "Reset to Default Layout" ) )
+                m_ResetDefaultLayout = true;
+            ImGui::EndMenu();
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Named docking layouts. Right-click a layout to delete it." );
 
         ImGui::EndMenu();
     }
