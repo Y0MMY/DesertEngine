@@ -1305,7 +1305,9 @@ namespace Desert::Editor
 
         m_MainScene->Init();
 
-        // reset (not release) — assigning a new unique_ptr already destroys the old; release() leaked it.
+        // Destroy the old registry FIRST: its destructor unregisters the editor passes by name, and
+        // assignment would run it after the new registry already re-registered them.
+        m_RenderRegistry.reset();
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
 
         // Update recent scenes
@@ -1591,7 +1593,9 @@ namespace Desert::Editor
         serializer.DeserializeFromJson( m_PlaySnapshot );
         m_MainScene->Init();
 
-        // reset (not release) — assigning a new unique_ptr already destroys the old; release() leaked it.
+        // Destroy the old registry FIRST: its destructor unregisters the editor passes by name, and
+        // assignment would run it after the new registry already re-registered them.
+        m_RenderRegistry.reset();
         m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
 
         m_MainScene->SetState( SceneState::Edit );

@@ -21,7 +21,6 @@
 
 #include "Systems/Scene/Mesh/MeshRenderer.hpp"
 #include "Systems/Scene/Skybox/SkyboxRenderer.hpp"
-#include "Systems/Scene/Grid/GridRenderer.hpp"
 #include "Systems/Scene/Terrain/TerrainRenderer.hpp"
 #include "Systems/Scene/PostProcessing/TonemapRenderer.hpp"
 #include "Systems/Scene/PostProcessing/JumpFloodOutlineRenderer.hpp"
@@ -36,6 +35,7 @@
 #include <Engine/Core/SceneSettings.hpp>
 
 #include <Engine/Graphic/IRenderSystem.hpp>
+#include <Engine/Graphic/ExternalRenderPass.hpp>
 
 namespace Desert::Core
 {
@@ -162,9 +162,17 @@ namespace Desert::Graphic
         void RegisterRenderPass( RenderPhaseID phase, const std::string& name, std::function<void()> executeFunc,
                                  const GraphicsPipelineSpecification& pipeSpec = {} );
 
-        void RegisterExternalPass( std::string&& name, std::function<void()> execute,
-                                   std::shared_ptr<RenderPass>&& renderPass )
+        // External (editor) pass injection: wraps the specification into an internal render system so
+        // the pass participates in the normal graph build (phases, dependencies, pass merging).
+        // Re-registering the same name replaces the previous pass; both rebuild the graph.
+        void RegisterExternalPass( ExternalPassSpecification&& spec );
+        void UnregisterExternalPass( const std::string& name );
+
+        // True while the scene runs in Play mode (refreshed each BeginScene). External passes use this
+        // to hide authoring aids during gameplay.
+        bool IsScenePlaying() const
         {
+            return m_ScenePlaying;
         }
 
         std::shared_ptr<Framebuffer> GetFramebufferForPhase( RenderPhaseID phase );

@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/RenderPass.hpp>
+#include <Engine/Graphic/ExternalRenderPass.hpp>
 
 #include <Common/Core/Core.hpp>
 #include <Engine/Core/Camera.hpp>
@@ -139,8 +140,10 @@ namespace Desert::Core
 
         void Serialize( const Assets::AssetManager* assetManager ) const;
 
-        void RegisterExternalPass( std::string&& name, std::function<void()> execute,
-                                   std::shared_ptr<Graphic::RenderPass>&& renderPass );
+        // Editor Pass API: inject a render pass into the scene render graph from outside the engine
+        // (debug draw, gizmos, authoring aids). See Graphic::ExternalPassSpecification for placement.
+        void RegisterExternalPass( Graphic::ExternalPassSpecification&& spec );
+        void UnregisterExternalPass( const std::string& name );
 
         const std::weak_ptr<Core::Camera>& GetMainCamera() const
         {

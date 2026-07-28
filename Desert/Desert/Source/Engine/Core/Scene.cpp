@@ -316,10 +316,14 @@ namespace Desert::Core
         return serializer.SaveToFile();
     }
 
-    void Scene::RegisterExternalPass( std::string&& name, std::function<void()> execute,
-                                      std::shared_ptr<Graphic::RenderPass>&& renderPass )
+    void Scene::RegisterExternalPass( Graphic::ExternalPassSpecification&& spec )
     {
-        m_SceneRenderer->RegisterExternalPass( std::move( name ), execute, std::move( renderPass ) );
+        m_SceneRenderer->RegisterExternalPass( std::move( spec ) );
+    }
+
+    void Scene::UnregisterExternalPass( const std::string& name )
+    {
+        m_SceneRenderer->UnregisterExternalPass( name );
     }
 
     void Scene::OnEntityCreated_Camera()

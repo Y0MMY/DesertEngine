@@ -86,11 +86,6 @@ namespace Desert::Graphic
         if ( !meshSystem->Initialize() )
             DESERT_VERIFY( false );
 
-        // Infinite editor grid (draws after geometry, depth-occluded, into the scene framebuffer).
-        RegisterSystem<System::GridRenderer>( "GridSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
-        if ( !SP_CAST( System::GridRenderer, m_RenderSystems["GridSystem"] )->Initialize() )
-            DESERT_VERIFY( false );
-
         // GPU terrain (tessellated patch grid; opaque geometry, depth-tested with the meshes).
         RegisterSystem<System::TerrainRenderer>( "TerrainSystem", this, m_TargetFramebuffer,
                                                  m_RenderGraphBuilder );
@@ -235,11 +230,6 @@ namespace Desert::Graphic
         const bool anisoChanged  = RenderConfig::AnisotropyLevel.exchange( desiredAniso ) != desiredAniso;
         if ( filterChanged || anisoChanged )
             Renderer::GetInstance().RecreateImageSamplers();
-
-        // The grid is an AUTHORING aid: honour the setting only while editing — never in Play (that
-        // includes the standalone Runtime player, which is permanently in Play).
-        UNIQUE_GET_AS( System::GridRenderer, m_RenderSystems["GridSystem"] )
-             ->SetShowGrid( sceneSettings.ShowGrid && !m_ScenePlaying );
 
         m_BloomEnabled = sceneSettings.EnableBloom;
         UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )
@@ -607,6 +597,69 @@ namespace Desert::Graphic
     void SceneRenderer::AddSpotLight( ShaderProtocols::SpotLightPayload&& spotLight )
     {
         m_SpotLight.SpotLights.push_back( std::move( spotLight ) );
+    }
+
+    namespace
+    {
+        // Adapts an ExternalPassSpecification to the render-system interface so external passes flow
+        // through the same graph build as engine systems (phases, dependencies, same-target merging).
+        // The target framebuffer is looked up at RegisterPasses time, so the adapter survives
+        // SceneRenderer re-Init (which recreates the framebuffers) until the owner re-registers.
+        class ExternalPassSystem final : public IRenderSystem
+        {
+        public:
+            ExternalPassSystem( SceneRenderer* renderer, ExternalPassSpecification&& spec )
+                 : m_Renderer( renderer ), m_Spec( std::move( spec ) )
+            {
+            }
+
+            void RegisterPasses( RenderGraphBuilder& builder ) override
+            {
+                const auto& target = m_Renderer->GetTargetFramebuffer();
+                if ( !target || !m_Spec.Execute )
+                    return;
+
+                builder.AddPass(
+                     m_Spec.Name, m_Spec.Phase,
+                     [this]()
+                     {
+                         const auto& target = m_Renderer->GetTargetFramebuffer();
+                         ExternalPassContext ctx;
+                         ctx.Camera       = m_Renderer->GetMainCamera();
+                         ctx.Target       = target.get();
+                         ctx.Depth        = target && target->GetDepthAttachmentCount() > 0
+                                                 ? target->GetDepthAttachmentImage().get()
+                                                 : nullptr;
+                         ctx.ScenePlaying = m_Renderer->IsScenePlaying();
+                         m_Spec.Execute( ctx );
+                     },
+                     m_Spec.PipelineSpecification, target, m_Spec.Dependencies );
+            }
+
+        private:
+            SceneRenderer*            m_Renderer;
+            ExternalPassSpecification m_Spec;
+        };
+
+        // Namespace external passes so they can never collide with (or evict) an engine system.
+        std::string ExternalSystemKey( const std::string& name )
+        {
+            return "External:" + name;
+        }
+    } // namespace
+
+    void SceneRenderer::RegisterExternalPass( ExternalPassSpecification&& spec )
+    {
+        DESERT_VERIFY( !spec.Name.empty() && spec.Execute );
+        auto key = ExternalSystemKey( spec.Name );
+        m_RenderSystems[key] = std::make_shared<ExternalPassSystem>( this, std::move( spec ) );
+        RebuildRenderGraph();
+    }
+
+    void SceneRenderer::UnregisterExternalPass( const std::string& name )
+    {
+        if ( m_RenderSystems.erase( ExternalSystemKey( name ) ) > 0 )
+            RebuildRenderGraph();
     }
 
     void SceneRenderer::RegisterRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system )
