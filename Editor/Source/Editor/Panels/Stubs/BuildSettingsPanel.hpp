@@ -22,6 +22,7 @@ namespace Desert::Editor
     private:
         int         m_Platform  = 0;
         int         m_Config    = 1;
+        bool        m_AppBundle = true; // macOS: .app with bundled MoltenVK/loader
         std::string m_OutputDir = "Build/Output";
 
         // Async packaging state (worker writes, UI reads).

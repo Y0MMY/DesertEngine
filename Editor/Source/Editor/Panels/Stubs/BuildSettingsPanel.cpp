@@ -40,6 +40,12 @@ namespace Desert::Editor
         ImGui::RadioButton( "Release", &m_Config, 1 );
 
         ImGui::Spacing();
+#ifdef DESERT_PLATFORM_MACOS
+        ImGui::Checkbox( ".app bundle (MoltenVK inside — no Homebrew on the player's machine)",
+                         &m_AppBundle );
+#endif
+
+        ImGui::Spacing();
         ImGui::TextUnformatted( "Output folder" );
         ImGui::SetNextItemWidth( 320.0f );
         Utils::ImGuiUtilities::InputText( m_OutputDir, "##BuildOutputDir" );
@@ -66,8 +72,9 @@ namespace Desert::Editor
         {
             // Snapshot the options on the UI thread; the copy work runs on a pool worker.
             PackageOptions options;
-            options.OutputDir = m_OutputDir;
-            options.Config    = m_Config == 0 ? "Debug" : "Release";
+            options.OutputDir    = m_OutputDir;
+            options.Config       = m_Config == 0 ? "Debug" : "Release";
+            options.MacAppBundle = m_AppBundle;
 
             m_Building.store( true );
             m_HasResult.store( false );

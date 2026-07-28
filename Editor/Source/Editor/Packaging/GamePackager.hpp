@@ -8,6 +8,9 @@ namespace Desert::Editor
     {
         std::string OutputDir = "Build/Output"; // relative to the editor cwd, or absolute
         std::string Config    = "Release";      // which Runtime binary to bundle: "Debug" | "Release"
+        // macOS: produce <Name>.app (launcher + Info.plist + MoltenVK/loader inside Contents/Frameworks
+        // so the player machine needs no Homebrew). false -> plain folder + run.sh.
+        bool MacAppBundle = true;
     };
 
     struct PackageResult
