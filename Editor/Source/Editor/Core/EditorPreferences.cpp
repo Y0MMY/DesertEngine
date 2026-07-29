@@ -2,6 +2,7 @@
 
 #include <Editor/Core/GizmoState.hpp>
 
+#include <Engine/Graphic/RenderConfig.hpp>
 #include <Engine/Project/ProjectContext.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
@@ -36,6 +37,10 @@ namespace Desert::Editor
 
     static void ApplyToGizmoState( const EditorPreferences& p )
     {
+        // MSAA is consumed by SceneRenderer::Init — Load() runs in the EditorLayer constructor,
+        // before any render system initializes, so a startup-baked setting lands in time.
+        Graphic::RenderConfig::MSAASamples = p.MSAASamples;
+
         Core::GizmoState::SetTranslateSnap( p.TranslateSnap );
         Core::GizmoState::SetRotateSnapDegrees( p.RotateSnapDeg );
         Core::GizmoState::SetScaleSnap( p.ScaleSnap );

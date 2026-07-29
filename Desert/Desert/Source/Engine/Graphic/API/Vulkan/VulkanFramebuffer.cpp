@@ -44,6 +44,14 @@ namespace Desert::Graphic::API::Vulkan
                                                    : VK_ATTACHMENT_STORE_OP_STORE;
         };
 
+        // MSAA: base attachments render at N samples; every COLOR gets a companion single-sample
+        // RESOLVE attachment (appended AFTER the base ones) the subpass resolves into at the end.
+        // Downstream consumers read the resolved images (see below), so only this file knows MSAA
+        // exists. Depth is not resolved — passes that sample depth are gated at the settings level.
+        const uint32_t samples = m_FramebufferSpecification.Samples > 1 ? m_FramebufferSpecification.Samples : 1;
+        const VkSampleCountFlagBits vkSamples = static_cast<VkSampleCountFlagBits>( samples );
+        std::vector<VkAttachmentReference> resolveAttachmentReferences;
+
         uint32_t i = 0;
         for ( const auto& attachment : m_FramebufferSpecification.Attachments.Attachments )
         {
@@ -52,7 +60,7 @@ namespace Desert::Graphic::API::Vulkan
             {
                 VkAttachmentDescription& depthAttachment = attachmentDescriptions.emplace_back();
                 depthAttachment.format         = GetImageVulkanFormat( format );
-                depthAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+                depthAttachment.samples        = vkSamples;
                 depthAttachment.loadOp         = toVkLoadOp( attachment.LoadOp );
                 depthAttachment.storeOp        = toVkStoreOp( attachment.StoreOp );
                 depthAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -70,25 +78,53 @@ namespace Desert::Graphic::API::Vulkan
             {
                 VkAttachmentDescription& colorAttachment = attachmentDescriptions.emplace_back();
                 colorAttachment.format         = GetImageVulkanFormat( format );
-                colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+                colorAttachment.samples        = vkSamples;
                 colorAttachment.loadOp         = toVkLoadOp( attachment.LoadOp );
                 colorAttachment.storeOp        = toVkStoreOp( attachment.StoreOp );
                 colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
                 colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                 colorAttachment.initialLayout  = attachment.LoadOp == AttachmentLoad::Load
-                                                     ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                     ? ( samples > 1 ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                                                                     : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL )
                                                      : VK_IMAGE_LAYOUT_UNDEFINED;
-                colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                colorAttachment.finalLayout    = samples > 1 ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                                                             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
                 colorAttachmentReferences.push_back( { i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } );
             }
             i++;
         }
 
+        // Companion resolve attachments (MSAA only): single-sample, DONT_CARE on load (the resolve
+        // overwrites every pixel), shader-readable at the end — exactly what downstream passes expect.
+        if ( samples > 1 )
+        {
+            for ( const auto& attachment : m_FramebufferSpecification.Attachments.Attachments )
+            {
+                const auto format = attachment.Format;
+                if ( Graphic::Utils::IsDepthFormat( format ) )
+                    continue;
+                VkAttachmentDescription& resolveAttachment = attachmentDescriptions.emplace_back();
+                resolveAttachment.format         = GetImageVulkanFormat( format );
+                resolveAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+                resolveAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                resolveAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+                resolveAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                resolveAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                resolveAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+                resolveAttachment.finalLayout    = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+                resolveAttachmentReferences.push_back( { i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } );
+                i++;
+            }
+        }
+
         VkSubpassDescription subpassDescription = {};
         subpassDescription.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpassDescription.colorAttachmentCount = static_cast<uint32_t>( colorAttachmentReferences.size() );
         subpassDescription.pColorAttachments    = colorAttachmentReferences.data();
+        subpassDescription.pResolveAttachments =
+             resolveAttachmentReferences.empty() ? nullptr : resolveAttachmentReferences.data();
         subpassDescription.pDepthStencilAttachment = hasDepth ? &depthAttachmentReference : nullptr;
 
         std::vector<VkSubpassDependency> dependencies;
@@ -177,6 +213,7 @@ namespace Desert::Graphic::API::Vulkan
                  .Height     = m_FramebufferSpecification.Height,
                  .Format     = format,
                  .Mips       = 1,
+                 .Samples    = samples,
                  .Usage      = Core::Formats::Image2DUsage::Attachment,
                  .Properties = Core::Formats::Sample };
 
@@ -185,10 +222,38 @@ namespace Desert::Graphic::API::Vulkan
 
             if ( Graphic::Utils::IsDepthFormat( format ) )
                 m_DepthAttachment = image;
+            else if ( samples > 1 )
+                m_MultisampleColorAttachments.push_back( image ); // render target; consumers get the resolve
             else
                 m_ColorAttachments.push_back( image );
 
             attachments.push_back( image->GetResource().ImageView );
+        }
+
+        // Resolve images (MSAA only), appended in the SAME order the resolve attachment
+        // descriptions were. These are what GetColorAttachmentImage() hands out — single-sample,
+        // shader-readable — so the post stack / ImGui viewport never know MSAA happened.
+        if ( samples > 1 )
+        {
+            for ( const auto& attachment : m_FramebufferSpecification.Attachments.Attachments )
+            {
+                const auto format = attachment.Format;
+                if ( Graphic::Utils::IsDepthFormat( format ) )
+                    continue;
+                Core::Formats::Image2DSpecification resolveSpec = {
+                     .Tag        = m_FramebufferSpecification.DebugName + "_resolve",
+                     .Width      = m_FramebufferSpecification.Width,
+                     .Height     = m_FramebufferSpecification.Height,
+                     .Format     = format,
+                     .Mips       = 1,
+                     .Usage      = Core::Formats::Image2DUsage::Attachment,
+                     .Properties = Core::Formats::Sample };
+
+                auto image = std::make_shared<VulkanImage2D>( resolveSpec );
+                image->RT_Invalidate();
+                m_ColorAttachments.push_back( image );
+                attachments.push_back( image->GetResource().ImageView );
+            }
         }
 
         VkFramebufferCreateInfo framebufferInfo = {};
@@ -234,6 +299,7 @@ namespace Desert::Graphic::API::Vulkan
         m_RenderPass     = VK_NULL_HANDLE;
         m_RenderPassLoad = VK_NULL_HANDLE;
         m_ColorAttachments.clear();
+        m_MultisampleColorAttachments.clear();
         m_DepthAttachment = nullptr;
 
         return BOOLSUCCESS;

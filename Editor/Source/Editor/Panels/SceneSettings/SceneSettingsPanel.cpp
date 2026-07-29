@@ -1,9 +1,15 @@
 #include "SceneSettingsPanel.hpp"
 
+#include <Editor/Core/EditorPreferences.hpp>
+
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/SceneSettings.hpp>
+#include <Engine/Graphic/RenderConfig.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/Image.hpp>
+
+#include <algorithm>
+#include <format>
 
 #include <ImGui/imgui.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -61,6 +67,35 @@ namespace Desert::Editor
             ImGui::SliderFloat( "Lens Dispersion", &s.LensDispersion, 0.0f, 3.0f );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Chromatic rainbow fringe around bright sources (glare). Needs Bloom on." );
+        }
+
+        if ( ImGui::CollapsingHeader( "Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            // MSAA is a USER pref (persisted in editor.json), not scene data: pipelines bake their
+            // sample count at startup, so the switch applies on the next editor start.
+            auto&       prefs    = EditorPreferences::Get();
+            const int   maxMsaa  = Graphic::RenderConfig::MaxMSAASamples.load();
+            const char* items[]  = { "Off", "2x", "4x", "8x" };
+            const int   values[] = { 1, 2, 4, 8 };
+            int         idx      = 0;
+            for ( int i = 0; i < IM_ARRAYSIZE( values ); ++i )
+                if ( values[i] == prefs.MSAASamples )
+                    idx = i;
+            if ( ImGui::Combo( "MSAA", &idx, items, IM_ARRAYSIZE( items ) ) )
+            {
+                prefs.MSAASamples = std::min( values[idx], maxMsaa );
+                EditorPreferences::Save();
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Hardware multisampling of the scene viewport (device max: %dx).\n"
+                                   "Applies on the next editor start.",
+                                   maxMsaa );
+            const int active = Graphic::RenderConfig::MSAASamplesActive.load();
+            if ( prefs.MSAASamples != active )
+                ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ),
+                                    "Restart the editor to apply (%s now, %dx selected).",
+                                    active > 1 ? std::format( "{}x", active ).c_str() : "off",
+                                    prefs.MSAASamples );
         }
 
         if ( ImGui::CollapsingHeader( "Textures", ImGuiTreeNodeFlags_DefaultOpen ) )

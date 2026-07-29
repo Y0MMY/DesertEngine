@@ -35,9 +35,16 @@ namespace Desert::Graphic
         const auto height = window ? window->GetHeight() : 720;
 
 
-        // Framebuffer
+        // Framebuffer. MSAA applies HERE only: every scene system renders into this target at N
+        // samples and the render pass resolves to single-sample for the post stack. Read once —
+        // pipelines bake their sample count, so a change applies on the next start.
         FramebufferSpecification fbSpec;
         fbSpec.DebugName = "Composite framebuffer";
+        fbSpec.Samples   = static_cast<uint32_t>(
+             std::clamp( RenderConfig::MSAASamples.load(), 1, RenderConfig::MaxMSAASamples.load() ) );
+        if ( fbSpec.Samples != 1 && fbSpec.Samples != 2 && fbSpec.Samples != 4 && fbSpec.Samples != 8 )
+            fbSpec.Samples = 1;
+        RenderConfig::MSAASamplesActive = static_cast<int>( fbSpec.Samples );
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
 

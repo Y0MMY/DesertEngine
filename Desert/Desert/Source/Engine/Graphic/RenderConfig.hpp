@@ -22,5 +22,14 @@ namespace Desert::Graphic
         static inline std::atomic<float> MaxAnisotropy{ 0.0f };
         // User-selected anisotropy level (1/2/4/8/16); clamped to MaxAnisotropy at sampler creation.
         static inline std::atomic<int> AnisotropyLevel{ 8 };
+
+        // MSAA sample count for the scene's composite framebuffer (1 = off, 2/4/8). Read ONCE at
+        // SceneRenderer::Init (pipelines bake their sample count), so a change applies on the next
+        // editor start. Clamped to MaxMSAASamples (device color&depth sample caps, set at init).
+        static inline std::atomic<int> MSAASamples{ 1 };
+        static inline std::atomic<int> MaxMSAASamples{ 1 };
+        // What the running renderer actually baked at Init (the UI compares against this to show
+        // its "restart to apply" note; MSAASamples may already hold the NEXT start's selection).
+        static inline std::atomic<int> MSAASamplesActive{ 1 };
     };
 } // namespace Desert::Graphic

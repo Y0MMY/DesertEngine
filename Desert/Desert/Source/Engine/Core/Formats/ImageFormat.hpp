@@ -78,6 +78,9 @@ namespace Desert::Core::Formats
         uint32_t              Height;
         const ImageFormat     Format;
         uint32_t              Mips = 1;
+        // MSAA sample count (1/2/4/8) — attachments only; a multisampled image must have Mips == 1
+        // and is consumed by the render pass RESOLVE, not by ordinary samplers.
+        uint32_t              Samples = 1;
         ImagePixelData        Data;
         const Image2DUsage    Usage;
         const ImageProperties Properties;

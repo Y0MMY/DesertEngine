@@ -90,6 +90,9 @@ namespace Desert::Graphic::API::Vulkan
     private:
         std::shared_ptr<Image2D>              m_DepthAttachment;
         std::vector<std::shared_ptr<Image2D>> m_ColorAttachments;
+        // MSAA render targets (Samples > 1). The subpass resolves them into m_ColorAttachments,
+        // which is all any consumer ever sees — kept here only to own their lifetime.
+        std::vector<std::shared_ptr<Image2D>> m_MultisampleColorAttachments;
 
         struct ExternalAttachmentInfo
         {

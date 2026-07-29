@@ -290,9 +290,13 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanPipeline::CreateMultisampleState()
     {
+        // The pipeline must rasterize at its target framebuffer's sample count (MSAA) — a
+        // mismatch is a validation error and a black frame.
+        const uint32_t samples =
+             m_Specification.Framebuffer ? m_Specification.Framebuffer->GetSpecification().Samples : 1;
         m_Multisampling = VkPipelineMultisampleStateCreateInfo{
              .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-             .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+             .rasterizationSamples = static_cast<VkSampleCountFlagBits>( samples > 1 ? samples : 1 ),
              .sampleShadingEnable  = VK_FALSE };
     }
 

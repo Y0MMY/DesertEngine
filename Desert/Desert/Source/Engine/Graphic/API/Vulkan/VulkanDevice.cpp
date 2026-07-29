@@ -81,6 +81,19 @@ namespace Desert::Graphic::API::Vulkan
         Graphic::RenderConfig::MaxAnisotropy =
              m_Capabilities.SupportsAnisotropy ? m_Capabilities.MaxAnisotropy : 0.0f;
 
+        // Publish the device's MSAA ceiling (color AND depth must support the count).
+        {
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties( selectedPhysicalDevice, &props );
+            const VkSampleCountFlags counts = props.limits.framebufferColorSampleCounts &
+                                              props.limits.framebufferDepthSampleCounts;
+            const int maxMsaa = ( counts & VK_SAMPLE_COUNT_8_BIT ) ? 8
+                                : ( counts & VK_SAMPLE_COUNT_4_BIT ) ? 4
+                                : ( counts & VK_SAMPLE_COUNT_2_BIT ) ? 2
+                                                                     : 1;
+            Graphic::RenderConfig::MaxMSAASamples = maxMsaa;
+        }
+
         DESERT_VERIFY( selectedPhysicalDevice, "Could not find any physical devices!" );
 
         m_PhysicalDevice = selectedPhysicalDevice;

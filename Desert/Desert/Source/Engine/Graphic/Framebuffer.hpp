@@ -67,7 +67,12 @@ namespace Desert::Graphic
     {
         uint32_t                           Width   = 1280;
         uint32_t                           Height  = 720;
-        uint32_t                           Samples = 2; // Multisampling
+        // MSAA sample count (1 = off, 2/4/8...). When > 1 the Vulkan framebuffer renders into
+        // multisampled attachments and RESOLVES each color into a single-sample image at
+        // subpass end; GetColorAttachmentImage() returns the RESOLVED image, so downstream
+        // passes (post stack, ImGui viewport) are untouched. NOTE: the field was previously an
+        // unused "2" — it is honoured now, so the default must be OFF.
+        uint32_t                           Samples = 1;
         FramebufferAttachmentSpecification Attachments;
         std::string                        DebugName;
         bool                               NoResizeble = false;

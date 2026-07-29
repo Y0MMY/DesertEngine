@@ -18,6 +18,9 @@ namespace Desert::Editor
         bool  PersistentSnap   = false;
         int   AutosaveMinutes  = 5;     // 0 = autosave off
         bool  ShowPerfHud      = false; // in-viewport FPS / frame-graph / top-scopes overlay
+        // MSAA for the scene viewport (1 = off, 2/4/8). Applied at STARTUP (pipelines bake their
+        // sample count): Load() pushes it into RenderConfig before the SceneRenderer initializes.
+        int   MSAASamples      = 1;
 
         // Selection outline (Jump Flood) — an editor-only viewport visualization, not a scene property.
         // Pushed to the renderer each frame via SceneRenderer::SetOutlineSettings. Width/smoothness in px.

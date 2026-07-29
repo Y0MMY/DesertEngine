@@ -159,14 +159,21 @@ namespace Desert::Graphic::API::Vulkan
              .extent        = { m_Specification.Width, m_Specification.Height, 1 },
              .mipLevels     = m_Resource.MipLevels,
              .arrayLayers   = 1,
-             .samples       = VK_SAMPLE_COUNT_1_BIT,
+             // 2/4/8 map 1:1 onto the VK_SAMPLE_COUNT_*_BIT values.
+             .samples       = static_cast<VkSampleCountFlagBits>(
+                  m_Specification.Samples > 1 ? m_Specification.Samples : 1 ),
              .tiling        = VK_IMAGE_TILING_OPTIMAL,
              .usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
              .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
              .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
 
+        // A multisampled image is written by the render pass and consumed by its RESOLVE — plain
+        // transfer usage does not apply to it (and mip generation is illegal on MS images).
+        if ( m_Specification.Samples > 1 )
+            info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+
         if ( m_Specification.Usage == Core::Formats::Image2DUsage::Attachment )
-            info.usage |= Graphic::Utils::IsDepthFormat( m_Specification.Format ) ? 
+            info.usage |= Graphic::Utils::IsDepthFormat( m_Specification.Format ) ?
                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         
         if ( m_Specification.Properties & Core::Formats::Storage ) info.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
