@@ -175,10 +175,22 @@ namespace Desert::Graphic
 
     bool MaterialInstance::SetParamFromVec4( const std::string& name, const glm::vec4& value )
     {
-        if ( !m_Properties.HasProperty( name ) )
-            return false;
+        // Resolve the param's type so the vec4 is unpacked correctly. When this instance has never held the
+        // param — the common case for a bare runtime instance created from a primitive + MaterialComponent
+        // override (e.g. the Cornell Box walls) — fall back to the parent instance's declared type, then to
+        // Vec4 (store the full value losslessly). Previously this bailed when the property was absent, which
+        // silently DROPPED every such override, so those walls lost their authored albedo/roughness.
+        MaterialPropertyType type = MaterialPropertyType::Vec4;
+        if ( m_Properties.HasProperty( name ) )
+        {
+            type = m_Properties.GetPropertyType( name );
+        }
+        else if ( auto parent = m_ParentInstance.lock(); parent && parent->m_Properties.HasProperty( name ) )
+        {
+            type = parent->m_Properties.GetPropertyType( name );
+        }
 
-        switch ( m_Properties.GetPropertyType( name ) )
+        switch ( type )
         {
             case MaterialPropertyType::Float:
                 SetFloat( name, value.x );
@@ -198,8 +210,9 @@ namespace Desert::Graphic
             case MaterialPropertyType::Vec4:
                 SetVec4( name, value );
                 return true;
-            default: // Mat4 / Texture / Invalid — not vec4-packable
-                return false;
+            default: // Mat4 / Texture / Invalid — not vec4-packable; keep the raw vec4 so nothing is lost
+                SetVec4( name, value );
+                return true;
         }
     }
 

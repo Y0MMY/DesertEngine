@@ -40,6 +40,10 @@ namespace Desert::Graphic::System
                 {
                     if ( auto* f = std::get_if<float>( &v ) )
                         return *f;
+                    // A bare-instance override (no pre-existing typed property) is stored as a vec4; a scalar
+                    // param authored that way (e.g. RoughnessFactor from MaterialComponent) rides in .x.
+                    if ( auto* v4 = std::get_if<glm::vec4>( &v ) )
+                        return v4->x;
                     return current;
                 };
 
