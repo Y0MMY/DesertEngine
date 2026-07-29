@@ -169,7 +169,8 @@ namespace Desert::Graphic::System
         m_InstancedQueue.clear();
     }
 
-    uint32_t MeshRenderer::ComputeLOD( const glm::mat4& transform, const Mesh* mesh, int forcedLOD ) const
+    uint32_t MeshRenderer::ComputeLOD( const glm::mat4& transform, const Mesh* mesh, int forcedLOD,
+                                       int lodBias ) const
     {
         if ( forcedLOD >= 0 )
             return static_cast<uint32_t>( forcedLOD );
@@ -200,7 +201,10 @@ namespace Desert::Graphic::System
 
         // Screen-coverage proxy (radius / distance): larger / closer = finer LOD.
         const float coverage = radius / glm::max( dist, 0.001f );
-        return coverage > 0.20f ? 0u : coverage > 0.08f ? 1u : coverage > 0.03f ? 2u : 3u;
+        const int   base     = coverage > 0.20f ? 0 : coverage > 0.08f ? 1 : coverage > 0.03f ? 2 : 3;
+        // Per-mesh bias shifts the auto pick (+coarser / -finer); the draw side clamps to the
+        // submesh's actual LOD count, so 3 here just means "the coarsest available".
+        return static_cast<uint32_t>( std::clamp( base + lodBias, 0, 3 ) );
     }
 
     void MeshRenderer::SubmitGenericMesh( const GenericMeshRenderData& data )
@@ -520,7 +524,7 @@ namespace Desert::Graphic::System
             m_GlassMaterial->Bind( gi );
             renderer.RenderMesh( m_StaticGlassPipeline.get(), obj->Mesh, obj->Transform,
                                  m_GlassMaterial->GetMaterialExecutor(), 1, 0, obj->HiddenSubmeshes,
-                                 ComputeLOD( obj->Transform, obj->Mesh, obj->ForcedLOD ) );
+                                 ComputeLOD( obj->Transform, obj->Mesh, obj->ForcedLOD, obj->LODBias ) );
         }
         renderer.EndRenderPass();
     }
@@ -653,7 +657,9 @@ namespace Desert::Graphic::System
                 std::vector<const StaticMeshRenderData*> batchable;
                 for ( const auto* obj : bucket )
                 {
-                    if ( obj->HiddenSubmeshes != 0 )
+                    // Hidden submeshes and shadow-receive opt-outs are per-object state the shared
+                    // batch material can't carry — those objects take the per-object path.
+                    if ( obj->HiddenSubmeshes != 0 || !obj->ReceiveShadows )
                         singles.push_back( obj );
                     else
                         batchable.push_back( obj );
@@ -687,7 +693,13 @@ namespace Desert::Graphic::System
             std::vector<PBRGpuMaterial> gpuMaterials;
             gpuMaterials.reserve( singles.size() );
             for ( const auto* obj : singles )
-                gpuMaterials.push_back( BuildEffectiveMaterial( mat, FirstPBRSlot( *obj->MaterialSlots ) ) );
+            {
+                PBRGpuMaterial gm = BuildEffectiveMaterial( mat, FirstPBRSlot( *obj->MaterialSlots ) );
+                // ExtraParams.w rides the per-mesh Receive Shadows toggle (1 = skip sun shadows);
+                // the batched path only ever carries receivers, so it stays 0 there.
+                gm.ExtraParams.w = obj->ReceiveShadows ? 0.0f : 1.0f;
+                gpuMaterials.push_back( gm );
+            }
 
             if ( auto* sb = mat->Get<StorageBufferProperty>( "Materials" ) )
                 sb->SetRawData( gpuMaterials.data(),
@@ -736,7 +748,7 @@ namespace Desert::Graphic::System
                                                 : ( m_Wireframe && m_StaticWireframePipeline )
                                                       ? m_StaticWireframePipeline.get()
                                                       : m_StaticPipeline.get();
-                    const uint32_t lod = ComputeLOD( obj->Transform, obj->Mesh, obj->ForcedLOD );
+                    const uint32_t lod = ComputeLOD( obj->Transform, obj->Mesh, obj->ForcedLOD, obj->LODBias );
                     renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor(), 1, 0,
                                          obj->HiddenSubmeshes, lod );
                 }
@@ -1264,7 +1276,7 @@ namespace Desert::Graphic::System
                          return byMesh.back().second;
                      };
                      for ( const auto& rd : m_StaticQueue )
-                         if ( rd.Mesh )
+                         if ( rd.Mesh && rd.CastShadows )
                              bucketFor( rd.Mesh ).push_back( &rd );
 
                      // Pack all instanced-batch transforms contiguously; each batch reads its slice via
@@ -1315,7 +1327,8 @@ namespace Desert::Graphic::System
                      for ( const auto* rd : singles )
                          renderer.RenderMesh( m_ShadowPipeline.get(), rd->Mesh, rd->Transform,
                                               m_ShadowMaterial[c]->GetMaterialExecutor(), 1, 0, 0,
-                                              ComputeLOD( rd->Transform, rd->Mesh, rd->ForcedLOD ) );
+                                              ComputeLOD( rd->Transform, rd->Mesh, rd->ForcedLOD,
+                                                          rd->LODBias ) );
 
                      // Instanced path.
                      if ( instancingOn && !batches.empty() )
@@ -1501,6 +1514,9 @@ namespace Desert::Graphic::System
                 staticData.Outlined        = data.Outlined;
                 staticData.HiddenSubmeshes = data.HiddenSubmeshes;
                 staticData.ForcedLOD       = data.ForcedLOD;
+                staticData.LODBias         = data.LODBias;
+                staticData.CastShadows     = data.CastShadows;
+                staticData.ReceiveShadows  = data.ReceiveShadows;
 
                 m_StaticQueue.push_back( staticData );
                 break;

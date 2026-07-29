@@ -120,6 +120,11 @@ namespace Desert::Editor
             ImGui::SetNextItemWidth( 180.0f );
             if ( ImGui::Combo( "Force LOD", &cur, items, 5 ) )
                 materialComp.ForcedLOD = ( cur == 0 ) ? -1 : cur - 1;
+
+            ImGui::SetNextItemWidth( 180.0f );
+            ImGui::SliderInt( "LOD Bias", &materialComp.LODBias, -3, 3 );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Shifts the automatic LOD pick (+coarser, -finer). No effect while a LOD is forced." );
         }
 
         // Rendering: persistent outline + per-submesh visibility. Both write component fields the
@@ -130,6 +135,14 @@ namespace Desert::Editor
             ImGui::Checkbox( "Draw outline", &materialComp.OutlineDraw );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Always draw the outline for this mesh, even when it is not selected" );
+
+            ImGui::Checkbox( "Cast Shadows", &materialComp.CastShadows );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Skip this mesh in the shadow (depth) passes" );
+
+            ImGui::Checkbox( "Receive Shadows", &materialComp.ReceiveShadows );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Sun (directional) shadows are not applied to this mesh when off" );
 
             const size_t subCount = lodMesh ? lodMesh->GetSubmeshes().size() : 0;
             if ( subCount > 1 )

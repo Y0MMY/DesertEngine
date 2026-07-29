@@ -38,6 +38,9 @@ namespace Desert::Graphic::System
         bool     Outlined        = false;
         uint64_t HiddenSubmeshes = 0;  // bit i = submesh i hidden (static meshes)
         int      ForcedLOD       = -1; // -1 = auto (by distance); 0..N pins a LOD level
+        int      LODBias         = 0;  // shifts the auto LOD (ignored when forced)
+        bool     CastShadows     = true;
+        bool     ReceiveShadows  = true;
     };
 
     class MeshRenderer final : public RenderSystem
@@ -52,6 +55,9 @@ namespace Desert::Graphic::System
             bool                                  Outlined        = false;
             uint64_t                              HiddenSubmeshes = 0;  // bit i = submesh i hidden
             int                                   ForcedLOD       = -1; // -1 = auto (by distance)
+            int                                   LODBias         = 0;  // shifts the auto LOD (ignored when forced)
+            bool                                  CastShadows     = true;
+            bool                                  ReceiveShadows  = true;
         };
 
         struct SkinnedMeshRenderData
@@ -161,7 +167,8 @@ namespace Desert::Graphic::System
         // Which LOD level to draw for a mesh: a forced level (>= 0) wins; otherwise auto by screen
         // coverage (world bounding radius / camera distance), so big objects keep detail farther than
         // small ones. Returns 0 when LOD is off or there's no camera. Used by every mesh draw path.
-        uint32_t ComputeLOD( const glm::mat4& transform, const class Desert::Mesh* mesh, int forcedLOD ) const;
+        uint32_t ComputeLOD( const glm::mat4& transform, const class Desert::Mesh* mesh, int forcedLOD,
+                             int lodBias = 0 ) const;
 
         // Cascaded shadow maps (R32F light-space depth, one framebuffer per cascade). Recompute the
         // per-cascade light matrices once per frame BEFORE the render graph records (intra-phase order is

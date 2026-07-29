@@ -17,21 +17,30 @@ namespace Desert::Graphic::Render
         bool                                           Outlined        = false;
         uint64_t                                       HiddenSubmeshes = 0;  // bit i = submesh i hidden
         int                                            ForcedLOD       = -1; // -1 = auto (by distance)
+        int                                            LODBias         = 0;  // shifts the auto LOD (ignored when forced)
+        bool                                           CastShadows     = true;
+        bool                                           ReceiveShadows  = true;
 
         DrawStaticMeshCommand( Desert::Mesh* mesh, const std::vector<Graphic::MaterialInstance*>* materialSlots,
                                const glm::mat4& transform, bool outlined = false, uint64_t hiddenSubmeshes = 0,
-                               int forcedLOD = -1 )
+                               int forcedLOD = -1, int lodBias = 0, bool castShadows = true,
+                               bool receiveShadows = true )
              : Mesh( mesh ), MaterialSlots( materialSlots ), Transform( transform ), Outlined( outlined ),
-               HiddenSubmeshes( hiddenSubmeshes ), ForcedLOD( forcedLOD )
+               HiddenSubmeshes( hiddenSubmeshes ), ForcedLOD( forcedLOD ), LODBias( lodBias ),
+               CastShadows( castShadows ), ReceiveShadows( receiveShadows )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
             if ( MaterialSlots )
-                renderer.SubmitMesh(
-                     Mesh, *MaterialSlots, Transform,
-                     { .Outlined = Outlined, .HiddenSubmeshes = HiddenSubmeshes, .ForcedLOD = ForcedLOD } );
+                renderer.SubmitMesh( Mesh, *MaterialSlots, Transform,
+                                     { .Outlined        = Outlined,
+                                       .HiddenSubmeshes = HiddenSubmeshes,
+                                       .ForcedLOD       = ForcedLOD,
+                                       .LODBias         = LODBias,
+                                       .CastShadows     = CastShadows,
+                                       .ReceiveShadows  = ReceiveShadows } );
         }
     };
 

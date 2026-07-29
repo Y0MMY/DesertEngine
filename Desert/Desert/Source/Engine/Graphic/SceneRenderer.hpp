@@ -59,6 +59,9 @@ namespace Desert::Graphic
             bool                   Outlined        = false;
             uint64_t               HiddenSubmeshes = 0;  // bit i = submesh i hidden (static meshes)
             int                    ForcedLOD       = -1; // -1 = auto (by distance)
+            int                    LODBias         = 0;  // shifts the auto LOD (ignored when forced)
+            bool                   CastShadows     = true;
+            bool                   ReceiveShadows  = true;
         };
 
         ~SceneRenderer() = default;

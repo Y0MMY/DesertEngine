@@ -15,7 +15,7 @@ namespace Desert::Graphic
         glm::vec4 AlbedoAO;           // rgb = albedo, a = ambient occlusion
         glm::vec4 MetalRoughEmission; // x = metallic, y = roughness, z = emission strength, w = alpha cutoff
         glm::vec4 EmissionColor;      // rgb = emission color
-        glm::vec4 ExtraParams;        // xy = UV tiling, z = IOR, w = reserved
+        glm::vec4 ExtraParams;        // xy = UV tiling, z = IOR, w = 1 -> mesh does NOT receive sun shadows
         glm::vec4 GlassTint;          // rgb = glass tint, a = transmission (0 = opaque)
     };
 

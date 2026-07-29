@@ -480,7 +480,10 @@ namespace Desert::Graphic
                              .BoneMatrices    = extra.BoneMatrices,
                              .Outlined        = extra.Outlined,
                              .HiddenSubmeshes = extra.HiddenSubmeshes,
-                             .ForcedLOD       = extra.ForcedLOD } );
+                             .ForcedLOD       = extra.ForcedLOD,
+                             .LODBias         = extra.LODBias,
+                             .CastShadows     = extra.CastShadows,
+                             .ReceiveShadows  = extra.ReceiveShadows } );
     }
 
     void SceneRenderer::SubmitTerrain( const glm::mat4& transform, float size, int resolution,

@@ -294,7 +294,8 @@ namespace Desert::ECS
                          if ( submeshCount == 0 || ( ~pbrHidden & allMask ) != 0 )
                              renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
                                   targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, outlined,
-                                  pbrHidden, mesh.ForcedLOD );
+                                  pbrHidden, mesh.ForcedLOD, mesh.LODBias, mesh.CastShadows,
+                                  mesh.ReceiveShadows );
                      } );
             }
 

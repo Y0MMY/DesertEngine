@@ -41,6 +41,13 @@ namespace Desert::Assets
         std::optional<Geometry::PrimitiveType>      Primitive;
         std::optional<std::vector<VertexSer>>       CustomVertices;
         std::optional<std::vector<uint32_t>>        CustomIndices;
+        // Rendering controls (absent = component default, so pre-existing scenes stay loadable).
+        std::optional<bool>                         OutlineDraw;
+        std::optional<int>                          ForcedLOD;
+        std::optional<int>                          LODBias;
+        std::optional<bool>                         CastShadows;
+        std::optional<bool>                         ReceiveShadows;
+        std::optional<uint64_t>                     HiddenSubmeshes;
     };
 
     struct SkinnedMeshComponentSer

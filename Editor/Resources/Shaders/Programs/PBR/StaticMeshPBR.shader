@@ -400,6 +400,9 @@ Shader "StaticMeshPBR"
             vec3  sunDir = normalize(-directionLights.directionLights.Direction.xyz); // toward the sun
             int   cascade;
             float shadow = ShadowFactor(inVertex.WorldPosition, m_Params.Normal, sunDir, cascade);
+            // Per-mesh "Receive Shadows" toggle rides ExtraParams.w (1 = don't receive sun shadows).
+            if (mat.ExtraParams.w > 0.5)
+                shadow = 1.0;
 
             // Lighting debug (Scene Settings -> Debug -> Light Debug): each source gets a distinct color, the
             // surface is tinted by the sources reaching it (weighted by attenuation * NdotL), brightness = light

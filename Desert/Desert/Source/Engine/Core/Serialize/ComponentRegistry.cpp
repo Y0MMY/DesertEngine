@@ -421,6 +421,20 @@ namespace Desert::Core::Serialize
                 }
                 meshSer.Primitive = smc.Primitive;
 
+                // Rendering controls: write only non-default values (absent = default on load).
+                if ( smc.OutlineDraw )
+                    meshSer.OutlineDraw = smc.OutlineDraw;
+                if ( smc.ForcedLOD >= 0 )
+                    meshSer.ForcedLOD = smc.ForcedLOD;
+                if ( smc.LODBias != 0 )
+                    meshSer.LODBias = smc.LODBias;
+                if ( !smc.CastShadows )
+                    meshSer.CastShadows = smc.CastShadows;
+                if ( !smc.ReceiveShadows )
+                    meshSer.ReceiveShadows = smc.ReceiveShadows;
+                if ( smc.HiddenSubmeshes != 0 )
+                    meshSer.HiddenSubmeshes = smc.HiddenSubmeshes;
+
                 if ( smc.RuntimeMesh )
                 {
                     const auto& vertices = smc.RuntimeMesh->GetVertices();
@@ -485,6 +499,13 @@ namespace Desert::Core::Serialize
                     }
                 }
                 smc.Primitive = meshData.Primitive;
+
+                smc.OutlineDraw     = meshData.OutlineDraw.value_or( smc.OutlineDraw );
+                smc.ForcedLOD       = meshData.ForcedLOD.value_or( smc.ForcedLOD );
+                smc.LODBias         = meshData.LODBias.value_or( smc.LODBias );
+                smc.CastShadows     = meshData.CastShadows.value_or( smc.CastShadows );
+                smc.ReceiveShadows  = meshData.ReceiveShadows.value_or( smc.ReceiveShadows );
+                smc.HiddenSubmeshes = meshData.HiddenSubmeshes.value_or( smc.HiddenSubmeshes );
 
                 if ( meshData.CustomVertices && meshData.CustomIndices )
                 {
