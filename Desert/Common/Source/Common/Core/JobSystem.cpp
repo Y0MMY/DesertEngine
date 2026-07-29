@@ -1,9 +1,12 @@
 #include "JobSystem.hpp"
 
+#include <Common/Core/Logger.hpp>
+
 #include <optick.h>
 
 #include <algorithm>
 #include <atomic>
+#include <exception>
 
 namespace Common
 {
@@ -47,7 +50,22 @@ namespace Common
                 ++m_Running;
             }
 
-            job();
+            // Never let a throwing job escape the worker thread: an uncaught exception here unwinds
+            // through this loop (and Optick's per-thread ThreadScope) and calls std::terminate(), taking
+            // the WHOLE app down — which showed up as a hard crash mid-startup while a background asset
+            // preload threw. Swallow + log so one bad job degrades gracefully and names itself.
+            try
+            {
+                job();
+            }
+            catch ( const std::exception& e )
+            {
+                LOG_ERROR( "[JobSystem] Worker job threw '{}' — swallowed to keep the app alive.", e.what() );
+            }
+            catch ( ... )
+            {
+                LOG_ERROR( "[JobSystem] Worker job threw a non-std exception — swallowed to keep the app alive." );
+            }
 
             {
                 std::lock_guard<std::mutex> lk( m_Mutex );
