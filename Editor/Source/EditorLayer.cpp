@@ -57,6 +57,8 @@
 #include "Editor/Panels/Stubs/SequencerPanel.hpp"
 #include "Editor/Panels/Stubs/BuildSettingsPanel.hpp"
 #include "Editor/Panels/History/HistoryPanel.hpp"
+#include "Editor/Panels/Validation/SceneValidationPanel.hpp"
+#include "Editor/Core/ToastManager.hpp"
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
@@ -295,6 +297,8 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::CollectionsPanel>( m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::HistoryPanel>() );
+        m_Panels.emplace_back(
+             std::make_unique<Editor::SceneValidationPanel>( m_MainScene, m_AssetManager.get() ) );
 
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
@@ -590,6 +594,8 @@ namespace Desert::Editor
                     m_MainScene->Serialize( m_AssetManager.get() );
                     s_SavedRevision = CommandHistory::Get().Revision();
                     LOG_INFO( "[Scene] Saved '{}' (Ctrl+S)", m_MainScene->GetSceneName() );
+                    Editor::ToastManager::Push( "Saved '" + m_MainScene->GetSceneName() + "'",
+                                                Editor::ToastLevel::Success );
                 }
             }
 
@@ -763,6 +769,9 @@ namespace Desert::Editor
         DrawCommandPalette();
         DrawRecoveryPopup();
         DrawLayoutSavePopup();
+
+        // Transient bottom-right notifications (save/import/validation). Drawn last so they float on top.
+        Editor::ToastManager::Get().Draw();
 
         ::ImGui::End(); // End dockspace
 
