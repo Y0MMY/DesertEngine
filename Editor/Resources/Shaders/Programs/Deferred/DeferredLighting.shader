@@ -7,7 +7,7 @@ Shader "DeferredLighting"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {
@@ -28,14 +28,14 @@ Shader "DeferredLighting"
         #include <Mesh/Spotlight.glslh>       // binding 16 (SSBO SpotLightsUB)  + CalculateSpotLight
         #include <Mesh/LightsMetadata.glslh>  // binding 4  (UB LightsMetadata: point/spot/dir counts)
 
-        layout(location = 0) in vec2 v_TexCoord;
+        In(0) vec2 v_TexCoord;
 
-        layout(binding = 1) uniform sampler2D u_GBufferC; // rgb = world position
-        layout(binding = 2) uniform sampler2D u_GBufferA; // rgb = albedo, a = metallic
-        layout(binding = 3) uniform sampler2D u_GBufferB; // rgb = world normal, a = roughness
-        layout(binding = 8) uniform sampler2D u_SSAO;     // r = ambient-occlusion factor (1 = lit)
+        Uniform(1) sampler2D u_GBufferC; // rgb = world position
+        Uniform(2) sampler2D u_GBufferA; // rgb = albedo, a = metallic
+        Uniform(3) sampler2D u_GBufferB; // rgb = world normal, a = roughness
+        Uniform(8) sampler2D u_SSAO;     // r = ambient-occlusion factor (1 = lit)
 
-        layout(location = 0) out vec4 oColor;
+        Out(0) vec4 oColor;
 
         const vec3 Fdielectric = vec3(0.04); // base reflectance for dielectrics (matches PBR.glsl.frag)
 
@@ -63,7 +63,7 @@ Shader "DeferredLighting"
         	return (diffuse + specular) * radiance * cosLi;
         }
 
-        layout(binding = 0) uniform DeferredUB
+        Uniform(0) DeferredUB
         {
         	vec4 u_LightDir;   // xyz = direction the light travels (away from the sun); w unused
         	vec4 u_LightColor; // rgb = colour, a = intensity
@@ -118,11 +118,11 @@ Shader "DeferredLighting"
         }
 
         // Cascaded directional shadow maps (identical layout to PBR.glsl.frag so the same CSM data drives both).
-        layout(binding = 5)  uniform sampler2D u_ShadowMap0;
-        layout(binding = 13) uniform sampler2D u_ShadowMap1;
-        layout(binding = 14) uniform sampler2D u_ShadowMap2;
-        layout(binding = 15) uniform sampler2D u_ShadowMap3;
-        layout(binding = 7) uniform ShadowUB {
+        Uniform(5) sampler2D u_ShadowMap0;
+        Uniform(13) sampler2D u_ShadowMap1;
+        Uniform(14) sampler2D u_ShadowMap2;
+        Uniform(15) sampler2D u_ShadowMap3;
+        Uniform(7) ShadowUB {
         	mat4 u_LightViewProj[4];
         	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode, w = cascade count
         	vec4 u_DebugParams;

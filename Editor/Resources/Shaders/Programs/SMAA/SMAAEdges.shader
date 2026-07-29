@@ -5,9 +5,9 @@ Shader "SMAAEdges"
         // SMAA pass 1: luma edge detection. Reads the tonemapped LDR color; writes 2-channel edges into .rg.
         #include <Common/SMAA.glslh>
 
-        layout(location = 0) in  vec2 v_TexCoord;
-        layout(binding  = 2) uniform sampler2D u_ColorTex;
-        layout(location = 0) out vec4 oColor;
+        In(0)  vec2 v_TexCoord;
+        Uniform(2) sampler2D u_ColorTex;
+        Out(0) vec4 oColor;
 
         void main()
         {
@@ -21,7 +21,7 @@ Shader "SMAAEdges"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {

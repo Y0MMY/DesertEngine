@@ -2,11 +2,11 @@ Shader "JFA_Init"
 {
     Fragment
     {
-        layout(location = 0) in vec2 v_TexCoord;
+        In(0) vec2 v_TexCoord;
 
-        layout(location = 0) out vec4 o_Seed;
+        Out(0) vec4 o_Seed;
 
-        layout(set = 0, binding = 0) uniform sampler2D u_StencilTexture;
+        Uniform(0, 0) sampler2D u_StencilTexture;
 
         void main()
         {
@@ -32,7 +32,7 @@ Shader "JFA_Init"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {

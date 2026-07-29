@@ -2,13 +2,13 @@ Shader "JFA_Step"
 {
     Fragment
     {
-        layout(location = 0) in vec2 v_TexCoord;
+        In(0) vec2 v_TexCoord;
 
-        layout(location = 0) out vec4 o_Result;
+        Out(0) vec4 o_Result;
 
-        layout(set = 0, binding = 0) uniform sampler2D u_InputTexture;
+        Uniform(0, 0) sampler2D u_InputTexture;
 
-        layout(push_constant) uniform PushConstants
+        PushConstant PushConstants
         {
             int u_StepLength;
         };
@@ -57,7 +57,7 @@ Shader "JFA_Step"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {

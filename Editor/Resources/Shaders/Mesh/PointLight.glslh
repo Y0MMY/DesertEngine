@@ -15,7 +15,7 @@ struct PointLight {
 };
 
 // Unbounded storage buffer — no MAX_POINT_LIGHT cap. Count comes from LightsMetadata.PointLightCount.
-layout(std430, binding = 6) readonly buffer PointLightsUB
+ReadBuffer(6) PointLightsUB
 {
     PointLight pointLights[];
 };

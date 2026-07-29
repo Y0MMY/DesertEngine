@@ -5,23 +5,24 @@ Shader "Silhouette_Skinned"
 
     Vertex
     {
-        layout(location = 0) in vec3 a_Position;
-        layout(location = 1) in vec3 a_Normal;
-        layout(location = 2) in vec3 a_Tangent;
-        layout(location = 3) in vec3 a_Bitangent;
-        layout(location = 4) in vec2 a_TextureCoord;
-        layout(location = 5) in ivec4 a_BoneIndices;
-        layout(location = 6) in vec4  a_BoneWeights;
+        In(0) vec3 a_Position;
+        In(1) vec3 a_Normal;
+        In(2) vec3 a_Tangent;
+        In(3) vec3 a_Bitangent;
+        In(4) vec2 a_TextureCoord;
+        In(5) ivec4 a_BoneIndices;
+        In(6) vec4  a_BoneWeights;
 
         #include <Common/CameraUB.glslh>
 
-        layout( push_constant ) uniform constants
+        PushConstant constants
         {
             mat4 Transform;
         } m_PushConstants;
 
         // Same bone matrices the skinned mesh is rendered with, so the silhouette (hence the outline) matches the
         // posed/animated mesh exactly. Binding 1 mirrors Skinned.glsl.vert.
+        // raw-glsl: implicit (shared) layout kept — std430 would change the bone matrix offsets.
         layout(binding = 1) readonly buffer Bones
         {
             mat4 BoneMatrices[];
@@ -40,7 +41,7 @@ Shader "Silhouette_Skinned"
 
     Fragment
     {
-        layout(location = 0) out vec4 o_Color;
+        Out(0) vec4 o_Color;
 
         void main()
         {

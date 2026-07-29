@@ -4,29 +4,30 @@ Shader "SkinnedMeshPBR"
 
     Vertex
     {
-        layout(location = 0) in vec3 a_Position;
-        layout(location = 1) in vec3 a_Normal;
-        layout(location = 2) in vec3 a_Tangent;
-        layout(location = 3) in vec3 a_Bitangent;
-        layout(location = 4) in vec2 a_TextureCoord;
-        layout(location = 5) in ivec4 a_BoneIndices;
-        layout(location = 6) in vec4  a_BoneWeights;
+        In(0) vec3 a_Position;
+        In(1) vec3 a_Normal;
+        In(2) vec3 a_Tangent;
+        In(3) vec3 a_Bitangent;
+        In(4) vec2 a_TextureCoord;
+        In(5) ivec4 a_BoneIndices;
+        In(6) vec4  a_BoneWeights;
 
         #include <Common/CameraUB.glslh>
 
         // Must match PBR.glsl.frag / Static.glsl.vert push block.
-        layout(push_constant) uniform PushConstants
+        PushConstant PushConstants
         {
             mat4 Transform;     // offset 0
             uint MaterialIndex; // offset 64
         } m_PushConstants;
 
+        // raw-glsl: implicit (shared) layout kept — std430 would change the bone matrix offsets.
         layout(binding = 1) readonly buffer Bones
         {
             mat4 BoneMatrices[];
         } bones;
 
-        layout(location = 0) out Vertex
+        Out(0) Vertex
         {
             vec3 WorldPosition;
             vec3 Normal;
@@ -83,7 +84,7 @@ Shader "SkinnedMeshPBR"
         #include <Mesh/Spotlight.glslh>
         #include <Mesh/LightsMetadata.glslh>
 
-        layout(location=0) in Vertex
+        In(0) Vertex
         {
         	vec3 WorldPosition;
         	vec3 Normal;
@@ -97,12 +98,12 @@ Shader "SkinnedMeshPBR"
         const vec3 Fdielectric = vec3(0.04);
 
 
-        layout(location = 0) out vec4 oColor;
+        Out(0) vec4 oColor;
 
         // Shared push-constant block. Must be byte-for-byte identical to the one in Static.glsl.vert /
         // Skinned.glsl.vert. Per-object material data lives in the Materials[] storage buffer (GPU-scene
         // style); the push constant only carries the per-object index into it.
-        layout( push_constant ) uniform PushConstants
+        PushConstant PushConstants
         {
         	mat4 Transform;     // offset 0   (vertex)
         	uint MaterialIndex; // offset 64  index into Materials[]
@@ -118,7 +119,7 @@ Shader "SkinnedMeshPBR"
         	vec4 GlassTint;          // rgb = glass tint, a = transmission (opaque path ignores it)
         };
 
-        layout( std430, binding = 2 ) readonly buffer Materials
+        ReadBuffer(2) Materials
         {
         	GpuMaterial materials[];
         };
@@ -129,16 +130,16 @@ Shader "SkinnedMeshPBR"
         	vec4 ColorIntensity; // rgb = color, a = intensity
         };
 
-        layout(binding = 3) uniform DirectionLightsUB {
+        Uniform(3) DirectionLightsUB {
         	DirectionLight 		directionLights;
         } directionLights;
 
         // Cascaded directional shadow maps (R32F light-space depth, one per cascade) + per-cascade light VP.
-        layout(binding = 5)  uniform sampler2D u_ShadowMap0;
-        layout(binding = 13) uniform sampler2D u_ShadowMap1;
-        layout(binding = 14) uniform sampler2D u_ShadowMap2;
-        layout(binding = 15) uniform sampler2D u_ShadowMap3;
-        layout(binding = 7) uniform ShadowUB {
+        Uniform(5) sampler2D u_ShadowMap0;
+        Uniform(13) sampler2D u_ShadowMap1;
+        Uniform(14) sampler2D u_ShadowMap2;
+        Uniform(15) sampler2D u_ShadowMap3;
+        Uniform(7) ShadowUB {
         	mat4 u_LightViewProj[4];
         	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode (0/1/2), w = cascade count
         	vec4 u_DebugParams;       // x = show normals (>0.5); y,z,w reserved
@@ -233,15 +234,15 @@ Shader "SkinnedMeshPBR"
         }
 
         // Environment maps
-        layout (binding = 8) uniform samplerCube u_EnvSpecularTex;
-        layout (binding = 9) uniform samplerCube u_EnvIrradianceTex;
+        Uniform(8) samplerCube u_EnvSpecularTex;
+        Uniform(9) samplerCube u_EnvIrradianceTex;
 
         // BRDF LUT
-        layout (binding = 10) uniform sampler2D u_BRDFLUTTexture;
+        Uniform(10) sampler2D u_BRDFLUTTexture;
 
-        layout(binding = 11) uniform sampler2D u_AlbedoTexture;
-        layout(binding = 12) uniform sampler2D u_NormalTexture;
-        layout(binding = 18) uniform sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
+        Uniform(11) sampler2D u_AlbedoTexture;
+        Uniform(12) sampler2D u_NormalTexture;
+        Uniform(18) sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
 
         struct Params
         {

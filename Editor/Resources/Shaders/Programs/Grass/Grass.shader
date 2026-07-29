@@ -20,7 +20,7 @@ Shader "Grass"
         // arc forward and sway. Placement is byte-identical to GrassCull.glsl.comp (the indirect draw's
         // instanceCount comes from that compute compaction). Lit by the SCENE directional light.
 
-        layout( binding = 0 ) uniform GrassUB
+        Uniform(0) GrassUB
         {
             mat4 View;
             mat4 Projection;
@@ -36,18 +36,18 @@ Shader "Grass"
         }
         u;
 
-        layout( binding = 1 ) uniform sampler2D u_SplatMap; // R = grass mask (optional reducer)
+        Uniform(1) sampler2D u_SplatMap; // R = grass mask (optional reducer)
 
-        layout( std430, binding = 3 ) readonly buffer GrassVisible
+        ReadBuffer(3) GrassVisible
         {
             uint u_Visible[];
         };
 
-        layout( location = 0 ) out vec2  v_UV;       // x across blade [0..1], y up [0..1]
-        layout( location = 1 ) out vec3  v_Normal;
-        layout( location = 2 ) out float v_Rand;     // per-blade random
-        layout( location = 3 ) out vec3  v_WorldPos;
-        layout( location = 4 ) out float v_Fade;     // distance LOD
+        Out(0) vec2  v_UV;       // x across blade [0..1], y up [0..1]
+        Out(1) vec3  v_Normal;
+        Out(2) float v_Rand;     // per-blade random
+        Out(3) vec3  v_WorldPos;
+        Out(4) float v_Fade;     // distance LOD
 
         const int kSegments = 4; // segments per blade -> kSegments*6 = 24 verts/blade. Blade COUNT per clump is
                                  // dynamic: the CPU sets the indirect vertex count = bladesPerClump*24, so bladeId
@@ -174,15 +174,15 @@ Shader "Grass"
         // Root->tip green gradient computed here, plus tonal sun/shade patches, yellow variation, AO, the SCENE
         // directional light and SSS translucency.
 
-        layout( location = 0 ) in vec2  v_UV;       // x across blade, y = height fraction
-        layout( location = 1 ) in vec3  v_Normal;
-        layout( location = 2 ) in float v_Rand;     // per-blade random
-        layout( location = 3 ) in vec3  v_WorldPos;
-        layout( location = 4 ) in float v_Fade;
+        In(0) vec2  v_UV;       // x across blade, y = height fraction
+        In(1) vec3  v_Normal;
+        In(2) float v_Rand;     // per-blade random
+        In(3) vec3  v_WorldPos;
+        In(4) float v_Fade;
 
-        layout( location = 0 ) out vec4 o_Color;
+        Out(0) vec4 o_Color;
 
-        layout( binding = 0 ) uniform GrassUB
+        Uniform(0) GrassUB
         {
             mat4 View;
             mat4 Projection;

@@ -6,7 +6,7 @@ Shader "Grid"
         // world ray onto y=0, draw an analytic, derivative-based multi-scale grid (distance LOD), highlight the
         // X/Z axes, fade to the horizon, and write gl_FragDepth so opaque geometry occludes it.
 
-        layout(binding = 0) uniform GridUB
+        Uniform(0) GridUB
         {
             mat4 Projection;
             mat4 View;
@@ -18,9 +18,9 @@ Shader "Grid"
             vec4 Params; // x = base cell size (m), y = fade start, z = fade end
         } u;
 
-        layout(location = 0) in vec3 v_Near;
-        layout(location = 1) in vec3 v_Far;
-        layout(location = 0) out vec4 o_Color;
+        In(0) vec3 v_Near;
+        In(1) vec3 v_Far;
+        Out(0) vec4 o_Color;
 
         // Named gridLog10, not log10: MoltenVK translates GLSL to MSL, where log10 is a
         // Metal built-in and a user function with that name makes the call ambiguous.
@@ -90,7 +90,7 @@ Shader "Grid"
         // Infinite ground-plane grid. A fullscreen quad emits a world-space ray per pixel (near->far,
         // reconstructed via the inverse view-projection); the fragment shader intersects it with the y=0 plane.
 
-        layout(binding = 0) uniform GridUB
+        Uniform(0) GridUB
         {
             mat4 Projection;
             mat4 View;
@@ -102,8 +102,8 @@ Shader "Grid"
             vec4 Params; // x = base cell size (m), y = fade start, z = fade end
         } u;
 
-        layout(location = 0) out vec3 v_Near;
-        layout(location = 1) out vec3 v_Far;
+        Out(0) vec3 v_Near;
+        Out(1) vec3 v_Far;
 
         vec3 Unproject( vec2 ndc, float z )
         {

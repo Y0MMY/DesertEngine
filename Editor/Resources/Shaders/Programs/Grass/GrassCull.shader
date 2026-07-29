@@ -9,16 +9,16 @@ Shader "GrassCull"
         //
         // Placement/height functions MUST stay byte-identical to Grass.glsl.vert or blades will pop/mismatch.
 
-        layout( local_size_x = 64, local_size_y = 1, local_size_z = 1 ) in;
+        LocalSize(64, 1, 1);
 
-        layout( binding = 0 ) uniform sampler2D u_SplatMap; // R = grass mask (only when splatPresent)
+        Uniform(0) sampler2D u_SplatMap; // R = grass mask (only when splatPresent)
 
-        layout( std430, binding = 1 ) buffer GrassVisible
+        Buffer(1) GrassVisible
         {
             uint u_Visible[]; // compacted list of visible clump ids
         };
 
-        layout( std430, binding = 2 ) buffer GrassIndirect
+        Buffer(2) GrassIndirect
         {
             uint u_VertexCount;   // = verts-per-clump (set by CPU each frame)
             uint u_InstanceCount; // = number of visible clumps (we atomicAdd here; CPU resets to 0)
@@ -26,7 +26,7 @@ Shader "GrassCull"
             uint u_FirstInstance;
         };
 
-        layout( push_constant ) uniform Push
+        PushConstant Push
         {
             mat4 u_MVP;     // Proj * View * Model  (terrain-local -> clip)
             vec4 u_Params;  // x=size, y=splatPresent, z=heightScale, w=noiseFrequency

@@ -5,24 +5,24 @@
 //   #define GRAPH_LIT 1        — also pass the world-space normal (location 1)
 //   #define GRAPH_DEPTH_ONLY 1 — no varyings at all (shadow/depth pass)
 
-layout( location = 0 ) in vec3 a_Position;
-layout( location = 1 ) in vec3 a_Normal;
-layout( location = 2 ) in vec3 a_Tangent;
-layout( location = 3 ) in vec3 a_Bitangent;
-layout( location = 4 ) in vec2 a_TextureCoord;
+In(0) vec3 a_Position;
+In(1) vec3 a_Normal;
+In(2) vec3 a_Tangent;
+In(3) vec3 a_Bitangent;
+In(4) vec2 a_TextureCoord;
 
 #include <Common/CameraUB.glslh>
 
-layout( push_constant ) uniform PushConstants
+PushConstant PushConstants
 {
     mat4 Transform;
 }
 m_PushConstants;
 
 #ifndef GRAPH_DEPTH_ONLY
-layout( location = 0 ) out vec2 v_UV;
+Out(0) vec2 v_UV;
 #ifdef GRAPH_LIT
-layout( location = 1 ) out vec3 v_Normal;
+Out(1) vec3 v_Normal;
 #endif
 #endif
 

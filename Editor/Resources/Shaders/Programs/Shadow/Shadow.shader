@@ -4,7 +4,7 @@ Shader "Shadow"
     {
         // Light-space depth written to an R32F colour target (sampled later in PBR). Using a colour target
         // instead of a sampled depth-stencil image sidesteps Vulkan depth-aspect sampling caveats.
-        layout(location = 0) out vec4 o_Depth;
+        Out(0) vec4 o_Depth;
 
         void main()
         {
@@ -14,17 +14,17 @@ Shader "Shadow"
 
     Vertex
     {
-        layout(location = 0) in vec3 a_Position;
-        layout(location = 1) in vec3 a_Normal;
-        layout(location = 2) in vec3 a_Tangent;
-        layout(location = 3) in vec3 a_Bitangent;
-        layout(location = 4) in vec2 a_TextureCoord;
+        In(0) vec3 a_Position;
+        In(1) vec3 a_Normal;
+        In(2) vec3 a_Tangent;
+        In(3) vec3 a_Bitangent;
+        In(4) vec2 a_TextureCoord;
 
         // The shared CameraUB is fed the LIGHT's view/projection by MaterialShadow (not the camera's).
         #include <Common/CameraUB.glslh>
 
         // Per-mesh transform, pushed automatically by Renderer::RenderMesh.
-        layout( push_constant ) uniform constants
+        PushConstant constants
         {
             mat4 Transform;
         } m_PushConstants;

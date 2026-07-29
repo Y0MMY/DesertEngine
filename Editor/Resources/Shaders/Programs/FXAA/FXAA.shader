@@ -6,9 +6,9 @@ Shader "FXAA"
         // gamma-encoded tonemapped image. Texel size is derived from textureSize() — no UB needed. This is a
         // deferred-friendly, post-process-only technique (no MSAA, no motion vectors).
 
-        layout(location = 0) in  vec2 v_TexCoord;
-        layout(binding  = 2) uniform sampler2D u_InputTexture;
-        layout(location = 0) out vec4 oColor;
+        In(0)  vec2 v_TexCoord;
+        Uniform(2) sampler2D u_InputTexture;
+        Out(0) vec4 oColor;
 
         #define FXAA_SPAN_MAX   8.0
         #define FXAA_REDUCE_MUL (1.0 / 8.0)
@@ -65,7 +65,7 @@ Shader "FXAA"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {

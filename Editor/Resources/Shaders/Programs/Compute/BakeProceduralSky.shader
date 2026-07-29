@@ -15,7 +15,7 @@ Shader "BakeProceduralSky"
 
         layout(binding = 0, rgba32f) restrict writeonly uniform image2D outputPanorama;
 
-        layout(push_constant) uniform PushConstants
+        PushConstant PushConstants
         {
             vec4 u_SunDirection; // xyz = direction TOWARD the sun (normalized), w = sun intensity
             vec4 u_SkyParams;    // x = sun angular radius; y = skyBrightness; z = horizonFalloff; w = sunGlow
@@ -27,7 +27,7 @@ Shader "BakeProceduralSky"
             vec4 u_Night;        // rgb
         };
 
-        layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+        LocalSize(32, 32, 1);
         void main()
         {
             ivec2 size  = imageSize(outputPanorama);

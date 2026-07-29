@@ -17,7 +17,7 @@ struct SpotLight {
 };
 
 // Unbounded storage buffer — no cap. Count from LightsMetadata.SpotLightCount.
-layout(std430, binding = 16) readonly buffer SpotLightsUB
+ReadBuffer(16) SpotLightsUB
 {
     SpotLight spotLights[];
 };

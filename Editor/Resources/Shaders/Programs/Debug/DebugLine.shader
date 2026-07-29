@@ -14,12 +14,12 @@ Shader "DebugLine"
             vec4 Color;      // rgba
         };
 
-        layout(std430, binding = 1) readonly buffer Lines
+        ReadBuffer(1) Lines
         {
             LineVertex u_Lines[];
         };
 
-        layout(location = 0) out vec4 v_Color;
+        Out(0) vec4 v_Color;
 
         void main()
         {
@@ -31,8 +31,8 @@ Shader "DebugLine"
 
     Fragment
     {
-        layout(location = 0) in  vec4 v_Color;
-        layout(location = 0) out vec4 oColor;
+        In(0)  vec4 v_Color;
+        Out(0) vec4 oColor;
 
         void main()
         {

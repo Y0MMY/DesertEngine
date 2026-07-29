@@ -6,12 +6,12 @@ Shader "SMAABlend"
         // produces the final anti-aliased color.
         #include <Common/SMAA.glslh>
 
-        layout(location = 0) in  vec2 v_TexCoord;
-        layout(binding  = 2) uniform sampler2D u_ColorTex;
-        layout(binding  = 3) uniform sampler2D u_BlendTex;
-        layout(binding  = 4) uniform sampler2D u_EdgesTex; // DIAGNOSTIC only
-        layout(binding  = 5) uniform sampler2D u_AreaTex;  // DIAGNOSTIC only
-        layout(location = 0) out vec4 oColor;
+        In(0)  vec2 v_TexCoord;
+        Uniform(2) sampler2D u_ColorTex;
+        Uniform(3) sampler2D u_BlendTex;
+        Uniform(4) sampler2D u_EdgesTex; // DIAGNOSTIC only
+        Uniform(5) sampler2D u_AreaTex;  // DIAGNOSTIC only
+        Out(0) vec4 oColor;
 
         // DIAGNOSTIC: 1 = grayscale blend-weight magnitude (x4); 0 = normal SMAA output.
         #define SMAA_DEBUG_VIEW 0
@@ -37,7 +37,7 @@ Shader "SMAABlend"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {

@@ -9,7 +9,7 @@ Shader "DiffuseIrradiance"
         const uint NumSamples = 64 * 1024;
         const float InvNumSamples = 1.0 / float(NumSamples);
 
-        layout(binding=0) uniform sampler2D  inputTexture;
+        Uniform(0) sampler2D  inputTexture;
         layout(binding=1, rgba32f) restrict writeonly uniform imageCube outputTexture;
 
         float radicalInverse_VdC(uint bits)
@@ -75,7 +75,7 @@ Shader "DiffuseIrradiance"
         	return S * v.x + T * v.y + N * v.z;
         }
 
-        layout(local_size_x=32, local_size_y=32, local_size_z=1) in;
+        LocalSize(32, 32, 1);
         void main(void)
         {
         	vec3 N = getSamplingVector();

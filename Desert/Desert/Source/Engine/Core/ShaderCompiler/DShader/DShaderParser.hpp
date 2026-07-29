@@ -93,5 +93,10 @@ namespace Desert::Core::Preprocess
 
         // Errors carry the source line: `DShader parse error (line N): message`.
         static Common::ResultStr<DShaderParseResult> Parse( const std::string& source );
+
+        // Translates the Desert layout sugar (In/Out/Uniform/Buffer/PushConstant/LocalSize) to plain GLSL,
+        // line-for-line. Used both when assembling stage code AND by the #include resolver, so shared
+        // `.glslh` headers can use the same sugar. A no-op on source that has none.
+        static std::string TranslateSugar( const std::string& source );
     };
 } // namespace Desert::Core::Preprocess

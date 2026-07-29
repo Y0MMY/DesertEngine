@@ -5,11 +5,11 @@ Shader "StaticMeshGBuffer"
 
     Vertex
     {
-        layout(location = 0) in vec3 a_Position;
-        layout(location = 1) in vec3 a_Normal;
-        layout(location = 2) in vec3 a_Tangent;
-        layout(location = 3) in vec3 a_Bitangent;
-        layout(location = 4) in vec2 a_TextureCoord;
+        In(0) vec3 a_Position;
+        In(1) vec3 a_Normal;
+        In(2) vec3 a_Tangent;
+        In(3) vec3 a_Bitangent;
+        In(4) vec2 a_TextureCoord;
 
         #include <Common/CameraUB.glslh>
 
@@ -20,14 +20,14 @@ Shader "StaticMeshGBuffer"
         // overwritten by later objects in the same frame (last-write-wins) before the GPU executes the draws.
         // Must match PBR.glsl.frag / Skinned.glsl.vert. Material data lives in a storage buffer (read in the
         // fragment); the vertex stage only needs Transform.
-        layout( push_constant ) uniform PushConstants
+        PushConstant PushConstants
         {
         	mat4 Transform;     // offset 0
         	uint MaterialIndex; // offset 64
         } m_PushConstants;
 
 
-        layout(location=0) out Vertex
+        Out(0) Vertex
         {
         	vec3 WorldPosition;
         	vec3 Normal;
@@ -70,7 +70,7 @@ Shader "StaticMeshGBuffer"
         #include <Mesh/Spotlight.glslh>       // binding 16 (SSBO spotLights[])
         #include <Mesh/LightsMetadata.glslh>  // binding 4  (UB lightsMetadata)
 
-        layout(location=0) in Vertex
+        In(0) Vertex
         {
         	vec3 WorldPosition;
         	vec3 Normal;
@@ -79,11 +79,11 @@ Shader "StaticMeshGBuffer"
         	vec3 CameraPosition;
         } inVertex;
 
-        layout(location = 0) out vec4 oGBufferA; // Albedo.rgb, Metallic.a
-        layout(location = 1) out vec4 oGBufferB; // Normal.rgb, Roughness.a
-        layout(location = 2) out vec4 oGBufferC; // WorldPosition.xyz (w unused)
+        Out(0) vec4 oGBufferA; // Albedo.rgb, Metallic.a
+        Out(1) vec4 oGBufferB; // Normal.rgb, Roughness.a
+        Out(2) vec4 oGBufferC; // WorldPosition.xyz (w unused)
 
-        layout( push_constant ) uniform PushConstants
+        PushConstant PushConstants
         {
         	mat4 Transform;
         	uint MaterialIndex;
@@ -97,28 +97,28 @@ Shader "StaticMeshGBuffer"
         	vec4 ExtraParams;
         	vec4 GlassTint; // rgb = tint, a = transmission (G-buffer path is opaque; used to SKIP glass, not shade it)
         };
-        layout( std430, binding = 2 ) readonly buffer Materials { GpuMaterial materials[]; };
+        ReadBuffer(2) Materials { GpuMaterial materials[]; };
 
         struct DirectionLight { vec4 Direction; vec4 ColorIntensity; };
-        layout(binding = 3) uniform DirectionLightsUB { DirectionLight directionLights; } directionLights;
+        Uniform(3) DirectionLightsUB { DirectionLight directionLights; } directionLights;
 
-        layout(binding = 5)  uniform sampler2D u_ShadowMap0;
-        layout(binding = 13) uniform sampler2D u_ShadowMap1;
-        layout(binding = 14) uniform sampler2D u_ShadowMap2;
-        layout(binding = 15) uniform sampler2D u_ShadowMap3;
-        layout(binding = 7) uniform ShadowUB
+        Uniform(5) sampler2D u_ShadowMap0;
+        Uniform(13) sampler2D u_ShadowMap1;
+        Uniform(14) sampler2D u_ShadowMap2;
+        Uniform(15) sampler2D u_ShadowMap3;
+        Uniform(7) ShadowUB
         {
         	mat4 u_LightViewProj[4];
         	vec4 u_ShadowParams;
         	vec4 u_DebugParams;
         	vec4 u_CascadeTexelWorld;
         };
-        layout(binding = 8)  uniform samplerCube u_EnvSpecularTex;
-        layout(binding = 9)  uniform samplerCube u_EnvIrradianceTex;
-        layout(binding = 10) uniform sampler2D  u_BRDFLUTTexture;
-        layout(binding = 11) uniform sampler2D  u_AlbedoTexture;
-        layout(binding = 12) uniform sampler2D  u_NormalTexture;
-        layout(binding = 18) uniform sampler2D  u_OpacityTexture;
+        Uniform(8) samplerCube u_EnvSpecularTex;
+        Uniform(9) samplerCube u_EnvIrradianceTex;
+        Uniform(10) sampler2D  u_BRDFLUTTexture;
+        Uniform(11) sampler2D  u_AlbedoTexture;
+        Uniform(12) sampler2D  u_NormalTexture;
+        Uniform(18) sampler2D  u_OpacityTexture;
 
         void main()
         {

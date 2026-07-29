@@ -6,11 +6,11 @@ Shader "SMAAWeights"
         // LUTs; writes per-direction blend weights (rgba).
         #include <Common/SMAA.glslh>
 
-        layout(location = 0) in  vec2 v_TexCoord;
-        layout(binding  = 2) uniform sampler2D u_EdgesTex;
-        layout(binding  = 3) uniform sampler2D u_AreaTex;
-        layout(binding  = 4) uniform sampler2D u_SearchTex;
-        layout(location = 0) out vec4 oColor;
+        In(0)  vec2 v_TexCoord;
+        Uniform(2) sampler2D u_EdgesTex;
+        Uniform(3) sampler2D u_AreaTex;
+        Uniform(4) sampler2D u_SearchTex;
+        Out(0) vec4 oColor;
 
         void main()
         {
@@ -25,7 +25,7 @@ Shader "SMAAWeights"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {

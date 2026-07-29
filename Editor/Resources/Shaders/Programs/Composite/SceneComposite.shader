@@ -2,13 +2,13 @@ Shader "SceneComposite"
 {
     Fragment
     {
-        layout(location = 0) in vec2 v_TexCoord;
-        layout(binding = 2) uniform sampler2D u_GeometryTexture;
-        layout(binding = 3) uniform sampler2D u_BloomTexture;
-        layout(binding = 4) uniform sampler2D u_AvgLuminance; // 1x1 adapted luminance (eye adaptation)
-        layout(location = 0) out vec4 oColor;
+        In(0) vec2 v_TexCoord;
+        Uniform(2) sampler2D u_GeometryTexture;
+        Uniform(3) sampler2D u_BloomTexture;
+        Uniform(4) sampler2D u_AvgLuminance; // 1x1 adapted luminance (eye adaptation)
+        Out(0) vec4 oColor;
 
-        layout(binding = 0) uniform TonemapUB
+        Uniform(0) TonemapUB
         {
             float u_Exposure;
             float u_Gamma;
@@ -79,7 +79,7 @@ Shader "SceneComposite"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord; 
+        Out(0) vec2 v_TexCoord; 
 
         void main()
         {

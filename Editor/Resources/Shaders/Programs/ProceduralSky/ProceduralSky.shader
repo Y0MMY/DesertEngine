@@ -13,10 +13,10 @@ Shader "ProceduralSky"
         #include <Common/Atmosphere.glslh>
         #include <Common/Clouds.glslh>
 
-        layout(location = 0) in vec3 v_RayDir;
-        layout(location = 0) out vec4 oColor;
+        In(0) vec3 v_RayDir;
+        Out(0) vec4 oColor;
 
-        layout(binding = 1) uniform SkyUB
+        Uniform(1) SkyUB
         {
             vec4 u_SunDirection; // xyz = direction TOWARD the sun (normalized), w = sun intensity
             vec4 u_SkyParams;    // x = sun angular radius; y = clouds enabled (>0.5); z = coverage; w = density
@@ -75,7 +75,7 @@ Shader "ProceduralSky"
         #include <Common/CameraUB.glslh>
 
         // World-space view ray for this fullscreen pixel (un-normalized; normalized in the fragment).
-        layout(location = 0) out vec3 v_RayDir;
+        Out(0) vec3 v_RayDir;
 
         void main()
         {

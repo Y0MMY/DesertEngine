@@ -5,7 +5,7 @@ Shader "JFA_Composite"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {
@@ -16,11 +16,11 @@ Shader "JFA_Composite"
 
     Fragment
     {
-        layout(location = 0) in vec2 v_TexCoord;
+        In(0) vec2 v_TexCoord;
 
-        layout(location = 0) out vec4 o_Color;
+        Out(0) vec4 o_Color;
 
-        layout(set = 0, binding = 0) uniform sampler2D u_OutlineResult;
+        Uniform(0, 0) sampler2D u_OutlineResult;
 
         void main()
         {

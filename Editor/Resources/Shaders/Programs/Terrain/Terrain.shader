@@ -28,7 +28,7 @@ Shader "Terrain"
         // quad patches purely from gl_VertexIndex (no vertex buffer). This stage emits each patch corner as a
         // world-space control point on the y=0 plane; the TES projects + (later) displaces it.
 
-        layout( binding = 0 ) uniform TerrainUB
+        Uniform(0) TerrainUB
         {
             mat4 View;
             mat4 Projection;
@@ -41,7 +41,7 @@ Shader "Terrain"
         }
         u;
 
-        layout( location = 0 ) out vec2 v_WorldXZ;
+        Out(0) vec2 v_WorldXZ;
 
         void main()
         {
@@ -75,7 +75,7 @@ Shader "Terrain"
 
         layout( vertices = 4 ) out;
 
-        layout( binding = 0 ) uniform TerrainUB
+        Uniform(0) TerrainUB
         {
             mat4 View;
             mat4 Projection;
@@ -88,8 +88,8 @@ Shader "Terrain"
         }
         u;
 
-        layout( location = 0 ) in vec2 v_WorldXZ[];
-        layout( location = 0 ) out vec2 tc_WorldXZ[];
+        In(0) vec2 v_WorldXZ[];
+        Out(0) vec2 tc_WorldXZ[];
 
         float TessForDistance( float d )
         {
@@ -152,7 +152,7 @@ Shader "Terrain"
 
         layout( quads, equal_spacing, cw ) in;
 
-        layout( binding = 0 ) uniform TerrainUB
+        Uniform(0) TerrainUB
         {
             mat4 View;
             mat4 Projection;
@@ -165,11 +165,11 @@ Shader "Terrain"
         }
         u;
 
-        layout( location = 0 ) in vec2 tc_WorldXZ[];
+        In(0) vec2 tc_WorldXZ[];
 
-        layout( location = 0 ) out vec3 v_WorldPos;
-        layout( location = 1 ) out vec3 v_Normal;
-        layout( location = 2 ) out float v_Height01; // normalized height [0..1] for slope/height tinting
+        Out(0) vec3 v_WorldPos;
+        Out(1) vec3 v_Normal;
+        Out(2) float v_Height01; // normalized height [0..1] for slope/height tinting
 
         // --- Value-noise fBm -------------------------------------------------------------------------------
 
@@ -257,14 +257,14 @@ Shader "Terrain"
         // tint so that with UNASSIGNED textures (white backend fallback) the result matches the Stage 2 relief.
         // Lit with a directional key light using the analytic normal from the TES.
 
-        layout( location = 0 ) in vec3 v_WorldPos;
-        layout( location = 1 ) in vec3 v_Normal;
-        layout( location = 2 ) in float v_Height01;
+        In(0) vec3 v_WorldPos;
+        In(1) vec3 v_Normal;
+        In(2) float v_Height01;
 
-        layout( location = 0 ) out vec4 o_Color;
+        Out(0) vec4 o_Color;
 
         // Engine-filled terrain UB (binding 0) — used here for the per-layer modes.
-        layout( binding = 0 ) uniform TerrainUB
+        Uniform(0) TerrainUB
         {
             mat4 View;
             mat4 Projection;
@@ -278,7 +278,7 @@ Shader "Terrain"
         u;
 
         // Data-driven material params (binding 1). Driven by MaterialComponent overrides.
-        layout( binding = 1 ) uniform MaterialUB
+        Uniform(1) MaterialUB
         {
             vec4  Tint;
             float DetailTiling; // world-space size (meters) of one texture tile
@@ -286,12 +286,12 @@ Shader "Terrain"
         u_Mat;
 
         // Splat layers (texture2D #pragma params; unassigned => white fallback). Bindings follow MaterialUB.
-        layout( binding = 2 ) uniform sampler2D u_GrassTex;
-        layout( binding = 3 ) uniform sampler2D u_RockTex;
-        layout( binding = 4 ) uniform sampler2D u_SnowTex;
+        Uniform(2) sampler2D u_GrassTex;
+        Uniform(3) sampler2D u_RockTex;
+        Uniform(4) sampler2D u_SnowTex;
         // Per-terrain splat map (R=grass, G=rock, B=snow weights), painted by the brush (Stage 3b). Engine-bound;
         // unassigned => white fallback (Manual layers show everywhere until painted).
-        layout( binding = 5 ) uniform sampler2D u_SplatMap;
+        Uniform(5) sampler2D u_SplatMap;
 
         // Triplanar sample: project onto the three world planes and blend by the (squared) normal so steep faces
         // don't stretch. scale = tiles per world unit.

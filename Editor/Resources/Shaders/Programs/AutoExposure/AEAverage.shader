@@ -7,16 +7,16 @@ Shader "AEAverage"
         // temporally adapts toward it (read the previous 1x1 luminance, lerp) and writes the new 1x1 value that
         // tonemap turns into exposure.
 
-        layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+        LocalSize(1, 1, 1);
 
-        layout(std430, binding = 0) buffer Histogram
+        Buffer(0) Histogram
         {
             uint u_Bins[256];
         };
-        layout(binding = 1) uniform sampler2D u_PrevLum;             // 1x1 previous adapted luminance
+        Uniform(1) sampler2D u_PrevLum;             // 1x1 previous adapted luminance
         layout(binding = 2, rgba32f) writeonly uniform image2D u_OutLum; // 1x1 new adapted luminance
 
-        layout(push_constant) uniform PushConstants
+        PushConstant PushConstants
         {
             float u_Dt;
             float u_AdaptSpeed;

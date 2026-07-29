@@ -5,7 +5,7 @@ Shader "PanoramaToCubemap"
         const float PI = 3.141592;
         const float TWOPI = 2 * PI;
 
-        layout(set=0, binding=0) uniform sampler2D inputTexture;
+        Uniform(0, 0) sampler2D inputTexture;
         layout(set=0, binding=1, rgba32f) restrict writeonly uniform imageCube outputTexture;
 
         vec3 getSamplingVector()
@@ -25,7 +25,7 @@ Shader "PanoramaToCubemap"
             return normalize(ret);
         }
 
-        layout(local_size_x=32, local_size_y=32, local_size_z=1) in;
+        LocalSize(32, 32, 1);
         void main(void)
         {
         	vec3 direction = getSamplingVector();

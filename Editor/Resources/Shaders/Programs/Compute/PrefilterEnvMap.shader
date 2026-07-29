@@ -10,10 +10,10 @@ Shader "PrefilterEnvMap"
         const float InvNumSamples = 1.0 / float(NumSamples);
 
 
-        layout(set=0, binding=0) uniform samplerCube inputTexture;
+        Uniform(0, 0) samplerCube inputTexture;
         layout(set=0, binding=1, rgba32f) restrict writeonly uniform imageCube outputTexture;
 
-        layout(push_constant) uniform PushConstants
+        PushConstant PushConstants
         {
         	float roughness;
         } pushConstants;
@@ -102,7 +102,7 @@ Shader "PrefilterEnvMap"
         	return S * v.x + T * v.y + N * v.z;
         }
 
-        layout(local_size_x=32, local_size_y=32, local_size_z=1) in;
+        LocalSize(32, 32, 1);
         void main(void)
         {
         	// Make sure we won't write past output when computing higher mipmap levels.

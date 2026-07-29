@@ -1,6 +1,6 @@
 // Engine-filled global time (MeshRenderer::DrawGenericMeshes writes it by reflection name for any
 // shader that declares this block). x = seconds since engine start; yzw reserved.
-layout( binding = 15 ) uniform TimeUB
+Uniform(15) TimeUB
 {
     vec4 TimeData;
 }

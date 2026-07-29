@@ -2,9 +2,9 @@ Shader "DiffuseIrradiance_4x3"
 {
     Compute
     {
-        layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+        LocalSize(32, 32, 1);
 
-        layout(set = 0, binding = 0) uniform sampler2D inputTexture;
+        Uniform(0, 0) sampler2D inputTexture;
         layout(set = 0, binding = 1, rgba32f) restrict writeonly uniform image2D outputTexture;
 
         const float PI = 3.141592653589793;

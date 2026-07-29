@@ -2,14 +2,14 @@ Shader "JFA_Final"
 {
     Fragment
     {
-        layout(location = 0) in vec2 v_TexCoord;
+        In(0) vec2 v_TexCoord;
 
-        layout(location = 0) out vec4 o_Color;
+        Out(0) vec4 o_Color;
 
-        layout(set = 0, binding = 0) uniform sampler2D u_JFATexture;
-        layout(set = 0, binding = 1) uniform sampler2D u_SceneTexture;
+        Uniform(0, 0) sampler2D u_JFATexture;
+        Uniform(0, 1) sampler2D u_SceneTexture;
 
-        layout(std140, binding = 2) uniform JFAFinalUB
+        Uniform(2) JFAFinalUB
         {
             vec4  u_OutlineColor;
             float u_OutlineWidth;
@@ -60,7 +60,7 @@ Shader "JFA_Final"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {

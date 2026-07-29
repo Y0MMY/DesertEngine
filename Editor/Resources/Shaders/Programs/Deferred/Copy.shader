@@ -7,7 +7,7 @@ Shader "Copy"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {
@@ -22,11 +22,11 @@ Shader "Copy"
         // colour into a separate texture so the glass pass can sample it (refraction) without a read+write feedback
         // loop on the scene target.
 
-        layout(location = 0) in vec2 v_TexCoord;
+        In(0) vec2 v_TexCoord;
 
-        layout(binding = 1) uniform sampler2D u_Input;
+        Uniform(1) sampler2D u_Input;
 
-        layout(location = 0) out vec4 oColor;
+        Out(0) vec4 oColor;
 
         void main()
         {

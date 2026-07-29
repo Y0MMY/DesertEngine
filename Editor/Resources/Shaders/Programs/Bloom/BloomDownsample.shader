@@ -8,10 +8,10 @@ Shader "BloomDownsample"
         // folded in here (so no separate bright-pass is needed). u_Source is sampled with an explicit LOD so the
         // whole bloom mip-chain can live in one image.
 
-        layout(binding = 0) uniform sampler2D u_Source;
+        Uniform(0) sampler2D u_Source;
         layout(binding = 1, rgba32f) writeonly uniform image2D u_Output;
 
-        layout(push_constant) uniform PushConstants
+        PushConstant PushConstants
         {
             vec2  u_SrcTexelSize; // 1 / size(source mip)
             int   u_SrcMip;       // LOD to sample from u_Source
@@ -19,7 +19,7 @@ Shader "BloomDownsample"
             float u_Threshold;    // bright-pass cutoff (first pass only)
         };
 
-        layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+        LocalSize(16, 16, 1);
 
         float Luminance( vec3 c )
         {

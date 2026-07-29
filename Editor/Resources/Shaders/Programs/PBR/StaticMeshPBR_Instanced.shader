@@ -7,11 +7,11 @@ Shader "StaticMeshPBR_Instanced"
 
     Vertex
     {
-        layout(location = 0) in vec3 a_Position;
-        layout(location = 1) in vec3 a_Normal;
-        layout(location = 2) in vec3 a_Tangent;
-        layout(location = 3) in vec3 a_Bitangent;
-        layout(location = 4) in vec2 a_TextureCoord;
+        In(0) vec3 a_Position;
+        In(1) vec3 a_Normal;
+        In(2) vec3 a_Tangent;
+        In(3) vec3 a_Bitangent;
+        In(4) vec2 a_TextureCoord;
 
         #include <Common/CameraUB.glslh>
 
@@ -25,7 +25,7 @@ Shader "StaticMeshPBR_Instanced"
         // Binding 17: PBR.glsl.frag (the shared fragment) already uses binding 16 for SpotLightsUB
         // (Spotlight.glslh) — a vertex SSBO at 16 would COLLIDE in the merged descriptor set and the slot would
         // resolve to SpotLightsUB, feeding garbage transforms (degenerate, invisible meshes). Keep 17 free.
-        layout( std430, binding = 17 ) readonly buffer InstanceTransforms
+        ReadBuffer(17) InstanceTransforms
         {
         	mat4 transforms[];
         };
@@ -33,13 +33,13 @@ Shader "StaticMeshPBR_Instanced"
         // Kept byte-identical to Static.glsl.vert / PBR.glsl.frag so the reflected push range matches. The
         // instanced vertex IGNORES Transform (the instance SSBO supplies the model matrix); MaterialIndex is still
         // used by the fragment stage.
-        layout( push_constant ) uniform PushConstants
+        PushConstant PushConstants
         {
         	mat4 Transform;     // offset 0  — unused here
         	uint MaterialIndex; // offset 64
         } m_PushConstants;
 
-        layout(location=0) out Vertex
+        Out(0) Vertex
         {
         	vec3 WorldPosition;
         	vec3 Normal;
@@ -75,7 +75,7 @@ Shader "StaticMeshPBR_Instanced"
         #include <Mesh/Spotlight.glslh>
         #include <Mesh/LightsMetadata.glslh>
 
-        layout(location=0) in Vertex
+        In(0) Vertex
         {
         	vec3 WorldPosition;
         	vec3 Normal;
@@ -89,12 +89,12 @@ Shader "StaticMeshPBR_Instanced"
         const vec3 Fdielectric = vec3(0.04);
 
 
-        layout(location = 0) out vec4 oColor;
+        Out(0) vec4 oColor;
 
         // Shared push-constant block. Must be byte-for-byte identical to the one in Static.glsl.vert /
         // Skinned.glsl.vert. Per-object material data lives in the Materials[] storage buffer (GPU-scene
         // style); the push constant only carries the per-object index into it.
-        layout( push_constant ) uniform PushConstants
+        PushConstant PushConstants
         {
         	mat4 Transform;     // offset 0   (vertex)
         	uint MaterialIndex; // offset 64  index into Materials[]
@@ -110,7 +110,7 @@ Shader "StaticMeshPBR_Instanced"
         	vec4 GlassTint;          // rgb = glass tint, a = transmission (opaque path ignores it)
         };
 
-        layout( std430, binding = 2 ) readonly buffer Materials
+        ReadBuffer(2) Materials
         {
         	GpuMaterial materials[];
         };
@@ -121,16 +121,16 @@ Shader "StaticMeshPBR_Instanced"
         	vec4 ColorIntensity; // rgb = color, a = intensity
         };
 
-        layout(binding = 3) uniform DirectionLightsUB {
+        Uniform(3) DirectionLightsUB {
         	DirectionLight 		directionLights;
         } directionLights;
 
         // Cascaded directional shadow maps (R32F light-space depth, one per cascade) + per-cascade light VP.
-        layout(binding = 5)  uniform sampler2D u_ShadowMap0;
-        layout(binding = 13) uniform sampler2D u_ShadowMap1;
-        layout(binding = 14) uniform sampler2D u_ShadowMap2;
-        layout(binding = 15) uniform sampler2D u_ShadowMap3;
-        layout(binding = 7) uniform ShadowUB {
+        Uniform(5) sampler2D u_ShadowMap0;
+        Uniform(13) sampler2D u_ShadowMap1;
+        Uniform(14) sampler2D u_ShadowMap2;
+        Uniform(15) sampler2D u_ShadowMap3;
+        Uniform(7) ShadowUB {
         	mat4 u_LightViewProj[4];
         	vec4 u_ShadowParams;      // x = bias, y = enabled (>0.5), z = debug mode (0/1/2), w = cascade count
         	vec4 u_DebugParams;       // x = show normals (>0.5); y,z,w reserved
@@ -225,15 +225,15 @@ Shader "StaticMeshPBR_Instanced"
         }
 
         // Environment maps
-        layout (binding = 8) uniform samplerCube u_EnvSpecularTex;
-        layout (binding = 9) uniform samplerCube u_EnvIrradianceTex;
+        Uniform(8) samplerCube u_EnvSpecularTex;
+        Uniform(9) samplerCube u_EnvIrradianceTex;
 
         // BRDF LUT
-        layout (binding = 10) uniform sampler2D u_BRDFLUTTexture;
+        Uniform(10) sampler2D u_BRDFLUTTexture;
 
-        layout(binding = 11) uniform sampler2D u_AlbedoTexture;
-        layout(binding = 12) uniform sampler2D u_NormalTexture;
-        layout(binding = 18) uniform sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
+        Uniform(11) sampler2D u_AlbedoTexture;
+        Uniform(12) sampler2D u_NormalTexture;
+        Uniform(18) sampler2D u_OpacityTexture; // alpha-cutout mask (foliage); unused when cutoff == 0 (16/17 = light SSBOs)
 
         struct Params
         {

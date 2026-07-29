@@ -11,15 +11,15 @@ Shader "AEHistogram"
         // bin to the global buffer. That is ~256x fewer global atomics than the naive per-texel atomicAdd —
         // per-texel atomics into the storage buffer made this dispatch cost SECONDS per frame on MoltenVK.
 
-        layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+        LocalSize(16, 16, 1);
 
-        layout(binding = 0) uniform sampler2D u_Scene;
-        layout(std430, binding = 1) buffer Histogram
+        Uniform(0) sampler2D u_Scene;
+        Buffer(1) Histogram
         {
             uint u_Bins[256];
         };
 
-        layout(push_constant) uniform PushConstants
+        PushConstant PushConstants
         {
             float u_MinLogLum;      // log2 of the darkest metered luminance
             float u_InvLogLumRange; // 1 / (log2 range)

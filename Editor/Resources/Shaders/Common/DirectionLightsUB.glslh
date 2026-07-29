@@ -7,7 +7,7 @@ struct DirectionLight
     vec4 ColorIntensity; // rgb = color, a = intensity
 };
 
-layout( binding = 14 ) uniform DirectionLightsUB
+Uniform(14) DirectionLightsUB
 {
     DirectionLight directionLights;
 }

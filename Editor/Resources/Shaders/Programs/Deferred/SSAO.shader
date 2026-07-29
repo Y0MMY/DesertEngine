@@ -8,7 +8,7 @@ Shader "SSAO"
         #include <Common/QuadPositions.glslh>
         #include <Common/QuadTextureCoords.glslh>
 
-        layout(location = 0) out vec2 v_TexCoord;
+        Out(0) vec2 v_TexCoord;
 
         void main()
         {
@@ -25,14 +25,14 @@ Shader "SSAO"
         // Self-contained: hemisphere directions come from a Hammersley sequence, rotated per-pixel by a hash (no
         // noise texture). The deferred lighting pass multiplies the ambient term by this.
 
-        layout(location = 0) in vec2 v_TexCoord;
+        In(0) vec2 v_TexCoord;
 
-        layout(binding = 1) uniform sampler2D u_GBufferPos;    // rgb = world position
-        layout(binding = 2) uniform sampler2D u_GBufferNormal; // rgb = world normal
+        Uniform(1) sampler2D u_GBufferPos;    // rgb = world position
+        Uniform(2) sampler2D u_GBufferNormal; // rgb = world normal
 
-        layout(location = 0) out vec4 oAO;
+        Out(0) vec4 oAO;
 
-        layout(binding = 0) uniform SSAOUB
+        Uniform(0) SSAOUB
         {
         	mat4 u_ViewProj;    // world -> clip (to project sample points back to screen)
         	vec4 u_CameraPos;   // xyz = camera world position
