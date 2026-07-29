@@ -16,6 +16,14 @@ if [ ! -x "$EDITOR" ]; then
     exit 1
 fi
 
+# STALE-BUILD GUARD: a binary older than the sources looks like a broken engine, not a stale
+# build (a day-old Release once choked on 43 shaders whose DSL its includer didn't know yet).
+NEWEST_SRC=$(find Desert/Desert/Source Desert/Common/Source Editor/Source -name '*.cpp' -newer "$EDITOR" -print -quit 2>/dev/null)
+if [ -n "$NEWEST_SRC" ]; then
+    echo "WARNING: $EDITOR is OLDER than $NEWEST_SRC" >&2
+    echo "         rebuild first: scripts/MacOS/BuildMacOS.sh $CONFIG" >&2
+fi
+
 # Make sure the Vulkan loader finds the MoltenVK ICD and validation layers from
 # Homebrew even when the environment doesn't provide them.
 BREW_PREFIX="${HOMEBREW_PREFIX:-$(brew --prefix 2>/dev/null || echo /opt/homebrew)}"
