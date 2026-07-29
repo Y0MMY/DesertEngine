@@ -6,12 +6,18 @@ Shader "Skybox"
 
         layout (binding = 1) uniform samplerCube samplerCubeMap;
 
+        // HDR skybox brightness — driven by SkyboxComponent::Intensity (x holds the multiplier).
+        layout(std140, binding = 2) uniform SkyboxParamsUB
+        {
+            vec4 u_SkyboxParams;
+        };
+
         layout(location = 3) in vec3 inUVW;
         layout(location = 4) in vec3  v_Position;
 
         void main()
         {
-        	oColor = texture(samplerCubeMap, v_Position);
+        	oColor = texture(samplerCubeMap, v_Position) * u_SkyboxParams.x;
         }
     }
 

@@ -12,18 +12,6 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    namespace
-    {
-        // Marks a group whose backing render feature isn't implemented yet, so the disabled controls
-        // below read as "intentionally inert" rather than "broken".
-        void NotImplementedNote( const char* feature )
-        {
-            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.85f, 0.65f, 0.25f, 1.0f ) );
-            ImGui::Text( "%s not implemented yet", feature );
-            ImGui::PopStyleColor();
-        }
-    } // namespace
-
     SceneSettingsPanel::SceneSettingsPanel( std::shared_ptr<::Desert::Core::Scene> scene )
          : IPanel( "Scene Settings" ), m_Scene( std::move( scene ) ),
            m_UIHelper( std::make_unique<UI::UIHelper>() )
@@ -105,8 +93,6 @@ namespace Desert::Editor
             }
         }
 
-        // The settings below have no renderer backing yet (no shadow / IBL-intensity / debug-viz systems).
-        // Shown disabled so they read honestly rather than appearing to do nothing.
         if ( ImGui::CollapsingHeader( "Environment" ) )
         {
             // Live — cascaded directional shadow maps.
@@ -115,14 +101,7 @@ namespace Desert::Editor
             ImGui::SliderFloat( "Cascade Split Lambda", &s.CascadeSplitLambda, 0.0f, 1.0f );
 
             ImGui::Spacing();
-            ImGui::TextDisabled( "Procedural Sky moved to the Skybox component (Details panel)." );
-
-            ImGui::Spacing();
-            NotImplementedNote( "environment-map intensity / skybox LOD" );
-            ImGui::BeginDisabled();
-            ImGui::SliderFloat( "Env Map Intensity", &s.EnvironmentMapIntensity, 0.0f, 5.0f );
-            ImGui::SliderFloat( "Skybox LOD", &s.SkyboxLOD, 0.0f, 10.0f );
-            ImGui::EndDisabled();
+            ImGui::TextDisabled( "Procedural Sky + skybox intensity moved to the Skybox component (Details)." );
         }
 
         if ( ImGui::CollapsingHeader( "Debug" ) )

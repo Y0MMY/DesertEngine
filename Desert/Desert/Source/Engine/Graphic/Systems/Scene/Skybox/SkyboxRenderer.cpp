@@ -63,7 +63,7 @@ namespace Desert::Graphic::System
         m_ActiveCamera = camera;
     }
 
-    void SkyboxRenderer::PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material )
+    void SkyboxRenderer::PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material, float intensity )
     {
         // Only record the material here. This can run from the skybox-load command (ExecuteAll) BEFORE
         // BeginScene/PrepareCamera, so the active camera may not exist yet — the camera-dependent bind
@@ -73,7 +73,8 @@ namespace Desert::Graphic::System
             return;
         }
 
-        m_MaterialSkybox = material;
+        m_MaterialSkybox  = material;
+        m_SkyboxIntensity = intensity;
     }
 
     void SkyboxRenderer::EnsureProceduralEnvironment()
@@ -136,7 +137,7 @@ namespace Desert::Graphic::System
         if ( const auto& material = m_MaterialSkybox.lock() )
         {
             if ( m_ActiveCamera )
-                material->Bind( { m_ActiveCamera } );
+                material->Bind( { m_ActiveCamera, m_SkyboxIntensity } );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), material->GetMaterialExecutor() );
         }
     }

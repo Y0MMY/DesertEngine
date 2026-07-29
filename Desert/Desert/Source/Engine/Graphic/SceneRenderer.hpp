@@ -98,7 +98,7 @@ namespace Desert::Graphic
                                   const std::vector<glm::mat4>* transforms );
 
         const Environment                 CreateEnvironment( const Common::Filepath& filepath );
-        void                              SetEnvironment( const std::shared_ptr<MaterialSkybox>& material );
+        void SetEnvironment( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );
         const std::optional<Environment>& GetEnvironment();
 
         // Procedural sky configuration (from the SkyboxComponent + directional light via the ECS).

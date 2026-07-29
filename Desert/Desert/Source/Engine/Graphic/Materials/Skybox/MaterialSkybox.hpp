@@ -13,6 +13,7 @@ namespace Desert::Graphic
     struct UpdateMaterialSkyboxInfo
     {
         Core::Camera* Camera;
+        float         Intensity = 1.0f; // HDR skybox brightness multiplier (SkyboxComponent::Intensity)
     };
 
     class MaterialSkybox final : public Material

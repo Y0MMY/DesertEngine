@@ -35,6 +35,12 @@ namespace Desert::Graphic
 
         Get<UniformBufferProperty>( CameraUB.Name )
              ->SetRawData( reinterpret_cast<std::byte*>( &CameraUB ), sizeof( ShaderProtocols::Camera ) );
+
+        // HDR skybox brightness: a std140 vec4 (x = intensity); the Skybox fragment multiplies the sampled
+        // radiance by .x. Null-guarded so an older Skybox shader without the UBO still binds cleanly.
+        const float params[4] = { data.Intensity, 0.0f, 0.0f, 0.0f };
+        if ( auto* ub = Get<UniformBufferProperty>( "SkyboxParamsUB" ) )
+            ub->SetRawData( reinterpret_cast<const std::byte*>( params ), sizeof( params ) );
     }
 
 } // namespace Desert::Graphic

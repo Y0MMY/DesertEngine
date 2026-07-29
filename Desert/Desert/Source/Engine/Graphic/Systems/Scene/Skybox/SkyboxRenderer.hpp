@@ -23,7 +23,7 @@ namespace Desert::Graphic::System
         }
 
         void PrepareCamera( Core::Camera* camera );
-        void PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material );
+        void PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );
 
         // When enabled, the Sky pass renders the engine-generated procedural atmosphere instead of the
         // HDR cubemap. The sun direction is the directional light's (toward-sun) direction.
@@ -70,6 +70,7 @@ namespace Desert::Graphic::System
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
 
         Core::Camera*             m_ActiveCamera = nullptr;
+        float                     m_SkyboxIntensity = 1.0f; // HDR-cubemap brightness (SkyboxComponent::Intensity)
         std::shared_ptr<GraphicsPipeline> m_Pipeline;
         std::shared_ptr<Shader>   m_Shader;
 

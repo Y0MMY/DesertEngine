@@ -83,7 +83,8 @@ namespace Desert::ECS
                     if ( auto skyboxAsset =
                               Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle ) )
                     {
-                        renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset );
+                        renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset,
+                                                                                      skybox.Intensity );
                     }
                 }
                 break;

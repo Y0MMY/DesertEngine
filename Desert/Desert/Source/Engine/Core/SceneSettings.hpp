@@ -86,12 +86,10 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Enable SSGI" ), Category( "Rendering" ) )
         bool EnableSSGI = true;
 
-        // Environment settings
-        PROPERTY( DisplayName( "Env Map Intensity" ), Category( "Environment" ), Range( 0.0f, 10.0f ) )
-        float EnvironmentMapIntensity = 1.0f;
-        PROPERTY( DisplayName( "Skybox LOD" ), Category( "Environment" ), Range( 0.0f, 10.0f ) )
-        float SkyboxLOD               = 0.0f; // Level of detail for skybox
-        // NOTE: procedural sky now lives on the SkyboxComponent (entity), not here.
+        // Environment: skybox brightness now lives on the SkyboxComponent (entity) as
+        // SkyboxComponent::Intensity — applied in the Skybox pass. Procedural sky lives there too. The old
+        // EnvironmentMapIntensity / SkyboxLOD scene-global knobs were dead (no render consumer) and removed;
+        // stale copies in old scene files are simply ignored on load.
         PROPERTY( DisplayName( "Enable Shadows" ), Category( "Shadows" ) )
         bool  EnableShadows           = true;
         PROPERTY( DisplayName( "Shadow Bias" ), Category( "Shadows" ), Range( 0.0f, 0.05f ) )

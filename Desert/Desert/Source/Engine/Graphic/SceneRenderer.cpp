@@ -546,9 +546,10 @@ namespace Desert::Graphic
         return {}; // EnvironmentManager::Create( filepath );
     }
 
-    void SceneRenderer::SetEnvironment( const std::shared_ptr<MaterialSkybox>& material )
+    void SceneRenderer::SetEnvironment( const std::shared_ptr<MaterialSkybox>& material, float intensity )
     {
-        UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->PrepareMaterial( material );
+        UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
+             ->PrepareMaterial( material, intensity );
     }
 
     void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity,
