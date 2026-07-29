@@ -31,7 +31,6 @@ namespace Desert::Graphic
 
         for ( auto [name, index] : uniformManager->GetUniformBufferTotal().Names )
         {
-            LOG_INFO( "Found {} as uniform", name );
             auto prop =
                  std::make_shared<UniformBufferProperty>( uniformManager->GetUniformBuffer( name ).GetValue() );
             m_UniformBufferPropertiesStorage.push_back( prop );
@@ -40,7 +39,6 @@ namespace Desert::Graphic
 
         for ( auto [name, index] : uniformManager->GetStorageBufferTotal().Names )
         {
-            LOG_INFO( "Found {} as storage buffer", name );
             auto prop =
                  std::make_shared<StorageBufferProperty>( uniformManager->GetStorageBuffer( name ).GetValue() );
             m_StorageBufferPropertiesStorage.push_back( prop );
@@ -49,7 +47,6 @@ namespace Desert::Graphic
 
         for ( auto [name, index] : uniformManager->GetUniformImageCubeTotal().Names )
         {
-            LOG_INFO( "Found {} as image cube", name );
             auto prop =
                  std::make_shared<TextureCubeProperty>( uniformManager->GetUniformImageCube( name ).GetValue() );
             m_TextureCubePropertiesStorage.push_back( prop );
@@ -58,7 +55,6 @@ namespace Desert::Graphic
 
         for ( auto [name, index] : uniformManager->GetUniformImage2DTotal().Names )
         {
-            LOG_INFO( "Found {} as image 2d", name );
             auto prop =
                  std::make_shared<Texture2DProperty>( uniformManager->GetUniformImage2D( name ).GetValue() );
             m_Texture2DPropertiesStorage.push_back( prop );
