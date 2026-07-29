@@ -1190,8 +1190,18 @@ namespace Desert::Editor
         char        stats[160];
         std::snprintf( stats, sizeof( stats ), "%s  %s   " ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms",
                        Common::Version::Full(), kBuildConfig, fps, fps > 0.0f ? 1000.0f / fps : 0.0f );
+        const bool  dirty  = CommandHistory::Get().Revision() != s_SavedRevision;
+        const float starW  = dirty ? ImGui::CalcTextSize( "* " ).x : 0.0f;
         const float statsW = ImGui::CalcTextSize( stats ).x;
-        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - statsW );
+        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - statsW - starW );
+        if ( dirty )
+        {
+            // Amber star next to the version/config block = unsaved scene changes.
+            ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.25f, 1.0f ), "*" );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Unsaved changes (Ctrl+S to save)" );
+            ImGui::SameLine( 0.0f, ImGui::CalcTextSize( " " ).x );
+        }
         ImGui::TextDisabled( "%s", stats );
 
         ImGui::EndChild();
@@ -1219,22 +1229,9 @@ namespace Desert::Editor
         const ImVec2 btnSize( btnH * 1.4f, btnH );
 
         // Transform-tool toggles moved into the VIEWPORT's own toolbar (Godot model: edit tools sit
-        // directly above the picture they act on). This strip: scene breadcrumb + dirty marker on
-        // the LEFT (it lived only in the OS window title, invisible when docked/fullscreen), the
-        // RUN cluster pinned to the RIGHT — isolated from editing so a stray click can't start Play.
-        {
-            const bool dirty = CommandHistory::Get().Revision() != s_SavedRevision;
-            ImGui::AlignTextToFramePadding();
-            if ( dirty )
-                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.25f, 1.0f ), ICON_MDI_FILE_DOCUMENT "  %s *",
-                                    m_MainScene->GetSceneName().c_str() );
-            else
-                ImGui::Text( ICON_MDI_FILE_DOCUMENT "  %s", m_MainScene->GetSceneName().c_str() );
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( dirty ? "Unsaved changes (Ctrl+S to save)" : "All changes saved" );
-        }
-
-        ImGui::SameLine();
+        // directly above the picture they act on). This strip keeps only the RUN cluster, pinned to
+        // the RIGHT edge — isolated from editing so a stray click can't start Play. The unsaved-
+        // changes marker lives in the status bar's version/config segment (no scene-name noise).
         const float spacing   = ImGui::GetStyle().ItemSpacing.x;
         const float playbackW = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
         ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - playbackW - 4.0f );
