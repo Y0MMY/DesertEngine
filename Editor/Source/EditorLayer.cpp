@@ -132,11 +132,29 @@ namespace Desert::Editor
         // apply immediately; the camera speed is applied on the first frame (the camera exists by then).
         EditorPreferences::Load();
 
+        // Sandbox one-time bake of the Cornell showcase to a loadable scene (File -> Open ->
+        // CornellDemo.desce). Runs BEFORE the default-scene handling below and clears itself, so it
+        // starts from and ends on an empty scene — it never fights the Starter scene the sandbox's
+        // own DefaultScene generates next.
+        if ( ProjectContext::HasProject() && ProjectContext::Current().Name == "Desert Sandbox" )
+        {
+            const auto demoPath = Common::Constants::Path::SCENE_PATH /
+                                  ( "CornellDemo" + Common::Constants::Extensions::SCENE_EXTENSION );
+            std::error_code ec;
+            if ( !std::filesystem::exists( demoPath, ec ) )
+            {
+                m_MainScene->Clear();
+                BuildCornellShowcase();
+                SaveSceneTo( demoPath.generic_string() );
+                m_MainScene->Clear();
+                LOG_INFO( "[Editor] Baked the Cornell showcase -> {}", demoPath.string() );
+            }
+        }
+
         // Launched with --project (Project Hub): adopt the project's name and queue its default scene
         // (loaded through the normal deferred path on the first frame, when the renderer is ready).
-        // A DefaultScene that does not exist yet (a FRESH Hub project) is GENERATED: a small Starter
-        // scene (sun, ground, cube, light, camera) built once and saved into the project — startup
-        // content is data in the project, never code in the engine.
+        // A DefaultScene that does not exist yet (a FRESH project, sandbox included) is GENERATED: the
+        // Starter playground built once and saved into the project — startup content is data, not code.
         if ( ProjectContext::HasProject() )
         {
             m_MainScene->SetSceneName( ProjectContext::Current().Name );
@@ -223,23 +241,6 @@ namespace Desert::Editor
         // (mechanism vs behaviour); runs after it so it reads this frame's state.
         m_MainScene->AddSystem<ECS::LocomotionSystem>( m_MainScene.get() );
         m_MainScene->AddSystem<ECS::AudioECSSystem>( m_MainScene.get() );
-
-        // The Cornell-Box GI + glass showcase is DATA now: baked ONCE into a loadable scene for the
-        // sandbox project (File -> Open -> CornellDemo.desce) instead of spawning on every launch.
-        // Fresh Hub projects get the Starter scene above, not the showcase.
-        if ( ProjectContext::HasProject() && ProjectContext::Current().Name == "Desert Sandbox" )
-        {
-            const auto demoPath = Common::Constants::Path::SCENE_PATH /
-                                  ( "CornellDemo" + Common::Constants::Extensions::SCENE_EXTENSION );
-            std::error_code ec;
-            if ( !std::filesystem::exists( demoPath, ec ) )
-            {
-                BuildCornellShowcase();
-                SaveSceneTo( demoPath.generic_string() );
-                m_MainScene->Clear(); // the showcase lives in the FILE; the editor starts empty
-                LOG_INFO( "[Editor] Baked the Cornell showcase -> {}", demoPath.string() );
-            }
-        }
 
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
 
