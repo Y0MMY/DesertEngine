@@ -697,10 +697,15 @@ namespace Desert::Graphic::System
                                                 : ( m_Wireframe && m_StaticWireframePipeline )
                                                       ? m_StaticWireframePipeline.get()
                                                       : m_StaticPipeline.get();
-                    // Auto LOD by camera distance (LOD0 near, coarser far). LOD0 is byte-identical to
-                    // the base geometry, so near objects are unaffected; disable via SetLODEnabled(false).
+                    // LOD: a per-mesh forced level (component's ForcedLOD) wins; otherwise auto by camera
+                    // distance (LOD0 near, coarser far). LOD0 is byte-identical to the base geometry, so near
+                    // objects are unaffected; the whole auto path is gated by SetLODEnabled.
                     uint32_t lod = 0;
-                    if ( m_LODEnabled && camera )
+                    if ( obj->ForcedLOD >= 0 )
+                    {
+                        lod = static_cast<uint32_t>( obj->ForcedLOD );
+                    }
+                    else if ( m_LODEnabled && camera )
                     {
                         const glm::vec3 objPos = glm::vec3( obj->Transform[3] );
                         const float     dist   = glm::length( camera->GetPosition() - objPos );
@@ -1468,6 +1473,7 @@ namespace Desert::Graphic::System
                 staticData.MaterialSlots   = data.MaterialSlots;
                 staticData.Outlined        = data.Outlined;
                 staticData.HiddenSubmeshes = data.HiddenSubmeshes;
+                staticData.ForcedLOD       = data.ForcedLOD;
 
                 m_StaticQueue.push_back( staticData );
                 break;

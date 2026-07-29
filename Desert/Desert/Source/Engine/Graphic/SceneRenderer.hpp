@@ -57,7 +57,8 @@ namespace Desert::Graphic
         {
             std::vector<glm::mat4> BoneMatrices; // optional
             bool                   Outlined        = false;
-            uint64_t               HiddenSubmeshes = 0; // bit i = submesh i hidden (static meshes)
+            uint64_t               HiddenSubmeshes = 0;  // bit i = submesh i hidden (static meshes)
+            int                    ForcedLOD       = -1; // -1 = auto (by distance)
         };
 
         ~SceneRenderer() = default;

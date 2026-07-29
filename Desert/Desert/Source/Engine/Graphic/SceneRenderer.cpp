@@ -482,7 +482,8 @@ namespace Desert::Graphic
                              .MaterialSlots   = &materialSlots,
                              .BoneMatrices    = extra.BoneMatrices,
                              .Outlined        = extra.Outlined,
-                             .HiddenSubmeshes = extra.HiddenSubmeshes } );
+                             .HiddenSubmeshes = extra.HiddenSubmeshes,
+                             .ForcedLOD       = extra.ForcedLOD } );
     }
 
     void SceneRenderer::SubmitTerrain( const glm::mat4& transform, float size, int resolution,

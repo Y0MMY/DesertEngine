@@ -91,6 +91,7 @@ namespace Desert::ECS
         std::optional<Geometry::PrimitiveType>    Primitive;                // Optional primitive type for dynamic generation
         std::shared_ptr<DynamicMesh>              RuntimeMesh;              // Unique mesh instance for modifications
         bool                                      OutlineDraw = false;
+        int                                       ForcedLOD   = -1;         // -1 = auto (by distance); 0..N pins a LOD
         // Per-submesh visibility: bit i set = submesh i is HIDDEN (skipped at draw). 0 = all visible. Up to
         // 64 submeshes; edited per Element in the Materials panel.
         uint64_t                                  HiddenSubmeshes = 0;

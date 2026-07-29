@@ -15,20 +15,23 @@ namespace Desert::Graphic::Render
         const std::vector<Graphic::MaterialInstance*>* MaterialSlots;
         glm::mat4                                      Transform;
         bool                                           Outlined        = false;
-        uint64_t                                       HiddenSubmeshes = 0; // bit i = submesh i hidden
+        uint64_t                                       HiddenSubmeshes = 0;  // bit i = submesh i hidden
+        int                                            ForcedLOD       = -1; // -1 = auto (by distance)
 
         DrawStaticMeshCommand( Desert::Mesh* mesh, const std::vector<Graphic::MaterialInstance*>* materialSlots,
-                               const glm::mat4& transform, bool outlined = false, uint64_t hiddenSubmeshes = 0 )
+                               const glm::mat4& transform, bool outlined = false, uint64_t hiddenSubmeshes = 0,
+                               int forcedLOD = -1 )
              : Mesh( mesh ), MaterialSlots( materialSlots ), Transform( transform ), Outlined( outlined ),
-               HiddenSubmeshes( hiddenSubmeshes )
+               HiddenSubmeshes( hiddenSubmeshes ), ForcedLOD( forcedLOD )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
             if ( MaterialSlots )
-                renderer.SubmitMesh( Mesh, *MaterialSlots, Transform,
-                                     { .Outlined = Outlined, .HiddenSubmeshes = HiddenSubmeshes } );
+                renderer.SubmitMesh(
+                     Mesh, *MaterialSlots, Transform,
+                     { .Outlined = Outlined, .HiddenSubmeshes = HiddenSubmeshes, .ForcedLOD = ForcedLOD } );
         }
     };
 

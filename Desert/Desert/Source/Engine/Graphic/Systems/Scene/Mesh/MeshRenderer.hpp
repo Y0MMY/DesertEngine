@@ -36,7 +36,8 @@ namespace Desert::Graphic::System
         std::vector<glm::mat4> BoneMatrices;
 
         bool     Outlined        = false;
-        uint64_t HiddenSubmeshes = 0; // bit i = submesh i hidden (static meshes)
+        uint64_t HiddenSubmeshes = 0;  // bit i = submesh i hidden (static meshes)
+        int      ForcedLOD       = -1; // -1 = auto (by distance); 0..N pins a LOD level
     };
 
     class MeshRenderer final : public RenderSystem
@@ -49,7 +50,8 @@ namespace Desert::Graphic::System
             // Pointer into the component's stable RuntimeSlotPtrs (valid for the frame) — no per-mesh copy.
             const std::vector<MaterialInstance*>* MaterialSlots   = nullptr;
             bool                                  Outlined        = false;
-            uint64_t                              HiddenSubmeshes = 0; // bit i = submesh i hidden
+            uint64_t                              HiddenSubmeshes = 0;  // bit i = submesh i hidden
+            int                                   ForcedLOD       = -1; // -1 = auto (by distance)
         };
 
         struct SkinnedMeshRenderData

@@ -73,6 +73,47 @@ namespace Desert::Editor
                 matc.Textures.clear();
             }
         }
+
+        // Level of Detail: the triangle count per LOD level + a per-mesh Force LOD override (Auto picks
+        // by camera distance). Only meshes that carry a LOD chain (imported / high-poly) show levels.
+        ::Desert::Mesh* lodMesh = nullptr;
+        if ( materialComp.MeshHandle )
+            lodMesh = Runtime::ResourceRegistry::GetMeshService()->Get( materialComp.MeshHandle );
+        else if ( materialComp.RuntimeMesh )
+            lodMesh = materialComp.RuntimeMesh.get();
+
+        if ( lodMesh && ImGui::CollapsingHeader( "Level of Detail" ) )
+        {
+            const auto& subs   = lodMesh->GetSubmeshes();
+            size_t      levels = 0;
+            for ( const auto& sm : subs )
+                if ( sm.LODs.size() > levels )
+                    levels = sm.LODs.size();
+
+            if ( levels <= 1 )
+            {
+                ImGui::TextDisabled( "No LOD chain (mesh too small / not generated)." );
+            }
+            else
+            {
+                for ( size_t l = 0; l < levels; ++l )
+                {
+                    uint32_t tris = 0;
+                    for ( const auto& sm : subs )
+                    {
+                        const size_t li = l < sm.LODs.size() ? l : sm.LODs.size() - 1;
+                        tris += sm.LODs[li].IndexCount / 3;
+                    }
+                    ImGui::BulletText( "LOD %zu \xE2\x80\x94 %u tris", l, tris );
+                }
+            }
+
+            const char* items[] = { "Auto (by distance)", "LOD 0", "LOD 1", "LOD 2", "LOD 3" };
+            int         cur     = materialComp.ForcedLOD < 0 ? 0 : materialComp.ForcedLOD + 1;
+            ImGui::SetNextItemWidth( 180.0f );
+            if ( ImGui::Combo( "Force LOD", &cur, items, 5 ) )
+                materialComp.ForcedLOD = ( cur == 0 ) ? -1 : cur - 1;
+        }
     }
 
     size_t MaterialComponentWidget::GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const
