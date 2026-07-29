@@ -1024,7 +1024,11 @@ namespace Desert::Editor
                     // icon + wrapped label + the ~6px card padding). The old value used the thumbnail-only
                     // 0.55*grid width, which packed ~1.6x too many columns -> cards overlapped and labels
                     // shifted into the next column.
-                    const float cellSize = m_GridSize + 12.0f + ImGui::GetStyle().ItemSpacing.x;
+                    // Card outsets in RenderFile (±2px horizontal, 8px above / 6px below the content) plus
+                    // breathing room so neighbouring cards and their shadow tiles never touch.
+                    const float cardPadX = 8.0f;
+                    const float cardPadY = 14.0f;
+                    const float cellSize = m_GridSize + 4.0f + cardPadX * 2.0f + ImGui::GetStyle().ItemSpacing.x;
 
                     constexpr float overlayPaddingY  = 6.0f * padding;
                     constexpr float thumbnailPadding = overlayPaddingY * 0.5f;
@@ -1050,14 +1054,21 @@ namespace Desert::Editor
                     }
                     else
                     {
-                        ImGui::PushStyleVar( ImGuiStyleVar_CellPadding,
-                                             { scaledThumbnailSizeX * 0.05f, scaledThumbnailSizeX * 0.05f } );
+                        ImGui::PushStyleVar( ImGuiStyleVar_CellPadding, { cardPadX, cardPadY } );
                         flags |= ImGuiTableFlags_PadOuterX | ImGuiTableFlags_SizingFixedFit;
                     }
 
                     ImVec2       cursorPos = ImGui::GetCursorPos();
                     const ImVec2 region    = ImGui::GetContentRegionAvail();
                     ImGui::InvisibleButton( "##DragDropTargetAssetPanelBody", region );
+
+                    // Click on the empty backdrop (tiles are drawn after and win hover) clears the selection —
+                    // this also folds the bottom preview pane away.
+                    if ( ImGui::IsItemClicked( ImGuiMouseButton_Left ) )
+                    {
+                        m_Selection.clear();
+                        m_CurrentSelected = nullptr;
+                    }
 
                     ImGui::SetCursorPos( cursorPos );
 
@@ -1181,7 +1192,7 @@ namespace Desert::Editor
 
     // Emit the drag-drop payloads a dragged asset can be dropped as. Target widgets accept exactly the
     // type they expect (texture slots: TEXTURE_ASSET; material slots: MATERIAL_ASSET; hierarchy: PREFAB_FILE).
-    static void EmitAssetDragSource( const DirectoryInformation& entry )
+    void FileExplorerPanel::EmitAssetDragSource( const DirectoryInformation& entry )
     {
         if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceAllowNullID ) )
         {
@@ -1197,7 +1208,34 @@ namespace Desert::Editor
                 type = ::Desert::Editor::DragPayloads::MeshAsset;
 
             ImGui::SetDragDropPayload( type, assetPath.c_str(), assetPath.size() + 1 );
-            // Drag preview: filename (the full path is long + reads as empty in a small tooltip).
+
+            // Drag preview: the tile's thumbnail (texture/material/model, when cached) or the big
+            // coloured type icon, with the filename beside it — mirrors what the user grabbed.
+            std::shared_ptr<Graphic::Image2D> img;
+            if ( m_Thumbnails )
+            {
+                if ( entry.Type == FileType::Texture )
+                    img = m_Thumbnails->Get( assetPath );
+                else if ( entry.Type == FileType::Material || entry.Type == FileType::Model )
+                    img = m_Thumbnails->Get( ThumbnailCache::DiskPath( assetPath ) );
+            }
+
+            constexpr float previewSize = 48.0f;
+            if ( img && m_UIHelper )
+                m_UIHelper->Image( img, ImVec2( previewSize, previewSize ) );
+            else
+            {
+                const char*  icon = entry.IsFile ? IconForType( entry.Type ) : ICON_MDI_FOLDER;
+                const ImVec4 col =
+                     entry.IsFile ? entry.FileTypeColour : ImVec4( 0.95f, 0.82f, 0.42f, 1.0f );
+                ImGui::PushFont( EditorResources::GetBigIconFont() );
+                ImGui::TextColored( col, "%s", icon );
+                ImGui::PopFont();
+            }
+            ImGui::SameLine();
+            // Center the single-line filename against the preview block.
+            ImGui::SetCursorPosY( ImGui::GetCursorPosY() +
+                                  std::max( 0.0f, ( previewSize - ImGui::GetTextLineHeight() ) * 0.5f ) );
             ImGui::TextUnformatted( std::filesystem::path( assetPath ).filename().string().c_str() );
             ImGui::EndDragDropSource();
         }
