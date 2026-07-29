@@ -305,7 +305,7 @@ namespace Desert::Editor
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
         m_Panels.emplace_back( std::make_unique<Editor::NodeGraphPanel>( m_AssetManager ) );
-        m_Panels.emplace_back( std::make_unique<Editor::AssetReferencesPanel>() );
+        m_Panels.emplace_back( std::make_unique<Editor::AssetReferencesPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::SequencerPanel>( m_MainScene, m_AnimationLibrary.get() ) );

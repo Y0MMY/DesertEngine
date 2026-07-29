@@ -4,19 +4,37 @@
 
 #include <Editor/Core/AssetReferences.hpp>
 
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace Desert
+{
+    namespace Core
+    {
+        class Scene;
+    }
+    namespace Assets
+    {
+        class AssetManager;
+    }
+} // namespace Desert
 
 namespace Desert::Editor
 {
     // "Asset References" — a read-only usage browser over the open project. Rebuild scans the Assets
-    // tree into an AssetReferenceIndex; from there you can see who references a given asset and which
-    // leaf assets (textures, materials) nothing references (cleanup candidates). Hidden by default;
-    // enable via View -> Asset References.
+    // tree into an AssetReferenceIndex (file-level, token-based: any TEXT asset — scene, prefab,
+    // material, graph, script — can be a referencer). On top of that the panel shows RUNTIME usage
+    // the text scan can't see: mesh ASSETS whose embedded material list uses the asset (meshes are
+    // binary) and the open-scene entities rendering with it right now. Also lists leaf assets
+    // nothing references (cleanup candidates). Hidden by default; enable via View -> Asset References.
     class AssetReferencesPanel final : public IPanel
     {
     public:
-        AssetReferencesPanel() : IPanel( "Asset References", /*showPanel=*/false )
+        AssetReferencesPanel( const std::shared_ptr<::Desert::Core::Scene>& scene,
+                              const std::shared_ptr<Assets::AssetManager>& assetManager )
+             : IPanel( "Asset References", /*showPanel=*/false ), m_Scene( scene ),
+               m_AssetManager( assetManager )
         {
         }
 
@@ -29,6 +47,11 @@ namespace Desert::Editor
 
     private:
         void Rebuild();
+        // Runtime usage of the selected asset: mesh-asset material lists + open-scene entities.
+        void DrawRuntimeUsage( const std::string& relPath );
+
+        std::shared_ptr<::Desert::Core::Scene> m_Scene;
+        std::shared_ptr<Assets::AssetManager> m_AssetManager;
 
         AssetReferenceIndex      m_Index;
         bool                     m_Built = false;

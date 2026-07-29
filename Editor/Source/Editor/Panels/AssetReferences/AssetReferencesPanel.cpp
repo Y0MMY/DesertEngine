@@ -2,7 +2,15 @@
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 
+#include <Common/Core/Constants.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+#include <Engine/Core/Scene.hpp>
+#include <Engine/ECS/Components.hpp>
+
 #include <algorithm>
+#include <filesystem>
 
 namespace Desert::Editor
 {
@@ -68,11 +76,13 @@ namespace Desert::Editor
             const auto refs = m_Index.ReferencersOf( m_AllPaths[m_Selected] );
             ImGui::BeginChild( "##referencers", ImVec2( 0.0f, 140.0f ), true );
             if ( refs.empty() )
-                ImGui::TextDisabled( ICON_MDI_ALERT_OUTLINE "  Nothing references this asset." );
+                ImGui::TextDisabled( ICON_MDI_ALERT_OUTLINE "  No FILE references this asset." );
             else
                 for ( const auto& r : refs )
                     ImGui::BulletText( "%s", r.c_str() );
             ImGui::EndChild();
+
+            DrawRuntimeUsage( m_AllPaths[m_Selected] );
         }
 
         ImGui::Spacing();
@@ -84,6 +94,89 @@ namespace Desert::Editor
         else
             for ( const auto& o : m_Orphans )
                 ImGui::BulletText( "%s", o.c_str() );
+        ImGui::EndChild();
+    }
+
+    void AssetReferencesPanel::DrawRuntimeUsage( const std::string& relPath )
+    {
+        // Runtime edges the file/token scan can't see. Currently material-centric: mesh assets
+        // reference materials from BINARY cooked data, and open-scene entities reference them by
+        // runtime handle in their slots — both invisible to a text scan by construction.
+        if ( !m_AssetManager ||
+             std::filesystem::path( relPath ).extension().string() !=
+                  Common::Constants::Extensions::MATERIAL_EXTENSION )
+            return;
+
+        const std::string fullPath =
+             ( std::filesystem::path( Common::Constants::Path::ASSETS_PATH ) / relPath ).generic_string();
+        const auto material = m_AssetManager->FindByPath<Assets::SurfaceMaterialAsset>( fullPath );
+        if ( !material )
+            return; // not loaded this session — the file-level section above still covers it
+
+        const auto handle     = material->GetMetadata().Handle;
+        const auto externalId = material->GetMaterialUUID();
+
+        // Mesh ASSETS whose embedded (imported) material list carries this material.
+        ImGui::Spacing();
+        ImGui::TextUnformatted( "Used by mesh assets" );
+        ImGui::BeginChild( "##meshUsers", ImVec2( 0.0f, 90.0f ), true );
+        {
+            size_t found = 0;
+            for ( const auto& [meshHandle, meshAsset] : m_AssetManager->FindAllByType<Assets::MeshAsset>() )
+            {
+                if ( !meshAsset )
+                    continue;
+                const auto& handles = meshAsset->GetMaterialHandles();
+                if ( std::find( handles.begin(), handles.end(), externalId ) == handles.end() )
+                    continue;
+                ImGui::BulletText(
+                     "%s", meshAsset->GetMetadata().Filepath.filename().generic_string().c_str() );
+                ++found;
+            }
+            if ( found == 0 )
+                ImGui::TextDisabled( "No loaded mesh asset embeds this material." );
+        }
+        ImGui::EndChild();
+
+        // Entities of the OPEN scene rendering with this material right now (slots by handle).
+        if ( !m_Scene )
+            return;
+        ImGui::Spacing();
+        ImGui::TextUnformatted( "Used by entities (open scene)" );
+        ImGui::BeginChild( "##entityUsers", ImVec2( 0.0f, 110.0f ), true );
+        {
+            size_t     found    = 0;
+            auto&      registry = m_Scene->GetRegistry();
+            const auto usesIt   = [&]( const std::vector<Assets::AssetHandle>& slots )
+            { return std::find( slots.begin(), slots.end(), handle ) != slots.end(); };
+            const auto tagOf = [&]( entt::entity e ) -> const char*
+            {
+                return registry.has<ECS::TagComponent>( e )
+                            ? registry.get<ECS::TagComponent>( e ).Tag.c_str()
+                            : "<unnamed>";
+            };
+
+            for ( auto e : registry.view<ECS::StaticMeshComponent>() )
+                if ( usesIt( registry.get<ECS::StaticMeshComponent>( e ).MaterialSlots ) )
+                {
+                    ImGui::BulletText( "%s", tagOf( e ) );
+                    ++found;
+                }
+            for ( auto e : registry.view<ECS::SkinnedMeshComponent>() )
+                if ( usesIt( registry.get<ECS::SkinnedMeshComponent>( e ).MaterialSlots ) )
+                {
+                    ImGui::BulletText( "%s  (skinned)", tagOf( e ) );
+                    ++found;
+                }
+            for ( auto e : registry.view<ECS::InstancedStaticMeshComponent>() )
+                if ( usesIt( registry.get<ECS::InstancedStaticMeshComponent>( e ).MaterialSlots ) )
+                {
+                    ImGui::BulletText( "%s  (instanced)", tagOf( e ) );
+                    ++found;
+                }
+            if ( found == 0 )
+                ImGui::TextDisabled( "No entity in the open scene uses this material." );
+        }
         ImGui::EndChild();
     }
 } // namespace Desert::Editor
