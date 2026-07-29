@@ -130,12 +130,19 @@ namespace Desert::Editor
         ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 4.0f );
         ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 4.0f, 4.0f ) );
 
+        // Breathing room: the row must not sit flush against the panel's left wall.
+        ImGui::SetCursorPosX( ImGui::GetCursorPosX() + 6.0f );
+
         // --- Mode dropdown ---
         const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage" };
         int         mode     = static_cast<int>( Core::ViewportMode::Get() );
         ImGui::SetNextItemWidth( 118.0f );
+        // WindowPadding is captured when the combo POPUP begins — push it here so the dropdown's
+        // items keep a margin from the popup border instead of touching it.
+        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 6.0f ) );
         if ( ImGui::Combo( "##ViewportMode", &mode, kModes, IM_ARRAYSIZE( kModes ) ) )
             Core::ViewportMode::Set( static_cast<Core::EditorMode>( mode ) );
+        ImGui::PopStyleVar();
 
         ImGui::SameLine();
         ImGui::TextDisabled( "|" );
