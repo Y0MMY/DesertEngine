@@ -134,12 +134,23 @@ namespace Desert::Editor
 
         // Launched with --project (Project Hub): adopt the project's name and queue its default scene
         // (loaded through the normal deferred path on the first frame, when the renderer is ready).
+        // A DefaultScene that does not exist yet (a FRESH Hub project) is GENERATED: a small Starter
+        // scene (sun, ground, cube, light, camera) built once and saved into the project — startup
+        // content is data in the project, never code in the engine.
         if ( ProjectContext::HasProject() )
         {
             m_MainScene->SetSceneName( ProjectContext::Current().Name );
-            if ( const auto scenePath = ProjectContext::DefaultScenePath();
-                 !scenePath.empty() && std::filesystem::exists( scenePath ) )
-                LoadScene( scenePath );
+            if ( const auto scenePath = ProjectContext::DefaultScenePath(); !scenePath.empty() )
+            {
+                if ( std::filesystem::exists( scenePath ) )
+                    LoadScene( scenePath );
+                else
+                {
+                    BuildStarterScene();
+                    SaveSceneTo( scenePath );
+                    LOG_INFO( "[Editor] Generated the Starter scene -> {}", scenePath );
+                }
+            }
         }
 
         BuiltinMeshRegistry::Init( nullptr );
@@ -213,55 +224,21 @@ namespace Desert::Editor
         m_MainScene->AddSystem<ECS::LocomotionSystem>( m_MainScene.get() );
         m_MainScene->AddSystem<ECS::AudioECSSystem>( m_MainScene.get() );
 
-        // Persistent Cornell-Box GI + glass showcase (loads by default). Red/green walls bleed onto the white
-        // objects (SSGI); a clear glass sphere sits in front of an orange cube (visible THROUGH the glass); a
-        // point light sits BEHIND the objects. Uses the scene's existing sun (adding a 2nd directional light
-        // overflows the single-light UB — see [[deferred-rendering-wip]]).
-        // Colours live in REAL material assets in the mesh slots (created/reused by name) — the same
-        // editable materials the panel shows; no per-entity override channel involved.
+        // The Cornell-Box GI + glass showcase is DATA now: baked ONCE into a loadable scene for the
+        // sandbox project (File -> Open -> CornellDemo.desce) instead of spawning on every launch.
+        // Fresh Hub projects get the Starter scene above, not the showcase.
+        if ( ProjectContext::HasProject() && ProjectContext::Current().Name == "Desert Sandbox" )
         {
-            auto tinted = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const char* matName,
-                               glm::vec4 albedo )
+            const auto demoPath = Common::Constants::Path::SCENE_PATH /
+                                  ( "CornellDemo" + Common::Constants::Extensions::SCENE_EXTENSION );
+            std::error_code ec;
+            if ( !std::filesystem::exists( demoPath, ec ) )
             {
-                auto& e   = m_MainScene->CreateNewEntity( std::string( name ) );
-                auto& smc = e.AddComponent<ECS::StaticMeshComponent>();
-                smc.Primitive = Geometry::PrimitiveType::Cube;
-                smc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
-                     m_AssetManager.get(), matName, albedo, 0.9f ) );
-                auto& tf       = e.GetComponent<ECS::TransformComponent>();
-                tf.Translation = pos;
-                tf.Scale       = scale;
-            };
-            const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1 ), red( 0.85f, 0.10f, 0.10f, 1 ),
-                 green( 0.10f, 0.70f, 0.15f, 1 );
-            tinted( "CB_Floor", { 0, 0, 0 }, { 6, 0.2f, 6 }, "CB_White", white );
-            tinted( "CB_Back", { 0, 3, -3 }, { 6, 6, 0.2f }, "CB_White", white );
-            tinted( "CB_LeftRed", { -3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Red", red );
-            tinted( "CB_RightGreen", { 3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Green", green );
-            // Orange opaque cube directly behind the glass sphere (seen through it).
-            tinted( "CB_OrangeCube", { 0, 1.3f, -1.2f }, { 1.4f, 1.4f, 1.4f }, "CB_Orange",
-                    glm::vec4( 0.95f, 0.5f, 0.08f, 1 ) );
-
-            // Clear glass sphere in front of the cube.
-            auto& glass = m_MainScene->CreateNewEntity( std::string( "CB_GlassSphere" ) );
-            auto& gsmc  = glass.AddComponent<ECS::StaticMeshComponent>();
-            gsmc.Primitive = Geometry::PrimitiveType::Sphere;
-            gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
-                 m_AssetManager.get(), "CB_Glass",
-                 { { "Transmission", glm::vec4( 0.9f, 0.0f, 0.0f, 0.0f ) },
-                   { "IOR", glm::vec4( 1.5f, 0.0f, 0.0f, 0.0f ) },
-                   { "GlassTint", glm::vec4( 0.75f, 0.9f, 1.0f, 1 ) } } ) );
-            auto& gtf       = glass.GetComponent<ECS::TransformComponent>();
-            gtf.Translation = { 0.0f, 1.5f, 0.7f };
-            gtf.Scale       = glm::vec3( 1.6f );
-
-            // Point light BEHIND the objects (backlight / rim).
-            auto& pl = m_MainScene->CreateNewEntity( std::string( "CB_BackLight" ) );
-            auto& pld = pl.AddComponent<ECS::PointLightComponent>().Data;
-            pld.Color     = glm::vec3( 1.0f, 0.85f, 0.6f );
-            pld.Intensity = 8.0f;
-            pld.Radius    = 12.0f;
-            pl.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.5f, -2.5f };
+                BuildCornellShowcase();
+                SaveSceneTo( demoPath.generic_string() );
+                m_MainScene->Clear(); // the showcase lives in the FILE; the editor starts empty
+                LOG_INFO( "[Editor] Baked the Cornell showcase -> {}", demoPath.string() );
+            }
         }
 
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
@@ -1499,6 +1476,111 @@ namespace Desert::Editor
             ImGui::SetTooltip( "Named docking layouts. Right-click a layout to delete it." );
 
         ImGui::EndMenu();
+    }
+
+    void EditorLayer::SaveSceneTo( const std::string& path )
+    {
+        std::error_code ec;
+        std::filesystem::create_directories( std::filesystem::path( path ).parent_path(), ec );
+        Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
+        Common::Utils::FileSystem::WriteContentToFile( path, serializer.SerializeToJson() );
+    }
+
+    void EditorLayer::BuildStarterScene()
+    {
+        // A fresh project's first scene: enough to orient (lit ground + one object + a playable
+        // camera), nothing to clean up. Materials are REAL assets in the project's Materials/.
+        auto& sun = m_MainScene->CreateNewEntity( "Sun" );
+        sun.AddComponent<ECS::DirectionLightComponent>();
+        // Translation encodes the direction (shading uses -normalize(T)) — high noon, slightly tilted.
+        sun.GetComponent<ECS::TransformComponent>().Translation =
+             glm::normalize( glm::vec3( 0.35f, 0.9f, 0.25f ) );
+
+        auto& ground   = m_MainScene->CreateNewEntity( "Ground" );
+        auto& gsmc     = ground.AddComponent<ECS::StaticMeshComponent>();
+        gsmc.Primitive = Geometry::PrimitiveType::Cube;
+        gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
+             m_AssetManager.get(), "Starter_Ground", glm::vec4( 0.55f, 0.55f, 0.58f, 1.0f ), 0.9f ) );
+        auto& gtf       = ground.GetComponent<ECS::TransformComponent>();
+        gtf.Translation = { 0.0f, -0.1f, 0.0f };
+        gtf.Scale       = { 12.0f, 0.2f, 12.0f };
+
+        auto& cube     = m_MainScene->CreateNewEntity( "Cube" );
+        auto& csmc     = cube.AddComponent<ECS::StaticMeshComponent>();
+        csmc.Primitive = Geometry::PrimitiveType::Cube;
+        csmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
+             m_AssetManager.get(), "Starter_Cube", glm::vec4( 0.80f, 0.45f, 0.20f, 1.0f ), 0.6f ) );
+        cube.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 0.5f, 0.0f };
+
+        auto& fill = m_MainScene->CreateNewEntity( "FillLight" );
+        auto& fld  = fill.AddComponent<ECS::PointLightComponent>().Data;
+        fld.Color     = glm::vec3( 1.0f, 0.95f, 0.85f );
+        fld.Intensity = 4.0f;
+        fld.Radius    = 10.0f;
+        fill.GetComponent<ECS::TransformComponent>().Translation = { 2.5f, 3.0f, 2.5f };
+
+        auto& camera = m_MainScene->CreateNewEntity( "Camera" );
+        camera.AddComponent<ECS::CameraComponent>();
+        camera.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.0f, 6.0f };
+    }
+
+    void EditorLayer::BuildCornellShowcase()
+    {
+        // Cornell-Box GI + glass showcase. Red/green walls bleed onto the white objects (SSGI); a
+        // clear glass sphere sits in front of an orange cube (visible THROUGH it); a point light
+        // backlights the set. Colours live in REAL material assets in the mesh slots.
+        auto tinted = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const char* matName,
+                           glm::vec4 albedo )
+        {
+            auto& e   = m_MainScene->CreateNewEntity( std::string( name ) );
+            auto& smc = e.AddComponent<ECS::StaticMeshComponent>();
+            smc.Primitive = Geometry::PrimitiveType::Cube;
+            smc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
+                 m_AssetManager.get(), matName, albedo, 0.9f ) );
+            auto& tf       = e.GetComponent<ECS::TransformComponent>();
+            tf.Translation = pos;
+            tf.Scale       = scale;
+        };
+        const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1 ), red( 0.85f, 0.10f, 0.10f, 1 ),
+             green( 0.10f, 0.70f, 0.15f, 1 );
+        tinted( "CB_Floor", { 0, 0, 0 }, { 6, 0.2f, 6 }, "CB_White", white );
+        tinted( "CB_Back", { 0, 3, -3 }, { 6, 6, 0.2f }, "CB_White", white );
+        tinted( "CB_LeftRed", { -3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Red", red );
+        tinted( "CB_RightGreen", { 3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Green", green );
+        // Orange opaque cube directly behind the glass sphere (seen through it).
+        tinted( "CB_OrangeCube", { 0, 1.3f, -1.2f }, { 1.4f, 1.4f, 1.4f }, "CB_Orange",
+                glm::vec4( 0.95f, 0.5f, 0.08f, 1 ) );
+
+        // Clear glass sphere in front of the cube.
+        auto& glass = m_MainScene->CreateNewEntity( std::string( "CB_GlassSphere" ) );
+        auto& gsmc  = glass.AddComponent<ECS::StaticMeshComponent>();
+        gsmc.Primitive = Geometry::PrimitiveType::Sphere;
+        gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
+             m_AssetManager.get(), "CB_Glass",
+             { { "Transmission", glm::vec4( 0.9f, 0.0f, 0.0f, 0.0f ) },
+               { "IOR", glm::vec4( 1.5f, 0.0f, 0.0f, 0.0f ) },
+               { "GlassTint", glm::vec4( 0.75f, 0.9f, 1.0f, 1 ) } } ) );
+        auto& gtf       = glass.GetComponent<ECS::TransformComponent>();
+        gtf.Translation = { 0.0f, 1.5f, 0.7f };
+        gtf.Scale       = glm::vec3( 1.6f );
+
+        // Point light BEHIND the objects (backlight / rim).
+        auto& pl  = m_MainScene->CreateNewEntity( std::string( "CB_BackLight" ) );
+        auto& pld = pl.AddComponent<ECS::PointLightComponent>().Data;
+        pld.Color     = glm::vec3( 1.0f, 0.85f, 0.6f );
+        pld.Intensity = 8.0f;
+        pld.Radius    = 12.0f;
+        pl.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.5f, -2.5f };
+
+        // The baked scene must carry its OWN sun — it no longer piggybacks on startup state.
+        // (Exactly one: a second directional light would overflow the single-light UB.)
+        if ( m_MainScene->GetRegistry().view<ECS::DirectionLightComponent>().size() == 0 )
+        {
+            auto& sun = m_MainScene->CreateNewEntity( "CB_Sun" );
+            sun.AddComponent<ECS::DirectionLightComponent>();
+            sun.GetComponent<ECS::TransformComponent>().Translation =
+                 glm::normalize( glm::vec3( -0.6f, 1.0f, -0.2f ) );
+        }
     }
 
     void EditorLayer::LoadScene( const Common::Filepath& path )

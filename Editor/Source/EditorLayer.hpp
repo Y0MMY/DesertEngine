@@ -92,6 +92,12 @@ namespace Desert::Editor
         void LoadScene( const Common::Filepath& path );
         void LoadSceneInternal( const Common::Filepath& path );
 
+        // Startup content is DATA, not code — these build entities into m_MainScene so the result
+        // can be serialized to a .desce ONCE and loaded like any scene afterwards.
+        void BuildStarterScene();    // fresh Hub project's DefaultScene: sun/ground/cube/light/camera
+        void BuildCornellShowcase(); // sandbox demo: baked into CornellDemo.desce on first launch
+        void SaveSceneTo( const std::string& path );
+
         // Force re-cook of Cooked/ from sources, re-register cooked assets, refresh the asset panel.
         void RebuildCookedAssets();
 
