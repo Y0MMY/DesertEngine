@@ -207,6 +207,34 @@ namespace Desert::Editor
             if ( ImGui::Combo( "Force LOD", &cur, items, 5 ) )
                 materialComp.ForcedLOD = ( cur == 0 ) ? -1 : cur - 1;
         }
+
+        // Rendering: selection-outline draw + per-submesh visibility. Both write component fields the
+        // renderer already honours (MeshRenderer::HasOutline / the HiddenSubmeshes bitmask), so they take
+        // effect live — the LOD-style inline-control pattern applied to the rest of the mesh.
+        if ( ImGui::CollapsingHeader( "Rendering" ) )
+        {
+            ImGui::Checkbox( "Draw selection outline", &materialComp.OutlineDraw );
+
+            const size_t subCount = lodMesh ? lodMesh->GetSubmeshes().size() : 0;
+            if ( subCount > 1 )
+            {
+                ImGui::Spacing();
+                ImGui::TextDisabled( "Submesh visibility" );
+                for ( size_t i = 0; i < subCount && i < 64; ++i )
+                {
+                    const uint64_t bit     = ( 1ull << i );
+                    bool           visible = ( materialComp.HiddenSubmeshes & bit ) == 0;
+                    const auto&    sm      = lodMesh->GetSubmeshes()[i];
+                    const std::string label =
+                         sm.Name.empty() ? ( "Submesh " + std::to_string( i ) ) : sm.Name;
+                    ImGui::PushID( static_cast<int>( i ) );
+                    if ( ImGui::Checkbox( label.c_str(), &visible ) )
+                        materialComp.HiddenSubmeshes =
+                             visible ? ( materialComp.HiddenSubmeshes & ~bit ) : ( materialComp.HiddenSubmeshes | bit );
+                    ImGui::PopID();
+                }
+            }
+        }
     }
 
     size_t MaterialComponentWidget::GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const
