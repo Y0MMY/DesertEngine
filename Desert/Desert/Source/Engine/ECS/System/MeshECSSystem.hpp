@@ -210,6 +210,9 @@ namespace Desert::ECS
                              }
                          }
 
+                         // Outline: editor selection OR the per-entity "Draw outline" toggle.
+                         const bool outlined = isSelected || mesh.OutlineDraw;
+
                          // A MaterialComponent assigning a NON-PBR shader takes this mesh off the batched
                          // PBR path onto the generic per-object data-driven path.
                          if ( registry.has<MaterialComponent>( entity ) )
@@ -232,7 +235,7 @@ namespace Desert::ECS
                                       targetMesh, worldTransform, matc.ShaderName,
                                       Graphic::MaterialOverrides{ std::move( overrides ),
                                                                   std::move( texOverrides ) },
-                                      isSelected );
+                                      outlined );
                                  return; // skip the PBR path for this entity
                              }
                          }
@@ -280,7 +283,7 @@ namespace Desert::ECS
                              const uint64_t visible = d.Mask & ~mesh.HiddenSubmeshes;
                              if ( visible )
                                  renderCommandBuffer.Emplace<Graphic::Render::DrawSlotMaterialMeshCommand>(
-                                      targetMesh, worldTransform, d.Mat, visible, isSelected );
+                                      targetMesh, worldTransform, d.Mat, visible, outlined );
                          }
 
                          // PBR path draws the remaining submeshes (skip entirely when every
@@ -290,7 +293,7 @@ namespace Desert::ECS
                          const uint64_t pbrHidden = mesh.HiddenSubmeshes | customMask;
                          if ( submeshCount == 0 || ( ~pbrHidden & allMask ) != 0 )
                              renderCommandBuffer.Emplace<Graphic::Render::DrawStaticMeshCommand>(
-                                  targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, isSelected,
+                                  targetMesh, &mesh.RuntimeSlotPtrs, worldTransform, outlined,
                                   pbrHidden, mesh.ForcedLOD );
                      } );
             }

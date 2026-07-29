@@ -119,12 +119,14 @@ namespace Desert::Editor
                 materialComp.ForcedLOD = ( cur == 0 ) ? -1 : cur - 1;
         }
 
-        // Rendering: selection-outline draw + per-submesh visibility. Both write component fields the
-        // renderer already honours (MeshRenderer::HasOutline / the HiddenSubmeshes bitmask), so they take
-        // effect live — the LOD-style inline-control pattern applied to the rest of the mesh.
+        // Rendering: persistent outline + per-submesh visibility. Both write component fields the
+        // renderer honours (MeshECSSystem ORs OutlineDraw into the outline flag / the HiddenSubmeshes
+        // bitmask), so they take effect live — the LOD-style inline-control pattern applied to the mesh.
         if ( ImGui::CollapsingHeader( "Rendering" ) )
         {
-            ImGui::Checkbox( "Draw selection outline", &materialComp.OutlineDraw );
+            ImGui::Checkbox( "Draw outline", &materialComp.OutlineDraw );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Always draw the outline for this mesh, even when it is not selected" );
 
             const size_t subCount = lodMesh ? lodMesh->GetSubmeshes().size() : 0;
             if ( subCount > 1 )
