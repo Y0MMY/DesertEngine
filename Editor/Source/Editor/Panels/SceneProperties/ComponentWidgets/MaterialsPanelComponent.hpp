@@ -38,6 +38,9 @@ namespace Desert::Editor
         // Resolves an asset path to a material, registers it if needed, and assigns it to a slot.
         void AssignMaterialFromPath( ECS::StaticMeshComponent& meshComp, size_t slot,
                                      const std::string& assetPath );
+        // Grows MaterialSlots up to `slot` by repeating the effective (last) handle so an inherited
+        // element row gains its own slot without changing the rendered look.
+        static void MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot );
 
     private:
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;

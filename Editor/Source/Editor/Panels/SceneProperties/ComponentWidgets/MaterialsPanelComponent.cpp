@@ -31,6 +31,7 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <system_error>
 
@@ -86,20 +87,22 @@ namespace Desert::Editor
         else if ( materialComp.RuntimeMesh )
             lodMesh = materialComp.RuntimeMesh.get();
 
-        if ( lodMesh && ImGui::CollapsingHeader( "Level of Detail" ) )
+        if ( ImGui::CollapsingHeader( "Level of Detail" ) )
         {
-            const auto& subs   = lodMesh->GetSubmeshes();
-            size_t      levels = 0;
-            for ( const auto& sm : subs )
-                if ( sm.LODs.size() > levels )
-                    levels = sm.LODs.size();
+            size_t levels = 0;
+            if ( lodMesh )
+                for ( const auto& sm : lodMesh->GetSubmeshes() )
+                    if ( sm.LODs.size() > levels )
+                        levels = sm.LODs.size();
 
             if ( levels <= 1 )
             {
-                ImGui::TextDisabled( "No LOD chain (mesh too small / not generated)." );
+                ImGui::TextDisabled( lodMesh ? "No LOD chain (mesh too small / not generated)."
+                                             : "No LOD chain (primitive meshes have a single level)." );
             }
             else
             {
+                const auto& subs = lodMesh->GetSubmeshes();
                 for ( size_t l = 0; l < levels; ++l )
                 {
                     uint32_t tris = 0;
@@ -208,6 +211,17 @@ namespace Desert::Editor
 
         Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
         return asset->GetMetadata().Handle;
+    }
+
+    void MaterialComponentWidget::MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot )
+    {
+        // Extend the slot array up to `slot` by repeating the last handle — exactly the renderer's
+        // min(i, slots-1) mapping — so materializing a row never changes the rendered look. With no
+        // slots at all the fill is Null (the engine default), same as what those rows showed before.
+        while ( meshComp.MaterialSlots.size() <= slot )
+            meshComp.MaterialSlots.push_back( meshComp.MaterialSlots.empty()
+                                                   ? Common::UUID::Null()
+                                                   : meshComp.MaterialSlots.back() );
     }
 
     void MaterialComponentWidget::AssignMaterialFromPath( ECS::StaticMeshComponent& meshComp, size_t slot,
@@ -440,80 +454,55 @@ namespace Desert::Editor
 
         if ( materialsOpen )
         {
+            // UE-style element list: ALWAYS one row per submesh (plus any extra explicit slots).
+            // A row without its own slot INHERITS the effective material the renderer actually uses
+            // (submesh i -> slot min(i, slots-1), or the engine default when there are no slots) and
+            // is shown greyed with a "Make Explicit" affordance — no slots are created behind the
+            // user's back, and making a row explicit never changes the rendered look.
             const size_t submeshCount = GetSubmeshCount( meshComp );
+            const size_t rowCount     = std::max( submeshCount, meshComp.MaterialSlots.size() );
 
-            // --- Per-submesh visibility (its OWN section, separate from material slots) ---
-            // Toggles bit i of HiddenSubmeshes -> the renderer skips that submesh (independent of the
-            // whole-entity VisibilityComponent). Lives here in plain rows (NOT on the framed "Element" tree
-            // header) because a framed TreeNodeEx swallows the row click, so the eye SmallButton never fired
-            // (it only collapsed the node). Only shown when there's more than one submesh to toggle.
-            if ( submeshCount > 1 )
-            {
-                if ( ImGui::TreeNodeEx( "Submesh Visibility", ImGuiTreeNodeFlags_DefaultOpen ) )
-                {
-                    for ( size_t s = 0; s < submeshCount && s < 64; ++s )
-                    {
-                        ImGui::PushID( static_cast<int>( 1000 + s ) );
-                        const bool hidden = ( meshComp.HiddenSubmeshes >> s ) & 1ull;
-                        if ( ImGui::SmallButton( hidden ? ICON_MDI_EYE_OFF : ICON_MDI_EYE ) )
-                            meshComp.HiddenSubmeshes ^= ( 1ull << s );
-                        ImGui::SameLine();
-                        ImGui::Text( "Submesh %zu%s", s, hidden ? "  (hidden)" : "" );
-                        ImGui::PopID();
-                    }
-                    ImGui::TreePop();
-                }
-            }
-
-            if ( meshComp.MaterialSlots.empty() )
-            {
-                ImGui::TextDisabled( "No material slots" );
-            }
-
-            // Create-material affordance: fill missing slots up to the mesh's submesh count with fresh,
-            // editable material assets. Also a drop target for dragging a .demat from the File Explorer.
-            if ( meshComp.MaterialSlots.size() < submeshCount )
-            {
-                const std::string addLabel =
-                     "Add Material (" + std::to_string( submeshCount - meshComp.MaterialSlots.size() ) + ")";
-                if ( ImGui::Button( addLabel.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
-                {
-                    while ( meshComp.MaterialSlots.size() < submeshCount )
-                        meshComp.MaterialSlots.push_back( CreateAndRegisterMaterial() );
-                    meshComp.RuntimeMaterialInstances.clear();
-                }
-                if ( ImGui::BeginDragDropTarget() )
-                {
-                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
-                    {
-                        const std::string path( static_cast<const char*>( p->Data ),
-                                                p->DataSize > 0 ? p->DataSize - 1 : 0 );
-                        AssignMaterialFromPath( meshComp, meshComp.MaterialSlots.size(), path );
-                    }
-                    ImGui::EndDragDropTarget();
-                }
-            }
-
-            for ( size_t i = 0; i < meshComp.MaterialSlots.size(); ++i )
+            for ( size_t i = 0; i < rowCount; ++i )
             {
                 ImGui::PushID( static_cast<int>( i ) );
 
-                const auto  handle = meshComp.MaterialSlots[i];
-                const auto  asset  = m_AssetManager
-                                         ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( handle )
-                                         : nullptr;
+                const bool hasOwnSlot =
+                     i < meshComp.MaterialSlots.size() && meshComp.MaterialSlots[i];
 
-                const std::string title = "Element " + std::to_string( i );
-                const bool        nodeOpen = ImGui::TreeNodeEx(
+                // The handle this row EFFECTIVELY renders with (mirrors the renderer's mapping).
+                Assets::AssetHandle handle        = Common::UUID::Null();
+                size_t              inheritedFrom = i;
+                if ( hasOwnSlot )
+                    handle = meshComp.MaterialSlots[i];
+                else if ( !meshComp.MaterialSlots.empty() )
+                {
+                    inheritedFrom = std::min( i, meshComp.MaterialSlots.size() - 1 );
+                    handle        = meshComp.MaterialSlots[inheritedFrom];
+                }
+
+                const auto asset = ( m_AssetManager && handle )
+                                        ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( handle )
+                                        : nullptr;
+
+                std::string title = "Element " + std::to_string( i );
+                if ( !hasOwnSlot )
+                    title += handle ? "  (inherited)" : "  (default)";
+
+                if ( !hasOwnSlot )
+                    ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+                const bool nodeOpen = ImGui::TreeNodeEx(
                     title.c_str(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen );
+                if ( !hasOwnSlot )
+                    ImGui::PopStyleColor();
 
-                // Drop an existing material asset onto this slot to assign it.
+                // Drop an existing material asset onto this row to assign it (creates the slot if needed).
                 if ( ImGui::BeginDragDropTarget() )
                 {
                     if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
                     {
                         const std::string path( static_cast<const char*>( p->Data ),
                                                 p->DataSize > 0 ? p->DataSize - 1 : 0 );
+                        MakeSlotExplicit( meshComp, i );
                         AssignMaterialFromPath( meshComp, i, path );
                     }
                     ImGui::EndDragDropTarget();
@@ -521,7 +510,44 @@ namespace Desert::Editor
 
                 if ( nodeOpen )
                 {
-                    if ( asset )
+                    if ( !hasOwnSlot )
+                    {
+                        // Inherited/default row: no inline editor (the material is authored on the row it
+                        // belongs to) — say where the look comes from and offer to own it.
+                        if ( asset )
+                        {
+                            const std::string matName =
+                                 std::filesystem::path( asset->GetMetadata().Filepath ).stem().string();
+                            ImGui::TextDisabled( "Uses Element %zu's material: %s", inheritedFrom,
+                                                 matName.c_str() );
+                        }
+                        else
+                        {
+                            ImGui::TextDisabled( "Uses the engine default material" );
+                        }
+
+                        if ( handle )
+                        {
+                            if ( ImGui::Button( "Make Explicit", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                            {
+                                MakeSlotExplicit( meshComp, i );
+                                meshComp.RuntimeMaterialInstances.clear();
+                            }
+                            if ( ImGui::IsItemHovered() )
+                                ImGui::SetTooltip( "Give this element its own slot (same material, look unchanged) "
+                                                   "so it can be assigned/edited independently" );
+                        }
+                        else if ( ImGui::Button( "Create Material", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                        {
+                            if ( const auto h = CreateAndRegisterMaterial() )
+                            {
+                                MakeSlotExplicit( meshComp, i );
+                                meshComp.MaterialSlots[i] = h;
+                                meshComp.RuntimeMaterialInstances.clear();
+                            }
+                        }
+                    }
+                    else if ( asset )
                     {
                         // ── Unity-style: the shader lives inside the material ──────────────
                         if ( DrawShaderPicker( *asset ) )
@@ -561,10 +587,8 @@ namespace Desert::Editor
                     }
                     else
                     {
-                        ImGui::TextDisabled( "Unassigned material slot" );
-                        // Pre-existing-but-empty slot (e.g. a mesh with no embedded material): let the user
-                        // create a fresh editable material right here (the "Add Material" button above only
-                        // shows when there are FEWER slots than submeshes). Also accepts a dropped .demat.
+                        // Slot exists but its asset can't be resolved (deleted/missing file).
+                        ImGui::TextDisabled( "Material asset missing" );
                         if ( ImGui::Button( "Create Material",
                                             ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
                         {
