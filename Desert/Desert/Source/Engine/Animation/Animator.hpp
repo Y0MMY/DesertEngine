@@ -77,6 +77,29 @@ namespace Desert::Animation
             return out;
         }
 
+        // --- Animation layers (override / additive, with optional per-bone masks) ---
+        // A layer plays a clip ON TOP of the base clip, restricted to its masked bones (empty mask = all).
+        //   Override (default): masked bones are blended base -> layer by Weight (e.g. an upper-body reload
+        //     over a full-body run — mask the spine/arms, weight 1).
+        //   Additive: the layer's delta from the rig's BIND pose is added (scaled by Weight) on top of the
+        //     base — for aim offsets / lean / breathing.
+        // Layers are skipped during a base crossfade (that brief frame plays the blend only). AddLayer returns
+        // the new layer index; the setters no-op on an out-of-range index.
+        int  AddLayer( const AnimationClip& clip, float weight = 1.0f, bool additive = false, bool loop = true );
+        void SetLayerClip( int index, const AnimationClip& clip );
+        void SetLayerWeight( int index, float weight );
+        void SetLayerAdditive( int index, bool additive );
+        // Restrict the layer to the named bones (and, by default, their descendants — a masked shoulder also
+        // masks the whole arm, which is what "upper body" means). Unknown names are ignored.
+        void SetLayerMaskByNames( int index, const std::vector<std::string>& boneNames, bool includeChildren = true );
+        void ClearLayerMask( int index ); // layer affects all bones
+        void RemoveLayer( int index );
+        void ClearLayers();
+        [[nodiscard]] size_t GetLayerCount() const
+        {
+            return m_Layers.size();
+        }
+
     private:
         struct ClipPlayback
         {
@@ -90,10 +113,26 @@ namespace Desert::Animation
             }
         };
 
+        struct AnimationLayer
+        {
+            ClipPlayback         Playback;              // clip + time + loop for this layer
+            float                Weight   = 1.0f;       // 0 = off, 1 = full
+            bool                 Additive = false;      // additive delta vs bind, else override blend
+            std::vector<uint8_t> BoneMask;              // per skeleton bone (1 = affected); empty = all bones
+        };
+
     private:
         void UpdatePlayback( ClipPlayback& playback, float deltaTime );
         void CalculatePose( const ClipPlayback& playback );
         void CalculateBlendedPose( float alpha );
+
+        // Local (parent-relative) transform of bone `boneIndex` driven by `clip` at `time`, or the bind-pose
+        // local when the clip has no track for it. The building block for layer composition.
+        glm::mat4 SampleLocalTransform( const AnimationClip* clip, uint32_t boneIndex, float time ) const;
+
+        // Recomputes m_CurrentPose from the base clip combined with every active layer, entirely in local
+        // bone space, then rebuilds the skinning matrices. Only called when layers exist (base path untouched).
+        void ApplyLayers();
 
         void CalculateBoneTransform( const ClipPlayback& playback, uint32_t boneIndex,
                                      const glm::mat4& parentTransform );
@@ -125,6 +164,9 @@ namespace Desert::Animation
 
         // Notify names crossed during the last Update of the current clip, drained by ConsumeNotifies().
         std::vector<std::string> m_FiredNotifies;
+
+        // Active animation layers, applied on top of the base clip each frame (see ApplyLayers).
+        std::vector<AnimationLayer> m_Layers;
 
         Pose m_CurrentPose;
     };
