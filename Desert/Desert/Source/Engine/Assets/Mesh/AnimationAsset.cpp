@@ -19,7 +19,10 @@ namespace Desert::Assets
     {
         auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
 
-        const auto dataReflected = rfl::json::read<Serialization::AnimationAssetData>( raw );
+        // DefaultIfMissing: clips cooked before a field existed (e.g. Notifies) still load — the missing
+        // field takes its default (empty) instead of failing the whole read.
+        const auto dataReflected =
+             rfl::json::read<Serialization::AnimationAssetData, rfl::DefaultIfMissing>( raw );
         if ( !dataReflected.has_value() )
         {
             return Common::MakeError( dataReflected.error().what() );
@@ -84,6 +87,14 @@ namespace Desert::Assets
 
             m_Clip.Tracks[track.BoneIndex] = std::move( track );
         }
+
+        // Notifies (sorted by time so the Animator's crossing test is a simple ordered scan).
+        m_Clip.Notifies.clear();
+        m_Clip.Notifies.reserve( data.Notifies.size() );
+        for ( const auto& n : data.Notifies )
+            m_Clip.Notifies.push_back( Animation::AnimationNotify{ n.Name, n.Time } );
+        std::sort( m_Clip.Notifies.begin(), m_Clip.Notifies.end(),
+                   []( const auto& a, const auto& b ) { return a.Time < b.Time; } );
 
         m_Clip.SkeletonSignature = m_SkeletonSignature;
         return BOOLSUCCESS;

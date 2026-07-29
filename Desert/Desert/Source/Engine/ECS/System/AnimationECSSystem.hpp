@@ -98,6 +98,10 @@ namespace Desert::ECS
 
                     anim.Animator->Update( animTs );
 
+                    // Notify markers crossed this frame -> queued for ScriptSystem to dispatch (assigned, so
+                    // a paused/cleared frame leaves it empty and nothing re-fires).
+                    anim.PendingNotifies = anim.Animator->ConsumeNotifies();
+
                     if ( !anim.Loop && anim.Animator->IsFinished() )
                     {
                         anim.Playing = false;

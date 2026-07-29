@@ -264,6 +264,10 @@ namespace Desert::ECS
         // Root motion
         bool EnableRootMotion = false;
 
+        // Notify names fired by the Animator THIS frame (crossed clip markers). Filled by AnimationECSSystem,
+        // drained + dispatched to the entity's scripts (OnAnimationNotify) by ScriptSystem. Transient.
+        std::vector<std::string> PendingNotifies;
+
         AnimationComponent() = default;
 
         explicit AnimationComponent( std::unique_ptr<Animation::Animator>&& animator )

@@ -146,6 +146,14 @@ namespace Desert::Animation
         }
     };
 
+    // Animation notify / event: a named marker at a time (same unit as Duration / key times). Fires once when
+    // playback crosses it; the Animator queues crossed notifies and the ECS dispatches them to scripts.
+    struct AnimationNotify
+    {
+        std::string Name;
+        float       Time = 0.0f;
+    };
+
     class AnimationClip
     {
     public:
@@ -156,5 +164,7 @@ namespace Desert::Animation
 
          std::vector<BoneTrack> Tracks; // it = bone index
         //std::unordered_map<std::string, BoneTrack> Tracks;
+
+        std::vector<AnimationNotify> Notifies; // sorted-by-time markers fired during playback
     };
 } // namespace Desert::Animation

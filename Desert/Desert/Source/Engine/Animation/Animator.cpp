@@ -143,12 +143,32 @@ namespace Desert::Animation
 
         float tps = playback.Clip->TicksPerSecond > 0.0f ? playback.Clip->TicksPerSecond : 25.0f;
 
+        const float prev     = playback.Time;
+        const float duration = playback.Clip->Duration;
+
         playback.Time += dt * tps;
 
+        const bool looped = playback.Loop && duration > 0.0f && playback.Time >= duration;
+
         if ( playback.Loop )
-            playback.Time = fmod( playback.Time, playback.Clip->Duration );
+            playback.Time = duration > 0.0f ? fmod( playback.Time, duration ) : 0.0f;
         else
-            playback.Time = glm::min( playback.Time, playback.Clip->Duration );
+            playback.Time = glm::min( playback.Time, duration );
+
+        // Fire the CURRENT clip's notifies whose time was crossed this frame (forward playback only). The
+        // covered interval is (prev, newTime]; on a loop wrap it is (prev, duration) ∪ [0, newTime]. One
+        // frame is assumed not to skip a whole loop (dt*tps < duration), which holds for real playback.
+        if ( &playback == &m_Current && dt > 0.0f && !playback.Clip->Notifies.empty() )
+        {
+            const float newTime = playback.Time;
+            for ( const auto& n : playback.Clip->Notifies )
+            {
+                const bool fire = looped ? ( n.Time > prev || n.Time <= newTime )
+                                         : ( n.Time > prev && n.Time <= newTime );
+                if ( fire )
+                    m_FiredNotifies.push_back( n.Name );
+            }
+        }
     }
 
     // ============================================================

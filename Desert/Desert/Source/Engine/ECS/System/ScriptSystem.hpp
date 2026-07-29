@@ -123,6 +123,21 @@ namespace Desert::ECS
                     m_Engine.ApplyProperties( id, slot, script.Properties );
                     m_Engine.CallUpdate( id, slot, ts.GetSeconds() );
                 }
+
+                // Dispatch animation notifies (footstep, hit-frame, ...) queued this frame by the Animator to
+                // EVERY started slot as OnAnimationNotify(name), then clear so each fires exactly once.
+                if ( registry.has<AnimationComponent>( entity ) )
+                {
+                    auto& anim = registry.get<AnimationComponent>( entity );
+                    if ( !anim.PendingNotifies.empty() )
+                    {
+                        for ( const auto& notify : anim.PendingNotifies )
+                            for ( uint32_t slot = 0; slot < sc.Scripts.size(); ++slot )
+                                if ( !sc.Scripts[slot].ScriptPath.empty() && sc.Scripts[slot].Started )
+                                    m_Engine.CallAnimationNotify( id, slot, notify );
+                        anim.PendingNotifies.clear();
+                    }
+                }
             }
 
             // Fire due Timer.after callbacks (scheduled by OnStart/OnUpdate/earlier timers). Game

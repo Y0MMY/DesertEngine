@@ -37,6 +37,15 @@ namespace Desert::Assets::Serialization
         std::vector<KeyScale>    Scales;
     };
 
+    // Animation notify / event: a named marker at a time (same unit as Duration / key times) that fires once
+    // when playback crosses it — dispatched to the entity's scripts as OnAnimationNotify(name). Footstep,
+    // hit-frame, "spawn VFX", etc.
+    struct NotifyData
+    {
+        std::string Name;
+        float       Time = 0.0f;
+    };
+
     struct AnimationAssetData
     {
         std::string              Name;
@@ -44,5 +53,7 @@ namespace Desert::Assets::Serialization
         float                    TicksPerSecond;
         uint64_t                 SkeletonSignature;
         std::vector<ChannelData> Channels;
+        // New field — clips cooked before notifies existed load with rfl::DefaultIfMissing (empty list).
+        std::vector<NotifyData>  Notifies;
     };
 } // namespace Desert::Assets::Serialization

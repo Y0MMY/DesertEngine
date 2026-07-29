@@ -67,6 +67,16 @@ namespace Desert::Animation
 
         [[nodiscard]] const AnimationClip* GetCurrentClip() const;
 
+        // Returns (and clears) the names of the current clip's notifies crossed during the last Update — for
+        // the ECS to dispatch to scripts. Call once per frame after Update. Scrubbing via SetTime does NOT
+        // fire notifies (only forward playback does).
+        std::vector<std::string> ConsumeNotifies()
+        {
+            std::vector<std::string> out;
+            out.swap( m_FiredNotifies );
+            return out;
+        }
+
     private:
         struct ClipPlayback
         {
@@ -112,6 +122,9 @@ namespace Desert::Animation
         float m_BlendDuration = 0.0f;
 
         float m_PlaybackSpeed = 1.0f;
+
+        // Notify names crossed during the last Update of the current clip, drained by ConsumeNotifies().
+        std::vector<std::string> m_FiredNotifies;
 
         Pose m_CurrentPose;
     };
