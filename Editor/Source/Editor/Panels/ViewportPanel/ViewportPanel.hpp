@@ -70,6 +70,10 @@ namespace Desert::Editor
 
         ViewportData m_ViewportData;
 
+        // True while the cursor is over the corner view-axis gizmo — set in DrawViewAxisGizmo, read in
+        // OnMousePressed to suppress scene picking (a click there snaps the camera, it doesn't select).
+        bool m_ViewAxisGizmoHovered = false;
+
         // Resize is deferred from OnUIRender (within the recording window) to OnPreUpdate
         // (start of next frame, before any rendering) to avoid destroying descriptor set pools
         // while they are bound to a recording command buffer.

@@ -474,26 +474,55 @@ namespace Desert::Editor
             ImU32       Color;
             bool        Positive;
             const char* Label;
+            glm::vec3   WorldDir; // the world-space axis end this tip represents (a.Dir * s)
         };
-        std::array<Tip, 6> tips;
+        std::array<Tip, 6> tips2;
         int                n = 0;
         for ( const Axis& a : axes )
             for ( float s : { 1.0f, -1.0f } )
             {
                 const glm::vec3 v = viewRot * ( a.Dir * s );
-                tips[n++]         = Tip{ ImVec2( center.x + v.x * radius, center.y - v.y * radius ), v.z, a.Color,
-                                 s > 0.0f, a.Label };
+                tips2[n++] = Tip{ ImVec2( center.x + v.x * radius, center.y - v.y * radius ),
+                                  v.z,
+                                  a.Color,
+                                  s > 0.0f,
+                                  a.Label,
+                                  a.Dir * s };
             }
-        std::sort( tips.begin(), tips.end(), []( const Tip& l, const Tip& r ) { return l.Depth < r.Depth; } );
+        std::sort( tips2.begin(), tips2.end(), []( const Tip& l, const Tip& r ) { return l.Depth < r.Depth; } );
+
+        // Clickable: a tip under the cursor snaps the editor camera to view FROM that axis end (forward =
+        // -worldDir). Hover state suppresses picking (see OnMousePressed). Nearest-to-cursor tip wins.
+        const ImVec2 mouse = ::ImGui::GetMousePos();
+        auto*        editorCam =
+             m_Scene ? dynamic_cast<::Desert::Core::EditorCamera*>( camera.get() ) : nullptr;
+        const float  dxg = mouse.x - center.x, dyg = mouse.y - center.y;
+        m_ViewAxisGizmoHovered = editorCam && ( dxg * dxg + dyg * dyg ) <= ( radius + 8.0f ) * ( radius + 8.0f );
+
+        int   hotTip  = -1;
+        float hotDist = 11.0f; // click/hover radius around a tip in pixels
+        for ( int i = 0; i < n; ++i )
+        {
+            const float dx = mouse.x - tips2[i].Pos.x, dy = mouse.y - tips2[i].Pos.y;
+            const float d  = std::sqrt( dx * dx + dy * dy );
+            if ( d < hotDist )
+            {
+                hotDist = d;
+                hotTip  = i;
+            }
+        }
 
         dl->AddCircleFilled( center, radius + 8.0f, IM_COL32( 20, 20, 24, 130 ) );
         for ( int i = 0; i < n; ++i )
         {
-            const Tip& t = tips[i];
+            const Tip& t   = tips2[i];
+            const bool hot = ( i == hotTip ) && editorCam;
             if ( t.Positive )
             {
                 dl->AddLine( center, t.Pos, t.Color, 2.0f );
-                dl->AddCircleFilled( t.Pos, 8.0f, t.Color );
+                dl->AddCircleFilled( t.Pos, hot ? 10.0f : 8.0f, t.Color );
+                if ( hot )
+                    dl->AddCircle( t.Pos, 10.0f, IM_COL32( 255, 255, 255, 220 ), 0, 2.0f );
                 const ImVec2 ts = ::ImGui::CalcTextSize( t.Label );
                 dl->AddText( ImVec2( t.Pos.x - ts.x * 0.5f, t.Pos.y - ts.y * 0.5f ), IM_COL32( 15, 15, 18, 255 ),
                              t.Label );
@@ -501,10 +530,14 @@ namespace Desert::Editor
             else
             {
                 // Negative ends: hollow dot, no label — reads as "the back of the axis".
-                dl->AddCircleFilled( t.Pos, 6.0f, IM_COL32( 40, 40, 46, 200 ) );
-                dl->AddCircle( t.Pos, 6.0f, t.Color, 0, 1.6f );
+                dl->AddCircleFilled( t.Pos, hot ? 8.0f : 6.0f, IM_COL32( 40, 40, 46, 200 ) );
+                dl->AddCircle( t.Pos, hot ? 8.0f : 6.0f, hot ? IM_COL32( 255, 255, 255, 220 ) : t.Color, 0,
+                               1.6f );
             }
         }
+
+        if ( hotTip >= 0 && editorCam && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+            editorCam->SnapToDirection( -tips2[hotTip].WorldDir );
     }
 
     void ViewportPanel::OnEvent( Common::Event& e )
@@ -533,6 +566,11 @@ namespace Desert::Editor
     {
         // LMB picks/selects ONLY in Select mode and when no brush is active (terrain brush / Foliage paint
         // both consume LMB in OnUIRender instead).
+        // A click on the corner view-axis gizmo snaps the camera (handled in DrawViewAxisGizmo) — don't also
+        // pick the object behind it.
+        if ( m_ViewAxisGizmoHovered )
+            return false;
+
         if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() &&
              Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered )
         {

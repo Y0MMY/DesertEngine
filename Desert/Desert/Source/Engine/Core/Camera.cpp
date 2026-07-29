@@ -190,6 +190,24 @@ namespace Desert::Core
         return glm::rotate( GetOrientation(), glm::vec3( 0.0, 0.0, -1.0 ) );
     }
 
+    void EditorCamera::SnapToDirection( const glm::vec3& forward )
+    {
+        if ( glm::length( forward ) < 1e-5f )
+            return;
+        const glm::vec3 f = glm::normalize( forward );
+
+        // Invert this camera's forward model  f = ( sin(yaw)cos(pitch), -sin(pitch), -cos(yaw)cos(pitch) ).
+        m_Pitch      = glm::asin( glm::clamp( -f.y, -1.0f, 1.0f ) );
+        m_Yaw        = std::atan2( f.x, -f.z );
+        m_YawDelta   = 0.0f;
+        m_PitchDelta = 0.0f;
+
+        // Keep the current framing distance; orbit the position onto the new direction.
+        const float dist = glm::max( glm::distance( m_Position, m_FocalPoint ), 1.0f );
+        m_Position       = m_FocalPoint - GetForwardDirection() * dist;
+        UpdateCameraView();
+    }
+
     void EditorCamera::UpdateCameraView()
     {
         const float     YAWsign       = GetUpDirection().y > 0 ? 1 : -1;

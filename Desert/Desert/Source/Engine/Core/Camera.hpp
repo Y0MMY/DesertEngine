@@ -71,6 +71,11 @@ namespace Desert::Core
         // inside the viewport stays active until the button is released even if the cursor leaves.
         void SetInputEnabled( bool enabled ) { m_InputEnabled = enabled; }
 
+        // Orbit the camera so it looks ALONG `forward` (a world-space direction) at the current focal point,
+        // preserving the current framing distance. Drives the clickable view-axis gizmo (snap to Front/Top/
+        // Right/... ortho-ish views). Derives yaw/pitch from the target forward under this camera's model.
+        void SnapToDirection( const glm::vec3& forward );
+
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );
