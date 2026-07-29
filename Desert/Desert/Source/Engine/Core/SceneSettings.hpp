@@ -62,15 +62,10 @@ namespace Desert::Core
     {
         REFLECT()
 
-        // Outline settings (Jump Flood). Width and smoothness are in screen pixels.
-        PROPERTY( DisplayName( "Outline Color" ), Category( "Outline" ), Color )
-        glm::vec3 OutlineColor{ 1.0f, 0.5f, 0.0f }; // Orange by default
-        PROPERTY( DisplayName( "Outline Width" ), Category( "Outline" ), Range( 0.0f, 20.0f ) )
-        float     OutlineWidth      = 4.0f;
-        PROPERTY( DisplayName( "Outline Smoothness" ), Category( "Outline" ), Range( 0.0f, 10.0f ) )
-        float     OutlineSmoothness = 2.0f;
-        PROPERTY( DisplayName( "Enable Outline" ), Category( "Outline" ) )
-        bool      EnableOutline     = true;
+        // Selection outline (Jump Flood) moved OUT of scene settings into EditorPreferences: it is an
+        // editor-only viewport visualization (runtime builds have no selection), not a scene property.
+        // See Editor::EditorPreferences (OutlineColor/Width/Smoothness/EnableOutline), pushed to the
+        // renderer each frame via SceneRenderer::SetOutlineSettings.
 
         // Rendering path (Forward default; Deferred is built incrementally behind this toggle).
         PROPERTY( DisplayName( "Render Path" ), Category( "Rendering" ) )

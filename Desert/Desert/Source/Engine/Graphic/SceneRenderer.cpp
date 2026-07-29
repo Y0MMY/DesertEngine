@@ -167,12 +167,9 @@ namespace Desert::Graphic
         m_ScenePlaying = scene.IsPlaying(); // grid & other authoring aids hide while the game runs
 
         const auto& sceneSettings    = scene.GetSettings();
-        const auto& jumpFloodSystem  = UNIQUE_GET_AS( System::JumpFloodOutlineRenderer,
-                                                     m_RenderSystems["JumpFloodSystem"] );
-        jumpFloodSystem->SetEnabled( sceneSettings.EnableOutline );
-        jumpFloodSystem->SetOutlineColor( sceneSettings.OutlineColor );
-        jumpFloodSystem->SetOutlineWidth( sceneSettings.OutlineWidth );
-        jumpFloodSystem->SetOutlineSmoothness( sceneSettings.OutlineSmoothness );
+        // Selection-outline appearance is NOT read from the scene: it's an editor-only viewport aid pushed
+        // each frame via SetOutlineSettings (from EditorPreferences). Runtime builds never push -> the
+        // JumpFlood system keeps its defaults, and MeshRenderer::HasOutline() gates whether it draws.
 
         m_AAMode       = sceneSettings.AA;
         m_RenderPath   = sceneSettings.RenderingPath;
@@ -544,6 +541,16 @@ namespace Desert::Graphic
     const Environment SceneRenderer::CreateEnvironment( const Common::Filepath& filepath )
     {
         return {}; // EnvironmentManager::Create( filepath );
+    }
+
+    void SceneRenderer::SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled )
+    {
+        const auto& jumpFloodSystem =
+             UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
+        jumpFloodSystem->SetEnabled( enabled );
+        jumpFloodSystem->SetOutlineColor( color );
+        jumpFloodSystem->SetOutlineWidth( width );
+        jumpFloodSystem->SetOutlineSmoothness( smoothness );
     }
 
     void SceneRenderer::SetEnvironment( const std::shared_ptr<MaterialSkybox>& material, float intensity )

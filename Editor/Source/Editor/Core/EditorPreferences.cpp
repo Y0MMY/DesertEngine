@@ -9,6 +9,9 @@
 
 #include <rflcpp/rfl/json.hpp>
 
+// glm::vec3 <-> JSON reflector (OutlineColor). Must be visible before the rfl::json read/write below.
+#include <Common/Core/Serialization/GlmReflection.hpp>
+
 #include <cstdlib>
 #include <filesystem>
 

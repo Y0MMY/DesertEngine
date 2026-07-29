@@ -30,10 +30,14 @@ namespace Desert::Editor
         // Keep AA on (FXAA) for smoother edges; supersampling (render 2x, downscale) adds the rest.
         auto& settings         = m_Scene->GetSettings();
         settings.ShowGrid      = false;
-        settings.EnableOutline = false;
         settings.EnableShadows = false;
         settings.EnableBloom   = false;
         settings.AA            = ::Desert::Core::AntiAliasingMode::FXAA;
+
+        // Selection outline is an editor-preference now (no longer a scene setting); force it off on this
+        // preview renderer so it never bleeds into a thumbnail (the main editor loop pushes it every frame,
+        // but this offscreen renderer is never fed, so disable it explicitly).
+        m_Renderer->SetOutlineSettings( glm::vec3( 0.0f ), 0.0f, 0.0f, false );
 
         // NOTE: the runtime Core::Camera is a fixed orbit camera (input-driven, ignores the ECS transform).
         // It sits at ~(-4.33, 6.12, -4.33) looking at the origin (distance ~8.66). We can't reposition it,

@@ -29,14 +29,6 @@ namespace Desert::Editor
 
         Core::SceneSettings& s = m_Scene->GetSettings();
 
-        if ( ImGui::CollapsingHeader( "Outline", ImGuiTreeNodeFlags_DefaultOpen ) )
-        {
-            ImGui::Checkbox( "Enable Outline", &s.EnableOutline );
-            ImGui::ColorEdit3( "Color", glm::value_ptr( s.OutlineColor ) );
-            ImGui::SliderFloat( "Width (px)", &s.OutlineWidth, 0.0f, 20.0f );
-            ImGui::SliderFloat( "Smoothness", &s.OutlineSmoothness, 0.0f, 10.0f );
-        }
-
         if ( ImGui::CollapsingHeader( "Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
             const char* items[] = { "None", "FXAA", "SMAA" };

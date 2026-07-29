@@ -99,6 +99,10 @@ namespace Desert::Graphic
 
         const Environment                 CreateEnvironment( const Common::Filepath& filepath );
         void SetEnvironment( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );
+
+        // Selection-outline (Jump Flood) appearance. Editor-only: pushed each frame from EditorPreferences
+        // (the outline is a viewport visualization, not a scene property, so it does not live in SceneSettings).
+        void SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled );
         const std::optional<Environment>& GetEnvironment();
 
         // Procedural sky configuration (from the SkyboxComponent + directional light via the ECS).

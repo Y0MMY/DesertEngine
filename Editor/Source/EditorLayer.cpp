@@ -59,6 +59,7 @@
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/DayNightSystem.hpp>
@@ -429,6 +430,15 @@ namespace Desert::Editor
         // command buffer references -> device lost.
         if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
             materialService->CollectGarbage();
+
+        // Push the editor-only selection-outline appearance into the renderer before it records this frame.
+        // Outline lives in EditorPreferences (viewport aid), not in the scene, so it is fed here per-frame.
+        if ( auto* sceneRenderer = m_MainScene->GetSceneRenderer() )
+        {
+            const auto& prefs = EditorPreferences::Get();
+            sceneRenderer->SetOutlineSettings( prefs.OutlineColor, prefs.OutlineWidth, prefs.OutlineSmoothness,
+                                               prefs.EnableOutline );
+        }
 
         Common::BoolResultStr beginResult = BOOLSUCCESS;
         {
@@ -1409,6 +1419,15 @@ namespace Desert::Editor
             ImGui::Separator();
             ImGui::SliderInt( "Interval (min)", &prefs.AutosaveMinutes, 0, 30, prefs.AutosaveMinutes == 0 ? "Off" : "%d min" );
             ImGui::TextDisabled( "Autosaves land in Scene/Autosave/, the main file is never touched." );
+
+            ImGui::Spacing();
+            ImGui::TextDisabled( "Selection Outline" );
+            ImGui::Separator();
+            ImGui::Checkbox( "Enable Outline", &prefs.EnableOutline );
+            ImGui::ColorEdit3( "Color", glm::value_ptr( prefs.OutlineColor ) );
+            ImGui::SliderFloat( "Width (px)", &prefs.OutlineWidth, 0.0f, 20.0f );
+            ImGui::SliderFloat( "Smoothness", &prefs.OutlineSmoothness, 0.0f, 10.0f );
+            ImGui::TextDisabled( "Live: applied to the selection outline every frame." );
 
             ImGui::Spacing();
             if ( ImGui::Button( "Save", ImVec2( 110.0f, 0.0f ) ) )

@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include <glm/glm.hpp>
+
 namespace Desert::Editor
 {
     // User-level editor settings, persisted to ~/.desertengine/editor.json (per-user, not per-project).
@@ -16,6 +18,13 @@ namespace Desert::Editor
         bool  PersistentSnap   = false;
         int   AutosaveMinutes  = 5;     // 0 = autosave off
         bool  ShowPerfHud      = false; // in-viewport FPS / frame-graph / top-scopes overlay
+
+        // Selection outline (Jump Flood) — an editor-only viewport visualization, not a scene property.
+        // Pushed to the renderer each frame via SceneRenderer::SetOutlineSettings. Width/smoothness in px.
+        glm::vec3 OutlineColor      = glm::vec3( 1.0f, 0.5f, 0.0f ); // orange
+        float     OutlineWidth      = 4.0f;
+        float     OutlineSmoothness = 2.0f;
+        bool      EnableOutline     = true;
 
         static EditorPreferences& Get();
 
