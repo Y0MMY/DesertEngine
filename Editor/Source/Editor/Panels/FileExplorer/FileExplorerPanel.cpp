@@ -22,7 +22,12 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
+#include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Engine/ECS/Entity.hpp>
+#include <Engine/ECS/Components.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Engine/Core/Scene.hpp>            // GetFinalImage (Capture Thumbnail from viewport)
 #include <Engine/Graphic/Renderer.hpp>      // WaitDeviceIdle before readback
 #include <Engine/Graphic/Image.hpp>         // Image2D::ReadPixelsRGBA8
@@ -393,6 +398,46 @@ namespace Desert::Editor
         else
             m_Favorites.push_back( folderPath );
         SaveFavorites();
+    }
+
+    void FileExplorerPanel::AddPrefabToScene( const std::string& prefabPath )
+    {
+        auto scene = m_ViewportScene.lock();
+        if ( !scene || !m_AssetManager )
+            return;
+
+        auto prefab = m_AssetManager->FindByPath<Assets::PrefabAsset>( prefabPath );
+        if ( !prefab )
+            prefab = m_AssetManager->CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High,
+                                                                       prefabPath );
+        if ( !prefab )
+            return;
+        if ( !prefab->IsReadyForUse() )
+            prefab->Load();
+
+        // Same instantiate path the viewport-drop uses (undoable, selects the new root).
+        ECS::Entity root = prefab->Instantiate( scene.get(), *m_AssetManager, nullptr );
+        if ( root )
+        {
+            const auto uuid = root.GetComponent<ECS::UUIDComponent>().UUID;
+            Core::SelectionManager::SetSelected( uuid );
+            Commands::NotifyCreated( { uuid } );
+        }
+    }
+
+    void FileExplorerPanel::CreateNewMaterial()
+    {
+        if ( !m_CurrentDir )
+            return;
+        const std::string ext  = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::string name = AssetFileOps::UniqueName(
+             "NewMaterial", ext,
+             [&]( const std::string& n )
+             { return std::filesystem::exists( std::filesystem::path( m_CurrentDir->AssetPath ) / n ); } );
+        const auto path = std::filesystem::path( m_CurrentDir->AssetPath ) / name;
+        // Minimal valid material: no params, no textures — the engine derives a stable id from the path.
+        Common::Utils::FileSystem::WriteContentToFile( path, "{\"Params\":[],\"Textures\":[]}" );
+        QueueRefresh();
     }
 
     void FileExplorerPanel::RemoveDirectory( DirectoryInformation* directory, bool removeFromParent )
@@ -1051,6 +1096,9 @@ namespace Desert::Editor
                                 QueueRefresh();
                             }
 
+                            if ( ImGui::Selectable( "New Material" ) )
+                                CreateNewMaterial();
+
                             // Pick the domain up front (like Unreal's Material Domain / Godot's Mode):
                             // it decides the output node, vertex contract and palette of the new graph.
                             if ( ImGui::BeginMenu( "New Shader Graph" ) )
@@ -1439,6 +1487,14 @@ namespace Desert::Editor
                 ShellRevealInExplorer( entry.AssetPath );
             if ( ImGui::MenuItem( "Open Containing Folder" ) )
                 ShellOpenDefault( std::filesystem::path( entry.AssetPath ).parent_path().string() );
+
+            // Quick "Add to Scene" for prefabs (same instantiate path as dragging into the viewport).
+            if ( entry.Type == FileType::Prefab && !m_ViewportScene.expired() && m_AssetManager )
+            {
+                ImGui::Separator();
+                if ( ImGui::MenuItem( "Add to Scene" ) )
+                    AddPrefabToScene( entry.AssetPath );
+            }
 
             // UE-style: use the current viewport view as this asset's thumbnail (frame it in the scene first).
             // Only meaningful for assets that show a rendered preview (meshes/materials).

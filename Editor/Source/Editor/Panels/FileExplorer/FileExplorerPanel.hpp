@@ -118,6 +118,10 @@ namespace Desert::Editor
         void        LoadFavorites();
         void        SaveFavorites() const;
         std::string FavoritesFile() const;
+
+        // Phase-4 engine integration: instantiate a prefab into the open scene; create a new material asset.
+        void AddPrefabToScene( const std::string& prefabPath );
+        void CreateNewMaterial();
         // UE-style "Capture Thumbnail": grab the current main-viewport rendered image, center-crop to a
         // square, downscale, and save it AS this asset's thumbnail (same DiskPath key the grid reads). Lets
         // the user frame the asset in the scene and use that exact view as the preview.
