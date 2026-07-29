@@ -300,7 +300,7 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::AssetReferencesPanel>() );
         m_Panels.emplace_back(
              std::make_unique<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() ) );
-        m_Panels.emplace_back( std::make_unique<Editor::SequencerPanel>() );
+        m_Panels.emplace_back( std::make_unique<Editor::SequencerPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
 #endif // EBABLE_IMGUI
 
