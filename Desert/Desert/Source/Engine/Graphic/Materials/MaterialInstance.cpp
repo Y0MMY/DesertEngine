@@ -173,6 +173,36 @@ namespace Desert::Graphic
         return m_Properties.HasProperty( name );
     }
 
+    bool MaterialInstance::SetParamFromVec4( const std::string& name, const glm::vec4& value )
+    {
+        if ( !m_Properties.HasProperty( name ) )
+            return false;
+
+        switch ( m_Properties.GetPropertyType( name ) )
+        {
+            case MaterialPropertyType::Float:
+                SetFloat( name, value.x );
+                return true;
+            case MaterialPropertyType::Int:
+                SetInt( name, static_cast<int>( value.x ) );
+                return true;
+            case MaterialPropertyType::Bool:
+                SetBool( name, value.x != 0.0f );
+                return true;
+            case MaterialPropertyType::Vec2:
+                SetVec2( name, glm::vec2( value ) );
+                return true;
+            case MaterialPropertyType::Vec3:
+                SetVec3( name, glm::vec3( value ) );
+                return true;
+            case MaterialPropertyType::Vec4:
+                SetVec4( name, value );
+                return true;
+            default: // Mat4 / Texture / Invalid — not vec4-packable
+                return false;
+        }
+    }
+
     void MaterialInstance::Apply()
     {
         if ( !m_bNeedsApply )

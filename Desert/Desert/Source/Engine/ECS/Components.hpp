@@ -548,6 +548,11 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Max Slope" ), Category( "Character" ), Range( 0.0f, 89.0f ) )
         float MaxSlopeDeg = 50.0f;
+
+        // Fall acceleration (m/s^2). Default ~2x real gravity so the jump arc feels SNAPPY (real 9.81 reads as
+        // floaty). Authorable per-character instead of a baked engine constant — a moon level just lowers it.
+        PROPERTY( DisplayName( "Gravity" ), Category( "Character" ), Range( 0.0f, 60.0f ) )
+        float Gravity = 20.0f;
     };
 
     // A WASD-driven player. The follow camera is NOT here — parent a child entity with a CameraComponent

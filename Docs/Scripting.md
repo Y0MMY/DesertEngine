@@ -91,6 +91,11 @@ Params are addressed by **shader-schema name** — the names declared in the `.s
 
 ### Character controller (needs `CharacterController` component; otherwise no-ops)
 
+The engine only executes physics (the Jolt capsule); *all* control policy — WASD→move, mouse→look,
+water→swim, sprint — lives in the script. See the complete reference controller in
+`Examples/PlayerController.lua`. Capsule + `Gravity` (fall accel, m/s²) are authored on the component;
+control *feel* (speeds, jump height, look sensitivity) is the script's `Properties`.
+
 | Call | Meaning |
 | --- | --- |
 | `e:move(forward, right, speed)` | Axes −1..1, speed m/s. |
@@ -98,7 +103,7 @@ Params are addressed by **shader-schema name** — the names declared in the `.s
 | `e:isOnGround()` | |
 | `e:addYaw(radians)` | Turns the whole entity. |
 | `e:addCameraPitch(radians)` | Tilts the child camera only (clamped ±85°). |
-| `e:setSwimming(on)` / `e:swim(vertical)` / `e:isSwimming()` | Buoyancy; `vertical` is +1 up / −1 down. |
+| `e:setSwimming(on)` / `e:swim(vertical)` / `e:isSwimming()` | Buoyancy; `vertical` is +1 up / −1 down. Detect the water crossing yourself against a `World.get("waterLevel")` blackboard value — no engine hardcode. |
 
 ### Attachment
 

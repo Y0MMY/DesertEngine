@@ -152,26 +152,13 @@ namespace Desert::ECS
                              const auto& matc = registry.get<MaterialComponent>( entity );
                              if ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" )
                              {
+                                 // Data-driven: every override is written by name, dispatched on the shader
+                                 // schema's OWN reflected type — no hardcoded per-param float/vec4 chain. Any
+                                 // param the PBR .shader declares (Albedo, Metallic, glass, and future ones)
+                                 // works with zero engine changes; unknown names are silently ignored.
                                  auto& inst = mesh.RuntimeMaterialInstances[0];
                                  for ( const auto& p : matc.Params )
-                                 {
-                                     if ( p.Name == "AlbedoColor" )
-                                         inst->SetVec4( "AlbedoColor", p.Value );
-                                     else if ( p.Name == "MetallicFactor" )
-                                         inst->SetFloat( "MetallicFactor", p.Value.x );
-                                     else if ( p.Name == "RoughnessFactor" )
-                                         inst->SetFloat( "RoughnessFactor", p.Value.x );
-                                     else if ( p.Name == "EmissiveColor" )
-                                         inst->SetVec4( "EmissiveColor", p.Value );
-                                     else if ( p.Name == "EmissiveIntensity" )
-                                         inst->SetFloat( "EmissiveIntensity", p.Value.x );
-                                     else if ( p.Name == "Transmission" )
-                                         inst->SetFloat( "Transmission", p.Value.x );
-                                     else if ( p.Name == "IOR" )
-                                         inst->SetFloat( "IOR", p.Value.x );
-                                     else if ( p.Name == "GlassTint" )
-                                         inst->SetVec4( "GlassTint", p.Value );
-                                 }
+                                     inst->SetParamFromVec4( p.Name, p.Value );
                              }
                          }
 

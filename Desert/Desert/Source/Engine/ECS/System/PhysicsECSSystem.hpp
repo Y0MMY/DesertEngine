@@ -179,8 +179,9 @@ namespace Desert::ECS
 
                 const bool onGround = m_World->IsCharacterOnGround( cc.RuntimeCharacter );
                 cc.OnGround         = onGround; // exposed to scripts via self:isOnGround()
-                // Game gravity is ~2x real so the jump arc is SNAPPY (real 9.81 feels floaty / cartoonish).
-                constexpr float kGravity = 20.0f;
+                // Gravity is authored per-character (CharacterControllerData::Gravity), not a baked constant —
+                // default ~2x real so the jump arc is SNAPPY (real 9.81 feels floaty / cartoonish).
+                const float kGravity = cc.Data.Gravity;
 
                 glm::vec3 horiz;
                 if ( cc.Swimming )

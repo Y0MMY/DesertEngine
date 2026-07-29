@@ -199,6 +199,7 @@ namespace
                     .Field( FieldInfo{ .Name = "Radius", .Type = FieldType::Float, .Offset = offsetof( T, Radius ), .Size = sizeof( T::Radius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Radius", .Category = "Character", .HasRange = true, .RangeMin = 0.05f, .RangeMax = 5.0f, } } )
                     .Field( FieldInfo{ .Name = "Height", .Type = FieldType::Float, .Offset = offsetof( T, Height ), .Size = sizeof( T::Height ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Height", .Category = "Character", .HasRange = true, .RangeMin = 0.2f, .RangeMax = 10.0f, } } )
                     .Field( FieldInfo{ .Name = "MaxSlopeDeg", .Type = FieldType::Float, .Offset = offsetof( T, MaxSlopeDeg ), .Size = sizeof( T::MaxSlopeDeg ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Max Slope", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 89.0f, } } )
+                    .Field( FieldInfo{ .Name = "Gravity", .Type = FieldType::Float, .Offset = offsetof( T, Gravity ), .Size = sizeof( T::Gravity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Gravity", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 60.0f, } } )
                     .WithDefault<T>()
                     .Register();
             }

@@ -38,6 +38,13 @@ namespace Desert::Graphic
         void SetMat4( const std::string& name, const glm::mat4& value );
         void SetTexture( const std::string& name, void* texture );
 
+        // Generic by-name write from a packed vec4, dispatched on the param's OWN reflected type (float reads
+        // .x, vec2 .xy, vec3 .xyz, vec4 all). This is the data-driven counterpart to the typed setters: apply a
+        // MaterialComponent's (name, vec4) overrides with no per-name if-chain — the shader schema decides the
+        // type. Mirrors DataDrivenMaterial::SetParamRaw for the instance path. Returns false if `name` is unknown
+        // or its type isn't vec4-packable (mat4/texture). See MaterialProperty for the type enum.
+        bool SetParamFromVec4( const std::string& name, const glm::vec4& value );
+
         // Batch operations
         void SetParameters( const std::vector<std::pair<std::string, MaterialPropertyValue>>& params );
         void SetParameters( const MaterialPropertySet& properties );
