@@ -215,11 +215,20 @@ namespace Desert::Graphic::API::Vulkan
 
     Common::BoolResultStr VulkanFramebuffer::Release()
     {
-        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
+        // At process teardown the swapchain's framebuffers can be destroyed AFTER the renderer context
+        // and its allocator/device are already gone (~Application -> ~Window -> ~VulkanSwapChain ->
+        // ~VulkanFramebuffer). Reaching for the allocator then dereferenced freed memory and segfaulted
+        // on exit. When it's unavailable, just drop our handles — the GPU objects are freed with the
+        // device anyway. During normal runtime (resize/recreate) the allocator is present, so we destroy.
+        const auto ctx       = EngineContext::GetInstance().GetRendererContext();
+        auto*      allocator = ctx ? SP_CAST( VulkanContext, ctx )->GetVulkanAllocator().get() : nullptr;
 
-        if ( m_Framebuffer )    allocator->RT_DestroyFramebuffer( m_Framebuffer );
-        if ( m_RenderPass )     allocator->RT_DestroyRenderPass( m_RenderPass );
-        if ( m_RenderPassLoad ) allocator->RT_DestroyRenderPass( m_RenderPassLoad );
+        if ( allocator )
+        {
+            if ( m_Framebuffer )    allocator->RT_DestroyFramebuffer( m_Framebuffer );
+            if ( m_RenderPass )     allocator->RT_DestroyRenderPass( m_RenderPass );
+            if ( m_RenderPassLoad ) allocator->RT_DestroyRenderPass( m_RenderPassLoad );
+        }
 
         m_Framebuffer    = VK_NULL_HANDLE;
         m_RenderPass     = VK_NULL_HANDLE;
