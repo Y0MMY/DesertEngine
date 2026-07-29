@@ -8,6 +8,7 @@
 #include <Editor/Core/Selection/ViewportMode.hpp>
 #include <Editor/Core/Selection/FoliagePaint.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Import/MeshMaterial.hpp>
@@ -112,6 +113,141 @@ namespace Desert::Editor
         }
     }
 
+    void ViewportPanel::DrawViewportToolbar()
+    {
+        // Godot-style strip directly ABOVE the image. Left cluster = how you EDIT (mode, transform
+        // tools, snap, contextual skeleton toggle); right edge = the camera gear. Small icons —
+        // the viewport pixels are the star, the tools are furniture.
+        bool canEditSkeleton = false;
+        if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+            if ( auto ref = m_Scene->FindEntityByID( *sel ); ref )
+                canEditSkeleton = ref->get().HasComponent<ECS::SkinnedMeshComponent>();
+
+        // Skeleton edit only makes sense in Select mode on a skinned mesh.
+        if ( !canEditSkeleton || Core::ViewportMode::Get() != Core::EditorMode::Select )
+            Core::SkeletonEditMode::SetActive( false );
+
+        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 4.0f );
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 4.0f, 4.0f ) );
+
+        // --- Mode dropdown ---
+        const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage" };
+        int         mode     = static_cast<int>( Core::ViewportMode::Get() );
+        ImGui::SetNextItemWidth( 118.0f );
+        if ( ImGui::Combo( "##ViewportMode", &mode, kModes, IM_ARRAYSIZE( kModes ) ) )
+            Core::ViewportMode::Set( static_cast<Core::EditorMode>( mode ) );
+
+        ImGui::SameLine();
+        ImGui::TextDisabled( "|" );
+        ImGui::SameLine();
+
+        // --- Transform-tool toggles (GizmoState is the single source of truth; hotkeys mirror it) ---
+        const auto opButton = [&]( const char* icon, Core::GizmoState::Operation op, const char* tip )
+        {
+            const bool active = Core::GizmoState::Get() == op;
+            if ( active )
+                ImGui::PushStyleColor( ImGuiCol_Button, ThemeManager::GetSelectedColor() );
+            if ( ImGui::Button( icon ) )
+                Core::GizmoState::Set( op );
+            if ( active )
+                ImGui::PopStyleColor();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%s", tip );
+            ImGui::SameLine();
+        };
+        opButton( ICON_MDI_CURSOR_DEFAULT_OUTLINE, Core::GizmoState::Operation::None, "Select (Esc)" );
+        opButton( ICON_MDI_AXIS_ARROW, Core::GizmoState::Operation::Translate, "Move (T)" );
+        opButton( ICON_MDI_ROTATE_ORBIT, Core::GizmoState::Operation::Rotate, "Rotate (R)" );
+        opButton( ICON_MDI_ARROW_EXPAND_ALL, Core::GizmoState::Operation::Scale, "Scale (C)" );
+
+        ImGui::TextDisabled( "|" );
+        ImGui::SameLine();
+
+        // --- Snap: magnet toggle (persistent) + right-click popup with the increments.
+        // Ctrl during a drag temporarily inverts the toggle.
+        {
+            const bool snapOn = Core::GizmoState::PersistentSnap();
+            if ( snapOn )
+                ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.95f, 1.0f ) );
+            if ( ImGui::Button( ICON_MDI_MAGNET "##SnapToggle" ) )
+                Core::GizmoState::SetPersistentSnap( !snapOn );
+            if ( snapOn )
+                ImGui::PopStyleColor();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Snap %s (Ctrl inverts while dragging).\nRight-click: snap steps",
+                                   snapOn ? "ON" : "OFF" );
+            if ( ImGui::IsItemClicked( ImGuiMouseButton_Right ) )
+                ImGui::OpenPopup( "##SnapSettings" );
+            if ( ImGui::BeginPopup( "##SnapSettings" ) )
+            {
+                ImGui::TextUnformatted( "Snap steps" );
+                ImGui::Separator();
+                float t = Core::GizmoState::TranslateSnap();
+                float r = Core::GizmoState::RotateSnapDegrees();
+                float s = Core::GizmoState::ScaleSnap();
+                ImGui::SetNextItemWidth( 130.0f );
+                if ( ImGui::DragFloat( "Move (m)", &t, 0.05f, 0.01f, 100.0f, "%.2f" ) )
+                    Core::GizmoState::SetTranslateSnap( t );
+                ImGui::SetNextItemWidth( 130.0f );
+                if ( ImGui::DragFloat( "Rotate (deg)", &r, 0.5f, 0.1f, 180.0f, "%.1f" ) )
+                    Core::GizmoState::SetRotateSnapDegrees( r );
+                ImGui::SetNextItemWidth( 130.0f );
+                if ( ImGui::DragFloat( "Scale", &s, 0.01f, 0.01f, 10.0f, "%.2f" ) )
+                    Core::GizmoState::SetScaleSnap( s );
+                ImGui::EndPopup();
+            }
+        }
+
+        // --- Select mode: contextual Skeleton-Edit toggle (skinned mesh only) ---
+        if ( Core::ViewportMode::Get() == Core::EditorMode::Select && canEditSkeleton )
+        {
+            const bool active = Core::SkeletonEditMode::IsActive();
+            ImGui::SameLine();
+            if ( active )
+                ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.85f, 0.45f, 0.1f, 1.0f ) );
+            if ( ImGui::Button( ICON_MDI_BONE "  Skeleton" ) )
+                Core::SkeletonEditMode::Toggle();
+            if ( active )
+                ImGui::PopStyleColor();
+            if ( active )
+            {
+                ImGui::SameLine();
+                bool showNames = Core::SkeletonEditMode::ShowAllNames();
+                if ( ImGui::Checkbox( "Names", &showNames ) )
+                    Core::SkeletonEditMode::SetShowAllNames( showNames );
+            }
+        }
+
+        // --- Right edge: editor camera settings (speed) behind a gear button ---
+        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight() - 6.0f );
+        if ( ImGui::Button( ICON_MDI_COG "##CamSettings" ) )
+            ImGui::OpenPopup( "##EditorCameraSettings" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Editor camera settings" );
+        if ( ImGui::BeginPopup( "##EditorCameraSettings" ) )
+        {
+            ImGui::TextUnformatted( "Editor Camera" );
+            ImGui::Separator();
+            if ( auto cam = m_Scene->GetMainCamera().lock() )
+            {
+                if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                {
+                    float spd = editorCam->GetMovementSpeed();
+                    ImGui::SetNextItemWidth( 160.0f );
+                    if ( ImGui::SliderFloat( "Speed", &spd, 0.1f, 10.0f, "%.2fx" ) )
+                        editorCam->SetMovementSpeed( spd );
+                }
+                else
+                {
+                    ImGui::TextDisabled( "(only in editor view, not Play)" );
+                }
+            }
+            ImGui::EndPopup();
+        }
+
+        ImGui::PopStyleVar( 2 );
+    }
+
     void ViewportPanel::OnUIRender()
     {
         UpdateAsyncLoads(); // spawn any meshes whose background cook just finished (+ progress bar)
@@ -124,24 +260,23 @@ namespace Desert::Editor
             return;
         }
 
-        ImVec2 mousePos    = ::ImGui::GetMousePos();
-        ImVec2 viewportPos = ::ImGui::GetWindowPos();
+        // Godot-style: one compact toolbar ROW above the image (mode, transform tools, snap,
+        // contextual skeleton toggle, camera gear on the right). Nothing floats over the scene
+        // pixels anymore, so the picture is clean and picking never fights an overlay window.
+        DrawViewportToolbar();
 
-        ImVec2 viewportMin = ImGui::GetWindowPos();
-        viewportMin.x += ImGui::GetWindowContentRegionMin().x;
-        viewportMin.y += ImGui::GetWindowContentRegionMin().y;
+        // The viewport rect is whatever remains BELOW the toolbar row.
+        const ImVec2 mousePos    = ::ImGui::GetMousePos();
+        const ImVec2 imagePos    = ImGui::GetCursorScreenPos();
+        ImVec2       imageAvail  = ImGui::GetContentRegionAvail();
+        imageAvail.x             = std::max( imageAvail.x, 1.0f );
+        imageAvail.y             = std::max( imageAvail.y, 1.0f );
 
-        ImVec2 viewportMax = ImGui::GetWindowPos();
-        viewportMax.x += ImGui::GetWindowContentRegionMax().x;
-        viewportMax.y += ImGui::GetWindowContentRegionMax().y;
-
-        m_ViewportData.ViewportPos = { ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x,
-                                       ImGui::GetWindowPos().y + ImGui::GetWindowContentRegionMin().y };
-
-        m_ViewportData.MousePosition = glm::vec2( mousePos.x - viewportMin.x, mousePos.y - viewportMin.y );
+        m_ViewportData.ViewportPos   = { imagePos.x, imagePos.y };
+        m_ViewportData.MousePosition = glm::vec2( mousePos.x - imagePos.x, mousePos.y - imagePos.y );
         const auto oldSize           = m_ViewportData.Size;
 
-        m_ViewportData.Size      = { viewportMax.x - viewportMin.x, viewportMax.y - viewportMin.y };
+        m_ViewportData.Size      = { imageAvail.x, imageAvail.y };
         m_ViewportData.IsHovered = ::ImGui::IsWindowHovered();
 
         if ( oldSize != m_ViewportData.Size )
@@ -166,130 +301,6 @@ namespace Desert::Editor
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
 
-        // UE5-style viewport toolbar (floating overlay, top-left): a MODE dropdown (Select / Foliage), the
-        // contextual Skeleton-Edit toggle (Select mode + skinned mesh only), and a gear popup for the editor
-        // camera settings (speed). Replaces the old single "Object Mode" button + always-on speed slider.
-        {
-            bool canEditSkeleton = false;
-            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
-                if ( auto ref = m_Scene->FindEntityByID( *sel ); ref )
-                    canEditSkeleton = ref->get().HasComponent<ECS::SkinnedMeshComponent>();
-
-            // Skeleton edit only makes sense in Select mode on a skinned mesh.
-            if ( !canEditSkeleton || Core::ViewportMode::Get() != Core::EditorMode::Select )
-                Core::SkeletonEditMode::SetActive( false );
-
-            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 12.0f,
-                                             m_ViewportData.ViewportPos.y + 12.0f ) );
-            const ImGuiWindowFlags overlayFlags =
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-
-            // Polished, rounded, padded toolbar (a flat semi-auto-resized box read as "crude" before).
-            ImGui::PushStyleVar( ImGuiStyleVar_WindowRounding, 6.0f );
-            ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 5.0f );
-            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 7.0f, 5.0f ) );
-            ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 6.0f, 4.0f ) );
-            ImGui::PushStyleColor( ImGuiCol_WindowBg, ImVec4( 0.10f, 0.10f, 0.12f, 0.88f ) );
-            ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0.18f, 0.18f, 0.21f, 1.0f ) );
-            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.18f, 0.18f, 0.21f, 1.0f ) );
-
-            if ( ImGui::Begin( "##ViewportModeOverlay", nullptr, overlayFlags ) )
-            {
-                // --- Mode dropdown ---
-                const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage" };
-                int         mode     = static_cast<int>( Core::ViewportMode::Get() );
-                ImGui::SetNextItemWidth( 128.0f );
-                if ( ImGui::Combo( "##ViewportMode", &mode, kModes, IM_ARRAYSIZE( kModes ) ) )
-                    Core::ViewportMode::Set( static_cast<Core::EditorMode>( mode ) );
-
-                // --- Select mode: contextual Skeleton-Edit toggle (skinned mesh only) ---
-                if ( Core::ViewportMode::Get() == Core::EditorMode::Select && canEditSkeleton )
-                {
-                    const bool active = Core::SkeletonEditMode::IsActive();
-                    ImGui::SameLine();
-                    if ( active )
-                        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.85f, 0.45f, 0.1f, 1.0f ) );
-                    if ( ImGui::Button( ICON_MDI_BONE "  Skeleton" ) )
-                        Core::SkeletonEditMode::Toggle();
-                    if ( active )
-                        ImGui::PopStyleColor();
-                    if ( active )
-                    {
-                        ImGui::SameLine();
-                        bool showNames = Core::SkeletonEditMode::ShowAllNames();
-                        if ( ImGui::Checkbox( "Names", &showNames ) )
-                            Core::SkeletonEditMode::SetShowAllNames( showNames );
-                    }
-                }
-
-                // --- Snap: magnet toggle (persistent) + right-click/arrow popup with the increments.
-                // Ctrl during a drag temporarily inverts the toggle.
-                {
-                    const bool snapOn = Core::GizmoState::PersistentSnap();
-                    ImGui::SameLine();
-                    if ( snapOn )
-                        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.95f, 1.0f ) );
-                    if ( ImGui::Button( ICON_MDI_MAGNET "##SnapToggle" ) )
-                        Core::GizmoState::SetPersistentSnap( !snapOn );
-                    if ( snapOn )
-                        ImGui::PopStyleColor();
-                    if ( ImGui::IsItemHovered() )
-                        ImGui::SetTooltip( "Snap %s (Ctrl inverts while dragging).\nRight-click: snap steps",
-                                           snapOn ? "ON" : "OFF" );
-                    if ( ImGui::IsItemClicked( ImGuiMouseButton_Right ) )
-                        ImGui::OpenPopup( "##SnapSettings" );
-                    if ( ImGui::BeginPopup( "##SnapSettings" ) )
-                    {
-                        ImGui::TextUnformatted( "Snap steps" );
-                        ImGui::Separator();
-                        float t = Core::GizmoState::TranslateSnap();
-                        float r = Core::GizmoState::RotateSnapDegrees();
-                        float s = Core::GizmoState::ScaleSnap();
-                        ImGui::SetNextItemWidth( 130.0f );
-                        if ( ImGui::DragFloat( "Move (m)", &t, 0.05f, 0.01f, 100.0f, "%.2f" ) )
-                            Core::GizmoState::SetTranslateSnap( t );
-                        ImGui::SetNextItemWidth( 130.0f );
-                        if ( ImGui::DragFloat( "Rotate (deg)", &r, 0.5f, 0.1f, 180.0f, "%.1f" ) )
-                            Core::GizmoState::SetRotateSnapDegrees( r );
-                        ImGui::SetNextItemWidth( 130.0f );
-                        if ( ImGui::DragFloat( "Scale", &s, 0.01f, 0.01f, 10.0f, "%.2f" ) )
-                            Core::GizmoState::SetScaleSnap( s );
-                        ImGui::EndPopup();
-                    }
-                }
-
-                // --- Editor camera settings (speed) behind a gear button ---
-                ImGui::SameLine();
-                if ( ImGui::Button( ICON_MDI_COG "##CamSettings" ) )
-                    ImGui::OpenPopup( "##EditorCameraSettings" );
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Editor camera settings" );
-                if ( ImGui::BeginPopup( "##EditorCameraSettings" ) )
-                {
-                    ImGui::TextUnformatted( "Editor Camera" );
-                    ImGui::Separator();
-                    if ( auto cam = m_Scene->GetMainCamera().lock() )
-                    {
-                        if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
-                        {
-                            float spd = editorCam->GetMovementSpeed();
-                            ImGui::SetNextItemWidth( 160.0f );
-                            if ( ImGui::SliderFloat( "Speed", &spd, 0.1f, 10.0f, "%.2fx" ) )
-                                editorCam->SetMovementSpeed( spd );
-                        }
-                        else
-                        {
-                            ImGui::TextDisabled( "(only in editor view, not Play)" );
-                        }
-                    }
-                    ImGui::EndPopup();
-                }
-            }
-            ImGui::End();
-            ImGui::PopStyleColor( 3 );
-            ImGui::PopStyleVar( 4 );
-        }
 
         // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
         if ( ImGui::BeginDragDropTarget() )
@@ -429,7 +440,9 @@ namespace Desert::Editor
 
         // Perf HUD (View -> Perf HUD): FPS + frame graph + top CPU scopes, useful in Play too.
         if ( EditorPreferences::Get().ShowPerfHud )
-            m_PerfHud.Draw( viewportMin, viewportMax );
+            m_PerfHud.Draw( ImVec2( m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y ),
+                            ImVec2( m_ViewportData.ViewportPos.x + m_ViewportData.Size.x,
+                                    m_ViewportData.ViewportPos.y + m_ViewportData.Size.y ) );
     }
 
     void ViewportPanel::OnPreUpdate()

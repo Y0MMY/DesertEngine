@@ -56,6 +56,10 @@ namespace Desert::Editor
         // to its material elements (all of them — the hit carries no submesh id yet).
         void AssignMaterialAtCursor( const std::string& materialPath );
 
+        // Godot-style toolbar row ABOVE the image: mode, transform tools, snap, contextual
+        // skeleton toggle, camera gear (right). Replaces the old floating in-viewport overlay.
+        void DrawViewportToolbar();
+
         // Corner XYZ orientation gizmo (a small triad tracking the camera's rotation) so you always know
         // which way world X/Y/Z point in the current view. Overlay only — pure ImGui, no scene interaction.
         void DrawViewAxisGizmo( const glm::vec2& viewportPos, const glm::vec2& viewportSize );

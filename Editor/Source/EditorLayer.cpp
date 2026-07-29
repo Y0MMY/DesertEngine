@@ -1201,34 +1201,16 @@ namespace Desert::Editor
         ImGui::BeginChild( "##Toolbar", ImVec2( 0.0f, barHeight ), false,
                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
-        // Buttons fill the FULL height of the toolbar (minus the child's vertical padding) so they occupy the
-        // whole strip; slightly wider than tall for a chunky UE-style hit target.
+        // Buttons fill the FULL height of the toolbar (minus the child's vertical padding).
         const float  btnH = ImGui::GetContentRegionAvail().y;
         const ImVec2 btnSize( btnH * 1.4f, btnH );
 
-        // ── Left: transform-gizmo mode toggles (mirror the viewport's Q/W/E/R; highlight the active one). ──
-        const auto modeButton = [&]( const char* icon, Op::Operation op, const char* tip )
-        {
-            const bool active = Op::Get() == op;
-            if ( active )
-                ImGui::PushStyleColor( ImGuiCol_Button, ThemeManager::GetSelectedColor() );
-            if ( ImGui::Button( icon, btnSize ) )
-                Op::Set( op );
-            if ( active )
-                ImGui::PopStyleColor();
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "%s", tip );
-            ImGui::SameLine();
-        };
-        modeButton( ICON_MDI_CURSOR_DEFAULT_OUTLINE, Op::Operation::None, "Select (Q)" );
-        modeButton( ICON_MDI_AXIS_ARROW, Op::Operation::Translate, "Move (W)" );
-        modeButton( ICON_MDI_ROTATE_ORBIT, Op::Operation::Rotate, "Rotate (E)" );
-        modeButton( ICON_MDI_ARROW_EXPAND_ALL, Op::Operation::Scale, "Scale (R)" );
-
-        // ── Centre: playback (Play/Stop toggle + Pause), same tall button size. ──
-        const float spacing    = ImGui::GetStyle().ItemSpacing.x;
-        const float playbackW  = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
-        ImGui::SameLine( ImGui::GetWindowContentRegionMax().x * 0.5f - playbackW * 0.5f );
+        // Transform-tool toggles moved into the VIEWPORT's own toolbar (Godot model: edit tools sit
+        // directly above the picture they act on). This strip keeps only the RUN cluster, pinned to
+        // the RIGHT edge — isolated from editing so a stray click can't start Play.
+        const float spacing   = ImGui::GetStyle().ItemSpacing.x;
+        const float playbackW = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
+        ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - playbackW - 4.0f );
         DrawPlayButton( btnSize );
         ImGui::SameLine();
         DrawPauseButton( btnSize );
