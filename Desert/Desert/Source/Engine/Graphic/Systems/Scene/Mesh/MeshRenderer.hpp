@@ -145,6 +145,17 @@ namespace Desert::Graphic::System
             m_Wireframe = enabled;
         }
 
+        // Distance-based mesh LOD (auto). LOD0 is byte-identical to the base geometry, so this only
+        // affects meshes far from the camera. Toggle from the editor's Graphics menu.
+        void SetLODEnabled( bool enabled )
+        {
+            m_LODEnabled = enabled;
+        }
+        bool IsLODEnabled() const
+        {
+            return m_LODEnabled;
+        }
+
         // Cascaded shadow maps (R32F light-space depth, one framebuffer per cascade). Recompute the
         // per-cascade light matrices once per frame BEFORE the render graph records (intra-phase order is
         // nondeterministic). Called from SceneRenderer::OnUpdate.
@@ -207,7 +218,8 @@ namespace Desert::Graphic::System
         std::shared_ptr<GraphicsPipeline> m_StaticPipeline;
         std::shared_ptr<GraphicsPipeline> m_StaticWireframePipeline; // same spec, PolygonMode::Wireframe
         std::shared_ptr<GraphicsPipeline> m_StaticInstancedPipeline; // reads per-instance transform from SSBO
-        bool                              m_Wireframe = false;
+        bool                              m_Wireframe  = false;
+        bool                              m_LODEnabled = true;
 
         // Deferred G-buffer geometry pipeline (static): writes Albedo+Metallic / Normal+Roughness into the
         // scene renderer's MRT G-buffer instead of shading. Same vertex layout + material bindings as the

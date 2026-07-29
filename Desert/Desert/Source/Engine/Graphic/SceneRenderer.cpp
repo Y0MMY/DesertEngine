@@ -215,6 +215,8 @@ namespace Desert::Graphic
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetWireframe( sceneSettings.WireframeMode );
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+             ->SetLODEnabled( sceneSettings.MeshLOD );
+        UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetShadows( sceneSettings.EnableShadows, sceneSettings.ShadowBias,
                            static_cast<int>( sceneSettings.ShadowDebug ), sceneSettings.CascadeSplitLambda );
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )

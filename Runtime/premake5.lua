@@ -41,6 +41,7 @@ project "Runtime"
         "yaml-cpp",
         "GLFW",
         "Optick",
+        "MeshOptimizer",
     }
 
     filter "configurations:Debug"

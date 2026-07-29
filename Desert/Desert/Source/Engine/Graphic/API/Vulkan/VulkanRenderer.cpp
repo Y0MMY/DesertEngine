@@ -198,7 +198,7 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanRendererAPI::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh,
                                         const glm::mat4 transform, const MaterialExecutor* materialExecutor,
                                         uint32_t instanceCount, uint32_t firstInstance,
-                                        uint64_t hiddenSubmeshMask )
+                                        uint64_t hiddenSubmeshMask, uint32_t lodLevel )
     {
         // Aggregate cost of EVERY mesh draw call across ALL passes (geometry + 4 shadow cascades +
         // silhouette). The call-site scopes break it down per-pass; this row is the engine-wide total.
@@ -268,16 +268,30 @@ namespace Desert::Graphic::API::Vulkan
 
             if ( mesh->GetIndexBuffer() )
             {
-                if ( submesh.IndexOffset + submesh.IndexCount > mesh->GetIndexBuffer()->GetCount() )
+                // LOD range for this submesh (LODs[0] is the original, so lodLevel 0 is identical to the
+                // base range). Clamp to the last available level; fall back to the base range when the
+                // submesh has no LOD chain (procedural / too small).
+                uint32_t drawOffset = submesh.IndexOffset;
+                uint32_t drawCount  = submesh.IndexCount;
+                if ( !submesh.LODs.empty() )
+                {
+                    const uint32_t lvl = lodLevel < submesh.LODs.size()
+                                              ? lodLevel
+                                              : static_cast<uint32_t>( submesh.LODs.size() ) - 1;
+                    drawOffset = submesh.LODs[lvl].IndexOffset;
+                    drawCount  = submesh.LODs[lvl].IndexCount;
+                }
+
+                if ( drawOffset + drawCount > mesh->GetIndexBuffer()->GetCount() )
                 {
                     LOG_ERROR(
                          "VulkanRendererAPI: Invalid index buffer access! Offset: {}, Count: {}, BufferSize: {}",
-                         submesh.IndexOffset, submesh.IndexCount, mesh->GetIndexBuffer()->GetCount() );
+                         drawOffset, drawCount, mesh->GetIndexBuffer()->GetCount() );
                     continue;
                 }
 
-                vkCmdDrawIndexed( m_CurrentCommandBuffer, submesh.IndexCount, instanceCount,
-                                  submesh.IndexOffset, (int32_t)submesh.VertexOffset, firstInstance );
+                vkCmdDrawIndexed( m_CurrentCommandBuffer, drawCount, instanceCount, drawOffset,
+                                  (int32_t)submesh.VertexOffset, firstInstance );
             }
             else
             {

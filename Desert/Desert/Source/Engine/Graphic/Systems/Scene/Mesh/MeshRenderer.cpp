@@ -697,8 +697,17 @@ namespace Desert::Graphic::System
                                                 : ( m_Wireframe && m_StaticWireframePipeline )
                                                       ? m_StaticWireframePipeline.get()
                                                       : m_StaticPipeline.get();
+                    // Auto LOD by camera distance (LOD0 near, coarser far). LOD0 is byte-identical to
+                    // the base geometry, so near objects are unaffected; disable via SetLODEnabled(false).
+                    uint32_t lod = 0;
+                    if ( m_LODEnabled && camera )
+                    {
+                        const glm::vec3 objPos = glm::vec3( obj->Transform[3] );
+                        const float     dist   = glm::length( camera->GetPosition() - objPos );
+                        lod = dist > 80.0f ? 3u : dist > 40.0f ? 2u : dist > 16.0f ? 1u : 0u;
+                    }
                     renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor(), 1, 0,
-                                         obj->HiddenSubmeshes );
+                                         obj->HiddenSubmeshes, lod );
                 }
             }
         }

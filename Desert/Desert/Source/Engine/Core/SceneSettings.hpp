@@ -150,6 +150,9 @@ namespace Desert::Core
         bool      ShowNormals          = false;
         PROPERTY( DisplayName( "Wireframe" ), Category( "Debug" ) )
         bool      WireframeMode        = false;
+        PROPERTY( DisplayName( "Mesh LOD (auto)" ), Category( "Debug" ),
+                  Tooltip( "Distance-based mesh level of detail. LOD0 (near) is identical geometry." ) )
+        bool      MeshLOD              = true;
         PROPERTY( DisplayName( "Light Debug" ), Category( "Debug" ) )
         bool      LightingDebug        = false;
 

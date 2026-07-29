@@ -30,7 +30,8 @@ namespace Desert::Graphic::API::Vulkan
         
         virtual void RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                  const MaterialExecutor* materialExecutor, uint32_t instanceCount = 1,
-                                 uint32_t firstInstance = 0, uint64_t hiddenSubmeshMask = 0 ) override;
+                                 uint32_t firstInstance = 0, uint64_t hiddenSubmeshMask = 0,
+                                 uint32_t lodLevel = 0 ) override;
 
         virtual void SubmitFullscreenQuad( const GraphicsPipeline*         pipeline,
                                            const MaterialExecutor* materialExecutor ) override;

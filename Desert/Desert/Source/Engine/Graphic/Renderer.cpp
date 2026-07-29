@@ -199,10 +199,10 @@ namespace Desert::Graphic
 
     void Renderer::RenderMesh( const GraphicsPipeline* pipeline, const Mesh* mesh, const glm::mat4 transform,
                                const MaterialExecutor* materialExecutor, uint32_t instanceCount,
-                               uint32_t firstInstance, uint64_t hiddenSubmeshMask )
+                               uint32_t firstInstance, uint64_t hiddenSubmeshMask, uint32_t lodLevel )
     {
         s_RendererAPI->RenderMesh( pipeline, mesh, transform, materialExecutor, instanceCount, firstInstance,
-                                   hiddenSubmeshMask );
+                                   hiddenSubmeshMask, lodLevel );
     }
 
     const std::shared_ptr<Desert::Graphic::Texture2D>& Renderer::GetBRDFTexture() const

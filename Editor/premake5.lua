@@ -43,6 +43,7 @@ project "Editor"
         "yaml-cpp",
         "GLFW",
         "Optick",
+        "MeshOptimizer",
         "ImGuiNodeEditor",
     }
 

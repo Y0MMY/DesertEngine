@@ -107,6 +107,14 @@ namespace Desert
         Vertex V1, V2, V3;
     };
 
+    // One level of detail for a submesh: a range into the mesh's index buffer (uint32 units) that draws
+    // the simplified geometry against the SAME vertex buffer (baseVertex = Submesh.VertexOffset).
+    struct LODRange
+    {
+        uint32_t IndexOffset;
+        uint32_t IndexCount;
+    };
+
     struct Submesh
     {
         std::string        Name;
@@ -116,6 +124,10 @@ namespace Desert
         uint32_t           IndexCount;
         glm::mat4          Transform;
         Common::Math::AABB BoundingBox;
+
+        // LOD chain (built by StaticMesh on load). LODs[0] is the original geometry, so drawing LOD 0 is
+        // byte-identical to (IndexOffset, IndexCount). Empty for meshes with no LODs (procedural / skinned).
+        std::vector<LODRange> LODs;
     };
 
     enum class MeshType
