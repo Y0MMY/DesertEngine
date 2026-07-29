@@ -165,6 +165,40 @@ namespace Desert::Graphic::System
         m_InstancedQueue.clear();
     }
 
+    uint32_t MeshRenderer::ComputeLOD( const glm::mat4& transform, const Mesh* mesh, int forcedLOD ) const
+    {
+        if ( forcedLOD >= 0 )
+            return static_cast<uint32_t>( forcedLOD );
+        if ( !m_LODEnabled || !mesh )
+            return 0;
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+        if ( !camera )
+            return 0;
+
+        // World-space bounding radius = mesh AABB half-diagonal * the largest transform scale. Using it
+        // (instead of raw distance) makes selection SIZE-AWARE: a large object keeps full detail farther
+        // away than a small one.
+        glm::vec3 mn( 1.0e30f );
+        glm::vec3 mx( -1.0e30f );
+        for ( const auto& sm : mesh->GetSubmeshes() )
+        {
+            mn = glm::min( mn, sm.BoundingBox.Min );
+            mx = glm::max( mx, sm.BoundingBox.Max );
+        }
+        if ( mn.x > mx.x )
+            return 0; // empty mesh
+
+        const float scale  = glm::max( glm::length( glm::vec3( transform[0] ) ),
+                                       glm::max( glm::length( glm::vec3( transform[1] ) ),
+                                                 glm::length( glm::vec3( transform[2] ) ) ) );
+        const float radius = glm::length( mx - mn ) * 0.5f * scale;
+        const float dist   = glm::length( camera->GetPosition() - glm::vec3( transform[3] ) );
+
+        // Screen-coverage proxy (radius / distance): larger / closer = finer LOD.
+        const float coverage = radius / glm::max( dist, 0.001f );
+        return coverage > 0.20f ? 0u : coverage > 0.08f ? 1u : coverage > 0.03f ? 2u : 3u;
+    }
+
     void MeshRenderer::SubmitGenericMesh( const GenericMeshRenderData& data )
     {
         // Two valid shapes: an override draw (ShaderName set) or a per-slot draw (SlotMaterial
@@ -305,8 +339,8 @@ namespace Desert::Graphic::System
             }
 
             Renderer::GetInstance().RenderMesh( pipeline.get(), g.Mesh, g.Transform,
-                                                material->GetMaterialExecutor(), 1, 0,
-                                                ~g.VisibleSubmeshMask );
+                                                material->GetMaterialExecutor(), 1, 0, ~g.VisibleSubmeshMask,
+                                                ComputeLOD( g.Transform, g.Mesh, /*forced*/ -1 ) );
         }
     }
 
@@ -481,7 +515,8 @@ namespace Desert::Graphic::System
             m_GlassMaterial->SetMaterialIndex( i );
             m_GlassMaterial->Bind( gi );
             renderer.RenderMesh( m_StaticGlassPipeline.get(), obj->Mesh, obj->Transform,
-                                 m_GlassMaterial->GetMaterialExecutor(), 1, 0, obj->HiddenSubmeshes );
+                                 m_GlassMaterial->GetMaterialExecutor(), 1, 0, obj->HiddenSubmeshes,
+                                 ComputeLOD( obj->Transform, obj->Mesh, obj->ForcedLOD ) );
         }
         renderer.EndRenderPass();
     }
@@ -697,20 +732,7 @@ namespace Desert::Graphic::System
                                                 : ( m_Wireframe && m_StaticWireframePipeline )
                                                       ? m_StaticWireframePipeline.get()
                                                       : m_StaticPipeline.get();
-                    // LOD: a per-mesh forced level (component's ForcedLOD) wins; otherwise auto by camera
-                    // distance (LOD0 near, coarser far). LOD0 is byte-identical to the base geometry, so near
-                    // objects are unaffected; the whole auto path is gated by SetLODEnabled.
-                    uint32_t lod = 0;
-                    if ( obj->ForcedLOD >= 0 )
-                    {
-                        lod = static_cast<uint32_t>( obj->ForcedLOD );
-                    }
-                    else if ( m_LODEnabled && camera )
-                    {
-                        const glm::vec3 objPos = glm::vec3( obj->Transform[3] );
-                        const float     dist   = glm::length( camera->GetPosition() - objPos );
-                        lod = dist > 80.0f ? 3u : dist > 40.0f ? 2u : dist > 16.0f ? 1u : 0u;
-                    }
+                    const uint32_t lod = ComputeLOD( obj->Transform, obj->Mesh, obj->ForcedLOD );
                     renderer.RenderMesh( pipeline, obj->Mesh, obj->Transform, mat->GetMaterialExecutor(), 1, 0,
                                          obj->HiddenSubmeshes, lod );
                 }
@@ -1288,7 +1310,8 @@ namespace Desert::Graphic::System
                      // Per-object path (singletons).
                      for ( const auto* rd : singles )
                          renderer.RenderMesh( m_ShadowPipeline.get(), rd->Mesh, rd->Transform,
-                                              m_ShadowMaterial[c]->GetMaterialExecutor() );
+                                              m_ShadowMaterial[c]->GetMaterialExecutor(), 1, 0, 0,
+                                              ComputeLOD( rd->Transform, rd->Mesh, rd->ForcedLOD ) );
 
                      // Instanced path.
                      if ( instancingOn && !batches.empty() )

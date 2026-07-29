@@ -158,6 +158,11 @@ namespace Desert::Graphic::System
             return m_LODEnabled;
         }
 
+        // Which LOD level to draw for a mesh: a forced level (>= 0) wins; otherwise auto by screen
+        // coverage (world bounding radius / camera distance), so big objects keep detail farther than
+        // small ones. Returns 0 when LOD is off or there's no camera. Used by every mesh draw path.
+        uint32_t ComputeLOD( const glm::mat4& transform, const class Desert::Mesh* mesh, int forcedLOD ) const;
+
         // Cascaded shadow maps (R32F light-space depth, one framebuffer per cascade). Recompute the
         // per-cascade light matrices once per frame BEFORE the render graph records (intra-phase order is
         // nondeterministic). Called from SceneRenderer::OnUpdate.
