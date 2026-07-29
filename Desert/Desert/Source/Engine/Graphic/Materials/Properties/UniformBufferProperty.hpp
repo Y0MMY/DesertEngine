@@ -67,6 +67,11 @@ namespace Desert::Graphic
             DESERT_VERIFY( data != nullptr, "UniformBufferProperty::SetRawData: data is null" );
 
             const size_t bufferSize = m_Buffer->GetSize();
+            if ( size > bufferSize ) // the sizes identify WHICH UB overflowed (VERIFY drops its args)
+                LOG_ERROR( "[UB] SetRawData overflow: writing {} bytes into a {}-byte buffer ({} field(s), "
+                           "first '{}')",
+                           size, bufferSize, m_FieldProperties.size(),
+                           m_FieldProperties.empty() ? "?" : m_FieldProperties[0].GetFieldInfo().Name );
             DESERT_VERIFY( size <= bufferSize,
                            "UniformBufferProperty::SetRawData: data size ({}) exceeds buffer size ({})", size,
                            bufferSize );
