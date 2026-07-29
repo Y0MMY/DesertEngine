@@ -273,11 +273,11 @@ namespace Desert::Editor
         DrawViewportToolbar();
 
         // The viewport rect is whatever remains BELOW the toolbar row.
-        const ImVec2 mousePos    = ::ImGui::GetMousePos();
-        const ImVec2 imagePos    = ImGui::GetCursorScreenPos();
-        ImVec2       imageAvail  = ImGui::GetContentRegionAvail();
-        imageAvail.x             = std::max( imageAvail.x, 1.0f );
-        imageAvail.y             = std::max( imageAvail.y, 1.0f );
+        const ImVec2 mousePos   = ::ImGui::GetMousePos();
+        const ImVec2 imagePos   = ImGui::GetCursorScreenPos();
+        ImVec2       imageAvail = ImGui::GetContentRegionAvail();
+        imageAvail.x            = std::max( imageAvail.x, 1.0f );
+        imageAvail.y            = std::max( imageAvail.y, 1.0f );
 
         m_ViewportData.ViewportPos   = { imagePos.x, imagePos.y };
         m_ViewportData.MousePosition = glm::vec2( mousePos.x - imagePos.x, mousePos.y - imagePos.y );
@@ -307,7 +307,6 @@ namespace Desert::Editor
 
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
-
 
         // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
         if ( ImGui::BeginDragDropTarget() )

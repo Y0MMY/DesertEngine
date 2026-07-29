@@ -18,6 +18,58 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
 
 jobs:
+  # Style gate: only the LINES CHANGED by this push/PR must satisfy .clang-format (legacy files
+  # converge as they get touched — a full-tree gate would fail on pre-config code forever).
+  format:
+    name: clang-format (changed lines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # merge-base needs history
+
+      - name: Install clang-format
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format
+
+      - name: Check formatting of changed lines
+        run: ./scripts/CI/CheckFormat.sh "${{ github.event.pull_request.base.sha || github.event.before }}"
+
+  # Dynamic checks: the whole workspace builds with ASan+UBSan (the premake makefiles append
+  # env CXXFLAGS/LDFLAGS) and the full test suite runs under them. Leak detection stays off —
+  # LSan is unsupported on Apple Silicon.
+  sanitizers:
+    name: ASan+UBSan tests
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('scripts/MacOS/Setup.sh') }}
+          restore-keys: brew-${{ runner.os }}-
+
+      - name: Setup dependencies
+        run: ./scripts/MacOS/Setup.sh
+
+      - name: Build Debug with sanitizers
+        env:
+          CXXFLAGS: "-fsanitize=address,undefined -fno-omit-frame-pointer"
+          LDFLAGS: "-fsanitize=address,undefined"
+        run: ./scripts/MacOS/BuildMacOS.sh Debug
+
+      - name: Run tests under sanitizers
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:abort_on_error=1"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: ./scripts/MacOS/RunTests.sh "$PWD" Debug
+
   macos:
     name: macOS ${{ matrix.config }}
     runs-on: macos-14 # Apple Silicon (arm64) — matches the supported platform
