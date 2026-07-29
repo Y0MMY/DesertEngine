@@ -418,6 +418,48 @@ TEST( DShaderParserPasses, SinglePassShaderHasNoPassNames )
     EXPECT_EQ( res.GetValue().Passes[0].Name, "" );
 }
 
+TEST( DShaderParser, TranslatesLayoutSugar )
+{
+    const char* kSugar = R"(
+Shader "Sugar"
+{
+    Domain Surface
+    Vertex
+    {
+        In(0) vec3 a_Position;
+        Out(1) vec2 v_UV;
+        PushConstant Push { mat4 M; } pc;
+        void main() { gl_Position = pc.M * vec4(a_Position, 1.0); v_UV = vec2(0.0); }
+    }
+    Fragment
+    {
+        Uniform(3) sampler2D u_Tex;
+        In(1) vec2 v_UV;
+        Out(0) vec4 o;
+        void main() { o = texture(u_Tex, v_UV); }
+    }
+}
+)";
+    auto res = DShaderParser::Parse( kSugar );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+
+    const auto& stages = res.GetValue().Stages;
+    ASSERT_TRUE( stages.count( ShaderStage::Vertex ) );
+    ASSERT_TRUE( stages.count( ShaderStage::Fragment ) );
+    const std::string& vs = stages.at( ShaderStage::Vertex );
+    const std::string& fs = stages.at( ShaderStage::Fragment );
+
+    EXPECT_NE( vs.find( "layout(location = 0) in vec3 a_Position;" ), std::string::npos );
+    EXPECT_NE( vs.find( "layout(location = 1) out vec2 v_UV;" ), std::string::npos );
+    EXPECT_NE( vs.find( "layout(push_constant) uniform Push { mat4 M; } pc;" ), std::string::npos );
+    EXPECT_NE( fs.find( "layout(binding = 3) uniform sampler2D u_Tex;" ), std::string::npos );
+    EXPECT_NE( fs.find( "layout(location = 0) out vec4 o;" ), std::string::npos );
+
+    // The sugar keywords must be fully consumed (no leftover In(/Out(/Uniform(/PushConstant).
+    EXPECT_EQ( vs.find( "In(0)" ), std::string::npos );
+    EXPECT_EQ( fs.find( "Uniform(3)" ), std::string::npos );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <charconv>
+#include <regex>
 #include <sstream>
 #include <vector>
 
@@ -651,6 +652,30 @@ namespace Desert::Core::Preprocess
             return out;
         }
 
+        // Desert shader-language sugar over GLSL's `layout(...)` qualifiers — a thin, ShaderLab-flavoured
+        // vocabulary that translates 1:1 to plain GLSL. Every rule is SINGLE-LINE so the line count is
+        // preserved and `#line`-based error mapping stays exact. Raw `layout(...)` still works verbatim
+        // (the sugar keywords are Capitalized; GLSL keywords are lowercase, so they never collide):
+        //   In(n)  T x;        -> layout(location = n) in  T x;
+        //   Out(n) T x;        -> layout(location = n) out T x;
+        //   Uniform(n) ...     -> layout(binding = n) uniform ...      (UBO block or a sampler)
+        //   Buffer(n)  ...     -> layout(std430, binding = n) buffer ...
+        //   PushConstant ...   -> layout(push_constant) uniform ...    (block name + instance kept as-is)
+        std::string TranslateSugar( const std::string& src )
+        {
+            static const std::pair<std::regex, std::string> kRules[] = {
+                { std::regex( R"(\bIn\s*\(\s*(\d+)\s*\))" ),      "layout(location = $1) in" },
+                { std::regex( R"(\bOut\s*\(\s*(\d+)\s*\))" ),     "layout(location = $1) out" },
+                { std::regex( R"(\bUniform\s*\(\s*(\d+)\s*\))" ), "layout(binding = $1) uniform" },
+                { std::regex( R"(\bBuffer\s*\(\s*(\d+)\s*\))" ),  "layout(std430, binding = $1) buffer" },
+                { std::regex( R"(\bPushConstant\b)" ),            "layout(push_constant) uniform" },
+            };
+            std::string out = src;
+            for ( const auto& [re, rep] : kRules )
+                out = std::regex_replace( out, re, rep );
+            return out;
+        }
+
         std::string AssembleStage( ShaderStage stage, const RawBlock& code, const RawBlock& include,
                                    const std::string& autoDecls )
         {
@@ -664,11 +689,11 @@ namespace Desert::Core::Preprocess
             {
                 // GLSL: after `#line N`, the NEXT line is numbered N+1.
                 out << "#line " << ( include.StartLine > 0 ? include.StartLine - 1 : 0 ) << "\n";
-                out << include.Content << "\n";
+                out << TranslateSugar( include.Content ) << "\n";
             }
 
             out << "#line " << ( code.StartLine > 0 ? code.StartLine - 1 : 0 ) << "\n";
-            out << code.Content;
+            out << TranslateSugar( code.Content );
 
             return out.str();
         }
