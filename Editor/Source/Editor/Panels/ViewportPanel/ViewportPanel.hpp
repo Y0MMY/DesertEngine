@@ -52,6 +52,10 @@ namespace Desert::Editor
         // (the collection root). Assigns it to every material slot. No-op if none found.
         void ApplySidecarMaterial( ECS::Entity& entity, const std::string& meshSourcePath );
 
+        // Viewport material DnD: raycast the mesh under the cursor and assign the dropped .demat
+        // to its material elements (all of them — the hit carries no submesh id yet).
+        void AssignMaterialAtCursor( const std::string& materialPath );
+
         // Corner XYZ orientation gizmo (a small triad tracking the camera's rotation) so you always know
         // which way world X/Y/Z point in the current view. Overlay only — pure ImGui, no scene interaction.
         void DrawViewAxisGizmo( const glm::vec2& viewportPos, const glm::vec2& viewportSize );

@@ -330,6 +330,17 @@ namespace Desert::Editor
                                                      // no-ops when its target entity is gone
                 m_AsyncLoader->Request( path, static_cast<uint64_t>( uuid ) );
             }
+
+            // Drag a material (.demat) onto the viewport: mouse-pick the mesh under the cursor and
+            // assign the material to its elements (UE-style drop-on-object).
+            if ( const ImGuiPayload* payload =
+                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset );
+                 payload && m_AssetManager )
+            {
+                const std::string path( static_cast<const char*>( payload->Data ),
+                                        payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
+                AssignMaterialAtCursor( path );
+            }
             ImGui::EndDragDropTarget();
         }
 
@@ -636,7 +647,44 @@ namespace Desert::Editor
         smc.RuntimeMaterialInstances.clear();
     }
 
+    void ViewportPanel::AssignMaterialAtCursor( const std::string& materialPath )
+    {
+        const auto& mainCamera = m_Scene->GetMainCamera().lock();
+        if ( !mainCamera || !m_AssetManager )
+            return;
 
+        // Same screen->world ray the click-picker uses (mouse position is already viewport-local).
+        const auto ray = Common::Math::Ray::FromScreenPosition(
+             { m_ViewportData.MousePosition.x, m_ViewportData.MousePosition.y },
+             mainCamera->GetProjectionMatrix(), mainCamera->GetViewMatrix(), mainCamera->GetPosition(),
+             static_cast<uint32_t>( m_ViewportData.Size.x ), static_cast<uint32_t>( m_ViewportData.Size.y ) );
 
+        ::Desert::Core::RaycastHit hit;
+        if ( !m_Scene->Raycast( ray, hit ) )
+            return;
+        auto ref = m_Scene->FindEntityByID( hit.Entity );
+        if ( !ref || !ref->get().HasComponent<ECS::StaticMeshComponent>() )
+            return;
+        const ECS::Entity& entity = ref->get();
+
+        // Resolve/register the dropped material (same path the slot editor's drop target takes).
+        auto& mgr   = const_cast<Assets::AssetManager&>( *m_AssetManager );
+        auto  asset = mgr.FindByPath<Assets::SurfaceMaterialAsset>( materialPath );
+        if ( !asset )
+            asset = mgr.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, materialPath );
+        if ( !asset )
+            return;
+        const auto handle = asset->GetMetadata().Handle;
+        if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
+            Runtime::ResourceRegistry::GetMaterialService()->RegisterAsset( asset );
+
+        // Assign every element (the renderer repeats the last slot anyway) and select the entity so
+        // the Materials panel shows the result of the drop immediately.
+        auto& smc = m_Scene->GetRegistry().get<ECS::StaticMeshComponent>( entity.GetHandle() );
+        const size_t count = std::max<size_t>( size_t{ 1 }, smc.MaterialSlots.size() );
+        smc.MaterialSlots.assign( count, handle );
+        smc.RuntimeMaterialInstances.clear();
+        Core::SelectionManager::SetSelected( hit.Entity );
+    }
 
 } // namespace Desert::Editor
