@@ -12,6 +12,108 @@
 
 namespace Common
 {
+    // Small-buffer callable for the job queue: closures up to kInlineSize bytes live INLINE in the
+    // queue node — zero heap per job (std::function's SBO is too small for a typical ParallelFor
+    // chunk, so every submit paid a heap alloc + free). Larger captures fall back to one heap
+    // block; that stays correct, just the exception rather than the rule.
+    class InlineJob
+    {
+    public:
+        static constexpr std::size_t kInlineSize = 64;
+
+        InlineJob() = default;
+
+        template <typename F, typename D = std::decay_t<F>,
+                  typename = std::enable_if_t<!std::is_same_v<D, InlineJob>>>
+        InlineJob( F&& fn )
+        {
+            if constexpr ( sizeof( D ) <= kInlineSize && alignof( D ) <= alignof( std::max_align_t ) &&
+                           std::is_nothrow_move_constructible_v<D> )
+            {
+                new ( m_Storage ) D( std::forward<F>( fn ) );
+                m_Ops = &s_InlineOps<D>;
+            }
+            else
+            {
+                *reinterpret_cast<D**>( static_cast<void*>( m_Storage ) ) = new D( std::forward<F>( fn ) );
+                m_Ops = &s_HeapOps<D>;
+            }
+        }
+
+        InlineJob( InlineJob&& other ) noexcept
+        {
+            MoveFrom( other );
+        }
+        InlineJob& operator=( InlineJob&& other ) noexcept
+        {
+            if ( this != &other )
+            {
+                Destroy();
+                MoveFrom( other );
+            }
+            return *this;
+        }
+        InlineJob( const InlineJob& )            = delete;
+        InlineJob& operator=( const InlineJob& ) = delete;
+        ~InlineJob()
+        {
+            Destroy();
+        }
+
+        void operator()()
+        {
+            m_Ops->Invoke( m_Storage );
+        }
+        explicit operator bool() const
+        {
+            return m_Ops != nullptr;
+        }
+
+    private:
+        struct Ops
+        {
+            void ( *Invoke )( void* );
+            void ( *MoveTo )( void* src, void* dst ); // dst is uninitialized; src is destroyed
+            void ( *Destroy )( void* );
+        };
+
+        template <typename D>
+        static constexpr Ops s_InlineOps = {
+            []( void* s ) { ( *static_cast<D*>( s ) )(); },
+            []( void* src, void* dst )
+            {
+                new ( dst ) D( std::move( *static_cast<D*>( src ) ) );
+                static_cast<D*>( src )->~D();
+            },
+            []( void* s ) { static_cast<D*>( s )->~D(); } };
+
+        template <typename D>
+        static constexpr Ops s_HeapOps = {
+            []( void* s ) { ( **static_cast<D**>( s ) )(); },
+            []( void* src, void* dst )
+            { *static_cast<D**>( dst ) = *static_cast<D**>( src ); },
+            []( void* s ) { delete *static_cast<D**>( s ); } };
+
+        void MoveFrom( InlineJob& other ) noexcept
+        {
+            m_Ops = other.m_Ops;
+            if ( m_Ops )
+                m_Ops->MoveTo( other.m_Storage, m_Storage );
+            other.m_Ops = nullptr;
+        }
+        void Destroy()
+        {
+            if ( m_Ops )
+            {
+                m_Ops->Destroy( m_Storage );
+                m_Ops = nullptr;
+            }
+        }
+
+        alignas( std::max_align_t ) unsigned char m_Storage[kInlineSize];
+        const Ops* m_Ops = nullptr;
+    };
+
     // Engine-wide worker-thread pool — THE place for CPU-parallel work (asset cooking, LUT generation,
     // background mesh cooks, future parallel ECS). Replaces the ad-hoc one-off std::thread/std::async
     // sprinkled around the codebase so thread count stays bounded (workers = cores - 1) and work is
@@ -32,8 +134,8 @@ namespace Common
         JobSystem( const JobSystem& )            = delete;
         JobSystem& operator=( const JobSystem& ) = delete;
 
-        // Fire-and-forget.
-        void Submit( std::function<void()> job );
+        // Fire-and-forget. Closures <= InlineJob::kInlineSize bytes enqueue with ZERO heap allocations.
+        void Submit( InlineJob job );
 
         // Submit with a result: returns a std::future for the callable's return value.
         template <typename F>
@@ -65,9 +167,9 @@ namespace Common
         JobSystem();
         void WorkerLoop();
 
-        mutable std::mutex                m_Mutex;
-        std::condition_variable           m_CV;
-        std::deque<std::function<void()>> m_Queue;
+        mutable std::mutex      m_Mutex;
+        std::condition_variable m_CV;
+        std::deque<InlineJob>   m_Queue;
         std::vector<std::thread>          m_Workers;
         size_t                            m_Running = 0; // jobs currently executing
         bool                              m_Stop    = false;

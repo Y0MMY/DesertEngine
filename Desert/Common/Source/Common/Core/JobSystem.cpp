@@ -39,7 +39,7 @@ namespace Common
         OPTICK_THREAD( "JobSystem Worker" );
         for ( ;; )
         {
-            std::function<void()> job;
+            InlineJob job;
             {
                 std::unique_lock<std::mutex> lk( m_Mutex );
                 m_CV.wait( lk, [this] { return m_Stop || !m_Queue.empty(); } );
@@ -74,7 +74,7 @@ namespace Common
         }
     }
 
-    void JobSystem::Submit( std::function<void()> job )
+    void JobSystem::Submit( InlineJob job )
     {
         {
             std::lock_guard<std::mutex> lk( m_Mutex );
