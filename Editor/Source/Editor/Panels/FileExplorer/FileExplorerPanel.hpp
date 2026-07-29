@@ -172,6 +172,10 @@ namespace Desert::Editor
         int    m_GridItemsPerRow;
         float  m_GridSize = 360.0f;
 
+        // Content-Browser left pane (folder tree + favorites) width; dragged via the splitter, remembered
+        // for the session. Clamped to [kMinTreeWidth, avail - kMinContentWidth] each frame.
+        float m_TreeWidth = 240.0f;
+
         // Asset filtering + sorting (toolbar).
         enum class SortMode
         {

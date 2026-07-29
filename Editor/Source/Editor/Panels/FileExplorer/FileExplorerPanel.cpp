@@ -718,73 +718,89 @@ namespace Desert::Editor
             m_ThumbRenderer->Tick();
         {
             FileIndex              = 0;
-            auto        windowSize = ImGui::GetWindowSize();
-            bool        vertical   = windowSize.y > windowSize.x;
-            static bool Init       = false;
-
             if ( m_Refresh )
             {
                 RefreshCurrentDirectory(); // in-place: keeps navigation (watcher / import / rebuild)
                 m_Refresh = false;
             }
 
-            if ( !vertical )
-            {
-                // Replace with columns implementation
-                ImGui::Columns( 2, "FileExplorerPanelColumns", false );
-                if ( !Init )
-                {
-                    ImGui::SetColumnWidth( 0, ImGui::GetWindowContentRegionMax().x / 3.0f );
-                    Init = true;
-                }
-                ImGui::BeginChild( "##folders_common" );
-            }
-            else
-                ImGui::BeginChild( "##folders_common", ImVec2( 0, ImGui::GetWindowHeight() / 3.0f ) );
+            // ── Content Browser: two panes split by a draggable vertical splitter. LEFT = pinned Favorites
+            //    + the project folder tree; RIGHT = toolbar / breadcrumb / asset grid / preview strip. ──
+            constexpr float kMinTreeWidth    = 120.0f;
+            constexpr float kMinContentWidth = 220.0f;
+            constexpr float kSplitterW       = 6.0f;
+            const float     totalAvail       = ImGui::GetContentRegionAvail().x;
+            m_TreeWidth = std::clamp( m_TreeWidth, kMinTreeWidth,
+                                      std::max( kMinTreeWidth, totalAvail - kMinContentWidth - kSplitterW ) );
 
+            // LEFT PANE.
+            ImGui::BeginChild( "##cb_left", ImVec2( m_TreeWidth, 0.0f ), true );
             {
+                if ( !m_Favorites.empty() )
                 {
-                    ImGui::BeginChild( "##folders" );
+                    ImGui::TextDisabled( ICON_MDI_STAR " FAVORITES" );
+                    for ( const auto& fav : m_Favorites )
                     {
-                        DrawFolder( m_BaseProjectDir, true );
+                        const std::string label = std::filesystem::path( fav ).filename().string();
+                        ImGui::PushID( fav.c_str() );
+                        if ( ImGui::Selectable(
+                                  ( std::string( "  " ) + ICON_MDI_FOLDER " " + ( label.empty() ? fav : label ) )
+                                       .c_str() ) )
+                            NavigateToPath( fav );
+                        if ( ImGui::BeginPopupContextItem( "##favctx" ) )
+                        {
+                            if ( ImGui::MenuItem( "Remove from Favorites" ) )
+                                ToggleFavorite( fav );
+                            ImGui::EndPopup();
+                        }
+                        ImGui::PopID();
                     }
-                    ImGui::EndChild();
+                    ImGui::Separator();
                 }
+                ImGui::TextDisabled( ICON_MDI_FOLDER_MULTIPLE " CONTENT" );
+                DrawFolder( m_BaseProjectDir, true );
             }
-
             ImGui::EndChild();
 
+            // The folder tree is a move-drop target: drag an asset onto a folder to move it there (the hovered
+            // folder sets m_MovePath inside DrawFolder).
             if ( ImGui::BeginDragDropTarget() )
             {
-                auto data =
-                     ImGui::AcceptDragDropPayload( "selectable", ImGuiDragDropFlags_AcceptNoDrawDefaultRect );
-                if ( data )
+                if ( auto data = ImGui::AcceptDragDropPayload( "selectable",
+                                                              ImGuiDragDropFlags_AcceptNoDrawDefaultRect ) )
                 {
                     std::string* file = (std::string*)data->Data;
-                    if ( MoveFile( *file, m_MovePath ) )
-                    {
-                        // LINFO("Moved File: %s to %s", file->c_str(), m_MovePath.c_str());
-                    }
+                    MoveFile( *file, m_MovePath );
                     m_IsDragging = false;
                 }
                 ImGui::EndDragDropTarget();
             }
-            float offset = 0.0f;
-            if ( !vertical )
-            {
-                ImGui::NextColumn();
-            }
-            else
-            {
-                offset = ImGui::GetWindowHeight() / 3.0f + 6.0f;
-                ImGui::Separator();
-            }
 
+            // SPLITTER — a thin invisible handle the user drags to resize the tree pane.
+            ImGui::SameLine( 0.0f, 0.0f );
+            ImGui::InvisibleButton( "##cb_splitter", ImVec2( kSplitterW, ImGui::GetContentRegionAvail().y ) );
+            if ( ImGui::IsItemActive() )
+                m_TreeWidth += ImGui::GetIO().MouseDelta.x;
+            if ( ImGui::IsItemHovered() || ImGui::IsItemActive() )
+                ImGui::SetMouseCursor( ImGuiMouseCursor_ResizeEW );
+            {
+                const ImVec2 mn  = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+                const bool   hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                     ImVec2( ( mn.x + mx.x ) * 0.5f - 1.0f, mn.y ), ImVec2( ( mn.x + mx.x ) * 0.5f + 1.0f, mx.y ),
+                     ImGui::GetColorU32( hot ? ImGuiCol_SeparatorActive : ImGuiCol_Separator ) );
+            }
+            ImGui::SameLine( 0.0f, 0.0f );
+
+            // RIGHT PANE.
+            ImGui::BeginChild( "##cb_right", ImVec2( 0.0f, 0.0f ), false );
+
+            // Toolbar strip (settings / search / sort / filter / nav / import + breadcrumb) inside the right pane.
             {
                 {
-                    ImGui::BeginChild(
-                         "##directory_breadcrumbs",
-                         ImVec2( ImGui::GetColumnWidth(), ImGui::GetFrameHeightWithSpacing() * 2.0f ) );
+                    ImGui::BeginChild( "##cb_toolbar",
+                                       ImVec2( 0.0f, ImGui::GetFrameHeightWithSpacing() * 2.0f ), false,
+                                       ImGuiWindowFlags_NoScrollbar );
 
                     ImGui::AlignTextToFramePadding();
                     // Button for advanced settings
@@ -1137,6 +1153,7 @@ namespace Desert::Editor
                         DrawPreviewPane();
                 }
             }
+            ImGui::EndChild(); // ##cb_right
 
             if ( ImGui::BeginDragDropTarget() )
             {
