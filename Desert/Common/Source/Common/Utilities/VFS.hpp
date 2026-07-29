@@ -11,16 +11,21 @@ namespace Common::Utils
     // disk. Wiring model (UE-style shipping):
     //
     //   - dev/editor: nothing mounted -> every read is a plain disk read (zero behavior change);
-    //   - packaged game: the Runtime mounts <package>/Content.dpak; FileSystem::ReadFileContent/
-    //     Exists/... try DISK FIRST (loose-file override for debugging), then fall back to the pak.
+    //   - packaged game: the Runtime mounts <package>/Content.dpak (plus any chunk/patch paks);
+    //     FileSystem::ReadFileContent/Exists/... try DISK FIRST (loose-file override for
+    //     debugging), then fall back through the mount stack.
     //
-    // Lookup: an incoming path (absolute or cwd-relative) is normalized and made relative to the pak's
-    // MOUNT ROOT (the directory the .dpak sits in); that relative generic string is the archive key —
-    // e.g. "/pkg/Assets/S.desce" with the pak at "/pkg/Content.dpak" resolves to key "Assets/S.desce".
+    // MOUNT STACK: MountPak may be called repeatedly; LATER mounts override earlier ones for the
+    // same key. That is the update mechanism — ship base.dpak (+ per-type chunks), then distribute
+    // small patch paks containing only the changed files and mount them last.
+    //
+    // Lookup: an incoming path (absolute or cwd-relative) is normalized and made relative to each
+    // pak's MOUNT ROOT (the directory the .dpak sits in); that relative generic string is the
+    // archive key — e.g. "/pkg/Assets/S.desce" with a pak at "/pkg/Content.dpak" -> "Assets/S.desce".
     class VFS
     {
     public:
-        // Mounts one archive (v1: single mount). Returns false when missing/corrupt.
+        // Mounts one archive on top of the stack. Returns false when missing/corrupt.
         static bool MountPak( const std::filesystem::path& pakFile );
         static bool IsMounted();
         static void Unmount();

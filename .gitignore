@@ -56,3 +56,4 @@ Cooked/
 
 # Fetched by scripts/MacOS/Setup.sh (not a submodule)
 ThirdParty/meshoptimizer/
+dist/

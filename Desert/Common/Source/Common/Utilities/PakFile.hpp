@@ -9,14 +9,21 @@
 
 namespace Common::Utils
 {
-    // The .dpak archive format (UE .pak-style): one file bundling all shipped content.
+    // The .dpak archive format (UE .pak-style): a file bundling shipped content. A build usually
+    // ships SEVERAL paks (base + per-type chunks + patches) mounted as a stack — see VFS.
     //
-    //   [ magic "DPK1" | u32 entryCount | u64 indexOffset ]   header (16 bytes)
-    //   [ blob | blob | ... ]                                 raw file contents
-    //   [ u32 pathLen | path utf8 | u64 offset | u64 size ]*  index (at indexOffset)
+    //   [ magic "DPK2" | u32 entryCount | u64 indexOffset ]              header (16 bytes)
+    //   [ blob | blob | ... ]                                            raw file contents
+    //   [ u32 pathLen | path utf8 | u64 offset | u64 size | u64 hash ]*  index (at indexOffset)
     //
-    // Paths are mount-root-relative, generic (forward-slash) strings — e.g. "Assets/Scenes/Main.desce".
-    // v1: no compression/encryption (index layout leaves room to version those in later).
+    // hash = FNV-1a 64 of the entry's content: drives `PakTool diff` (patch-pak generation) and
+    // post-download integrity checks. The reader still accepts v1 "DPK1" archives (no hash column;
+    // EntryHash reports 0 for them). Paths are mount-root-relative, generic (forward-slash)
+    // strings — e.g. "Assets/Scenes/Main.desce". No compression/encryption yet (a future version
+    // bumps the magic again).
+
+    // Content hash used by the pak index (FNV-1a 64) — public so tools/tests hash the same way.
+    uint64_t PakContentHash( const void* data, size_t size );
 
     class PakWriter
     {
@@ -39,6 +46,7 @@ namespace Common::Utils
             std::string Key;
             uint64_t    Offset = 0;
             uint64_t    Size   = 0;
+            uint64_t    Hash   = 0; // FNV-1a 64 of the content
         };
 
         std::filesystem::path m_Path;
@@ -58,6 +66,8 @@ namespace Common::Utils
 
         bool Contains( const std::string& key ) const;
         std::optional<uint64_t> EntrySize( const std::string& key ) const;
+        // Content hash from the index (0 for v1 archives that predate hashing).
+        std::optional<uint64_t> EntryHash( const std::string& key ) const;
 
         // Reads one entry (opens its own stream — safe to call from any thread).
         std::optional<std::string> Read( const std::string& key ) const;
@@ -70,6 +80,7 @@ namespace Common::Utils
         {
             uint64_t Offset = 0;
             uint64_t Size   = 0;
+            uint64_t Hash   = 0; // 0 when the archive is v1 (pre-hash)
         };
 
         std::filesystem::path                 m_Path;

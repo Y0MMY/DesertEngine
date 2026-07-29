@@ -98,6 +98,63 @@ TEST( Pak, VfsMountResolvesAbsolutePathsAndFileSystemFallsBack )
     EXPECT_FALSE( Common::Utils::VFS::Exists( virtualPath ) );
 }
 
+TEST( Pak, EntryHashesMatchContent )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string payload = "hash me";
+    {
+        Common::Utils::PakWriter writer( dir / "hash.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "a.bin", payload.data(), payload.size() ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    Common::Utils::PakReader reader( dir / "hash.dpak" );
+    ASSERT_TRUE( reader.IsOpen() );
+    const auto h = reader.EntryHash( "a.bin" );
+    ASSERT_TRUE( h.has_value() );
+    EXPECT_EQ( *h, Common::Utils::PakContentHash( payload.data(), payload.size() ) );
+    EXPECT_NE( *h, 0u );
+    EXPECT_FALSE( reader.EntryHash( "missing" ).has_value() );
+}
+
+TEST( Pak, PatchMountOverridesBase )
+{
+    const fs::path dir = MakeTempDir();
+
+    const std::string baseData  = "base";
+    const std::string patchData = "patched";
+    const std::string extraData = "only-in-base";
+    {
+        Common::Utils::PakWriter writer( dir / "Content.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "Assets/a.txt", baseData.data(), baseData.size() ) );
+        ASSERT_TRUE( writer.AddData( "Assets/b.txt", extraData.data(), extraData.size() ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+    {
+        Common::Utils::PakWriter writer( dir / "Patch_001.dpak" );
+        ASSERT_TRUE( writer.IsOpen() );
+        ASSERT_TRUE( writer.AddData( "Assets/a.txt", patchData.data(), patchData.size() ) );
+        ASSERT_TRUE( writer.Finalize() > 0 );
+    }
+
+    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Content.dpak" ) );
+    ASSERT_TRUE( Common::Utils::VFS::MountPak( dir / "Patch_001.dpak" ) ); // later mount wins
+
+    // The patched key reads from the LATER mount; untouched keys still come from the base.
+    EXPECT_EQ( Common::Utils::VFS::ReadFile( dir / "Assets/a.txt" ).value_or( "" ), "patched" );
+    EXPECT_EQ( Common::Utils::VFS::ReadFile( dir / "Assets/b.txt" ).value_or( "" ), "only-in-base" );
+
+    // Listing dedupes overridden keys (a.txt appears once).
+    const auto listed = Common::Utils::VFS::ListFiles( dir / "Assets" );
+    EXPECT_EQ( listed.size(), 2u );
+
+    Common::Utils::VFS::Unmount();
+    EXPECT_FALSE( Common::Utils::VFS::IsMounted() );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

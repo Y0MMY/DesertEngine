@@ -5,6 +5,10 @@
 //                                                      to it, optionally prefixed "P/...")
 //   PakTool list    <archive.dpak>                     print every entry with its size
 //   PakTool extract <archive.dpak> <outDir>            unpack all entries into outDir
+//   PakTool diff    <base.dpak> <new.dpak> <patch.dpak> patch pak = entries of new that are absent
+//                                                      or changed vs base (per-entry content hash;
+//                                                      byte-compare fallback for v1 archives).
+//                                                      Mount it AFTER the base to apply the update.
 
 #include <Common/Utilities/PakFile.hpp>
 
@@ -114,12 +118,84 @@ namespace
         return 0;
     }
 
+    int Diff( const fs::path& basePath, const fs::path& newPath, const fs::path& outPath )
+    {
+        Common::Utils::PakReader base( basePath );
+        Common::Utils::PakReader newer( newPath );
+        if ( !base.IsOpen() || !newer.IsOpen() )
+        {
+            std::fprintf( stderr, "PakTool: cannot open %s\n",
+                          ( base.IsOpen() ? newPath : basePath ).string().c_str() );
+            return 1;
+        }
+
+        Common::Utils::PakWriter writer( outPath );
+        if ( !writer.IsOpen() )
+        {
+            std::fprintf( stderr, "PakTool: cannot create %s\n", outPath.string().c_str() );
+            return 1;
+        }
+
+        size_t added = 0, changed = 0, removed = 0;
+        for ( const auto& key : newer.KeysWithPrefix( "" ) )
+        {
+            bool same = false;
+            if ( base.Contains( key ) )
+            {
+                const auto oldHash = base.EntryHash( key ).value_or( 0 );
+                const auto newHash = newer.EntryHash( key ).value_or( 0 );
+                if ( oldHash != 0 && newHash != 0 )
+                    same = oldHash == newHash;
+                else
+                    same = base.Read( key ) == newer.Read( key ); // v1 archive: no hashes -> bytes
+            }
+            if ( same )
+                continue;
+
+            const auto data = newer.Read( key );
+            if ( !data || !writer.AddData( key, data->data(), data->size() ) )
+            {
+                std::fprintf( stderr, "PakTool: failed to copy entry %s\n", key.c_str() );
+                return 1;
+            }
+            base.Contains( key ) ? ++changed : ++added;
+        }
+
+        // Deletions are NOT representable in an overlay patch (a later mount can only override).
+        // Report them so the packager knows a full base re-ship is needed to actually drop files.
+        for ( const auto& key : base.KeysWithPrefix( "" ) )
+            if ( !newer.Contains( key ) )
+                ++removed;
+
+        if ( added + changed == 0 )
+        {
+            std::printf( "PakTool: no differences — no patch written\n" );
+            std::error_code ec;
+            fs::remove( outPath, ec );
+            return 0;
+        }
+        if ( writer.Finalize() == 0 )
+        {
+            std::fprintf( stderr, "PakTool: finalize failed\n" );
+            return 1;
+        }
+
+        std::string removedNote;
+        if ( removed )
+            removedNote =
+                 " (" + std::to_string( removed ) + " deletion(s) not representable in an overlay patch)";
+        std::printf( "PakTool: patch %s — %zu added, %zu changed%s\n", outPath.string().c_str(), added,
+                     changed, removedNote.c_str() );
+        return 0;
+    }
+
     int Usage()
     {
         std::fprintf( stderr, "Usage:\n"
                               "  PakTool create  <out.dpak> <srcDir> [--prefix P]\n"
                               "  PakTool list    <archive.dpak>\n"
-                              "  PakTool extract <archive.dpak> <outDir>\n" );
+                              "  PakTool extract <archive.dpak> <outDir>\n"
+                              "  PakTool diff    <base.dpak> <new.dpak> <patch.dpak>\n" );
         return 2;
     }
 } // namespace
@@ -142,6 +218,8 @@ int main( int argc, char** argv )
         return List( argv[2] );
     if ( cmd == "extract" && argc >= 4 )
         return Extract( argv[2], argv[3] );
+    if ( cmd == "diff" && argc >= 5 )
+        return Diff( argv[2], argv[3], argv[4] );
 
     return Usage();
 }

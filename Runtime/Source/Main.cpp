@@ -70,14 +70,26 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
         std::exit( 1 );
     }
 
-    // Packaged game: all content lives in Content.dpak next to the .deproj — mount it so every engine
+    // Packaged game: content lives in Content.dpak next to the .deproj — mount it so every engine
     // read (scenes, cooked meshes, textures, shaders, scripts) resolves through the VFS. In a dev
     // project the archive simply does not exist and reads stay plain disk reads.
+    // UPDATES: any Patch*.dpak next to it mounts ON TOP in name order (Patch_001, Patch_002, ...) —
+    // later mounts override earlier keys, so shipping a fix = dropping one small pak beside the base.
     {
-        const auto pak = std::filesystem::path( Desert::Project::ProjectContext::Directory() ) /
-                         "Content.dpak";
+        const auto dir = std::filesystem::path( Desert::Project::ProjectContext::Directory() );
+        const auto pak = dir / "Content.dpak";
         if ( std::filesystem::exists( pak ) )
             Common::Utils::VFS::MountPak( pak );
+
+        std::vector<std::filesystem::path> patches;
+        std::error_code                    ec;
+        for ( const auto& de : std::filesystem::directory_iterator( dir, ec ) )
+            if ( de.is_regular_file( ec ) && de.path().extension() == ".dpak" &&
+                 de.path().filename().string().rfind( "Patch", 0 ) == 0 )
+                patches.push_back( de.path() );
+        std::sort( patches.begin(), patches.end() );
+        for ( const auto& p : patches )
+            Common::Utils::VFS::MountPak( p );
     }
 
     std::printf( "Desert Runtime %s\n", Common::Version::Full() );

@@ -4,31 +4,53 @@
 
 #include <Common/Core/Logger.hpp>
 
+#include <algorithm>
 #include <memory>
+#include <unordered_set>
+#include <vector>
 
 namespace Common::Utils
 {
     namespace
     {
-        std::unique_ptr<PakReader> s_Pak;
-        std::filesystem::path      s_MountRoot; // absolute, normalized
-
-        // Archive key for an incoming path: absolute-normalized, then relative to the mount root.
-        // nullopt when the path points outside the mounted tree.
-        std::optional<std::string> KeyFor( const std::filesystem::path& path )
+        struct Mount
         {
-            if ( !s_Pak )
-                return std::nullopt;
+            std::unique_ptr<PakReader> Pak;
+            std::filesystem::path      Root; // absolute, normalized
+        };
 
+        // Mount STACK: later mounts override earlier ones for the same key (base.dpak first, then
+        // per-type chunks, then patch paks — the patch wins). Lookups walk it newest-first.
+        std::vector<Mount> s_Mounts;
+
+        // Archive key for an incoming path within ONE mount: absolute-normalized, then relative to
+        // that mount's root. nullopt when the path points outside the mounted tree.
+        std::optional<std::string> KeyFor( const Mount& mount, const std::filesystem::path& path )
+        {
             std::error_code ec;
             std::filesystem::path abs =
                  path.is_absolute() ? path.lexically_normal()
                                     : ( std::filesystem::current_path( ec ) / path ).lexically_normal();
 
-            const std::filesystem::path rel = abs.lexically_relative( s_MountRoot );
+            const std::filesystem::path rel = abs.lexically_relative( mount.Root );
             if ( rel.empty() || rel.begin()->string() == ".." )
                 return std::nullopt;
             return rel.generic_string();
+        }
+
+        // Newest-first resolution of a path to the mount that owns it.
+        template <typename Fn>
+        auto Resolve( const std::filesystem::path& path, Fn&& fn )
+             -> decltype( fn( *s_Mounts.front().Pak, std::string{} ) )
+        {
+            for ( auto it = s_Mounts.rbegin(); it != s_Mounts.rend(); ++it )
+            {
+                const auto key = KeyFor( *it, path );
+                if ( !key || !it->Pak->Contains( *key ) )
+                    continue;
+                return fn( *it->Pak, *key );
+            }
+            return {};
         }
     } // namespace
 
@@ -42,63 +64,68 @@ namespace Common::Utils
         }
 
         std::error_code ec;
-        s_MountRoot = std::filesystem::absolute( pakFile, ec ).parent_path().lexically_normal();
-        s_Pak       = std::move( reader );
-        LOG_INFO( "[VFS] Mounted {} ({} entries, root {})", pakFile.string(), s_Pak->EntryCount(),
-                  s_MountRoot.string() );
+        Mount           mount;
+        mount.Root = std::filesystem::absolute( pakFile, ec ).parent_path().lexically_normal();
+        mount.Pak  = std::move( reader );
+        LOG_INFO( "[VFS] Mounted {} ({} entries, root {}, priority {})", pakFile.string(),
+                  mount.Pak->EntryCount(), mount.Root.string(), s_Mounts.size() );
+        s_Mounts.push_back( std::move( mount ) );
         return true;
     }
 
     bool VFS::IsMounted()
     {
-        return static_cast<bool>( s_Pak );
+        return !s_Mounts.empty();
     }
 
     void VFS::Unmount()
     {
-        s_Pak.reset();
-        s_MountRoot.clear();
+        s_Mounts.clear();
     }
 
     bool VFS::Exists( const std::filesystem::path& path )
     {
-        const auto key = KeyFor( path );
-        return key && s_Pak->Contains( *key );
+        for ( auto it = s_Mounts.rbegin(); it != s_Mounts.rend(); ++it )
+            if ( const auto key = KeyFor( *it, path ); key && it->Pak->Contains( *key ) )
+                return true;
+        return false;
     }
 
     std::optional<std::string> VFS::ReadFile( const std::filesystem::path& path )
     {
-        const auto key = KeyFor( path );
-        if ( !key )
-            return std::nullopt;
-        return s_Pak->Read( *key );
+        return Resolve( path, []( const PakReader& pak, const std::string& key ) { return pak.Read( key ); } );
     }
 
     std::optional<uint64_t> VFS::FileSize( const std::filesystem::path& path )
     {
-        const auto key = KeyFor( path );
-        if ( !key )
-            return std::nullopt;
-        return s_Pak->EntrySize( *key );
+        return Resolve( path,
+                        []( const PakReader& pak, const std::string& key ) { return pak.EntrySize( key ); } );
     }
 
     std::vector<std::filesystem::path> VFS::ListFiles( const std::filesystem::path& directory )
     {
-        std::vector<std::filesystem::path> result;
-        if ( !s_Pak )
-            return result;
+        // Union across the stack, newest mount first, deduped by full path — a patched file lists once.
+        std::vector<std::filesystem::path>  result;
+        std::unordered_set<std::string>     seen;
 
-        auto prefix = KeyFor( directory );
-        if ( !prefix )
-            return result;
-        std::string p = *prefix;
-        if ( p == "." )
-            p.clear(); // the mount root itself
-        else if ( !p.empty() && p.back() != '/' )
-            p += '/';
+        for ( auto it = s_Mounts.rbegin(); it != s_Mounts.rend(); ++it )
+        {
+            auto prefix = KeyFor( *it, directory );
+            if ( !prefix )
+                continue;
+            std::string p = *prefix;
+            if ( p == "." )
+                p.clear(); // the mount root itself
+            else if ( !p.empty() && p.back() != '/' )
+                p += '/';
 
-        for ( const auto& key : s_Pak->KeysWithPrefix( p ) )
-            result.push_back( s_MountRoot / std::filesystem::path( key ) );
+            for ( const auto& key : it->Pak->KeysWithPrefix( p ) )
+            {
+                const std::filesystem::path full = it->Root / std::filesystem::path( key );
+                if ( seen.insert( full.generic_string() ).second )
+                    result.push_back( full );
+            }
+        }
         return result;
     }
 } // namespace Common::Utils

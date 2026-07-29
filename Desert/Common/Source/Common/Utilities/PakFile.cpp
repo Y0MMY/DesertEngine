@@ -7,7 +7,8 @@ namespace Common::Utils
 {
     namespace
     {
-        constexpr char     kMagic[4]   = { 'D', 'P', 'K', '1' };
+        constexpr char     kMagicV1[4] = { 'D', 'P', 'K', '1' }; // pre-hash (still readable)
+        constexpr char     kMagicV2[4] = { 'D', 'P', 'K', '2' }; // + u64 content hash per entry
         constexpr uint64_t kHeaderSize = 4 + sizeof( uint32_t ) + sizeof( uint64_t );
 
         template <typename T>
@@ -24,6 +25,20 @@ namespace Common::Utils
         }
     } // namespace
 
+    uint64_t PakContentHash( const void* data, size_t size )
+    {
+        // FNV-1a 64: tiny, dependency-free, plenty for change detection (a diff/integrity aid,
+        // not a cryptographic guarantee).
+        uint64_t    h = 14695981039346656037ull;
+        const auto* p = static_cast<const unsigned char*>( data );
+        for ( size_t i = 0; i < size; ++i )
+        {
+            h ^= p[i];
+            h *= 1099511628211ull;
+        }
+        return h;
+    }
+
     // ---------------------------------------------------------------- PakWriter
 
     PakWriter::PakWriter( const std::filesystem::path& pakPath ) : m_Path( pakPath )
@@ -36,7 +51,7 @@ namespace Common::Utils
             return;
 
         // Placeholder header; Finalize() rewrites it with the real index offset.
-        out.write( kMagic, 4 );
+        out.write( kMagicV2, 4 );
         WritePod<uint32_t>( out, 0 );
         WritePod<uint64_t>( out, 0 );
         m_Cursor = kHeaderSize;
@@ -70,7 +85,7 @@ namespace Common::Utils
         if ( !out )
             return false;
 
-        m_Entries.push_back( { key, m_Cursor, static_cast<uint64_t>( size ) } );
+        m_Entries.push_back( { key, m_Cursor, static_cast<uint64_t>( size ), PakContentHash( data, size ) } );
         m_Cursor += size;
         return true;
     }
@@ -92,10 +107,11 @@ namespace Common::Utils
             out.write( entry.Key.data(), static_cast<std::streamsize>( entry.Key.size() ) );
             WritePod<uint64_t>( out, entry.Offset );
             WritePod<uint64_t>( out, entry.Size );
+            WritePod<uint64_t>( out, entry.Hash );
         }
 
         out.seekp( 0 );
-        out.write( kMagic, 4 );
+        out.write( kMagicV2, 4 );
         WritePod<uint32_t>( out, static_cast<uint32_t>( m_Entries.size() ) );
         WritePod<uint64_t>( out, indexOffset );
         return out ? m_Entries.size() : 0;
@@ -111,7 +127,9 @@ namespace Common::Utils
 
         char magic[4] = {};
         in.read( magic, 4 );
-        if ( !in || std::memcmp( magic, kMagic, 4 ) != 0 )
+        const bool v1 = in && std::memcmp( magic, kMagicV1, 4 ) == 0;
+        const bool v2 = in && std::memcmp( magic, kMagicV2, 4 ) == 0;
+        if ( !v1 && !v2 )
             return;
 
         uint32_t entryCount  = 0;
@@ -129,6 +147,8 @@ namespace Common::Utils
             in.read( key.data(), pathLen );
             Span span;
             if ( !in || !ReadPod( in, span.Offset ) || !ReadPod( in, span.Size ) )
+                return;
+            if ( v2 && !ReadPod( in, span.Hash ) ) // v1 has no hash column -> stays 0
                 return;
             m_Index.emplace( std::move( key ), span );
         }
@@ -156,6 +176,14 @@ namespace Common::Utils
         if ( it == m_Index.end() )
             return std::nullopt;
         return it->second.Size;
+    }
+
+    std::optional<uint64_t> PakReader::EntryHash( const std::string& key ) const
+    {
+        const auto it = m_Index.find( key );
+        if ( it == m_Index.end() )
+            return std::nullopt;
+        return it->second.Hash;
     }
 
     std::optional<std::string> PakReader::Read( const std::string& key ) const
