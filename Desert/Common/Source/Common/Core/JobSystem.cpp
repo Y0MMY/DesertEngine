@@ -117,7 +117,7 @@ namespace Common
 
         // Chunks [1..N) go to the pool; the CALLING thread runs chunk 0 (so a saturated pool can never
         // deadlock this call — worst case everything runs right here, just serially).
-        std::atomic<size_t>     remaining( ranges.size() - 1 );
+        size_t                  remaining = ranges.size() - 1;
         std::mutex              doneMutex;
         std::condition_variable doneCV;
 
@@ -129,11 +129,15 @@ namespace Common
                  {
                      for ( size_t i = begin; i < end; ++i )
                          body( i );
-                     if ( remaining.fetch_sub( 1 ) == 1 )
-                     {
-                         std::lock_guard<std::mutex> lk( doneMutex );
+                     // Decrement AND notify while HOLDING doneMutex: the waiter owns doneMutex/doneCV on
+                     // its stack and returns (destroying both) as soon as its predicate sees 0. Since the
+                     // predicate is only evaluated under the lock, we can't be caught still touching either
+                     // object after the waiter proceeds. The previous atomic fetch_sub-THEN-lock raced
+                     // exactly there — the waiter destroyed the mutex between the two steps, and the worker
+                     // threw "mutex lock failed: Invalid argument" on the dead mutex.
+                     std::lock_guard<std::mutex> lk( doneMutex );
+                     if ( --remaining == 0 )
                          doneCV.notify_one();
-                     }
                  } );
         }
 
@@ -141,7 +145,7 @@ namespace Common
             body( i );
 
         std::unique_lock<std::mutex> lk( doneMutex );
-        doneCV.wait( lk, [&] { return remaining.load() == 0; } );
+        doneCV.wait( lk, [&] { return remaining == 0; } );
     }
 
     void JobSystem::Shutdown()
