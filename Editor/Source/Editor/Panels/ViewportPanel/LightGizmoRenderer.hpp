@@ -20,9 +20,19 @@ namespace Desert::Editor
         // last skeleton-overlay frame; -1 if none. Populated by RenderSkeleton; drives viewport bone picking.
         int PickBone( const ImVec2& absMouse, float radiusPx = 12.0f ) const;
 
+        // True while the mouse is over a light billboard this frame — icons click-select the light,
+        // so the scene ray-pick must not run over them (it would hit whatever is behind).
+        bool IsLightIconHovered() const
+        {
+            return m_LightIconHovered;
+        }
+
     private:
         void RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,
                                 float xpos, float ypos );
+        // Sun billboard + direction arrow (direction = -normalize(Translation), the shading convention).
+        void RenderDirectionLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
+                                    float height );
         void RenderSpotLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,
                                float xpos, float ypos );
         // Camera entities (CameraComponent): billboard icon + wireframe view frustum.
@@ -58,5 +68,7 @@ namespace Desert::Editor
         // (boneIndex, absolute-screen head position) captured each frame RenderSkeleton draws — the source
         // for PickBone. Cleared when Skeleton Edit mode is inactive so stale positions never pick.
         std::vector<std::pair<int, ImVec2>> m_BoneScreenPositions;
+
+        bool m_LightIconHovered = false; // see IsLightIconHovered()
     };
 } // namespace Desert::Editor

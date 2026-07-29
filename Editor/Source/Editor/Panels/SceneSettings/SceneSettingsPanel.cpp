@@ -173,17 +173,8 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Shared: one direction moves grass AND clouds." );
         }
 
-        // Opt-in day/night cycle: drives the sun (directional light) from the hour; the sky follows its
-        // elevation. Default off leaves any hand-placed sun untouched.
-        if ( ImGui::CollapsingHeader( "Time of Day", ImGuiTreeNodeFlags_DefaultOpen ) )
-        {
-            ImGui::Checkbox( "Enable Day/Night", &s.EnableDayNight );
-            ImGui::BeginDisabled( !s.EnableDayNight );
-            ImGui::SliderFloat( "Time of Day (h)", &s.TimeOfDay, 0.0f, 24.0f );
-            ImGui::SliderFloat( "Day Length (s)", &s.DayLengthSeconds, 0.0f, 600.0f );
-            ImGui::SliderFloat( "Sun Peak Intensity", &s.SunPeakIntensity, 0.0f, 10.0f );
-            ImGui::EndDisabled();
-            ImGui::TextDisabled( "Day Length 0 = frozen (scrub the hour by hand)." );
-        }
+        // NOTE: the Time of Day section was removed on purpose — the sun's state is the directional
+        // light entity itself (its position IS the direction; the sky/lighting follow it). One
+        // source of truth, no second global knob fighting the hand-placed sun.
     }
 } // namespace Desert::Editor

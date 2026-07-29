@@ -12,7 +12,6 @@
 
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
-#include <Engine/ECS/System/DayNightSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/SpotLightSystem.hpp>
@@ -60,7 +59,6 @@ namespace Desert::Player
         m_AssetPreloader->PreloadSkyboxes();
 
         // Same system set + order as the editor's Play mode.
-        m_Scene->AddSystem<ECS::DayNightSystem>( m_Scene.get() );
         m_Scene->AddSystem<ECS::MeshECSSystem>();
         m_Scene->AddSystem<ECS::SkyboxECSSystem>();
         m_Scene->AddSystem<ECS::TerrainECSSystem>();

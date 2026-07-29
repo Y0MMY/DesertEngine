@@ -190,21 +190,29 @@ namespace Desert::Editor
         return 1; // single implicit slot when the mesh exposes none (e.g. primitives)
     }
 
-    Assets::AssetHandle MaterialComponentWidget::CreateAndRegisterMaterial()
+    Assets::AssetHandle MaterialComponentWidget::CreateAndRegisterMaterial( const std::string& baseName )
     {
         if ( !m_AssetManager )
             return {};
 
-        // Meaningful, human-readable filename (NO handle in the name): "Material", then "Material_1", ... —
-        // first free index in the material folder. The stable identity lives INSIDE the file (MaterialId).
+        // Meaningful, human-readable filename: "M_<Entity>" (sanitized), then "M_<Entity>_1", ... —
+        // first free index in the material folder. The name is ONLY a label: the stable identity
+        // lives INSIDE the file (MaterialId), so renaming the entity or the file later breaks nothing.
+        std::string base;
+        base.reserve( baseName.size() );
+        for ( const char c : baseName )
+            base += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '-' ) ? c : '_';
+        if ( base.empty() )
+            base = "Material";
+
         const std::string         ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
         const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
         std::error_code             ec;
         std::filesystem::create_directories( dir, ec );
 
-        std::filesystem::path path = dir / ( "Material" + ext );
+        std::filesystem::path path = dir / ( base + ext );
         for ( int n = 1; std::filesystem::exists( path, ec ); ++n )
-            path = dir / ( "Material_" + std::to_string( n ) + ext );
+            path = dir / ( base + "_" + std::to_string( n ) + ext );
 
         // Write the file FIRST (defaults + freshly stamped MaterialId), then create-with-load: the
         // asset adopts its stable in-file GUID as the internal handle during Load, so the handle the
@@ -532,6 +540,14 @@ namespace Desert::Editor
 
         if ( materialsOpen )
         {
+            // New materials are named after the entity ("M_<Tag>") — "Material_9" told nobody
+            // anything. The filename is a label only (identity = in-file GUID), so a later entity
+            // rename orphans nothing.
+            const std::string matBaseName =
+                 "M_" + ( entity.HasComponent<ECS::TagComponent>()
+                               ? entity.GetComponent<ECS::TagComponent>().Tag
+                               : std::string( "Material" ) );
+
             // UE-style element list: ALWAYS one row per submesh (plus any extra explicit slots).
             // A row without its own slot INHERITS the effective material the renderer actually uses
             // (submesh i -> slot min(i, slots-1), or the engine default when there are no slots) and
@@ -617,7 +633,7 @@ namespace Desert::Editor
                         }
                         else if ( ImGui::Button( "Create Material", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
                         {
-                            if ( const auto h = CreateAndRegisterMaterial() )
+                            if ( const auto h = CreateAndRegisterMaterial( matBaseName ) )
                             {
                                 MakeSlotExplicit( meshComp, i );
                                 meshComp.MaterialSlots[i] = h;
@@ -730,7 +746,7 @@ namespace Desert::Editor
                         if ( ImGui::Button( "Create Material",
                                             ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
                         {
-                            if ( const auto h = CreateAndRegisterMaterial() )
+                            if ( const auto h = CreateAndRegisterMaterial( matBaseName ) )
                             {
                                 meshComp.MaterialSlots[i] = h;
                                 meshComp.RuntimeMaterialInstances.clear();

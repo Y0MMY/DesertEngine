@@ -17,6 +17,10 @@ namespace Desert::Editor
 
     namespace
     {
+        // Light billboards draw with the big icon font at this pixel size — the default-font glyph
+        // was a barely-visible, barely-clickable speck.
+        constexpr float kLightIconSize = 30.0f;
+
         // Projects a world point to viewport-local screen coords, returning false when the point is
         // behind the camera (clip w <= 0). WorldToScreenSpace divides by w unconditionally, so behind
         // points flip to mirrored on-screen positions — that produced both the ghost bulb icon when
@@ -45,8 +49,11 @@ namespace Desert::Editor
         if ( !camera )
             return;
 
+        m_LightIconHovered = false; // recomputed by the icon renderers below (gates scene picking)
+
         RenderPointLights( camera, width, height, xpos, ypos );
         RenderSpotLights( camera, width, height, xpos, ypos );
+        RenderDirectionLights( camera, width, height );
         RenderCameras( camera, width, height, xpos, ypos );
         RenderSpawnIcons( camera, width, height );
 
@@ -88,13 +95,18 @@ namespace Desert::Editor
             float absoluteX = windowPos.x + screenPos.x;
             float absoluteY = windowPos.y + screenPos.y;
 
+            // Readable billboard: the big icon font at a fixed pixel size (the default-font glyph
+            // was a barely-clickable speck). Tinted with the light's colour so lights are
+            // distinguishable at a glance.
             const char* icon     = ICON_MDI_LIGHTBULB;
-            ImVec2      iconSize = ImGui::CalcTextSize( icon );
+            ImFont*     iconFont = EditorResources::GetBigIconFont();
+            ImVec2      iconSize = iconFont->CalcTextSizeA( kLightIconSize, FLT_MAX, 0.0f, icon );
 
             ImDrawList* drawList   = ImGui::GetWindowDrawList();
-            ImVec4      lightColor = ImVec4( 1.0f, 1.0f, 1.0f, 1.0f );
+            const ImVec4 lightColor( light.Color.r, light.Color.g, light.Color.b, 1.0f );
 
-            drawList->AddText( ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
+            drawList->AddText( iconFont, kLightIconSize,
+                               ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
                                ImColor( lightColor ), icon );
 
             if ( light.ShowRadius )
@@ -106,11 +118,92 @@ namespace Desert::Editor
             if ( mousePos.x >= absoluteX - iconSize.x * 0.5f && mousePos.x <= absoluteX + iconSize.x * 0.5f &&
                  mousePos.y >= absoluteY - iconSize.y * 0.5f && mousePos.y <= absoluteY + iconSize.y * 0.5f )
             {
+                m_LightIconHovered = true;
+                if ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+                    Core::SelectionManager::SetSelected( entity.GetComponent<ECS::UUIDComponent>().UUID );
                 ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
                 ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
                 Utils::ImGuiUtilities::Tooltip(
                      std::format( "Point Light\nIntensity: {}\nRadius: {}\nPosition: ({}, {}, {})",
                                   light.Intensity, light.Radius, worldPos.x, worldPos.y, worldPos.z )
+                          .c_str() );
+                ImGui::PopStyleColor( 2 );
+            }
+        }
+    }
+
+    void LightGizmoRenderer::RenderDirectionLights( const std::shared_ptr<Desert::Core::Camera>& camera,
+                                                    float width, float height )
+    {
+        // Sun billboard + direction arrow. The light's DIRECTION is derived from its Translation
+        // (shading uses -normalize(T), same convention as SkyboxECSSystem) — the arrow shows where
+        // the light actually points, which a bare transform never made visible.
+        auto entities = m_Scene->GetAllEntities();
+
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        const auto   mvp       = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+        ImDrawList*  drawList  = ImGui::GetWindowDrawList();
+
+        for ( auto entity : entities )
+        {
+            if ( !entity.HasComponent<ECS::DirectionLightComponent>() )
+                continue;
+
+            const glm::vec3 worldPos = glm::vec3( entity.GetWorldTransform()[3] );
+            glm::vec2       screenPos;
+            if ( !ProjectToScreen( worldPos, mvp, width, height, screenPos ) )
+                continue;
+
+            const float absoluteX = windowPos.x + screenPos.x;
+            const float absoluteY = windowPos.y + screenPos.y;
+
+            const char* icon     = ICON_MDI_WHITE_BALANCE_SUNNY;
+            ImFont*     iconFont = EditorResources::GetBigIconFont();
+            ImVec2      iconSize = iconFont->CalcTextSizeA( kLightIconSize, FLT_MAX, 0.0f, icon );
+            const ImU32 sunCol   = IM_COL32( 255, 214, 90, 255 );
+
+            drawList->AddText( iconFont, kLightIconSize,
+                               ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
+                               sunCol, icon );
+
+            // Direction arrow: a short world-space segment from the light along its shading direction.
+            if ( glm::length( worldPos ) > 1e-4f )
+            {
+                const glm::vec3 dir = -glm::normalize( worldPos );
+                glm::vec2       tip;
+                if ( ProjectToScreen( worldPos + dir * 2.5f, mvp, width, height, tip ) )
+                {
+                    const ImVec2 from( absoluteX, absoluteY );
+                    const ImVec2 to( windowPos.x + tip.x, windowPos.y + tip.y );
+                    drawList->AddLine( from, to, sunCol, 2.0f );
+                    // Arrow head: two short flicks back from the tip.
+                    const ImVec2 d( to.x - from.x, to.y - from.y );
+                    const float  len = std::sqrt( d.x * d.x + d.y * d.y );
+                    if ( len > 8.0f )
+                    {
+                        const ImVec2 n( d.x / len, d.y / len );
+                        const ImVec2 p( -n.y, n.x );
+                        drawList->AddLine( to, ImVec2( to.x - n.x * 10 + p.x * 5, to.y - n.y * 10 + p.y * 5 ),
+                                           sunCol, 2.0f );
+                        drawList->AddLine( to, ImVec2( to.x - n.x * 10 - p.x * 5, to.y - n.y * 10 - p.y * 5 ),
+                                           sunCol, 2.0f );
+                    }
+                }
+            }
+
+            const auto&  light    = entity.GetComponent<ECS::DirectionLightComponent>().Data;
+            const ImVec2 mousePos = ImGui::GetMousePos();
+            if ( mousePos.x >= absoluteX - iconSize.x * 0.5f && mousePos.x <= absoluteX + iconSize.x * 0.5f &&
+                 mousePos.y >= absoluteY - iconSize.y * 0.5f && mousePos.y <= absoluteY + iconSize.y * 0.5f )
+            {
+                m_LightIconHovered = true;
+                if ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+                    Core::SelectionManager::SetSelected( entity.GetComponent<ECS::UUIDComponent>().UUID );
+                ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
+                ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
+                Utils::ImGuiUtilities::Tooltip(
+                     std::format( "Directional Light (sun)\nIntensity: {}\nDirection: ({:.2f}, {:.2f}, {:.2f})",
+                                  light.Intensity, -worldPos.x, -worldPos.y, -worldPos.z )
                           .c_str() );
                 ImGui::PopStyleColor( 2 );
             }
@@ -143,10 +236,12 @@ namespace Desert::Editor
             const float absoluteY = windowPos.y + screenPos.y;
 
             const char* icon     = ICON_MDI_SPOTLIGHT;
-            ImVec2      iconSize  = ImGui::CalcTextSize( icon );
-            ImDrawList* drawList  = ImGui::GetWindowDrawList();
+            ImFont*     iconFont = EditorResources::GetBigIconFont();
+            ImVec2      iconSize = iconFont->CalcTextSizeA( kLightIconSize, FLT_MAX, 0.0f, icon );
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-            drawList->AddText( ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
+            drawList->AddText( iconFont, kLightIconSize,
+                               ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
                                ImColor( ImVec4( 1.0f, 0.9f, 0.5f, 1.0f ) ), icon );
 
             // Forward = entity's -Z in world space (matches the SpotLightECSSystem direction).
@@ -160,6 +255,9 @@ namespace Desert::Editor
             if ( mousePos.x >= absoluteX - iconSize.x * 0.5f && mousePos.x <= absoluteX + iconSize.x * 0.5f &&
                  mousePos.y >= absoluteY - iconSize.y * 0.5f && mousePos.y <= absoluteY + iconSize.y * 0.5f )
             {
+                m_LightIconHovered = true;
+                if ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+                    Core::SelectionManager::SetSelected( entity.GetComponent<ECS::UUIDComponent>().UUID );
                 ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
                 ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
                 Utils::ImGuiUtilities::Tooltip(

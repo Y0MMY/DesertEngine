@@ -170,17 +170,8 @@ namespace Desert::Core
         // lives on the spawned "Water" entity (World.spawnWater drops a plane at the level); World.waterLevel
         // reads that entity's height, so the swim script keeps working without a global knob here.
 
-        // Time of Day — an OPT-IN day/night cycle (default off, so existing scenes are untouched). When on,
-        // the DayNightSystem drives the scene's directional light (the "sun"): its DIRECTION follows the hour
-        // and its INTENSITY fades to 0 at night (peak = SunPeakIntensity). The procedural sky already reacts
-        // to the sun's elevation, so day/sunset/night colours follow for free.
-        PROPERTY( DisplayName( "Enable Day/Night" ), Category( "Time of Day" ) )
-        bool  EnableDayNight   = false;
-        PROPERTY( DisplayName( "Time of Day" ), Category( "Time of Day" ), Range( 0.0f, 24.0f ) )
-        float TimeOfDay        = 12.0f; // hours [0,24); 12 = noon
-        PROPERTY( DisplayName( "Day Length (s)" ), Category( "Time of Day" ), Range( 0.0f, 600.0f ) )
-        float DayLengthSeconds = 0.0f;  // real seconds for a full 24h cycle; 0 = frozen (manual scrub)
-        PROPERTY( DisplayName( "Sun Peak Intensity" ), Category( "Time of Day" ), Range( 0.0f, 10.0f ) )
-        float SunPeakIntensity = 3.0f;  // noon directional intensity (scaled down toward night)
+        // Time of Day was removed: the sun's single source of truth is the directional-light ENTITY
+        // (its position encodes the direction; sky + lighting follow it). Old scene files may still
+        // carry the fields — unknown keys are ignored on load.
     };
 } // namespace Desert::Core

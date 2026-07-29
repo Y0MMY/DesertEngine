@@ -596,7 +596,8 @@ namespace Desert::Editor
             else
             {
                 m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size,
-                                m_Gizmo.IsHovered(), ::ImGui::GetIO().KeyCtrl );
+                                m_Gizmo.IsHovered() || m_LightGizmoRenderer->IsLightIconHovered(),
+                                ::ImGui::GetIO().KeyCtrl );
             }
         }
 

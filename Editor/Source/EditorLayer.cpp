@@ -67,7 +67,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
-#include <Engine/ECS/System/DayNightSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -197,9 +196,6 @@ namespace Desert::Editor
         // resolve shaders in the ctor). Meshes/skyboxes are staged behind the loading overlay instead.
         m_AssetPreloader->PreloadShaders();
 
-        // Day/night runs FIRST so the sun's direction + intensity are current before the sky and the mesh
-        // lighting read the directional light this frame. No-op unless SceneSettings::EnableDayNight is on.
-        m_MainScene->AddSystem<ECS::DayNightSystem>( m_MainScene.get() );
         m_MainScene->AddSystem<ECS::MeshECSSystem>();
         m_MainScene->AddSystem<ECS::SkyboxECSSystem>();
         m_MainScene->AddSystem<ECS::TerrainECSSystem>();
