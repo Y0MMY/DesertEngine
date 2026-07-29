@@ -196,7 +196,7 @@ namespace Desert::Core
                  m_Registry.group<ECS::DirectionLightComponent>( entt::get<ECS::TransformComponent> );
 
             dirLightGroup.each(
-                 [&]( const auto& light, const auto& transform )
+                 [&]( entt::entity entity, const auto& light, const auto& transform )
                  {
                      const glm::vec3& rawDir = transform.Translation;
                      if ( glm::length( rawDir ) > 0.001f )
@@ -204,6 +204,25 @@ namespace Desert::Core
                               { glm::vec4( glm::normalize( rawDir ), 0.0f ),
                                 glm::vec4( light.Data.Color, light.Data.Intensity ) } );
                  } );
+
+            // The engine supports EXACTLY ONE directional light (DirectionLightsUB is a single
+            // struct — a second payload overflows every PBR material's UB and aborts). Truncate
+            // loudly instead of crashing; name the extras so the offending entity is findable.
+            if ( sceneRendererInfo.DirLights.DirectionLights.size() > 1 )
+            {
+                std::string names;
+                dirLightGroup.each(
+                     [&]( entt::entity entity, const auto&, const auto& )
+                     {
+                         if ( m_Registry.has<ECS::TagComponent>( entity ) )
+                             names += ( names.empty() ? "" : ", " ) +
+                                      m_Registry.get<ECS::TagComponent>( entity ).Tag;
+                     } );
+                LOG_ERROR( "[Scene] {} directional lights collected ({}) — only ONE is supported; "
+                           "using the first.",
+                           sceneRendererInfo.DirLights.DirectionLights.size(), names );
+                sceneRendererInfo.DirLights.DirectionLights.resize( 1 );
+            }
         }
 
         // TODO: system

@@ -299,6 +299,12 @@ namespace Desert::Editor
 
         // Default scene content: a sun + procedural sky (like UE's default level) so created meshes/primitives
         // are LIT and have a backdrop (an empty scene with no light renders everything ~black).
+        // ONLY for a genuinely empty boot: the constructor already gave a fresh project its Starter
+        // scene (own sun+sky) and queued any existing project scene for load (brings its own). Adding
+        // a sun here regardless is what produced TWO directional lights — and the engine supports one.
+        const bool sceneLoadPending = m_SceneLoadRequested.has_value();
+        const bool hasSun = !m_MainScene->GetRegistry().view<ECS::DirectionLightComponent>().empty();
+        if ( !sceneLoadPending && !hasSun )
         {
             using namespace ::Desert;
             auto& sun = m_MainScene->CreateNewEntity( "Sun" );
@@ -1494,40 +1500,94 @@ namespace Desert::Editor
 
     void EditorLayer::BuildStarterScene()
     {
-        // A fresh project's first scene: enough to orient (lit ground + one object + a playable
-        // camera), nothing to clean up. Materials are REAL assets in the project's Materials/.
+        // A fresh project's first scene = a TEST PLAYGROUND: procedural sky + sun, a ground slab,
+        // the classic PBR calibration rows (dielectric + metal, roughness 0..1), glass, an emissive
+        // bloom probe, a shadow-caster cluster, coloured fill lights and a playable camera. Only
+        // primitives + REAL material assets (created by name in the project's Materials/), so a new
+        // project has zero external dependencies and every render feature has something to show on.
+        auto prim = [&]( const std::string& name, Geometry::PrimitiveType type, glm::vec3 pos,
+                         glm::vec3 scale, Assets::AssetHandle material = Common::UUID::Null() )
+        {
+            auto& e       = m_MainScene->CreateNewEntity( std::string( name ) );
+            auto& smc     = e.AddComponent<ECS::StaticMeshComponent>();
+            smc.Primitive = type;
+            if ( material )
+                smc.MaterialSlots.push_back( material );
+            auto& tf       = e.GetComponent<ECS::TransformComponent>();
+            tf.Translation = pos;
+            tf.Scale       = scale;
+        };
+        auto mat = [&]( const std::string&                                       name,
+                        std::initializer_list<std::pair<const char*, glm::vec4>> params )
+        { return Editor::MaterialAssetUtils::CreatePBRMaterialAsset( m_AssetManager.get(), name, params ); };
+
+        // Sun (Translation encodes the direction; shading uses -normalize(T)) + procedural sky.
         auto& sun = m_MainScene->CreateNewEntity( "Sun" );
         sun.AddComponent<ECS::DirectionLightComponent>();
-        // Translation encodes the direction (shading uses -normalize(T)) — high noon, slightly tilted.
         sun.GetComponent<ECS::TransformComponent>().Translation =
              glm::normalize( glm::vec3( 0.35f, 0.9f, 0.25f ) );
 
-        auto& ground   = m_MainScene->CreateNewEntity( "Ground" );
-        auto& gsmc     = ground.AddComponent<ECS::StaticMeshComponent>();
-        gsmc.Primitive = Geometry::PrimitiveType::Cube;
-        gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
-             m_AssetManager.get(), "Starter_Ground", glm::vec4( 0.55f, 0.55f, 0.58f, 1.0f ), 0.9f ) );
-        auto& gtf       = ground.GetComponent<ECS::TransformComponent>();
-        gtf.Translation = { 0.0f, -0.1f, 0.0f };
-        gtf.Scale       = { 12.0f, 0.2f, 12.0f };
+        auto& sky = m_MainScene->CreateNewEntity( "Sky" );
+        sky.AddComponent<ECS::SkyboxComponent>().Procedural = true;
 
-        auto& cube     = m_MainScene->CreateNewEntity( "Cube" );
-        auto& csmc     = cube.AddComponent<ECS::StaticMeshComponent>();
-        csmc.Primitive = Geometry::PrimitiveType::Cube;
-        csmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
-             m_AssetManager.get(), "Starter_Cube", glm::vec4( 0.80f, 0.45f, 0.20f, 1.0f ), 0.6f ) );
-        cube.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 0.5f, 0.0f };
+        prim( "Ground", Geometry::PrimitiveType::Cube, { 0.0f, -0.1f, 0.0f }, { 24.0f, 0.2f, 24.0f },
+              mat( "Starter_Ground", { { "AlbedoColor", { 0.55f, 0.55f, 0.58f, 1.0f } },
+                                       { "RoughnessFactor", { 0.9f, 0, 0, 0 } } } ) );
 
-        auto& fill = m_MainScene->CreateNewEntity( "FillLight" );
-        auto& fld  = fill.AddComponent<ECS::PointLightComponent>().Data;
-        fld.Color     = glm::vec3( 1.0f, 0.95f, 0.85f );
-        fld.Intensity = 4.0f;
-        fld.Radius    = 10.0f;
-        fill.GetComponent<ECS::TransformComponent>().Translation = { 2.5f, 3.0f, 2.5f };
+        // PBR calibration rows: roughness 0 -> 1 in 6 steps; front row dielectric, back row metal.
+        for ( int i = 0; i < 6; ++i )
+        {
+            const float roughness = static_cast<float>( i ) / 5.0f;
+            const float x         = static_cast<float>( i ) * 1.4f - 3.5f;
+            const auto  suffix    = std::to_string( i * 20 );
+
+            prim( "PBR_Dielectric_" + suffix, Geometry::PrimitiveType::Sphere, { x, 0.6f, -3.0f },
+                  glm::vec3( 0.55f ),
+                  mat( "PBR_D_R" + suffix, { { "AlbedoColor", { 0.85f, 0.20f, 0.15f, 1.0f } },
+                                             { "RoughnessFactor", { roughness, 0, 0, 0 } },
+                                             { "MetallicFactor", { 0.0f, 0, 0, 0 } } } ) );
+            prim( "PBR_Metal_" + suffix, Geometry::PrimitiveType::Sphere, { x, 0.6f, -4.6f },
+                  glm::vec3( 0.55f ),
+                  mat( "PBR_M_R" + suffix, { { "AlbedoColor", { 0.95f, 0.93f, 0.88f, 1.0f } },
+                                             { "RoughnessFactor", { roughness, 0, 0, 0 } },
+                                             { "MetallicFactor", { 1.0f, 0, 0, 0 } } } ) );
+        }
+
+        // Glass probe (refraction path) + emissive probe (bloom path — glows past the threshold).
+        prim( "GlassSphere", Geometry::PrimitiveType::Sphere, { -2.5f, 1.0f, 0.5f }, glm::vec3( 1.2f ),
+              mat( "Starter_Glass", { { "Transmission", { 0.9f, 0, 0, 0 } },
+                                      { "IOR", { 1.5f, 0, 0, 0 } },
+                                      { "GlassTint", { 0.8f, 0.95f, 1.0f, 1.0f } } } ) );
+        prim( "EmissiveCube", Geometry::PrimitiveType::Cube, { 2.5f, 0.5f, 0.5f }, glm::vec3( 1.0f ),
+              mat( "Starter_Emissive", { { "AlbedoColor", { 0.1f, 0.1f, 0.1f, 1.0f } },
+                                         { "EmissiveColor", { 0.2f, 0.8f, 1.0f, 1.0f } },
+                                         { "EmissiveIntensity", { 6.0f, 0, 0, 0 } } } ) );
+
+        // Shadow-caster cluster (different silhouettes for the cascades to chew on).
+        const auto clusterMat = mat( "Starter_Prop", { { "AlbedoColor", { 0.80f, 0.45f, 0.20f, 1.0f } },
+                                                       { "RoughnessFactor", { 0.6f, 0, 0, 0 } } } );
+        prim( "Cube", Geometry::PrimitiveType::Cube, { 0.0f, 0.5f, 1.5f }, glm::vec3( 1.0f ), clusterMat );
+        prim( "Cylinder", Geometry::PrimitiveType::Cylinder, { 1.2f, 0.75f, 2.6f }, { 0.6f, 1.5f, 0.6f },
+              clusterMat );
+        prim( "Capsule", Geometry::PrimitiveType::Capsule, { -1.2f, 0.75f, 2.6f }, { 0.6f, 1.5f, 0.6f },
+              clusterMat );
+
+        // Coloured fills (shadowless accents) framing the set.
+        auto pointLight = [&]( const char* name, glm::vec3 pos, glm::vec3 color, float intensity )
+        {
+            auto& e     = m_MainScene->CreateNewEntity( std::string( name ) );
+            auto& d     = e.AddComponent<ECS::PointLightComponent>().Data;
+            d.Color     = color;
+            d.Intensity = intensity;
+            d.Radius    = 12.0f;
+            e.GetComponent<ECS::TransformComponent>().Translation = pos;
+        };
+        pointLight( "FillWarm", { 4.0f, 3.0f, 3.0f }, { 1.0f, 0.85f, 0.6f }, 5.0f );
+        pointLight( "FillCool", { -4.0f, 2.5f, -1.0f }, { 0.4f, 0.6f, 1.0f }, 4.0f );
 
         auto& camera = m_MainScene->CreateNewEntity( "Camera" );
         camera.AddComponent<ECS::CameraComponent>();
-        camera.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.0f, 6.0f };
+        camera.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.5f, 7.0f };
     }
 
     void EditorLayer::BuildCornellShowcase()
