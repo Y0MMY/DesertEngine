@@ -79,6 +79,24 @@ namespace Desert::Core::Serialize
             return s;
         }
 
+        // A marker component (no data, e.g. FolderComponent): presence IS the state. Serializes as an empty
+        // object; deserialize just re-adds it.
+        template <class TComponent>
+        ComponentSerializer MakeMarker( std::string key )
+        {
+            ComponentSerializer s;
+            s.Key       = std::move( key );
+            s.Has       = []( ECS::Entity e ) { return e.HasComponent<TComponent>(); };
+            s.Serialize = []( ECS::Entity, const Assets::AssetManager& ) -> rfl::Generic
+            { return rfl::Generic( rfl::Generic::Object{} ); };
+            s.Deserialize = []( ECS::Entity e, const rfl::Generic&, const Assets::AssetManager& )
+            {
+                if ( !e.HasComponent<TComponent>() )
+                    e.AddComponent<TComponent>();
+            };
+            return s;
+        }
+
         // ScriptComponent has no reflected data block (reflection can't do std::string/variant lists), so it
         // gets a manual serializer via a reflect-cpp mirror: the .lua path + the exposed-property values.
         struct ScriptPropSer
@@ -755,6 +773,9 @@ namespace Desert::Core::Serialize
              "CharacterController", "CharacterControllerData", &ECS::CharacterControllerComponent::Data ) );
         Register( MakeReflected<ECS::AudioSourceComponent, ECS::AudioSourceData>(
              "AudioSource", "AudioSourceData", &ECS::AudioSourceComponent::Data ) );
+
+        // ---- Marker components (presence is the state) ----
+        Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its

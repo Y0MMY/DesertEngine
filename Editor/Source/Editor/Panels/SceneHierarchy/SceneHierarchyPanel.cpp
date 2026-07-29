@@ -78,7 +78,9 @@ namespace Desert::Editor
                              entity.GetComponent<ECS::VisibilityComponent>().Visible;
 
         const char* icon = ICON_MDI_CUBE_OUTLINE;
-        if ( entity.HasComponent<ECS::CameraComponent>() )
+        if ( entity.HasComponent<ECS::FolderComponent>() )
+            icon = ICON_MDI_FOLDER;
+        else if ( entity.HasComponent<ECS::CameraComponent>() )
             icon = ICON_MDI_CAMERA;
         else if ( entity.HasComponent<ECS::SpotLightComponent>() )
             icon = ICON_MDI_SPOTLIGHT;
@@ -336,6 +338,22 @@ namespace Desert::Editor
             {
                 if ( ImGui::Selectable( "Empty Entity" ) )
                     track( scene->CreateNewEntity( "Empty Entity" ) );
+
+                // Folder: an empty grouping node. Drag entities onto it in the outliner to group them
+                // (e.g. all Cornell Box parts under one "Cornell Box" folder). Or select entities first and
+                // use "Group Selected into Folder" below to auto-parent them.
+                if ( ImGui::Selectable( ICON_MDI_FOLDER " Folder" ) )
+                    track( scene->CreateNewEntity( "Folder" ) ).AddComponent<ECS::FolderComponent>();
+
+                if ( Core::SelectionManager::Count() > 0 &&
+                     ImGui::Selectable( ICON_MDI_FOLDER_PLUS " Group Selected into Folder" ) )
+                {
+                    auto  folder = track( scene->CreateNewEntity( "Folder" ) );
+                    folder.AddComponent<ECS::FolderComponent>();
+                    for ( const auto& id : Core::SelectionManager::GetSelection() )
+                        if ( const auto e = scene->FindEntityByID( id ) )
+                            scene->Attach( folder, e->get() );
+                }
 
                 if ( ImGui::BeginMenu( "Light" ) )
                 {

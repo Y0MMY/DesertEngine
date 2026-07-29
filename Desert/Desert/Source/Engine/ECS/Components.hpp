@@ -458,6 +458,13 @@ namespace Desert::ECS
         bool  RequestBake   = false;
     };
 
+    // Scene-outliner grouping node: an otherwise-empty entity that acts as a FOLDER for organizing the
+    // hierarchy (drag entities under it). It renders nothing — just parents children via RelationshipComponent
+    // — so it's purely an authoring aid. Marker component (no data); serialized so folders persist.
+    struct FolderComponent
+    {
+    };
+
     struct PrefabComponent
     {
         Assets::AssetHandle Prefab;
