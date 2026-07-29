@@ -644,6 +644,14 @@ namespace Desert::Editor
             case Common::KeyCode::C:
                 m_Gizmo.SetOperation( Tools::GizmoController::Operation::Scale );
                 break;
+            case Common::KeyCode::F:
+                // Frame the selected entity (Unity/Godot 'F').
+                if ( const auto sel = Core::SelectionManager::GetSelected() )
+                    if ( auto cam = m_Scene->GetMainCamera().lock() )
+                        if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                            if ( auto ref = m_Scene->FindEntityByID( *sel ) )
+                                editorCam->Focus( glm::vec3( ref->get().GetWorldTransform()[3] ) );
+                break;
         }
         return false;
     }

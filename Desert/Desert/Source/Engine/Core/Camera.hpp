@@ -76,6 +76,10 @@ namespace Desert::Core
         // Right/... ortho-ish views). Derives yaw/pitch from the target forward under this camera's model.
         void SnapToDirection( const glm::vec3& forward );
 
+        // Frame a world point: the focal point moves there and the camera backs off along its
+        // CURRENT view direction to `distance`. Drives F-focus and hierarchy double-click.
+        void Focus( const glm::vec3& point, float distance = 5.0f );
+
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );
         bool OnMouseMove( Common::MouseMovedEvent& e );

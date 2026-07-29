@@ -181,9 +181,13 @@ namespace Desert::Editor
             ImGui::PopStyleColor();
             if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
             {
-                m_RenamingEntity     = UUID;
-                m_RenameBuffer       = name;
-                m_RenameFocusPending = true;
+                // Double-click FRAMES the entity in the viewport — the most frequent
+                // hierarchy->viewport hop gets the fastest gesture. Renaming lives in the
+                // context menu, where slower, deliberate edits belong.
+                if ( auto cam = m_Scene->GetMainCamera().lock() )
+                    if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
+                        if ( auto ref = m_Scene->FindEntityByID( UUID ) )
+                            editorCam->Focus( glm::vec3( ref->get().GetWorldTransform()[3] ) );
             }
         }
         if ( isPrefab )

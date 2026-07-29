@@ -208,6 +208,14 @@ namespace Desert::Core
         UpdateCameraView();
     }
 
+    void EditorCamera::Focus( const glm::vec3& point, float distance )
+    {
+        // Keep the current orientation — only re-center and re-frame (matches Unity/Godot 'F').
+        m_FocalPoint = point;
+        m_Position   = point - GetForwardDirection() * glm::max( distance, 0.5f );
+        UpdateCameraView();
+    }
+
     void EditorCamera::UpdateCameraView()
     {
         const float     YAWsign       = GetUpDirection().y > 0 ? 1 : -1;

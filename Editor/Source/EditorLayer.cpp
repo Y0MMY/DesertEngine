@@ -1135,18 +1135,7 @@ namespace Desert::Editor
         ImGui::TextUnformatted( stateText );
         ImGui::PopStyleColor();
 
-        ImGui::SameLine( 0.0f, 16.0f );
-        {
-            const bool dirty = CommandHistory::Get().Revision() != s_SavedRevision;
-            if ( dirty )
-                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.25f, 1.0f ), "%s*",
-                                    m_MainScene->GetSceneName().c_str() );
-            else
-                ImGui::TextDisabled( "%s", m_MainScene->GetSceneName().c_str() );
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( dirty ? "Unsaved changes (Ctrl+S to save)" : "All changes saved" );
-        }
-
+        // (The scene name + dirty marker moved UP into the window toolbar breadcrumb.)
         ImGui::SameLine( 0.0f, 16.0f );
         if ( const size_t selCount = Core::SelectionManager::Count(); selCount > 1 )
         {
@@ -1166,6 +1155,30 @@ namespace Desert::Editor
 
         ImGui::SameLine( 0.0f, 16.0f );
         ImGui::TextDisabled( ICON_MDI_CUBE_OUTLINE " %zu entities", m_MainScene->GetAllEntities().size() );
+
+        // Active snap state: off, or the step of the CURRENT transform tool — answers "why did it
+        // jump?" without opening the snap popup.
+        ImGui::SameLine( 0.0f, 16.0f );
+        {
+            using Gz = ::Desert::Editor::Core::GizmoState;
+            if ( !Gz::PersistentSnap() )
+                ImGui::TextDisabled( ICON_MDI_MAGNET " off" );
+            else
+                switch ( Gz::Get() )
+                {
+                    case Gz::Operation::Rotate:
+                        ImGui::TextDisabled( ICON_MDI_MAGNET " %.1f\xC2\xB0", Gz::RotateSnapDegrees() );
+                        break;
+                    case Gz::Operation::Scale:
+                        ImGui::TextDisabled( ICON_MDI_MAGNET " x%.2f", Gz::ScaleSnap() );
+                        break;
+                    default:
+                        ImGui::TextDisabled( ICON_MDI_MAGNET " %.2fm", Gz::TranslateSnap() );
+                        break;
+                }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Snap (toggle in the viewport toolbar; Ctrl inverts while dragging)" );
+        }
 
         // Right: build configuration + frame rate + frame time.
 #ifdef DESERT_CONFIG_DEBUG
@@ -1206,8 +1219,22 @@ namespace Desert::Editor
         const ImVec2 btnSize( btnH * 1.4f, btnH );
 
         // Transform-tool toggles moved into the VIEWPORT's own toolbar (Godot model: edit tools sit
-        // directly above the picture they act on). This strip keeps only the RUN cluster, pinned to
-        // the RIGHT edge — isolated from editing so a stray click can't start Play.
+        // directly above the picture they act on). This strip: scene breadcrumb + dirty marker on
+        // the LEFT (it lived only in the OS window title, invisible when docked/fullscreen), the
+        // RUN cluster pinned to the RIGHT — isolated from editing so a stray click can't start Play.
+        {
+            const bool dirty = CommandHistory::Get().Revision() != s_SavedRevision;
+            ImGui::AlignTextToFramePadding();
+            if ( dirty )
+                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.25f, 1.0f ), ICON_MDI_FILE_DOCUMENT "  %s *",
+                                    m_MainScene->GetSceneName().c_str() );
+            else
+                ImGui::Text( ICON_MDI_FILE_DOCUMENT "  %s", m_MainScene->GetSceneName().c_str() );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( dirty ? "Unsaved changes (Ctrl+S to save)" : "All changes saved" );
+        }
+
+        ImGui::SameLine();
         const float spacing   = ImGui::GetStyle().ItemSpacing.x;
         const float playbackW = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
         ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - playbackW - 4.0f );
