@@ -1781,9 +1781,19 @@ namespace Desert::Editor
 
         if ( gridView )
         {
-            const float thumb = m_GridSize * 0.6f;
+            const float thumb  = m_GridSize * 0.62f;
+            const float cellW  = m_GridSize;
+            const float indent = ( cellW - thumb ) * 0.5f; // center the icon/thumbnail in the cell
+
+            // Card: draw the hover/selection background BEHIND the content via a draw-list channel split
+            // (the content is emitted on the top channel, the rounded background on the bottom one).
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->ChannelsSplit( 2 );
+            dl->ChannelsSetCurrent( 1 );
 
             ImGui::BeginGroup();
+            if ( indent > 0.0f )
+                ImGui::Indent( indent );
 
             // Texture -> thumbnail; everything else -> a large type icon. Either way the item is hoverable,
             // selectable and drag-able.
@@ -1817,14 +1827,29 @@ namespace Desert::Editor
             if ( ImGui::IsItemHovered() && !ImGui::IsDragDropActive() )
                 ImGui::SetTooltip( "%s", fileName.c_str() );
 
-            ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + thumb );
+            if ( indent > 0.0f )
+                ImGui::Unindent( indent );
+            ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + cellW );
             ImGui::TextWrapped( "%s", fileName.c_str() );
             ImGui::PopTextWrapPos();
 
             ImGui::EndGroup();
-            if ( IsSelected( entry ) )
-                ImGui::GetWindowDrawList()->AddRect( ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
-                                                     IM_COL32( 120, 170, 255, 255 ), 4.0f, 0, 2.0f );
+
+            // Background card, drawn behind: subtle always, brighter on hover, filled + outlined when selected.
+            const ImVec2 pad   = ImVec2( 6.0f, 6.0f );
+            const ImVec2 cmin  = ImVec2( ImGui::GetItemRectMin().x - pad.x, ImGui::GetItemRectMin().y - pad.y );
+            const ImVec2 cmax  = ImVec2( ImGui::GetItemRectMin().x - pad.x + cellW + pad.x,
+                                        ImGui::GetItemRectMax().y + pad.y );
+            const bool   sel   = IsSelected( entry );
+            const bool   hover = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( cmin, cmax );
+            const ImU32  bg    = sel     ? IM_COL32( 66, 110, 180, 160 )
+                                 : hover ? IM_COL32( 255, 255, 255, 20 )
+                                         : IM_COL32( 255, 255, 255, 8 );
+            dl->ChannelsSetCurrent( 0 );
+            dl->AddRectFilled( cmin, cmax, bg, 6.0f );
+            if ( sel )
+                dl->AddRect( cmin, cmax, IM_COL32( 120, 170, 255, 255 ), 6.0f, 0, 1.5f );
+            dl->ChannelsMerge();
         }
         else
         {
