@@ -195,10 +195,13 @@ namespace Desert::Editor
 
         bool m_UpdateNavigationPath = true;
 
-        DirectoryInformation* m_CurrentDir;
-        DirectoryInformation* m_BaseProjectDir;
-        DirectoryInformation* m_NextDirectory;
-        DirectoryInformation* m_PreviousDirectory;
+        // Default-initialized: the ctor omitted m_CurrentSelected / m_NextDirectory, so they held
+        // indeterminate values and the first frame could deref garbage (a layout-dependent crash in
+        // OnUIRender). Also nulled on Refresh so a rebuilt m_Directories never leaves a dangling selection.
+        DirectoryInformation* m_CurrentDir        = nullptr;
+        DirectoryInformation* m_BaseProjectDir    = nullptr;
+        DirectoryInformation* m_NextDirectory     = nullptr;
+        DirectoryInformation* m_PreviousDirectory = nullptr;
 
         std::unordered_map<std::string, std::shared_ptr<DirectoryInformation>> m_Directories;
         std::vector<DirectoryInformation*>                                     m_BreadCrumbData;
@@ -206,7 +209,7 @@ namespace Desert::Editor
          SharedPtr<Graphics::Texture2D>                                                     m_FolderIcon;
          SharedPtr<Graphics::Texture2D>                                                     m_FileIcon;*/
 
-        DirectoryInformation* m_CurrentSelected;
+        DirectoryInformation* m_CurrentSelected = nullptr;
 
         std::string m_RequestedThumbnailPath;
         std::string m_CopiedPath;

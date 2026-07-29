@@ -1880,6 +1880,11 @@ namespace Desert::Editor
         if ( !m_CurrentDir )
             return;
 
+        // The erase below frees the child DirectoryInformation entries, so any raw pointer into them (the
+        // selection) would dangle. Remember it by its stable path and re-resolve after the rescan.
+        const std::string selectedPath = m_CurrentSelected ? m_CurrentSelected->AssetPath : std::string();
+        m_CurrentSelected              = nullptr;
+
         // Drop cached child entries so they re-process from disk (picks up added/removed files), then
         // re-scan the current directory in place — navigation (m_CurrentDir / the tree) is preserved.
         for ( auto* child : m_CurrentDir->Children )
@@ -1890,6 +1895,10 @@ namespace Desert::Editor
 
         ProcessDirectory( m_CurrentDir->AssetPath, m_CurrentDir->Parent, true );
         m_UpdateNavigationPath = true;
+
+        if ( !selectedPath.empty() )
+            if ( auto it = m_Directories.find( selectedPath ); it != m_Directories.end() )
+                m_CurrentSelected = it->second.get();
     }
 
     void FileExplorerPanel::Refresh()
@@ -1898,6 +1907,9 @@ namespace Desert::Editor
             m_Thumbnails->Clear();
 
         std::string currentPath = m_CurrentDir->AssetPath;
+
+        // clear() frees every DirectoryInformation -> drop the raw selection pointer so it can't dangle.
+        m_CurrentSelected = nullptr;
 
         m_Directories.clear();
 
