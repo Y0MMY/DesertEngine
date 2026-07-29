@@ -1004,7 +1004,11 @@ namespace Desert::Editor
                     constexpr float padding              = 4.0f;
                     const float     scaledThumbnailSize  = m_GridSize; // * ImGui::GetIO().FontGlobalScale;
                     const float     scaledThumbnailSizeX = scaledThumbnailSize * 0.55f;
-                    const float     cellSize = scaledThumbnailSizeX + 2 * padding + scaledThumbnailSizeX * 0.1f;
+                    // Column stride MUST match the cell RenderFile actually draws (m_GridSize wide: centered
+                    // icon + wrapped label + the ~6px card padding). The old value used the thumbnail-only
+                    // 0.55*grid width, which packed ~1.6x too many columns -> cards overlapped and labels
+                    // shifted into the next column.
+                    const float cellSize = m_GridSize + 12.0f + ImGui::GetStyle().ItemSpacing.x;
 
                     constexpr float overlayPaddingY  = 6.0f * padding;
                     constexpr float thumbnailPadding = overlayPaddingY * 0.5f;
