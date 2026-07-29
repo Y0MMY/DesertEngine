@@ -60,6 +60,54 @@ namespace Desert::Editor
                 overriddenBy = matc.ShaderName;
         }
 
+        // Runtime material override (MaterialComponent) — surfaces the per-entity param/texture overrides
+        // painted on TOP of the batched PBR path. This is what colours e.g. the Cornell Box walls
+        // (AlbedoColor set here, NOT via a material-asset slot), so previously they looked "coloured but
+        // with no material to edit". Now the overrides are shown + editable in place, with a one-click clear.
+        // These are per-ENTITY tweaks; assign a material asset to a slot below to make them reusable/saved.
+        if ( entity.HasComponent<ECS::MaterialComponent>() )
+        {
+            auto& matc = entity.GetComponent<ECS::MaterialComponent>();
+            if ( !matc.Params.empty() || !matc.Textures.empty() )
+            {
+                if ( ImGui::CollapsingHeader( "Runtime Override", ImGuiTreeNodeFlags_DefaultOpen ) )
+                {
+                    ImGui::TextDisabled( "Per-entity tweak on '%s' (not a material asset).",
+                                         matc.ShaderName.empty() ? "PBR" : matc.ShaderName.c_str() );
+                    for ( auto& p : matc.Params )
+                    {
+                        const bool isColor  = p.Name.find( "Color" ) != std::string::npos ||
+                                             p.Name.find( "Tint" ) != std::string::npos;
+                        const bool isScalar = p.Name.find( "Factor" ) != std::string::npos ||
+                                              p.Name.find( "Intensity" ) != std::string::npos ||
+                                              p.Name.find( "Strength" ) != std::string::npos ||
+                                              p.Name.find( "Cutoff" ) != std::string::npos ||
+                                              p.Name.find( "IOR" ) != std::string::npos;
+                        ImGui::PushID( p.Name.c_str() );
+                        if ( isColor )
+                            ImGui::ColorEdit4( p.Name.c_str(), &p.Value.x, ImGuiColorEditFlags_NoInputs );
+                        else if ( isScalar )
+                            ImGui::DragFloat( p.Name.c_str(), &p.Value.x, 0.01f );
+                        else
+                            ImGui::DragFloat4( p.Name.c_str(), &p.Value.x, 0.01f );
+                        ImGui::PopID();
+                    }
+                    for ( const auto& t : matc.Textures )
+                        ImGui::BulletText( "Texture override: %s", t.Name.c_str() );
+
+                    if ( ImGui::Button( "Clear Override" ) )
+                    {
+                        matc.ShaderName.clear();
+                        matc.Params.clear();
+                        matc.Textures.clear();
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Remove the per-entity override; the mesh falls back to its "
+                                           "material slots / PBR defaults." );
+                }
+            }
+        }
+
         RenderMaterialProperties( materialComp, overriddenBy );
 
         // Quick way back to the PBR path without hunting for the Shader Override section.
