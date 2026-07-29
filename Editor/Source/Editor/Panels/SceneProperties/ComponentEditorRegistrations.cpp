@@ -401,6 +401,61 @@ namespace Desert::Editor
         };
         return e;
     }
+
+    // Blendshape / morph-target editor: one slider per morph target of the entity's mesh (static or skinned).
+    // Names + count come from the mesh asset; the sliders write MorphComponent::Weights (index-aligned).
+    static ComponentEditorEntry MakeMorphEntry()
+    {
+        using MC = ::Desert::ECS::MorphComponent;
+        ComponentEditorEntry e;
+        e.Name      = "Morph Targets";
+        e.CanRemove = true;
+        e.Has       = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<MC>(); };
+        e.Add       = []( ::Desert::ECS::Entity& en ) { en.AddComponent<MC>(); };
+        e.Remove    = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<MC>(); };
+        e.Draw      = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& )
+        {
+            namespace ImGui = ::ImGui;
+            auto& mc        = en.GetComponent<MC>();
+
+            ::Desert::Assets::AssetHandle meshHandle;
+            if ( en.HasComponent<::Desert::ECS::SkinnedMeshComponent>() )
+                meshHandle = en.GetComponent<::Desert::ECS::SkinnedMeshComponent>().MeshHandle;
+            else if ( en.HasComponent<::Desert::ECS::StaticMeshComponent>() )
+                meshHandle = en.GetComponent<::Desert::ECS::StaticMeshComponent>().MeshHandle;
+
+            const ::Desert::Assets::MeshAsset* meshAsset =
+                 meshHandle ? ::Desert::Runtime::ResourceRegistry::GetMeshService()->GetAsset( meshHandle )
+                            : nullptr;
+
+            if ( !meshAsset || meshAsset->GetMorphTargets().empty() )
+            {
+                ImGui::TextDisabled( "This entity's mesh has no blendshapes (morph targets)." );
+                return;
+            }
+
+            const auto& targets = meshAsset->GetMorphTargets();
+
+            // Keep the component's arrays in step with the mesh's targets (the mesh may have been swapped).
+            if ( mc.Weights.size() != targets.size() )
+                mc.Weights.resize( targets.size(), 0.0f );
+            mc.TargetNames.resize( targets.size() );
+            for ( size_t i = 0; i < targets.size(); ++i )
+                mc.TargetNames[i] = targets[i].Name;
+
+            ImGui::TextDisabled( "%d blendshape(s)", static_cast<int>( targets.size() ) );
+            for ( size_t i = 0; i < targets.size(); ++i )
+            {
+                ImGui::PushID( static_cast<int>( i ) );
+                const char* name = mc.TargetNames[i].empty() ? "<unnamed>" : mc.TargetNames[i].c_str();
+                ImGui::SliderFloat( name, &mc.Weights[i], 0.0f, 1.0f );
+                ImGui::PopID();
+            }
+            if ( ImGui::Button( "Reset All", ImVec2( -1.0f, 0.0f ) ) )
+                std::fill( mc.Weights.begin(), mc.Weights.end(), 0.0f );
+        };
+        return e;
+    }
 } // namespace Desert::Editor
 
 namespace
@@ -412,6 +467,9 @@ namespace
 
     const int _desert_ism_component_reg = ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
          ::Desert::Editor::MakeInstancedStaticMeshEntry() );
+
+    const int _desert_morph_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeMorphEntry() );
 }
 
 // SINGLE SOURCE OF TRUTH: for MESH entities, materials (shader + params) are authored ONLY in

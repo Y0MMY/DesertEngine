@@ -50,6 +50,15 @@ namespace Desert::Assets::Serialization
         Common::UUID MaterialHandle;
     };
 
+    // Blendshape / morph target on disk: per-vertex deltas index-aligned with the mesh's global vertex array
+    // (Static/SkinnedVertices). DeltaNormals may be empty (position-only). Mirrors Desert::MorphTarget.
+    struct MorphTargetData
+    {
+        std::string            Name;
+        std::vector<glm::vec3> DeltaPositions;
+        std::vector<glm::vec3> DeltaNormals;
+    };
+
     struct MeshAssetData
     {
         bool                           IsSkinned = false;
@@ -58,5 +67,8 @@ namespace Desert::Assets::Serialization
         std::vector<IndexData>         Indices;
         std::vector<SubmeshData>       Submeshes;
         std::optional<uint64_t>        SkeletonSignature;
+        // Blendshapes (empty for meshes without morph targets). New field — meshes cooked before this exists
+        // are read with rfl::DefaultIfMissing so they simply come back with an empty list.
+        std::vector<MorphTargetData>   MorphTargets;
     };
 } // namespace Desert::Assets::Serialization

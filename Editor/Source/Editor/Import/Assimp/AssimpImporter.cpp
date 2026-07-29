@@ -366,6 +366,18 @@ namespace Desert::Editor
         // Mesh extraction
         // ============================
 
+        // Blendshape/morph deltas collected per submesh, then merged (by name) into global morph targets
+        // after the mesh loop — a named blendshape can span several submeshes, and each contributes its
+        // deltas at its own vertex offset into the final mesh-wide vertex array.
+        struct MorphContribution
+        {
+            std::string            Name;
+            uint32_t               VertexOffset;
+            std::vector<glm::vec3> DeltaPos;
+            std::vector<glm::vec3> DeltaNorm; // empty => no normal deltas
+        };
+        std::vector<MorphContribution> morphContribs;
+
         for ( uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx )
         {
             aiMesh* mesh = scene->mMeshes[meshIdx];
@@ -524,6 +536,46 @@ namespace Desert::Editor
             }
 
             // ============================
+            // MORPH TARGETS (blendshapes)
+            // ============================
+            // Assimp exposes FBX/glTF blendshapes as aiAnimMesh entries — each stores the FULL morphed
+            // vertex positions, so the per-vertex delta is (morphed - base). Static meshes bake the node
+            // world transform into base positions, so the delta (a direction) uses only the 3x3 part;
+            // skinned meshes keep local space (their base verts are untransformed too).
+            for ( uint32_t a = 0; a < mesh->mNumAnimMeshes; ++a )
+            {
+                const aiAnimMesh* anim = mesh->mAnimMeshes[a];
+                if ( !anim || !anim->HasPositions() )
+                    continue;
+
+                MorphContribution mc;
+                mc.Name = anim->mName.length > 0 ? std::string( anim->mName.C_Str() )
+                                                 : ( "Morph_" + std::to_string( a ) );
+                mc.VertexOffset    = submesh.VertexOffset;
+                const bool hasNorm = anim->mNormals != nullptr && mesh->HasNormals();
+                mc.DeltaPos.resize( mesh->mNumVertices );
+                if ( hasNorm )
+                    mc.DeltaNorm.resize( mesh->mNumVertices );
+
+                const glm::mat3 dirMat = meshHasBones ? glm::mat3( 1.0f ) : glm::mat3( meshWorld[meshIdx] );
+                for ( uint32_t i = 0; i < mesh->mNumVertices; ++i )
+                {
+                    const glm::vec3 dp( anim->mVertices[i].x - mesh->mVertices[i].x,
+                                        anim->mVertices[i].y - mesh->mVertices[i].y,
+                                        anim->mVertices[i].z - mesh->mVertices[i].z );
+                    mc.DeltaPos[i] = dirMat * dp;
+                    if ( hasNorm )
+                    {
+                        const glm::vec3 dn( anim->mNormals[i].x - mesh->mNormals[i].x,
+                                            anim->mNormals[i].y - mesh->mNormals[i].y,
+                                            anim->mNormals[i].z - mesh->mNormals[i].z );
+                        mc.DeltaNorm[i] = dirMat * dn;
+                    }
+                }
+                morphContribs.push_back( std::move( mc ) );
+            }
+
+            // ============================
             // INDICES
             // ============================
 
@@ -567,6 +619,46 @@ namespace Desert::Editor
         // ============================
 
         meshData.IsSkinned = hasBones;
+
+        // Merge the per-submesh morph contributions (by name) into mesh-wide morph targets whose delta
+        // arrays are index-aligned with the final vertex array (zero where a target doesn't touch a vertex).
+        if ( !morphContribs.empty() )
+        {
+            const size_t totalVerts =
+                 meshData.IsSkinned ? meshData.SkinnedVertices.size() : meshData.StaticVertices.size();
+            std::unordered_map<std::string, size_t> morphIndex;
+            for ( auto& mc : morphContribs )
+            {
+                size_t idx;
+                if ( auto it = morphIndex.find( mc.Name ); it != morphIndex.end() )
+                {
+                    idx = it->second;
+                }
+                else
+                {
+                    idx                 = meshData.MorphTargets.size();
+                    morphIndex[mc.Name] = idx;
+                    MorphTargetData mt;
+                    mt.Name = mc.Name;
+                    mt.DeltaPositions.assign( totalVerts, glm::vec3( 0.0f ) );
+                    mt.DeltaNormals.assign( totalVerts, glm::vec3( 0.0f ) );
+                    meshData.MorphTargets.push_back( std::move( mt ) );
+                }
+
+                auto&      mt      = meshData.MorphTargets[idx];
+                const bool hasNorm = !mc.DeltaNorm.empty();
+                for ( size_t i = 0; i < mc.DeltaPos.size(); ++i )
+                {
+                    const size_t g = static_cast<size_t>( mc.VertexOffset ) + i;
+                    if ( g < mt.DeltaPositions.size() )
+                        mt.DeltaPositions[g] = mc.DeltaPos[i];
+                    if ( hasNorm && g < mt.DeltaNormals.size() )
+                        mt.DeltaNormals[g] = mc.DeltaNorm[i];
+                }
+            }
+            LOG_INFO( "[Import] {} morph target(s) across {} contribution(s).", meshData.MorphTargets.size(),
+                      morphContribs.size() );
+        }
 
         if ( hasBones )
         {

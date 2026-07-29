@@ -55,6 +55,12 @@ namespace Desert::Assets
             return m_Submeshes;
         }
 
+        // Blendshapes (empty when the mesh has none). Deltas are index-aligned with GetVertices().
+        const std::vector<MorphTarget>& GetMorphTargets() const
+        {
+            return m_MorphTargets;
+        }
+
         const auto& GetSkeletonDependency() const
         {
             return m_SkeletonDependency;
@@ -92,6 +98,7 @@ namespace Desert::Assets
         std::vector<SkinnedVertex> m_Vertices;
         std::vector<Index>         m_Indices;
         std::vector<Submesh>       m_Submeshes;
+        std::vector<MorphTarget>   m_MorphTargets;
         std::vector<Common::UUID>  m_MaterialAssetHandles;
 
         uint64_t m_SkeletonSignature = 0U;

@@ -4,6 +4,8 @@
 #include <Common/Core/Math/AABB.hpp>
 
 #include <array>
+#include <string>
+#include <vector>
 
 namespace Desert
 {
@@ -95,6 +97,17 @@ namespace Desert
             }
             return count;
         }
+    };
+
+    // Blendshape / morph target: per-vertex deltas relative to the base mesh, applied as
+    // base + Σ(weight_k · target_k). Delta arrays are index-aligned with the mesh's (global, all-submeshes)
+    // vertex array; a delta of 0 means the vertex is untouched by that target. DeltaNormals may be empty
+    // (position-only morph). See Geometry::ApplyMorphTargets for the CPU blend.
+    struct MorphTarget
+    {
+        std::string            Name;
+        std::vector<glm::vec3> DeltaPositions;
+        std::vector<glm::vec3> DeltaNormals; // optional; empty => positions only
     };
 
     struct Index

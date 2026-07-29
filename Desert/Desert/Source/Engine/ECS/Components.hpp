@@ -272,6 +272,20 @@ namespace Desert::ECS
         }
     };
 
+    // Blendshape / morph-target weights for the entity's mesh. Weights[k] (0..1, though over/undershoot is
+    // allowed) scales morph target k of the mesh asset; the CPU blend is base + Σ(weight·delta) (see
+    // Geometry::ApplyMorphTargets). TargetNames mirrors the mesh's target names for the Details UI and stays
+    // index-aligned with Weights. Non-reflected (like AnimationComponent) — edited via the Morph widget.
+    struct MorphComponent
+    {
+        std::vector<float>       Weights;
+        std::vector<std::string> TargetNames;
+
+        // Last weights the runtime blended into the entity's geometry — lets a per-frame apply skip work
+        // when nothing changed. Transient (not serialized).
+        std::vector<float> AppliedWeights;
+    };
+
     struct TransformComponent
     {
         glm::vec3 Translation = { 0.0f, 0.0f, 0.0f };

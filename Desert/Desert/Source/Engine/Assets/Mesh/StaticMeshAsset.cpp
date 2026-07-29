@@ -22,7 +22,10 @@ namespace Desert::Assets
     {
         auto raw = Common::Utils::FileSystem::ReadFileContent( m_Metadata.Filepath );
 
-        const auto dataReflected = rfl::json::read<Serialization::MeshAssetData>( raw );
+        // DefaultIfMissing: meshes cooked before a field existed (e.g. MorphTargets) still load — the missing
+        // field takes its default (empty) instead of failing the whole read.
+        const auto dataReflected =
+             rfl::json::read<Serialization::MeshAssetData, rfl::DefaultIfMissing>( raw );
 
         if ( !dataReflected.has_value() )
         {
@@ -89,6 +92,11 @@ namespace Desert::Assets
             m_Submeshes.emplace_back( std::move( submesh ) );
         }
 
+        m_MorphTargets.clear();
+        m_MorphTargets.reserve( data.MorphTargets.size() );
+        for ( const auto& mt : data.MorphTargets )
+            m_MorphTargets.push_back( MorphTarget{ mt.Name, mt.DeltaPositions, mt.DeltaNormals } );
+
         m_IsReadyForUse = true;
         return BOOLSUCCESS;
     }
@@ -98,10 +106,12 @@ namespace Desert::Assets
         m_Vertices.clear();
         m_Indices.clear();
         m_Submeshes.clear();
+        m_MorphTargets.clear();
 
         m_Vertices.shrink_to_fit();
         m_Indices.shrink_to_fit();
         m_Submeshes.shrink_to_fit();
+        m_MorphTargets.shrink_to_fit();
 
         return BOOLSUCCESS;
     }

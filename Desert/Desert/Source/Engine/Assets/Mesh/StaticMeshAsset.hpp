@@ -32,6 +32,12 @@ namespace Desert::Assets
             return m_Submeshes;
         }
 
+        // Blendshapes (empty when the mesh has none). Deltas are index-aligned with GetVertices().
+        const std::vector<MorphTarget>& GetMorphTargets() const
+        {
+            return m_MorphTargets;
+        }
+
         virtual const Common::UUID& GetMaterialHandle( const uint32_t submeshIndex ) const override
         {
             return m_MaterialAssetHandles[submeshIndex];
@@ -51,6 +57,7 @@ namespace Desert::Assets
         std::vector<Vertex>       m_Vertices;
         std::vector<Index>        m_Indices;
         std::vector<Submesh>      m_Submeshes;
+        std::vector<MorphTarget>  m_MorphTargets;
         std::vector<Common::UUID> m_MaterialAssetHandles;
 
         bool m_IsReadyForUse = false;
