@@ -53,3 +53,6 @@ Desert/Common/Source/Common/Core/Version.gen.hpp
 
 # Cooked artifacts (mesh/texture cooks, SPIR-V shader cache) — machine-local, content-addressed
 Cooked/
+
+# Fetched by scripts/MacOS/Setup.sh (not a submodule)
+ThirdParty/meshoptimizer/

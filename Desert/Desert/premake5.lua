@@ -45,6 +45,7 @@ project "Desert"
         "Jolt",
         "Lua",
         "Optick",
+        "MeshOptimizer",
         deps.Common.Libraries.yaml_cpp
     }
     

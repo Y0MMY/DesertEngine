@@ -11,6 +11,7 @@ include( buildScripts .. "/YamlCpp.lua" )
 include( buildScripts .. "/Jolt.lua" )
 include( buildScripts .. "/Lua.lua" )
 include( buildScripts .. "/Optick.lua" )
+include( buildScripts .. "/MeshOptimizer.lua" )
 
 -- Windows links the prebuilt reflectcpp.lib; other platforms compile the
 -- yyjson backend from source (see the file for details).

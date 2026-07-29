@@ -69,6 +69,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 3c. meshoptimizer (mesh simplification / LOD generation) — not a submodule
+# ---------------------------------------------------------------------------
+if [ ! -f "$ROOT/ThirdParty/meshoptimizer/src/meshoptimizer.h" ]; then
+    echo "--- Cloning meshoptimizer into ThirdParty/meshoptimizer"
+    rm -rf "$ROOT/ThirdParty/meshoptimizer"
+    git clone --branch v0.20 --depth 1 https://github.com/zeux/meshoptimizer.git "$ROOT/ThirdParty/meshoptimizer"
+else
+    echo "--- meshoptimizer sources present"
+fi
+
+# ---------------------------------------------------------------------------
 # 4. reflect-cpp compiled sources. The vendored include/ headers are reflect-cpp
 #    v0.19.0 and need rfl::Generic / rfl::json / yyjson built from the matching
 #    sources (Windows uses the prebuilt reflectcpp.lib instead).

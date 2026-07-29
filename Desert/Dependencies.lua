@@ -176,6 +176,7 @@ Dependencies = {
             imgui = baseDir .. "/stb/ImGui",
             entt = baseDir .. "/entt/include",
             reflect_cpp = baseDir .. "/reflect-cpp/include",
+            meshoptimizer = baseDir .. "/meshoptimizer/src",
             jolt = baseDir .. "/JoltPhysics",
             lua = baseDir .. "/lua",
             sol2 = baseDir .. "/sol2/include",
