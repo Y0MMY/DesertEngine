@@ -23,6 +23,7 @@ project "Desert"
         "Source/Engine/**.hpp",
         "%{wks.location}/ThirdParty/VulkanAllocator/vk_mem_alloc.cpp",
         "%{wks.location}/ThirdParty/stb/stb_image.cpp",
+        "%{wks.location}/ThirdParty/stb/stb_truetype.cpp",
         "%{wks.location}/ThirdParty/miniaudio/miniaudio.cpp",
     }
 

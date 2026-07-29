@@ -15,6 +15,7 @@ project "Desert"
         "Source/Engine/**.hpp",
         "%{wks.location}/ThirdParty/VulkanSDK/VulkanAllocator/vk_mem_alloc.cpp",
         "%{wks.location}/ThirdParty/stb/stb_image.cpp",
+        "%{wks.location}/ThirdParty/stb/stb_truetype.cpp",
     }
 
     includedirs {
