@@ -149,10 +149,21 @@ namespace Desert::Editor
             if ( !entity.HasComponent<ECS::DirectionLightComponent>() )
                 continue;
 
-            const glm::vec3 worldPos = glm::vec3( entity.GetWorldTransform()[3] );
-            glm::vec2       screenPos;
-            if ( !ProjectToScreen( worldPos, mvp, width, height, screenPos ) )
-                continue;
+            // The entity's Translation is a DIRECTION encoding, not a place (the demo sun "sits"
+            // at (0.3, 0.9, 0.3)) — drawing the icon there parked it next to the origin. Instead
+            // the sun billboards IN THE SKY: camera-relative along the toward-sun direction, like
+            // a skybox element — same screen spot for a given direction, from anywhere.
+            const glm::vec3 t = glm::vec3( entity.GetWorldTransform()[3] );
+            if ( glm::length( t ) < 1e-4f )
+                continue; // undefined direction — nothing meaningful to draw
+
+            const glm::vec3 towardSun = glm::normalize( t );          // scene -> sun
+            const glm::vec3 lightDir  = -towardSun;                   // sun -> scene (shading dir)
+            const glm::vec3 iconWorld = camera->GetPosition() + towardSun * 50.0f;
+
+            glm::vec2 screenPos;
+            if ( !ProjectToScreen( iconWorld, mvp, width, height, screenPos ) )
+                continue; // sun is behind the camera
 
             const float absoluteX = windowPos.x + screenPos.x;
             const float absoluteY = windowPos.y + screenPos.y;
@@ -166,12 +177,10 @@ namespace Desert::Editor
                                ImVec2( absoluteX - iconSize.x * 0.5f, absoluteY - iconSize.y * 0.5f ),
                                sunCol, icon );
 
-            // Direction arrow: a short world-space segment from the light along its shading direction.
-            if ( glm::length( worldPos ) > 1e-4f )
+            // Direction arrow: from the sun into the scene (the direction the LIGHT travels).
             {
-                const glm::vec3 dir = -glm::normalize( worldPos );
-                glm::vec2       tip;
-                if ( ProjectToScreen( worldPos + dir * 2.5f, mvp, width, height, tip ) )
+                glm::vec2 tip;
+                if ( ProjectToScreen( iconWorld + lightDir * 8.0f, mvp, width, height, tip ) )
                 {
                     const ImVec2 from( absoluteX, absoluteY );
                     const ImVec2 to( windowPos.x + tip.x, windowPos.y + tip.y );
@@ -203,7 +212,7 @@ namespace Desert::Editor
                 ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
                 Utils::ImGuiUtilities::Tooltip(
                      std::format( "Directional Light (sun)\nIntensity: {}\nDirection: ({:.2f}, {:.2f}, {:.2f})",
-                                  light.Intensity, -worldPos.x, -worldPos.y, -worldPos.z )
+                                  light.Intensity, lightDir.x, lightDir.y, lightDir.z )
                           .c_str() );
                 ImGui::PopStyleColor( 2 );
             }
