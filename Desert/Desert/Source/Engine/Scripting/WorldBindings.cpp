@@ -111,10 +111,25 @@ namespace Desert::Scripting
             return impl->MakeEntity( e.GetHandle() );
         };
 
-        // Water: the scene-global water level (SceneSettings) the swim logic reads, + a helper to drop a
-        // visible water plane at a level.
-        world["waterLevel"]   = [impl]() { return impl->Scene->GetSettings().WaterLevel; };
-        world["waterEnabled"] = [impl]() { return impl->Scene->GetSettings().WaterEnabled; };
+        // Water is entity-based (no global setting): World.spawnWater drops a "Water" plane at a level; the
+        // swim logic reads its height here. waterLevel = the Water entity's Y (very low when none exists),
+        // waterEnabled = whether a Water entity exists.
+        world["waterLevel"] = [impl]() -> float
+        {
+            auto& reg = impl->Scene->GetRegistry();
+            for ( auto e : reg.view<ECS::TagComponent, ECS::TransformComponent>() )
+                if ( reg.get<ECS::TagComponent>( e ).Tag == "Water" )
+                    return reg.get<ECS::TransformComponent>( e ).Translation.y;
+            return -1.0e9f;
+        };
+        world["waterEnabled"] = [impl]() -> bool
+        {
+            auto& reg = impl->Scene->GetRegistry();
+            for ( auto e : reg.view<ECS::TagComponent>() )
+                if ( reg.get<ECS::TagComponent>( e ).Tag == "Water" )
+                    return true;
+            return false;
+        };
         world["spawnWater"]   = [impl]( float level, float size ) -> ScriptEntity
         {
             ECS::Entity e = impl->Scene->CreateNewEntity( "Water" );

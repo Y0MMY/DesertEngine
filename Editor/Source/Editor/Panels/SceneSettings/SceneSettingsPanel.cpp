@@ -214,15 +214,5 @@ namespace Desert::Editor
             ImGui::EndDisabled();
             ImGui::TextDisabled( "Day Length 0 = frozen (scrub the hour by hand)." );
         }
-
-        // Water: the swim system reads WaterLevel/WaterEnabled from here (World.waterLevel/waterEnabled in Lua).
-        if ( ImGui::CollapsingHeader( "Water", ImGuiTreeNodeFlags_DefaultOpen ) )
-        {
-            ImGui::Checkbox( "Water Enabled", &s.WaterEnabled );
-            ImGui::BeginDisabled( !s.WaterEnabled );
-            ImGui::SliderFloat( "Water Level", &s.WaterLevel, -100.0f, 100.0f, "%.1f" );
-            ImGui::EndDisabled();
-            ImGui::TextDisabled( "Below this Y the character swims. Spawn a surface: World.spawnWater(level,size)." );
-        }
     }
 } // namespace Desert::Editor

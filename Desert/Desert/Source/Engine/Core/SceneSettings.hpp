@@ -173,13 +173,9 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Wind Turbulence" ), Category( "Wind" ), Range( 0.0f, 3.0f ) )
         float WindTurbulence = 1.0f;  // gustiness (reserved for foliage/hair/cloth response)
 
-        // Water: a scene-global water surface level. The character-controller script reads it (World.waterLevel)
-        // and switches to swimming (buoyancy) when the body drops below it. A visible water plane can be
-        // spawned via World.spawnWater(level, size).
-        PROPERTY( DisplayName( "Water Enabled" ), Category( "Water" ) )
-        bool  WaterEnabled = false;
-        PROPERTY( DisplayName( "Water Level" ), Category( "Water" ), Range( -100.0f, 100.0f ) )
-        float WaterLevel   = 0.0f;
+        // Water moved OUT of global scene settings: it is a gameplay value, not a render setting. It now
+        // lives on the spawned "Water" entity (World.spawnWater drops a plane at the level); World.waterLevel
+        // reads that entity's height, so the swim script keeps working without a global knob here.
 
         // Time of Day — an OPT-IN day/night cycle (default off, so existing scenes are untouched). When on,
         // the DayNightSystem drives the scene's directional light (the "sun"): its DIRECTION follows the hour
