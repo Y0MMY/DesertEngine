@@ -20,6 +20,11 @@ namespace Desert::Editor::AssetFileOps
     // Copy `src` next to itself under a unique "<stem> N" name.
     bool Duplicate( const std::string& src, std::string& outNewPath, std::string& error );
 
+    // Copy `src` INTO directory `destDir`, keeping its name (or a unique "<stem> N" if taken). Used by
+    // copy+paste across folders.
+    bool CopyInto( const std::string& src, const std::string& destDir, std::string& outNewPath,
+                   std::string& error );
+
     // Delete a file or a directory (recursively).
     bool Delete( const std::string& path, std::string& error );
 

@@ -101,6 +101,13 @@ namespace Desert::Editor
         void DrawItemContextMenu( DirectoryInformation& entry );
         // Modal dialogs for the cross-platform file ops (rename / delete-with-reference-warning).
         void DrawFileOpsPopups();
+        // Multi-select click handling (plain / Ctrl-toggle / Shift-range over the display order).
+        void SelectClick( DirectoryInformation* entry, int shownIndex );
+        bool IsSelected( const DirectoryInformation* entry ) const;
+        // Paths of the current multi-selection; falls back to m_CurrentSelected when empty.
+        std::vector<std::string> SelectionPaths() const;
+        // Cut/copy/paste of the current selection into the current directory.
+        void PasteClipboard();
         // UE-style "Capture Thumbnail": grab the current main-viewport rendered image, center-crop to a
         // square, downscale, and save it AS this asset's thumbnail (same DiskPath key the grid reads). Lets
         // the user frame the asset in the scene and use that exact view as the preview.
@@ -192,14 +199,19 @@ namespace Desert::Editor
         bool        m_CutFile = false;
 
         // Phase-1 file operations (rename / delete / duplicate / move), cross-platform.
-        bool                     m_ShowRenamePopup     = false;
+        bool                     m_ShowRenamePopup   = false;
         std::string              m_RenamePath;
-        char                     m_RenameBuf[128]      = { 0 };
-        bool                     m_ShowDeleteConfirm   = false;
-        bool                     m_PendingDeleteIsFile = true;
-        std::string              m_PendingDeletePath;
-        std::vector<std::string> m_DeleteReferencers; // assets still pointing at the delete target
+        char                     m_RenameBuf[128]    = { 0 };
+        bool                     m_ShowDeleteConfirm = false;
+        std::vector<std::string> m_PendingDeleteList; // paths queued for the delete-confirm modal
+        std::vector<std::string> m_DeleteReferencers; // assets still pointing at the delete target(s)
         std::string              m_FileOpStatus;      // last error line (shown in the toolbar area)
+
+        // Phase-2 multi-select + clipboard.
+        std::unordered_set<std::string> m_Selection;            // selected asset paths
+        int                             m_SelectionAnchorShown = -1; // display index of the range anchor
+        std::vector<std::string>        m_Clipboard;            // cut/copied paths
+        bool                            m_ClipboardCut = false; // true = move on paste, false = copy
 
         Assets::AssetManager*           m_AssetManager = nullptr;
         std::unique_ptr<UI::UIHelper>   m_UIHelper;

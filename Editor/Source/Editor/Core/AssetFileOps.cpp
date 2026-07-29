@@ -104,6 +104,25 @@ namespace Desert::Editor::AssetFileOps
         return true;
     }
 
+    bool CopyInto( const std::string& src, const std::string& destDir, std::string& outNewPath,
+                   std::string& error )
+    {
+        const fs::path  s = src;
+        std::error_code ec;
+        const std::string name =
+             UniqueName( s.stem().string(), s.extension().string(),
+                         [&]( const std::string& n ) { return fs::exists( fs::path( destDir ) / n ); } );
+        const fs::path dst = fs::path( destDir ) / name;
+        fs::copy( s, dst, fs::copy_options::recursive, ec );
+        if ( ec )
+        {
+            error = ec.message();
+            return false;
+        }
+        outNewPath = dst.string();
+        return true;
+    }
+
     bool Delete( const std::string& path, std::string& error )
     {
         std::error_code ec;

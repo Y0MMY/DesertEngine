@@ -515,11 +515,24 @@ namespace Desert::Editor
             }
             if ( ImGui::IsKeyPressed( ImGuiKey_Delete, false ) )
             {
-                m_PendingDeletePath   = m_CurrentSelected->AssetPath;
-                m_PendingDeleteIsFile = m_CurrentSelected->IsFile;
+                m_PendingDeleteList = SelectionPaths();
                 m_DeleteReferencers.clear();
                 m_ShowDeleteConfirm = true;
             }
+            // Clipboard: Ctrl/Cmd + C / X / V.
+            const bool mod = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper;
+            if ( mod && ImGui::IsKeyPressed( ImGuiKey_C, false ) )
+            {
+                m_Clipboard    = SelectionPaths();
+                m_ClipboardCut = false;
+            }
+            if ( mod && ImGui::IsKeyPressed( ImGuiKey_X, false ) )
+            {
+                m_Clipboard    = SelectionPaths();
+                m_ClipboardCut = true;
+            }
+            if ( mod && ImGui::IsKeyPressed( ImGuiKey_V, false ) )
+                PasteClipboard();
         }
 
         // File-op modals (rename / delete) + last error line.
@@ -833,14 +846,10 @@ namespace Desert::Editor
                                                              ImGuiPopupFlags_MouseButtonRight |
                                                                   ImGuiPopupFlags_NoOpenOverItems ) )
                         {
-                            if ( std::filesystem::exists( m_CopiedPath ) && ImGui::Selectable( "Paste" ) )
+                            if ( !m_Clipboard.empty() &&
+                                 ImGui::Selectable( m_ClipboardCut ? "Paste (move)" : "Paste (copy)" ) )
                             {
-                                // Paste implementation
-                            }
-
-                            if ( ImGui::Selectable( "Open Location" ) )
-                            {
-                                // Open location implementation
+                                PasteClipboard();
                             }
 
                             ImGui::Separator();
@@ -1273,38 +1282,59 @@ namespace Desert::Editor
         if ( ImGui::MenuItem( "Copy Name" ) )
             ImGui::SetClipboardText( name.c_str() );
 
-        // ---- File operations (cross-platform) ----
+        // ---- File operations (cross-platform, selection-aware) ----
+        // Right-clicking an item outside the current multi-selection makes it the selection.
+        if ( !IsSelected( &entry ) )
+        {
+            m_Selection.clear();
+            m_Selection.insert( entry.AssetPath );
+            m_CurrentSelected = &entry;
+        }
+        const std::vector<std::string> sel   = SelectionPaths();
+        const size_t                   count = sel.size();
+
         ImGui::Separator();
-        if ( ImGui::MenuItem( "Rename", "F2" ) )
+        if ( count <= 1 && ImGui::MenuItem( "Rename", "F2" ) )
         {
             m_RenamePath = entry.AssetPath;
             std::snprintf( m_RenameBuf, sizeof( m_RenameBuf ), "%s", name.c_str() );
             m_ShowRenamePopup = true;
         }
-        if ( ImGui::MenuItem( "Duplicate" ) )
+        if ( ImGui::MenuItem( count > 1 ? "Duplicate selection" : "Duplicate" ) )
         {
-            std::string np, err;
-            if ( AssetFileOps::Duplicate( entry.AssetPath, np, err ) )
-                QueueRefresh();
-            else
-                m_FileOpStatus = "Duplicate failed: " + err;
+            for ( const auto& p : sel )
+            {
+                std::string np, err;
+                if ( !AssetFileOps::Duplicate( p, np, err ) )
+                    m_FileOpStatus = "Duplicate failed: " + err;
+            }
+            QueueRefresh();
+        }
+        if ( ImGui::MenuItem( "Cut", "Ctrl+X" ) )
+        {
+            m_Clipboard    = sel;
+            m_ClipboardCut = true;
+        }
+        if ( ImGui::MenuItem( "Copy", "Ctrl+C" ) )
+        {
+            m_Clipboard    = sel;
+            m_ClipboardCut = false;
         }
         ImGui::Separator();
-        if ( ImGui::MenuItem( "Delete", "Del" ) )
+        if ( ImGui::MenuItem( count > 1 ? "Delete selection" : "Delete", "Del" ) )
         {
-            m_PendingDeletePath   = entry.AssetPath;
-            m_PendingDeleteIsFile = entry.IsFile;
+            m_PendingDeleteList = sel;
             m_DeleteReferencers.clear();
-            // Safe delete: for a file asset, warn if anything still references it (best-effort text scan).
-            if ( entry.IsFile )
+            // Safe delete: warn if any file in the selection is still referenced (best-effort text scan).
+            AssetReferenceIndex idx;
+            BuildProjectAssetReferenceIndex( idx );
+            for ( const auto& p : sel )
             {
-                AssetReferenceIndex idx;
-                BuildProjectAssetReferenceIndex( idx );
                 std::error_code ec;
                 const std::string rel =
-                     std::filesystem::relative( entry.AssetPath, Common::Constants::Path::ASSETS_PATH, ec )
-                          .generic_string();
-                m_DeleteReferencers = idx.ReferencersOf( rel );
+                     std::filesystem::relative( p, Common::Constants::Path::ASSETS_PATH, ec ).generic_string();
+                for ( const auto& r : idx.ReferencersOf( rel ) )
+                    m_DeleteReferencers.push_back( r );
             }
             m_ShowDeleteConfirm = true;
         }
@@ -1353,15 +1383,18 @@ namespace Desert::Editor
         }
         if ( ImGui::BeginPopupModal( "Delete?##assetDelete", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
         {
-            const std::string name = std::filesystem::path( m_PendingDeletePath ).filename().string();
-            ImGui::Text( "Delete \"%s\"%s?", name.c_str(),
-                         m_PendingDeleteIsFile ? "" : " and everything inside it" );
+            if ( m_PendingDeleteList.size() == 1 )
+                ImGui::Text(
+                     "Delete \"%s\"?",
+                     std::filesystem::path( m_PendingDeleteList.front() ).filename().string().c_str() );
+            else
+                ImGui::Text( "Delete %zu items?", m_PendingDeleteList.size() );
 
             if ( !m_DeleteReferencers.empty() )
             {
                 ImGui::Spacing();
                 ImGui::TextColored( ImVec4( 1.0f, 0.6f, 0.3f, 1.0f ),
-                                    "Warning: %zu asset(s) still reference this:",
+                                    "Warning: %zu asset(s) still reference the selection:",
                                     m_DeleteReferencers.size() );
                 ImGui::BeginChild( "##delrefs", ImVec2( 360.0f, 90.0f ), true );
                 for ( const auto& r : m_DeleteReferencers )
@@ -1373,11 +1406,14 @@ namespace Desert::Editor
             ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.6f, 0.15f, 0.15f, 1.0f ) );
             if ( ImGui::Button( "Delete", ImVec2( 110.0f, 0.0f ) ) )
             {
-                std::string err;
-                if ( AssetFileOps::Delete( m_PendingDeletePath, err ) )
-                    QueueRefresh();
-                else
-                    m_FileOpStatus = "Delete failed: " + err;
+                for ( const auto& path : m_PendingDeleteList )
+                {
+                    std::string err;
+                    if ( !AssetFileOps::Delete( path, err ) )
+                        m_FileOpStatus = "Delete failed: " + err;
+                }
+                m_Selection.clear();
+                QueueRefresh();
                 ImGui::CloseCurrentPopup();
             }
             ImGui::PopStyleColor();
@@ -1386,6 +1422,67 @@ namespace Desert::Editor
                 ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
+    }
+
+    bool FileExplorerPanel::IsSelected( const DirectoryInformation* entry ) const
+    {
+        return entry && m_Selection.count( entry->AssetPath ) != 0;
+    }
+
+    std::vector<std::string> FileExplorerPanel::SelectionPaths() const
+    {
+        if ( !m_Selection.empty() )
+            return std::vector<std::string>( m_Selection.begin(), m_Selection.end() );
+        if ( m_CurrentSelected )
+            return { m_CurrentSelected->AssetPath };
+        return {};
+    }
+
+    void FileExplorerPanel::SelectClick( DirectoryInformation* entry, int shownIndex )
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        if ( io.KeyShift && m_SelectionAnchorShown >= 0 && m_CurrentDir )
+        {
+            const auto order = BuildDisplayOrder();
+            const int  lo    = m_SelectionAnchorShown < shownIndex ? m_SelectionAnchorShown : shownIndex;
+            const int  hi    = m_SelectionAnchorShown < shownIndex ? shownIndex : m_SelectionAnchorShown;
+            m_Selection.clear();
+            for ( int i = lo; i <= hi && i < static_cast<int>( order.size() ); ++i )
+                m_Selection.insert( m_CurrentDir->Children[order[i]]->AssetPath );
+        }
+        else if ( io.KeyCtrl || io.KeySuper ) // Cmd on macOS
+        {
+            if ( m_Selection.count( entry->AssetPath ) )
+                m_Selection.erase( entry->AssetPath );
+            else
+                m_Selection.insert( entry->AssetPath );
+            m_SelectionAnchorShown = shownIndex;
+        }
+        else
+        {
+            m_Selection.clear();
+            m_Selection.insert( entry->AssetPath );
+            m_SelectionAnchorShown = shownIndex;
+        }
+        m_CurrentSelected = entry;
+    }
+
+    void FileExplorerPanel::PasteClipboard()
+    {
+        if ( m_Clipboard.empty() || !m_CurrentDir )
+            return;
+        for ( const auto& src : m_Clipboard )
+        {
+            std::string np, err;
+            const bool  ok = m_ClipboardCut
+                                 ? AssetFileOps::Move( src, m_CurrentDir->AssetPath, np, err )
+                                 : AssetFileOps::CopyInto( src, m_CurrentDir->AssetPath, np, err );
+            if ( !ok )
+                m_FileOpStatus = "Paste failed: " + err;
+        }
+        if ( m_ClipboardCut )
+            m_Clipboard.clear(); // a cut is consumed by the paste
+        QueueRefresh();
     }
 
     void FileExplorerPanel::CaptureThumbnailFromViewport( const std::string& assetPath )
@@ -1467,7 +1564,7 @@ namespace Desert::Editor
             }
 
             if ( ImGui::IsItemClicked() )
-                m_CurrentSelected = entry;
+                SelectClick( entry, shownIndex );
             if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
                 doubleClicked = true;
 
@@ -1483,13 +1580,16 @@ namespace Desert::Editor
             ImGui::PopTextWrapPos();
 
             ImGui::EndGroup();
+            if ( IsSelected( entry ) )
+                ImGui::GetWindowDrawList()->AddRect( ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                                                     IM_COL32( 120, 170, 255, 255 ), 4.0f, 0, 2.0f );
         }
         else
         {
             const std::string label = std::string( icon ) + "  " + fileName;
-            if ( ImGui::Selectable( label.c_str(), m_CurrentSelected == entry, ImGuiSelectableFlags_AllowDoubleClick ) )
+            if ( ImGui::Selectable( label.c_str(), IsSelected( entry ), ImGuiSelectableFlags_AllowDoubleClick ) )
             {
-                m_CurrentSelected = entry;
+                SelectClick( entry, shownIndex );
                 if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
                     doubleClicked = true;
             }
