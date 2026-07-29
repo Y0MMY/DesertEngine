@@ -1785,12 +1785,12 @@ namespace Desert::Editor
 
         if ( gridView )
         {
-            const float thumb  = m_GridSize * 0.62f;
+            const float thumb  = m_GridSize * 0.66f;
             const float cellW  = m_GridSize;
             const float indent = ( cellW - thumb ) * 0.5f; // center the icon/thumbnail in the cell
 
-            // Card: draw the hover/selection background BEHIND the content via a draw-list channel split
-            // (the content is emitted on the top channel, the rounded background on the bottom one).
+            // Content is emitted on the TOP draw-list channel; the card + thumbnail tile go on the BOTTOM
+            // one behind it (channel split).
             ImDrawList* dl = ImGui::GetWindowDrawList();
             dl->ChannelsSplit( 2 );
             dl->ChannelsSetCurrent( 1 );
@@ -1799,8 +1799,8 @@ namespace Desert::Editor
             if ( indent > 0.0f )
                 ImGui::Indent( indent );
 
-            // Texture -> thumbnail; everything else -> a large type icon. Either way the item is hoverable,
-            // selectable and drag-able.
+            // Texture/material/model -> live thumbnail; everything else -> a big coloured type icon. The
+            // thumbnail/icon IS the hoverable/selectable/draggable item.
             const bool drewThumb =
                  entry->IsFile &&
                  ( ( entry->Type == FileType::Texture && DrawTextureThumbnail( entry, ImVec2( thumb, thumb ) ) ) ||
@@ -1810,14 +1810,19 @@ namespace Desert::Editor
                      DrawRenderedMeshThumbnail( entry, ImVec2( thumb, thumb ) ) ) );
             if ( !drewThumb )
             {
-                const ImVec4 col = entry->IsFile ? entry->FileTypeColour : ImVec4( 0.90f, 0.78f, 0.38f, 1.0f );
+                const ImVec4 col = entry->IsFile ? entry->FileTypeColour : ImVec4( 0.95f, 0.82f, 0.42f, 1.0f );
                 ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
                 ImGui::PushStyleColor( ImGuiCol_Text, col );
                 ImGui::PushFont( EditorResources::GetBigIconFont() );
                 ImGui::Button( icon, ImVec2( thumb, thumb ) );
                 ImGui::PopFont();
-                ImGui::PopStyleColor( 2 );
+                ImGui::PopStyleColor( 4 );
             }
+
+            const ImVec2 thumbMin = ImGui::GetItemRectMin();
+            const ImVec2 thumbMax = ImGui::GetItemRectMax();
 
             if ( ImGui::IsItemClicked() )
                 SelectClick( entry, shownIndex );
@@ -1827,32 +1832,71 @@ namespace Desert::Editor
             EmitAssetDragSource( *entry );
             DrawItemContextMenu( *entry );
 
-            // Hover tooltip — but NOT while dragging, or it clobbers the drag-source preview (shows empty).
             if ( ImGui::IsItemHovered() && !ImGui::IsDragDropActive() )
                 ImGui::SetTooltip( "%s", fileName.c_str() );
 
+            // Type badge — a small coloured pill (the extension) at the tile's bottom-right, files only.
+            if ( entry->IsFile )
+            {
+                std::string ext = std::filesystem::path( entry->AssetPath ).extension().string();
+                if ( !ext.empty() && ext.front() == '.' )
+                    ext.erase( ext.begin() );
+                std::transform( ext.begin(), ext.end(), ext.begin(),
+                                []( unsigned char c ) { return static_cast<char>( std::toupper( c ) ); } );
+                if ( ext.size() > 4 )
+                    ext.resize( 4 );
+                if ( !ext.empty() )
+                {
+                    const ImVec4 c  = entry->FileTypeColour;
+                    const ImVec2 ts = ImGui::CalcTextSize( ext.c_str() );
+                    const ImVec2 bpad( 4.0f, 1.0f );
+                    const ImVec2 bmax( thumbMax.x - 2.0f, thumbMax.y - 2.0f );
+                    const ImVec2 bmin( bmax.x - ts.x - bpad.x * 2.0f, bmax.y - ts.y - bpad.y * 2.0f );
+                    dl->AddRectFilled( bmin, bmax,
+                                       IM_COL32( (int)( c.x * 255 ), (int)( c.y * 255 ), (int)( c.z * 255 ), 235 ),
+                                       3.0f );
+                    dl->AddText( ImVec2( bmin.x + bpad.x, bmin.y + bpad.y ), IM_COL32( 15, 15, 18, 255 ),
+                                 ext.c_str() );
+                }
+            }
+
             if ( indent > 0.0f )
                 ImGui::Unindent( indent );
-            ImGui::PushTextWrapPos( ImGui::GetCursorPosX() + cellW );
-            ImGui::TextWrapped( "%s", fileName.c_str() );
-            ImGui::PopTextWrapPos();
+
+            // Label: single line, centered under the tile, ellipsized to the cell width.
+            {
+                std::string shown = fileName;
+                if ( ImGui::CalcTextSize( shown.c_str() ).x > cellW )
+                {
+                    while ( shown.size() > 1 &&
+                            ImGui::CalcTextSize( ( shown + "..." ).c_str() ).x > cellW )
+                        shown.pop_back();
+                    shown += "...";
+                }
+                const float tw = ImGui::CalcTextSize( shown.c_str() ).x;
+                ImGui::SetCursorPosX( ImGui::GetCursorPosX() + std::max( 0.0f, ( cellW - tw ) * 0.5f ) );
+                ImGui::TextUnformatted( shown.c_str() );
+            }
 
             ImGui::EndGroup();
 
-            // Background card, drawn behind: subtle always, brighter on hover, filled + outlined when selected.
-            const ImVec2 pad   = ImVec2( 6.0f, 6.0f );
-            const ImVec2 cmin  = ImVec2( ImGui::GetItemRectMin().x - pad.x, ImGui::GetItemRectMin().y - pad.y );
-            const ImVec2 cmax  = ImVec2( ImGui::GetItemRectMin().x - pad.x + cellW + pad.x,
-                                        ImGui::GetItemRectMax().y + pad.y );
+            // Card + thumbnail tile behind the content: rounded, subtle by default, brighter on hover,
+            // filled + accent-ringed when selected. Card spans the full cell width (centered on the thumb).
+            const float  cellLeft = thumbMin.x - indent;
+            const ImVec2 cmin( cellLeft - 2.0f, thumbMin.y - 8.0f );
+            const ImVec2 cmax( cellLeft + cellW + 2.0f, ImGui::GetItemRectMax().y + 6.0f );
             const bool   sel   = IsSelected( entry );
             const bool   hover = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( cmin, cmax );
-            const ImU32  bg    = sel     ? IM_COL32( 66, 110, 180, 160 )
-                                 : hover ? IM_COL32( 255, 255, 255, 20 )
-                                         : IM_COL32( 255, 255, 255, 8 );
+            const ImU32  bg    = sel     ? IM_COL32( 52, 92, 160, 150 )
+                                 : hover ? IM_COL32( 255, 255, 255, 24 )
+                                         : IM_COL32( 255, 255, 255, 10 );
             dl->ChannelsSetCurrent( 0 );
-            dl->AddRectFilled( cmin, cmax, bg, 6.0f );
+            dl->AddRectFilled( cmin, cmax, bg, 8.0f );
             if ( sel )
-                dl->AddRect( cmin, cmax, IM_COL32( 120, 170, 255, 255 ), 6.0f, 0, 1.5f );
+                dl->AddRect( cmin, cmax, IM_COL32( 120, 170, 255, 255 ), 8.0f, 0, 1.5f );
+            // Rounded tile behind the thumbnail/icon.
+            dl->AddRectFilled( ImVec2( thumbMin.x - 5.0f, thumbMin.y - 5.0f ),
+                               ImVec2( thumbMax.x + 5.0f, thumbMax.y + 5.0f ), IM_COL32( 0, 0, 0, 60 ), 6.0f );
             dl->ChannelsMerge();
         }
         else
