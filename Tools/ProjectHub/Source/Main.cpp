@@ -31,6 +31,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Material Design icon literals (byte-identical to the editor's IconsMaterialDesignIcons.hpp).
@@ -130,7 +131,39 @@ namespace
         SaveRecentProjects( recent );
     }
 
-    std::string CreateProject( const std::string& parentDir, const std::string& name, std::string& error )
+    // A starter project template: extra folders on top of the standard set, whether the .deproj points
+    // at a default scene, and any starter files to drop in. ProjectHub does not link the engine, so it
+    // can't author a binary .desce — templates differ by scaffolding (folders / config / sample files).
+    struct ProjectTemplate
+    {
+        const char*                                      Id;
+        const char*                                      Title;
+        const char*                                      Description;
+        std::vector<const char*>                         ExtraFolders;    // under Assets/
+        bool                                             SetDefaultScene; // write a DefaultScene into the .deproj
+        std::vector<std::pair<std::string, std::string>> Files;           // project-relative path -> contents
+    };
+
+    const std::vector<ProjectTemplate>& Templates()
+    {
+        static const std::vector<ProjectTemplate> s_Templates = {
+            { "empty", "Empty Project", "Standard content folders — start from scratch.", {}, false, {} },
+            { "3d", "3D Sandbox",
+              "Content folders, a default-scene entry and a starter Lua script.", {}, true,
+              { { "Assets/Scripts/Spin.lua",
+                  "-- Starter script: rotates the entity it is attached to.\n"
+                  "function OnUpdate(dt)\n"
+                  "    -- self.transform.rotation.y = self.transform.rotation.y + dt\n"
+                  "end\n" },
+                { "README.md", "# 3D Sandbox\n\nCreated with the Desert Project Hub.\n" } } },
+            { "2d", "2D", "Adds a Sprites folder for 2D content.", { "Sprites" }, false,
+              { { "README.md", "# 2D Project\n\nCreated with the Desert Project Hub.\n" } } },
+        };
+        return s_Templates;
+    }
+
+    std::string CreateProject( const std::string& parentDir, const std::string& name,
+                               const ProjectTemplate& tpl, std::string& error )
     {
         if ( name.empty() || parentDir.empty() )
         {
@@ -146,9 +179,12 @@ namespace
             return {};
         }
 
-        // Folder layout mirrors the engine's content constants (Common::Constants::Path).
+        // Folder layout mirrors the engine's content constants (Common::Constants::Path), plus any
+        // template-specific folders.
         for ( const char* sub :
               { "Scenes", "Prefabs", "Scripts", "Textures", "Meshes", "Materials", "Collections" } )
+            fs::create_directories( root / "Assets" / sub, ec );
+        for ( const char* sub : tpl.ExtraFolders )
             fs::create_directories( root / "Assets" / sub, ec );
         if ( ec )
         {
@@ -156,11 +192,21 @@ namespace
             return {};
         }
 
+        // Starter files from the template.
+        for ( const auto& [rel, content] : tpl.Files )
+        {
+            const fs::path p = root / rel;
+            fs::create_directories( p.parent_path(), ec );
+            WriteFile( p.string(), content );
+        }
+
         // Field names must match the Editor's ProjectFile struct (rfl::json parses this).
+        const std::string defaultScene =
+             tpl.SetDefaultScene ? ( "Assets/Scenes/" + name + ".desce" ) : std::string();
         const std::string  deproj = ( root / ( name + ".deproj" ) ).string();
         std::ostringstream ss;
-        ss << "{\"Name\":\"" << name << "\",\"AssetsRoot\":\"Assets\",\"DefaultScene\":\"Assets/Scenes/"
-           << name << ".desce\"}";
+        ss << "{\"Name\":\"" << name << "\",\"AssetsRoot\":\"Assets\",\"DefaultScene\":\"" << defaultScene
+           << "\"}";
         WriteFile( deproj, ss.str() );
 
         error.clear();
@@ -308,6 +354,7 @@ namespace
         char        NewName[128]     = "MyGame";
         char        NewLocation[512] = "";
         char        OpenPath[512]    = "";
+        int         Template         = 0; // index into Templates()
         bool        OpenPopup        = false;
         std::string Status;
         bool        StatusIsError = false;
@@ -501,19 +548,34 @@ namespace
         ImGui::PopFont();
         ImGui::Dummy( ImVec2( 0, 8 ) );
 
-        // Template card (single template for now — mirrors the trimmed scope).
-        ImGui::PushStyleColor( ImGuiCol_ChildBg, kPanel );
-        ImGui::BeginChild( "##template", ImVec2( 260.0f, 96.0f ), false );
-        ImGui::SetCursorPos( ImVec2( 16, 14 ) );
-        ImGui::PushFont( g_FontTitle );
-        ImGui::TextColored( kAccent, HUB_ICON_PACKAGE "  Empty Project" );
-        ImGui::PopFont();
-        ImGui::SetCursorPos( ImVec2( 16, 46 ) );
-        ImGui::PushTextWrapPos( 244.0f );
-        ImGui::TextColored( kTextDim, "Standard content folders + a default scene entry." );
-        ImGui::PopTextWrapPos();
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
+        // Template picker: one selectable card per starter template.
+        ImGui::TextColored( kTextDim, "TEMPLATE" );
+        const auto& templates = Templates();
+        for ( int i = 0; i < static_cast<int>( templates.size() ); ++i )
+        {
+            const ProjectTemplate& tpl      = templates[i];
+            const bool             selected = ( st.Template == i );
+
+            ImGui::PushID( tpl.Id );
+            ImGui::PushStyleColor( ImGuiCol_ChildBg, selected ? kAccent : kPanel );
+            ImGui::BeginChild( "##tplcard", ImVec2( 260.0f, 84.0f ), false );
+            if ( ImGui::InvisibleButton( "##pick", ImVec2( 260.0f, 84.0f ) ) )
+                st.Template = i;
+            ImGui::SetCursorPos( ImVec2( 16, 12 ) );
+            ImGui::PushFont( g_FontTitle );
+            ImGui::TextColored( selected ? kPanel : kAccent, HUB_ICON_PACKAGE "  %s", tpl.Title );
+            ImGui::PopFont();
+            ImGui::SetCursorPos( ImVec2( 16, 44 ) );
+            ImGui::PushTextWrapPos( 244.0f );
+            ImGui::TextColored( selected ? kPanel : kTextDim, "%s", tpl.Description );
+            ImGui::PopTextWrapPos();
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            ImGui::PopID();
+
+            if ( ( i % 2 ) == 0 && i + 1 < static_cast<int>( templates.size() ) )
+                ImGui::SameLine();
+        }
 
         ImGui::Dummy( ImVec2( 0, 8 ) );
         ImGui::TextColored( kTextDim, "PROJECT NAME" );
@@ -527,8 +589,9 @@ namespace
         ImGui::Dummy( ImVec2( 0, 10 ) );
         if ( PrimaryButton( HUB_ICON_ROCKET "  Create & Open", ImVec2( 190.0f, 42.0f ) ) )
         {
-            std::string error;
-            if ( const std::string deproj = CreateProject( st.NewLocation, st.NewName, error );
+            std::string       error;
+            const auto&       tpl = Templates()[st.Template];
+            if ( const std::string deproj = CreateProject( st.NewLocation, st.NewName, tpl, error );
                  !deproj.empty() )
                 OpenProject( st, deproj );
             else
