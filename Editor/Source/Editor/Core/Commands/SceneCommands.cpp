@@ -160,6 +160,11 @@ namespace Desert::Editor::Commands
             {
             }
 
+            std::string GetLabel() const override
+            {
+                return "Move / Transform";
+            }
+
             bool Undo() override
             {
                 return Apply( m_Old );
@@ -199,6 +204,11 @@ namespace Desert::Editor::Commands
             {
             }
 
+            std::string GetLabel() const override
+            {
+                return "Rename";
+            }
+
             bool Undo() override
             {
                 return Apply( m_OldName );
@@ -229,6 +239,11 @@ namespace Desert::Editor::Commands
                              const Common::UUID& newParent )
                  : m_Child( child ), m_OldParent( oldParent ), m_NewParent( newParent )
             {
+            }
+
+            std::string GetLabel() const override
+            {
+                return "Reparent";
             }
 
             bool Undo() override
@@ -267,6 +282,11 @@ namespace Desert::Editor::Commands
             explicit DeleteCommand( std::vector<Assets::EntityData>&& snapshot )
                  : m_Snapshot( std::move( snapshot ) )
             {
+            }
+
+            std::string GetLabel() const override
+            {
+                return "Delete";
             }
 
             bool Undo() override
@@ -321,6 +341,13 @@ namespace Desert::Editor::Commands
                 auto cmd = std::move( m_Commands.front() );
                 m_Commands.clear();
                 return cmd;
+            }
+
+            std::string GetLabel() const override
+            {
+                if ( m_Commands.size() == 1 )
+                    return m_Commands.front()->GetLabel();
+                return "Grouped edit (" + std::to_string( m_Commands.size() ) + ")";
             }
 
             bool Undo() override
@@ -419,6 +446,11 @@ namespace Desert::Editor::Commands
             {
             }
 
+            std::string GetLabel() const override
+            {
+                return "Component / entity edit";
+            }
+
             bool Undo() override
             {
                 return Apply( m_Before );
@@ -453,6 +485,11 @@ namespace Desert::Editor::Commands
         public:
             explicit CreateCommand( std::vector<Common::UUID> roots ) : m_Roots( std::move( roots ) )
             {
+            }
+
+            std::string GetLabel() const override
+            {
+                return m_Roots.size() > 1 ? "Create (" + std::to_string( m_Roots.size() ) + ")" : "Create";
             }
 
             bool Undo() override

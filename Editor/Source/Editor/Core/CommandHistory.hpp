@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace Desert::Editor
@@ -26,6 +27,12 @@ namespace Desert::Editor
         virtual bool IsVolatile() const
         {
             return false;
+        }
+
+        // Short human-readable name for the History panel (e.g. "Move", "Rename", "Delete").
+        virtual std::string GetLabel() const
+        {
+            return "Edit";
         }
     };
 
@@ -115,6 +122,16 @@ namespace Desert::Editor
             m_Redo.clear();
         }
 
+        // Read-only views for the History panel (bottom = oldest, back = the next Undo target).
+        const std::vector<std::unique_ptr<ICommand>>& UndoStack() const
+        {
+            return m_Undo;
+        }
+        const std::vector<std::unique_ptr<ICommand>>& RedoStack() const
+        {
+            return m_Redo;
+        }
+
     private:
         class ByteCommand final : public ICommand
         {
@@ -143,6 +160,11 @@ namespace Desert::Editor
             bool IsVolatile() const override
             {
                 return true;
+            }
+
+            std::string GetLabel() const override
+            {
+                return "Property edit";
             }
 
         private:

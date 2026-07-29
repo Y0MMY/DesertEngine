@@ -56,6 +56,7 @@
 #include "Editor/Panels/LuaConsole/LuaConsolePanel.hpp"
 #include "Editor/Panels/Stubs/SequencerPanel.hpp"
 #include "Editor/Panels/Stubs/BuildSettingsPanel.hpp"
+#include "Editor/Panels/History/HistoryPanel.hpp"
 
 // 4. Misc
 #include <glm/gtx/matrix_decompose.hpp>
@@ -293,6 +294,7 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::CollectionsPanel>( m_AssetManager.get() ) );
+        m_Panels.emplace_back( std::make_unique<Editor::HistoryPanel>() );
 
         // Visual stubs for upcoming tools (hidden by default; toggled via the View menu). No real
         // functionality yet — they exist so the layouts/interactions can be iterated on early.
