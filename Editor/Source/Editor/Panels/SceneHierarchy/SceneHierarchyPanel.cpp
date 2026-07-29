@@ -2,6 +2,13 @@
 #include <Editor/Core/DragPayloads.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Assets/MaterialData.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Core/Serialize/GLMReflect.hpp>
+#include <Engine/Core/Serialize/CustomReflect.hpp>
+#include <rflcpp/rfl/json.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
@@ -25,6 +32,41 @@
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
+
+    // Creates (or reuses, by name) a StaticMeshPBR material ASSET (.demat) carrying an albedo + roughness,
+    // and returns its handle to drop into a mesh material SLOT. This is the UE-style way the demo builders
+    // colour their meshes — a real, editable, reusable material asset — instead of the per-entity
+    // MaterialComponent override channel. Reused by name so re-spawning a demo doesn't duplicate files.
+    static Assets::AssetHandle CreatePBRMaterialAsset( const Assets::AssetManager* am, const std::string& name,
+                                                       const glm::vec4& albedo, float roughness )
+    {
+        if ( !am )
+            return {};
+
+        const std::string           ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
+        std::error_code             ec;
+        std::filesystem::create_directories( dir, ec );
+        const std::filesystem::path path = dir / ( name + ext );
+
+        if ( std::filesystem::exists( path, ec ) )
+            if ( auto existing = am->FindByPath<Assets::SurfaceMaterialAsset>( path.generic_string() ) )
+                return existing->GetMetadata().Handle;
+
+        Assets::MaterialData data;
+        data.MaterialId = Common::UUID();
+        data.SetParam( "AlbedoColor", albedo );
+        data.SetParam( "RoughnessFactor", glm::vec4( roughness, 0.0f, 0.0f, 0.0f ) );
+        Common::Utils::FileSystem::WriteContentToFile( path.generic_string(), rfl::json::write( data ) );
+
+        auto asset = const_cast<Assets::AssetManager&>( *am )
+                          .CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
+                                                                      path.generic_string() );
+        if ( !asset )
+            return {};
+        Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
+        return asset->GetMetadata().Handle;
+    }
 
     const char* SceneHierarchyPanel::GetEntityTypeName( const ECS::Entity& entity )
     {
@@ -325,7 +367,8 @@ namespace Desert::Editor
 
         ImRect windowRect = { ImGui::GetWindowContentRegionMin(), ImGui::GetWindowContentRegionMax() };
 
-        auto AddEntity = []( const std::shared_ptr<Desert::Core::Scene>& scene )
+        auto AddEntity = []( const std::shared_ptr<Desert::Core::Scene>&    scene,
+                             const std::shared_ptr<Assets::AssetManager>& assetManager )
         {
             // Every menu spawn is recorded as one undo step (Ctrl+Z removes what was just added).
             auto track = []( ECS::Entity& e ) -> ECS::Entity&
@@ -454,26 +497,28 @@ namespace Desert::Editor
                 {
                     std::vector<Common::UUID> created; // the whole box = ONE undo step
 
-                    auto mkBox = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec4 albedo )
+                    // UE-style: each wall gets a real, shared material ASSET in its slot (not a per-entity
+                    // override) — so it shows up in 3D Model -> Material and is editable/reusable.
+                    auto mkBox = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const glm::vec4& albedo,
+                                      const std::string& matName )
                     {
                         auto  e  = scene->CreateNewEntity( name );
                         created.push_back( e.GetComponent<ECS::UUIDComponent>().UUID );
-                        e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
+                        auto& smc     = e.AddComponent<ECS::StaticMeshComponent>();
+                        smc.Primitive = Geometry::PrimitiveType::Cube;
+                        if ( auto mat = CreatePBRMaterialAsset( assetManager.get(), matName, albedo, 0.9f ) )
+                            smc.MaterialSlots.push_back( mat );
                         auto& tf       = e.GetComponent<ECS::TransformComponent>();
                         tf.Translation = pos;
                         tf.Scale       = scale;
-                        auto& mc       = e.AddComponent<ECS::MaterialComponent>();
-                        mc.ShaderName  = "StaticMeshPBR"; // stays on the batched PBR (G-buffer) path
-                        mc.Params.push_back( ECS::MaterialParamOverride{ "AlbedoColor", albedo } );
-                        mc.Params.push_back( ECS::MaterialParamOverride{ "RoughnessFactor", glm::vec4( 0.9f ) } );
                     };
                     const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1.0f );
                     const glm::vec4 red( 0.85f, 0.10f, 0.10f, 1.0f );
                     const glm::vec4 green( 0.10f, 0.70f, 0.15f, 1.0f );
-                    mkBox( "CB_Floor", { 0.0f, 0.0f, 0.0f }, { 4.0f, 0.1f, 4.0f }, white );
-                    mkBox( "CB_Back", { 0.0f, 2.0f, -2.0f }, { 4.0f, 4.0f, 0.1f }, white );
-                    mkBox( "CB_LeftRed", { -2.0f, 2.0f, 0.0f }, { 0.1f, 4.0f, 4.0f }, red );
-                    mkBox( "CB_RightGreen", { 2.0f, 2.0f, 0.0f }, { 0.1f, 4.0f, 4.0f }, green );
+                    mkBox( "CB_Floor", { 0.0f, 0.0f, 0.0f }, { 4.0f, 0.1f, 4.0f }, white, "CB_White" );
+                    mkBox( "CB_Back", { 0.0f, 2.0f, -2.0f }, { 4.0f, 4.0f, 0.1f }, white, "CB_White" );
+                    mkBox( "CB_LeftRed", { -2.0f, 2.0f, 0.0f }, { 0.1f, 4.0f, 4.0f }, red, "CB_Red" );
+                    mkBox( "CB_RightGreen", { 2.0f, 2.0f, 0.0f }, { 0.1f, 4.0f, 4.0f }, green, "CB_Green" );
 
                     auto mkWhite = [&]( const char* name, Geometry::PrimitiveType prim, glm::vec3 pos, glm::vec3 scale )
                     {
@@ -546,18 +591,23 @@ namespace Desert::Editor
                     auto sphere = std::make_shared<DynamicMesh>( verts, inds, subs, /*generateLODs*/ true );
                     sphere->Invalidate(); // build GPU buffers (base + LOD indices)
 
+                    // One shared material ASSET for the whole row (UE-style slot assignment), so the spheres
+                    // read as a real, editable material instead of per-entity overrides.
+                    const auto lodMat =
+                         CreatePBRMaterialAsset( assetManager.get(), "LOD_Sphere", glm::vec4( 0.70f, 0.75f, 0.85f, 1.0f ),
+                                                 0.5f );
+
                     std::vector<Common::UUID> created;
                     for ( int k = 0; k < 8; ++k )
                     {
                         auto e = scene->CreateNewEntity( "LOD_Sphere_" + std::to_string( k ) );
                         created.push_back( e.GetComponent<ECS::UUIDComponent>().UUID );
-                        e.AddComponent<ECS::StaticMeshComponent>().RuntimeMesh = sphere;
+                        auto& smc      = e.AddComponent<ECS::StaticMeshComponent>();
+                        smc.RuntimeMesh = sphere;
+                        if ( lodMat )
+                            smc.MaterialSlots.push_back( lodMat );
                         auto& tf       = e.GetComponent<ECS::TransformComponent>();
                         tf.Translation = { float( k ) * 4.0f - 8.0f, 1.0f, -float( k ) * 10.0f };
-                        auto& mc       = e.AddComponent<ECS::MaterialComponent>();
-                        mc.ShaderName  = "StaticMeshPBR";
-                        mc.Params.push_back(
-                             ECS::MaterialParamOverride{ "AlbedoColor", glm::vec4( 0.70f, 0.75f, 0.85f, 1.0f ) } );
                     }
                     if ( scene->GetRegistry().view<ECS::DirectionLightComponent>().size() == 0 )
                     {
@@ -614,7 +664,7 @@ namespace Desert::Editor
 
         if ( ImGui::BeginPopup( "AddEntity" ) )
         {
-            AddEntity( m_Scene );
+            AddEntity( m_Scene, m_AssetManager );
             ImGui::EndPopup();
         }
 
@@ -651,7 +701,7 @@ namespace Desert::Editor
         if ( ImGui::BeginPopupContextWindow() )
         {
             ImGui::Separator();
-            AddEntity( m_Scene );
+            AddEntity( m_Scene, m_AssetManager );
             ImGui::Separator();
             if ( ImGui::MenuItem( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )
                 m_OpenInstantiatePrefab = true; // deferred: OpenPopup at panel scope below

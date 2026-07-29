@@ -141,11 +141,12 @@ namespace Desert::ECS
 
                          }
 
-                         // Tint/roughen a batched PBR primitive straight from a MaterialComponent (no
-                         // material asset needed) — the Cornell Box walls, and scripts animating
-                         // params live (self:setMaterialParam). Applied EVERY frame (not only on
-                         // instance rebuild) so runtime changes show immediately; cheap — a few
-                         // by-name writes only on entities that carry a MaterialComponent.
+                         // Apply MaterialComponent param overrides onto slot-0 of a batched PBR mesh. This
+                         // is NO LONGER an editor-authored channel (the demos use material-asset slots now,
+                         // UE-style) — it survives ONLY for scripts animating params live
+                         // (self:setMaterialParam) and for loading legacy scenes that still carry per-entity
+                         // param overrides. Applied EVERY frame so runtime script changes show immediately;
+                         // cheap — a few by-name writes only on entities that carry a MaterialComponent.
                          // Empty/"StaticMeshPBR" shader = still PBR.
                          if ( registry.has<MaterialComponent>( entity ) && !mesh.RuntimeMaterialInstances.empty() )
                          {
