@@ -65,7 +65,7 @@ namespace Desert::Editor
         // from material-asset SLOTS now (UE-style). The MaterialComponent param channel survives purely as
         // the scripting (Lua setMaterialParam) + legacy-scene compat path; it is no longer editor-authored.
 
-        RenderMaterialProperties( materialComp, overriddenBy );
+        RenderMaterialProperties( entity, materialComp, overriddenBy );
 
         // Quick way back to the PBR path without hunting for the Shader Override section.
         if ( !overriddenBy.empty() )
@@ -224,6 +224,18 @@ namespace Desert::Editor
 
         Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
         return asset->GetMetadata().Handle;
+    }
+
+    void MaterialComponentWidget::ClearPBRParamOverrides( ECS::Entity& entity )
+    {
+        if ( !entity.HasComponent<ECS::MaterialComponent>() )
+            return;
+        auto& matc = entity.GetComponent<ECS::MaterialComponent>();
+        if ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" )
+        {
+            matc.Params.clear();
+            matc.Textures.clear();
+        }
     }
 
     void MaterialComponentWidget::MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot )
@@ -425,7 +437,8 @@ namespace Desert::Editor
         return changed;
     }
 
-    void MaterialComponentWidget::RenderMaterialProperties( ECS::StaticMeshComponent& meshComp,
+    void MaterialComponentWidget::RenderMaterialProperties( ECS::Entity&              entity,
+                                                            ECS::StaticMeshComponent& meshComp,
                                                             const std::string&        overriddenByShader )
     {
         Utils::ImGuiUtilities::PushID();
@@ -440,6 +453,25 @@ namespace Desert::Editor
                                 "the material slots below are NOT used until it is cleared.",
                                 ICON_MDI_ALERT, overriddenByShader.c_str() );
             ImGui::PopStyleColor();
+        }
+
+        // PBR-channel param overrides (script / legacy scene / startup demo) are re-applied over
+        // slot 0 EVERY frame by MeshECSSystem — slot edits to those params silently don't show.
+        // Surface the state with a one-click way back to pure slot authoring.
+        if ( overriddenByShader.empty() && entity.HasComponent<ECS::MaterialComponent>() )
+        {
+            const auto& matc = entity.GetComponent<ECS::MaterialComponent>();
+            if ( ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" ) && !matc.Params.empty() )
+            {
+                ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ) );
+                ImGui::TextWrapped( "%s %zu runtime param override(s) (script / legacy scene) are applied "
+                                    "over the material slots each frame — matching slot params won't "
+                                    "take effect until cleared.",
+                                    ICON_MDI_ALERT, matc.Params.size() );
+                ImGui::PopStyleColor();
+                if ( ImGui::Button( "Clear Param Overrides" ) )
+                    ClearPBRParamOverrides( entity );
+            }
         }
 
         ImGuiTreeNodeFlags materialsFlags = ImGuiTreeNodeFlags_Framed;
@@ -461,6 +493,7 @@ namespace Desert::Editor
                     meshComp.MaterialSlots.push_back( Common::UUID::Null() );
                 for ( size_t s = 0; s < meshComp.MaterialSlots.size(); ++s )
                     AssignMaterialFromPath( meshComp, s, path );
+                ClearPBRParamOverrides( entity ); // the explicit assignment must actually show
             }
             ImGui::EndDragDropTarget();
         }
@@ -517,6 +550,7 @@ namespace Desert::Editor
                                                 p->DataSize > 0 ? p->DataSize - 1 : 0 );
                         MakeSlotExplicit( meshComp, i );
                         AssignMaterialFromPath( meshComp, i, path );
+                        ClearPBRParamOverrides( entity ); // the explicit assignment must actually show
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -557,6 +591,7 @@ namespace Desert::Editor
                                 MakeSlotExplicit( meshComp, i );
                                 meshComp.MaterialSlots[i] = h;
                                 meshComp.RuntimeMaterialInstances.clear();
+                                ClearPBRParamOverrides( entity );
                             }
                         }
                     }
@@ -609,6 +644,7 @@ namespace Desert::Editor
                             {
                                 meshComp.MaterialSlots[i] = h;
                                 meshComp.RuntimeMaterialInstances.clear();
+                                ClearPBRParamOverrides( entity );
                             }
                         }
                     }

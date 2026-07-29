@@ -20,8 +20,13 @@ namespace Desert::Editor
     private:
         // overriddenByShader: non-empty when the entity's Shader Override component routes the
         // mesh off the PBR path — the slots are shown collapsed with a notice.
-        void RenderMaterialProperties( ECS::StaticMeshComponent& materialComp,
-                                       const std::string&        overriddenByShader );
+        void RenderMaterialProperties( ECS::Entity& entity, ECS::StaticMeshComponent& materialComp,
+                                       const std::string& overriddenByShader );
+
+        // Drops the PBR-channel MaterialComponent param overrides (script/legacy-scene channel) that
+        // MeshECSSystem re-applies over slot 0 every frame — called when the user EXPLICITLY assigns
+        // or creates a slot material, so the assignment actually shows.
+        static void ClearPBRParamOverrides( ECS::Entity& entity );
 
         // Unity-style shader picker inside the material (PBR (Standard) + Surface-domain DSL shaders).
         // Returns true when the shader changed (the runtime material must be rebuilt).

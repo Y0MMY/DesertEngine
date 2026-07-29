@@ -1062,19 +1062,22 @@ namespace Desert::Editor
                     const ImVec2 region    = ImGui::GetContentRegionAvail();
                     ImGui::InvisibleButton( "##DragDropTargetAssetPanelBody", region );
 
-                    // Click on the empty backdrop (tiles are drawn after and win hover) clears the selection —
-                    // this also folds the bottom preview pane away.
-                    if ( ImGui::IsItemClicked( ImGuiMouseButton_Left ) )
-                    {
-                        m_Selection.clear();
-                        m_CurrentSelected = nullptr;
-                    }
-
                     ImGui::SetCursorPos( cursorPos );
+
+                    // Tile-hover tracking for the empty-click deselect below: the ScrollY table is its own
+                    // child window, so a backdrop item in THIS window never sees hover — RenderFile flags
+                    // hovered tiles instead.
+                    m_TileHovered = false;
 
                     if ( ImGui::BeginTable( "BodyTable", columnCount, flags ) )
                     {
-                        // Mouse scroll implementation would go here
+                        // Grid: pin every column to the card's real width. SizingFixedFit alone sizes a
+                        // column to its CONTENT (icon/label), which can be narrower than the m_GridSize-wide
+                        // card RenderFile paints — neighbouring cards then overlapped horizontally.
+                        if ( !m_IsInListView )
+                            for ( int ci = 0; ci < columnCount; ++ci )
+                                ImGui::TableSetupColumn( nullptr, ImGuiTableColumnFlags_WidthFixed,
+                                                         m_GridSize + 4.0f );
 
                         m_GridItemsPerRow =
                              (int)floor( xAvail / ( m_GridSize + ImGui::GetStyle().ItemSpacing.x ) );
@@ -1158,6 +1161,16 @@ namespace Desert::Editor
                         ImGui::EndTable();
                     }
                     ImGui::PopStyleVar();
+
+                    // Left-click anywhere in the body that is NOT over a tile clears the selection (and
+                    // folds the preview pane). Hover is checked window-wide including the table's child.
+                    if ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && !m_TileHovered &&
+                         ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) )
+                    {
+                        m_Selection.clear();
+                        m_CurrentSelected = nullptr;
+                    }
+
                     ImGui::EndChild();
 
                     if ( previewH > 0.0f )
@@ -1942,6 +1955,8 @@ namespace Desert::Editor
             const ImVec2 cmax( cellLeft + cellW + 2.0f, ImGui::GetItemRectMax().y + 6.0f );
             const bool   sel   = IsSelected( entry );
             const bool   hover = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( cmin, cmax );
+            if ( hover )
+                m_TileHovered = true; // consumed by the empty-click deselect in the body loop
             const ImU32  bg    = sel     ? IM_COL32( 52, 92, 160, 150 )
                                  : hover ? IM_COL32( 255, 255, 255, 24 )
                                          : IM_COL32( 255, 255, 255, 10 );
@@ -1963,6 +1978,8 @@ namespace Desert::Editor
                 if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
                     doubleClicked = true;
             }
+            if ( ImGui::IsItemHovered() )
+                m_TileHovered = true;
             EmitAssetDragSource( *entry );
             DrawItemContextMenu( *entry );
         }

@@ -106,6 +106,10 @@ namespace Desert::Editor
         bool IsSelected( const DirectoryInformation* entry ) const;
         // Drag source with a thumbnail/big-icon preview (needs the thumbnail cache, hence a member).
         void EmitAssetDragSource( const DirectoryInformation& entry );
+
+        // True while any tile (card rect / list row) is hovered this frame — clicking elsewhere in the
+        // body clears the selection (the ScrollY table is a child window, so an item-based check can't work).
+        bool m_TileHovered = false;
         // Paths of the current multi-selection; falls back to m_CurrentSelected when empty.
         std::vector<std::string> SelectionPaths() const;
         // Cut/copy/paste of the current selection into the current directory.
