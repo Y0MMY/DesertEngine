@@ -72,26 +72,71 @@ namespace Desert::Editor
             {
                 if ( ImGui::CollapsingHeader( "Runtime Override", ImGuiTreeNodeFlags_DefaultOpen ) )
                 {
-                    ImGui::TextDisabled( "Per-entity tweak on '%s' (not a material asset).",
-                                         matc.ShaderName.empty() ? "PBR" : matc.ShaderName.c_str() );
-                    for ( auto& p : matc.Params )
+                    using W  = ::Desert::Core::Formats::ShaderParamWidget;
+                    using VT = ::Desert::Core::Formats::ShaderValueType;
+
+                    // Each param's type / widget / range is taken from the SHADER SCHEMA (its Properties
+                    // block) — the single source of truth — not inferred from the param name. Resolve the
+                    // override's shader (batched PBR when unset) and look each override up in its schema.
+                    const std::string shaderName =
+                         matc.ShaderName.empty() ? std::string( "StaticMeshPBR" ) : matc.ShaderName;
+                    auto*                                    shaderService = Runtime::ResourceRegistry::GetShaderService();
+                    auto                                     shader = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
+                    const ::Desert::Core::Formats::ShaderProgramMeta* schema =
+                         shader ? &shader->GetProgramMeta() : nullptr;
+
+                    ImGui::TextDisabled( "Per-entity tweak on '%s' (not a material asset).", shaderName.c_str() );
+
+                    for ( auto& op : matc.Params )
                     {
-                        const bool isColor  = p.Name.find( "Color" ) != std::string::npos ||
-                                             p.Name.find( "Tint" ) != std::string::npos;
-                        const bool isScalar = p.Name.find( "Factor" ) != std::string::npos ||
-                                              p.Name.find( "Intensity" ) != std::string::npos ||
-                                              p.Name.find( "Strength" ) != std::string::npos ||
-                                              p.Name.find( "Cutoff" ) != std::string::npos ||
-                                              p.Name.find( "IOR" ) != std::string::npos;
-                        ImGui::PushID( p.Name.c_str() );
-                        if ( isColor )
-                            ImGui::ColorEdit4( p.Name.c_str(), &p.Value.x, ImGuiColorEditFlags_NoInputs );
-                        else if ( isScalar )
-                            ImGui::DragFloat( p.Name.c_str(), &p.Value.x, 0.01f );
+                        const ::Desert::Core::Formats::ShaderParam* sp = nullptr;
+                        if ( schema )
+                            for ( const auto& q : schema->Params )
+                                if ( q.Name == op.Name )
+                                {
+                                    sp = &q;
+                                    break;
+                                }
+
+                        const char* label =
+                             ( sp && !sp->DisplayName.empty() ) ? sp->DisplayName.c_str() : op.Name.c_str();
+                        const std::string id = "##ro_" + op.Name;
+
+                        ImGui::PushID( op.Name.c_str() );
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::TextUnformatted( label );
+                        ImGui::SameLine();
+                        ImGui::PushItemWidth( -FLT_MIN );
+
+                        if ( sp && sp->Widget == W::Color )
+                        {
+                            if ( sp->Type == VT::Float3 )
+                                ImGui::ColorEdit3( id.c_str(), &op.Value.x );
+                            else
+                                ImGui::ColorEdit4( id.c_str(), &op.Value.x );
+                        }
                         else
-                            ImGui::DragFloat4( p.Name.c_str(), &p.Value.x, 0.01f );
+                        {
+                            const int comps = !sp                        ? 4
+                                              : ( sp->Type == VT::Float2 ) ? 2
+                                              : ( sp->Type == VT::Float3 ) ? 3
+                                              : ( sp->Type == VT::Float4 ) ? 4
+                                                                           : 1;
+                            if ( sp && sp->Min.has_value() && sp->Max.has_value() )
+                            {
+                                float mn = *sp->Min, mx = *sp->Max;
+                                ImGui::SliderScalarN( id.c_str(), ImGuiDataType_Float, &op.Value.x, comps, &mn,
+                                                      &mx );
+                            }
+                            else
+                            {
+                                ImGui::DragScalarN( id.c_str(), ImGuiDataType_Float, &op.Value.x, comps, 0.01f );
+                            }
+                        }
+                        ImGui::PopItemWidth();
                         ImGui::PopID();
                     }
+
                     for ( const auto& t : matc.Textures )
                         ImGui::BulletText( "Texture override: %s", t.Name.c_str() );
 
