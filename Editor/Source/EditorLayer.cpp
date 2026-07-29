@@ -58,6 +58,7 @@
 #include "Editor/Panels/Stubs/BuildSettingsPanel.hpp"
 #include "Editor/Panels/History/HistoryPanel.hpp"
 #include "Editor/Panels/Validation/SceneValidationPanel.hpp"
+#include "Editor/Panels/Animation/AnimLayersPanel.hpp"
 #include "Editor/Core/ToastManager.hpp"
 
 // 4. Misc
@@ -307,6 +308,8 @@ namespace Desert::Editor
         m_Panels.emplace_back(
              std::make_unique<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::SequencerPanel>( m_MainScene, m_AnimationLibrary.get() ) );
+        m_Panels.emplace_back(
+             std::make_unique<Editor::AnimLayersPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::BuildSettingsPanel>() );
 #endif // EBABLE_IMGUI
 

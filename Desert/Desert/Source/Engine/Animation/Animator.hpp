@@ -99,6 +99,19 @@ namespace Desert::Animation
         {
             return m_Layers.size();
         }
+        [[nodiscard]] float GetLayerWeight( int index ) const
+        {
+            return ( index >= 0 && index < static_cast<int>( m_Layers.size() ) ) ? m_Layers[index].Weight : 0.0f;
+        }
+        [[nodiscard]] bool GetLayerAdditive( int index ) const
+        {
+            return ( index >= 0 && index < static_cast<int>( m_Layers.size() ) ) && m_Layers[index].Additive;
+        }
+        [[nodiscard]] const AnimationClip* GetLayerClip( int index ) const
+        {
+            return ( index >= 0 && index < static_cast<int>( m_Layers.size() ) ) ? m_Layers[index].Playback.Clip
+                                                                                 : nullptr;
+        }
 
     private:
         struct ClipPlayback
