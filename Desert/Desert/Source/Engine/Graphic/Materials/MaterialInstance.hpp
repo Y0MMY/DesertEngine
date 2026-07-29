@@ -75,6 +75,14 @@ namespace Desert::Graphic
             return m_Properties;
         }
 
+        // Drops every instance override so the instance renders with the parent material's values
+        // again — the inverse of SetParamFromVec4 (exposed to scripts as clearMaterialParams()).
+        void ResetOverrides()
+        {
+            m_Properties.ResetToDefaults();
+            MarkNeedsApply();
+        }
+
         // GPU update
         void MarkNeedsApply()
         {

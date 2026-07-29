@@ -608,16 +608,12 @@ namespace Desert::Graphic::System
         // statics take the per-object path with m_StaticGBufferPipeline.
         const bool instancingOn = m_StaticInstancedPipeline && m_StaticInstancedMaterial &&
                                   m_StaticInstancedInstance && !m_Wireframe && !m_DeferredGeometry;
-        std::vector<glm::mat4>       instTransforms;
-        std::vector<PBRGpuMaterial> instMaterials;
-        struct InstancedDraw
-        {
-            Desert::StaticMesh* Mesh          = nullptr;
-            uint32_t            InstanceCount = 0;
-            uint32_t            FirstInstance = 0;
-            uint32_t            MaterialIndex = 0;
-        };
-        std::vector<InstancedDraw> instDraws;
+        auto& instTransforms = m_ScratchInstTransforms;
+        auto& instMaterials  = m_ScratchInstMaterials;
+        auto& instDraws      = m_ScratchInstDraws;
+        instTransforms.clear();
+        instMaterials.clear();
+        instDraws.clear();
 
         for ( auto& [mat, objects] : groups )
         {
@@ -627,42 +623,54 @@ namespace Desert::Graphic::System
             // Sub-group this material's objects by Mesh*; a sub-group of >= 2 identical meshes collapses into
             // one instanced draw. Singletons (and everything when instancing is off / wireframe) take the
             // classic per-object path below — which also preserves their individual material overrides.
-            std::vector<std::pair<Desert::StaticMesh*, std::vector<const StaticMeshRenderData*>>> byMesh;
-            const auto bucketFor =
-                 [&]( Desert::StaticMesh* mesh ) -> std::vector<const StaticMeshRenderData*>&
+            std::vector<std::pair<Desert::StaticMesh*, std::vector<ObjDraw>>> byMesh;
+            const auto bucketFor = [&]( Desert::StaticMesh* mesh ) -> std::vector<ObjDraw>&
             {
                 for ( auto& [m, v] : byMesh )
                     if ( m == mesh )
                         return v;
-                byMesh.emplace_back( mesh, std::vector<const StaticMeshRenderData*>{} );
+                byMesh.emplace_back( mesh, std::vector<ObjDraw>{} );
                 return byMesh.back().second;
             };
+
+            // The effective material is built ONCE per object here and reused for the glass split,
+            // the batch entry and the per-object SSBO (it used to be rebuilt up to three times).
             // Transparency split (per-object so instance-level Transmission overrides are honoured): a material
             // with Transmission > 0 is GLASS — skipped by every opaque pass (forward + deferred G-buffer) and
             // drawn ONLY by the glass pass (m_GlassPass), which composites forward over the scene with blending.
             for ( const auto* obj : objects )
             {
-                const bool objIsGlass =
-                     BuildEffectiveMaterial( mat, FirstPBRSlot( *obj->MaterialSlots ) ).GlassTint.a > 0.001f;
-                if ( objIsGlass != m_GlassPass )
+                ObjDraw od;
+                od.Obj  = obj;
+                od.Inst = FirstPBRSlot( *obj->MaterialSlots );
+                od.Gm   = BuildEffectiveMaterial( mat, od.Inst );
+                if ( ( od.Gm.GlassTint.a > 0.001f ) != m_GlassPass )
                     continue;
-                bucketFor( obj->Mesh ).push_back( obj );
+                if ( od.Inst )
+                    for ( const auto& [pname, prop] : od.Inst->GetPropertySet().GetProperties() )
+                        if ( prop.bIsOverridden )
+                        {
+                            od.HasOverrides = true;
+                            break;
+                        }
+                bucketFor( obj->Mesh ).push_back( od );
             }
 
-            std::vector<const StaticMeshRenderData*> singles;
+            auto& singles = m_ScratchSingles;
+            singles.clear();
             for ( auto& [mesh, bucket] : byMesh )
             {
-                // Objects with hidden submeshes can't share an instanced draw (the hidden mask is per-object,
-                // applied in RenderMesh) — force them onto the per-object path so the mask is honored.
-                std::vector<const StaticMeshRenderData*> batchable;
-                for ( const auto* obj : bucket )
+                // Per-object state a shared batch entry can't carry: hidden submeshes, the
+                // shadow-receive opt-out, and INSTANCE OVERRIDES — a batch shares one material
+                // entry, so an overridden instance in it would silently render with someone
+                // else's values. All of those take the per-object path.
+                std::vector<ObjDraw> batchable;
+                for ( auto& od : bucket )
                 {
-                    // Hidden submeshes and shadow-receive opt-outs are per-object state the shared
-                    // batch material can't carry — those objects take the per-object path.
-                    if ( obj->HiddenSubmeshes != 0 || !obj->ReceiveShadows )
-                        singles.push_back( obj );
+                    if ( od.Obj->HiddenSubmeshes != 0 || !od.Obj->ReceiveShadows || od.HasOverrides )
+                        singles.push_back( od );
                     else
-                        batchable.push_back( obj );
+                        batchable.push_back( od );
                 }
 
                 if ( instancingOn && batchable.size() >= 2 )
@@ -672,16 +680,17 @@ namespace Desert::Graphic::System
                     d.InstanceCount = static_cast<uint32_t>( batchable.size() );
                     d.FirstInstance = static_cast<uint32_t>( instTransforms.size() );
                     d.MaterialIndex = static_cast<uint32_t>( instMaterials.size() );
-                    for ( const auto* obj : batchable )
-                        instTransforms.push_back( obj->Transform );
-                    // v1: all instances of a batch share ONE material (the first object's effective material).
-                    instMaterials.push_back( BuildEffectiveMaterial( mat, FirstPBRSlot( *batchable[0]->MaterialSlots ) ) );
+                    for ( const auto& od : batchable )
+                        instTransforms.push_back( od.Obj->Transform );
+                    // No batchable object carries overrides (filtered above), so every instance of
+                    // the batch genuinely shares the parent material's effective values.
+                    instMaterials.push_back( batchable[0].Gm );
                     instDraws.push_back( d );
                 }
                 else
                 {
-                    for ( const auto* obj : batchable )
-                        singles.push_back( obj );
+                    for ( const auto& od : batchable )
+                        singles.push_back( od );
                 }
             }
 
@@ -690,14 +699,15 @@ namespace Desert::Graphic::System
 
             // ---- Classic per-object path (singletons / wireframe) ----
             // Fill this material's per-object storage buffer (one GpuMaterial per drawn object).
-            std::vector<PBRGpuMaterial> gpuMaterials;
+            auto& gpuMaterials = m_ScratchGpuMaterials;
+            gpuMaterials.clear();
             gpuMaterials.reserve( singles.size() );
-            for ( const auto* obj : singles )
+            for ( const auto& od : singles )
             {
-                PBRGpuMaterial gm = BuildEffectiveMaterial( mat, FirstPBRSlot( *obj->MaterialSlots ) );
+                PBRGpuMaterial gm = od.Gm;
                 // ExtraParams.w rides the per-mesh Receive Shadows toggle (1 = skip sun shadows);
                 // the batched path only ever carries receivers, so it stays 0 there.
-                gm.ExtraParams.w = obj->ReceiveShadows ? 0.0f : 1.0f;
+                gm.ExtraParams.w = od.Obj->ReceiveShadows ? 0.0f : 1.0f;
                 gpuMaterials.push_back( gm );
             }
 
@@ -711,7 +721,7 @@ namespace Desert::Graphic::System
             // constant), so it stays in the draw loop below.
             {
                 DESERT_PROFILE_SCOPE( "Mesh: SharedSceneSetup (1x/group)" );
-                MaterialInstance* anyInst = FirstPBRSlot( *singles[0]->MaterialSlots );
+                MaterialInstance* anyInst = singles[0].Inst;
                 StaticMaterialPBR::UpdateCamera( anyInst, camera );
                 StaticMaterialPBR::UpdateLights( anyInst, pointLights, spotLights, dirLights );
                 Image2D* cascadeMaps[kNumCascades];
@@ -725,8 +735,8 @@ namespace Desert::Graphic::System
 
             for ( uint32_t i = 0; i < static_cast<uint32_t>( singles.size() ); ++i )
             {
-                const auto*       obj  = singles[i];
-                MaterialInstance* inst = FirstPBRSlot( *obj->MaterialSlots );
+                const auto*       obj  = singles[i].Obj;
+                MaterialInstance* inst = singles[i].Inst;
 
                 {
                     // Per-object work: transform (push constant) + material index + descriptor bind.
@@ -1281,15 +1291,13 @@ namespace Desert::Graphic::System
 
                      // Pack all instanced-batch transforms contiguously; each batch reads its slice via
                      // firstInstance. Upload the SSBO ONCE (final size) before any instanced draw is recorded.
-                     std::vector<glm::mat4> instTransforms;
-                     struct ShadowBatch
-                     {
-                         Desert::StaticMesh* Mesh;
-                         uint32_t            Count;
-                         uint32_t            First;
-                     };
-                     std::vector<ShadowBatch>                  batches;
-                     std::vector<const StaticMeshRenderData*>  singles;
+                     // Scratch members: capacity persists across cascades/frames (4 refills per frame).
+                     auto& instTransforms = m_ScratchInstTransforms;
+                     auto& batches        = m_ScratchShadowBatches;
+                     auto& singles        = m_ScratchShadowSingles;
+                     instTransforms.clear();
+                     batches.clear();
+                     singles.clear();
                      for ( auto& [mesh, bucket] : byMesh )
                      {
                          if ( instancingOn && bucket.size() >= 2 )

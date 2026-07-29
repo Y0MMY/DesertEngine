@@ -321,6 +321,27 @@ namespace Desert::Scripting
                 return { 0.0f, 0.0f, 0.0f, 0.0f };
             }
 
+            // Undo every script-set param: clears the component channel (custom-shader state +
+            // unconsumed seeds) AND resets the slot-0 instance overrides, so the entity renders
+            // with its authored slot materials again.
+            void ClearMaterialParams()
+            {
+                if ( !Valid() )
+                    return;
+                if ( Reg().has<ECS::MaterialComponent>( handle ) )
+                {
+                    auto& mc = Reg().get<ECS::MaterialComponent>( handle );
+                    mc.Params.clear();
+                    mc.Textures.clear();
+                }
+                if ( Reg().has<ECS::StaticMeshComponent>( handle ) )
+                {
+                    auto& smc = Reg().get<ECS::StaticMeshComponent>( handle );
+                    if ( !smc.RuntimeMaterialInstances.empty() && smc.RuntimeMaterialInstances[0] )
+                        smc.RuntimeMaterialInstances[0]->ResetOverrides();
+                }
+            }
+
             // Assign a surface shader by name ("" -> back to the PBR slot materials). Same routing
             // as the editor's Shader Override section.
             void SetShader( const std::string& name )

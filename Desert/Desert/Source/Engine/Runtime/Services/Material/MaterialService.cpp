@@ -67,6 +67,7 @@ namespace Desert::Runtime
         // the command buffer (-> device lost).
         m_Graveyard.push_back( std::move( it->second ) );
         m_Materials.erase( it );
+        ++m_InvalidationVersion; // cached instance sets rebuild on their next system tick
     }
 
     void MaterialService::CollectGarbage()

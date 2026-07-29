@@ -324,5 +324,39 @@ namespace Desert::Graphic::System
         // fallbacks
         std::unique_ptr<Graphic::StaticMaterialPBR>  m_StaticMaterialFallback;
         std::unique_ptr<Graphic::SkinnedMaterialPBR> m_SkinnedMaterialFallback;
+
+        // ── Per-frame scratch (memory discipline: reuse, don't reallocate) ──────────────────
+        // Cleared each use; capacity persists across frames so the steady state allocates nothing.
+
+        // One draw-ready record per object: the effective material is built ONCE per object per
+        // frame and reused for the glass split, the batch entry and the per-object SSBO.
+        struct ObjDraw
+        {
+            const StaticMeshRenderData* Obj  = nullptr;
+            MaterialInstance*           Inst = nullptr;
+            PBRGpuMaterial              Gm{};
+            bool                        HasOverrides = false;
+        };
+        struct InstancedDraw
+        {
+            Desert::StaticMesh* Mesh          = nullptr;
+            uint32_t            InstanceCount = 0;
+            uint32_t            FirstInstance = 0;
+            uint32_t            MaterialIndex = 0;
+        };
+        struct ShadowBatch
+        {
+            Desert::StaticMesh* Mesh  = nullptr;
+            uint32_t            Count = 0;
+            uint32_t            First = 0;
+        };
+
+        std::vector<glm::mat4>      m_ScratchInstTransforms; // geometry + shadow instanced SSBOs
+        std::vector<PBRGpuMaterial> m_ScratchInstMaterials;
+        std::vector<InstancedDraw>  m_ScratchInstDraws;
+        std::vector<PBRGpuMaterial> m_ScratchGpuMaterials; // per-object Materials[] SSBO
+        std::vector<ObjDraw>        m_ScratchSingles;
+        std::vector<ShadowBatch>    m_ScratchShadowBatches;
+        std::vector<const StaticMeshRenderData*> m_ScratchShadowSingles;
     };
 } // namespace Desert::Graphic::System

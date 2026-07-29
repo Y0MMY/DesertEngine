@@ -38,6 +38,11 @@ namespace Desert::ECS
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
         {
+            // Frame-constant invalidation stamp: cached instance sets built against an older stamp
+            // rebuild below (their parent Material may have been graveyarded by Invalidate()).
+            const uint32_t materialsVersion =
+                 Runtime::ResourceRegistry::GetMaterialService()->GetInvalidationVersion();
+
             /* =========================
                STATIC MESHES
                ========================= */
@@ -84,21 +89,43 @@ namespace Desert::ECS
                              return;
 
                          // --- Auto-Initialize Material Slots ---
-                         // If the component has no materials assigned, try to fetch defaults from the asset
+                         // If the component has no materials assigned, try to fetch defaults from the asset.
+                         // ALL-OR-NOTHING: an external id that doesn't resolve yet (material registered
+                         // later than the mesh) leaves the slots EMPTY so this retries next frame —
+                         // pushing Null() handles would pass the empty() gate forever and freeze the
+                         // mesh on the fallback material.
                          if ( mesh.MaterialSlots.empty() && mesh.MeshHandle )
                          {
                              auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( mesh.MeshHandle );
                              if ( meshAsset )
                              {
                                  const auto& defaultHandles = meshAsset->GetMaterialHandles();
+                                 std::vector<Assets::AssetHandle> resolved;
+                                 resolved.reserve( defaultHandles.size() );
                                  for ( const auto& h : defaultHandles )
                                  {
-                                     // Resolve external handle to internal asset handle
-                                     mesh.MaterialSlots.push_back( 
-                                         Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal( h ) 
-                                     );
+                                     const auto internal =
+                                          Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal( h );
+                                     if ( internal.IsNull() )
+                                     {
+                                         resolved.clear();
+                                         break;
+                                     }
+                                     resolved.push_back( internal );
                                  }
+                                 if ( !resolved.empty() )
+                                     mesh.MaterialSlots = std::move( resolved );
                              }
+                         }
+
+                         // A MaterialService::Invalidate() this frame dropped some runtime Material —
+                         // rebuild every cached instance set (parents may be graveyarded). One uint
+                         // compare per entity; without it a stale RuntimeMaterialInstances would keep
+                         // a dangling GetParentMaterial() pointer past the next CollectGarbage().
+                         if ( mesh.SeenMaterialsVersion != materialsVersion )
+                         {
+                             mesh.RuntimeMaterialInstances.clear();
+                             mesh.SeenMaterialsVersion = materialsVersion;
                          }
 
                          // Ensure runtime material instances are initialized and match the slots
@@ -322,6 +349,13 @@ namespace Desert::ECS
                          if ( !targetMesh )
                              return;
 
+                         // Invalidation stamp (see the static path) — rebuild on any Invalidate().
+                         if ( ism.SeenMaterialsVersion != materialsVersion )
+                         {
+                             ism.RuntimeMaterialInstances.clear();
+                             ism.SeenMaterialsVersion = materialsVersion;
+                         }
+
                          // One PBR material instance (slot 0), rebuilt only when the slot set changes.
                          const size_t slotCount = ism.MaterialSlots.empty() ? 1 : ism.MaterialSlots.size();
                          if ( ism.RuntimeMaterialInstances.size() != slotCount )
@@ -394,6 +428,12 @@ namespace Desert::ECS
 
                          // One skinned PBR material instance (default if no slot assigned), rebuilt only when
                          // the slot set changes.
+                         // Invalidation stamp (see the static path) — rebuild on any Invalidate().
+                         if ( mesh.SeenMaterialsVersion != materialsVersion )
+                         {
+                             mesh.RuntimeMaterialInstances.clear();
+                             mesh.SeenMaterialsVersion = materialsVersion;
+                         }
                          const size_t slotCount = mesh.MaterialSlots.empty() ? 1 : mesh.MaterialSlots.size();
                          if ( mesh.RuntimeMaterialInstances.size() != slotCount )
                          {

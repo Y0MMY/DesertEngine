@@ -7,9 +7,10 @@ namespace Desert::Scripting
     void RegisterMaterialBindings( ScriptEngine::Impl& impl )
     {
         sol::table entity = impl.Lua["Entity"];
-        entity["setMaterialParam"] = &ScriptEntity::SetMaterialParam;
-        entity["getMaterialParam"] = &ScriptEntity::GetMaterialParam;
-        entity["setShader"]        = &ScriptEntity::SetShader;
-        entity["getShader"]        = &ScriptEntity::GetShader;
+        entity["setMaterialParam"]    = &ScriptEntity::SetMaterialParam;
+        entity["getMaterialParam"]    = &ScriptEntity::GetMaterialParam;
+        entity["clearMaterialParams"] = &ScriptEntity::ClearMaterialParams;
+        entity["setShader"]           = &ScriptEntity::SetShader;
+        entity["getShader"]           = &ScriptEntity::GetShader;
     }
 } // namespace Desert::Scripting

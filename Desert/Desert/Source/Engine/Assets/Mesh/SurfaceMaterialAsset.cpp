@@ -95,8 +95,11 @@ namespace Desert::Assets
         }
 
         // Nothing parsed — keep the editor usable with defaults; a re-save fixes the file.
-        LOG_WARN( "[SurfaceMaterialAsset] '{}' could not be parsed in any known format; using defaults",
-                  m_Metadata.Filepath.string() );
+        // ERROR (not warn) on purpose: the authored parameters are LOST for this session and a
+        // re-save makes that permanent — this must not scroll by silently.
+        LOG_ERROR( "[SurfaceMaterialAsset] '{}' is corrupted/unparseable — rendering with DEFAULTS; "
+                   "authored parameters are NOT applied and re-saving will overwrite the file.",
+                   m_Metadata.Filepath.string() );
         m_Data = MaterialData{};
         finalize();
         return BOOLSUCCESS;

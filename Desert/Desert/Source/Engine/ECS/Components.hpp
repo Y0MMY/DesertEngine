@@ -98,6 +98,9 @@ namespace Desert::ECS
         // Per-submesh visibility: bit i set = submesh i is HIDDEN (skipped at draw). 0 = all visible. Up to
         // 64 submeshes; edited per Element in the Materials panel.
         uint64_t                                  HiddenSubmeshes = 0;
+        // Transient: MaterialService invalidation stamp the runtime instances were built against;
+        // a mismatch forces a rebuild (see MeshECSSystem) so parent Material* can never dangle.
+        uint32_t                                  SeenMaterialsVersion = 0;
     };
 
     struct SkinnedMeshComponent
@@ -105,6 +108,7 @@ namespace Desert::ECS
         Assets::AssetHandle                       MeshHandle;
         std::vector<Assets::AssetHandle>          MaterialSlots;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+        uint32_t                                  SeenMaterialsVersion = 0; // see StaticMeshComponent
     };
 
     // UE-style Instanced Static Mesh: ONE mesh + ONE material drawn N times (per-instance world transforms)
@@ -123,6 +127,7 @@ namespace Desert::ECS
         std::shared_ptr<DynamicMesh>              RuntimeMesh;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances;
         bool                                      InstancesDirty = true;
+        uint32_t                                  SeenMaterialsVersion = 0; // see StaticMeshComponent
     };
 
     // A FOLIAGE type (UE5-style). Sits alongside an InstancedStaticMeshComponent (the mesh + per-instance

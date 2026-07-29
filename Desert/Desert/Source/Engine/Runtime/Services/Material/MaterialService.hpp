@@ -34,7 +34,17 @@ namespace Desert::Runtime
         // reference the dying descriptor pools. No-op (and free) when the graveyard is empty.
         void CollectGarbage();
 
+        // Monotonic stamp, bumped on every Invalidate(). Consumers that cache raw Material* /
+        // instances (the mesh components' RuntimeMaterialInstances) compare their stored stamp
+        // and rebuild when it moved — dangling parent pointers become impossible without any
+        // "remember to clear the instances" discipline at the Invalidate call sites.
+        uint32_t GetInvalidationVersion() const
+        {
+            return m_InvalidationVersion;
+        }
+
     private:
+        uint32_t m_InvalidationVersion = 0;
         mutable std::unordered_map<Assets::AssetHandle, std::shared_ptr<Graphic::Material>> m_Materials;
         std::unordered_map<Common::UUID, Assets::AssetHandle>                               m_ExternalToInternal;
         std::unordered_map<Assets::AssetHandle, std::shared_ptr<Assets::MaterialAsset>>     m_MaterialAssets;
