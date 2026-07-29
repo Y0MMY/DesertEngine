@@ -460,6 +460,37 @@ Shader "Sugar"
     EXPECT_EQ( fs.find( "Uniform(3)" ), std::string::npos );
 }
 
+TEST( DShaderParser, ParsesBlendFactorsAndStencil )
+{
+    const char* kSrc = R"(
+Shader "BS"
+{
+    State
+    {
+        Blend One OneMinusSrcAlpha
+        Stencil Equal 1 Keep Replace Keep
+    }
+    Vertex   { void main() { gl_Position = vec4(0.0); } }
+    Fragment { Out(0) vec4 o; void main() { o = vec4(1.0); } }
+}
+)";
+    auto res = DShaderParser::Parse( kSrc );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& s = res.GetValue().Meta.State;
+
+    ASSERT_TRUE( s.Blend.has_value() );
+    EXPECT_TRUE( *s.Blend );
+    ASSERT_TRUE( s.BlendSrc.has_value() );
+    ASSERT_TRUE( s.BlendDst.has_value() );
+    EXPECT_EQ( *s.BlendSrc, StateBlendFactor::One );
+    EXPECT_EQ( *s.BlendDst, StateBlendFactor::OneMinusSrcAlpha );
+
+    ASSERT_TRUE( s.StencilTest.value_or( false ) );
+    EXPECT_EQ( *s.StencilCompare, StateCompare::Equal );
+    EXPECT_EQ( *s.StencilRef, 1u );
+    EXPECT_EQ( *s.StencilPass, StateStencilOp::Replace );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

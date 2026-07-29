@@ -47,6 +47,72 @@ namespace Desert::Graphic
         }
         if ( state.Blend )
             spec.BlendEnable = *state.Blend;
+
+        const auto toBlendFactor = []( StateBlendFactor f )
+        {
+            switch ( f )
+            {
+                case StateBlendFactor::Zero:             return BlendFactor::Zero;
+                case StateBlendFactor::One:              return BlendFactor::One;
+                case StateBlendFactor::SrcColor:         return BlendFactor::SrcColor;
+                case StateBlendFactor::OneMinusSrcColor: return BlendFactor::OneMinusSrcColor;
+                case StateBlendFactor::DstColor:         return BlendFactor::DstColor;
+                case StateBlendFactor::OneMinusDstColor: return BlendFactor::OneMinusDstColor;
+                case StateBlendFactor::SrcAlpha:         return BlendFactor::SrcAlpha;
+                case StateBlendFactor::OneMinusSrcAlpha: return BlendFactor::OneMinusSrcAlpha;
+                case StateBlendFactor::DstAlpha:         return BlendFactor::DstAlpha;
+                case StateBlendFactor::OneMinusDstAlpha: return BlendFactor::OneMinusDstAlpha;
+            }
+            return BlendFactor::One;
+        };
+        if ( state.BlendSrc )
+            spec.SrcColorBlendFactor = toBlendFactor( *state.BlendSrc );
+        if ( state.BlendDst )
+            spec.DstColorBlendFactor = toBlendFactor( *state.BlendDst );
+
+        if ( state.StencilTest )
+        {
+            spec.StencilTestEnabled = *state.StencilTest;
+            const auto toStencilOp  = []( StateStencilOp o )
+            {
+                switch ( o )
+                {
+                    case StateStencilOp::Keep:           return StencilOp::Keep;
+                    case StateStencilOp::Zero:           return StencilOp::Zero;
+                    case StateStencilOp::Replace:        return StencilOp::Replace;
+                    case StateStencilOp::IncrementClamp: return StencilOp::IncrementAndClamp;
+                    case StateStencilOp::DecrementClamp: return StencilOp::DecrementAndClamp;
+                    case StateStencilOp::Invert:         return StencilOp::Invert;
+                    case StateStencilOp::IncrementWrap:  return StencilOp::IncrementAndWrap;
+                    case StateStencilOp::DecrementWrap:  return StencilOp::DecrementAndWrap;
+                }
+                return StencilOp::Keep;
+            };
+            const auto toCompare = []( StateCompare c )
+            {
+                switch ( c )
+                {
+                    case StateCompare::Never:          return CompareOp::Never;
+                    case StateCompare::Less:           return CompareOp::Less;
+                    case StateCompare::Equal:          return CompareOp::Equal;
+                    case StateCompare::LessOrEqual:    return CompareOp::LessOrEqual;
+                    case StateCompare::Greater:        return CompareOp::Greater;
+                    case StateCompare::NotEqual:       return CompareOp::NotEqual;
+                    case StateCompare::GreaterOrEqual: return CompareOp::GreaterOrEqual;
+                    case StateCompare::Always:         return CompareOp::Always;
+                }
+                return CompareOp::Always;
+            };
+            StencilOpState os;
+            os.CompareOp   = state.StencilCompare ? toCompare( *state.StencilCompare ) : CompareOp::Always;
+            os.FailOp      = state.StencilFail ? toStencilOp( *state.StencilFail ) : StencilOp::Keep;
+            os.PassOp      = state.StencilPass ? toStencilOp( *state.StencilPass ) : StencilOp::Replace;
+            os.DepthFailOp = state.StencilDepthFail ? toStencilOp( *state.StencilDepthFail ) : StencilOp::Keep;
+            os.Reference   = state.StencilRef.value_or( 1u );
+            spec.StencilFront = os;
+            spec.StencilBack  = os;
+        }
+
         if ( state.Topology )
         {
             switch ( *state.Topology )
@@ -115,6 +181,10 @@ namespace Desert::Graphic
             int         Topology      = 0;
             int         Polygon       = 0;
             uint32_t    PatchPoints   = 0;
+            int         BlendSrc      = 0;
+            int         BlendDst      = 0;
+            int         StencilState  = 0; // packed compare + fail/pass/depthfail ops
+            uint32_t    StencilRef    = 0;
 
             bool operator==( const Key& ) const = default;
         };
@@ -139,6 +209,10 @@ namespace Desert::Graphic
                 mix( static_cast<size_t>( k.Topology ) );
                 mix( static_cast<size_t>( k.Polygon ) );
                 mix( static_cast<size_t>( k.PatchPoints ) );
+                mix( static_cast<size_t>( k.BlendSrc ) );
+                mix( static_cast<size_t>( k.BlendDst ) );
+                mix( static_cast<size_t>( k.StencilState ) );
+                mix( static_cast<size_t>( k.StencilRef ) );
                 return h;
             }
         };
@@ -158,6 +232,16 @@ namespace Desert::Graphic
             k.Topology     = static_cast<int>( s.Topology );
             k.Polygon      = static_cast<int>( s.PolygonMode );
             k.PatchPoints  = s.PatchControlPoints;
+            k.BlendSrc     = s.BlendEnable ? static_cast<int>( s.SrcColorBlendFactor ) : 0;
+            k.BlendDst     = s.BlendEnable ? static_cast<int>( s.DstColorBlendFactor ) : 0;
+            if ( s.StencilTestEnabled )
+            {
+                k.StencilState = static_cast<int>( s.StencilFront.CompareOp ) |
+                                 ( static_cast<int>( s.StencilFront.FailOp ) << 4 ) |
+                                 ( static_cast<int>( s.StencilFront.PassOp ) << 8 ) |
+                                 ( static_cast<int>( s.StencilFront.DepthFailOp ) << 12 );
+                k.StencilRef = s.StencilFront.Reference;
+            }
             return k;
         }
 

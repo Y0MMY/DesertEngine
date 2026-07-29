@@ -58,6 +58,15 @@ namespace Desert::Core::Formats
     enum class StateCull : uint8_t  { None, Front, Back, FrontAndBack };
     enum class StateCompare : uint8_t { Never, Less, Equal, LessOrEqual, Greater, NotEqual, GreaterOrEqual, Always };
     enum class StateTopology : uint8_t { Triangles, Lines, Points, Patches };
+    enum class StateBlendFactor : uint8_t
+    {
+        Zero, One, SrcColor, OneMinusSrcColor, DstColor, OneMinusDstColor,
+        SrcAlpha, OneMinusSrcAlpha, DstAlpha, OneMinusDstAlpha
+    };
+    enum class StateStencilOp : uint8_t
+    {
+        Keep, Zero, Replace, IncrementClamp, DecrementClamp, Invert, IncrementWrap, DecrementWrap
+    };
 
     struct ShaderRenderState
     {
@@ -68,6 +77,20 @@ namespace Desert::Core::Formats
         std::optional<bool>          Blend;
         std::optional<StateTopology> Topology;
         std::optional<uint32_t>      PatchControlPoints; // only meaningful for Patches topology
+
+        // Custom blend factors (only meaningful when Blend is on). Both set => custom; otherwise the
+        // renderer's standard src-alpha / one-minus-src-alpha blend. DSL: `Blend SrcAlpha OneMinusSrcAlpha`.
+        std::optional<StateBlendFactor> BlendSrc;
+        std::optional<StateBlendFactor> BlendDst;
+
+        // Stencil test. DSL: `Stencil <compare> <ref> [<fail> <pass> <depthFail>]`
+        // (default ops Keep/Replace/Keep; read/write masks 0xFF). std::nullopt = no stencil (default).
+        std::optional<bool>           StencilTest;
+        std::optional<StateCompare>   StencilCompare;
+        std::optional<uint32_t>       StencilRef;
+        std::optional<StateStencilOp> StencilFail;
+        std::optional<StateStencilOp> StencilPass;
+        std::optional<StateStencilOp> StencilDepthFail;
     };
 
     // Where a shader may be used (mirrors UE's Material Domain). Drives the editor's material shader

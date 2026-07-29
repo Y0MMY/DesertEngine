@@ -63,6 +63,24 @@ namespace Desert::Graphic::API::Vulkan
             }
         }
 
+        static VkBlendFactor ConvertBlendFactor( BlendFactor f )
+        {
+            switch ( f )
+            {
+                case BlendFactor::Zero:             return VK_BLEND_FACTOR_ZERO;
+                case BlendFactor::One:              return VK_BLEND_FACTOR_ONE;
+                case BlendFactor::SrcColor:         return VK_BLEND_FACTOR_SRC_COLOR;
+                case BlendFactor::OneMinusSrcColor: return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+                case BlendFactor::DstColor:         return VK_BLEND_FACTOR_DST_COLOR;
+                case BlendFactor::OneMinusDstColor: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+                case BlendFactor::SrcAlpha:         return VK_BLEND_FACTOR_SRC_ALPHA;
+                case BlendFactor::OneMinusSrcAlpha: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                case BlendFactor::DstAlpha:         return VK_BLEND_FACTOR_DST_ALPHA;
+                case BlendFactor::OneMinusDstAlpha: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+                default:                            return VK_BLEND_FACTOR_ONE;
+            }
+        }
+
         static VkCullModeFlags ConvertCullMode( CullMode mode )
         {
             switch ( mode )
@@ -302,14 +320,16 @@ namespace Desert::Graphic::API::Vulkan
         uint32_t colorAttachmentCount =
              m_Specification.Framebuffer ? m_Specification.Framebuffer->GetColorAttachmentCount() : 1;
 
-        const VkBool32 blend = m_Specification.BlendEnable ? VK_TRUE : VK_FALSE;
+        const VkBool32       blend  = m_Specification.BlendEnable ? VK_TRUE : VK_FALSE;
+        const VkBlendFactor  srcCol = ConvertBlendFactor( m_Specification.SrcColorBlendFactor );
+        const VkBlendFactor  dstCol = ConvertBlendFactor( m_Specification.DstColorBlendFactor );
 
         m_ColorBlendAttachments.resize( colorAttachmentCount );
         for ( auto& attachment : m_ColorBlendAttachments )
         {
             attachment = { .blendEnable         = blend,
-                           .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-                           .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                           .srcColorBlendFactor = srcCol,
+                           .dstColorBlendFactor = dstCol,
                            .colorBlendOp        = VK_BLEND_OP_ADD,
                            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
                            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,

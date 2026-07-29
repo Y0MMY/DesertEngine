@@ -543,8 +543,109 @@ namespace Desert::Core::Preprocess
                 }
                 else if ( cmd == "blend" )
                 {
+                    // `Blend Off | On | Alpha` OR custom factors `Blend <src> <dst>` (e.g.
+                    // `Blend SrcAlpha OneMinusSrcAlpha`, `Blend One One` for additive).
+                    const auto factor = []( const std::string& v ) -> std::optional<StateBlendFactor> {
+                        if ( v == "zero" )             return StateBlendFactor::Zero;
+                        if ( v == "one" )              return StateBlendFactor::One;
+                        if ( v == "srccolor" )         return StateBlendFactor::SrcColor;
+                        if ( v == "oneminussrccolor" ) return StateBlendFactor::OneMinusSrcColor;
+                        if ( v == "dstcolor" )         return StateBlendFactor::DstColor;
+                        if ( v == "oneminusdstcolor" ) return StateBlendFactor::OneMinusDstColor;
+                        if ( v == "srcalpha" )         return StateBlendFactor::SrcAlpha;
+                        if ( v == "oneminussrcalpha" ) return StateBlendFactor::OneMinusSrcAlpha;
+                        if ( v == "dstalpha" )         return StateBlendFactor::DstAlpha;
+                        if ( v == "oneminusdstalpha" ) return StateBlendFactor::OneMinusDstAlpha;
+                        return std::nullopt;
+                    };
                     const std::string v = Lower( ReadIdent( c ) );
-                    state.Blend         = ( v == "on" || v == "alpha" || v == "true" );
+                    if ( v == "off" || v == "false" )
+                        state.Blend = false;
+                    else if ( v == "on" || v == "alpha" || v == "true" )
+                        state.Blend = true;
+                    else if ( auto src = factor( v ) )
+                    {
+                        const std::string d   = Lower( ReadIdent( c ) );
+                        auto              dst = factor( d );
+                        if ( !dst )
+                        {
+                            err = { line, "unknown Blend dst factor '" + d + "'" };
+                            return false;
+                        }
+                        state.Blend    = true;
+                        state.BlendSrc = *src;
+                        state.BlendDst = *dst;
+                    }
+                    else
+                    {
+                        err = { line, "unknown Blend value '" + v + "'" };
+                        return false;
+                    }
+                }
+                else if ( cmd == "stencil" )
+                {
+                    // `Stencil <compare> <ref> [<fail> <pass> <depthFail>]`. Ops default Keep/Replace/Keep
+                    // (write the ref where the test passes — the outline-mask idiom).
+                    const auto compare = []( const std::string& v ) -> std::optional<StateCompare> {
+                        if ( v == "never" )                        return StateCompare::Never;
+                        if ( v == "less" )                         return StateCompare::Less;
+                        if ( v == "equal" )                        return StateCompare::Equal;
+                        if ( v == "lequal" || v == "lessorequal" ) return StateCompare::LessOrEqual;
+                        if ( v == "greater" )                      return StateCompare::Greater;
+                        if ( v == "notequal" )                     return StateCompare::NotEqual;
+                        if ( v == "gequal" || v == "greaterorequal" ) return StateCompare::GreaterOrEqual;
+                        if ( v == "always" )                       return StateCompare::Always;
+                        return std::nullopt;
+                    };
+                    const auto stencilOp = []( const std::string& v ) -> std::optional<StateStencilOp> {
+                        if ( v == "keep" )    return StateStencilOp::Keep;
+                        if ( v == "zero" )    return StateStencilOp::Zero;
+                        if ( v == "replace" ) return StateStencilOp::Replace;
+                        if ( v == "incrclamp" || v == "incrementclamp" ) return StateStencilOp::IncrementClamp;
+                        if ( v == "decrclamp" || v == "decrementclamp" ) return StateStencilOp::DecrementClamp;
+                        if ( v == "invert" )  return StateStencilOp::Invert;
+                        if ( v == "incrwrap" || v == "incrementwrap" ) return StateStencilOp::IncrementWrap;
+                        if ( v == "decrwrap" || v == "decrementwrap" ) return StateStencilOp::DecrementWrap;
+                        return std::nullopt;
+                    };
+
+                    const std::string cmpS = Lower( ReadIdent( c ) );
+                    auto              cmp  = compare( cmpS );
+                    if ( !cmp )
+                    {
+                        err = { line, "unknown Stencil compare '" + cmpS + "'" };
+                        return false;
+                    }
+                    float ref = 0;
+                    if ( !ReadNumber( c, ref, err ) )
+                        return false;
+
+                    state.StencilTest    = true;
+                    state.StencilCompare = cmp;
+                    state.StencilRef     = static_cast<uint32_t>( ref );
+
+                    // Optional 3 ops: peek — if the next ident is a stencil op, consume fail/pass/depthFail
+                    // (Cursor has a reference member so it isn't assignable; rewind via Pos/Line).
+                    const size_t   savePos  = c.Pos;
+                    const uint32_t saveLine = c.Line;
+                    if ( stencilOp( Lower( ReadIdent( c ) ) ) )
+                    {
+                        c.Pos                  = savePos;
+                        c.Line                 = saveLine;
+                        state.StencilFail      = stencilOp( Lower( ReadIdent( c ) ) );
+                        state.StencilPass      = stencilOp( Lower( ReadIdent( c ) ) );
+                        state.StencilDepthFail = stencilOp( Lower( ReadIdent( c ) ) );
+                        if ( !state.StencilFail || !state.StencilPass || !state.StencilDepthFail )
+                        {
+                            err = { line, "Stencil expects 3 ops (fail pass depthFail) when any is given" };
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        c.Pos  = savePos; // not ops -> leave for the next State command
+                        c.Line = saveLine;
+                    }
                 }
                 else if ( cmd == "topology" )
                 {
@@ -645,10 +746,23 @@ namespace Desert::Core::Preprocess
                 out.DepthCompare = over.DepthCompare;
             if ( over.Blend )
                 out.Blend = over.Blend;
+            if ( over.BlendSrc )
+                out.BlendSrc = over.BlendSrc;
+            if ( over.BlendDst )
+                out.BlendDst = over.BlendDst;
             if ( over.Topology )
                 out.Topology = over.Topology;
             if ( over.PatchControlPoints )
                 out.PatchControlPoints = over.PatchControlPoints;
+            if ( over.StencilTest )
+            {
+                out.StencilTest      = over.StencilTest;
+                out.StencilCompare   = over.StencilCompare;
+                out.StencilRef       = over.StencilRef;
+                out.StencilFail      = over.StencilFail;
+                out.StencilPass      = over.StencilPass;
+                out.StencilDepthFail = over.StencilDepthFail;
+            }
             return out;
         }
 

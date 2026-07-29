@@ -53,15 +53,21 @@ namespace Desert::Graphic
         None = 0, Front, Back, FrontAndBack
     };
 
+    enum class BlendFactor
+    {
+        Zero = 0, One, SrcColor, OneMinusSrcColor, DstColor, OneMinusDstColor,
+        SrcAlpha, OneMinusSrcAlpha, DstAlpha, OneMinusDstAlpha
+    };
+
     struct StencilOpState
     {
-        StencilOp FailOp;
-        StencilOp PassOp;
-        StencilOp DepthFailOp;
-        CompareOp CompareOp;
-        uint32_t  CompareMask;
-        uint32_t  WriteMask;
-        uint32_t  Reference;
+        StencilOp FailOp      = StencilOp::Keep;
+        StencilOp PassOp      = StencilOp::Keep;
+        StencilOp DepthFailOp = StencilOp::Keep;
+        CompareOp CompareOp   = CompareOp::Always;
+        uint32_t  CompareMask = 0xFF;
+        uint32_t  WriteMask   = 0xFF;
+        uint32_t  Reference   = 0;
     };
 
     enum class PrimitiveTopology
@@ -111,6 +117,10 @@ namespace Desert::Graphic
         bool           DepthWriteEnabled = true;
         // Standard src-alpha / one-minus-src-alpha blending (transparency overlays, e.g. the scene grid).
         bool           BlendEnable       = false;
+        // Color blend factors used when BlendEnable is on. Defaults reproduce the previous hardcoded alpha
+        // blend, so shaders that don't declare custom factors render identically. Alpha channel mirrors these.
+        BlendFactor    SrcColorBlendFactor = BlendFactor::SrcAlpha;
+        BlendFactor    DstColorBlendFactor = BlendFactor::OneMinusSrcAlpha;
 
         // Build the pipeline against the target framebuffer's LOAD render pass instead of the CLEAR one, so
         // the pass can be begun with clearFrame=false (preserve existing content) without a render-pass
