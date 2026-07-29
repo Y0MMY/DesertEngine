@@ -413,6 +413,9 @@ namespace Desert::Editor
             m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y,
                                           m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y );
 
+        // Corner XYZ orientation triad — always shown so the world axes are readable at a glance.
+        DrawViewAxisGizmo( m_ViewportData.ViewportPos, m_ViewportData.Size );
+
         // Perf HUD (View -> Perf HUD): FPS + frame graph + top CPU scopes, useful in Play too.
         if ( EditorPreferences::Get().ShowPerfHud )
             m_PerfHud.Draw( viewportMin, viewportMax );
@@ -434,6 +437,74 @@ namespace Desert::Editor
     std::pair<float, float> ViewportPanel::GetMouseViewportSpace() const
     {
         return { m_ViewportData.MousePosition.x, m_ViewportData.MousePosition.y };
+    }
+
+    void ViewportPanel::DrawViewAxisGizmo( const glm::vec2& viewportPos, const glm::vec2& viewportSize )
+    {
+        const auto camera = m_Scene->GetMainCamera().lock();
+        if ( !camera )
+            return;
+
+        // Rotation-only part of the view matrix maps world directions into view space (x=right, y=up,
+        // z=toward-viewer). We only need orientation, so drop translation.
+        const glm::mat3 viewRot = glm::mat3( camera->GetViewMatrix() );
+
+        const float  radius = 34.0f;
+        const ImVec2 center( viewportPos.x + viewportSize.x - radius - 18.0f, viewportPos.y + radius + 18.0f );
+        ImDrawList*  dl = ::ImGui::GetWindowDrawList();
+
+        struct Axis
+        {
+            glm::vec3   Dir;
+            ImU32       Color;
+            const char* Label;
+        };
+        const Axis axes[3] = {
+            { { 1.0f, 0.0f, 0.0f }, IM_COL32( 232, 88, 88, 255 ), "X" },
+            { { 0.0f, 1.0f, 0.0f }, IM_COL32( 120, 208, 96, 255 ), "Y" },
+            { { 0.0f, 0.0f, 1.0f }, IM_COL32( 92, 152, 240, 255 ), "Z" },
+        };
+
+        // One drawable tip per axis END (+ and -). Sort back-to-front by view-space depth so the nearer
+        // axis ends overpaint the farther ones (a readable 3D triad instead of flat crossing lines).
+        struct Tip
+        {
+            ImVec2      Pos;
+            float       Depth;
+            ImU32       Color;
+            bool        Positive;
+            const char* Label;
+        };
+        std::array<Tip, 6> tips;
+        int                n = 0;
+        for ( const Axis& a : axes )
+            for ( float s : { 1.0f, -1.0f } )
+            {
+                const glm::vec3 v = viewRot * ( a.Dir * s );
+                tips[n++]         = Tip{ ImVec2( center.x + v.x * radius, center.y - v.y * radius ), v.z, a.Color,
+                                 s > 0.0f, a.Label };
+            }
+        std::sort( tips.begin(), tips.end(), []( const Tip& l, const Tip& r ) { return l.Depth < r.Depth; } );
+
+        dl->AddCircleFilled( center, radius + 8.0f, IM_COL32( 20, 20, 24, 130 ) );
+        for ( int i = 0; i < n; ++i )
+        {
+            const Tip& t = tips[i];
+            if ( t.Positive )
+            {
+                dl->AddLine( center, t.Pos, t.Color, 2.0f );
+                dl->AddCircleFilled( t.Pos, 8.0f, t.Color );
+                const ImVec2 ts = ::ImGui::CalcTextSize( t.Label );
+                dl->AddText( ImVec2( t.Pos.x - ts.x * 0.5f, t.Pos.y - ts.y * 0.5f ), IM_COL32( 15, 15, 18, 255 ),
+                             t.Label );
+            }
+            else
+            {
+                // Negative ends: hollow dot, no label — reads as "the back of the axis".
+                dl->AddCircleFilled( t.Pos, 6.0f, IM_COL32( 40, 40, 46, 200 ) );
+                dl->AddCircle( t.Pos, 6.0f, t.Color, 0, 1.6f );
+            }
+        }
     }
 
     void ViewportPanel::OnEvent( Common::Event& e )
