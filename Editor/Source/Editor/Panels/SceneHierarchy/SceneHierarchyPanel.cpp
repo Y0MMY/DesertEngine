@@ -4,6 +4,9 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
+#include <Engine/Geometry/DynamicMesh.hpp>
+
+#include <cmath>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Core/EditorResources.hpp>
@@ -480,6 +483,72 @@ namespace Desert::Editor
                              glm::normalize( glm::vec3( -0.6f, -1.0f, -0.2f ) );
                     }
 
+                    Commands::NotifyCreated( created );
+                }
+
+                if ( ImGui::Selectable( "LOD Test Grid (HD spheres)" ) )
+                {
+                    // One high-poly sphere (with a LOD chain) shared by a row of entities receding from
+                    // the camera — pull back and the far ones simplify. Toggle Scene Settings > Debug >
+                    // "Mesh LOD (auto)". LOD0 (near) is identical geometry.
+                    constexpr uint32_t sectors = 96, stacks = 48;
+                    constexpr float    radius  = 0.5f;
+
+                    std::vector<::Desert::Vertex> verts;
+                    std::vector<::Desert::Index>  inds;
+                    for ( uint32_t i = 0; i <= stacks; ++i )
+                    {
+                        const float phi = glm::pi<float>() * float( i ) / float( stacks );
+                        const float sp = std::sin( phi ), cp = std::cos( phi );
+                        for ( uint32_t j = 0; j <= sectors; ++j )
+                        {
+                            const float     th = glm::two_pi<float>() * float( j ) / float( sectors );
+                            const float     st = std::sin( th ), ct = std::cos( th );
+                            const glm::vec3 n = { sp * ct, cp, sp * st };
+                            const glm::vec3 tg = { -st, 0.0f, ct };
+                            verts.push_back( { n * radius, n, tg, glm::cross( n, tg ),
+                                               { float( j ) / sectors, float( i ) / stacks } } );
+                        }
+                    }
+                    const uint32_t stride = sectors + 1;
+                    for ( uint32_t i = 0; i < stacks; ++i )
+                        for ( uint32_t j = 0; j < sectors; ++j )
+                        {
+                            const uint32_t a = i * stride + j, b = a + stride;
+                            inds.push_back( { a, a + 1, b } );
+                            inds.push_back( { a + 1, b + 1, b } );
+                        }
+                    Common::Math::AABB aabb;
+                    aabb.Min = glm::vec3( -radius );
+                    aabb.Max = glm::vec3( radius );
+                    std::vector<::Desert::Submesh> subs = { { "Sphere", 0, uint32_t( verts.size() ), 0,
+                                                             uint32_t( inds.size() ) * 3, glm::mat4( 1.0f ),
+                                                             aabb } };
+
+                    auto sphere = std::make_shared<DynamicMesh>( verts, inds, subs, /*generateLODs*/ true );
+                    sphere->Invalidate(); // build GPU buffers (base + LOD indices)
+
+                    std::vector<Common::UUID> created;
+                    for ( int k = 0; k < 8; ++k )
+                    {
+                        auto e = scene->CreateNewEntity( "LOD_Sphere_" + std::to_string( k ) );
+                        created.push_back( e.GetComponent<ECS::UUIDComponent>().UUID );
+                        e.AddComponent<ECS::StaticMeshComponent>().RuntimeMesh = sphere;
+                        auto& tf       = e.GetComponent<ECS::TransformComponent>();
+                        tf.Translation = { float( k ) * 4.0f - 8.0f, 1.0f, -float( k ) * 10.0f };
+                        auto& mc       = e.AddComponent<ECS::MaterialComponent>();
+                        mc.ShaderName  = "StaticMeshPBR";
+                        mc.Params.push_back(
+                             ECS::MaterialParamOverride{ "AlbedoColor", glm::vec4( 0.70f, 0.75f, 0.85f, 1.0f ) } );
+                    }
+                    if ( scene->GetRegistry().view<ECS::DirectionLightComponent>().size() == 0 )
+                    {
+                        auto sun = scene->CreateNewEntity( "LOD_Sun" );
+                        created.push_back( sun.GetComponent<ECS::UUIDComponent>().UUID );
+                        sun.AddComponent<ECS::DirectionLightComponent>();
+                        sun.GetComponent<ECS::TransformComponent>().Translation =
+                             glm::normalize( glm::vec3( -0.4f, -1.0f, -0.5f ) );
+                    }
                     Commands::NotifyCreated( created );
                 }
 

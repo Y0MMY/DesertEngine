@@ -1,5 +1,7 @@
 #include "DynamicMesh.hpp"
 
+#include "MeshLOD.hpp"
+
 namespace Desert
 {
     Common::BoolResultWithCodes<Desert::MeshError> DynamicMesh::Invalidate()
@@ -10,7 +12,19 @@ namespace Desert
 
         if ( !m_Indices.empty() )
         {
-            m_IndexBuffer = Graphic::IndexBuffer::Create( m_Indices.data(), m_Indices.size() * sizeof( Index ) );
+            // With LODs, upload base + appended LOD indices (fills each submesh's LOD ranges) while
+            // GetIndices() stays the base geometry; otherwise upload the base indices as-is.
+            if ( m_GenerateLODs )
+            {
+                const std::vector<Index> gpu =
+                     Geometry::BuildLODIndexBuffer( m_Vertices, m_Indices, m_Submeshes );
+                m_IndexBuffer = Graphic::IndexBuffer::Create( gpu.data(), gpu.size() * sizeof( Index ) );
+            }
+            else
+            {
+                m_IndexBuffer =
+                     Graphic::IndexBuffer::Create( m_Indices.data(), m_Indices.size() * sizeof( Index ) );
+            }
             m_IndexBuffer->RT_Invalidate();
         }
         else
