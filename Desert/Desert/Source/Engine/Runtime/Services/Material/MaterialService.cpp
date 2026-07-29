@@ -1,5 +1,6 @@
 #include "MaterialService.hpp"
 
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 
@@ -39,18 +40,72 @@ namespace Desert::Runtime
 
     Graphic::Material* MaterialService::Get( const Assets::AssetHandle& handle ) const
     {
-        if ( auto it = m_Materials.find( handle ); it != m_Materials.end() )
+        // Material-instance assets resolve through the parent chain to the BASE material: an
+        // instance never builds a runtime Material of its own (its overrides live on the
+        // per-entity MaterialInstance, see CreateRuntimeInstance). Depth-capped cycle guard.
+        Assets::AssetHandle current = handle;
+        for ( int depth = 0; depth < 8; ++depth )
+        {
+            if ( auto ait = m_MaterialAssets.find( current ); ait != m_MaterialAssets.end() )
+            {
+                if ( auto* surf = dynamic_cast<Assets::SurfaceMaterialAsset*>( ait->second.get() );
+                     surf && surf->Data().IsInstance() )
+                {
+                    const auto parent = GetAssetHandleByExternal( *surf->Data().ParentMaterialId );
+                    if ( parent.IsNull() || parent == current )
+                        return nullptr;
+                    current = parent;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        if ( auto it = m_Materials.find( current ); it != m_Materials.end() )
             return it->second.get();
 
         // Lazy build: a shell was registered but the runtime material (with its bound textures) isn't built.
-        if ( auto ait = m_MaterialAssets.find( handle ); ait != m_MaterialAssets.end() )
+        if ( auto ait = m_MaterialAssets.find( current ); ait != m_MaterialAssets.end() )
         {
-            auto material       = Graphic::MaterialFactory::CreateMaterial( ait->second.get() );
-            auto* raw           = material.get();
-            m_Materials[handle] = std::move( material );
+            auto material        = Graphic::MaterialFactory::CreateMaterial( ait->second.get() );
+            auto* raw            = material.get();
+            m_Materials[current] = std::move( material );
             return raw;
         }
         return nullptr;
+    }
+
+    Graphic::MaterialInstancePtr MaterialService::CreateRuntimeInstance( const Assets::AssetHandle& handle ) const
+    {
+        // Collect the instance chain child -> base (depth-capped cycle guard), then create one
+        // runtime instance of the base material and apply overrides base-first so the NEAREST
+        // (childmost) override wins.
+        std::vector<const Assets::SurfaceMaterialAsset*> chain;
+        Assets::AssetHandle                              current = handle;
+        for ( int depth = 0; depth < 8; ++depth )
+        {
+            auto ait = m_MaterialAssets.find( current );
+            if ( ait == m_MaterialAssets.end() )
+                break;
+            auto* surf = dynamic_cast<Assets::SurfaceMaterialAsset*>( ait->second.get() );
+            if ( !surf || !surf->Data().IsInstance() )
+                break;
+            chain.push_back( surf );
+            const auto parent = GetAssetHandleByExternal( *surf->Data().ParentMaterialId );
+            if ( parent.IsNull() || parent == current )
+                break;
+            current = parent;
+        }
+
+        auto* base = Get( current );
+        if ( !base )
+            return nullptr;
+
+        auto instance = base->CreateInstance();
+        for ( auto it = chain.rbegin(); it != chain.rend(); ++it )
+            for ( const auto& p : ( *it )->Data().Params )
+                instance->SetParamFromVec4( p.Name, p.Value );
+        return instance;
     }
 
     void MaterialService::Clear()
@@ -94,12 +149,18 @@ namespace Desert::Runtime
     Assets::AssetHandle MaterialService::GetAssetHandleByExternal( const Common::UUID& uuid ) const
     {
         auto it = m_ExternalToInternal.find( uuid );
-        if ( it == m_ExternalToInternal.end() )
-        {
-            return Common::UUID::Null();
-        }
+        if ( it != m_ExternalToInternal.end() )
+            return it->second;
 
-        return it->second;
+        // Identity fallback: file materials ADOPT their in-file MaterialId as the asset handle,
+        // so for them external id == internal handle. This makes resolution independent of the
+        // order the external->internal map fills in (the map stays authoritative for imported
+        // materials whose ids genuinely diverge).
+        const Assets::AssetHandle asHandle{ uuid };
+        if ( m_MaterialAssets.count( asHandle ) || m_Materials.count( asHandle ) )
+            return asHandle;
+
+        return Common::UUID::Null();
     }
 
 } // namespace Desert::Runtime

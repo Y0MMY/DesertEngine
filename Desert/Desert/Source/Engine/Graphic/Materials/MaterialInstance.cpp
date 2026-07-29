@@ -189,6 +189,30 @@ namespace Desert::Graphic
         {
             type = parent->m_Properties.GetPropertyType( name );
         }
+        else if ( m_ParentMaterial && m_ParentMaterial->GetMaterialExecutor() &&
+                  m_ParentMaterial->GetMaterialExecutor()->GetShader() )
+        {
+            // Last authority before the lossy vec4 fallback: the shader SCHEMA's declared type.
+            // Without this, a param set before it ever existed on the instance was stored as a
+            // raw vec4 and silently changed type (GetFloat then read .x of a vec4 forever).
+            using VT = ::Desert::Core::Formats::ShaderValueType;
+            for ( const auto& p :
+                  m_ParentMaterial->GetMaterialExecutor()->GetShader()->GetProgramMeta().Params )
+            {
+                if ( p.Name != name || p.IsTexture )
+                    continue;
+                switch ( p.Type )
+                {
+                    case VT::Float:  type = MaterialPropertyType::Float; break;
+                    case VT::Float2: type = MaterialPropertyType::Vec2;  break;
+                    case VT::Float3: type = MaterialPropertyType::Vec3;  break;
+                    case VT::Float4: type = MaterialPropertyType::Vec4;  break;
+                    case VT::Int:    type = MaterialPropertyType::Int;   break;
+                    default:         type = MaterialPropertyType::Vec4;  break;
+                }
+                break;
+            }
+        }
 
         switch ( type )
         {

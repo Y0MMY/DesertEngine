@@ -29,8 +29,15 @@ namespace Desert::Editor
         bool DrawShaderPicker( Assets::SurfaceMaterialAsset& asset );
 
         // Schema-driven parameter editor for a custom-shader material; edits are persisted in the
-        // asset's ShaderParams/ShaderTextures. Returns true when anything changed.
-        bool DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset );
+        // asset's ShaderParams/ShaderTextures. Returns true when anything changed. In material-
+        // INSTANCE mode (parentData/isInstance) the schema comes from the parent's shader,
+        // non-overridden rows show the parent's values and edits write child overrides.
+        bool DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset,
+                                       const Assets::MaterialData* parentData = nullptr,
+                                       bool                        isInstance = false );
+        // Creates a child material-instance asset (.demat with ParentMaterialId) next to the other
+        // materials and registers its shell (lazy — instances have no runtime Material of their own).
+        Assets::AssetHandle CreateAndRegisterMaterialInstance( const Assets::SurfaceMaterialAsset& parent );
 
         // Number of material slots the mesh expects (one per submesh; 1 for primitives).
         size_t GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const;

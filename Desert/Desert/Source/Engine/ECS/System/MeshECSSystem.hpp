@@ -145,16 +145,13 @@ namespace Desert::ECS
                              {
                                  for ( const auto& assetHandle : mesh.MaterialSlots )
                                  {
-                                     auto* baseMaterial = Runtime::ResourceRegistry::GetMaterialService()->Get( assetHandle );
-                                     if ( baseMaterial )
-                                     {
-                                         mesh.RuntimeMaterialInstances.push_back( baseMaterial->CreateInstance() );
-                                     }
-                                     else
-                                     {
-                                         // Fallback to system default if asset is not loaded
-                                         mesh.RuntimeMaterialInstances.push_back( m_DefaultMaterial->CreateInstance() );
-                                     }
+                                     // Service-owned resolution: base assets give a plain instance,
+                                     // material-INSTANCE assets give an instance of their base with
+                                     // the child overrides applied.
+                                     auto inst = Runtime::ResourceRegistry::GetMaterialService()
+                                                      ->CreateRuntimeInstance( assetHandle );
+                                     mesh.RuntimeMaterialInstances.push_back(
+                                          inst ? std::move( inst ) : m_DefaultMaterial->CreateInstance() );
                                  }
                              }
 
@@ -366,9 +363,10 @@ namespace Desert::ECS
                              else
                                  for ( const auto& h : ism.MaterialSlots )
                                  {
-                                     auto* base = Runtime::ResourceRegistry::GetMaterialService()->Get( h );
+                                     auto inst = Runtime::ResourceRegistry::GetMaterialService()
+                                                      ->CreateRuntimeInstance( h );
                                      ism.RuntimeMaterialInstances.push_back(
-                                          base ? base->CreateInstance() : m_DefaultMaterial->CreateInstance() );
+                                          inst ? std::move( inst ) : m_DefaultMaterial->CreateInstance() );
                                  }
                          }
                          if ( ism.RuntimeMaterialInstances.empty() )
@@ -444,9 +442,10 @@ namespace Desert::ECS
                              else
                                  for ( const auto& h : mesh.MaterialSlots )
                                  {
-                                     auto* base = Runtime::ResourceRegistry::GetMaterialService()->Get( h );
+                                     auto inst = Runtime::ResourceRegistry::GetMaterialService()
+                                                      ->CreateRuntimeInstance( h );
                                      mesh.RuntimeMaterialInstances.push_back(
-                                          base ? base->CreateInstance()
+                                          inst ? std::move( inst )
                                                : m_DefaultSkinnedMaterial->CreateInstance() );
                                  }
                          }

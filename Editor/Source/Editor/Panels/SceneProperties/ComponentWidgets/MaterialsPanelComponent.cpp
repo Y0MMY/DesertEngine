@@ -226,6 +226,45 @@ namespace Desert::Editor
         return asset->GetMetadata().Handle;
     }
 
+    Assets::AssetHandle
+    MaterialComponentWidget::CreateAndRegisterMaterialInstance( const Assets::SurfaceMaterialAsset& parent )
+    {
+        if ( !m_AssetManager )
+            return Common::UUID::Null();
+
+        const std::string           ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
+        const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
+        std::error_code             ec;
+        std::filesystem::create_directories( dir, ec );
+
+        const std::string     base = std::filesystem::path( parent.GetMetadata().Filepath ).stem().string() + "_Inst";
+        std::filesystem::path path = dir / ( base + ext );
+        for ( int n = 1; std::filesystem::exists( path, ec ); ++n )
+            path = dir / ( base + "_" + std::to_string( n ) + ext );
+
+        {
+            Assets::MaterialData data;
+            data.MaterialId = Common::UUID();
+            // Reference the parent by its STABLE in-file id (falls back to the asset handle,
+            // which file materials adopt from that id anyway).
+            data.ParentMaterialId = ( parent.Data().MaterialId && !parent.Data().MaterialId->IsNull() )
+                                         ? *parent.Data().MaterialId
+                                         : Common::UUID( static_cast<uint64_t>( parent.GetMetadata().Handle ) );
+            Common::Utils::FileSystem::WriteContentToFile( path.generic_string(), rfl::json::write( data ) );
+        }
+
+        auto asset = const_cast<Assets::AssetManager&>( *m_AssetManager )
+                          .CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
+                                                                      path.generic_string() );
+        if ( !asset )
+            return Common::UUID::Null();
+
+        // LAZY registration: an instance asset must never build a runtime Material of its own
+        // (Get() resolves it to the base; CreateRuntimeInstance applies the overrides).
+        Runtime::ResourceRegistry::GetMaterialService()->RegisterAsset( asset );
+        return asset->GetMetadata().Handle;
+    }
+
     void MaterialComponentWidget::MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot )
     {
         // Extend the slot array up to `slot` by repeating the last handle — exactly the renderer's
@@ -305,10 +344,16 @@ namespace Desert::Editor
     // Schema-driven editor for ANY material (PBR included — its schema lives in
     // StaticMeshPBR.shader like every other shader's). Two-column rows: the label cell never
     // overlaps the control, controls stretch to the full remaining width.
-    bool MaterialComponentWidget::DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset )
+    // parentData/isInstance: material-INSTANCE mode — the schema comes from the parent's shader,
+    // non-overridden rows display the PARENT's value, edits write overrides into the child, and
+    // texture rows are read-only (per-instance texture descriptors are a v2).
+    bool MaterialComponentWidget::DrawCustomShaderMaterial( Assets::SurfaceMaterialAsset& asset,
+                                                            const Assets::MaterialData*   parentData,
+                                                            bool                          isInstance )
     {
         auto*             shaderService = Runtime::ResourceRegistry::GetShaderService();
-        const std::string shaderName    = asset.Data().EffectiveShaderName();
+        const std::string shaderName    = parentData ? parentData->EffectiveShaderName()
+                                                     : asset.Data().EffectiveShaderName();
         auto              shader        = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
         if ( !shader )
         {
@@ -341,15 +386,29 @@ namespace Desert::Editor
             const char*       label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
             const std::string hiddenId = "##mp_" + p.Name; // control id; label lives in its own cell
 
+            // Instance mode: a row with its own entry in the child IS an override — mark it.
+            const bool overridden = isInstance && !p.IsTexture && asset.Data().FindParam( p.Name ) != nullptr;
+
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted( label );
+            if ( overridden )
+                ImGui::TextColored( ImVec4( 1.0f, 0.85f, 0.4f, 1.0f ), "%s *", label );
+            else
+                ImGui::TextUnformatted( label );
             ImGui::TableNextColumn();
             ImGui::PushItemWidth( -FLT_MIN );
 
             if ( p.IsTexture )
             {
+                if ( isInstance )
+                {
+                    // v1: textures always come from the parent (per-instance texture overrides
+                    // need their own descriptor sets — the batched SSBO path can't carry them).
+                    ImGui::TextDisabled( "from parent material" );
+                    ImGui::PopItemWidth();
+                    continue;
+                }
                 std::string disp = "<drop texture>";
                 if ( const uint64_t h = data.GetTexture( p.Name ); h != 0 && m_AssetManager )
                 {
@@ -386,9 +445,10 @@ namespace Desert::Editor
                 continue;
             }
 
-            // Seed the canon entry with the schema default the first time the param shows up.
-            glm::vec4 value = data.GetParam( p.Name, p.Default );
-            bool      edited = false;
+            // Seed with: child override -> parent's effective value (instance mode) -> schema default.
+            const glm::vec4 fallback = parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
+            glm::vec4       value    = data.GetParam( p.Name, fallback );
+            bool            edited   = false;
 
             if ( p.Widget == W::Color )
             {
@@ -567,8 +627,30 @@ namespace Desert::Editor
                     }
                     else if ( asset )
                     {
-                        // ── Unity-style: the shader lives inside the material ──────────────
-                        if ( DrawShaderPicker( *asset ) )
+                        // Material INSTANCE asset (UE model): shader + non-overridden params come
+                        // from the parent chain; this editor writes ONLY overrides into the child.
+                        const bool isInstanceAsset = asset->Data().IsInstance();
+
+                        std::shared_ptr<Assets::SurfaceMaterialAsset> parentAsset;
+                        if ( isInstanceAsset && m_AssetManager )
+                        {
+                            const auto parentHandle =
+                                 Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal(
+                                      *asset->Data().ParentMaterialId );
+                            if ( !parentHandle.IsNull() )
+                                parentAsset =
+                                     m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( parentHandle );
+                            const std::string parentName =
+                                 parentAsset ? std::filesystem::path( parentAsset->GetMetadata().Filepath )
+                                                    .stem()
+                                                    .string()
+                                             : std::string( "<missing parent>" );
+                            ImGui::TextDisabled( "Instance of: %s", parentName.c_str() );
+                        }
+
+                        // ── Unity-style: the shader lives inside the material (base assets only —
+                        // an instance always renders with its parent chain's shader) ────────────
+                        if ( !isInstanceAsset && DrawShaderPicker( *asset ) )
                         {
                             // A different shader means a different runtime material CLASS —
                             // rebuild it from the asset and refresh the entity's instances.
@@ -578,17 +660,27 @@ namespace Desert::Editor
 
                         // ONE schema-driven editor for every shader — the PBR schema lives in
                         // StaticMeshPBR.shader like any other shader's (single material protocol).
-                        const bool changed = DrawCustomShaderMaterial( *asset );
+                        const bool changed = DrawCustomShaderMaterial(
+                             *asset, parentAsset ? &parentAsset->Data() : nullptr, isInstanceAsset );
 
-                        // Live edit -> viewport: re-apply the canon onto the slot's runtime material.
+                        // Live edit -> viewport.
                         if ( changed )
                         {
-                            if ( auto* runtime = Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
+                            if ( isInstanceAsset )
+                            {
+                                // An instance has no runtime Material of its own — bump the stamp so
+                                // every cached instance set rebuilds with the new overrides next tick.
+                                Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
+                            }
+                            else if ( auto* runtime = Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
                             {
                                 if ( auto* pbr = dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) )
                                     Graphic::MaterialFactory::ApplyPBRAsset( *pbr, *asset );
                                 else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
                                     Graphic::MaterialFactory::ApplyShaderAsset( *ddm, *asset );
+                                // Base edits must also reach entities rendering through CHILD
+                                // instances of this material (their instances cache override sets).
+                                Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
                             }
                         }
 
@@ -601,6 +693,34 @@ namespace Desert::Editor
                             std::error_code ec;
                             std::filesystem::remove(
                                  ThumbnailCache::DiskPath( asset->GetMetadata().Filepath.generic_string() ), ec );
+                        }
+
+                        if ( isInstanceAsset )
+                        {
+                            if ( ImGui::Button( "Reset Overrides",
+                                                ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                            {
+                                asset->Data().Params.clear();
+                                asset->Data().Textures.clear();
+                                Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
+                            }
+                            if ( ImGui::IsItemHovered() )
+                                ImGui::SetTooltip( "Drop every override — back to the parent material's values" );
+                        }
+                        else
+                        {
+                            if ( ImGui::Button( "Create Material Instance",
+                                                ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                            {
+                                if ( const auto h = CreateAndRegisterMaterialInstance( *asset ) )
+                                {
+                                    meshComp.MaterialSlots[i] = h;
+                                    meshComp.RuntimeMaterialInstances.clear();
+                                }
+                            }
+                            if ( ImGui::IsItemHovered() )
+                                ImGui::SetTooltip( "New child asset inheriting this material — override "
+                                                   "params per-object without touching the parent" );
                         }
                     }
                     else

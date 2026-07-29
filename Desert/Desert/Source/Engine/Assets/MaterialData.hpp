@@ -44,6 +44,17 @@ namespace Desert::Assets
         // travels inside the file. Also the "external" id mesh submeshes reference.
         std::optional<Common::UUID> MaterialId;
 
+        // MATERIAL INSTANCE (UE model): when set, this asset is a CHILD of the material whose
+        // MaterialId this references, and Params/Textures hold ONLY the overridden values — the
+        // shader and every non-overridden parameter come from the parent chain. Absent in every
+        // pre-instance .demat, so old files load unchanged.
+        std::optional<Common::UUID> ParentMaterialId;
+
+        bool IsInstance() const
+        {
+            return ParentMaterialId.has_value() && !ParentMaterialId->IsNull();
+        }
+
         // ── Queries ────────────────────────────────────────────────────────────────
         std::string EffectiveShaderName() const
         {

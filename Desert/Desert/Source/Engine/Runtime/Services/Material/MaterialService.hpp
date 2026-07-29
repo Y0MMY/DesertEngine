@@ -14,10 +14,28 @@ namespace Desert::Runtime
         // its textures) is built on the first Get.
         Common::BoolResultStr RegisterAsset( const std::shared_ptr<Assets::MaterialAsset>& materialAsset );
 
-        Graphic::Material*    Get( const Assets::AssetHandle& handle ) const; // builds-on-miss from a shell
+        // Builds-on-miss from a shell. A material-INSTANCE handle resolves through its parent
+        // chain to the BASE material (an instance has no runtime Material of its own).
+        Graphic::Material*    Get( const Assets::AssetHandle& handle ) const;
         Graphic::Material*    GetByExternalHandle( const Common::UUID& handle ) const;
         Assets::AssetHandle   GetAssetHandleByExternal( const Common::UUID& uuid ) const;
         void                  Clear();
+
+        // THE way render systems obtain a slot's runtime instance. Base material asset -> a plain
+        // instance of it; material-INSTANCE asset -> an instance of the parent chain's base
+        // material with every level's overrides applied nearest-last (child wins). Returns null
+        // when nothing resolves (caller falls back to its default material).
+        // v1 note: instance assets override PARAMS only — texture overrides need per-instance
+        // descriptors and are ignored by the batched path.
+        Graphic::MaterialInstancePtr CreateRuntimeInstance( const Assets::AssetHandle& handle ) const;
+
+        // For editor live-edit of a material-instance asset: entities rebuild their cached
+        // runtime instances on the next tick (same mechanism as Invalidate, no graveyard needed —
+        // no runtime Material dies here).
+        void BumpInvalidationVersion()
+        {
+            ++m_InvalidationVersion;
+        }
 
         // Drops the built runtime Material so the next Get() rebuilds it from the asset shell.
         // Needed when the asset's SHADER changes (a different runtime material class entirely);
