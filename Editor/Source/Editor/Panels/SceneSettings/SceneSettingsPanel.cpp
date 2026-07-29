@@ -37,11 +37,65 @@ namespace Desert::Editor
 
         if ( ImGui::CollapsingHeader( "Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
-            const char* items[] = { "None", "FXAA", "SMAA" };
-            int         current = static_cast<int>( s.AA );
-            if ( ImGui::Combo( "Mode", &current, items, IM_ARRAYSIZE( items ) ) )
-                s.AA = static_cast<Core::AntiAliasingMode>( current );
-            ImGui::TextDisabled( "TAA/DLSS need motion vectors (deferred)." );
+            // ONE mode selector for every AA technique. None/FXAA/SMAA are post passes on the
+            // scene setting (live); MSAA is hardware multisampling — a USER pref (editor.json ->
+            // RenderConfig), because pipelines bake their sample count at startup. Selecting MSAA
+            // turns the post AA off and vice versa: they are alternatives, not layers.
+            auto&      prefs        = EditorPreferences::Get();
+            const int  maxMsaa      = Graphic::RenderConfig::MaxMSAASamples.load();
+            const bool msaaSelected = prefs.MSAASamples > 1;
+
+            const char* modes[] = { "None", "FXAA", "SMAA", "MSAA" };
+            int         current = msaaSelected ? 3 : static_cast<int>( s.AA );
+            if ( ImGui::Combo( "Mode", &current, modes, IM_ARRAYSIZE( modes ) ) )
+            {
+                if ( current == 3 )
+                {
+                    s.AA              = Core::AntiAliasingMode::None;
+                    prefs.MSAASamples = std::min( 4, maxMsaa ); // sensible default sample count
+                    EditorPreferences::Save();
+                }
+                else
+                {
+                    if ( msaaSelected )
+                    {
+                        prefs.MSAASamples = 1;
+                        EditorPreferences::Save();
+                    }
+                    s.AA = static_cast<Core::AntiAliasingMode>( current );
+                }
+            }
+
+            if ( prefs.MSAASamples > 1 )
+            {
+                // Sample count — MSAA only.
+                const char* levels[] = { "2x", "4x", "8x" };
+                const int   values[] = { 2, 4, 8 };
+                int         idx      = 1;
+                for ( int v = 0; v < IM_ARRAYSIZE( values ); ++v )
+                    if ( values[v] == prefs.MSAASamples )
+                        idx = v;
+                if ( ImGui::Combo( "Samples", &idx, levels, IM_ARRAYSIZE( levels ) ) )
+                {
+                    prefs.MSAASamples = std::min( values[idx], maxMsaa );
+                    EditorPreferences::Save();
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Device max: %dx", maxMsaa );
+            }
+            else
+            {
+                ImGui::TextDisabled( "TAA/DLSS need motion vectors (deferred)." );
+            }
+
+            // MSAA bakes into the pipelines at startup — flag any pending change loudly.
+            const int active = Graphic::RenderConfig::MSAASamplesActive.load();
+            if ( prefs.MSAASamples != active )
+                ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ),
+                                    "Restart the editor to apply MSAA (now: %s, selected: %s).",
+                                    active > 1 ? std::format( "{}x", active ).c_str() : "off",
+                                    prefs.MSAASamples > 1 ? std::format( "{}x", prefs.MSAASamples ).c_str()
+                                                          : "off" );
         }
 
         if ( ImGui::CollapsingHeader( "Post-Processing", ImGuiTreeNodeFlags_DefaultOpen ) )
@@ -67,35 +121,6 @@ namespace Desert::Editor
             ImGui::SliderFloat( "Lens Dispersion", &s.LensDispersion, 0.0f, 3.0f );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Chromatic rainbow fringe around bright sources (glare). Needs Bloom on." );
-        }
-
-        if ( ImGui::CollapsingHeader( "Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen ) )
-        {
-            // MSAA is a USER pref (persisted in editor.json), not scene data: pipelines bake their
-            // sample count at startup, so the switch applies on the next editor start.
-            auto&       prefs    = EditorPreferences::Get();
-            const int   maxMsaa  = Graphic::RenderConfig::MaxMSAASamples.load();
-            const char* items[]  = { "Off", "2x", "4x", "8x" };
-            const int   values[] = { 1, 2, 4, 8 };
-            int         idx      = 0;
-            for ( int i = 0; i < IM_ARRAYSIZE( values ); ++i )
-                if ( values[i] == prefs.MSAASamples )
-                    idx = i;
-            if ( ImGui::Combo( "MSAA", &idx, items, IM_ARRAYSIZE( items ) ) )
-            {
-                prefs.MSAASamples = std::min( values[idx], maxMsaa );
-                EditorPreferences::Save();
-            }
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Hardware multisampling of the scene viewport (device max: %dx).\n"
-                                   "Applies on the next editor start.",
-                                   maxMsaa );
-            const int active = Graphic::RenderConfig::MSAASamplesActive.load();
-            if ( prefs.MSAASamples != active )
-                ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ),
-                                    "Restart the editor to apply (%s now, %dx selected).",
-                                    active > 1 ? std::format( "{}x", active ).c_str() : "off",
-                                    prefs.MSAASamples );
         }
 
         if ( ImGui::CollapsingHeader( "Textures", ImGuiTreeNodeFlags_DefaultOpen ) )
