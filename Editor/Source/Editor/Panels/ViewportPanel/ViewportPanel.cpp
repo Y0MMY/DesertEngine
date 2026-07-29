@@ -465,8 +465,19 @@ namespace Desert::Editor
         if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() &&
              Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered )
         {
-            m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size, m_Gizmo.IsHovered(),
-                            ::ImGui::GetIO().KeyCtrl );
+            // Skeleton Edit mode: LMB selects the nearest bone joint under the cursor (keeping the skinned
+            // mesh selected) rather than picking a new entity — unless the bone gizmo is being interacted with.
+            if ( Core::SkeletonEditMode::IsActive() && !m_Gizmo.IsHovered() )
+            {
+                const int bone = m_LightGizmoRenderer->PickBone( ::ImGui::GetMousePos() );
+                if ( bone >= 0 )
+                    Core::SkeletonEditMode::SetSelectedBone( bone );
+            }
+            else
+            {
+                m_Picking.Pick( *m_Scene, m_ViewportData.MousePosition, m_ViewportData.Size,
+                                m_Gizmo.IsHovered(), ::ImGui::GetIO().KeyCtrl );
+            }
         }
 
         return false;

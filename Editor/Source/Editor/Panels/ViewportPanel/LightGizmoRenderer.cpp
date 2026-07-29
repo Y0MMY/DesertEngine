@@ -48,11 +48,18 @@ namespace Desert::Editor
         RenderPointLights( camera, width, height, xpos, ypos );
         RenderSpotLights( camera, width, height, xpos, ypos );
         RenderCameras( camera, width, height, xpos, ypos );
+        RenderSpawnIcons( camera, width, height );
 
         // Collider wireframes moved to EditorColliderPass (true 3D, depth-tested) via the Editor Pass API.
 
         if ( Core::SkeletonEditMode::IsActive() )
+        {
             RenderSkeleton( camera, width, height, xpos, ypos );
+        }
+        else
+        {
+            m_BoneScreenPositions.clear(); // outside Skeleton Edit -> no stale bone picks
+        }
     }
 
     void LightGizmoRenderer::RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
@@ -375,12 +382,14 @@ namespace Desert::Editor
         // the bone NAME as a label next to each head (the selected bone's label is accent-coloured).
         const ImU32 labelCol    = IM_COL32( 220, 220, 230, 210 );
         const ImU32 labelSelCol = IM_COL32( 255, 170, 90, 255 );
+        m_BoneScreenPositions.clear();
         for ( size_t i = 0; i < bones.size(); ++i )
         {
             glm::vec2 s;
             if ( !ProjectToScreen( heads[i], mvp, width, height, s ) )
                 continue;
             const ImVec2 c( windowPos.x + s.x, windowPos.y + s.y );
+            m_BoneScreenPositions.emplace_back( static_cast<int>( i ), c ); // absolute-screen — for PickBone
             const bool   sel = ( static_cast<int>( i ) == selectedBone );
             const float  r   = sel ? 5.0f : 3.0f;
             drawList->AddRectFilled( ImVec2( c.x - r, c.y - r ), ImVec2( c.x + r, c.y + r ),
@@ -390,6 +399,104 @@ namespace Desert::Editor
             if ( !bones[i].Name.empty() && ( sel || Core::SkeletonEditMode::ShowAllNames() ) )
                 drawList->AddText( ImVec2( c.x + r + 3.0f, c.y - 7.0f ), sel ? labelSelCol : labelCol,
                                    bones[i].Name.c_str() );
+        }
+    }
+
+    int LightGizmoRenderer::PickBone( const ImVec2& absMouse, float radiusPx ) const
+    {
+        int   best      = -1;
+        float bestDist2 = radiusPx * radiusPx;
+        for ( const auto& [idx, pos] : m_BoneScreenPositions )
+        {
+            const float dx = pos.x - absMouse.x;
+            const float dy = pos.y - absMouse.y;
+            const float d2 = dx * dx + dy * dy;
+            if ( d2 <= bestDist2 )
+            {
+                bestDist2 = d2;
+                best      = idx;
+            }
+        }
+        return best;
+    }
+
+    void LightGizmoRenderer::RenderSpawnIcons( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
+                                               float height )
+    {
+        auto         entities  = m_Scene->GetAllEntities();
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        const auto   mvp       = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+        ImDrawList*  drawList  = ImGui::GetWindowDrawList();
+        const ImVec2 mouse     = ImGui::GetMousePos();
+
+        for ( auto entity : entities )
+        {
+            // Only entities WITHOUT a rendered/gizmo'd representation get a billboard — anything already
+            // visible (mesh/terrain/foliage/light/camera/skybox) is skipped so we don't double-mark it.
+            if ( entity.HasComponent<ECS::StaticMeshComponent>() ||
+                 entity.HasComponent<ECS::SkinnedMeshComponent>() ||
+                 entity.HasComponent<ECS::InstancedStaticMeshComponent>() ||
+                 entity.HasComponent<ECS::TerrainComponent>() || entity.HasComponent<ECS::FoliageComponent>() ||
+                 entity.HasComponent<ECS::PointLightComponent>() ||
+                 entity.HasComponent<ECS::SpotLightComponent>() ||
+                 entity.HasComponent<ECS::DirectionLightComponent>() ||
+                 entity.HasComponent<ECS::CameraComponent>() || entity.HasComponent<ECS::SkyboxComponent>() )
+                continue;
+
+            // Pick the icon by the most specific "invisible" role the entity plays.
+            const char* icon  = ICON_MDI_AXIS_ARROW; // generic empty / transform helper
+            ImVec4      color = ImVec4( 0.75f, 0.78f, 0.85f, 1.0f );
+            const char* label = "Empty";
+            if ( entity.HasComponent<ECS::AudioSourceComponent>() )
+            {
+                icon  = ICON_MDI_VOLUME_HIGH;
+                color = ImVec4( 0.60f, 0.90f, 0.70f, 1.0f );
+                label = "Audio Source";
+            }
+            else if ( entity.HasComponent<ECS::CharacterControllerComponent>() ||
+                      entity.HasComponent<ECS::ProjectileComponent>() )
+            {
+                icon  = ICON_MDI_MAP_MARKER;
+                color = ImVec4( 1.00f, 0.80f, 0.40f, 1.0f );
+                label = "Spawn Point";
+            }
+            else if ( entity.HasComponent<ECS::ColliderComponent>() &&
+                      !entity.HasComponent<ECS::RigidBodyComponent>() )
+            {
+                icon  = ICON_MDI_SHAPE_OUTLINE;
+                color = ImVec4( 0.50f, 0.85f, 1.00f, 1.0f );
+                label = "Trigger / Volume";
+            }
+            else if ( entity.HasComponent<ECS::ScriptComponent>() )
+            {
+                icon  = ICON_MDI_SCRIPT;
+                color = ImVec4( 0.85f, 0.70f, 1.00f, 1.0f );
+                label = "Script";
+            }
+
+            const glm::vec3 worldPos = glm::vec3( entity.GetWorldTransform()[3] );
+            glm::vec2       screenPos;
+            if ( !ProjectToScreen( worldPos, mvp, width, height, screenPos ) )
+                continue;
+
+            const float  ax = windowPos.x + screenPos.x;
+            const float  ay = windowPos.y + screenPos.y;
+            const ImVec2 sz = ImGui::CalcTextSize( icon );
+            drawList->AddText( ImVec2( ax - sz.x * 0.5f, ay - sz.y * 0.5f ), ImColor( color ), icon );
+
+            if ( mouse.x >= ax - sz.x * 0.5f && mouse.x <= ax + sz.x * 0.5f && mouse.y >= ay - sz.y * 0.5f &&
+                 mouse.y <= ay + sz.y * 0.5f )
+            {
+                const std::string name = entity.HasComponent<ECS::TagComponent>()
+                                              ? entity.GetComponent<ECS::TagComponent>().Tag
+                                              : std::string( "Actor" );
+                ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
+                ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
+                Utils::ImGuiUtilities::Tooltip( std::format( "{}\n{}\nPosition: ({:.2f}, {:.2f}, {:.2f})", name,
+                                                             label, worldPos.x, worldPos.y, worldPos.z )
+                                                     .c_str() );
+                ImGui::PopStyleColor( 2 );
+            }
         }
     }
 

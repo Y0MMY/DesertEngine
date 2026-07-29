@@ -3,6 +3,9 @@
 #include <Engine/Desert.hpp>
 #include <imgui/imgui.h>
 
+#include <utility>
+#include <vector>
+
 namespace Desert::Editor
 {
     class LightGizmoRenderer
@@ -12,6 +15,10 @@ namespace Desert::Editor
         ~LightGizmoRenderer() = default;
 
         void Render( float width, float height, float xpos, float ypos );
+
+        // Nearest skeleton bone head within radiusPx of the (absolute-screen) mouse position, taken from the
+        // last skeleton-overlay frame; -1 if none. Populated by RenderSkeleton; drives viewport bone picking.
+        int PickBone( const ImVec2& absMouse, float radiusPx = 12.0f ) const;
 
     private:
         void RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,
@@ -25,6 +32,9 @@ namespace Desert::Editor
         // links) as an overlay, with the bone-tree-selected bone highlighted. Read-only (Phase 1).
         void RenderSkeleton( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height,
                              float xpos, float ypos );
+        // Billboard icons for entities with no rendered geometry (spawn points, audio emitters, triggers,
+        // empties) so they are visible in the viewport. Hover shows a tooltip; the normal LMB pick selects them.
+        void RenderSpawnIcons( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height );
         // Draws a world-space line segment, clipping the endpoint that crosses the editor camera's near
         // plane (so a segment dipping behind the camera never wraps across the whole viewport).
         void DrawWorldLine( ImDrawList* drawList, const glm::vec3& a, const glm::vec3& b, const glm::mat4& mvp,
@@ -44,5 +54,9 @@ namespace Desert::Editor
 
     private:
         std::shared_ptr<Desert::Core::Scene> m_Scene;
+
+        // (boneIndex, absolute-screen head position) captured each frame RenderSkeleton draws — the source
+        // for PickBone. Cleared when Skeleton Edit mode is inactive so stale positions never pick.
+        std::vector<std::pair<int, ImVec2>> m_BoneScreenPositions;
     };
 } // namespace Desert::Editor
