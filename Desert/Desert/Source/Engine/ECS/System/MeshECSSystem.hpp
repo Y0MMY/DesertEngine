@@ -139,27 +139,25 @@ namespace Desert::ECS
                              for ( const auto& inst : mesh.RuntimeMaterialInstances )
                                  mesh.RuntimeSlotPtrs.push_back( inst.get() );
 
-                         }
-
-                         // Apply MaterialComponent param overrides onto slot-0 of a batched PBR mesh. This
-                         // is NO LONGER an editor-authored channel (the demos use material-asset slots now,
-                         // UE-style) — it survives ONLY for scripts animating params live
-                         // (self:setMaterialParam) and for loading legacy scenes that still carry per-entity
-                         // param overrides. Applied EVERY frame so runtime script changes show immediately;
-                         // cheap — a few by-name writes only on entities that carry a MaterialComponent.
-                         // Empty/"StaticMeshPBR" shader = still PBR.
-                         if ( registry.has<MaterialComponent>( entity ) && !mesh.RuntimeMaterialInstances.empty() )
-                         {
-                             const auto& matc = registry.get<MaterialComponent>( entity );
-                             if ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" )
+                             // One-shot seed, CONSUMED here: PBR-channel MaterialComponent params exist only
+                             // as a hand-off buffer (scripts that ran before this build + legacy scenes).
+                             // They land as slot-0 instance overrides once and the buffer is cleared — the
+                             // authored slots stay the single source of truth, nothing re-applies per frame,
+                             // and slot edits in the editor can never be silently shadowed. Live script
+                             // writes go straight to the instance (ScriptEntity::SetMaterialParam).
+                             if ( registry.has<MaterialComponent>( entity ) &&
+                                  !mesh.RuntimeMaterialInstances.empty() )
                              {
-                                 // Data-driven: every override is written by name, dispatched on the shader
-                                 // schema's OWN reflected type — no hardcoded per-param float/vec4 chain. Any
-                                 // param the PBR .shader declares (Albedo, Metallic, glass, and future ones)
-                                 // works with zero engine changes; unknown names are silently ignored.
-                                 auto& inst = mesh.RuntimeMaterialInstances[0];
-                                 for ( const auto& p : matc.Params )
-                                     inst->SetParamFromVec4( p.Name, p.Value );
+                                 auto& matc = registry.get<MaterialComponent>( entity );
+                                 if ( ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" ) &&
+                                      !matc.Params.empty() )
+                                 {
+                                     auto& inst = mesh.RuntimeMaterialInstances[0];
+                                     for ( const auto& p : matc.Params )
+                                         inst->SetParamFromVec4( p.Name, p.Value );
+                                     matc.Params.clear();
+                                     matc.Textures.clear();
+                                 }
                              }
                          }
 

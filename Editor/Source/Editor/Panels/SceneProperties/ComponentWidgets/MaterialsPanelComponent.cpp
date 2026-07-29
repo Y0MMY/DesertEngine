@@ -226,18 +226,6 @@ namespace Desert::Editor
         return asset->GetMetadata().Handle;
     }
 
-    void MaterialComponentWidget::ClearPBRParamOverrides( ECS::Entity& entity )
-    {
-        if ( !entity.HasComponent<ECS::MaterialComponent>() )
-            return;
-        auto& matc = entity.GetComponent<ECS::MaterialComponent>();
-        if ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" )
-        {
-            matc.Params.clear();
-            matc.Textures.clear();
-        }
-    }
-
     void MaterialComponentWidget::MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot )
     {
         // Extend the slot array up to `slot` by repeating the last handle — exactly the renderer's
@@ -455,24 +443,9 @@ namespace Desert::Editor
             ImGui::PopStyleColor();
         }
 
-        // PBR-channel param overrides (script / legacy scene / startup demo) are re-applied over
-        // slot 0 EVERY frame by MeshECSSystem — slot edits to those params silently don't show.
-        // Surface the state with a one-click way back to pure slot authoring.
-        if ( overriddenByShader.empty() && entity.HasComponent<ECS::MaterialComponent>() )
-        {
-            const auto& matc = entity.GetComponent<ECS::MaterialComponent>();
-            if ( ( matc.ShaderName.empty() || matc.ShaderName == "StaticMeshPBR" ) && !matc.Params.empty() )
-            {
-                ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ) );
-                ImGui::TextWrapped( "%s %zu runtime param override(s) (script / legacy scene) are applied "
-                                    "over the material slots each frame — matching slot params won't "
-                                    "take effect until cleared.",
-                                    ICON_MDI_ALERT, matc.Params.size() );
-                ImGui::PopStyleColor();
-                if ( ImGui::Button( "Clear Param Overrides" ) )
-                    ClearPBRParamOverrides( entity );
-            }
-        }
+        // NOTE: there is deliberately NO per-frame param-override channel over the slots anymore.
+        // Script writes go straight to the runtime instance; pre-build/legacy params are consumed
+        // ONCE by MeshECSSystem at instance build. Slots are the single authored source of truth.
 
         ImGuiTreeNodeFlags materialsFlags = ImGuiTreeNodeFlags_Framed;
         if ( overriddenByShader.empty() )
@@ -493,7 +466,6 @@ namespace Desert::Editor
                     meshComp.MaterialSlots.push_back( Common::UUID::Null() );
                 for ( size_t s = 0; s < meshComp.MaterialSlots.size(); ++s )
                     AssignMaterialFromPath( meshComp, s, path );
-                ClearPBRParamOverrides( entity ); // the explicit assignment must actually show
             }
             ImGui::EndDragDropTarget();
         }
@@ -550,7 +522,6 @@ namespace Desert::Editor
                                                 p->DataSize > 0 ? p->DataSize - 1 : 0 );
                         MakeSlotExplicit( meshComp, i );
                         AssignMaterialFromPath( meshComp, i, path );
-                        ClearPBRParamOverrides( entity ); // the explicit assignment must actually show
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -591,7 +562,6 @@ namespace Desert::Editor
                                 MakeSlotExplicit( meshComp, i );
                                 meshComp.MaterialSlots[i] = h;
                                 meshComp.RuntimeMaterialInstances.clear();
-                                ClearPBRParamOverrides( entity );
                             }
                         }
                     }
@@ -644,7 +614,6 @@ namespace Desert::Editor
                             {
                                 meshComp.MaterialSlots[i] = h;
                                 meshComp.RuntimeMaterialInstances.clear();
-                                ClearPBRParamOverrides( entity );
                             }
                         }
                     }

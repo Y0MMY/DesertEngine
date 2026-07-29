@@ -18,6 +18,7 @@
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
+#include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
@@ -220,39 +221,43 @@ namespace Desert::Editor
         // objects (SSGI); a clear glass sphere sits in front of an orange cube (visible THROUGH the glass); a
         // point light sits BEHIND the objects. Uses the scene's existing sun (adding a 2nd directional light
         // overflows the single-light UB — see [[deferred-rendering-wip]]).
+        // Colours live in REAL material assets in the mesh slots (created/reused by name) — the same
+        // editable materials the panel shows; no per-entity override channel involved.
         {
-            auto tinted = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec4 albedo )
+            auto tinted = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const char* matName,
+                               glm::vec4 albedo )
             {
-                auto& e = m_MainScene->CreateNewEntity( std::string( name ) );
-                e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
+                auto& e   = m_MainScene->CreateNewEntity( std::string( name ) );
+                auto& smc = e.AddComponent<ECS::StaticMeshComponent>();
+                smc.Primitive = Geometry::PrimitiveType::Cube;
+                smc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
+                     m_AssetManager.get(), matName, albedo, 0.9f ) );
                 auto& tf       = e.GetComponent<ECS::TransformComponent>();
                 tf.Translation = pos;
                 tf.Scale       = scale;
-                auto& mc       = e.AddComponent<ECS::MaterialComponent>();
-                mc.ShaderName  = "StaticMeshPBR";
-                mc.Params.push_back( ECS::MaterialParamOverride{ "AlbedoColor", albedo } );
-                mc.Params.push_back( ECS::MaterialParamOverride{ "RoughnessFactor", glm::vec4( 0.9f ) } );
             };
             const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1 ), red( 0.85f, 0.10f, 0.10f, 1 ),
                  green( 0.10f, 0.70f, 0.15f, 1 );
-            tinted( "CB_Floor", { 0, 0, 0 }, { 6, 0.2f, 6 }, white );
-            tinted( "CB_Back", { 0, 3, -3 }, { 6, 6, 0.2f }, white );
-            tinted( "CB_LeftRed", { -3, 3, 0 }, { 0.2f, 6, 6 }, red );
-            tinted( "CB_RightGreen", { 3, 3, 0 }, { 0.2f, 6, 6 }, green );
+            tinted( "CB_Floor", { 0, 0, 0 }, { 6, 0.2f, 6 }, "CB_White", white );
+            tinted( "CB_Back", { 0, 3, -3 }, { 6, 6, 0.2f }, "CB_White", white );
+            tinted( "CB_LeftRed", { -3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Red", red );
+            tinted( "CB_RightGreen", { 3, 3, 0 }, { 0.2f, 6, 6 }, "CB_Green", green );
             // Orange opaque cube directly behind the glass sphere (seen through it).
-            tinted( "CB_OrangeCube", { 0, 1.3f, -1.2f }, { 1.4f, 1.4f, 1.4f }, glm::vec4( 0.95f, 0.5f, 0.08f, 1 ) );
+            tinted( "CB_OrangeCube", { 0, 1.3f, -1.2f }, { 1.4f, 1.4f, 1.4f }, "CB_Orange",
+                    glm::vec4( 0.95f, 0.5f, 0.08f, 1 ) );
 
             // Clear glass sphere in front of the cube.
             auto& glass = m_MainScene->CreateNewEntity( std::string( "CB_GlassSphere" ) );
-            glass.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Sphere;
+            auto& gsmc  = glass.AddComponent<ECS::StaticMeshComponent>();
+            gsmc.Primitive = Geometry::PrimitiveType::Sphere;
+            gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
+                 m_AssetManager.get(), "CB_Glass",
+                 { { "Transmission", glm::vec4( 0.9f, 0.0f, 0.0f, 0.0f ) },
+                   { "IOR", glm::vec4( 1.5f, 0.0f, 0.0f, 0.0f ) },
+                   { "GlassTint", glm::vec4( 0.75f, 0.9f, 1.0f, 1 ) } } ) );
             auto& gtf       = glass.GetComponent<ECS::TransformComponent>();
             gtf.Translation = { 0.0f, 1.5f, 0.7f };
             gtf.Scale       = glm::vec3( 1.6f );
-            auto& gmc       = glass.AddComponent<ECS::MaterialComponent>();
-            gmc.ShaderName  = "StaticMeshPBR";
-            gmc.Params.push_back( ECS::MaterialParamOverride{ "Transmission", glm::vec4( 0.9f ) } );
-            gmc.Params.push_back( ECS::MaterialParamOverride{ "IOR", glm::vec4( 1.5f ) } );
-            gmc.Params.push_back( ECS::MaterialParamOverride{ "GlassTint", glm::vec4( 0.75f, 0.9f, 1.0f, 1 ) } );
 
             // Point light BEHIND the objects (backlight / rim).
             auto& pl = m_MainScene->CreateNewEntity( std::string( "CB_BackLight" ) );

@@ -23,6 +23,7 @@
 #include <Engine/Core/Input.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Geometry/PrimitiveType.hpp>
+#include <Engine/Graphic/Materials/MaterialInstance.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 
@@ -223,21 +224,9 @@ namespace Desert::Scripting
                 }
             }
 
-            // ── Material access (the unified material protocol: params by shader-schema name) ──
-            // Writes land in the entity's MaterialComponent: the PBR path applies known schema
-            // names (AlbedoColor, RoughnessFactor, ...) as slot-0 overrides, a custom Shader
-            // Override consumes them directly — same names either way.
-            void SetMaterialParam( const std::string& name, float x, sol::optional<float> y,
-                                   sol::optional<float> z, sol::optional<float> w )
+            static void UpsertComponentParam( ECS::MaterialComponent& mc, const std::string& name,
+                                              const glm::vec4& v )
             {
-                if ( !Valid() )
-                    return;
-                if ( !Reg().has<ECS::MaterialComponent>( handle ) )
-                    Reg().emplace<ECS::MaterialComponent>( handle );
-                auto& mc = Reg().get<ECS::MaterialComponent>( handle );
-
-                // w defaults to 1 so `self:setMaterialParam("AlbedoColor", r, g, b)` reads as a colour.
-                const glm::vec4 v( x, y.value_or( 0.0f ), z.value_or( 0.0f ), w.value_or( 1.0f ) );
                 for ( auto& p : mc.Params )
                     if ( p.Name == name )
                     {
@@ -247,14 +236,87 @@ namespace Desert::Scripting
                 mc.Params.push_back( { name, v } );
             }
 
+            // ── Material access (the unified material protocol: params by shader-schema name) ──
+            // PBR path: writes go STRAIGHT to the slot-0 runtime MaterialInstance (live override, no
+            // per-frame re-apply channel — the authored material slots stay the source of truth).
+            // Custom Shader Override path: the MaterialComponent params ARE the draw state consumed
+            // per draw by the generic path. Before the first instance build (Init() runs before the
+            // mesh system's first tick) the write is stashed on the component; MeshECSSystem applies
+            // it once at build time and clears it.
+            void SetMaterialParam( const std::string& name, float x, sol::optional<float> y,
+                                   sol::optional<float> z, sol::optional<float> w )
+            {
+                if ( !Valid() )
+                    return;
+
+                // w defaults to 1 so `self:setMaterialParam("AlbedoColor", r, g, b)` reads as a colour.
+                const glm::vec4 v( x, y.value_or( 0.0f ), z.value_or( 0.0f ), w.value_or( 1.0f ) );
+
+                // Custom-shader entities keep the component channel (it is their material state).
+                if ( Reg().has<ECS::MaterialComponent>( handle ) )
+                {
+                    auto& mc = Reg().get<ECS::MaterialComponent>( handle );
+                    if ( !mc.ShaderName.empty() && mc.ShaderName != "StaticMeshPBR" &&
+                         mc.ShaderName != "SkinnedMeshPBR" )
+                    {
+                        UpsertComponentParam( mc, name, v );
+                        return;
+                    }
+                }
+
+                // PBR path: live write on the slot-0 instance.
+                if ( Reg().has<ECS::StaticMeshComponent>( handle ) )
+                {
+                    auto& smc = Reg().get<ECS::StaticMeshComponent>( handle );
+                    if ( !smc.RuntimeMaterialInstances.empty() && smc.RuntimeMaterialInstances[0] )
+                    {
+                        smc.RuntimeMaterialInstances[0]->SetParamFromVec4( name, v );
+                        return;
+                    }
+                }
+
+                // Instances not built yet — stash as a one-shot seed MeshECSSystem consumes at build.
+                if ( !Reg().has<ECS::MaterialComponent>( handle ) )
+                    Reg().emplace<ECS::MaterialComponent>( handle );
+                UpsertComponentParam( Reg().get<ECS::MaterialComponent>( handle ), name, v );
+            }
+
             std::tuple<float, float, float, float> GetMaterialParam( const std::string& name ) const
             {
-                if ( Valid() && Reg().has<ECS::MaterialComponent>( handle ) )
+                if ( !Valid() )
+                    return { 0.0f, 0.0f, 0.0f, 0.0f };
+
+                // Component channel first: custom-shader state and not-yet-consumed seeds live here.
+                if ( Reg().has<ECS::MaterialComponent>( handle ) )
                 {
                     const auto& mc = Reg().get<ECS::MaterialComponent>( handle );
                     for ( const auto& p : mc.Params )
                         if ( p.Name == name )
                             return { p.Value.x, p.Value.y, p.Value.z, p.Value.w };
+                }
+
+                // PBR path: read the live override off the slot-0 instance.
+                if ( Reg().has<ECS::StaticMeshComponent>( handle ) )
+                {
+                    const auto& smc = Reg().get<ECS::StaticMeshComponent>( handle );
+                    if ( !smc.RuntimeMaterialInstances.empty() && smc.RuntimeMaterialInstances[0] )
+                    {
+                        const auto& props =
+                             smc.RuntimeMaterialInstances[0]->GetPropertySet().GetProperties();
+                        for ( const auto& [pname, prop] : props )
+                        {
+                            if ( pname != name || !prop.bIsOverridden )
+                                continue;
+                            if ( const auto* f = std::get_if<float>( &prop.Value ) )
+                                return { *f, 0.0f, 0.0f, 0.0f };
+                            if ( const auto* v2 = std::get_if<glm::vec2>( &prop.Value ) )
+                                return { v2->x, v2->y, 0.0f, 0.0f };
+                            if ( const auto* v3 = std::get_if<glm::vec3>( &prop.Value ) )
+                                return { v3->x, v3->y, v3->z, 1.0f };
+                            if ( const auto* v4 = std::get_if<glm::vec4>( &prop.Value ) )
+                                return { v4->x, v4->y, v4->z, v4->w };
+                        }
+                    }
                 }
                 return { 0.0f, 0.0f, 0.0f, 0.0f };
             }

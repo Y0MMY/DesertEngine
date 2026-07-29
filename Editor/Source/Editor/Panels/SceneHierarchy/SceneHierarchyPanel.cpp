@@ -1,5 +1,6 @@
 #include "SceneHierarchyPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/MaterialAssetUtils.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/MaterialData.hpp>
@@ -33,40 +34,9 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    // Creates (or reuses, by name) a StaticMeshPBR material ASSET (.demat) carrying an albedo + roughness,
-    // and returns its handle to drop into a mesh material SLOT. This is the UE-style way the demo builders
-    // colour their meshes — a real, editable, reusable material asset — instead of the per-entity
-    // MaterialComponent override channel. Reused by name so re-spawning a demo doesn't duplicate files.
-    static Assets::AssetHandle CreatePBRMaterialAsset( const Assets::AssetManager* am, const std::string& name,
-                                                       const glm::vec4& albedo, float roughness )
-    {
-        if ( !am )
-            return {};
-
-        const std::string           ext = Common::Constants::Extensions::MATERIAL_EXTENSION;
-        const std::filesystem::path dir = Common::Constants::Path::MATERIAL_PATH;
-        std::error_code             ec;
-        std::filesystem::create_directories( dir, ec );
-        const std::filesystem::path path = dir / ( name + ext );
-
-        if ( std::filesystem::exists( path, ec ) )
-            if ( auto existing = am->FindByPath<Assets::SurfaceMaterialAsset>( path.generic_string() ) )
-                return existing->GetMetadata().Handle;
-
-        Assets::MaterialData data;
-        data.MaterialId = Common::UUID();
-        data.SetParam( "AlbedoColor", albedo );
-        data.SetParam( "RoughnessFactor", glm::vec4( roughness, 0.0f, 0.0f, 0.0f ) );
-        Common::Utils::FileSystem::WriteContentToFile( path.generic_string(), rfl::json::write( data ) );
-
-        auto asset = const_cast<Assets::AssetManager&>( *am )
-                          .CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High,
-                                                                      path.generic_string() );
-        if ( !asset )
-            return {};
-        Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
-        return asset->GetMetadata().Handle;
-    }
+    // Demo builders colour meshes through real material assets in slots — the shared helper in
+    // Editor/Core/MaterialAssetUtils.hpp (reuse-by-name, never rewrites an existing file).
+    using MaterialAssetUtils::CreatePBRMaterialAsset;
 
     const char* SceneHierarchyPanel::GetEntityTypeName( const ECS::Entity& entity )
     {
