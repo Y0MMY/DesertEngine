@@ -108,6 +108,16 @@ namespace Desert::Editor
         std::vector<std::string> SelectionPaths() const;
         // Cut/copy/paste of the current selection into the current directory.
         void PasteClipboard();
+
+        // Phase-3 navigation.
+        void        GoBack();
+        void        GoForward();
+        void        NavigateToPath( const std::string& path ); // resolves a visited path to its dir
+        void        ToggleFavorite( const std::string& folderPath );
+        bool        IsFavorite( const std::string& folderPath ) const;
+        void        LoadFavorites();
+        void        SaveFavorites() const;
+        std::string FavoritesFile() const;
         // UE-style "Capture Thumbnail": grab the current main-viewport rendered image, center-crop to a
         // square, downscale, and save it AS this asset's thumbnail (same DiskPath key the grid reads). Lets
         // the user frame the asset in the scene and use that exact view as the preview.
@@ -212,6 +222,13 @@ namespace Desert::Editor
         int                             m_SelectionAnchorShown = -1; // display index of the range anchor
         std::vector<std::string>        m_Clipboard;            // cut/copied paths
         bool                            m_ClipboardCut = false; // true = move on paste, false = copy
+
+        // Phase-3 navigation/UX.
+        int                      m_TypeFilter = -1;      // FileType value to show, or -1 for "All"
+        std::vector<std::string> m_NavHistory;           // visited folder paths (back/forward)
+        int                      m_NavPos            = -1;
+        bool                     m_NavigatingHistory = false; // suppress history push during back/forward
+        std::vector<std::string> m_Favorites;                 // pinned folder paths (persisted)
 
         Assets::AssetManager*           m_AssetManager = nullptr;
         std::unique_ptr<UI::UIHelper>   m_UIHelper;

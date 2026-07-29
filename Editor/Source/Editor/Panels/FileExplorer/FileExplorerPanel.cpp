@@ -38,7 +38,9 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <system_error>
 
 #ifdef DESERT_PLATFORM_WINDOWS
@@ -169,6 +171,8 @@ namespace Desert::Editor
         m_Thumbnails = std::make_unique<ThumbnailCache>();
         ThumbnailCache::PurgeOldVersions(); // drop stale-renderer thumbnails so they regenerate cleanly
 
+        LoadFavorites(); // pinned folders, persisted in ~/.desertengine/asset_favorites.txt
+
 #ifdef DESERT_PLATFORM_WINDOWS
         m_Delimiter = std::string( "\\" );
 #else
@@ -271,6 +275,124 @@ namespace Desert::Editor
         {
             ProcessDirectory( m_CurrentDir->AssetPath, m_CurrentDir->Parent, true );
         }
+
+        // Record in the back/forward history, unless this navigation IS a back/forward.
+        if ( !m_NavigatingHistory )
+        {
+            if ( m_NavPos + 1 < static_cast<int>( m_NavHistory.size() ) )
+                m_NavHistory.resize( m_NavPos + 1 ); // drop the forward branch
+            if ( m_NavHistory.empty() || m_NavHistory.back() != directory->AssetPath )
+            {
+                m_NavHistory.push_back( directory->AssetPath );
+                m_NavPos = static_cast<int>( m_NavHistory.size() ) - 1;
+            }
+        }
+    }
+
+    void FileExplorerPanel::NavigateToPath( const std::string& path )
+    {
+        if ( auto it = m_Directories.find( path ); it != m_Directories.end() )
+        {
+            ChangeDirectory( it->second.get() );
+            return;
+        }
+
+        // Not loaded yet (e.g. a favorite from a previous session): expand the tree from the project
+        // root down to `path`, matching one segment at a time.
+        if ( !m_BaseProjectDir )
+            return;
+        const std::filesystem::path base = m_BaseProjectDir->AssetPath;
+        std::error_code             ec;
+        const std::filesystem::path rel = std::filesystem::relative( path, base, ec );
+        if ( ec || rel.empty() || rel.native().rfind( ".." ) == 0 )
+            return; // not under the project
+
+        DirectoryInformation* cur = m_BaseProjectDir;
+        if ( !cur->Opened )
+            ProcessDirectory( cur->AssetPath, cur->Parent, true );
+        std::filesystem::path acc = base;
+        for ( const auto& seg : rel )
+        {
+            acc /= seg;
+            DirectoryInformation* next = nullptr;
+            for ( auto* ch : cur->Children )
+                if ( !ch->IsFile && std::filesystem::path( ch->AssetPath ) == acc )
+                {
+                    next = ch;
+                    break;
+                }
+            if ( !next )
+                return; // path no longer exists
+            if ( !next->Opened )
+                ProcessDirectory( next->AssetPath, next->Parent, true );
+            cur = next;
+        }
+        ChangeDirectory( cur );
+    }
+
+    void FileExplorerPanel::GoBack()
+    {
+        if ( m_NavPos <= 0 )
+            return;
+        --m_NavPos;
+        m_NavigatingHistory = true;
+        NavigateToPath( m_NavHistory[m_NavPos] );
+        m_NavigatingHistory = false;
+    }
+
+    void FileExplorerPanel::GoForward()
+    {
+        if ( m_NavPos + 1 >= static_cast<int>( m_NavHistory.size() ) )
+            return;
+        ++m_NavPos;
+        m_NavigatingHistory = true;
+        NavigateToPath( m_NavHistory[m_NavPos] );
+        m_NavigatingHistory = false;
+    }
+
+    std::string FileExplorerPanel::FavoritesFile() const
+    {
+        const char* home = std::getenv( "HOME" );
+#ifdef DESERT_PLATFORM_WINDOWS
+        if ( !home )
+            home = std::getenv( "USERPROFILE" );
+#endif
+        return ( std::filesystem::path( home ? home : "." ) / ".desertengine" / "asset_favorites.txt" )
+             .string();
+    }
+
+    void FileExplorerPanel::LoadFavorites()
+    {
+        m_Favorites.clear();
+        std::ifstream f( FavoritesFile() );
+        std::string   line;
+        while ( std::getline( f, line ) )
+            if ( !line.empty() )
+                m_Favorites.push_back( line );
+    }
+
+    void FileExplorerPanel::SaveFavorites() const
+    {
+        std::error_code ec;
+        std::filesystem::create_directories( std::filesystem::path( FavoritesFile() ).parent_path(), ec );
+        std::ofstream f( FavoritesFile(), std::ios::trunc );
+        for ( const auto& p : m_Favorites )
+            f << p << '\n';
+    }
+
+    bool FileExplorerPanel::IsFavorite( const std::string& folderPath ) const
+    {
+        return std::find( m_Favorites.begin(), m_Favorites.end(), folderPath ) != m_Favorites.end();
+    }
+
+    void FileExplorerPanel::ToggleFavorite( const std::string& folderPath )
+    {
+        auto it = std::find( m_Favorites.begin(), m_Favorites.end(), folderPath );
+        if ( it != m_Favorites.end() )
+            m_Favorites.erase( it );
+        else
+            m_Favorites.push_back( folderPath );
+        SaveFavorites();
     }
 
     void FileExplorerPanel::RemoveDirectory( DirectoryInformation* directory, bool removeFromParent )
@@ -686,19 +808,77 @@ namespace Desert::Editor
                         ImGui::SetTooltip( m_SortDescending ? "Descending" : "Ascending" );
                     ImGui::SameLine();
 
-                    if ( ImGui::Button( ICON_MDI_ARROW_LEFT ) )
+                    // Type filter — show only one asset kind (folders always stay visible).
+                    ImGui::SetNextItemWidth( 130.0f );
+                    static const struct
                     {
-                        if ( m_CurrentDir != m_BaseProjectDir )
-                        {
-                            ChangeDirectory( m_CurrentDir->Parent );
-                        }
+                        const char* Label;
+                        int         Type;
+                    } kTypeFilters[] = {
+                        { "All Types", -1 },
+                        { "Scenes", static_cast<int>( FileType::Scene ) },
+                        { "Prefabs", static_cast<int>( FileType::Prefab ) },
+                        { "Scripts", static_cast<int>( FileType::Script ) },
+                        { "Textures", static_cast<int>( FileType::Texture ) },
+                        { "Materials", static_cast<int>( FileType::Material ) },
+                        { "Models", static_cast<int>( FileType::Model ) },
+                        { "Shader Graphs", static_cast<int>( FileType::ShaderGraph ) },
+                        { "Audio", static_cast<int>( FileType::Audio ) },
+                    };
+                    const char* currentFilter = "All Types";
+                    for ( const auto& f : kTypeFilters )
+                        if ( f.Type == m_TypeFilter )
+                            currentFilter = f.Label;
+                    if ( ImGui::BeginCombo( "##AssetTypeFilter", currentFilter ) )
+                    {
+                        for ( const auto& f : kTypeFilters )
+                            if ( ImGui::Selectable( f.Label, f.Type == m_TypeFilter ) )
+                                m_TypeFilter = f.Type;
+                        ImGui::EndCombo();
                     }
                     ImGui::SameLine();
+
+                    // Back / Forward / Up navigation.
+                    ImGui::BeginDisabled( m_NavPos <= 0 );
+                    if ( ImGui::Button( ICON_MDI_ARROW_LEFT ) )
+                        GoBack();
+                    ImGui::EndDisabled();
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Back" );
+                    ImGui::SameLine();
+
+                    ImGui::BeginDisabled( m_NavPos + 1 >= static_cast<int>( m_NavHistory.size() ) );
                     if ( ImGui::Button( ICON_MDI_ARROW_RIGHT ) )
+                        GoForward();
+                    ImGui::EndDisabled();
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Forward" );
+                    ImGui::SameLine();
+
+                    ImGui::BeginDisabled( !m_CurrentDir || m_CurrentDir == m_BaseProjectDir );
+                    if ( ImGui::Button( ICON_MDI_ARROW_UP_BOLD ) && m_CurrentDir )
+                        ChangeDirectory( m_CurrentDir->Parent );
+                    ImGui::EndDisabled();
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Up" );
+                    ImGui::SameLine();
+
+                    // Favorites: jump to a pinned folder (added via a folder's right-click menu).
+                    if ( ImGui::Button( ICON_MDI_STAR ) )
+                        ImGui::OpenPopup( "##favMenu" );
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Favorite folders" );
+                    if ( ImGui::BeginPopup( "##favMenu" ) )
                     {
-                        m_PreviousDirectory = m_CurrentDir;
-                        // m_CurrentDir = m_LastNavPath;
-                        m_UpdateNavigationPath = true;
+                        if ( m_Favorites.empty() )
+                            ImGui::TextDisabled( "No favorites — right-click a folder -> Add to Favorites." );
+                        for ( const auto& fav : m_Favorites )
+                        {
+                            const std::string label = std::filesystem::path( fav ).filename().string();
+                            if ( ImGui::MenuItem( ( label.empty() ? fav : label ).c_str() ) )
+                                NavigateToPath( fav );
+                        }
+                        ImGui::EndPopup();
                     }
                     ImGui::SameLine();
                     if ( ImGui::Button( ICON_MDI_FILE_IMPORT " Import" ) )
@@ -1193,6 +1373,9 @@ namespace Desert::Editor
             const auto* c = children[i];
             if ( !m_ShowHiddenFiles && c->Hidden )
                 continue;
+            // Type filter (folders always shown so you can still navigate).
+            if ( m_TypeFilter >= 0 && c->IsFile && static_cast<int>( c->Type ) != m_TypeFilter )
+                continue;
             if ( !search.empty() )
             {
                 const std::string name =
@@ -1273,6 +1456,9 @@ namespace Desert::Editor
                 ChangeDirectory( &entry );
             if ( ImGui::MenuItem( "Show in Explorer" ) )
                 ShellRevealInExplorer( entry.AssetPath );
+            if ( ImGui::MenuItem( IsFavorite( entry.AssetPath ) ? "Remove from Favorites"
+                                                               : "Add to Favorites" ) )
+                ToggleFavorite( entry.AssetPath );
         }
 
         ImGui::Separator();
