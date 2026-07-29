@@ -111,39 +111,22 @@ namespace Desert::Scripting
             return impl->MakeEntity( e.GetHandle() );
         };
 
-        // Water is entity-based (no global setting): World.spawnWater drops a "Water" plane at a level; the
-        // swim logic reads its height here. waterLevel = the Water entity's Y (very low when none exists),
-        // waterEnabled = whether a Water entity exists.
-        world["waterLevel"] = [impl]() -> float
+        // Generic per-scene variable store (a "blackboard"): World.set(key, value) / World.get(key) /
+        // World.has(key). Gameplay defines its OWN dynamic variables — water level, quest flags, timers,
+        // team scores, anything — with NO engine hardcode. This replaced the hardcoded water bindings
+        // (World.waterLevel/waterEnabled/spawnWater): water is now just a user-defined variable, e.g.
+        //   World.set("waterLevel", 5.0)      -- set it up
+        //   if body.y < World.get("waterLevel") then ... end   -- swim logic reads it
+        // Values are any Lua value (numbers, strings, bools, tables, entities); the store lives in the VM.
+        impl->Lua["__world_vars"] = impl->Lua.create_table();
+        world["set"]              = [impl]( const std::string& key, sol::object value )
+        { impl->Lua["__world_vars"][key] = value; };
+        world["get"] = [impl]( const std::string& key ) -> sol::object
+        { return impl->Lua["__world_vars"][key]; };
+        world["has"] = [impl]( const std::string& key ) -> bool
         {
-            auto& reg = impl->Scene->GetRegistry();
-            for ( auto e : reg.view<ECS::TagComponent, ECS::TransformComponent>() )
-                if ( reg.get<ECS::TagComponent>( e ).Tag == "Water" )
-                    return reg.get<ECS::TransformComponent>( e ).Translation.y;
-            return -1.0e9f;
-        };
-        world["waterEnabled"] = [impl]() -> bool
-        {
-            auto& reg = impl->Scene->GetRegistry();
-            for ( auto e : reg.view<ECS::TagComponent>() )
-                if ( reg.get<ECS::TagComponent>( e ).Tag == "Water" )
-                    return true;
-            return false;
-        };
-        world["spawnWater"]   = [impl]( float level, float size ) -> ScriptEntity
-        {
-            ECS::Entity e = impl->Scene->CreateNewEntity( "Water" );
-            e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Plane;
-
-            auto& t       = e.GetComponent<ECS::TransformComponent>();
-            t.Translation = glm::vec3( 0.0f, level, 0.0f );
-            t.Scale       = glm::vec3( size <= 0.0f ? 100.0f : size, 1.0f, size <= 0.0f ? 100.0f : size );
-
-            auto& mc      = e.AddComponent<ECS::MaterialComponent>();
-            mc.ShaderName = "Unlit";
-            mc.Params.push_back( ECS::MaterialParamOverride{ "Color", glm::vec4( 0.10f, 0.35f, 0.60f, 0.6f ) } );
-
-            return impl->MakeEntity( e.GetHandle() );
+            sol::object v = impl->Lua["__world_vars"][key];
+            return v.valid() && v.get_type() != sol::type::lua_nil;
         };
     }
 } // namespace Desert::Scripting

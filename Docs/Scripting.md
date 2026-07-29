@@ -150,8 +150,7 @@ end
 | `World.cameraRay()` → `ox, oy, oz, dx, dy, dz` | Active camera eye + forward — the natural "what am I looking at" ray. |
 | `World.spawn(prefabPath, x, y, z)` | Instantiate a prefab; returns the root entity. |
 | `World.spawnMarker(x, y, z, scale, r, g, b)` | Small solid-colour Unlit sphere (impact marker); `:destroy()` it later. |
-| `World.waterLevel()` / `World.waterEnabled()` | Scene water settings (what the swim logic reads). |
-| `World.spawnWater(level, size)` | Drops a visible water plane. |
+| `World.set(key, value)` / `World.get(key)` / `World.has(key)` | Per-scene variable store ("blackboard") — define your OWN dynamic variables (water level, quest flags, scores, ...) with no engine hardcode. Values are any Lua value. |
 
 ```lua
 -- Interact with what the camera looks at:
