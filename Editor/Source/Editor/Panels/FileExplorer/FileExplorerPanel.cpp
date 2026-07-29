@@ -6,6 +6,8 @@
 
 #include "FileExplorerPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/AssetFileOps.hpp>
+#include <Editor/Core/AssetReferences.hpp>
 #include <Editor/Panels/NodeGraph/NodeGraphPanel.hpp>
 #include "../../Core/EditorResources.hpp"
 
@@ -50,15 +52,12 @@ namespace Desert::Editor
 
     namespace
     {
+        // Cross-platform move into a destination DIRECTORY (std::filesystem, with a copy+remove fallback
+        // across volumes). Replaces the old Windows-only `system("move ...")` that no-op'd on macOS.
         bool MoveFile( const std::string& filePath, const std::string& movePath )
         {
-            std::string s = "move " + filePath + " " + movePath;
-
-#ifdef DESERT_PLATFORM_WINDOWS
-            system( s.c_str() );
-#endif
-
-            return false;
+            std::string newPath, error;
+            return AssetFileOps::Move( filePath, movePath, newPath, error );
         }
 
         std::string ToLowerCopy( std::string s )
@@ -501,6 +500,37 @@ namespace Desert::Editor
     {
         // Captured for the OS file-drop handler (which runs outside the ImGui frame, via OnEvent).
         m_IsHovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_RootAndChildWindows );
+
+        // Keyboard shortcuts on the selected item (panel focused, no text field active): F2 rename, Del delete.
+        if ( ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows ) && m_CurrentSelected &&
+             !ImGui::GetIO().WantTextInput )
+        {
+            if ( ImGui::IsKeyPressed( ImGuiKey_F2, false ) )
+            {
+                m_RenamePath = m_CurrentSelected->AssetPath;
+                std::snprintf(
+                     m_RenameBuf, sizeof( m_RenameBuf ), "%s",
+                     std::filesystem::path( m_CurrentSelected->AssetPath ).filename().string().c_str() );
+                m_ShowRenamePopup = true;
+            }
+            if ( ImGui::IsKeyPressed( ImGuiKey_Delete, false ) )
+            {
+                m_PendingDeletePath   = m_CurrentSelected->AssetPath;
+                m_PendingDeleteIsFile = m_CurrentSelected->IsFile;
+                m_DeleteReferencers.clear();
+                m_ShowDeleteConfirm = true;
+            }
+        }
+
+        // File-op modals (rename / delete) + last error line.
+        DrawFileOpsPopups();
+        if ( !m_FileOpStatus.empty() )
+        {
+            ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.4f, 1.0f ), "%s", m_FileOpStatus.c_str() );
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "x##clearFileOp" ) )
+                m_FileOpStatus.clear();
+        }
 
         // Advance the material-thumbnail capture state machine once per frame (renders + reads back the
         // pending material; see AssetThumbnailRenderer).
@@ -1243,7 +1273,119 @@ namespace Desert::Editor
         if ( ImGui::MenuItem( "Copy Name" ) )
             ImGui::SetClipboardText( name.c_str() );
 
+        // ---- File operations (cross-platform) ----
+        ImGui::Separator();
+        if ( ImGui::MenuItem( "Rename", "F2" ) )
+        {
+            m_RenamePath = entry.AssetPath;
+            std::snprintf( m_RenameBuf, sizeof( m_RenameBuf ), "%s", name.c_str() );
+            m_ShowRenamePopup = true;
+        }
+        if ( ImGui::MenuItem( "Duplicate" ) )
+        {
+            std::string np, err;
+            if ( AssetFileOps::Duplicate( entry.AssetPath, np, err ) )
+                QueueRefresh();
+            else
+                m_FileOpStatus = "Duplicate failed: " + err;
+        }
+        ImGui::Separator();
+        if ( ImGui::MenuItem( "Delete", "Del" ) )
+        {
+            m_PendingDeletePath   = entry.AssetPath;
+            m_PendingDeleteIsFile = entry.IsFile;
+            m_DeleteReferencers.clear();
+            // Safe delete: for a file asset, warn if anything still references it (best-effort text scan).
+            if ( entry.IsFile )
+            {
+                AssetReferenceIndex idx;
+                BuildProjectAssetReferenceIndex( idx );
+                std::error_code ec;
+                const std::string rel =
+                     std::filesystem::relative( entry.AssetPath, Common::Constants::Path::ASSETS_PATH, ec )
+                          .generic_string();
+                m_DeleteReferencers = idx.ReferencersOf( rel );
+            }
+            m_ShowDeleteConfirm = true;
+        }
+
         ImGui::EndPopup();
+    }
+
+    void FileExplorerPanel::DrawFileOpsPopups()
+    {
+        // ---- Rename ----
+        if ( m_ShowRenamePopup )
+        {
+            ImGui::OpenPopup( "Rename##assetRename" );
+            m_ShowRenamePopup = false;
+        }
+        if ( ImGui::BeginPopupModal( "Rename##assetRename", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        {
+            ImGui::TextUnformatted( "New name:" );
+            ImGui::SetNextItemWidth( 320.0f );
+            const bool submit =
+                 ImGui::InputText( "##renameField", m_RenameBuf, sizeof( m_RenameBuf ),
+                                   ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll );
+            if ( ImGui::IsWindowAppearing() )
+                ImGui::SetKeyboardFocusHere( -1 );
+
+            if ( ImGui::Button( "Rename", ImVec2( 110.0f, 0.0f ) ) || submit )
+            {
+                std::string np, err;
+                if ( AssetFileOps::Rename( m_RenamePath, m_RenameBuf, np, err ) )
+                    QueueRefresh();
+                else
+                    m_FileOpStatus = "Rename failed: " + err;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if ( ImGui::Button( "Cancel", ImVec2( 110.0f, 0.0f ) ) )
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+
+        // ---- Delete (confirm, with a reference warning) ----
+        if ( m_ShowDeleteConfirm )
+        {
+            ImGui::OpenPopup( "Delete?##assetDelete" );
+            m_ShowDeleteConfirm = false;
+        }
+        if ( ImGui::BeginPopupModal( "Delete?##assetDelete", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        {
+            const std::string name = std::filesystem::path( m_PendingDeletePath ).filename().string();
+            ImGui::Text( "Delete \"%s\"%s?", name.c_str(),
+                         m_PendingDeleteIsFile ? "" : " and everything inside it" );
+
+            if ( !m_DeleteReferencers.empty() )
+            {
+                ImGui::Spacing();
+                ImGui::TextColored( ImVec4( 1.0f, 0.6f, 0.3f, 1.0f ),
+                                    "Warning: %zu asset(s) still reference this:",
+                                    m_DeleteReferencers.size() );
+                ImGui::BeginChild( "##delrefs", ImVec2( 360.0f, 90.0f ), true );
+                for ( const auto& r : m_DeleteReferencers )
+                    ImGui::BulletText( "%s", r.c_str() );
+                ImGui::EndChild();
+            }
+            ImGui::Spacing();
+
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.6f, 0.15f, 0.15f, 1.0f ) );
+            if ( ImGui::Button( "Delete", ImVec2( 110.0f, 0.0f ) ) )
+            {
+                std::string err;
+                if ( AssetFileOps::Delete( m_PendingDeletePath, err ) )
+                    QueueRefresh();
+                else
+                    m_FileOpStatus = "Delete failed: " + err;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            if ( ImGui::Button( "Cancel", ImVec2( 110.0f, 0.0f ) ) )
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
     }
 
     void FileExplorerPanel::CaptureThumbnailFromViewport( const std::string& assetPath )

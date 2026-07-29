@@ -6,7 +6,9 @@
 #include <stack>
 #include <functional>
 #include <memory>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 namespace Desert::Assets
 {
@@ -97,6 +99,8 @@ namespace Desert::Editor
         bool RenderFile( int dirIndex, bool folder, int shownIndex, bool gridView );
         // Right-click context menu on a file/folder: Open (default app), Show in Explorer, Open folder, etc.
         void DrawItemContextMenu( DirectoryInformation& entry );
+        // Modal dialogs for the cross-platform file ops (rename / delete-with-reference-warning).
+        void DrawFileOpsPopups();
         // UE-style "Capture Thumbnail": grab the current main-viewport rendered image, center-crop to a
         // square, downscale, and save it AS this asset's thumbnail (same DiskPath key the grid reads). Lets
         // the user frame the asset in the scene and use that exact view as the preview.
@@ -186,6 +190,16 @@ namespace Desert::Editor
         std::string m_RequestedThumbnailPath;
         std::string m_CopiedPath;
         bool        m_CutFile = false;
+
+        // Phase-1 file operations (rename / delete / duplicate / move), cross-platform.
+        bool                     m_ShowRenamePopup     = false;
+        std::string              m_RenamePath;
+        char                     m_RenameBuf[128]      = { 0 };
+        bool                     m_ShowDeleteConfirm   = false;
+        bool                     m_PendingDeleteIsFile = true;
+        std::string              m_PendingDeletePath;
+        std::vector<std::string> m_DeleteReferencers; // assets still pointing at the delete target
+        std::string              m_FileOpStatus;      // last error line (shown in the toolbar area)
 
         Assets::AssetManager*           m_AssetManager = nullptr;
         std::unique_ptr<UI::UIHelper>   m_UIHelper;
