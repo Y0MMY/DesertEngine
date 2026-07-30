@@ -7,7 +7,10 @@
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Animation/Animator.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <functional>
+#include <optional>
 
 #include "../../Core/EditorResources.hpp"
 
@@ -431,9 +434,7 @@ namespace Desert::Editor
         const ImVec2    windowPos   = ImGui::GetWindowPos();
         ImDrawList*     drawList    = ImGui::GetWindowDrawList();
 
-        const ImU32 boneCol      = IM_COL32( 235, 200, 90, 230 ); // bind-pose bone
-        const ImU32 selCol       = IM_COL32( 255, 130, 40, 255 ); // tree-selected bone
-        const int   selectedBone = Core::SkeletonEditMode::GetSelectedBone();
+        const int selectedBone = Core::SkeletonEditMode::GetSelectedBone();
 
         // Bone head (world) = entityWorld * chainGlobal[3], where chainGlobal = the parent chain of
         // LocalBindTransform (= the Animator's bind global). This MATCHES the rendered mesh, which is skinned
@@ -476,39 +477,78 @@ namespace Desert::Editor
             heads[i] = glm::vec3( entityWorld * glm::vec4( glm::vec3( global[3] ), 1.0f ) );
         }
 
-        // Parent -> child bone links.
+        // Project every bone head to absolute-screen once (nullopt when behind the camera).
+        std::vector<std::optional<ImVec2>> screen( bones.size() );
+        for ( size_t i = 0; i < bones.size(); ++i )
+        {
+            glm::vec2 s;
+            if ( ProjectToScreen( heads[i], mvp, width, height, s ) )
+                screen[i] = ImVec2( windowPos.x + s.x, windowPos.y + s.y );
+        }
+
+        const ImVec2 mouse = ImGui::GetMousePos();
+
+        // UE-style bones: each parent->child link is a tapered octahedron (a 2D "kite" widest ~20% from the
+        // parent). A translucent fill + bright edge reads as a solid bone rather than a bare line.
+        const ImU32 boneFill    = IM_COL32( 200, 215, 240, 55 );
+        const ImU32 boneEdge    = IM_COL32( 225, 235, 255, 190 );
+        const ImU32 boneFillSel = IM_COL32( 255, 165, 60, 110 );
+        const ImU32 boneEdgeSel = IM_COL32( 255, 190, 90, 255 );
         for ( size_t i = 0; i < bones.size(); ++i )
         {
             if ( !bones[i].ParentBoneID.has_value() )
                 continue;
             const uint32_t p = bones[i].ParentBoneID.value();
-            if ( p >= heads.size() )
+            if ( p >= bones.size() || !screen[p] || !screen[i] )
                 continue;
-            const bool sel = ( static_cast<int>( i ) == selectedBone || static_cast<int>( p ) == selectedBone );
-            DrawWorldLine( drawList, heads[p], heads[i], mvp, width, height, windowPos.x, windowPos.y,
-                           sel ? selCol : boneCol, sel ? 3.0f : 2.0f );
+
+            const ImVec2 P  = *screen[p];
+            const ImVec2 C  = *screen[i];
+            const float  dx = C.x - P.x, dy = C.y - P.y;
+            const float  len = std::sqrt( dx * dx + dy * dy );
+            if ( len < 1.0f )
+                continue;
+            const ImVec2 dir( dx / len, dy / len );
+            const ImVec2 perp( -dir.y, dir.x );
+            const float  w = std::clamp( len * 0.16f, 2.5f, 12.0f );                // octahedron half-width
+            const ImVec2 mid( P.x + dir.x * len * 0.2f, P.y + dir.y * len * 0.2f ); // widest ring
+            ImVec2       kite[4] = { P, ImVec2( mid.x + perp.x * w, mid.y + perp.y * w ), C,
+                                     ImVec2( mid.x - perp.x * w, mid.y - perp.y * w ) };
+            const bool   sel = ( static_cast<int>( i ) == selectedBone || static_cast<int>( p ) == selectedBone );
+            drawList->AddConvexPolyFilled( kite, 4, sel ? boneFillSel : boneFill );
+            drawList->AddPolyline( kite, 4, sel ? boneEdgeSel : boneEdge, ImDrawFlags_Closed, sel ? 2.0f : 1.5f );
         }
 
-        // Bone head markers (small screen-space squares; the selected bone is larger + accent-coloured) +
-        // the bone NAME as a label next to each head (the selected bone's label is accent-coloured).
-        const ImU32 labelCol    = IM_COL32( 220, 220, 230, 210 );
-        const ImU32 labelSelCol = IM_COL32( 255, 170, 90, 255 );
+        // UE-style joints: a filled "sphere" (disc + dark rim) at each bone head. Root is cyan, the
+        // selected/hovered joint is accented + enlarged. Records absolute-screen positions for PickBone.
+        const ImU32 jointCol    = IM_COL32( 240, 220, 120, 255 );
+        const ImU32 jointRoot   = IM_COL32( 90, 220, 235, 255 );
+        const ImU32 jointSel    = IM_COL32( 255, 140, 40, 255 );
+        const ImU32 jointRim    = IM_COL32( 25, 25, 30, 220 );
+        const ImU32 labelCol    = IM_COL32( 220, 220, 230, 220 );
+        const ImU32 labelSelCol = IM_COL32( 255, 175, 95, 255 );
         m_BoneScreenPositions.clear();
         for ( size_t i = 0; i < bones.size(); ++i )
         {
-            glm::vec2 s;
-            if ( !ProjectToScreen( heads[i], mvp, width, height, s ) )
+            if ( !screen[i] )
                 continue;
-            const ImVec2 c( windowPos.x + s.x, windowPos.y + s.y );
+            const ImVec2 c = *screen[i];
             m_BoneScreenPositions.emplace_back( static_cast<int>( i ), c ); // absolute-screen — for PickBone
-            const bool   sel = ( static_cast<int>( i ) == selectedBone );
-            const float  r   = sel ? 5.0f : 3.0f;
-            drawList->AddRectFilled( ImVec2( c.x - r, c.y - r ), ImVec2( c.x + r, c.y + r ),
-                                     sel ? selCol : boneCol );
-            // Only label the selected bone by default — dense rigs overlap all names into a blob otherwise
-            // (toggle "Names" in the viewport overlay to show them all).
-            if ( !bones[i].Name.empty() && ( sel || Core::SkeletonEditMode::ShowAllNames() ) )
-                drawList->AddText( ImVec2( c.x + r + 3.0f, c.y - 7.0f ), sel ? labelSelCol : labelCol,
+
+            const bool  sel     = ( static_cast<int>( i ) == selectedBone );
+            const bool  hovered = ( std::abs( mouse.x - c.x ) < 7.0f && std::abs( mouse.y - c.y ) < 7.0f );
+            const bool  isRoot  = !bones[i].ParentBoneID.has_value();
+            const float r       = sel ? 6.0f : ( hovered ? 5.5f : 4.0f );
+            const ImU32 fill    = sel ? jointSel : ( isRoot ? jointRoot : jointCol );
+
+            drawList->AddCircleFilled( c, r, fill, 16 );
+            drawList->AddCircle( c, r, jointRim, 16, 1.5f ); // dark rim -> reads as a small sphere
+            if ( sel || hovered )
+                drawList->AddCircle( c, r + 2.0f, sel ? jointSel : labelCol, 16, 1.0f ); // selection halo
+
+            // Label the selected/hovered bone by default; "Names" toggle shows them all (dense rigs blob).
+            if ( !bones[i].Name.empty() && ( sel || hovered || Core::SkeletonEditMode::ShowAllNames() ) )
+                drawList->AddText( ImVec2( c.x + r + 4.0f, c.y - 7.0f ), sel ? labelSelCol : labelCol,
                                    bones[i].Name.c_str() );
         }
     }
