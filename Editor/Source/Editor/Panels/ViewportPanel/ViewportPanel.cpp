@@ -782,8 +782,16 @@ namespace Desert::Editor
         if ( m_ViewAxisGizmoHovered )
             return false;
 
+        // The pick must fire ONLY over the rendered scene image — not the toolbar/overlay widgets that sit
+        // in the same viewport window. IsHovered (IsWindowHovered) is true for the whole window, so a click
+        // on e.g. the "Skeleton" toolbar button used to leak here, Raycast-miss, and clear the selection.
+        const ImVec2 mp        = ::ImGui::GetMousePos();
+        const auto&  vp        = m_ViewportData;
+        const bool   overImage = mp.x >= vp.ViewportPos.x && mp.y >= vp.ViewportPos.y &&
+                                 mp.x < vp.ViewportPos.x + vp.Size.x && mp.y < vp.ViewportPos.y + vp.Size.y;
+
         if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() &&
-             Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered )
+             Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered && overImage )
         {
             // Skeleton Edit mode: LMB selects the nearest bone joint under the cursor (keeping the skinned
             // mesh selected) rather than picking a new entity — unless the bone gizmo is being interacted with.
