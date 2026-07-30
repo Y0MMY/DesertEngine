@@ -41,6 +41,9 @@ namespace Desert::Editor
              "ffmpeg -y -f avfoundation -framerate 2 -i 0 -t 20 -q:v 2 {photos}/frame_%03d.jpg";
         std::string PhotogrammetryPhotosDir  = "";
         std::string PhotogrammetryOutputMesh = "Cooked/Photogrammetry/model.obj";
+        // 0 = Object (generic photogrammetry), 1 = Face (MetaHuman-style capture). Only swaps the tool
+        // presets + on-screen guidance; the engine still delegates the heavy lifting to the external CLI.
+        int PhotogrammetryMode = 0;
 
         static EditorPreferences& Get();
 
