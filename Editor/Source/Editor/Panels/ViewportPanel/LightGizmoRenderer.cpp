@@ -1,4 +1,5 @@
 #include "LightGizmoRenderer.hpp"
+#include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
@@ -74,6 +75,9 @@ namespace Desert::Editor
         {
             m_BoneScreenPositions.clear(); // outside Skeleton Edit -> no stale bone picks
         }
+
+        // Rig placement overlay (Convert-to-Skinned) — draws the bones being placed on a static mesh.
+        RenderRigBuilder( camera, width, height );
     }
 
     void LightGizmoRenderer::RenderPointLights( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
@@ -421,8 +425,9 @@ namespace Desert::Editor
         if ( !entity.HasComponent<ECS::SkinnedMeshComponent>() )
             return;
 
-        const auto& smc  = entity.GetComponent<ECS::SkinnedMeshComponent>();
-        auto*       mesh = Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
+        const auto&   smc  = entity.GetComponent<ECS::SkinnedMeshComponent>();
+        Desert::Mesh* mesh = smc.RuntimeMesh ? static_cast<Desert::Mesh*>( smc.RuntimeMesh.get() )
+                                             : Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
         if ( !mesh || !mesh->IsSkinned() )
             return;
         const auto& bones = static_cast<SkinnedMesh*>( mesh )->GetSkeleton().GetBones();
@@ -483,6 +488,26 @@ namespace Desert::Editor
                 screen[i] = ImVec2( windowPos.x + s.x, windowPos.y + s.y );
         }
 
+        std::vector<int>         parents( bones.size() );
+        std::vector<std::string> names( bones.size() );
+        for ( size_t i = 0; i < bones.size(); ++i )
+        {
+            parents[i] = -1;
+            if ( bones[i].ParentBoneID.has_value() )
+                parents[i] = static_cast<int>( bones[i].ParentBoneID.value() );
+            names[i] = bones[i].Name;
+        }
+
+        DrawBoneGizmos( drawList, screen, parents, names, selectedBone, Core::SkeletonEditMode::ShowAllNames(),
+                        /*recordForPick=*/true );
+    }
+
+    void LightGizmoRenderer::DrawBoneGizmos( ImDrawList* drawList,
+                                             const std::vector<std::optional<ImVec2>>& screen,
+                                             const std::vector<int>& parents,
+                                             const std::vector<std::string>& names, int selectedBone,
+                                             bool showAllNames, bool recordForPick )
+    {
         const ImVec2 mouse = ImGui::GetMousePos();
 
         // UE-style bones: each parent->child link is a tapered octahedron (a 2D "kite" widest ~20% from the
@@ -491,12 +516,10 @@ namespace Desert::Editor
         const ImU32 boneEdge    = IM_COL32( 225, 235, 255, 190 );
         const ImU32 boneFillSel = IM_COL32( 255, 165, 60, 110 );
         const ImU32 boneEdgeSel = IM_COL32( 255, 190, 90, 255 );
-        for ( size_t i = 0; i < bones.size(); ++i )
+        for ( size_t i = 0; i < screen.size(); ++i )
         {
-            if ( !bones[i].ParentBoneID.has_value() )
-                continue;
-            const uint32_t p = bones[i].ParentBoneID.value();
-            if ( p >= bones.size() || !screen[p] || !screen[i] )
+            const int p = parents[i];
+            if ( p < 0 || p >= static_cast<int>( screen.size() ) || !screen[p] || !screen[i] )
                 continue;
 
             const ImVec2 P  = *screen[p];
@@ -511,7 +534,7 @@ namespace Desert::Editor
             const ImVec2 mid( P.x + dir.x * len * 0.2f, P.y + dir.y * len * 0.2f ); // widest ring
             ImVec2       kite[4] = { P, ImVec2( mid.x + perp.x * w, mid.y + perp.y * w ), C,
                                      ImVec2( mid.x - perp.x * w, mid.y - perp.y * w ) };
-            const bool   sel = ( static_cast<int>( i ) == selectedBone || static_cast<int>( p ) == selectedBone );
+            const bool   sel = ( static_cast<int>( i ) == selectedBone || p == selectedBone );
             drawList->AddConvexPolyFilled( kite, 4, sel ? boneFillSel : boneFill );
             drawList->AddPolyline( kite, 4, sel ? boneEdgeSel : boneEdge, ImDrawFlags_Closed, sel ? 2.0f : 1.5f );
         }
@@ -524,17 +547,19 @@ namespace Desert::Editor
         const ImU32 jointRim    = IM_COL32( 25, 25, 30, 220 );
         const ImU32 labelCol    = IM_COL32( 220, 220, 230, 220 );
         const ImU32 labelSelCol = IM_COL32( 255, 175, 95, 255 );
-        m_BoneScreenPositions.clear();
-        for ( size_t i = 0; i < bones.size(); ++i )
+        if ( recordForPick )
+            m_BoneScreenPositions.clear();
+        for ( size_t i = 0; i < screen.size(); ++i )
         {
             if ( !screen[i] )
                 continue;
             const ImVec2 c = *screen[i];
-            m_BoneScreenPositions.emplace_back( static_cast<int>( i ), c ); // absolute-screen — for PickBone
+            if ( recordForPick )
+                m_BoneScreenPositions.emplace_back( static_cast<int>( i ), c ); // absolute-screen — for PickBone
 
             const bool  sel     = ( static_cast<int>( i ) == selectedBone );
             const bool  hovered = ( std::abs( mouse.x - c.x ) < 7.0f && std::abs( mouse.y - c.y ) < 7.0f );
-            const bool  isRoot  = !bones[i].ParentBoneID.has_value();
+            const bool  isRoot  = ( parents[i] < 0 );
             const float r       = sel ? 6.0f : ( hovered ? 5.5f : 4.0f );
             const ImU32 fill    = sel ? jointSel : ( isRoot ? jointRoot : jointCol );
 
@@ -553,10 +578,49 @@ namespace Desert::Editor
                 drawList->AddCircle( c, r + 2.5f, IM_COL32( 255, 255, 255, 140 ), 24, 1.0f ); // hover ring
 
             // Label the selected/hovered bone by default; "Names" toggle shows them all (dense rigs blob).
-            if ( !bones[i].Name.empty() && ( sel || hovered || Core::SkeletonEditMode::ShowAllNames() ) )
+            if ( i < names.size() && !names[i].empty() && ( sel || hovered || showAllNames ) )
                 drawList->AddText( ImVec2( c.x + r + 4.0f, c.y - 7.0f ), sel ? labelSelCol : labelCol,
-                                   bones[i].Name.c_str() );
+                                   names[i].c_str() );
         }
+    }
+
+    void LightGizmoRenderer::RenderRigBuilder( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
+                                               float height )
+    {
+        if ( !RigBuilder::IsActive() )
+            return;
+        const auto& entOpt = m_Scene->FindEntityByID( RigBuilder::Target() );
+        if ( !entOpt )
+            return;
+        auto& entity = entOpt->get();
+        if ( !entity.HasComponent<ECS::TransformComponent>() )
+            return;
+
+        const auto& bones = RigBuilder::Bones();
+        if ( bones.empty() )
+            return;
+
+        // Heads live in mesh-LOCAL space; lift to world with the entity transform (mirrors RenderSkeleton).
+        const glm::mat4 entityWorld = entity.GetComponent<ECS::TransformComponent>().GetTransform();
+        const glm::mat4 mvp         = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+        const ImVec2    windowPos   = ImGui::GetWindowPos();
+        ImDrawList*     drawList    = ImGui::GetWindowDrawList();
+
+        std::vector<std::optional<ImVec2>> screen( bones.size() );
+        std::vector<int>                   parents( bones.size() );
+        std::vector<std::string>           names( bones.size() );
+        for ( size_t i = 0; i < bones.size(); ++i )
+        {
+            parents[i]                = bones[i].Parent;
+            names[i]                  = bones[i].Name;
+            const glm::vec3 headWorld = glm::vec3( entityWorld * glm::vec4( bones[i].Head, 1.0f ) );
+            glm::vec2       s;
+            if ( ProjectToScreen( headWorld, mvp, width, height, s ) )
+                screen[i] = ImVec2( windowPos.x + s.x, windowPos.y + s.y );
+        }
+
+        DrawBoneGizmos( drawList, screen, parents, names, RigBuilder::SelectedBone(), /*showAllNames=*/true,
+                        /*recordForPick=*/false );
     }
 
     int LightGizmoRenderer::PickBone( const ImVec2& absMouse, float radiusPx ) const

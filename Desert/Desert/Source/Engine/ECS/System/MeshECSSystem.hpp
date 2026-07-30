@@ -419,7 +419,10 @@ namespace Desert::ECS
                               !registry.get<VisibilityComponent>( entity ).Visible )
                              return;
 
-                         auto baseMesh = Runtime::ResourceRegistry::GetMeshService()->Get( mesh.MeshHandle );
+                         // Editor-built runtime rig (Convert to Skinned) takes priority over the cooked asset.
+                         Desert::Mesh* baseMesh = mesh.RuntimeMesh.get();
+                         if ( !baseMesh )
+                             baseMesh = Runtime::ResourceRegistry::GetMeshService()->Get( mesh.MeshHandle );
                          if ( !baseMesh || !baseMesh->IsSkinned() )
                              return;
                          auto* skinnedMesh = static_cast<Desert::SkinnedMesh*>( baseMesh );

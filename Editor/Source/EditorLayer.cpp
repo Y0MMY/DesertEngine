@@ -70,6 +70,7 @@
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
+#include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/SpotLightSystem.hpp>
@@ -503,6 +504,11 @@ namespace Desert::Editor
             DESERT_PROFILE_SCOPE( "Scene::OnUpdate" );
             m_MainScene->OnUpdate( ts );
         }
+
+        // Runs a queued "Convert to Skinned" (rig builder) here, outside ImGui component iteration — the swap
+        // removes the StaticMeshComponent the Details panel is drawing, so it must not happen mid-render.
+        if ( m_MainScene && m_AssetManager )
+            RigBuilder::ProcessPending( *m_MainScene, *m_AssetManager );
 
         // DEBUG: press F9 to dump the final rendered viewport image to F:/DesertEngine/frame_dump.png. Useful
         // because external GDI/PrintWindow capture returns white for the Vulkan surface — this reads the actual

@@ -22,6 +22,9 @@ namespace Desert::Editor
         void        SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle );
         std::string GetPrimitiveName( const ECS::StaticMeshComponent& staticMesh ) const;
 
+        // In-editor rigging section: place bones on an asset-backed static mesh and "Convert to Skinned".
+        void RenderRigging( ECS::Entity& entity, ECS::StaticMeshComponent& staticMesh );
+
     private:
         const Assets::AssetManager* m_AssetManager;
     };

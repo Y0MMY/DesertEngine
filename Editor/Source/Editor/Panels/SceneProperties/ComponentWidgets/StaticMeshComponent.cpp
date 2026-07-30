@@ -10,7 +10,11 @@
 
 #include "../../MeshEditor/MeshEditorPanel.hpp"
 
+#include <Editor/Core/Rigging/RigBuilder.hpp>
+#include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
+
+#include <cfloat>
 
 namespace Desert::Editor
 {
@@ -135,8 +139,94 @@ namespace Desert::Editor
             materialComponent.Render( entity );
         }
 
+        RenderRigging( entity, staticMesh );
+
         ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
+    }
+
+    void StaticMeshComponentWidget::RenderRigging( ECS::Entity& entity, ECS::StaticMeshComponent& staticMesh )
+    {
+        // Rigging needs asset-backed CPU geometry (primitives/procedural have no StaticMeshAsset vertices).
+        if ( staticMesh.Primitive.has_value() || !staticMesh.MeshHandle )
+            return;
+        if ( !entity.HasComponent<ECS::UUIDComponent>() )
+            return;
+
+        const Common::UUID uuid = entity.GetComponent<ECS::UUIDComponent>().UUID;
+
+        // Seed / default placement = the mesh's local AABB centre.
+        glm::vec3 center( 0.0f );
+        if ( auto asset = m_AssetManager->FindByHandle<Assets::StaticMeshAsset>( staticMesh.MeshHandle ) )
+        {
+            const auto& verts = asset->GetVertices();
+            if ( !verts.empty() )
+            {
+                glm::vec3 mn( FLT_MAX ), mx( -FLT_MAX );
+                for ( const auto& v : verts )
+                {
+                    mn = glm::min( mn, v.Position );
+                    mx = glm::max( mx, v.Position );
+                }
+                center = 0.5f * ( mn + mx );
+            }
+        }
+
+        ImGui::Separator();
+        if ( !ImGui::CollapsingHeader( "Rigging (Skeleton)" ) )
+            return;
+
+        const bool   riggingThis = RigBuilder::IsActive() && RigBuilder::Target() == uuid;
+        const ImVec2 full( ImGui::GetContentRegionAvail().x, 0 );
+
+        if ( !riggingThis )
+        {
+            if ( RigBuilder::IsActive() )
+                ImGui::TextDisabled( "Another mesh is being rigged." );
+            ImGui::TextWrapped( "Place bones on this static mesh, then convert it to a skinned mesh with "
+                                "automatic vertex weights. Pose the bones afterwards in Skeleton Edit mode." );
+            if ( ImGui::Button( "Add Skeleton / Rig this Mesh", full ) )
+                RigBuilder::Begin( uuid, center );
+            return;
+        }
+
+        const auto& bones = RigBuilder::Bones();
+        const int   sel   = RigBuilder::SelectedBone();
+
+        ImGui::TextDisabled( "Bones (%d)", static_cast<int>( bones.size() ) );
+        for ( int i = 0; i < static_cast<int>( bones.size() ); ++i )
+        {
+            ImGui::PushID( i );
+            std::string label = bones[i].Name;
+            if ( bones[i].Parent < 0 )
+                label += "  (root)";
+            if ( ImGui::Selectable( label.c_str(), i == sel ) )
+                RigBuilder::SelectBone( i );
+            ImGui::PopID();
+        }
+
+        ImGui::Separator();
+        if ( sel >= 0 && sel < static_cast<int>( bones.size() ) )
+        {
+            glm::vec3 head = bones[sel].Head;
+            if ( ImGui::DragFloat3( "Head", &head.x, 0.01f ) )
+                RigBuilder::SetHead( sel, head );
+        }
+
+        if ( ImGui::Button( "Add Child Bone" ) )
+        {
+            const glm::vec3 head = ( sel >= 0 ) ? bones[sel].Head + glm::vec3( 0.0f, 0.5f, 0.0f ) : center;
+            RigBuilder::AddBone( sel, head );
+        }
+        ImGui::SameLine();
+        if ( ImGui::Button( "Delete Bone" ) )
+            RigBuilder::DeleteBone( sel );
+
+        ImGui::Separator();
+        if ( ImGui::Button( "Convert to Skinned", full ) )
+            RigBuilder::RequestConvert();
+        if ( ImGui::Button( "Cancel", full ) )
+            RigBuilder::Cancel();
     }
 
     void StaticMeshComponentWidget::SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle )

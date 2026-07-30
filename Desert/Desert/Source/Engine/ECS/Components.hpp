@@ -29,6 +29,11 @@ namespace Desert
 {
     class Mesh;
     class DynamicMesh;
+    class SkinnedMesh;
+    namespace Animation
+    {
+        class Skeleton;
+    }
 }
 
 namespace Desert::Graphic
@@ -128,6 +133,13 @@ namespace Desert::ECS
         std::vector<Assets::AssetHandle>          MaterialSlots;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
         uint32_t                                  SeenMaterialsVersion = 0; // see StaticMeshComponent
+
+        // In-editor rig: a skinned mesh built at runtime by "Convert to Skinned" (from a static mesh + placed
+        // bones, auto-weighted), NOT yet a cooked asset. When set, RuntimeMesh overrides MeshHandle in the
+        // render path. RuntimeSkeleton owns the Skeleton that RuntimeMesh references by raw pointer, keeping it
+        // alive for the mesh's lifetime (destroyed together with the component).
+        std::shared_ptr<SkinnedMesh>         RuntimeMesh;
+        std::shared_ptr<Animation::Skeleton> RuntimeSkeleton;
     };
 
     // UE-style Instanced Static Mesh: ONE mesh + ONE material drawn N times (per-instance world transforms)
