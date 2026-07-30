@@ -241,6 +241,7 @@ namespace Desert::Editor
                 VM_Roughness,
                 VM_AO,
                 VM_LightComplexity,
+                VM_Overdraw,
                 VM_ShadowCascades,
                 VM_Count
             };
@@ -252,6 +253,7 @@ namespace Desert::Editor
                                          ICON_MDI_BLUR "  Roughness",
                                          ICON_MDI_WEATHER_NIGHT "  Ambient Occlusion",
                                          ICON_MDI_FIRE "  Light Complexity",
+                                         ICON_MDI_LAYERS_TRIPLE "  Overdraw",
                                          ICON_MDI_LAYERS "  Shadow Cascades" };
 
             // Derive the active mode from the current settings (last-wins order matches the enum).
@@ -272,6 +274,8 @@ namespace Desert::Editor
                 vm = VM_AO;
             else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::LightComplexity )
                 vm = VM_LightComplexity;
+            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Overdraw )
+                vm = VM_Overdraw;
             else if ( s.ShowNormals )
                 vm = VM_Normals;
 
@@ -309,6 +313,9 @@ namespace Desert::Editor
                         break;
                     case VM_LightComplexity:
                         s.DeferredDebug = ::Desert::Core::DeferredDebugMode::LightComplexity;
+                        break;
+                    case VM_Overdraw:
+                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Overdraw;
                         break;
                     case VM_ShadowCascades:
                         s.ShadowDebug = ::Desert::Core::ShadowDebugMode::Cascades;

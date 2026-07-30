@@ -126,6 +126,10 @@ namespace Desert::Graphic::System
         if ( !SetupDebugLinePass() )
             return Common::MakeError( "Failed to setup debug line pass" );
 
+        // Overdraw is an optional debug view — never fatal if its shaders are missing.
+        if ( !SetupOverdrawPass() )
+            LOG_WARN( "[MeshRenderer] Overdraw debug view unavailable (shaders missing)." );
+
         m_StaticMaterialFallback =
              std::make_unique<Graphic::StaticMaterialPBR>();
 
@@ -1411,6 +1415,109 @@ namespace Desert::Graphic::System
 
         m_DebugLineMaterial = std::make_unique<MaterialDebugLine>();
         return m_DebugLinePipeline != nullptr;
+    }
+
+    bool MeshRenderer::SetupOverdrawPass()
+    {
+        m_OverdrawShader        = Runtime::ResourceRegistry::GetShaderService()->GetByName( "Overdraw" );
+        m_OverdrawResolveShader = Runtime::ResourceRegistry::GetShaderService()->GetByName( "OverdrawResolve" );
+        if ( !m_OverdrawShader || !m_OverdrawResolveShader )
+            return false;
+
+        const auto& targetFb = m_TargetFramebuffer.lock();
+        if ( !targetFb )
+            return false;
+
+        // Accumulation target: RGBA32F so many additive fragments don't clip. Cleared to 0 each frame; each
+        // drawn fragment adds a small constant, so the .r channel ends up holding overdraw-count * step.
+        FramebufferSpecification accumSpec;
+        accumSpec.DebugName = "OverdrawAccum";
+        accumSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+        m_OverdrawFB = Graphic::Framebuffer::Create( accumSpec );
+        m_OverdrawFB->Resize( targetFb->GetFramebufferWidth(), targetFb->GetFramebufferHeight() );
+
+        // Geometry accumulation pipeline: static-mesh layout (same as silhouette), ADDITIVE blend, and NO
+        // depth test — every fragment (even occluded ones) must count, which is exactly what overdraw measures.
+        GraphicsPipelineSpecification spec;
+        spec.DebugName           = "OverdrawPipeline";
+        spec.Layout              = { { Graphic::ShaderDataType::Float3, "a_Position" },
+                                     { Graphic::ShaderDataType::Float3, "a_Normal" },
+                                     { Graphic::ShaderDataType::Float3, "a_Tangent" },
+                                     { Graphic::ShaderDataType::Float3, "a_Bitangent" },
+                                     { Graphic::ShaderDataType::Float2, "a_TextureCoord" } };
+        spec.Shader              = m_OverdrawShader;
+        spec.Framebuffer         = m_OverdrawFB;
+        spec.DepthTestEnabled    = false;
+        spec.DepthWriteEnabled   = false;
+        spec.CullMode            = CullMode::None;
+        spec.BlendEnable         = true;
+        spec.SrcColorBlendFactor = BlendFactor::One;
+        spec.DstColorBlendFactor = BlendFactor::One;
+        m_OverdrawPipeline       = GraphicsPipeline::Create( spec );
+        m_OverdrawPipeline->Invalidate();
+        m_OverdrawMaterial = std::make_unique<MaterialOverdraw>();
+
+        // Fullscreen resolve: heat-map the accumulation over the scene colour (LOAD so the scene shows through).
+        GraphicsPipelineSpecification rspec;
+        rspec.DebugName           = "OverdrawResolvePipeline";
+        rspec.Shader              = m_OverdrawResolveShader;
+        rspec.Framebuffer         = targetFb;
+        rspec.DepthTestEnabled    = false;
+        rspec.DepthWriteEnabled   = false;
+        rspec.UseLoadRenderPass   = true;
+        m_OverdrawResolvePipeline = GraphicsPipeline::Create( rspec );
+        m_OverdrawResolvePipeline->Invalidate();
+        m_OverdrawResolveMaterial = std::make_unique<MaterialOverdrawResolve>();
+
+        return true;
+    }
+
+    void MeshRenderer::RenderOverdrawManual()
+    {
+        if ( !m_OverdrawPipeline || !m_OverdrawFB || !m_OverdrawResolvePipeline )
+            return;
+        const auto& target = m_SceneRenderer ? m_SceneRenderer->GetTargetFramebuffer() : nullptr;
+        const auto  camera = m_SceneRenderer ? m_SceneRenderer->GetMainCamera() : nullptr;
+        if ( !target || !camera )
+            return;
+
+        auto& renderer = Renderer::GetInstance();
+
+        // 1) Accumulate: clear to 0, then draw every opaque mesh additively (static + generic; both use the
+        //    static vertex layout). Skinned meshes are skipped — they'd need the skinned layout + bone SSBO.
+        {
+            RenderPassSpecification rpSpec;
+            rpSpec.TargetFramebuffer = m_OverdrawFB;
+            rpSpec.DebugName         = "OverdrawAccumPass";
+            rpSpec.ClearColor.Color  = glm::vec4( 0.0f );
+            auto rp                  = RenderPass::Create( rpSpec );
+
+            renderer.BeginRenderPass( rp.get() );
+            m_OverdrawMaterial->UpdateCamera( camera );
+            for ( const auto& rd : m_StaticQueue )
+                if ( rd.Mesh )
+                    renderer.RenderMesh( m_OverdrawPipeline.get(), rd.Mesh, rd.Transform,
+                                         m_OverdrawMaterial->GetMaterialExecutor() );
+            for ( const auto& g : m_GenericQueue )
+                if ( g.Mesh )
+                    renderer.RenderMesh( m_OverdrawPipeline.get(), g.Mesh, g.Transform,
+                                         m_OverdrawMaterial->GetMaterialExecutor() );
+            renderer.EndRenderPass();
+        }
+
+        // 2) Resolve: heat-map the accumulation over the scene colour (LOAD; the resolve discards empty texels).
+        {
+            RenderPassSpecification rpSpec;
+            rpSpec.TargetFramebuffer = target;
+            rpSpec.DebugName         = "OverdrawResolvePass";
+            auto rp                  = RenderPass::Create( rpSpec );
+
+            renderer.BeginRenderPass( rp.get(), false );
+            m_OverdrawResolveMaterial->Bind( m_OverdrawFB->GetColorAttachmentImage( 0 ) );
+            renderer.SubmitFullscreenQuad( m_OverdrawResolvePipeline.get(),
+                                           m_OverdrawResolveMaterial->GetMaterialExecutor() );
+            renderer.EndRenderPass();
+        }
     }
 
     void MeshRenderer::RegisterDebugPass( RenderGraphBuilder& builder )

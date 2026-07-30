@@ -7,6 +7,8 @@
 #include <Engine/Graphic/Materials/Mesh/MaterialSilhouette.hpp>
 #include <Engine/Graphic/Materials/Mesh/MaterialShadow.hpp>
 #include <Engine/Graphic/Materials/Debug/MaterialDebugLine.hpp>
+#include <Engine/Graphic/Materials/Debug/MaterialOverdraw.hpp>
+#include <Engine/Graphic/Materials/Debug/MaterialOverdrawResolve.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/SkinnedMaterialPBR.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
@@ -132,6 +134,16 @@ namespace Desert::Graphic::System
             return m_SilhouetteMaskFramebuffer;
         }
 
+        // Overdraw debug view: re-rasterize every opaque mesh with additive blend (no depth) into a float
+        // accumulation buffer, then heat-map the per-pixel overdraw count over the finished scene colour.
+        // Path-independent (re-draws geometry; ignores the G-buffer), so it works in Forward and Deferred.
+        void RenderOverdrawManual();
+
+        const std::shared_ptr<Framebuffer>& GetOverdrawFramebuffer() const
+        {
+            return m_OverdrawFB;
+        }
+
         // True if any queued mesh is flagged for the selection outline this frame. The Jump Flood pass
         // uses this to skip its (log2(width)) full-screen ping-pong passes when nothing is selected.
         bool HasOutline() const
@@ -228,6 +240,7 @@ namespace Desert::Graphic::System
         void RegisterSilhouettePass( RenderGraphBuilder& builder );
         void RegisterShadowPass( RenderGraphBuilder& builder );
         bool SetupDebugLinePass();
+        bool SetupOverdrawPass(); // overdraw accumulation pipeline + FB + fullscreen heat resolve
         void RegisterDebugPass( RenderGraphBuilder& builder );
 
         void UpdateGlobalUniforms( const Core::Camera* camera, const ShaderProtocols::PointLight& pointLights,
@@ -313,6 +326,16 @@ namespace Desert::Graphic::System
         std::shared_ptr<GraphicsPipeline>  m_DebugLinePipeline;
         std::shared_ptr<Shader>            m_DebugLineShader;
         std::unique_ptr<MaterialDebugLine> m_DebugLineMaterial;
+
+        // Overdraw view: geometry accumulation (additive, no depth) into m_OverdrawFB, then a fullscreen
+        // resolve that heat-maps the count over the scene colour. Static/generic meshes only (skinned skipped).
+        std::shared_ptr<GraphicsPipeline>        m_OverdrawPipeline;
+        std::shared_ptr<Shader>                  m_OverdrawShader;
+        std::unique_ptr<MaterialOverdraw>        m_OverdrawMaterial;
+        std::shared_ptr<Framebuffer>             m_OverdrawFB;
+        std::shared_ptr<GraphicsPipeline>        m_OverdrawResolvePipeline;
+        std::shared_ptr<Shader>                  m_OverdrawResolveShader;
+        std::unique_ptr<MaterialOverdrawResolve> m_OverdrawResolveMaterial;
 
         std::vector<StaticMeshRenderData>  m_StaticQueue;
         std::vector<SkinnedMeshRenderData> m_SkinnedQueue;
