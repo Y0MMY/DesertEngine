@@ -246,9 +246,10 @@ namespace Desert::Editor
 
         const float playX = timeToX( animator->GetCurrentTime() );
 
-        bool moved        = false; // a key's time changed this frame
-        int  movedTrack   = -1;
-        int  movedChannel = -1;
+        bool liveRefresh = false; // a key is being dragged this frame -> refresh the pose live
+        bool needSort    = false; // a drag just ended -> re-sort that channel + reselect the moved key
+        int  sortTrack   = -1;
+        int  sortChannel = -1;
 
         for ( int ti = 0; ti < static_cast<int>( clip->Tracks.size() ); ++ti )
         {
@@ -292,11 +293,17 @@ namespace Desert::Editor
                     }
                     if ( ImGui::IsItemActive() && laneW > 0.0f )
                     {
+                        // Retime WITHOUT sorting mid-drag: sorting would change this key's index (and thus its
+                        // ImGui ID), dropping the drag. We sort once on release instead.
                         kt = std::clamp( ( ImGui::GetMousePos().x - laneX0 ) / laneW, 0.0f, 1.0f ) * duration;
-                        m_DragTime   = kt;
-                        moved        = true;
-                        movedTrack   = ti;
-                        movedChannel = ch;
+                        m_DragTime  = kt;
+                        liveRefresh = true;
+                    }
+                    if ( ImGui::IsItemDeactivated() )
+                    {
+                        needSort    = true;
+                        sortTrack   = ti;
+                        sortChannel = ch;
                     }
                     ImGui::PopID();
 
@@ -313,14 +320,17 @@ namespace Desert::Editor
         }
         ImGui::EndChild();
 
-        // A drag changed a key's time: keep the channel sorted (the sampler needs monotonic time) and follow
-        // the moved key so it stays selected.
-        if ( moved && movedTrack >= 0 )
+        if ( liveRefresh )
+            animator->SetTime( animator->GetCurrentTime() ); // show the retimed pose live while dragging
+
+        // Drag released: keep the channel sorted (the sampler needs monotonic time) and re-select the key
+        // that just moved (its index changed after the sort).
+        if ( needSort && sortTrack >= 0 )
         {
-            auto& tr = clip->Tracks[movedTrack];
-            if ( movedChannel == 0 )
+            auto& tr = clip->Tracks[sortTrack];
+            if ( sortChannel == 0 )
                 std::sort( tr.PositionKeys.begin(), tr.PositionKeys.end() );
-            else if ( movedChannel == 1 )
+            else if ( sortChannel == 1 )
                 std::sort( tr.RotationKeys.begin(), tr.RotationKeys.end() );
             else
                 std::sort( tr.ScaleKeys.begin(), tr.ScaleKeys.end() );
@@ -337,11 +347,11 @@ namespace Desert::Editor
                     }
                 return best;
             };
-            m_SelTrack   = movedTrack;
-            m_SelChannel = movedChannel;
-            m_SelKey     = movedChannel == 0   ? nearestKey( tr.PositionKeys )
-                           : movedChannel == 1 ? nearestKey( tr.RotationKeys )
-                                               : nearestKey( tr.ScaleKeys );
+            m_SelTrack   = sortTrack;
+            m_SelChannel = sortChannel;
+            m_SelKey     = sortChannel == 0   ? nearestKey( tr.PositionKeys )
+                           : sortChannel == 1 ? nearestKey( tr.RotationKeys )
+                                              : nearestKey( tr.ScaleKeys );
 
             animator->SetTime( animator->GetCurrentTime() ); // refresh the pose to the edited key
         }
