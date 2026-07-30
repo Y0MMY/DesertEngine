@@ -20,6 +20,8 @@ namespace Desert::Editor
         // Light billboards draw with the big icon font at this pixel size — the default-font glyph
         // was a barely-visible, barely-clickable speck.
         constexpr float kLightIconSize = 30.0f;
+        // Text-label billboard: noticeable but a touch smaller than the light bulbs so it doesn't dominate.
+        constexpr float kTextIconSize = 26.0f;
 
         // Projects a world point to viewport-local screen coords, returning false when the point is
         // behind the camera (clip w <= 0). WorldToScreenSpace divides by w unconditionally, so behind
@@ -56,6 +58,7 @@ namespace Desert::Editor
         RenderDirectionLights( camera, width, height );
         RenderCameras( camera, width, height, xpos, ypos );
         RenderSpawnIcons( camera, width, height );
+        RenderTextIcons( camera, width, height );
 
         // Collider wireframes moved to EditorColliderPass (true 3D, depth-tested) via the Editor Pass API.
 
@@ -547,7 +550,8 @@ namespace Desert::Editor
                  entity.HasComponent<ECS::PointLightComponent>() ||
                  entity.HasComponent<ECS::SpotLightComponent>() ||
                  entity.HasComponent<ECS::DirectionLightComponent>() ||
-                 entity.HasComponent<ECS::CameraComponent>() || entity.HasComponent<ECS::SkyboxComponent>() )
+                 entity.HasComponent<ECS::CameraComponent>() || entity.HasComponent<ECS::SkyboxComponent>() ||
+                 entity.HasComponent<ECS::TextComponent>() ) // Text has its own big billboard (RenderTextIcons)
                 continue;
 
             // Pick the icon by the most specific "invisible" role the entity plays.
@@ -602,6 +606,59 @@ namespace Desert::Editor
                 Utils::ImGuiUtilities::Tooltip( std::format( "{}\n{}\nPosition: ({:.2f}, {:.2f}, {:.2f})", name,
                                                              label, worldPos.x, worldPos.y, worldPos.z )
                                                      .c_str() );
+                ImGui::PopStyleColor( 2 );
+            }
+        }
+    }
+
+    void LightGizmoRenderer::RenderTextIcons( const std::shared_ptr<Desert::Core::Camera>& camera, float width,
+                                              float height )
+    {
+        auto         entities  = m_Scene->GetAllEntities();
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        const auto   mvp       = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+        ImDrawList*  drawList  = ImGui::GetWindowDrawList();
+        const ImVec2 mouse     = ImGui::GetMousePos();
+
+        ImFont* iconFont = EditorResources::GetBigIconFont();
+
+        for ( auto entity : entities )
+        {
+            if ( !entity.HasComponent<ECS::TextComponent>() )
+                continue;
+
+            const glm::vec3 worldPos = glm::vec3( entity.GetWorldTransform()[3] );
+            glm::vec2       screenPos;
+            if ( !ProjectToScreen( worldPos, mvp, width, height, screenPos ) )
+                continue;
+
+            const float  ax   = windowPos.x + screenPos.x;
+            const float  ay   = windowPos.y + screenPos.y;
+            const char*  icon = ICON_MDI_FORMAT_TEXT;
+            const ImVec2 sz   = iconFont->CalcTextSizeA( kTextIconSize, FLT_MAX, 0.0f, icon );
+
+            // Text colour tint so the marker reads as "this is the label" at a glance.
+            const auto&  tc = entity.GetComponent<ECS::TextComponent>();
+            const ImVec4 col( tc.Color.r, tc.Color.g, tc.Color.b, 1.0f );
+            drawList->AddText( iconFont, kTextIconSize, ImVec2( ax - sz.x * 0.5f, ay - sz.y * 0.5f ),
+                               ImColor( col ), icon );
+
+            if ( mouse.x >= ax - sz.x * 0.5f && mouse.x <= ax + sz.x * 0.5f && mouse.y >= ay - sz.y * 0.5f &&
+                 mouse.y <= ay + sz.y * 0.5f )
+            {
+                m_LightIconHovered = true; // shares the icon-hover gate so scene ray-pick doesn't fire under it
+                if ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+                    Core::SelectionManager::SetSelected( entity.GetComponent<ECS::UUIDComponent>().UUID );
+
+                const std::string name = entity.HasComponent<ECS::TagComponent>()
+                                              ? entity.GetComponent<ECS::TagComponent>().Tag
+                                              : std::string( "Text" );
+                ImGui::PushStyleColor( ImGuiCol_PopupBg, IM_COL32( 0, 0, 0, 0 ) );
+                ImGui::PushStyleColor( ImGuiCol_Border, IM_COL32( 0, 0, 0, 0 ) );
+                Utils::ImGuiUtilities::Tooltip(
+                     std::format( "{}\nText: \"{}\"\nPosition: ({:.2f}, {:.2f}, {:.2f})", name, tc.Text,
+                                  worldPos.x, worldPos.y, worldPos.z )
+                          .c_str() );
                 ImGui::PopStyleColor( 2 );
             }
         }

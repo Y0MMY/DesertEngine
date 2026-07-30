@@ -274,6 +274,10 @@ Shader "DeferredLighting"
         		return;
         	}
 
+        	// Material Complexity: the G-buffer pass stashed the material's sampled-texture count in GBufferC.w
+        	// (0..3). Heat-map it as a proxy for per-pixel shading cost (UE-style shader/material complexity).
+        	if (dbg == 9) { oColor = vec4(HeatColor(gc.w / 3.0), 1.0); return; }
+
         	// --- Lit: shadow-mapped directional sun (N·L) + full PBR point/spot lights ---
         	vec3 N    = normalize(normal);
         	vec3 view = normalize(u_CameraPos.xyz - worldPos);

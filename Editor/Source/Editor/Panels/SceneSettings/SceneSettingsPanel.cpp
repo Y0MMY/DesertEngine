@@ -156,22 +156,17 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Procedural Sky + skybox intensity moved to the Skybox component (Details)." );
         }
 
-        if ( ImGui::CollapsingHeader( "Debug" ) )
+        if ( ImGui::CollapsingHeader( "Shadow Debug" ) )
         {
-            // Live — infinite editor ground grid.
-            ImGui::Checkbox( "Show Grid", &s.ShowGrid );
+            // Viewport "show flags" (Grid / Bounding Boxes / Colliders / Wireframe / Mesh LOD) moved to the
+            // viewport toolbar's "Show" dropdown, next to View Mode. "Show Normals" and "Light Debug" moved
+            // to the View Mode dropdown (Normals / Light Complexity). This section keeps shadow-map inspection.
 
-            // Live — selects the line-polygon mesh pipeline.
-            ImGui::Checkbox( "Wireframe", &s.WireframeMode );
-
-            // Live — shadow debug: Off / raw shadow factor (grayscale) / cascade tint. Lets the CSM
-            // shadow maps be verified independently of scene lighting (IBL isn't shadowed).
-            {
-                const char* modes[] = { "Off", "Shadow Factor", "Cascades" };
-                int         cur     = static_cast<int>( s.ShadowDebug );
-                if ( ImGui::Combo( "Shadow Debug", &cur, modes, IM_ARRAYSIZE( modes ) ) )
-                    s.ShadowDebug = static_cast<Core::ShadowDebugMode>( cur );
-            }
+            // Off / raw shadow factor (grayscale) / cascade tint — verifies the CSM independently of lighting.
+            const char* modes[] = { "Off", "Shadow Factor", "Cascades" };
+            int         cur     = static_cast<int>( s.ShadowDebug );
+            if ( ImGui::Combo( "Shadow Debug", &cur, modes, IM_ARRAYSIZE( modes ) ) )
+                s.ShadowDebug = static_cast<Core::ShadowDebugMode>( cur );
 
             // CSM cascade depth maps (R32F light-space depth, near→far cascades).
             if ( auto* sr = m_Scene->GetSceneRenderer() )
@@ -187,18 +182,6 @@ namespace Desert::Editor
                         ImGui::SameLine();
                 }
             }
-
-            ImGui::Spacing();
-            ImGui::Checkbox( "Show Bounding Boxes", &s.ShowBoundingBoxes );
-            ImGui::BeginDisabled( !s.ShowBoundingBoxes );
-            ImGui::ColorEdit3( "BB Color", glm::value_ptr( s.BoundingBoxColor ) );
-            ImGui::SliderFloat( "BB Line Width", &s.BoundingBoxLineWidth, 1.0f, 10.0f, "%.1f" );
-            ImGui::EndDisabled();
-            ImGui::Checkbox( "Show Colliders", &s.ShowColliders );
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Draw green wireframes for physics colliders (Box/Sphere/Capsule)." );
-            // "Show Normals" and "Light Debug" moved to the viewport View Mode dropdown (Normals /
-            // Light Complexity) — they are no longer standalone Scene Settings toggles.
         }
 
         if ( ImGui::CollapsingHeader( "Rendering", ImGuiTreeNodeFlags_DefaultOpen ) )

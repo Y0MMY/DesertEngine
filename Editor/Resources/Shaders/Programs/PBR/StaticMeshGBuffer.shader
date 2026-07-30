@@ -157,9 +157,17 @@ Shader "StaticMeshGBuffer"
         	if (lightsMetadata.SpotLightCount  > 0u) keep += spotLights[0].intensity;  // binding 16
         	keep *= 1e-20;
 
+        	// Material-complexity proxy (heat-mapped by the DeferredLighting debug branch): count the textures
+        	// this material actually samples — a bound map is a real texture, an absent one is a 1x1 dummy.
+        	// Stashed in the otherwise-unused GBufferC.w so it costs no extra target.
+        	int texCount = 0;
+        	if (textureSize(u_AlbedoTexture, 0).x > 1)  texCount++;
+        	if (nrmSize.x > 1)                          texCount++; // normal map (nrmSize computed above)
+        	if (textureSize(u_OpacityTexture, 0).x > 1) texCount++;
+
         	oGBufferA = vec4(albedo + keep, metallic);
         	oGBufferB = vec4(N, roughness);
-        	oGBufferC = vec4(inVertex.WorldPosition, 1.0);
+        	oGBufferC = vec4(inVertex.WorldPosition, float(texCount));
         }
     }
 }

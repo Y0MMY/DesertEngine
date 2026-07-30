@@ -45,6 +45,9 @@ namespace Desert::Editor
         // Billboard icons for entities with no rendered geometry (spawn points, audio emitters, triggers,
         // empties) so they are visible in the viewport. Hover shows a tooltip; the normal LMB pick selects them.
         void RenderSpawnIcons( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height );
+        // Text entities (TextComponent): a big, click-selectable "Aa" billboard so a label is easy to find
+        // and grab in the viewport even when its glyphs are small/edge-on.
+        void RenderTextIcons( const std::shared_ptr<Desert::Core::Camera>& camera, float width, float height );
         // Draws a world-space line segment, clipping the endpoint that crosses the editor camera's near
         // plane (so a segment dipping behind the camera never wraps across the whole viewport).
         void DrawWorldLine( ImDrawList* drawList, const glm::vec3& a, const glm::vec3& b, const glm::mat4& mvp,

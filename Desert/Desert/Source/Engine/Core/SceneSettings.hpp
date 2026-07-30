@@ -55,8 +55,9 @@ namespace Desert::Core
         Roughness = 4,
         AO        = 5,
         // 6 is reserved (an internal GI-only debug in the deferred shader).
-        LightComplexity = 7, // per-pixel count of point/spot light volumes, heat-mapped (UE-style)
-        Overdraw        = 8, // additive re-raster of all meshes -> heat-mapped overdraw count (both paths)
+        LightComplexity    = 7, // per-pixel count of point/spot light volumes, heat-mapped (UE-style)
+        Overdraw           = 8, // additive re-raster of all meshes -> heat-mapped overdraw count (both paths)
+        MaterialComplexity = 9, // per-pixel sampled-texture count (from GBufferC.w), heat-mapped (UE-style)
     };
 
     // Reflected (REFLECT/PROPERTY) so the whole block (de)serializes generically via the reflection
