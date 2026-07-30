@@ -10,14 +10,14 @@ namespace Desert::ShaderResources
 {
 
     std::shared_ptr<StorageBuffer> StorageBuffer::Create( const std::string_view debugName, uint32_t size,
-                                                          uint32_t binding )
+                                                          uint32_t binding, bool persistent )
     {
         switch ( Graphic::RendererAPI::GetAPIType() )
         {
             case Graphic::RendererAPIType::None:
                 return nullptr;
             case Graphic::RendererAPIType::Vulkan:
-                return std::make_shared<API::Vulkan::VulkanStorageBuffer>( debugName, size, binding );
+                return std::make_shared<API::Vulkan::VulkanStorageBuffer>( debugName, size, binding, persistent );
         }
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
         return nullptr;

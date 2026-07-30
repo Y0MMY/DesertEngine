@@ -8,8 +8,9 @@
 
 namespace Desert::ShaderResources::API::Vulkan
 {
-    VulkanStorageBuffer::VulkanStorageBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding )
-         : m_Size( size ), m_Binding( binding ), m_BufferName( bufferName )
+    VulkanStorageBuffer::VulkanStorageBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding,
+                                              bool persistent )
+         : m_Size( size ), m_Binding( binding ), m_BufferName( bufferName ), m_Persistent( persistent )
     {
         if ( m_Size == 0 )
             m_Size = 1; // Vulkan requires size > 0; grows on first SetData.
@@ -58,16 +59,20 @@ namespace Desert::ShaderResources::API::Vulkan
         Release();
 
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
+        // Persistent = ONE buffer shared by every frame (GPU sim state must survive across frames); otherwise
+        // one buffer per frame in flight. The descriptor-info array stays sized to framesInFlight either way,
+        // so GetDescriptorBufferInfo(frameIndex) is always valid — persistent just points them all at buffer 0.
+        const uint32_t bufferCount = m_Persistent ? 1u : framesInFlight;
 
-        m_Buffers.resize( framesInFlight, VK_NULL_HANDLE );
-        m_MemoryAllocs.resize( framesInFlight, nullptr );
+        m_Buffers.resize( bufferCount, VK_NULL_HANDLE );
+        m_MemoryAllocs.resize( bufferCount, nullptr );
+        m_MappedMemories.resize( bufferCount, nullptr );
         m_DescriptorInfos.resize( framesInFlight );
-        m_MappedMemories.resize( framesInFlight, nullptr );
 
         auto vulkanContext = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
                                       EngineContext::GetInstance().GetRendererContext() );
 
-        for ( uint32_t i = 0; i < framesInFlight; ++i )
+        for ( uint32_t i = 0; i < bufferCount; ++i )
         {
             VkBufferCreateInfo bufferInfo = {};
             bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -77,19 +82,23 @@ namespace Desert::ShaderResources::API::Vulkan
             bufferInfo.size  = m_Size;
 
             const auto allocatedBuffer = vulkanContext->GetVulkanAllocator()->RT_AllocateBuffer(
-                 std::format( "{}-StorageBuffer-Frame{}", m_BufferName, i ), bufferInfo,
-                 VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffers[i] );
+                 std::format( "{}-StorageBuffer-{}{}", m_BufferName, m_Persistent ? "Persistent" : "Frame", i ),
+                 bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffers[i] );
 
             if ( !allocatedBuffer.IsSuccess() )
                 continue;
 
-            m_MemoryAllocs[i] = allocatedBuffer.GetValue();
-
-            m_DescriptorInfos[i].buffer = m_Buffers[i];
-            m_DescriptorInfos[i].offset = 0;
-            m_DescriptorInfos[i].range  = m_Size;
-
+            m_MemoryAllocs[i]   = allocatedBuffer.GetValue();
             m_MappedMemories[i] = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
+        }
+
+        // Point every frame's descriptor at its buffer (persistent: all at buffer 0).
+        for ( uint32_t f = 0; f < framesInFlight; ++f )
+        {
+            const uint32_t idx          = m_Persistent ? 0u : f;
+            m_DescriptorInfos[f].buffer = ( idx < m_Buffers.size() ) ? m_Buffers[idx] : VK_NULL_HANDLE;
+            m_DescriptorInfos[f].offset = 0;
+            m_DescriptorInfos[f].range  = m_Size;
         }
     }
 
@@ -106,15 +115,16 @@ namespace Desert::ShaderResources::API::Vulkan
             m_LocalStorage.Allocate( m_Size );
         std::memcpy( static_cast<uint8_t*>( m_LocalStorage.Data ) + offset, data, size );
 
-        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
-        if ( frameIndex < m_MappedMemories.size() && m_MappedMemories[frameIndex] )
-            std::memcpy( m_MappedMemories[frameIndex] + offset, data, size );
+        // Persistent buffers have a single mapping (index 0); per-frame buffers write the current frame's.
+        const uint32_t idx = m_Persistent ? 0u : EngineContext::GetInstance().GetCurrentFrameIndex();
+        if ( idx < m_MappedMemories.size() && m_MappedMemories[idx] )
+            std::memcpy( m_MappedMemories[idx] + offset, data, size );
     }
 
     uint8_t* VulkanStorageBuffer::MapMemory()
     {
-        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
-        return frameIndex < m_MappedMemories.size() ? m_MappedMemories[frameIndex] : nullptr;
+        const uint32_t idx = m_Persistent ? 0u : EngineContext::GetInstance().GetCurrentFrameIndex();
+        return idx < m_MappedMemories.size() ? m_MappedMemories[idx] : nullptr;
     }
 
     void VulkanStorageBuffer::UnmapMemory()

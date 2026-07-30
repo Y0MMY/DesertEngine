@@ -15,7 +15,8 @@ namespace Desert::ShaderResources::API::Vulkan
     class VulkanStorageBuffer : public StorageBuffer
     {
     public:
-        VulkanStorageBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding );
+        VulkanStorageBuffer( const std::string_view bufferName, uint32_t size, uint32_t binding,
+                             bool persistent = false );
         virtual ~VulkanStorageBuffer();
 
         virtual uint8_t* MapMemory() override;
@@ -55,6 +56,9 @@ namespace Desert::ShaderResources::API::Vulkan
         uint32_t          m_Size    = 0;
         uint32_t          m_Binding = 0;
         const std::string m_BufferName;
+        // true = ONE device buffer shared by every frame (GPU state persists across frames); false =
+        // per-frame-in-flight. See StorageBuffer::Create.
+        bool m_Persistent = false;
 
         Common::Memory::Buffer m_LocalStorage; // CPU shadow copy (for GetData)
     };
