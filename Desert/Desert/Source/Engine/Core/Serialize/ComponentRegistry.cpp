@@ -868,6 +868,16 @@ namespace Desert::Core::Serialize
              "AudioSource", "AudioSourceData", &ECS::AudioSourceComponent::Data ) );
         Register( MakeReflected<ECS::ParticleEmitterComponent, ECS::ParticleEmitterData>(
              "ParticleEmitter", "ParticleEmitterData", &ECS::ParticleEmitterComponent::Data ) );
+        Register( MakeReflected<ECS::UICanvasComponent, ECS::UICanvasData>( "UICanvas", "UICanvasData",
+                                                                            &ECS::UICanvasComponent::Data ) );
+        Register( MakeReflected<ECS::UILayoutComponent, ECS::UILayoutData>( "UILayout", "UILayoutData",
+                                                                            &ECS::UILayoutComponent::Data ) );
+        Register( MakeReflected<ECS::UIPanelComponent, ECS::UIPanelData>( "UIPanel", "UIPanelData",
+                                                                          &ECS::UIPanelComponent::Data ) );
+        Register( MakeReflected<ECS::UITextComponent2D, ECS::UITextData>( "UIText", "UITextData",
+                                                                          &ECS::UITextComponent2D::Data ) );
+        Register( MakeReflected<ECS::UIButtonComponent, ECS::UIButtonData>( "UIButton", "UIButtonData",
+                                                                            &ECS::UIButtonComponent::Data ) );
 
         // ---- Marker components (presence is the state) ----
         Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );

@@ -50,6 +50,11 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CharacterControllerComponent
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, "AudioSourceData", "Audio Source" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ParticleEmitterComponent, Data, "ParticleEmitterData",
                                      "Particle Emitter" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UICanvasComponent, Data, "UICanvasData", "UI Canvas" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UILayoutComponent, Data, "UILayoutData", "UI Layout" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIPanelComponent, Data, "UIPanelData", "UI Panel" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UITextComponent2D, Data, "UITextData", "UI Text" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIButtonComponent, Data, "UIButtonData", "UI Button" )
 
 namespace Desert::Editor
 {

@@ -56,6 +56,7 @@
 #include "Editor/Panels/Animation/AnimGraphPanel.hpp"
 #include "Editor/Panels/Photogrammetry/PhotogrammetryPanel.hpp"
 #include "Editor/Panels/Particles/ParticleEditorPanel.hpp"
+#include "Editor/Panels/UI/UIEditorPanel.hpp"
 #include "Editor/Panels/AssetReferences/AssetReferencesPanel.hpp"
 #include "Editor/Panels/LuaConsole/LuaConsolePanel.hpp"
 #include "Editor/Panels/Stubs/SequencerPanel.hpp"
@@ -126,6 +127,8 @@ namespace Desert::Editor
             return ICON_MDI_CUBE_SCAN;
         if ( name == "Particle Editor" )
             return ICON_MDI_CREATION;
+        if ( name == "UI Editor" )
+            return ICON_MDI_VIEW_DASHBOARD;
         if ( name == "Lua Console" )
             return ICON_MDI_CONSOLE;
         if ( name == "Build Settings" )
@@ -348,6 +351,7 @@ namespace Desert::Editor
         m_Panels.emplace_back(
              std::make_unique<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ParticleEditorPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::UIEditorPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::AssetReferencesPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() ) );

@@ -150,6 +150,57 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UICanvasData;
+                TypeBuilder( "UICanvasData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "ReferenceWidth", .Type = FieldType::Float, .Offset = offsetof( T, ReferenceWidth ), .Size = sizeof( T::ReferenceWidth ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Reference Width", .Category = "UI Canvas", .HasRange = true, .RangeMin = 64.0f, .RangeMax = 7680.0f, } } )
+                    .Field( FieldInfo{ .Name = "ReferenceHeight", .Type = FieldType::Float, .Offset = offsetof( T, ReferenceHeight ), .Size = sizeof( T::ReferenceHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Reference Height", .Category = "UI Canvas", .HasRange = true, .RangeMin = 64.0f, .RangeMax = 4320.0f, } } )
+                    .Field( FieldInfo{ .Name = "Visible", .Type = FieldType::Bool, .Offset = offsetof( T, Visible ), .Size = sizeof( T::Visible ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Visible", .Category = "UI Canvas", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UILayoutData;
+                TypeBuilder( "UILayoutData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "AnchorMin", .Type = FieldType::Vec2, .Offset = offsetof( T, AnchorMin ), .Size = sizeof( T::AnchorMin ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Anchor Min", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "AnchorMax", .Type = FieldType::Vec2, .Offset = offsetof( T, AnchorMax ), .Size = sizeof( T::AnchorMax ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Anchor Max", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "OffsetMin", .Type = FieldType::Vec2, .Offset = offsetof( T, OffsetMin ), .Size = sizeof( T::OffsetMin ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Offset Min", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "OffsetMax", .Type = FieldType::Vec2, .Offset = offsetof( T, OffsetMax ), .Size = sizeof( T::OffsetMax ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Offset Max", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "CustomMinimumSize", .Type = FieldType::Vec2, .Offset = offsetof( T, CustomMinimumSize ), .Size = sizeof( T::CustomMinimumSize ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Custom Minimum Size", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "Pivot", .Type = FieldType::Vec2, .Offset = offsetof( T, Pivot ), .Size = sizeof( T::Pivot ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Pivot", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "ClipContents", .Type = FieldType::Bool, .Offset = offsetof( T, ClipContents ), .Size = sizeof( T::ClipContents ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Clip Contents", .Category = "UI Layout", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UIPanelData;
+                TypeBuilder( "UIPanelData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Color", .Type = FieldType::Vec3, .Offset = offsetof( T, Color ), .Size = sizeof( T::Color ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Color", .Category = "UI Panel", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "Opacity", .Type = FieldType::Float, .Offset = offsetof( T, Opacity ), .Size = sizeof( T::Opacity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Opacity", .Category = "UI Panel", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .Field( FieldInfo{ .Name = "CornerRadius", .Type = FieldType::Float, .Offset = offsetof( T, CornerRadius ), .Size = sizeof( T::CornerRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Corner Radius", .Category = "UI Panel", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 64.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UITextData;
+                TypeBuilder( "UITextData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Text", .Type = FieldType::String, .Offset = offsetof( T, Text ), .Size = sizeof( T::Text ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Text", .Category = "UI Text", } } )
+                    .Field( FieldInfo{ .Name = "FontSize", .Type = FieldType::Float, .Offset = offsetof( T, FontSize ), .Size = sizeof( T::FontSize ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Font Size", .Category = "UI Text", .HasRange = true, .RangeMin = 6.0f, .RangeMax = 200.0f, } } )
+                    .Field( FieldInfo{ .Name = "Color", .Type = FieldType::Vec3, .Offset = offsetof( T, Color ), .Size = sizeof( T::Color ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Color", .Category = "UI Text", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "Align", .Type = FieldType::Enum, .Offset = offsetof( T, Align ), .Size = sizeof( T::Align ), .TypeName = "UITextAlign", .Meta = PropertyMetadata{ .DisplayName = "Alignment", .Category = "UI Text", }, .EnumValues = { EnumValue{ "Left", 0 }, EnumValue{ "Center", 1 }, EnumValue{ "Right", 2 }, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UIButtonData;
+                TypeBuilder( "UIButtonData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "NormalColor", .Type = FieldType::Vec3, .Offset = offsetof( T, NormalColor ), .Size = sizeof( T::NormalColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Normal", .Category = "UI Button", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "HoverColor", .Type = FieldType::Vec3, .Offset = offsetof( T, HoverColor ), .Size = sizeof( T::HoverColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Hover", .Category = "UI Button", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "PressedColor", .Type = FieldType::Vec3, .Offset = offsetof( T, PressedColor ), .Size = sizeof( T::PressedColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Pressed", .Category = "UI Button", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "OnClickMessage", .Type = FieldType::String, .Offset = offsetof( T, OnClickMessage ), .Size = sizeof( T::OnClickMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Click Message", .Category = "UI Button", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::SkyboxComponent;
                 TypeBuilder( "SkyboxComponent", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "SkyboxHandle", .Type = FieldType::AssetHandle, .Offset = offsetof( T, SkyboxHandle ), .Size = sizeof( T::SkyboxHandle ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Skybox", .Category = "Skybox", .IsAsset = true, .AssetType = "SkyboxAsset", .Hidden = true, } } )

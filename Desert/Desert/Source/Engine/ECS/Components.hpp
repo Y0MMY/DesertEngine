@@ -549,6 +549,135 @@ namespace Desert::ECS
         ParticleEmitterData Data;
     };
 
+    // ============================================================
+    // UI — Godot-Control-style screen-space UI (2D)
+    // ============================================================
+
+    // Horizontal text alignment within a UI element's rect. Reflected enum -> editor combo + serialization.
+    enum class UITextAlign
+    {
+        Left,
+        Center,
+        Right
+    };
+
+    // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas, whose
+    // design resolution is scaled to fit the viewport. Add UI elements as children of the canvas entity.
+    struct UICanvasData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Reference Width" ), Category( "UI Canvas" ), Range( 64.0f, 7680.0f ) )
+        float ReferenceWidth = 1280.0f;
+
+        PROPERTY( DisplayName( "Reference Height" ), Category( "UI Canvas" ), Range( 64.0f, 4320.0f ) )
+        float ReferenceHeight = 720.0f;
+
+        PROPERTY( DisplayName( "Visible" ), Category( "UI Canvas" ) )
+        bool Visible = true;
+    };
+    struct UICanvasComponent
+    {
+        UICanvasData Data;
+    };
+
+    // Godot Control-like rect: anchors (fraction of the parent rect, 0..1), offsets (pixels from the anchored
+    // edges), a custom minimum size, a pivot and content clipping. The layout solver turns these into a screen
+    // rect each frame. AnchorMin==AnchorMax => fixed-size element positioned by offsets; spread anchors =>
+    // element stretches with the parent.
+    struct UILayoutData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Anchor Min" ), Category( "UI Layout" ) )
+        glm::vec2 AnchorMin = glm::vec2( 0.0f, 0.0f );
+
+        PROPERTY( DisplayName( "Anchor Max" ), Category( "UI Layout" ) )
+        glm::vec2 AnchorMax = glm::vec2( 0.0f, 0.0f );
+
+        PROPERTY( DisplayName( "Offset Min" ), Category( "UI Layout" ) )
+        glm::vec2 OffsetMin = glm::vec2( 0.0f, 0.0f ); // px from the AnchorMin edges (left/top)
+
+        PROPERTY( DisplayName( "Offset Max" ), Category( "UI Layout" ) )
+        glm::vec2 OffsetMax = glm::vec2( 160.0f, 48.0f ); // px from the AnchorMax edges (right/bottom)
+
+        PROPERTY( DisplayName( "Custom Minimum Size" ), Category( "UI Layout" ) )
+        glm::vec2 CustomMinimumSize = glm::vec2( 0.0f, 0.0f );
+
+        PROPERTY( DisplayName( "Pivot" ), Category( "UI Layout" ) )
+        glm::vec2 Pivot = glm::vec2( 0.5f, 0.5f );
+
+        PROPERTY( DisplayName( "Clip Contents" ), Category( "UI Layout" ) )
+        bool ClipContents = false;
+    };
+    struct UILayoutComponent
+    {
+        UILayoutData Data;
+    };
+
+    // A filled (rounded) rectangle — the background of a panel / window / button.
+    struct UIPanelData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Color" ), Category( "UI Panel" ), Color )
+        glm::vec3 Color = glm::vec3( 0.15f, 0.16f, 0.2f );
+
+        PROPERTY( DisplayName( "Opacity" ), Category( "UI Panel" ), Range( 0.0f, 1.0f ) )
+        float Opacity = 0.92f;
+
+        PROPERTY( DisplayName( "Corner Radius" ), Category( "UI Panel" ), Range( 0.0f, 64.0f ) )
+        float CornerRadius = 6.0f;
+    };
+    struct UIPanelComponent
+    {
+        UIPanelData Data;
+    };
+
+    // Screen-space text label (distinct from the 3D world-space TextComponent).
+    struct UITextData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Text" ), Category( "UI Text" ) )
+        std::string Text = "Label";
+
+        PROPERTY( DisplayName( "Font Size" ), Category( "UI Text" ), Range( 6.0f, 200.0f ) )
+        float FontSize = 22.0f;
+
+        PROPERTY( DisplayName( "Color" ), Category( "UI Text" ), Color )
+        glm::vec3 Color = glm::vec3( 1.0f, 1.0f, 1.0f );
+
+        PROPERTY( DisplayName( "Alignment" ), Category( "UI Text" ) )
+        UITextAlign Align = UITextAlign::Center;
+    };
+    struct UITextComponent2D
+    {
+        UITextData Data;
+    };
+
+    // Interactive button: tints its panel by pointer state and dispatches OnClickMessage to Lua on click.
+    struct UIButtonData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Normal" ), Category( "UI Button" ), Color )
+        glm::vec3 NormalColor = glm::vec3( 0.20f, 0.40f, 0.70f );
+
+        PROPERTY( DisplayName( "Hover" ), Category( "UI Button" ), Color )
+        glm::vec3 HoverColor = glm::vec3( 0.30f, 0.52f, 0.82f );
+
+        PROPERTY( DisplayName( "Pressed" ), Category( "UI Button" ), Color )
+        glm::vec3 PressedColor = glm::vec3( 0.15f, 0.30f, 0.55f );
+
+        PROPERTY( DisplayName( "On Click Message" ), Category( "UI Button" ) )
+        std::string OnClickMessage = ""; // event name dispatched to the entity's Lua script on click
+    };
+    struct UIButtonComponent
+    {
+        UIButtonData Data;
+    };
+
     // Reflected (REFLECT/PROPERTY) so it (de)serializes generically — the SkyboxHandle round-trips as an
     // asset PATH via the serializer's AssetResolver. RequestBake has NO PROPERTY → excluded from
     // reflection (transient). All fields kept flat (no Data sub-struct) so existing accessors are unchanged.
