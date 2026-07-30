@@ -36,6 +36,15 @@ namespace Desert::Editor
         void OnUIRender() override;
 
     private:
+        enum class Job
+        {
+            None,
+            Capture,     // grab frames from the camera into the photos folder
+            Reconstruct, // run photogrammetry on the photos -> mesh
+        };
+
+        void RunCommand( const std::string& cmd, Job job ); // launches the worker thread
+        void StartCapture();
         void StartReconstruction();
         void ImportResult(); // main-thread: cook the produced mesh + spawn an entity
 
@@ -46,7 +55,8 @@ namespace Desert::Editor
         std::atomic<bool> m_Running{ false };
         std::atomic<bool> m_Done{ false };
         std::atomic<int>  m_ExitCode{ 0 };
-        std::string       m_OutputCaptured; // resolved output path for the running job
+        Job               m_Job = Job::None;
+        std::string       m_OutputCaptured; // resolved output mesh path for a running Reconstruct
         std::string       m_Status;
         bool              m_StatusError = false;
     };

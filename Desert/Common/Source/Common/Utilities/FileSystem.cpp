@@ -84,6 +84,30 @@ namespace Common::Utils
 #endif
     }
 
+    std::filesystem::path FileSystem::OpenFolderDialog( const char* initialFolder )
+    {
+#if defined( DESERT_PLATFORM_WINDOWS )
+        return WindowsFileSystem::OpenFolderDialog( initialFolder );
+#elif defined( DESERT_PLATFORM_MACOS )
+        return MacOSFileSystem::OpenFolderDialog( initialFolder );
+#else
+        (void)initialFolder;
+        return {};
+#endif
+    }
+
+    std::filesystem::path FileSystem::SaveFileDialog( const char* filter )
+    {
+#if defined( DESERT_PLATFORM_WINDOWS )
+        return WindowsFileSystem::SaveFileDialog( filter );
+#elif defined( DESERT_PLATFORM_MACOS )
+        return MacOSFileSystem::SaveFileDialog( filter );
+#else
+        (void)filter;
+        return {};
+#endif
+    }
+
     std::filesystem::path FileSystem::GetFileDirectory( const std::filesystem::path& filepath )
     {
         return filepath.parent_path();
