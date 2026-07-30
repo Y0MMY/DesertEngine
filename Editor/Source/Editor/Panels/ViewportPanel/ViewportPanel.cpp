@@ -225,6 +225,97 @@ namespace Desert::Editor
             }
         }
 
+        // --- Right edge: View Mode (UE-style) + editor camera gear ---
+        // One dropdown driving the engine's existing debug visualizations behind a single control
+        // (instead of scattered Scene Settings checkboxes). Each mode maps to the underlying flags;
+        // the current selection is derived back from them so external edits stay in sync.
+        {
+            auto& s = m_Scene->GetSettings();
+            enum ViewMode
+            {
+                VM_Lit,
+                VM_Wireframe,
+                VM_Normals,
+                VM_Albedo,
+                VM_Metallic,
+                VM_Roughness,
+                VM_AO,
+                VM_ShadowCascades,
+                VM_Count
+            };
+            const char* kViewModes[] = { ICON_MDI_LIGHTBULB_ON "  Lit",
+                                         ICON_MDI_VECTOR_TRIANGLE "  Wireframe",
+                                         ICON_MDI_AXIS_ARROW "  Normals",
+                                         ICON_MDI_PALETTE "  Albedo (Unlit)",
+                                         ICON_MDI_CIRCLE_HALF_FULL "  Metallic",
+                                         ICON_MDI_BLUR "  Roughness",
+                                         ICON_MDI_WEATHER_NIGHT "  Ambient Occlusion",
+                                         ICON_MDI_LAYERS "  Shadow Cascades" };
+
+            // Derive the active mode from the current settings (last-wins order matches the enum).
+            int vm = VM_Lit;
+            if ( s.WireframeMode )
+                vm = VM_Wireframe;
+            else if ( s.ShadowDebug == ::Desert::Core::ShadowDebugMode::Cascades )
+                vm = VM_ShadowCascades;
+            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Albedo )
+                vm = VM_Albedo;
+            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Normal )
+                vm = VM_Normals;
+            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Metallic )
+                vm = VM_Metallic;
+            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::Roughness )
+                vm = VM_Roughness;
+            else if ( s.DeferredDebug == ::Desert::Core::DeferredDebugMode::AO )
+                vm = VM_AO;
+            else if ( s.ShowNormals )
+                vm = VM_Normals;
+
+            const float gearW = ImGui::GetFrameHeight();
+            ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - gearW - 6.0f - 160.0f );
+            ImGui::SetNextItemWidth( 154.0f );
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 8.0f, 6.0f ) );
+            if ( ImGui::Combo( "##ViewMode", &vm, kViewModes, IM_ARRAYSIZE( kViewModes ) ) )
+            {
+                // Reset every debug channel, then set the one this mode needs.
+                s.WireframeMode = false;
+                s.ShowNormals   = false;
+                s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Off;
+                s.ShadowDebug   = ::Desert::Core::ShadowDebugMode::Off;
+                switch ( vm )
+                {
+                    case VM_Wireframe:
+                        s.WireframeMode = true;
+                        break;
+                    case VM_Normals:
+                        s.ShowNormals   = true;
+                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Normal;
+                        break;
+                    case VM_Albedo:
+                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Albedo;
+                        break;
+                    case VM_Metallic:
+                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Metallic;
+                        break;
+                    case VM_Roughness:
+                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::Roughness;
+                        break;
+                    case VM_AO:
+                        s.DeferredDebug = ::Desert::Core::DeferredDebugMode::AO;
+                        break;
+                    case VM_ShadowCascades:
+                        s.ShadowDebug = ::Desert::Core::ShadowDebugMode::Cascades;
+                        break;
+                    default:
+                        break; // VM_Lit
+                }
+            }
+            ImGui::PopStyleVar();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Viewport view mode. Buffer views (Albedo/Metallic/Roughness/AO)\n"
+                                   "need the Deferred render path." );
+        }
+
         // --- Right edge: editor camera settings (speed) behind a gear button ---
         ImGui::SameLine( ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight() - 6.0f );
         if ( ImGui::Button( ICON_MDI_COG "##CamSettings" ) )

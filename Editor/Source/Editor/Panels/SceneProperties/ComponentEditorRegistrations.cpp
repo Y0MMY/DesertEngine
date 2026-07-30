@@ -627,12 +627,19 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
               if ( !s_Scanned )
               {
                   s_Scanned = true;
-                  std::error_code ec;
-                  for ( const auto& de :
-                        std::filesystem::recursive_directory_iterator( Common::Constants::Path::FONTS_PATH, ec ) )
-                      if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".ttf" )
-                          s_Fonts.push_back( de.path().generic_string() );
+                  // Fonts come from THIS project's Assets tree first (drop a .ttf into the project),
+                  // plus the shared engine Resources/Fonts built-ins (Roboto, Noto, ...).
+                  const std::filesystem::path roots[] = { Common::Constants::Path::ASSETS_PATH,
+                                                          Common::Constants::Path::FONTS_PATH };
+                  for ( const auto& root : roots )
+                  {
+                      std::error_code ec;
+                      for ( const auto& de : std::filesystem::recursive_directory_iterator( root, ec ) )
+                          if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".ttf" )
+                              s_Fonts.push_back( de.path().generic_string() );
+                  }
                   std::sort( s_Fonts.begin(), s_Fonts.end() );
+                  s_Fonts.erase( std::unique( s_Fonts.begin(), s_Fonts.end() ), s_Fonts.end() );
               }
 
               const std::string preview =

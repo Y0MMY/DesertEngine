@@ -28,6 +28,10 @@ namespace Desert::Graphic
         // editor start. Clamped to MaxMSAASamples (device color&depth sample caps, set at init).
         static inline std::atomic<int> MSAASamples{ 1 };
         static inline std::atomic<int> MaxMSAASamples{ 1 };
+
+        // Device supports line widths > 1 (VkPhysicalDeviceFeatures.wideLines). MoltenVK does NOT —
+        // setting a wider line then is a validation error, so the debug-line paths clamp to 1.0.
+        static inline std::atomic<bool> WideLines{ false };
         // What the running renderer actually baked at Init (the UI compares against this to show
         // its "restart to apply" note; MSAASamples may already hold the NEXT start's selection).
         static inline std::atomic<int> MSAASamplesActive{ 1 };

@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanRenderer.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Engine/Graphic/RenderConfig.hpp>
 #include <Common/Core/Profiler.hpp>
 
 #include <algorithm>
@@ -364,8 +365,10 @@ namespace Desert::Graphic::API::Vulkan
         }
 
         // The graphics pipeline enables VK_DYNAMIC_STATE_LINE_WIDTH, so it must be set before drawing.
-        // Widths > 1 require the wideLines device feature (enabled when supported); clamp to a safe range.
-        vkCmdSetLineWidth( m_CurrentCommandBuffer, std::clamp( lineWidth, 1.0f, 10.0f ) );
+        // Widths > 1 require the wideLines device feature — MoltenVK lacks it, so force 1.0 there (a
+        // wider value is a validation error and gets dropped anyway).
+        const float safeWidth = Graphic::RenderConfig::WideLines ? std::clamp( lineWidth, 1.0f, 10.0f ) : 1.0f;
+        vkCmdSetLineWidth( m_CurrentCommandBuffer, safeWidth );
 
         // Vertexless: the DebugLine vertex shader pulls each endpoint from the Lines storage buffer by
         // gl_VertexIndex. Lines topology -> every 2 vertices form one segment.

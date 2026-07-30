@@ -80,6 +80,7 @@ namespace Desert::Graphic::API::Vulkan
         // Publish anisotropy support to the low-level sampler-creation path (0 = unsupported -> no aniso).
         Graphic::RenderConfig::MaxAnisotropy =
              m_Capabilities.SupportsAnisotropy ? m_Capabilities.MaxAnisotropy : 0.0f;
+        Graphic::RenderConfig::WideLines = m_Capabilities.SupportsWideLines; // clamp debug-line width if false
 
         // Publish the device's MSAA ceiling (color AND depth must support the count).
         {

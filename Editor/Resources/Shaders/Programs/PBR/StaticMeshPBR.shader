@@ -191,25 +191,12 @@ Shader "StaticMeshPBR"
         	return -1;
         }
 
-        // N = world-space surface normal, L = world-space direction TOWARD the sun (both normalized).
-        // Picks the cascade covering worldPos and PCF-samples it. `cascadeOut` returns the chosen cascade (-1
-        // if outside all / disabled) for the debug visualization.
-        float ShadowFactor(vec3 worldPos, vec3 N, vec3 L, out int cascadeOut)
+        // PCF-samples ONE cascade at worldPos. Returns 1 (lit) when outside the cascade so the caller's
+        // blend/fallback can take over. Factored out of ShadowFactor so cascades can be cross-faded.
+        float sampleCascade(int c, vec3 worldPos, vec3 N, float NdotL)
         {
-        	cascadeOut = -1;
-        	if (u_ShadowParams.y < 0.5)
-        		return 1.0;
-
-        	int c = chooseCascade(worldPos);
-        	cascadeOut = c;
-        	if (c < 0)
-        		return 1.0;
-
-        	float NdotL = max(dot(N, L), 0.0);
-
-        	// Normal-offset bias scaled by the CHOSEN cascade's world-per-texel: a few texels along the normal,
-        	// widening at grazing angles. Cascade-correct (tight near cascades get a small offset, far ones large)
-        	// instead of the old fixed world-unit constants.
+        	// Normal-offset bias scaled by the cascade's world-per-texel (a few texels along the normal,
+        	// widening at grazing angles) — cascade-correct instead of fixed world-unit constants.
         	float texelWorld   = u_CascadeTexelWorld[c];
         	float normalOffset = (1.5 + 2.5 * (1.0 - NdotL)) * texelWorld;
         	vec3  samplePos    = worldPos + N * normalOffset;
@@ -230,14 +217,48 @@ Shader "StaticMeshPBR"
         	float shadow = 0.0;
         	vec2 texel = 1.0 / vec2(shadowMapSize(c));
         	for (int y = -1; y <= 1; ++y)
-        	{
         		for (int x = -1; x <= 1; ++x)
         		{
         			float closest = sampleShadowMap(c, uv + vec2(x, y) * texel);
         			shadow += (currentDepth - bias > closest) ? 0.0 : 1.0;
         		}
-        	}
         	return shadow / 9.0;
+        }
+
+        // N = world-space surface normal, L = world-space direction TOWARD the sun (both normalized).
+        // Picks the cascade covering worldPos, PCF-samples it, and CROSS-FADES into the next (looser)
+        // cascade within a band at the tight cascade's edge so the boundary seam doesn't pop/flicker as
+        // the camera moves. `cascadeOut` returns the chosen cascade (-1 outside all / disabled) for debug.
+        float ShadowFactor(vec3 worldPos, vec3 N, vec3 L, out int cascadeOut)
+        {
+        	cascadeOut = -1;
+        	if (u_ShadowParams.y < 0.5)
+        		return 1.0;
+
+        	int c = chooseCascade(worldPos);
+        	cascadeOut = c;
+        	if (c < 0)
+        		return 1.0;
+
+        	float NdotL  = max(dot(N, L), 0.0);
+        	float shadow = sampleCascade(c, worldPos, N, NdotL);
+
+        	// Cross-fade near the chosen cascade's border into the next one (which fully covers this
+        	// region). `edge` is the distance to the nearest UV border (0.5 at centre, 0 at the seam).
+        	const float kBand = 0.10;
+        	int cascadeCount = int(u_ShadowParams.w);
+        	if (c + 1 < cascadeCount)
+        	{
+        		vec4  lc  = u_LightViewProj[c] * vec4(worldPos, 1.0);
+        		vec2  uv  = (lc.xy / lc.w) * 0.5 + 0.5;
+        		float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+        		if (edge < kBand)
+        		{
+        			float next = sampleCascade(c + 1, worldPos, N, NdotL);
+        			shadow = mix(next, shadow, clamp(edge / kBand, 0.0, 1.0));
+        		}
+        	}
+        	return shadow;
         }
 
         // Environment maps

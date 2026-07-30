@@ -155,16 +155,9 @@ Shader "DeferredLighting"
         	}
         	return -1;
         }
-        // N = surface normal, L = direction TOWARD the sun (both normalized). 1 = lit, 0 = fully shadowed.
-        float ShadowFactor(vec3 worldPos, vec3 N, vec3 L)
+        // PCF-samples ONE cascade; 1 (lit) when outside so the caller's blend/fallback takes over.
+        float sampleCascade(int c, vec3 worldPos, vec3 N, float NdotL)
         {
-        	if (u_ShadowParams.y < 0.5)
-        		return 1.0;
-        	int c = chooseCascade(worldPos);
-        	if (c < 0)
-        		return 1.0;
-
-        	float NdotL = max(dot(N, L), 0.0);
         	float texelWorld   = u_CascadeTexelWorld[c];
         	float normalOffset = (1.5 + 2.5 * (1.0 - NdotL)) * texelWorld;
         	vec3  samplePos    = worldPos + N * normalOffset;
@@ -189,6 +182,36 @@ Shader "DeferredLighting"
         			shadow += (currentDepth - bias > closest) ? 0.0 : 1.0;
         		}
         	return shadow / 9.0;
+        }
+
+        // N = surface normal, L = direction TOWARD the sun (both normalized). 1 = lit, 0 = fully shadowed.
+        // Cross-fades into the next (looser) cascade near the tight cascade's border so the seam doesn't
+        // pop/flicker as the camera moves — the deferred-path counterpart of StaticMeshPBR's ShadowFactor.
+        float ShadowFactor(vec3 worldPos, vec3 N, vec3 L)
+        {
+        	if (u_ShadowParams.y < 0.5)
+        		return 1.0;
+        	int c = chooseCascade(worldPos);
+        	if (c < 0)
+        		return 1.0;
+
+        	float NdotL  = max(dot(N, L), 0.0);
+        	float shadow = sampleCascade(c, worldPos, N, NdotL);
+
+        	const float kBand = 0.10;
+        	int cascadeCount = int(u_ShadowParams.w);
+        	if (c + 1 < cascadeCount)
+        	{
+        		vec4  lc   = u_LightViewProj[c] * vec4(worldPos, 1.0);
+        		vec2  uv   = (lc.xy / lc.w) * 0.5 + 0.5;
+        		float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+        		if (edge < kBand)
+        		{
+        			float next = sampleCascade(c + 1, worldPos, N, NdotL);
+        			shadow = mix(next, shadow, clamp(edge / kBand, 0.0, 1.0));
+        		}
+        	}
+        	return shadow;
         }
 
         void main()

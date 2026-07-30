@@ -179,7 +179,10 @@ namespace Desert::Graphic
         // JumpFlood system keeps its defaults, and MeshRenderer::HasOutline() gates whether it draws.
 
         m_AAMode       = sceneSettings.AA;
-        m_RenderPath   = sceneSettings.RenderingPath;
+        // Wireframe is a FORWARD-only debug view (the deferred G-buffer pipeline has no wireframe
+        // variant — that's why turning it on in the default Deferred path did nothing). Force forward
+        // while it's active so the wireframe pipeline is actually used and the grid composites over it.
+        m_RenderPath    = sceneSettings.WireframeMode ? Core::RenderPath::Forward : sceneSettings.RenderingPath;
         m_DeferredDebug = sceneSettings.DeferredDebug;
         m_EnableSSAO    = sceneSettings.EnableSSAO;
         m_EnableSSGI    = sceneSettings.EnableSSGI;
