@@ -33,7 +33,7 @@ namespace Desert::Editor
         // Member default -> evaluated at panel construction, i.e. AFTER the project path remap.
         std::string m_PrefabInstantiatePath =
              ( Common::Constants::Path::PREFAB_PATH / "MyPrefab.deprefab" ).string();
-        bool                                        m_OpenInstantiatePrefab = false; // deferred OpenPopup
+        bool m_OpenInstantiatePrefab = false; // deferred OpenPopup
 
         // "Save as Prefab..." (context menu -> modal at panel scope, same deferred pattern).
         bool                        m_OpenSavePrefab = false;
@@ -45,6 +45,7 @@ namespace Desert::Editor
         bool                        m_OpenApplyPrefab = false;
         std::optional<Common::UUID> m_ApplyPrefabTarget;
         std::optional<Common::UUID> m_PendingPrefabRevert;
+        std::optional<Common::UUID> m_PendingPrefabUnpack; // strip the prefab link from a subtree (make local)
         // Deferred structural edits, applied after the UI iteration (they create/destroy entities or edit
         // the Children vectors the tree walk is iterating). Lists: an operation on an entity that is part
         // of the multi-selection applies to the WHOLE selection.

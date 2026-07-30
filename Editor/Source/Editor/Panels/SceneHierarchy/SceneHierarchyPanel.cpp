@@ -29,6 +29,7 @@
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <filesystem>
+#include <functional>
 
 namespace Desert::Editor
 {
@@ -268,6 +269,8 @@ namespace Desert::Editor
                 }
                 if ( ImGui::Selectable( ICON_MDI_PACKAGE_DOWN " Revert Instance to Prefab" ) )
                     m_PendingPrefabRevert = UUID; // deferred: replaces the subtree after iteration
+                if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT_CLOSED " Unpack Prefab (make local)" ) )
+                    m_PendingPrefabUnpack = UUID; // deferred: strips the prefab link from the subtree
             }
 
             ImGui::EndPopup();
@@ -733,6 +736,26 @@ namespace Desert::Editor
         {
             Commands::RevertPrefabInstance( *m_PendingPrefabRevert ); // one undo step
             m_PendingPrefabRevert.reset();
+        }
+        if ( m_PendingPrefabUnpack.has_value() )
+        {
+            // Make local: strip the PrefabComponent link from the whole instance subtree so it becomes a
+            // plain, freely-editable entity hierarchy (no more Apply/Revert to a source prefab).
+            if ( auto root = m_Scene->FindEntityByID( *m_PendingPrefabUnpack ) )
+            {
+                auto&                               reg   = m_Scene->GetRegistry();
+                std::function<void( entt::entity )> strip = [&]( entt::entity e )
+                {
+                    if ( reg.has<ECS::PrefabComponent>( e ) )
+                        reg.remove<ECS::PrefabComponent>( e );
+                    if ( reg.has<ECS::RelationshipComponent>( e ) )
+                        for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
+                            if ( reg.valid( c ) )
+                                strip( c );
+                };
+                strip( root->get().GetHandle() );
+            }
+            m_PendingPrefabUnpack.reset();
         }
     }
 
