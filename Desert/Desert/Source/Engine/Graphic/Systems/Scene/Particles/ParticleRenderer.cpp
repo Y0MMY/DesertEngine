@@ -107,8 +107,13 @@ namespace Desert::Graphic::System
         if ( e.MaxParticles != cap || !e.Particles )
         {
             e.MaxParticles = cap;
-            e.Particles    = ShaderResources::StorageBuffer::Create(
-                 "ParticleState", static_cast<uint32_t>( cap ) * kParticleStride, 0, /*persistent=*/true );
+            // Binding 1: the graphics descriptor write uses the buffer's OWN binding (VulkanMaterialBackend),
+            // and the billboard shader reads it at ReadBuffer(1). The compute pass binds it at 0 via the
+            // explicit SetStorageBuffer(0, ...) arg (compute uses the arg, not the buffer's binding), matching
+            // ParticleSimulate's Buffer(0). Mismatching this (buffer binding 0) aliased the camera UB at
+            // binding 0 -> VUID-VkWriteDescriptorSet-descriptorType-00319.
+            e.Particles = ShaderResources::StorageBuffer::Create(
+                 "ParticleState", static_cast<uint32_t>( cap ) * kParticleStride, 1, /*persistent=*/true );
             e.Counter    = ShaderResources::StorageBuffer::Create( "ParticleSpawn", sizeof( uint32_t ), 1 );
             e.SpawnAccum = 0.0f;
 
