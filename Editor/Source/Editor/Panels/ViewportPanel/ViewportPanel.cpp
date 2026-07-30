@@ -293,8 +293,11 @@ namespace Desert::Editor
                 ImGui::OpenPopup( "##DebugShowFlagsPopup" );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Show flags (grid, bounding boxes, colliders, wireframe, LOD)" );
+            // Roomy padding + item spacing so the toggles aren't cramped against the popup border.
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 12.0f, 10.0f ) );
             if ( ImGui::BeginPopup( "##DebugShowFlagsPopup" ) )
             {
+                ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8.0f, 8.0f ) );
                 ImGui::TextUnformatted( "Show" );
                 ImGui::Separator();
                 ImGui::Checkbox( "Grid", &s.ShowGrid );
@@ -306,8 +309,10 @@ namespace Desert::Editor
                 ImGui::Checkbox( "Colliders", &s.ShowColliders );
                 ImGui::Checkbox( "Wireframe", &s.WireframeMode );
                 ImGui::Checkbox( "Mesh LOD (auto)", &s.MeshLOD );
+                ImGui::PopStyleVar();
                 ImGui::EndPopup();
             }
+            ImGui::PopStyleVar(); // WindowPadding (pushed unconditionally before BeginPopup)
 
             ImGui::SameLine( vmX );
             ImGui::SetNextItemWidth( 154.0f );

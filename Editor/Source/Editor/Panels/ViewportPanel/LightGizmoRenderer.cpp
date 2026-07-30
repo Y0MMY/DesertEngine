@@ -20,8 +20,9 @@ namespace Desert::Editor
         // Light billboards draw with the big icon font at this pixel size — the default-font glyph
         // was a barely-visible, barely-clickable speck.
         constexpr float kLightIconSize = 30.0f;
-        // Text-label billboard: noticeable but a touch smaller than the light bulbs so it doesn't dominate.
-        constexpr float kTextIconSize = 26.0f;
+        // Every viewport billboard (lights, camera, sun, spawn icons, text) uses this one size so the
+        // markers read as a consistent set.
+        constexpr float kIconSize = kLightIconSize;
 
         // Projects a world point to viewport-local screen coords, returning false when the point is
         // behind the camera (clip w <= 0). WorldToScreenSpace divides by w unconditionally, so behind
@@ -590,10 +591,12 @@ namespace Desert::Editor
             if ( !ProjectToScreen( worldPos, mvp, width, height, screenPos ) )
                 continue;
 
-            const float  ax = windowPos.x + screenPos.x;
-            const float  ay = windowPos.y + screenPos.y;
-            const ImVec2 sz = ImGui::CalcTextSize( icon );
-            drawList->AddText( ImVec2( ax - sz.x * 0.5f, ay - sz.y * 0.5f ), ImColor( color ), icon );
+            const float  ax       = windowPos.x + screenPos.x;
+            const float  ay       = windowPos.y + screenPos.y;
+            ImFont*      iconFont = EditorResources::GetBigIconFont();
+            const ImVec2 sz       = iconFont->CalcTextSizeA( kIconSize, FLT_MAX, 0.0f, icon );
+            drawList->AddText( iconFont, kIconSize, ImVec2( ax - sz.x * 0.5f, ay - sz.y * 0.5f ), ImColor( color ),
+                               icon );
 
             if ( mouse.x >= ax - sz.x * 0.5f && mouse.x <= ax + sz.x * 0.5f && mouse.y >= ay - sz.y * 0.5f &&
                  mouse.y <= ay + sz.y * 0.5f )
@@ -635,13 +638,13 @@ namespace Desert::Editor
             const float  ax   = windowPos.x + screenPos.x;
             const float  ay   = windowPos.y + screenPos.y;
             const char*  icon = ICON_MDI_FORMAT_TEXT;
-            const ImVec2 sz   = iconFont->CalcTextSizeA( kTextIconSize, FLT_MAX, 0.0f, icon );
+            const ImVec2 sz   = iconFont->CalcTextSizeA( kIconSize, FLT_MAX, 0.0f, icon );
 
             // Text colour tint so the marker reads as "this is the label" at a glance.
             const auto&  tc = entity.GetComponent<ECS::TextComponent>();
             const ImVec4 col( tc.Color.r, tc.Color.g, tc.Color.b, 1.0f );
-            drawList->AddText( iconFont, kTextIconSize, ImVec2( ax - sz.x * 0.5f, ay - sz.y * 0.5f ),
-                               ImColor( col ), icon );
+            drawList->AddText( iconFont, kIconSize, ImVec2( ax - sz.x * 0.5f, ay - sz.y * 0.5f ), ImColor( col ),
+                               icon );
 
             if ( mouse.x >= ax - sz.x * 0.5f && mouse.x <= ax + sz.x * 0.5f && mouse.y >= ay - sz.y * 0.5f &&
                  mouse.y <= ay + sz.y * 0.5f )
