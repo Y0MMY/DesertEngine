@@ -623,13 +623,13 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
               // drop target for dragging a .ttf from the Content Browser. FontPath stays a plain string —
               // it just gets CHOSEN from real files instead of typed by hand.
               static std::vector<std::string> s_Fonts;
-              static bool                      s_Scanned = false;
+              static bool                     s_Scanned = false;
               if ( !s_Scanned )
               {
                   s_Scanned = true;
                   std::error_code ec;
-                  for ( const auto& de : std::filesystem::recursive_directory_iterator(
-                            Common::Constants::Path::FONTS_PATH, ec ) )
+                  for ( const auto& de :
+                        std::filesystem::recursive_directory_iterator( Common::Constants::Path::FONTS_PATH, ec ) )
                       if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".ttf" )
                           s_Fonts.push_back( de.path().generic_string() );
                   std::sort( s_Fonts.begin(), s_Fonts.end() );

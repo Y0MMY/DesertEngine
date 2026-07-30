@@ -1239,12 +1239,12 @@ namespace Desert::Graphic::System
             // the world origin, which projects to large light-space coords far from the cascade —
             // keeps the rounding precise; the world-origin variant loses bits and still shimmers when
             // the cascade is away from (0,0,0), which is exactly the "walk up to an object" case.
-            glm::mat4       vp           = proj * view;
-            const float     halfRes      = static_cast<float>( kShadowMapSize ) * 0.5f;
-            glm::vec4       centerShadow = vp * glm::vec4( center, 1.0f );
+            glm::mat4   vp           = proj * view;
+            const float halfRes      = static_cast<float>( kShadowMapSize ) * 0.5f;
+            glm::vec4   centerShadow = vp * glm::vec4( center, 1.0f );
             centerShadow *= halfRes;
-            glm::vec2       rounded( std::round( centerShadow.x ), std::round( centerShadow.y ) );
-            glm::vec2       offset = ( rounded - glm::vec2( centerShadow ) ) / halfRes;
+            glm::vec2 rounded( std::round( centerShadow.x ), std::round( centerShadow.y ) );
+            glm::vec2 offset = ( rounded - glm::vec2( centerShadow ) ) / halfRes;
             proj[3][0] += offset.x;
             proj[3][1] += offset.y;
             m_CascadeVP[c] = proj * view;
