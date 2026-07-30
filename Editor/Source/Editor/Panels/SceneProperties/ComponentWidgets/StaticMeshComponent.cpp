@@ -187,7 +187,8 @@ namespace Desert::Editor
         {
             if ( RigBuilder::IsActive() )
             {
-                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ), ICON_MDI_ALERT " Another mesh is being rigged." );
+                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ),
+                                    ICON_MDI_ALERT " Another mesh is being rigged." );
                 ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
             }
             ImGui::PushTextWrapPos( 0.0f );

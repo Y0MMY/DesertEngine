@@ -104,8 +104,8 @@ namespace Desert::Editor
         if ( m_AsyncLoader->IsBusy() )
         {
             ImGui::SetNextWindowBgAlpha( 0.90f );
-            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 16.0f,
-                                             m_ViewportData.ViewportPos.y + 16.0f ) );
+            ImGui::SetNextWindowPos(
+                 ImVec2( m_ViewportData.ViewportPos.x + 16.0f, m_ViewportData.ViewportPos.y + 16.0f ) );
             ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 18.0f, 14.0f ) );
             ImGui::PushStyleVar( ImGuiStyleVar_WindowRounding, 8.0f );
             ImGui::PushStyleVar( ImGuiStyleVar_WindowBorderSize, 1.0f );

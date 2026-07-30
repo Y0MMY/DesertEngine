@@ -16,10 +16,10 @@ namespace Desert::Editor::Utils
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 8.0f, 6.0f ) );
         ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 5.0f );
 
-        const ImGuiTreeNodeFlags flags =
-             ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap |
-             ( defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0 );
-        const bool open = ImGui::CollapsingHeader( label, flags );
+        const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth |
+                                         ImGuiTreeNodeFlags_AllowItemOverlap |
+                                         ( defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0 );
+        const bool               open  = ImGui::CollapsingHeader( label, flags );
 
         ImGui::PopStyleVar( 2 );
         ImGui::PopStyleColor( 3 );
