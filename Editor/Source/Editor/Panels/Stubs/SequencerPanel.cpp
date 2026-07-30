@@ -508,6 +508,8 @@ namespace Desert::Editor
                         std::sort( tr.ScaleKeys.begin(), tr.ScaleKeys.end() );
                     m_SelTrack   = ti;
                     m_SelChannel = ch;
+                    if ( auto bi = animator->GetSkeleton().FindBoneIndex( tr.BoneName ); bi.has_value() )
+                        Core::SkeletonEditMode::SetSelectedBone( static_cast<int>( bi.value() ) );
                     animator->SetTime( animator->GetCurrentTime() );
                 }
                 ImGui::PopID();
@@ -535,6 +537,10 @@ namespace Desert::Editor
                         m_SelTrack   = ti;
                         m_SelChannel = ch;
                         m_SelKey     = k;
+                        // Selecting a bone's track also selects that bone on the skeleton (viewport highlight
+                        // + gizmo), so Sequencer <-> Skeleton Edit stay in sync.
+                        if ( auto bi = animator->GetSkeleton().FindBoneIndex( tr.BoneName ); bi.has_value() )
+                            Core::SkeletonEditMode::SetSelectedBone( static_cast<int>( bi.value() ) );
                     }
                     if ( ImGui::IsItemActive() && laneW > 0.0f )
                     {
