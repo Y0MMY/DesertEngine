@@ -4,18 +4,14 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Core/Scene.hpp>
 
-#include <Engine/Geometry/ProceduralCharacterFactory.hpp>
-#include <Engine/Geometry/SkinnedMesh.hpp>
-#include <Engine/Animation/ProceduralCharacterAnimations.hpp>
-#include <Engine/Runtime/ResourceRegistry.hpp>
-
 namespace Desert::ECS
 {
     // Maps a character's MOVEMENT STATE (planar speed + on-ground, produced by PhysicsECSSystem) to a locomotion
-    // CLIP on its skinned child. This is deliberately SEPARATE from the physics system: physics is a mechanism
-    // that only outputs state (CharacterControllerComponent.CurrentSpeed / .OnGround); deciding "which animation
-    // for this state" is behaviour and does not belong inside the physics step. (A future AnimationStateMachine
-    // or a Lua policy could replace this system without touching physics.) Play-only. Runs AFTER PhysicsECSSystem.
+    // CLIP NAME on its skinned child. Deliberately SEPARATE from physics (mechanism vs behaviour), and — by
+    // design — the system holds NO clip knowledge: the state->clip-name mapping + speed thresholds come from a
+    // LocomotionComponent (data), and the clip itself is resolved by name in AnimationECSSystem from the
+    // AnimationLibrary. So neither a clip instance nor a clip name is hard-coded here. Play-only; runs AFTER
+    // PhysicsECSSystem.
     class LocomotionSystem final : public System
     {
     public:
@@ -38,13 +34,19 @@ namespace Desert::ECS
         }
 
     private:
-        // Selects + plays the procedural locomotion clip on the character's skinned child (the one carrying the
-        // humanoid rig), based on planar speed. Only changes the clip on transition (so it doesn't restart every
-        // frame). No-op for a non-humanoid rig (the procedural clips are bone-indexed for that skeleton).
+        // Picks the locomotion clip NAME for the current speed from the entity's LocomotionComponent (or the
+        // struct defaults when absent) and writes it to the skinned child's AnimationComponent.CurrentClip.
+        // AnimationECSSystem resolves + cross-fades to that clip; an unknown name simply plays nothing.
         static void Drive( entt::registry& registry, entt::entity character, float speed, bool onGround )
         {
             if ( !registry.has<RelationshipComponent>( character ) )
                 return;
+
+            // Defaults live in the struct (data), so the system code contains no clip names.
+            static const LocomotionComponent kDefault{};
+            const LocomotionComponent&       loco = registry.has<LocomotionComponent>( character )
+                                                         ? registry.get<LocomotionComponent>( character )
+                                                         : kDefault;
 
             for ( entt::entity child : registry.get<RelationshipComponent>( character ).Children )
             {
@@ -52,45 +54,17 @@ namespace Desert::ECS
                     continue;
 
                 auto& anim = registry.get<AnimationComponent>( child );
-                if ( !anim.Animator )
-                    return; // created by AnimationECSSystem next frame
-
-                auto* base = Runtime::ResourceRegistry::GetMeshService()->Get(
-                     registry.get<SkinnedMeshComponent>( child ).MeshHandle );
-                if ( !base || !base->IsSkinned() )
+                if ( anim.Graph ) // a state machine already owns clip selection
                     return;
-                if ( static_cast<SkinnedMesh*>( base )->GetSkeleton().GetSignature() !=
-                     Geometry::ProceduralCharacterFactory::GetHumanoidSkeletonSignature() )
-                    return; // a different rig — our procedural clips wouldn't map onto it
 
-                const Animation::AnimationClip* clip = nullptr;
-                const char*                     name = nullptr;
-                if ( !onGround )
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Jump();
-                    name = "Jump";
-                }
-                else if ( speed < 0.2f )
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Idle();
-                    name = "Idle";
-                }
-                else if ( speed <= 6.5f ) // absolute walk/run split (sprint speed lands above this)
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Walk();
-                    name = "Walk";
-                }
-                else
-                {
-                    clip = &Animation::ProceduralCharacterAnimations::Run();
-                    name = "Run";
-                }
+                const std::string& name = !onGround                ? loco.JumpClip
+                                          : speed < loco.WalkSpeed ? loco.IdleClip
+                                          : speed <= loco.RunSpeed ? loco.WalkClip
+                                                                   : loco.RunClip;
 
                 if ( anim.CurrentClip != name )
                 {
-                    // CrossFade (not Play) so idle<->walk<->run transitions blend smoothly instead of popping.
-                    anim.Animator->CrossFade( *clip, 0.18f, true );
-                    anim.CurrentClip = name;
+                    anim.CurrentClip = name; // AnimationECSSystem cross-fades on change
                     anim.Playing     = true;
                     anim.Loop        = true;
                 }

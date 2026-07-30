@@ -119,10 +119,12 @@ namespace Desert::ECS
                         {
                             const auto* current = anim.Animator->GetCurrentClip();
 
-                            if ( !current || current->AnimationName != clip.AnimationName )
-                            {
+                            // Cross-fade on change (smooth idle<->walk<->run) — LocomotionSystem used to do this
+                            // itself; now clip selection is data-driven there, so the blend lives here.
+                            if ( !current )
                                 anim.Animator->Play( clip, anim.Loop );
-                            }
+                            else if ( current->AnimationName != clip.AnimationName )
+                                anim.Animator->CrossFade( clip, 0.15f, anim.Loop );
 
                             break;
                         }

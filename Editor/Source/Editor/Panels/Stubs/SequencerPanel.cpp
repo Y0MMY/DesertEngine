@@ -10,6 +10,9 @@
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Animation/Animator.hpp>
 #include <Engine/Animation/AnimationLibrary.hpp>
+#include <Engine/Animation/Skeleton.hpp>
+#include <Engine/Assets/AssetManager.hpp>
+#include <Engine/Assets/Mesh/AnimationAsset.hpp>
 
 #include <Engine/Animation/AnimationClip.hpp>
 
@@ -26,9 +29,73 @@ namespace Desert::Editor
     namespace ImGui = ::ImGui;
 
     SequencerPanel::SequencerPanel( std::shared_ptr<::Desert::Core::Scene> scene,
-                                    Animation::AnimationLibrary* library )
-         : IPanel( "Sequencer", /*showPanel=*/false ), m_Scene( std::move( scene ) ), m_Library( library )
+                                    Animation::AnimationLibrary* library, Assets::AssetManager* assetManager )
+         : IPanel( "Sequencer", /*showPanel=*/false ), m_Scene( std::move( scene ) ), m_Library( library ),
+           m_AssetManager( assetManager )
     {
+    }
+
+    namespace
+    {
+        bool s_OpenRequested = false;
+    }
+
+    void SequencerPanel::RequestOpen()
+    {
+        s_OpenRequested = true;
+    }
+
+    void SequencerPanel::OnPreUpdate()
+    {
+        if ( s_OpenRequested )
+        {
+            GetVisibility() = true;
+            s_OpenRequested = false;
+        }
+    }
+
+    std::string SequencerPanel::CreateEmptyClip( const Animation::Skeleton& skeleton )
+    {
+        if ( !m_AssetManager || !m_Library )
+            return {};
+
+        // Unique name so repeated "New Clip" presses don't collide (scan this skeleton's registered clips).
+        const auto  existing = m_Library->GetBySkeleton( skeleton.GetSignature() );
+        std::string name     = "NewClip";
+        for ( int n = 1;; ++n )
+        {
+            bool taken = false;
+            for ( const auto& a : existing )
+                if ( a && a->GetClip().AnimationName == name )
+                {
+                    taken = true;
+                    break;
+                }
+            if ( !taken )
+                break;
+            name = "NewClip_" + std::to_string( n );
+        }
+
+        Animation::AnimationClip clip;
+        clip.AnimationName     = name;
+        clip.Duration          = 1.0f;
+        clip.TicksPerSecond    = 25.0f;
+        clip.SkeletonSignature = skeleton.GetSignature();
+        clip.Tracks.reserve( skeleton.GetBones().size() );
+        for ( const auto& bone : skeleton.GetBones() )
+        {
+            Animation::BoneTrack track;
+            track.BoneName = bone.Name; // empty channels; the user adds keys in the track editor
+            clip.Tracks.push_back( std::move( track ) );
+        }
+
+        auto asset = m_AssetManager->CreateAsset<Assets::AnimationAsset>(
+             Assets::AssetPriority::Medium, Common::Filepath( "memory://clip/" + name ), false );
+        if ( !asset )
+            return {};
+        asset->SetInMemoryClip( clip );
+        m_Library->Register( asset );
+        return name;
     }
 
     void SequencerPanel::OnUIRender()
@@ -99,6 +166,31 @@ namespace Desert::Editor
                 if ( animator )
                     animator->Play( clips[currentClipIdx]->GetClip(), anim.Loop );
             }
+        }
+
+        // ---- New empty clip (authored from scratch on this skeleton) ----
+        ImGui::SameLine();
+        if ( animator && m_AssetManager )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.40f, 0.28f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.50f, 0.36f, 1.0f ) );
+            if ( ImGui::Button( ICON_MDI_PLUS " New Clip" ) )
+            {
+                const std::string created = CreateEmptyClip( animator->GetSkeleton() );
+                if ( !created.empty() )
+                {
+                    anim.CurrentClip = created;
+                    anim.Playing     = false;
+                    // Rebind the picker's clip list next frame; play the new (empty) clip so its lanes show.
+                    for ( const auto& a : m_Library->GetBySkeleton( animator->GetSkeleton().GetSignature() ) )
+                        if ( a && a->GetClip().AnimationName == created )
+                        {
+                            animator->Play( a->GetClip(), false );
+                            break;
+                        }
+                }
+            }
+            ImGui::PopStyleColor( 2 );
         }
 
         // ---- Transport ----
@@ -272,7 +364,31 @@ namespace Desert::Editor
                 if ( ch == 0 )
                     dl->AddText( ImVec2( contentX0 + 6.0f, laneY + 1.0f ), IM_COL32( 205, 205, 215, 255 ),
                                  tr.BoneName.c_str() );
-                dl->AddText( ImVec2( contentX0 + gutter - 34.0f, laneY + 1.0f ), chCol[ch], chName[ch] );
+                dl->AddText( ImVec2( contentX0 + gutter - 58.0f, laneY + 1.0f ), chCol[ch], chName[ch] );
+
+                // Per-lane "+" (add a key at the playhead) so empty channels are keyable from scratch.
+                ImGui::SetCursorScreenPos( ImVec2( contentX0 + gutter - 22.0f, laneY - 1.0f ) );
+                ImGui::PushID( ( ti * 3 + ch ) * 4096 + 3999 );
+                if ( ImGui::SmallButton( "+" ) )
+                {
+                    const float t = animator->GetCurrentTime();
+                    if ( ch == 0 )
+                        tr.PositionKeys.push_back( { t, glm::vec3( 0.0f ) } );
+                    else if ( ch == 1 )
+                        tr.RotationKeys.push_back( { t, glm::quat( 1.0f, 0.0f, 0.0f, 0.0f ) } );
+                    else
+                        tr.ScaleKeys.push_back( { t, glm::vec3( 1.0f ) } );
+                    if ( ch == 0 )
+                        std::sort( tr.PositionKeys.begin(), tr.PositionKeys.end() );
+                    else if ( ch == 1 )
+                        std::sort( tr.RotationKeys.begin(), tr.RotationKeys.end() );
+                    else
+                        std::sort( tr.ScaleKeys.begin(), tr.ScaleKeys.end() );
+                    m_SelTrack   = ti;
+                    m_SelChannel = ch;
+                    animator->SetTime( animator->GetCurrentTime() );
+                }
+                ImGui::PopID();
 
                 dl->AddLine( ImVec2( playX, laneY ), ImVec2( playX, laneY + laneH - 2.0f ),
                              IM_COL32( 255, 90, 90, 150 ), 1.0f );

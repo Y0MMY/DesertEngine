@@ -75,6 +75,25 @@ namespace Desert::Editor
             ed::DestroyEditor( m_Context );
     }
 
+    namespace
+    {
+        bool s_OpenRequested = false;
+    }
+
+    void AnimGraphPanel::RequestOpen()
+    {
+        s_OpenRequested = true;
+    }
+
+    void AnimGraphPanel::OnPreUpdate()
+    {
+        if ( s_OpenRequested )
+        {
+            GetVisibility() = true; // reveal even if it was a hidden/closed tab
+            s_OpenRequested = false;
+        }
+    }
+
     void AnimGraphPanel::OnUIRender()
     {
         // Resolve the selected entity's AnimationComponent.

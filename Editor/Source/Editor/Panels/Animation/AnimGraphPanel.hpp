@@ -45,6 +45,10 @@ namespace Desert::Editor
         }
 
         void OnUIRender() override;
+        void OnPreUpdate() override;
+
+        // Cross-panel: a Details "Open in Anim Graph" button asks the panel to reveal itself next frame.
+        static void RequestOpen();
 
     private:
         void DrawCanvas( ECS::AnimationComponent& anim, const std::vector<std::string>& clipNames );

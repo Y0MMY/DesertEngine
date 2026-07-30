@@ -12,6 +12,9 @@
 
 #include <Engine/Animation/Graph/AnimGraph.hpp>
 
+#include <Editor/Panels/Animation/AnimGraphPanel.hpp>
+#include <Editor/Panels/Stubs/SequencerPanel.hpp>
+
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
@@ -115,9 +118,12 @@ namespace Desert::Editor
             }
         }
 
-        // Keyframe/track editing lives in the Sequencer now (a proper timeline). Point there instead of the
-        // old cramped tree so the Details panel stays focused on playback + the AnimGraph.
-        ImGui::TextDisabled( ICON_MDI_CHART_TIMELINE " Edit keyframes in the Sequencer (View -> Sequencer)." );
+        // Keyframe/track editing lives in the Sequencer (a proper timeline); Details stays focused on playback
+        // + the AnimGraph summary.
+        ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
+        if ( ImGui::Button( ICON_MDI_CHART_TIMELINE "  Open in Sequencer",
+                            ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+            SequencerPanel::RequestOpen();
 
         RenderAnimGraph( animation, cached );
 
@@ -125,6 +131,9 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::PopID();
     }
 
+    // Compact AnimGraph summary in Details: create / active-badge / counts + an "Open in Anim Graph" button.
+    // Full authoring (states / transitions / parameters) lives in the visual Anim Graph node panel — no triple
+    // UI.
     void
     AnimationComponentWidget::RenderAnimGraph( ECS::AnimationComponent&                                  animation,
                                                const std::vector<Assets::Asset<Assets::AnimationAsset>>& clips )
@@ -141,8 +150,8 @@ namespace Desert::Editor
         if ( !animation.Graph )
         {
             ImGui::PushTextWrapPos( 0.0f );
-            ImGui::TextDisabled( "A state machine that picks the clip to play from live parameters "
-                                 "(e.g. Speed, IsJumping). Author it here or visually in View -> Anim Graph." );
+            ImGui::TextDisabled( "A state machine that picks the clip from live parameters "
+                                 "(e.g. Speed, IsJumping). Author it visually in the Anim Graph panel." );
             ImGui::PopTextWrapPos();
             ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
             if ( Utils::ImGuiUtilities::AccentButton( ICON_MDI_PLUS_CIRCLE "  Create AnimGraph", 28.0f ) )
@@ -156,14 +165,13 @@ namespace Desert::Editor
                 graph->Entry    = "Idle";
                 animation.Graph = graph;
                 animation.GraphRevision++;
+                AnimGraphPanel::RequestOpen(); // jump straight into the visual editor
             }
             ImGui::Unindent( 6.0f );
             return;
         }
 
-        auto& graph      = *animation.Graph;
-        auto* eval       = animation.GraphEvaluator.get();
-        bool  structural = false; // set on any change that requires rebuilding the runtime evaluator
+        auto* eval = animation.GraphEvaluator.get();
 
         // Active-state badge.
         if ( eval && eval->CurrentState() )
@@ -176,303 +184,24 @@ namespace Desert::Editor
         {
             ImGui::TextDisabled( ICON_MDI_PAUSE " Active state shows in Play/Preview" );
         }
-        ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
-
-        // Small tinted add / delete buttons reused across this section (green add, red delete).
-        auto addBtn = []( const char* label )
-        {
-            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.40f, 0.28f, 1.0f ) );
-            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.50f, 0.36f, 1.0f ) );
-            ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 4.0f );
-            const bool c = ImGui::SmallButton( label );
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor( 2 );
-            return c;
-        };
-        auto delBtn = []( const char* label )
-        {
-            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.46f, 0.19f, 0.19f, 1.0f ) );
-            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.64f, 0.24f, 0.24f, 1.0f ) );
-            const bool c = ImGui::SmallButton( label );
-            ImGui::PopStyleColor( 2 );
-            return c;
-        };
-
-        // ---------------------------------------------------------------- Parameters ----------
-        const char*  kTypeNames[] = { "Bool", "Int", "Float" };
-        const ImVec4 kTypeCol[3]  = { ImVec4( 0.55f, 0.80f, 1.00f, 1.0f ), ImVec4( 0.70f, 0.86f, 0.55f, 1.0f ),
-                                      ImVec4( 0.96f, 0.76f, 0.45f, 1.0f ) };
-        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_TUNE_VARIANT "  Parameters" ) )
-        {
-            ImGui::Indent( 6.0f );
-            ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
-            if ( graph.Parameters.empty() )
-                ImGui::TextDisabled( "No parameters yet — add one to drive transitions." );
-
-            for ( int i = 0; i < static_cast<int>( graph.Parameters.size() ); ++i )
-            {
-                auto&     p  = graph.Parameters[i];
-                const int tt = ( p.Type >= 0 && p.Type < 3 ) ? p.Type : 2;
-                ImGui::PushID( i );
-
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextColored( kTypeCol[tt], ICON_MDI_CIRCLE_MEDIUM ); // type-coloured dot
-                ImGui::SameLine( 0.0f, 2.0f );
-                ImGui::SetNextItemWidth( 104 );
-                structural |= Utils::ImGuiUtilities::Property( "##pname", p.Name );
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth( 62 );
-                structural |= ImGui::Combo( "##ptype", &p.Type, kTypeNames, 3 );
-                ImGui::SameLine();
-
-                // Live value control (drives the running evaluator; does NOT rebuild it).
-                ImGui::SetNextItemWidth( 84 );
-                float live = eval ? eval->GetFloat( p.Name ) : p.Default;
-                if ( static_cast<G::ParamType>( p.Type ) == G::ParamType::Bool )
-                {
-                    bool b = live != 0.0f;
-                    if ( ImGui::Checkbox( "##pval", &b ) && eval )
-                        eval->SetBool( p.Name, b );
-                }
-                else if ( ImGui::DragFloat( "##pval", &live, 0.05f ) && eval )
-                {
-                    eval->SetFloat( p.Name, live );
-                }
-                ImGui::SameLine();
-                if ( delBtn( ICON_MDI_CLOSE "##delp" ) )
-                {
-                    graph.Parameters.erase( graph.Parameters.begin() + i );
-                    structural = true;
-                    ImGui::PopID();
-                    break;
-                }
-                ImGui::PopID();
-            }
-
-            ImGui::Dummy( ImVec2( 0.0f, 3.0f ) );
-            if ( addBtn( ICON_MDI_PLUS " Add Parameter" ) )
-            {
-                graph.Parameters.push_back( { "Param", static_cast<int>( G::ParamType::Float ), 0.0f } );
-                structural = true;
-            }
-            ImGui::Unindent( 6.0f );
-        }
-        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
-
-        // ---------------------------------------------------------------- States ---------------
-        const char* kOpNames[] = { ">", "<", ">=", "<=", "==", "!=", "is true", "is false" };
-        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_SHAPE "  States" ) )
-        {
-            ImGui::Indent( 6.0f );
-            ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
-            for ( int i = 0; i < static_cast<int>( graph.States.size() ); ++i )
-            {
-                auto&      s        = graph.States[i];
-                const bool isEntry  = ( graph.Entry == s.Name );
-                const bool isActive = eval && eval->CurrentState() && eval->CurrentState()->Name == s.Name;
-
-                // Framed state row, tinted by role (active = orange, entry = teal, else neutral).
-                const ImVec4 hdr = isActive  ? ImVec4( 0.52f, 0.30f, 0.10f, 0.90f )
-                                   : isEntry ? ImVec4( 0.14f, 0.36f, 0.40f, 0.85f )
-                                             : ImVec4( 0.22f, 0.24f, 0.30f, 0.70f );
-                ImGui::PushStyleColor( ImGuiCol_Header, hdr );
-                ImGui::PushStyleColor( ImGuiCol_HeaderHovered,
-                                       ImVec4( hdr.x + 0.06f, hdr.y + 0.06f, hdr.z + 0.06f, 0.95f ) );
-                ImGui::PushStyleColor( ImGuiCol_HeaderActive, hdr );
-                ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 6.0f, 5.0f ) );
-
-                const std::string title = std::string( isEntry ? ICON_MDI_STAR "  " : ICON_MDI_SHAPE "  " ) +
-                                          s.Name + "###state" + std::to_string( i );
-                ImGui::PushID( 1000 + i );
-                const bool open = ImGui::TreeNodeEx( title.c_str(), ImGuiTreeNodeFlags_Framed |
-                                                                         ImGuiTreeNodeFlags_SpanAvailWidth );
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor( 3 );
-                if ( open )
-                {
-                    const std::string oldName = s.Name;
-                    if ( Utils::ImGuiUtilities::Property( "Name", s.Name ) )
-                    {
-                        // Keep references intact when a state is renamed.
-                        if ( graph.Entry == oldName )
-                            graph.Entry = s.Name;
-                        for ( auto& st : graph.States )
-                            for ( auto& t : st.Transitions )
-                                if ( t.To == oldName )
-                                    t.To = s.Name;
-                        structural = true;
-                    }
-
-                    // Clip picker.
-                    const char* clipPreview = s.Clip.empty() ? "Select Clip" : s.Clip.c_str();
-                    if ( ImGui::BeginCombo( "Clip", clipPreview ) )
-                    {
-                        for ( const auto& animAsset : clips )
-                        {
-                            const auto& name = animAsset->GetClip().AnimationName;
-                            if ( ImGui::Selectable( name.c_str(), s.Clip == name ) )
-                            {
-                                s.Clip     = name;
-                                structural = true;
-                            }
-                        }
-                        ImGui::EndCombo();
-                    }
-
-                    structural |= ImGui::Checkbox( "Loop", &s.Loop );
-                    ImGui::SameLine();
-                    ImGui::SetNextItemWidth( 90 );
-                    structural |= ImGui::DragFloat( "Speed", &s.Speed, 0.01f, 0.0f, 5.0f );
-
-                    if ( !isEntry )
-                    {
-                        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.14f, 0.36f, 0.40f, 1.0f ) );
-                        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.18f, 0.46f, 0.50f, 1.0f ) );
-                        if ( ImGui::SmallButton( ICON_MDI_STAR " Set Entry" ) )
-                        {
-                            graph.Entry = s.Name;
-                            structural  = true;
-                        }
-                        ImGui::PopStyleColor( 2 );
-                        ImGui::SameLine();
-                    }
-                    if ( delBtn( ICON_MDI_DELETE " Delete State" ) )
-                    {
-                        graph.States.erase( graph.States.begin() + i );
-                        structural = true;
-                        ImGui::TreePop();
-                        ImGui::PopID();
-                        break;
-                    }
-
-                    // ------------- Transitions of this state -------------
-                    ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
-                    ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ),
-                                        ICON_MDI_SWAP_HORIZONTAL " Transitions" );
-                    ImGui::Separator();
-                    for ( int ti = 0; ti < static_cast<int>( s.Transitions.size() ); ++ti )
-                    {
-                        auto& t = s.Transitions[ti];
-                        ImGui::PushID( 5000 + ti );
-
-                        const std::string toLabel = t.To.empty() ? std::string( "-> Target" ) : "-> " + t.To;
-                        ImGui::SetNextItemWidth( 150 );
-                        if ( ImGui::BeginCombo( "##to", toLabel.c_str() ) )
-                        {
-                            for ( const auto& other : graph.States )
-                                if ( other.Name != s.Name &&
-                                     ImGui::Selectable( other.Name.c_str(), t.To == other.Name ) )
-                                {
-                                    t.To       = other.Name;
-                                    structural = true;
-                                }
-                            ImGui::EndCombo();
-                        }
-                        ImGui::SameLine();
-                        ImGui::SetNextItemWidth( 80 );
-                        structural |= ImGui::DragFloat( "Blend", &t.Blend, 0.01f, 0.0f, 2.0f );
-                        ImGui::SameLine();
-                        if ( delBtn( ICON_MDI_CLOSE "##delt" ) )
-                        {
-                            s.Transitions.erase( s.Transitions.begin() + ti );
-                            structural = true;
-                            ImGui::PopID();
-                            break;
-                        }
-
-                        structural |= ImGui::Checkbox( "Exit time", &t.HasExitTime );
-                        if ( t.HasExitTime )
-                        {
-                            ImGui::SameLine();
-                            ImGui::SetNextItemWidth( 90 );
-                            structural |= ImGui::DragFloat( "##exit", &t.ExitTime, 0.01f, 0.0f, 1.0f );
-                        }
-
-                        // Conditions (AND).
-                        for ( int ci = 0; ci < static_cast<int>( t.Conditions.size() ); ++ci )
-                        {
-                            auto& c = t.Conditions[ci];
-                            ImGui::PushID( 9000 + ci );
-                            ImGui::SetNextItemWidth( 110 );
-                            const char* cparam = c.Parameter.empty() ? "param" : c.Parameter.c_str();
-                            if ( ImGui::BeginCombo( "##cparam", cparam ) )
-                            {
-                                for ( const auto& p : graph.Parameters )
-                                    if ( ImGui::Selectable( p.Name.c_str(), c.Parameter == p.Name ) )
-                                    {
-                                        c.Parameter = p.Name;
-                                        structural  = true;
-                                    }
-                                ImGui::EndCombo();
-                            }
-                            ImGui::SameLine();
-                            ImGui::SetNextItemWidth( 75 );
-                            structural |= ImGui::Combo( "##cop", &c.Op, kOpNames, IM_ARRAYSIZE( kOpNames ) );
-                            const auto op = static_cast<G::CompareOp>( c.Op );
-                            if ( op != G::CompareOp::IsTrue && op != G::CompareOp::IsFalse )
-                            {
-                                ImGui::SameLine();
-                                ImGui::SetNextItemWidth( 70 );
-                                structural |= ImGui::DragFloat( "##cval", &c.Value, 0.05f );
-                            }
-                            ImGui::SameLine();
-                            if ( delBtn( ICON_MDI_CLOSE "##delc" ) )
-                            {
-                                t.Conditions.erase( t.Conditions.begin() + ci );
-                                structural = true;
-                                ImGui::PopID();
-                                break;
-                            }
-                            ImGui::PopID();
-                        }
-                        if ( addBtn( ICON_MDI_PLUS " Condition" ) )
-                        {
-                            t.Conditions.push_back( {} );
-                            structural = true;
-                        }
-                        ImGui::Separator();
-                        ImGui::PopID();
-                    }
-                    if ( addBtn( ICON_MDI_PLUS " Add Transition" ) )
-                    {
-                        s.Transitions.push_back( {} );
-                        structural = true;
-                    }
-
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
-                ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
-            }
-
-            if ( addBtn( ICON_MDI_PLUS " Add State" ) )
-            {
-                G::State ns;
-                ns.Name = "State_" + std::to_string( graph.States.size() );
-                graph.States.push_back( ns );
-                structural = true;
-            }
-            ImGui::Unindent( 6.0f );
-        }
+        ImGui::TextDisabled( "%zu states  \xc2\xb7  %zu parameters", animation.Graph->States.size(),
+                             animation.Graph->Parameters.size() );
 
         ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
-        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.55f, 0.20f, 0.20f, 1.0f ) );
-        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.70f, 0.24f, 0.24f, 1.0f ) );
+        if ( Utils::ImGuiUtilities::AccentButton( ICON_MDI_STATE_MACHINE "  Open in Anim Graph", 28.0f ) )
+            AnimGraphPanel::RequestOpen();
+
+        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.46f, 0.19f, 0.19f, 1.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.62f, 0.24f, 0.24f, 1.0f ) );
         const bool remove = ImGui::Button( ICON_MDI_DELETE "  Remove AnimGraph" );
         ImGui::PopStyleColor( 2 );
         if ( remove )
         {
             animation.Graph.reset();
             animation.GraphEvaluator.reset();
-            ImGui::Unindent( 6.0f );
-            return;
         }
 
         ImGui::Unindent( 6.0f );
-
-        // Any structural edit bumps the revision so AnimationECSSystem rebuilds the runtime evaluator.
-        if ( structural )
-            animation.GraphRevision++;
     }
 
     DESERT_REGISTER_CUSTOM_COMPONENT(
