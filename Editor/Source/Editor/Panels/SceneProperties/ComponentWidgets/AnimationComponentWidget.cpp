@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include <ImGui/imgui.h>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 
@@ -114,159 +115,9 @@ namespace Desert::Editor
             }
         }
 
-        // ============================================================
-        // CLIP EDITOR
-        // ============================================================
-
-        auto* clip = const_cast<Animation::AnimationClip*>( animator->GetCurrentClip() );
-
-        if ( clip && ImGui::TreeNodeEx( "Clip Editor", ImGuiTreeNodeFlags_Framed ) )
-        {
-            bool changed = false;
-
-            ImGui::Columns( 2 );
-
-            changed |= Utils::ImGuiUtilities::Property( "Name", clip->AnimationName );
-            changed |= Utils::ImGuiUtilities::Property( "Duration", clip->Duration, 0.0f, 100.0f, 0.01f,
-                                                        Utils::ImGuiUtilities::PropertyFlag::DragValue );
-            changed |= Utils::ImGuiUtilities::Property( "TPS", clip->TicksPerSecond, 1.0f, 200.0f, 0.1f,
-                                                        Utils::ImGuiUtilities::PropertyFlag::DragValue );
-
-            ImGui::Columns( 1 );
-            ImGui::Separator();
-
-            // ========================================================
-            // TRACKS
-            // ========================================================
-
-            for ( size_t i = 0; i < clip->Tracks.size(); ++i )
-            {
-                auto& track = clip->Tracks[i];
-
-                if ( ImGui::TreeNode( ( track.BoneName + "##track" ).c_str() ) )
-                {
-                    // ---------------- POSITION ----------------
-                    if ( ImGui::TreeNode( "Position" ) )
-                    {
-                        for ( size_t k = 0; k < track.PositionKeys.size(); ++k )
-                        {
-                            auto& key = track.PositionKeys[k];
-                            ImGui::PushID( (int)k );
-
-                            changed |= ImGui::DragFloat( "Time", &key.Time, 0.01f );
-                            changed |= Utils::ImGuiUtilities::Property( "Value", key.Position );
-
-                            if ( ImGui::Button( "Delete" ) )
-                            {
-                                track.PositionKeys.erase( track.PositionKeys.begin() + k );
-                                ImGui::PopID();
-                                break;
-                            }
-
-                            ImGui::Separator();
-                            ImGui::PopID();
-                        }
-
-                        if ( ImGui::Button( "Add Position Key" ) )
-                        {
-                            track.PositionKeys.push_back( { animator->GetCurrentTime(), glm::vec3( 0.0f ) } );
-
-                            std::sort( track.PositionKeys.begin(), track.PositionKeys.end() );
-                            changed = true;
-                        }
-
-                        ImGui::TreePop();
-                    }
-
-                    // ---------------- ROTATION ----------------
-                    if ( ImGui::TreeNode( "Rotation" ) )
-                    {
-                        for ( size_t k = 0; k < track.RotationKeys.size(); ++k )
-                        {
-                            auto& key = track.RotationKeys[k];
-                            ImGui::PushID( (int)k );
-
-                            changed |= ImGui::DragFloat( "Time", &key.Time, 0.01f );
-
-                            glm::vec3 euler = glm::degrees( glm::eulerAngles( key.Rotation ) );
-
-                            if ( Utils::ImGuiUtilities::Property( "Rotation", euler ) )
-                            {
-                                key.Rotation = glm::quat( glm::radians( euler ) );
-                                changed      = true;
-                            }
-
-                            if ( ImGui::Button( "Delete" ) )
-                            {
-                                track.RotationKeys.erase( track.RotationKeys.begin() + k );
-                                ImGui::PopID();
-                                break;
-                            }
-
-                            ImGui::Separator();
-                            ImGui::PopID();
-                        }
-
-                        if ( ImGui::Button( "Add Rotation Key" ) )
-                        {
-                            track.RotationKeys.push_back(
-                                 { animator->GetCurrentTime(), glm::quat( 1, 0, 0, 0 ) } );
-
-                            std::sort( track.RotationKeys.begin(), track.RotationKeys.end() );
-                            changed = true;
-                        }
-
-                        ImGui::TreePop();
-                    }
-
-                    // ---------------- SCALE ----------------
-                    if ( ImGui::TreeNode( "Scale" ) )
-                    {
-                        for ( size_t k = 0; k < track.ScaleKeys.size(); ++k )
-                        {
-                            auto& key = track.ScaleKeys[k];
-                            ImGui::PushID( (int)k );
-
-                            changed |= ImGui::DragFloat( "Time", &key.Time, 0.01f );
-                            changed |= Utils::ImGuiUtilities::Property( "Value", key.Scale );
-
-                            if ( ImGui::Button( "Delete" ) )
-                            {
-                                track.ScaleKeys.erase( track.ScaleKeys.begin() + k );
-                                ImGui::PopID();
-                                break;
-                            }
-
-                            ImGui::Separator();
-                            ImGui::PopID();
-                        }
-
-                        if ( ImGui::Button( "Add Scale Key" ) )
-                        {
-                            track.ScaleKeys.push_back( { animator->GetCurrentTime(), glm::vec3( 1.0f ) } );
-
-                            std::sort( track.ScaleKeys.begin(), track.ScaleKeys.end() );
-                            changed = true;
-                        }
-
-                        ImGui::TreePop();
-                    }
-
-                    ImGui::TreePop();
-                }
-            }
-
-            // ========================================================
-            //  LIVE UPDATE
-            // ========================================================
-
-            if ( changed )
-            {
-                animator->SetTime( animator->GetCurrentTime() );
-            }
-
-            ImGui::TreePop();
-        }
+        // Keyframe/track editing lives in the Sequencer now (a proper timeline). Point there instead of the
+        // old cramped tree so the Details panel stays focused on playback + the AnimGraph.
+        ImGui::TextDisabled( ICON_MDI_CHART_TIMELINE " Edit keyframes in the Sequencer (View -> Sequencer)." );
 
         RenderAnimGraph( animation, cached );
 
@@ -280,16 +131,21 @@ namespace Desert::Editor
     {
         namespace G = Animation::Graph;
 
-        ImGui::Separator();
-        if ( !ImGui::CollapsingHeader( "AnimGraph (State Machine)" ) )
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        if ( !Utils::ImGuiUtilities::SectionHeader( ICON_MDI_STATE_MACHINE "  AnimGraph (State Machine)" ) )
             return;
+
+        ImGui::Indent( 6.0f );
+        ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
 
         if ( !animation.Graph )
         {
-            ImGui::TextWrapped( "A state machine that picks the clip to play from live parameters "
-                                "(e.g. Speed, IsJumping). Drive the parameters from scripts or the controls "
-                                "below." );
-            if ( ImGui::Button( "Create AnimGraph" ) )
+            ImGui::PushTextWrapPos( 0.0f );
+            ImGui::TextDisabled( "A state machine that picks the clip to play from live parameters "
+                                 "(e.g. Speed, IsJumping). Author it here or visually in View -> Anim Graph." );
+            ImGui::PopTextWrapPos();
+            ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+            if ( Utils::ImGuiUtilities::AccentButton( ICON_MDI_PLUS_CIRCLE "  Create AnimGraph", 28.0f ) )
             {
                 auto     graph = std::make_shared<G::AnimGraph>();
                 G::State idle;
@@ -301,6 +157,7 @@ namespace Desert::Editor
                 animation.Graph = graph;
                 animation.GraphRevision++;
             }
+            ImGui::Unindent( 6.0f );
             return;
         }
 
@@ -308,10 +165,18 @@ namespace Desert::Editor
         auto* eval       = animation.GraphEvaluator.get();
         bool  structural = false; // set on any change that requires rebuilding the runtime evaluator
 
+        // Active-state badge.
         if ( eval && eval->CurrentState() )
-            ImGui::Text( "Active State: %s", eval->CurrentState()->Name.c_str() );
+        {
+            ImGui::TextColored( ImVec4( 1.0f, 0.65f, 0.2f, 1.0f ), ICON_MDI_PLAY );
+            ImGui::SameLine( 0.0f, 6.0f );
+            ImGui::Text( "Active: %s", eval->CurrentState()->Name.c_str() );
+        }
         else
-            ImGui::TextDisabled( "Active State: (evaluated in Play/Preview)" );
+        {
+            ImGui::TextDisabled( ICON_MDI_PAUSE " Active state shows in Play/Preview" );
+        }
+        ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
 
         // ---------------------------------------------------------------- Parameters ----------
         const char* kTypeNames[] = { "Bool", "Int", "Float" };
@@ -529,12 +394,20 @@ namespace Desert::Editor
             ImGui::TreePop();
         }
 
-        if ( ImGui::Button( "Remove AnimGraph" ) )
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.55f, 0.20f, 0.20f, 1.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.70f, 0.24f, 0.24f, 1.0f ) );
+        const bool remove = ImGui::Button( ICON_MDI_DELETE "  Remove AnimGraph" );
+        ImGui::PopStyleColor( 2 );
+        if ( remove )
         {
             animation.Graph.reset();
             animation.GraphEvaluator.reset();
+            ImGui::Unindent( 6.0f );
             return;
         }
+
+        ImGui::Unindent( 6.0f );
 
         // Any structural edit bumps the revision so AnimationECSSystem rebuilds the runtime evaluator.
         if ( structural )
