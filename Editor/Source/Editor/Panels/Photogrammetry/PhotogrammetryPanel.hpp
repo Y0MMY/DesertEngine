@@ -75,6 +75,7 @@ namespace Desert::Editor
         void CancelJob();
         void ImportResult();
         void Reimport();
+        void LoadMeshFile(); // import + preview an arbitrary mesh (test the viewport without a tool)
         void OpenOutputFolder();
 
         // --- live mesh preview (own offscreen scene, mirrors AssetThumbnailRenderer) ---

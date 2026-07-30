@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
@@ -86,6 +87,30 @@ namespace Desert::Editor
             replace( "{output}", output );
             replace( "{outdir}", outdir );
             return cmd;
+        }
+
+        // First whitespace-delimited token of a command (the binary name), for preflight + messages.
+        std::string FirstToken( const std::string& cmd )
+        {
+            const size_t s = cmd.find_first_not_of( " \t" );
+            if ( s == std::string::npos )
+                return {};
+            const size_t e = cmd.find_first_of( " \t", s );
+            return cmd.substr( s, e == std::string::npos ? std::string::npos : e - s );
+        }
+
+        // True if the command's binary resolves on PATH (POSIX `command -v`). Non-POSIX: assume present.
+        bool CommandExists( const std::string& cmd )
+        {
+            const std::string tok = FirstToken( cmd );
+            if ( tok.empty() )
+                return false;
+#if defined( DE_POSIX_PROC )
+            const std::string probe = "command -v \"" + tok + "\" >/dev/null 2>&1";
+            return std::system( probe.c_str() ) == 0;
+#else
+            return true;
+#endif
         }
 
         bool CommandField( const char* id, std::string& value )
@@ -162,38 +187,60 @@ namespace Desert::Editor
             return changed;
         }
 
-        // Rough face-landmark ring (placeholder — real tracking is a follow-up external tool). Normalized
-        // points in [0,1] over the camera rect; drawn as green dots like MetaHuman's tracked markers.
+        // Placeholder face-landmark guide over the camera rect (real dlib tracking is wired separately).
+        // A bright green ring + feature dots + frame + caption so it's unmistakably visible; centered as a
+        // guide (it does NOT follow the face until the tracker feeds real points).
         void DrawLandmarks( const ImVec2& mn, const ImVec2& mx )
         {
-            ImDrawList*  dl  = ImGui::GetWindowDrawList();
-            const ImVec2 c   = ImVec2( ( mn.x + mx.x ) * 0.5f, ( mn.y + mx.y ) * 0.5f );
-            const float  rw  = ( mx.x - mn.x ) * 0.22f;
-            const float  rh  = ( mx.y - mn.y ) * 0.30f;
-            const ImU32  col = IM_COL32( 90, 230, 90, 235 );
-            const auto   dot = [&]( float nx, float ny )
-            { dl->AddCircleFilled( ImVec2( c.x + nx, c.y + ny ), 2.4f, col ); };
+            ImDrawList*  dl   = ImGui::GetWindowDrawList();
+            const ImVec2 c    = ImVec2( ( mn.x + mx.x ) * 0.5f, ( mn.y + mx.y ) * 0.5f );
+            const float  w    = mx.x - mn.x;
+            const float  h    = mx.y - mn.y;
+            const float  rw   = w * 0.22f;
+            const float  rh   = h * 0.30f;
+            const float  rad  = std::max( 3.0f, std::min( w, h ) * 0.008f );
+            const ImU32  col  = IM_COL32( 70, 245, 90, 255 );
+            const ImU32  ring = IM_COL32( 70, 245, 90, 110 );
+            const auto   dot  = [&]( float nx, float ny )
+            { dl->AddCircleFilled( ImVec2( c.x + nx, c.y + ny ), rad, col ); };
 
-            // Jaw / face outline ring.
-            for ( int i = 0; i < 24; ++i )
+            // Jaw / face outline ring (thin connecting line + dots).
+            ImVec2 prev;
+            for ( int i = 0; i <= 28; ++i )
             {
-                const float a = ( 3.14159265f * 2.0f ) * ( static_cast<float>( i ) / 24.0f );
-                dot( std::cos( a ) * rw, std::sin( a ) * rh );
+                const float  a = ( 3.14159265f * 2.0f ) * ( static_cast<float>( i ) / 28.0f );
+                const ImVec2 p( c.x + std::cos( a ) * rw, c.y + std::sin( a ) * rh );
+                if ( i > 0 )
+                    dl->AddLine( prev, p, ring, 1.5f );
+                if ( i < 28 )
+                    dl->AddCircleFilled( p, rad, col );
+                prev = p;
             }
             // Eyes.
-            for ( int i = 0; i < 6; ++i )
+            for ( int i = 0; i < 8; ++i )
             {
-                const float a  = ( 3.14159265f * 2.0f ) * ( static_cast<float>( i ) / 6.0f );
+                const float a  = ( 3.14159265f * 2.0f ) * ( static_cast<float>( i ) / 8.0f );
                 const float ex = std::cos( a ) * rw * 0.16f;
                 const float ey = std::sin( a ) * rh * 0.10f;
                 dot( -rw * 0.42f + ex, -rh * 0.22f + ey );
                 dot( rw * 0.42f + ex, -rh * 0.22f + ey );
             }
+            // Brows.
+            for ( int i = -2; i <= 2; ++i )
+            {
+                dot( -rw * 0.42f + rw * 0.12f * static_cast<float>( i ), -rh * 0.44f );
+                dot( rw * 0.42f + rw * 0.12f * static_cast<float>( i ), -rh * 0.44f );
+            }
             // Nose + mouth.
-            dot( 0.0f, 0.0f );
-            dot( 0.0f, rh * 0.12f );
-            for ( int i = -3; i <= 3; ++i )
-                dot( rw * 0.18f * static_cast<float>( i ) / 3.0f, rh * 0.42f );
+            for ( int i = 0; i < 4; ++i )
+                dot( 0.0f, -rh * 0.04f + rh * 0.06f * static_cast<float>( i ) );
+            for ( int i = -4; i <= 4; ++i )
+                dot( rw * 0.20f * static_cast<float>( i ) / 4.0f, rh * 0.44f );
+
+            // Frame + caption so the overlay reads clearly against any video.
+            dl->AddRect( mn, mx, IM_COL32( 70, 245, 90, 70 ) );
+            dl->AddText( ImVec2( mn.x + 6.0f, mn.y + 4.0f ), IM_COL32( 150, 245, 150, 235 ),
+                         "landmarks (placeholder)" );
         }
     } // namespace
 
@@ -410,6 +457,18 @@ namespace Desert::Editor
             return;
         }
 
+        // Preflight: the tool has to exist on PATH, otherwise the shell returns 127 ("command not found").
+        if ( !CommandExists( prefs.PhotogrammetryCommand ) )
+        {
+            const std::string tok = FirstToken( prefs.PhotogrammetryCommand );
+            m_Status      = "Reconstruction tool '" + tok +
+                            "' is not installed / not on PATH. Install a photogrammetry tool (Meshroom, COLMAP, "
+                            "RealityCapture) and pick it in Reconstruction settings. Nothing was run.";
+            m_StatusError = true;
+            PushLog( "[preflight] '" + tok + "' not found — is it installed and on PATH?" );
+            return;
+        }
+
         m_OutputCaptured = prefs.PhotogrammetryOutputMesh;
         std::error_code ec;
         std::filesystem::create_directories( std::filesystem::path( m_OutputCaptured ).parent_path(), ec );
@@ -426,7 +485,14 @@ namespace Desert::Editor
         std::error_code ec;
         if ( m_ExitCode != 0 )
         {
-            m_Status      = "The external tool exited with code " + std::to_string( m_ExitCode.load() ) + ".";
+            if ( m_ExitCode == 127 )
+                m_Status = "External tool not found (exit 127). Install a photogrammetry tool (Meshroom / "
+                           "COLMAP) and set its command in Reconstruction settings.";
+            else if ( m_ExitCode == 130 )
+                m_Status = "Reconstruction was cancelled.";
+            else
+                m_Status = "The external tool exited with code " + std::to_string( m_ExitCode.load() ) +
+                           ". See the log below.";
             m_StatusError = true;
             return;
         }
@@ -476,6 +542,17 @@ namespace Desert::Editor
         if ( m_OutputCaptured.empty() )
             m_OutputCaptured = EditorPreferences::Get().PhotogrammetryOutputMesh;
         m_ExitCode = 0;
+        ImportResult();
+    }
+
+    void PhotogrammetryPanel::LoadMeshFile()
+    {
+        const auto picked =
+             Common::Utils::FileSystem::OpenFileDialog( "Meshes\0*.obj;*.glb;*.gltf;*.fbx;*.ply\0All\0*.*\0" );
+        if ( picked.empty() )
+            return;
+        m_OutputCaptured = picked.string();
+        m_ExitCode       = 0;
         ImportResult();
     }
 
@@ -668,8 +745,9 @@ namespace Desert::Editor
 
         // Reconstruct.
         std::error_code ec;
-        const bool      hasFrames = !prefs.PhotogrammetryPhotosDir.empty() &&
-                                    std::filesystem::is_directory( prefs.PhotogrammetryPhotosDir, ec );
+        bool            hasFrames = !prefs.PhotogrammetryPhotosDir.empty();
+        if ( hasFrames )
+            hasFrames = std::filesystem::is_directory( prefs.PhotogrammetryPhotosDir, ec );
         ImGui::BeginDisabled( running || !hasFrames );
         ImGui::PushStyleColor( ImGuiCol_Button, kColAccent );
         ImGui::PushStyleColor( ImGuiCol_ButtonHovered, kColAccentHov );
@@ -691,8 +769,10 @@ namespace Desert::Editor
         const float rightW = 130.0f + 150.0f + 12.0f;
         ImGui::SameLine();
         ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - rightW );
-        const std::string outPath   = m_OutputCaptured.empty() ? prefs.PhotogrammetryOutputMesh : m_OutputCaptured;
-        const bool        hasOutput = std::filesystem::exists( outPath, ec );
+        std::string outPath = m_OutputCaptured;
+        if ( outPath.empty() )
+            outPath = prefs.PhotogrammetryOutputMesh;
+        const bool hasOutput = std::filesystem::exists( outPath, ec );
         ImGui::BeginDisabled( running || !hasOutput );
         if ( ImGui::Button( ICON_MDI_IMPORT "  Import result", ImVec2( 130.0f, 28.0f ) ) )
             Reimport();
@@ -717,10 +797,15 @@ namespace Desert::Editor
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         if ( static_cast<uint64_t>( m_PreviewMesh ) == 0 )
         {
-            ImGui::Dummy( ImVec2( 0.0f, avail.y * 0.45f ) );
+            ImGui::Dummy( ImVec2( 0.0f, avail.y * 0.40f ) );
             const char* msg = "Reconstruct to see the model here.";
             ImGui::SetCursorPosX( ( ImGui::GetWindowWidth() - ImGui::CalcTextSize( msg ).x ) * 0.5f );
             ImGui::TextDisabled( "%s", msg );
+            ImGui::Spacing();
+            const float btnW = 150.0f;
+            ImGui::SetCursorPosX( ( ImGui::GetWindowWidth() - btnW ) * 0.5f );
+            if ( ImGui::Button( ICON_MDI_FILE_IMPORT "  Load mesh…", ImVec2( btnW, 0.0f ) ) )
+                LoadMeshFile(); // preview an existing mesh (test the viewport without a photogrammetry tool)
         }
         else if ( avail.x > 4.0f && avail.y > 4.0f )
         {
