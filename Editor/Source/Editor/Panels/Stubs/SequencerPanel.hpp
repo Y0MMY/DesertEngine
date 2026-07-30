@@ -20,7 +20,7 @@ namespace Desert::Animation
     class Animator;
     class Skeleton;
     struct AnimationClip;
-}
+} // namespace Desert::Animation
 
 namespace Desert::Editor
 {
@@ -63,7 +63,7 @@ namespace Desert::Editor
         // Records the bone's CURRENT local transform (posed in the viewport via Skeleton Edit) as position +
         // rotation + scale keyframes at `time` in `clip` (upserting any key already at that time). This is the
         // "keyframe by manipulation" path: pose with the gizmo, then key. boneIndex is a Skeleton bone index.
-        void KeyBonePose( Animation::AnimationClip* clip, const Animation::Skeleton& skeleton, int boneIndex,
+        void KeyBonePose( Animation::AnimationClip* clip, const Animation::Animator& animator, int boneIndex,
                           float time );
 
         std::shared_ptr<::Desert::Core::Scene> m_Scene;

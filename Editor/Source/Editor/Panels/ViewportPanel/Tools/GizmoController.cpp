@@ -13,6 +13,8 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Animation/Skeleton.hpp>
+#include <Engine/Animation/Animator.hpp>
+#include <Engine/ECS/Components.hpp>
 
 #include <ImGuizmo.h>
 #include <glm/gtx/matrix_decompose.hpp>
@@ -151,14 +153,12 @@ namespace Desert::Editor::Tools
         // toolbar's magnet toggle is on OR Ctrl is held (Ctrl inverts the toggle).
         const auto  operation     = Core::GizmoState::Get();
         float       snapValues[3] = { 0.0f, 0.0f, 0.0f };
-        const float snapUnit      = ( operation == Core::GizmoState::Operation::Rotate )
-                                         ? Core::GizmoState::RotateSnapDegrees()
-                                         : ( operation == Core::GizmoState::Operation::Scale )
-                                              ? Core::GizmoState::ScaleSnap()
-                                              : Core::GizmoState::TranslateSnap();
+        const float snapUnit =
+             ( operation == Core::GizmoState::Operation::Rotate )  ? Core::GizmoState::RotateSnapDegrees()
+             : ( operation == Core::GizmoState::Operation::Scale ) ? Core::GizmoState::ScaleSnap()
+                                                                   : Core::GizmoState::TranslateSnap();
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
-        const float* snap =
-             Core::GizmoState::SnapActive( ::ImGui::GetIO().KeyCtrl ) ? snapValues : nullptr;
+        const float* snap = Core::GizmoState::SnapActive( ::ImGui::GetIO().KeyCtrl ) ? snapValues : nullptr;
 
         const bool manipulated =
              ImGuizmo::Manipulate( &view[0][0], &proj[0][0], static_cast<ImGuizmo::OPERATION>( operation ),
@@ -250,7 +250,7 @@ namespace Desert::Editor::Tools
     }
 
     void GizmoController::RenderBone( ::Desert::Core::Scene& scene, const glm::vec2& viewportPos,
-                                     const glm::vec2& viewportSize )
+                                      const glm::vec2& viewportSize )
     {
         const auto& mainCamera = scene.GetMainCamera().lock();
         if ( !mainCamera )
@@ -279,18 +279,34 @@ namespace Desert::Editor::Tools
         if ( boneIdx >= static_cast<int>( bones.size() ) )
             return;
 
+        // Pose mode (Sequencer authoring): the gizmo edits the Animator's EDITABLE pose buffer instead of the
+        // rig's bind pose, so posing to key a clip never mutates the shared rest pose. Falls back to bind
+        // editing when there's no animator. See SkeletonEditMode::PoseMode / Animator::SetBoneLocalPose.
+        Animation::Animator* animator = nullptr;
+        if ( Core::SkeletonEditMode::PoseMode() && entity.HasComponent<ECS::AnimationComponent>() )
+            animator = entity.GetComponent<ECS::AnimationComponent>().Animator.get();
+        const bool usePose = ( animator != nullptr );
+
+        // The local (parent-relative) transform to build the bone chain from: the animated pose in pose mode,
+        // else the bind pose.
+        const auto localOf = [&]( size_t i ) -> glm::mat4
+        {
+            return usePose ? animator->GetBoneLocalPose( static_cast<uint32_t>( i ) )
+                           : bones[i].LocalBindTransform;
+        };
+
         const glm::mat4 entityWorld = entity.GetComponent<ECS::TransformComponent>().GetTransform();
 
-        // Chain global bind per bone — the SAME space the mesh is skinned in, so the gizmo sits on the bone.
+        // Chain global per bone — the SAME space the mesh is skinned in, so the gizmo sits on the bone.
         std::vector<glm::mat4>             chainGlobal( bones.size(), glm::mat4( 1.0f ) );
         std::vector<bool>                  done( bones.size(), false );
         std::function<glm::mat4( size_t )> resolve = [&]( size_t i ) -> glm::mat4
         {
             if ( done[i] )
                 return chainGlobal[i];
-            glm::mat4 g = bones[i].LocalBindTransform;
+            glm::mat4 g = localOf( i );
             if ( bones[i].ParentBoneID.has_value() && bones[i].ParentBoneID.value() < bones.size() )
-                g = resolve( bones[i].ParentBoneID.value() ) * bones[i].LocalBindTransform;
+                g = resolve( bones[i].ParentBoneID.value() ) * localOf( i );
             chainGlobal[i] = g;
             done[i]        = true;
             return g;
@@ -305,8 +321,7 @@ namespace Desert::Editor::Tools
         const auto& view = mainCamera->GetViewMatrix();
         const auto& proj = mainCamera->GetProjectionMatrix();
         // Scale on a bone's rest pose is rarely wanted; default None/Scale to Translate.
-        const auto op =
-             ( Core::GizmoState::Get() == Operation::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
+        const auto op = ( Core::GizmoState::Get() == Operation::Rotate ) ? ImGuizmo::ROTATE : ImGuizmo::TRANSLATE;
 
         const bool boneManipulated =
              ImGuizmo::Manipulate( &view[0][0], &proj[0][0], op, ImGuizmo::WORLD, &gizmoWorld[0][0] );
@@ -316,9 +331,9 @@ namespace Desert::Editor::Tools
             m_Hovered = true;
 
         // One undo entry per drag: capture the bone's pre-drag rest transform when the drag STARTS, before
-        // this frame's edit is written below.
+        // this frame's edit is written below. Rig editing only — pose-mode edits are persisted by keying.
         const bool usingNow = ImGuizmo::IsUsing();
-        if ( usingNow && !m_BoneDragActive )
+        if ( !usePose && usingNow && !m_BoneDragActive )
         {
             m_BoneDragActive = true;
             m_BoneDragIndex  = boneIdx;
@@ -328,17 +343,27 @@ namespace Desert::Editor::Tools
 
         if ( boneManipulated )
         {
-            // Edit ONLY this bone's LocalBindTransform (relative to its parent's unchanged chain global).
+            // The new local (parent-relative) transform from the gizmo's world matrix.
             const glm::mat4 newGlobalMesh = glm::inverse( entityWorld ) * gizmoWorld;
             glm::mat4       parentGlobal( 1.0f );
-            if ( bones[boneIdx].ParentBoneID.has_value() &&
-                 bones[boneIdx].ParentBoneID.value() < bones.size() )
+            if ( bones[boneIdx].ParentBoneID.has_value() && bones[boneIdx].ParentBoneID.value() < bones.size() )
                 parentGlobal = resolve( bones[boneIdx].ParentBoneID.value() );
-            bones[boneIdx].LocalBindTransform = glm::inverse( parentGlobal ) * newGlobalMesh;
+            const glm::mat4 newLocal = glm::inverse( parentGlobal ) * newGlobalMesh;
+
+            if ( usePose )
+            {
+                // Pose the ANIMATED buffer (never the bind pose) and re-render it so the viewport updates.
+                animator->SetBoneLocalPose( static_cast<uint32_t>( boneIdx ), newLocal );
+                animator->ApplyLocalPose();
+            }
+            else
+            {
+                bones[boneIdx].LocalBindTransform = newLocal; // rig / rest-pose editing
+            }
         }
 
-        // On release: record the net change (old -> current) as one undoable command.
-        if ( !usingNow && m_BoneDragActive )
+        // On release: record the net rig change (old -> current) as one undoable command (rig editing only).
+        if ( !usePose && !usingNow && m_BoneDragActive )
         {
             m_BoneDragActive = false;
             if ( m_BoneDragIndex == boneIdx && bones[boneIdx].LocalBindTransform != m_BoneDragOld )

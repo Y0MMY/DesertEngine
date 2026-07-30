@@ -68,17 +68,20 @@ namespace Desert::Editor
         }
     } // namespace
 
-    void SequencerPanel::KeyBonePose( Animation::AnimationClip* clip, const Animation::Skeleton& skeleton,
+    void SequencerPanel::KeyBonePose( Animation::AnimationClip* clip, const Animation::Animator& animator,
                                       int boneIndex, float time )
     {
+        const auto& skeleton = animator.GetSkeleton();
         if ( !clip || boneIndex < 0 || boneIndex >= static_cast<int>( skeleton.GetBones().size() ) )
             return;
         const auto& bone = skeleton.GetBones()[boneIndex];
 
+        // Key the EDITABLE animated pose (what the gizmo posed) — NOT the shared bind pose. The gizmo in pose
+        // mode writes the Animator's local-pose buffer, so this captures the posed skeleton.
         glm::vec3 t, s, skew;
         glm::vec4 persp;
         glm::quat r;
-        glm::decompose( bone.LocalBindTransform, s, r, t, skew, persp );
+        glm::decompose( animator.GetBoneLocalPose( static_cast<uint32_t>( boneIndex ) ), s, r, t, skew, persp );
 
         // Find (or create) the track for this bone.
         Animation::BoneTrack* track = nullptr;
@@ -236,8 +239,7 @@ namespace Desert::Editor
             return;
         }
         auto& entity = entOpt->get();
-        if ( !entity.HasComponent<ECS::AnimationComponent>() ||
-             !entity.HasComponent<ECS::SkinnedMeshComponent>() )
+        if ( !entity.HasComponent<ECS::AnimationComponent>() || !entity.HasComponent<ECS::SkinnedMeshComponent>() )
         {
             ImGui::TextDisabled( "Selected entity has no Animation + Skinned Mesh component." );
             return;
@@ -254,9 +256,9 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Skinned mesh not resolved yet." );
             return;
         }
-        const uint64_t sig   = static_cast<SkinnedMesh*>( mesh )->GetSkeleton().GetSignature();
-        const auto     clips = m_Library ? m_Library->GetBySkeleton( sig )
-                                         : std::vector<Assets::Asset<Assets::AnimationAsset>>{};
+        const uint64_t sig = static_cast<SkinnedMesh*>( mesh )->GetSkeleton().GetSignature();
+        const auto     clips =
+             m_Library ? m_Library->GetBySkeleton( sig ) : std::vector<Assets::Asset<Assets::AnimationAsset>>{};
 
         // Names for the clip combos + the index of the currently-selected clip.
         std::vector<const char*> clipNames;
@@ -379,6 +381,10 @@ namespace Desert::Editor
             const int  selBone  = Core::SkeletonEditMode::GetSelectedBone();
             const bool canKey   = editClip && Core::SkeletonEditMode::IsActive() && selBone >= 0;
 
+            // Author-by-posing: while a clip is open in Skeleton Edit, the bone gizmo edits the Animator's
+            // editable pose buffer (not the rig's bind pose), and keying captures that buffer.
+            Core::SkeletonEditMode::SetPoseMode( Core::SkeletonEditMode::IsActive() && editClip != nullptr );
+
             // Record toggle (red when armed) — auto-keys while the gizmo moves the selected bone.
             if ( m_Record )
             {
@@ -399,7 +405,7 @@ namespace Desert::Editor
             if ( ImGui::Button( ICON_MDI_KEY_PLUS " Key Bone @ Playhead" ) && canKey )
             {
                 anim.Playing = false;
-                KeyBonePose( editClip, animator->GetSkeleton(), selBone, playTime );
+                KeyBonePose( editClip, *animator, selBone, playTime );
                 animator->SetTime( playTime ); // re-evaluate so the new key shows immediately
             }
             ImGui::EndDisabled();
@@ -411,10 +417,10 @@ namespace Desert::Editor
                         "3) Turn on Record (auto-key as you move) OR click Key Bone at the playhead.\n"
                         "Repeat at different times to build the motion (drag the diamond keys below to retime)." );
 
-            // Record mode: detect the selected bone's transform CHANGING (a gizmo drag) and auto-key it.
+            // Record mode: detect the selected bone's POSE changing (a gizmo drag in pose mode) and auto-key it.
             if ( m_Record && canKey )
             {
-                const glm::mat4 cur = animator->GetSkeleton().GetBones()[selBone].LocalBindTransform;
+                const glm::mat4 cur = animator->GetBoneLocalPose( static_cast<uint32_t>( selBone ) );
                 if ( selBone != m_RecordBone )
                 {
                     m_RecordBone = selBone; // switched bone -> seed the baseline, don't key yet
@@ -423,7 +429,7 @@ namespace Desert::Editor
                 else if ( cur != m_RecordLast )
                 {
                     anim.Playing = false;
-                    KeyBonePose( editClip, animator->GetSkeleton(), selBone, playTime );
+                    KeyBonePose( editClip, *animator, selBone, playTime );
                     animator->SetTime( playTime );
                     m_RecordLast = cur;
                 }
@@ -468,7 +474,7 @@ namespace Desert::Editor
             {
                 for ( const auto& n : clip->Notifies )
                 {
-                    const float x = timeToX( n.Time );
+                    const float  x = timeToX( n.Time );
                     const ImVec2 d0( x, origin.y + rulerH - 11.0f );
                     dl->AddTriangleFilled( ImVec2( d0.x - 5.0f, d0.y ), ImVec2( d0.x + 5.0f, d0.y ),
                                            ImVec2( d0.x, d0.y + 9.0f ), IM_COL32( 240, 200, 90, 255 ) );
@@ -529,8 +535,8 @@ namespace Desert::Editor
             ImGui::BeginDisabled( !canAdd );
             if ( ImGui::Button( "Add Layer" ) && canAdd )
             {
-                const int idx = animator->AddLayer( clips[m_LayerClip]->GetClip(), m_LayerWeight,
-                                                    m_LayerAdditive, /*loop=*/true );
+                const int idx = animator->AddLayer( clips[m_LayerClip]->GetClip(), m_LayerWeight, m_LayerAdditive,
+                                                    /*loop=*/true );
                 if ( m_LayerMaskBone[0] != '\0' )
                     animator->SetLayerMaskByNames( idx, { std::string( m_LayerMaskBone ) } );
             }
