@@ -82,17 +82,24 @@ namespace Desert::Editor
                 currentClipIdx = static_cast<int>( i );
         }
 
+        Animation::Animator* animator = anim.Animator.get();
+
         // ---- Clip picker ----
         ImGui::SetNextItemWidth( 240.0f );
-        if ( ImGui::Combo( "Clip", &currentClipIdx,
-                           clipNames.empty() ? nullptr : clipNames.data(),
+        if ( ImGui::Combo( "Clip", &currentClipIdx, clipNames.empty() ? nullptr : clipNames.data(),
                            static_cast<int>( clipNames.size() ) ) )
         {
             if ( currentClipIdx >= 0 && currentClipIdx < static_cast<int>( clips.size() ) )
-                anim.CurrentClip = clips[currentClipIdx]->GetClip().AnimationName; // AnimationECSSystem plays it
+            {
+                anim.CurrentClip = clips[currentClipIdx]->GetClip().AnimationName;
+                // Play it RIGHT NOW on the animator instead of only setting CurrentClip: when an AnimGraph is
+                // attached the ECS drives the clip FROM the graph and ignores CurrentClip, so the picker looked
+                // dead. A direct Play previews the picked clip immediately; while paused the graph (which only
+                // runs when Playing) won't override it, so authoring/scrubbing sticks.
+                if ( animator )
+                    animator->Play( clips[currentClipIdx]->GetClip(), anim.Loop );
+            }
         }
-
-        Animation::Animator* animator = anim.Animator.get();
 
         // ---- Transport ----
         ImGui::SameLine( 0.0f, 20.0f );

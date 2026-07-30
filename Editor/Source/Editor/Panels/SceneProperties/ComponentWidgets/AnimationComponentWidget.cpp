@@ -178,24 +178,55 @@ namespace Desert::Editor
         }
         ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
 
-        // ---------------------------------------------------------------- Parameters ----------
-        const char* kTypeNames[] = { "Bool", "Int", "Float" };
-        if ( ImGui::TreeNodeEx( "Parameters", ImGuiTreeNodeFlags_DefaultOpen ) )
+        // Small tinted add / delete buttons reused across this section (green add, red delete).
+        auto addBtn = []( const char* label )
         {
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.40f, 0.28f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.50f, 0.36f, 1.0f ) );
+            ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 4.0f );
+            const bool c = ImGui::SmallButton( label );
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor( 2 );
+            return c;
+        };
+        auto delBtn = []( const char* label )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.46f, 0.19f, 0.19f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.64f, 0.24f, 0.24f, 1.0f ) );
+            const bool c = ImGui::SmallButton( label );
+            ImGui::PopStyleColor( 2 );
+            return c;
+        };
+
+        // ---------------------------------------------------------------- Parameters ----------
+        const char*  kTypeNames[] = { "Bool", "Int", "Float" };
+        const ImVec4 kTypeCol[3]  = { ImVec4( 0.55f, 0.80f, 1.00f, 1.0f ), ImVec4( 0.70f, 0.86f, 0.55f, 1.0f ),
+                                      ImVec4( 0.96f, 0.76f, 0.45f, 1.0f ) };
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_TUNE_VARIANT "  Parameters" ) )
+        {
+            ImGui::Indent( 6.0f );
+            ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
+            if ( graph.Parameters.empty() )
+                ImGui::TextDisabled( "No parameters yet — add one to drive transitions." );
+
             for ( int i = 0; i < static_cast<int>( graph.Parameters.size() ); ++i )
             {
-                auto& p = graph.Parameters[i];
+                auto&     p  = graph.Parameters[i];
+                const int tt = ( p.Type >= 0 && p.Type < 3 ) ? p.Type : 2;
                 ImGui::PushID( i );
 
-                ImGui::SetNextItemWidth( 110 );
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextColored( kTypeCol[tt], ICON_MDI_CIRCLE_MEDIUM ); // type-coloured dot
+                ImGui::SameLine( 0.0f, 2.0f );
+                ImGui::SetNextItemWidth( 104 );
                 structural |= Utils::ImGuiUtilities::Property( "##pname", p.Name );
                 ImGui::SameLine();
-                ImGui::SetNextItemWidth( 65 );
+                ImGui::SetNextItemWidth( 62 );
                 structural |= ImGui::Combo( "##ptype", &p.Type, kTypeNames, 3 );
                 ImGui::SameLine();
 
                 // Live value control (drives the running evaluator; does NOT rebuild it).
-                ImGui::SetNextItemWidth( 90 );
+                ImGui::SetNextItemWidth( 84 );
                 float live = eval ? eval->GetFloat( p.Name ) : p.Default;
                 if ( static_cast<G::ParamType>( p.Type ) == G::ParamType::Bool )
                 {
@@ -208,7 +239,7 @@ namespace Desert::Editor
                     eval->SetFloat( p.Name, live );
                 }
                 ImGui::SameLine();
-                if ( ImGui::SmallButton( "X" ) )
+                if ( delBtn( ICON_MDI_CLOSE "##delp" ) )
                 {
                     graph.Parameters.erase( graph.Parameters.begin() + i );
                     structural = true;
@@ -217,26 +248,47 @@ namespace Desert::Editor
                 }
                 ImGui::PopID();
             }
-            if ( ImGui::SmallButton( "+ Parameter" ) )
+
+            ImGui::Dummy( ImVec2( 0.0f, 3.0f ) );
+            if ( addBtn( ICON_MDI_PLUS " Add Parameter" ) )
             {
                 graph.Parameters.push_back( { "Param", static_cast<int>( G::ParamType::Float ), 0.0f } );
                 structural = true;
             }
-            ImGui::TreePop();
+            ImGui::Unindent( 6.0f );
         }
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
 
         // ---------------------------------------------------------------- States ---------------
         const char* kOpNames[] = { ">", "<", ">=", "<=", "==", "!=", "is true", "is false" };
-        if ( ImGui::TreeNodeEx( "States", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_SHAPE "  States" ) )
         {
+            ImGui::Indent( 6.0f );
+            ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
             for ( int i = 0; i < static_cast<int>( graph.States.size() ); ++i )
             {
-                auto&             s       = graph.States[i];
-                const bool        isEntry = ( graph.Entry == s.Name );
-                const std::string title =
-                     s.Name + ( isEntry ? "  [entry]" : "" ) + "###state" + std::to_string( i );
+                auto&      s        = graph.States[i];
+                const bool isEntry  = ( graph.Entry == s.Name );
+                const bool isActive = eval && eval->CurrentState() && eval->CurrentState()->Name == s.Name;
+
+                // Framed state row, tinted by role (active = orange, entry = teal, else neutral).
+                const ImVec4 hdr = isActive  ? ImVec4( 0.52f, 0.30f, 0.10f, 0.90f )
+                                   : isEntry ? ImVec4( 0.14f, 0.36f, 0.40f, 0.85f )
+                                             : ImVec4( 0.22f, 0.24f, 0.30f, 0.70f );
+                ImGui::PushStyleColor( ImGuiCol_Header, hdr );
+                ImGui::PushStyleColor( ImGuiCol_HeaderHovered,
+                                       ImVec4( hdr.x + 0.06f, hdr.y + 0.06f, hdr.z + 0.06f, 0.95f ) );
+                ImGui::PushStyleColor( ImGuiCol_HeaderActive, hdr );
+                ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 6.0f, 5.0f ) );
+
+                const std::string title = std::string( isEntry ? ICON_MDI_STAR "  " : ICON_MDI_SHAPE "  " ) +
+                                          s.Name + "###state" + std::to_string( i );
                 ImGui::PushID( 1000 + i );
-                if ( ImGui::TreeNodeEx( title.c_str() ) )
+                const bool open = ImGui::TreeNodeEx( title.c_str(), ImGuiTreeNodeFlags_Framed |
+                                                                         ImGuiTreeNodeFlags_SpanAvailWidth );
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor( 3 );
+                if ( open )
                 {
                     const std::string oldName = s.Name;
                     if ( Utils::ImGuiUtilities::Property( "Name", s.Name ) )
@@ -272,13 +324,19 @@ namespace Desert::Editor
                     ImGui::SetNextItemWidth( 90 );
                     structural |= ImGui::DragFloat( "Speed", &s.Speed, 0.01f, 0.0f, 5.0f );
 
-                    if ( !isEntry && ImGui::SmallButton( "Set as Entry" ) )
+                    if ( !isEntry )
                     {
-                        graph.Entry = s.Name;
-                        structural  = true;
+                        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.14f, 0.36f, 0.40f, 1.0f ) );
+                        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.18f, 0.46f, 0.50f, 1.0f ) );
+                        if ( ImGui::SmallButton( ICON_MDI_STAR " Set Entry" ) )
+                        {
+                            graph.Entry = s.Name;
+                            structural  = true;
+                        }
+                        ImGui::PopStyleColor( 2 );
+                        ImGui::SameLine();
                     }
-                    ImGui::SameLine();
-                    if ( ImGui::SmallButton( "Delete State" ) )
+                    if ( delBtn( ICON_MDI_DELETE " Delete State" ) )
                     {
                         graph.States.erase( graph.States.begin() + i );
                         structural = true;
@@ -288,8 +346,10 @@ namespace Desert::Editor
                     }
 
                     // ------------- Transitions of this state -------------
+                    ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
+                    ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ),
+                                        ICON_MDI_SWAP_HORIZONTAL " Transitions" );
                     ImGui::Separator();
-                    ImGui::TextDisabled( "Transitions" );
                     for ( int ti = 0; ti < static_cast<int>( s.Transitions.size() ); ++ti )
                     {
                         auto& t = s.Transitions[ti];
@@ -312,7 +372,7 @@ namespace Desert::Editor
                         ImGui::SetNextItemWidth( 80 );
                         structural |= ImGui::DragFloat( "Blend", &t.Blend, 0.01f, 0.0f, 2.0f );
                         ImGui::SameLine();
-                        if ( ImGui::SmallButton( "Del" ) )
+                        if ( delBtn( ICON_MDI_CLOSE "##delt" ) )
                         {
                             s.Transitions.erase( s.Transitions.begin() + ti );
                             structural = true;
@@ -356,7 +416,7 @@ namespace Desert::Editor
                                 structural |= ImGui::DragFloat( "##cval", &c.Value, 0.05f );
                             }
                             ImGui::SameLine();
-                            if ( ImGui::SmallButton( "x" ) )
+                            if ( delBtn( ICON_MDI_CLOSE "##delc" ) )
                             {
                                 t.Conditions.erase( t.Conditions.begin() + ci );
                                 structural = true;
@@ -365,7 +425,7 @@ namespace Desert::Editor
                             }
                             ImGui::PopID();
                         }
-                        if ( ImGui::SmallButton( "+ Condition" ) )
+                        if ( addBtn( ICON_MDI_PLUS " Condition" ) )
                         {
                             t.Conditions.push_back( {} );
                             structural = true;
@@ -373,7 +433,7 @@ namespace Desert::Editor
                         ImGui::Separator();
                         ImGui::PopID();
                     }
-                    if ( ImGui::SmallButton( "+ Transition" ) )
+                    if ( addBtn( ICON_MDI_PLUS " Add Transition" ) )
                     {
                         s.Transitions.push_back( {} );
                         structural = true;
@@ -382,16 +442,17 @@ namespace Desert::Editor
                     ImGui::TreePop();
                 }
                 ImGui::PopID();
+                ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
             }
 
-            if ( ImGui::SmallButton( "+ State" ) )
+            if ( addBtn( ICON_MDI_PLUS " Add State" ) )
             {
                 G::State ns;
                 ns.Name = "State_" + std::to_string( graph.States.size() );
                 graph.States.push_back( ns );
                 structural = true;
             }
-            ImGui::TreePop();
+            ImGui::Unindent( 6.0f );
         }
 
         ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
