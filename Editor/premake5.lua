@@ -83,6 +83,8 @@ project "Editor"
             "IOKit.framework",
             "CoreFoundation.framework",
             "CoreVideo.framework",
+            "CoreMedia.framework",
+            "AVFoundation.framework",
             "QuartzCore.framework",
         }
 

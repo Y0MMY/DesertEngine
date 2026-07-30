@@ -3,30 +3,36 @@
 #include <Editor/Core/EditorPreferences.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Import/MeshDnD.hpp>
-#include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
+#include <Common/Utilities/CameraCapture.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
 #include <Engine/Core/Scene.hpp>
+#include <Engine/Core/Formats/ImageFormat.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/System/MeshECSSystem.hpp>
+#include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Core/Logger.hpp>
 
 #include <ImGui/imgui.h>
 
+#include <stb_image/stb_image_write.h>
+
 #include <algorithm>
-#include <cctype>
-#include <cstdlib>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <iterator>
 #include <system_error>
 
 #if defined( __APPLE__ ) || defined( __unix__ )
 #define DE_POSIX_PROC 1
-#include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -38,18 +44,20 @@ namespace Desert::Editor
 
     namespace
     {
-        // House palette (matches MeshEditorPanel) so the panel reads as part of the editor, not a bolt-on.
         constexpr ImVec4 kColHeader    = { 0.13f, 0.14f, 0.17f, 1.0f };
-        constexpr ImVec4 kColSection   = { 0.11f, 0.12f, 0.14f, 1.0f };
+        constexpr ImVec4 kColSection   = { 0.09f, 0.10f, 0.12f, 1.0f };
         constexpr ImVec4 kColLogBg     = { 0.07f, 0.07f, 0.08f, 1.0f };
         constexpr ImVec4 kColAccent    = { 0.20f, 0.44f, 0.72f, 1.0f };
         constexpr ImVec4 kColAccentHov = { 0.26f, 0.52f, 0.82f, 1.0f };
         constexpr ImVec4 kColDanger    = { 0.62f, 0.22f, 0.22f, 1.0f };
+        constexpr ImVec4 kColRecord    = { 0.78f, 0.20f, 0.20f, 1.0f };
         constexpr ImVec4 kColOk        = { 0.55f, 0.85f, 0.55f, 1.0f };
         constexpr ImVec4 kColWarn      = { 0.95f, 0.75f, 0.35f, 1.0f };
         constexpr ImVec4 kColErr       = { 0.95f, 0.45f, 0.45f, 1.0f };
 
-        constexpr std::size_t kMaxLogLines = 600;
+        constexpr std::size_t kMaxLogLines  = 600;
+        constexpr double      kTexInterval  = 0.12; // ~8 fps camera-texture rebuild (bounds descriptor churn)
+        constexpr double      kSaveInterval = 0.35; // ~3 fps frame saving while recording
 
         struct CmdPreset
         {
@@ -57,8 +65,7 @@ namespace Desert::Editor
             const char* cmd;
         };
 
-        // Reconstruct presets, split by mode. "Custom" is implicit (an edited command matches nothing).
-        constexpr CmdPreset kReconstructObject[] = {
+        constexpr CmdPreset kReconstructPresets[] = {
              { "Meshroom (AliceVision)", "meshroom_batch --input {input} --output {outdir}" },
              { "COLMAP (automatic)",
                "colmap automatic_reconstructor --workspace_path {outdir} --image_path {input}" },
@@ -66,30 +73,7 @@ namespace Desert::Editor
                "RealityCapture -addFolder {input} -align -setReconstructionRegionAuto -calculateModel "
                "-exportModel {output} -quit" },
         };
-        constexpr CmdPreset kReconstructFace[] = {
-             { "Meshroom (head, high detail)", "meshroom_batch --input {input} --output {outdir}" },
-             { "Face solver (your CLI)", "your_face_tool --frames {input} --out {output}" },
-        };
-        constexpr CmdPreset kCaptureObject[] = {
-             { "Webcam -> image burst (ffmpeg)",
-               "ffmpeg -y -f avfoundation -framerate 2 -i 0 -t 20 -q:v 2 {photos}/frame_%03d.jpg" },
-             { "Webcam -> 1 fps (ffmpeg)",
-               "ffmpeg -y -f avfoundation -framerate 1 -i 0 -t 30 -q:v 2 {photos}/frame_%03d.jpg" },
-        };
-        constexpr CmdPreset kCaptureFace[] = {
-             { "Webcam sweep 30s (ffmpeg)",
-               "ffmpeg -y -f avfoundation -framerate 3 -i 0 -t 30 -q:v 2 {photos}/frame_%03d.jpg" },
-        };
 
-        bool IsImageExt( const std::filesystem::path& p )
-        {
-            std::string ext = p.extension().string();
-            for ( auto& c : ext )
-                c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
-            return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".tga" || ext == ".bmp";
-        }
-
-        // Substitutes {input}/{output}/{outdir} in the command template.
         std::string Substitute( std::string cmd, const std::string& input, const std::string& output )
         {
             const std::string outdir  = std::filesystem::path( output ).parent_path().string();
@@ -104,7 +88,6 @@ namespace Desert::Editor
             return cmd;
         }
 
-        // Multi-line command editor backed by a std::string (copied in/out around the widget).
         bool CommandField( const char* id, std::string& value )
         {
             char buf[2048];
@@ -116,16 +99,15 @@ namespace Desert::Editor
             return changed;
         }
 
-        // Preset dropdown: the current label is the matching preset name or "Custom". Picking one writes it
-        // into `value`. Returns true when the value changed.
-        bool PresetCombo( const char* id, const CmdPreset* presets, int count, std::string& value )
+        bool PresetCombo( const char* id, std::string& value )
         {
+            const int   count   = static_cast<int>( std::size( kReconstructPresets ) );
             const char* current = "Custom";
             for ( int i = 0; i < count; ++i )
             {
-                if ( value == presets[i].cmd )
+                if ( value == kReconstructPresets[i].cmd )
                 {
-                    current = presets[i].name;
+                    current = kReconstructPresets[i].name;
                     break;
                 }
             }
@@ -136,24 +118,18 @@ namespace Desert::Editor
             {
                 for ( int i = 0; i < count; ++i )
                 {
-                    const bool sel = ( value == presets[i].cmd );
-                    if ( ImGui::Selectable( presets[i].name, sel ) )
+                    const bool sel = ( value == kReconstructPresets[i].cmd );
+                    if ( ImGui::Selectable( kReconstructPresets[i].name, sel ) )
                     {
-                        value   = presets[i].cmd;
+                        value   = kReconstructPresets[i].cmd;
                         changed = true;
                     }
-                    if ( sel )
-                        ImGui::SetItemDefaultFocus();
                 }
-                ImGui::Separator();
-                ImGui::TextDisabled( "Edit the field below for a Custom command." );
                 ImGui::EndCombo();
             }
             return changed;
         }
 
-        // A path field with a native "Browse…" button: [ editable field ][ Browse ]. `folder` picks a
-        // directory (OpenFolderDialog); otherwise a save-file dialog (the output mesh).
         bool PathPicker( const char* id, std::string& value, bool folder )
         {
             constexpr float btnW = 92.0f;
@@ -185,6 +161,40 @@ namespace Desert::Editor
             ImGui::PopID();
             return changed;
         }
+
+        // Rough face-landmark ring (placeholder — real tracking is a follow-up external tool). Normalized
+        // points in [0,1] over the camera rect; drawn as green dots like MetaHuman's tracked markers.
+        void DrawLandmarks( const ImVec2& mn, const ImVec2& mx )
+        {
+            ImDrawList*  dl  = ImGui::GetWindowDrawList();
+            const ImVec2 c   = ImVec2( ( mn.x + mx.x ) * 0.5f, ( mn.y + mx.y ) * 0.5f );
+            const float  rw  = ( mx.x - mn.x ) * 0.22f;
+            const float  rh  = ( mx.y - mn.y ) * 0.30f;
+            const ImU32  col = IM_COL32( 90, 230, 90, 235 );
+            const auto   dot = [&]( float nx, float ny )
+            { dl->AddCircleFilled( ImVec2( c.x + nx, c.y + ny ), 2.4f, col ); };
+
+            // Jaw / face outline ring.
+            for ( int i = 0; i < 24; ++i )
+            {
+                const float a = ( 3.14159265f * 2.0f ) * ( static_cast<float>( i ) / 24.0f );
+                dot( std::cos( a ) * rw, std::sin( a ) * rh );
+            }
+            // Eyes.
+            for ( int i = 0; i < 6; ++i )
+            {
+                const float a  = ( 3.14159265f * 2.0f ) * ( static_cast<float>( i ) / 6.0f );
+                const float ex = std::cos( a ) * rw * 0.16f;
+                const float ey = std::sin( a ) * rh * 0.10f;
+                dot( -rw * 0.42f + ex, -rh * 0.22f + ey );
+                dot( rw * 0.42f + ex, -rh * 0.22f + ey );
+            }
+            // Nose + mouth.
+            dot( 0.0f, 0.0f );
+            dot( 0.0f, rh * 0.12f );
+            for ( int i = -3; i <= 3; ++i )
+                dot( rw * 0.18f * static_cast<float>( i ) / 3.0f, rh * 0.42f );
+        }
     } // namespace
 
     PhotogrammetryPanel::PhotogrammetryPanel( const std::shared_ptr<::Desert::Core::Scene>& scene,
@@ -193,16 +203,103 @@ namespace Desert::Editor
     {
         m_UIHelper = std::make_unique<UI::UIHelper>();
         m_UIHelper->Init();
-        m_Thumbnails = std::make_unique<ThumbnailCache>();
-        m_Mode       = static_cast<Mode>( EditorPreferences::Get().PhotogrammetryMode );
+        m_Camera = std::make_unique<Common::Utils::CameraCapture>();
     }
 
     PhotogrammetryPanel::~PhotogrammetryPanel()
     {
+        StopCamera();
         CancelJob();
         if ( m_Worker.joinable() )
             m_Worker.join();
     }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Camera
+    // ---------------------------------------------------------------------------------------------------
+
+    void PhotogrammetryPanel::StartCamera()
+    {
+        if ( m_CameraOn )
+            return;
+        if ( m_Camera && m_Camera->Start() )
+        {
+            m_CameraOn    = true;
+            m_Status      = "Camera started. Point it at the subject and press Record.";
+            m_StatusError = false;
+        }
+        else
+        {
+            m_Status      = "Could not open the camera (no device / permission denied).";
+            m_StatusError = true;
+        }
+    }
+
+    void PhotogrammetryPanel::StopCamera()
+    {
+        m_Recording = false;
+        if ( m_Camera )
+            m_Camera->Stop();
+        m_CameraOn = false;
+    }
+
+    void PhotogrammetryPanel::UpdateCamera()
+    {
+        if ( !m_CameraOn || !m_Camera )
+            return;
+
+        const double now = ImGui::GetTime();
+
+        // Rebuild the display texture at a throttled rate (each rebuild registers a new ImGui descriptor).
+        if ( now - m_LastTexTime >= kTexInterval )
+        {
+            int w = 0, h = 0;
+            if ( m_Camera->GetLatestFrame( m_FrameBuf, w, h ) && w > 0 && h > 0 )
+            {
+                m_LastTexTime = now;
+                m_CamW        = w;
+                m_CamH        = h;
+
+                std::vector<uint8_t>                data = m_FrameBuf; // copy: spec takes ownership
+                Core::Formats::Image2DSpecification spec = {
+                     .Tag        = "CameraFeed",
+                     .Width      = static_cast<uint32_t>( w ),
+                     .Height     = static_cast<uint32_t>( h ),
+                     .Format     = Core::Formats::ImageFormat::RGBA8F,
+                     .Mips       = 1u,
+                     .Data       = std::move( data ),
+                     .Usage      = Core::Formats::Image2DUsage::Image2D,
+                     .Properties = Core::Formats::Sample,
+                };
+                m_CameraImage = Graphic::Image2D::Create( spec, nullptr );
+
+                // Save the frame to the photos folder while recording (also throttled).
+                if ( m_Recording && now - m_LastSaveTime >= kSaveInterval )
+                {
+                    m_LastSaveTime = now;
+                    auto& prefs    = EditorPreferences::Get();
+                    if ( prefs.PhotogrammetryPhotosDir.empty() )
+                    {
+                        prefs.PhotogrammetryPhotosDir = "Cooked/Photogrammetry/frames";
+                        EditorPreferences::Save();
+                    }
+                    std::error_code ec;
+                    std::filesystem::create_directories( prefs.PhotogrammetryPhotosDir, ec );
+                    char name[64];
+                    std::snprintf( name, sizeof( name ), "frame_%05d.png", m_RecordedFrames );
+                    const std::string path =
+                         ( std::filesystem::path( prefs.PhotogrammetryPhotosDir ) / name ).string();
+                    stbi_flip_vertically_on_write( 0 );
+                    if ( stbi_write_png( path.c_str(), w, h, 4, m_FrameBuf.data(), w * 4 ) )
+                        ++m_RecordedFrames;
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Reconstruction pipeline
+    // ---------------------------------------------------------------------------------------------------
 
     void PhotogrammetryPanel::PushLog( const std::string& line )
     {
@@ -244,7 +341,6 @@ namespace Desert::Editor
                  const pid_t pid = fork();
                  if ( pid == 0 )
                  {
-                     // Child: own process group (so Cancel can signal the whole tree), stdout+stderr -> pipe.
                      setpgid( 0, 0 );
                      dup2( fds[1], STDOUT_FILENO );
                      dup2( fds[1], STDERR_FILENO );
@@ -257,7 +353,6 @@ namespace Desert::Editor
                  close( fds[1] );
                  m_ChildPid = pid;
 
-                 // Stream stdout line by line into the shared log (blocking reads on this worker thread).
                  std::string acc;
                  char        buf[512];
                  ssize_t     n;
@@ -281,11 +376,10 @@ namespace Desert::Editor
                  if ( WIFEXITED( status ) )
                      m_ExitCode = WEXITSTATUS( status );
                  else if ( WIFSIGNALED( status ) )
-                     m_ExitCode = 130; // treated as "cancelled"
+                     m_ExitCode = 130;
                  else
                      m_ExitCode = -1;
 #else
-                 // Fallback (no streaming / cancel): run through the shell and capture only the exit code.
                  const int rc = std::system( cmd.c_str() );
                  m_ExitCode   = rc;
 #endif
@@ -300,30 +394,10 @@ namespace Desert::Editor
         const long pid = m_ChildPid.load();
         if ( pid > 0 )
         {
-            kill( static_cast<pid_t>( -pid ), SIGTERM ); // signal the whole process group
+            kill( static_cast<pid_t>( -pid ), SIGTERM );
             PushLog( "[cancelled by user]" );
         }
 #endif
-    }
-
-    void PhotogrammetryPanel::StartCapture()
-    {
-        auto& prefs = EditorPreferences::Get();
-        if ( prefs.PhotogrammetryPhotosDir.empty() )
-        {
-            m_Status      = "Set the photos folder first.";
-            m_StatusError = true;
-            return;
-        }
-        std::error_code ec;
-        std::filesystem::create_directories( prefs.PhotogrammetryPhotosDir, ec );
-
-        std::string cmd = prefs.PhotogrammetryCaptureCommand;
-        for ( size_t p = cmd.find( "{photos}" ); p != std::string::npos; p = cmd.find( "{photos}", p ) )
-            cmd.replace( p, 8, prefs.PhotogrammetryPhotosDir );
-
-        m_Status = "Capturing frames from the camera… move slowly around the subject.";
-        RunCommand( cmd, Job::Capture );
     }
 
     void PhotogrammetryPanel::StartReconstruction()
@@ -331,7 +405,7 @@ namespace Desert::Editor
         auto& prefs = EditorPreferences::Get();
         if ( prefs.PhotogrammetryPhotosDir.empty() )
         {
-            m_Status      = "Set the photos folder first.";
+            m_Status      = "No frames captured yet — start the camera and Record first.";
             m_StatusError = true;
             return;
         }
@@ -378,8 +452,7 @@ namespace Desert::Editor
             return;
         }
 
-        auto& e =
-             m_Scene->CreateNewEntity( m_Mode == Mode::Face ? "Photogrammetry Head" : "Photogrammetry Model" );
+        auto& e = m_Scene->CreateNewEntity( "Reconstructed Model" );
         if ( resolved.Skinned )
         {
             e.AddComponent<ECS::SkinnedMeshComponent>();
@@ -391,6 +464,9 @@ namespace Desert::Editor
             e.AddComponent<ECS::StaticMeshComponent>();
             e.GetComponent<ECS::StaticMeshComponent>().MeshHandle = resolved.Handle;
         }
+
+        if ( !resolved.Skinned )
+            SetPreviewMesh( resolved.Handle ); // show it spinning in the left viewport
         m_Status      = "Imported the reconstructed mesh and spawned it into the scene.";
         m_StatusError = false;
     }
@@ -399,7 +475,7 @@ namespace Desert::Editor
     {
         if ( m_OutputCaptured.empty() )
             m_OutputCaptured = EditorPreferences::Get().PhotogrammetryOutputMesh;
-        m_ExitCode = 0; // Reimport is a manual action on an existing file; don't gate on the last run.
+        m_ExitCode = 0;
         ImportResult();
     }
 
@@ -421,26 +497,128 @@ namespace Desert::Editor
 #endif
     }
 
-    void PhotogrammetryPanel::RescanPhotos()
+    // ---------------------------------------------------------------------------------------------------
+    // Live mesh preview (own offscreen scene)
+    // ---------------------------------------------------------------------------------------------------
+
+    void PhotogrammetryPanel::EnsurePreview()
     {
-        auto& prefs   = EditorPreferences::Get();
-        m_ScannedDir  = prefs.PhotogrammetryPhotosDir;
-        m_PhotosDirty = false;
-        m_PhotoFiles.clear();
-        m_SelectedPhoto = -1;
-        if ( m_ScannedDir.empty() )
+        if ( m_PreviewInit )
             return;
-        std::error_code ec;
-        if ( !std::filesystem::is_directory( m_ScannedDir, ec ) )
-            return;
-        for ( const auto& f : std::filesystem::directory_iterator( m_ScannedDir, ec ) )
-        {
-            if ( f.is_regular_file( ec ) && IsImageExt( f.path() ) )
-                m_PhotoFiles.push_back( f.path().string() );
-        }
-        std::sort( m_PhotoFiles.begin(), m_PhotoFiles.end() );
+
+        m_PreviewRenderer = std::make_unique<Graphic::SceneRenderer>();
+        m_PreviewScene    = std::make_shared<::Desert::Core::Scene>( "ReconPreview", m_PreviewRenderer.get() );
+        m_PreviewScene->Init();
+
+        auto& settings         = m_PreviewScene->GetSettings();
+        settings.ShowGrid      = false;
+        settings.EnableShadows = false;
+        settings.EnableBloom   = false;
+        settings.AA            = ::Desert::Core::AntiAliasingMode::FXAA;
+
+        m_PreviewRenderer->SetOutlineSettings( glm::vec3( 0.0f ), 0.0f, 0.0f, false );
+
+        auto cam                                                   = m_PreviewScene->CreateNewEntity( "PrevCam" );
+        cam.AddComponent<ECS::CameraComponent>().Data.IsMainCamera = true;
+
+        auto  light           = m_PreviewScene->CreateNewEntity( "PrevLight" );
+        auto& lightC          = light.AddComponent<ECS::DirectionLightComponent>();
+        lightC.Data.Intensity = 3.5f;
+        lightC.Data.Color     = { 1.0f, 0.97f, 0.92f };
+        light.GetComponent<ECS::TransformComponent>().Translation = { 2.0f, -6.0f, 5.0f };
+
+        m_PreviewTarget = m_PreviewScene->CreateNewEntity( "PrevTarget" );
+        m_PreviewTarget.AddComponent<ECS::StaticMeshComponent>();
+
+        m_PreviewScene->AddSystem<ECS::MeshECSSystem>();
+        m_PreviewScene->AddSystem<ECS::SkyboxECSSystem>();
+
+        auto  skyEnt        = m_PreviewScene->CreateNewEntity( "PrevSky" );
+        auto& skyC          = skyEnt.AddComponent<ECS::SkyboxComponent>();
+        skyC.Procedural     = true;
+        skyC.ZenithColor    = { 0.26f, 0.46f, 0.78f };
+        skyC.HorizonColor   = { 0.62f, 0.73f, 0.87f };
+        skyC.GroundColor    = { 0.45f, 0.56f, 0.72f };
+        skyC.SunColor       = { 1.00f, 0.95f, 0.85f };
+        skyC.SkyBrightness  = 1.15f;
+        skyC.HorizonFalloff = 0.5f;
+        skyC.SunGlow        = 0.8f;
+        skyC.StarIntensity  = 0.0f;
+        skyC.SunIntensity   = 16.0f;
+        skyC.SunDiskRadius  = 0.02f;
+        skyC.RequestBake    = true;
+
+        m_PreviewInit = true;
     }
 
+    void PhotogrammetryPanel::SetPreviewMesh( const Assets::AssetHandle& mesh )
+    {
+        m_PreviewMesh = mesh;
+        EnsurePreview();
+
+        auto& smc = m_PreviewTarget.GetComponent<ECS::StaticMeshComponent>();
+        smc.RuntimeMesh.reset();
+        smc.Primitive.reset();
+        smc.RuntimeMaterialInstances.clear();
+        smc.MaterialSlots.clear();
+        smc.MeshHandle = mesh;
+
+        // Center + scale the mesh to fill the fixed preview camera (which sits at ~distance 8.66).
+        glm::vec3 center( 0.0f );
+        float     extent = 1.0f;
+        if ( auto* m = Runtime::ResourceRegistry::GetMeshService()->Get( mesh ) )
+        {
+            glm::vec3 mn( 1e9f ), mx( -1e9f );
+            for ( const auto& sm : m->GetSubmeshes() )
+            {
+                const glm::vec3 lo = sm.BoundingBox.Min, hi = sm.BoundingBox.Max;
+                for ( int corner = 0; corner < 8; ++corner )
+                {
+                    const glm::vec3 p( ( corner & 1 ) ? hi.x : lo.x, ( corner & 2 ) ? hi.y : lo.y,
+                                       ( corner & 4 ) ? hi.z : lo.z );
+                    const glm::vec3 w = glm::vec3( sm.Transform * glm::vec4( p, 1.0f ) );
+                    mn                = glm::min( mn, w );
+                    mx                = glm::max( mx, w );
+                }
+            }
+            if ( mx.x >= mn.x )
+            {
+                center               = ( mn + mx ) * 0.5f;
+                const glm::vec3 size = mx - mn;
+                extent               = std::max( size.x, std::max( size.y, size.z ) );
+            }
+        }
+
+        constexpr float kFitSpan = 4.0f;
+        const float     scale    = extent > 1e-4f ? kFitSpan / extent : kFitSpan;
+        auto&           tc       = m_PreviewTarget.GetComponent<ECS::TransformComponent>();
+        tc.Scale                 = glm::vec3( scale );
+        tc.Translation           = -center * scale;
+    }
+
+    void PhotogrammetryPanel::RenderPreview( uint32_t w, uint32_t h )
+    {
+        if ( !m_PreviewInit || w == 0 || h == 0 )
+            return;
+
+        if ( w != m_PreviewW || h != m_PreviewH )
+        {
+            m_PreviewScene->Resize( w, h );
+            m_PreviewW = w;
+            m_PreviewH = h;
+        }
+
+        // Slow orbit by spinning the model (the preview camera is fixed).
+        m_Spin += 0.01f;
+        m_PreviewTarget.GetComponent<ECS::TransformComponent>().Rotation = glm::vec3( 0.0f, m_Spin, 0.0f );
+
+        m_PreviewScene->BeginScene();
+        m_PreviewScene->OnUpdate( Common::Timestep( 0.016f ) );
+        m_PreviewScene->EndScene();
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // UI
     // ---------------------------------------------------------------------------------------------------
 
     void PhotogrammetryPanel::DrawToolbar( bool running )
@@ -450,20 +628,49 @@ namespace Desert::Editor
         ImGui::PushStyleColor( ImGuiCol_ChildBg, kColHeader );
         ImGui::BeginChild( "##pgToolbar", ImVec2( 0.0f, 44.0f ), false,
                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
-        ImGui::SetCursorPosY( 8.0f );
-        ImGui::SetCursorPosX( 8.0f );
+        ImGui::SetCursorPos( ImVec2( 8.0f, 8.0f ) );
 
-        const bool hasFolder = !prefs.PhotogrammetryPhotosDir.empty();
+        // Start / Stop camera.
+        if ( !m_CameraOn )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Button, kColAccent );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, kColAccentHov );
+            if ( ImGui::Button( ICON_MDI_VIDEO "  Start camera", ImVec2( 150.0f, 28.0f ) ) )
+                StartCamera();
+            ImGui::PopStyleColor( 2 );
+        }
+        else
+        {
+            ImGui::PushStyleColor( ImGuiCol_Button, kColDanger );
+            if ( ImGui::Button( ICON_MDI_VIDEO_OFF "  Stop camera", ImVec2( 150.0f, 28.0f ) ) )
+                StopCamera();
+            ImGui::PopStyleColor();
+        }
+        ImGui::SameLine( 0.0f, 6.0f );
 
-        // Capture
-        ImGui::BeginDisabled( running || !hasFolder );
-        if ( ImGui::Button( ICON_MDI_CAMERA "  Capture", ImVec2( 130.0f, 28.0f ) ) )
-            StartCapture();
+        // Record toggle.
+        ImGui::BeginDisabled( !m_CameraOn );
+        ImGui::PushStyleColor( ImGuiCol_Button, m_Recording ? kColRecord : ImVec4( 0.22f, 0.22f, 0.24f, 1.0f ) );
+        if ( ImGui::Button( m_Recording ? ICON_MDI_RECORD "  Recording…" : ICON_MDI_RECORD "  Record",
+                            ImVec2( 150.0f, 28.0f ) ) )
+        {
+            m_Recording = !m_Recording;
+            if ( m_Recording )
+            {
+                m_RecordedFrames = 0;
+                m_Status         = "Recording frames — slowly move around the subject.";
+                m_StatusError    = false;
+            }
+        }
+        ImGui::PopStyleColor();
         ImGui::EndDisabled();
         ImGui::SameLine( 0.0f, 6.0f );
 
-        // Reconstruct (primary)
-        ImGui::BeginDisabled( running || !hasFolder );
+        // Reconstruct.
+        std::error_code ec;
+        const bool      hasFrames = !prefs.PhotogrammetryPhotosDir.empty() &&
+                                    std::filesystem::is_directory( prefs.PhotogrammetryPhotosDir, ec );
+        ImGui::BeginDisabled( running || !hasFrames );
         ImGui::PushStyleColor( ImGuiCol_Button, kColAccent );
         ImGui::PushStyleColor( ImGuiCol_ButtonHovered, kColAccentHov );
         if ( ImGui::Button( ICON_MDI_CUBE_SCAN "  Reconstruct", ImVec2( 150.0f, 28.0f ) ) )
@@ -472,7 +679,7 @@ namespace Desert::Editor
         ImGui::EndDisabled();
         ImGui::SameLine( 0.0f, 6.0f );
 
-        // Cancel
+        // Cancel.
         ImGui::BeginDisabled( !running );
         ImGui::PushStyleColor( ImGuiCol_Button, kColDanger );
         if ( ImGui::Button( ICON_MDI_STOP "  Cancel", ImVec2( 110.0f, 28.0f ) ) )
@@ -480,14 +687,12 @@ namespace Desert::Editor
         ImGui::PopStyleColor();
         ImGui::EndDisabled();
 
-        // Right-aligned: Reimport + Open output folder
+        // Right-aligned: Import result + Open output.
         const float rightW = 130.0f + 150.0f + 12.0f;
         ImGui::SameLine();
         ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - rightW );
-
-        std::error_code ec;
-        const bool      hasOutput = std::filesystem::exists(
-             m_OutputCaptured.empty() ? prefs.PhotogrammetryOutputMesh : m_OutputCaptured, ec );
+        const std::string outPath   = m_OutputCaptured.empty() ? prefs.PhotogrammetryOutputMesh : m_OutputCaptured;
+        const bool        hasOutput = std::filesystem::exists( outPath, ec );
         ImGui::BeginDisabled( running || !hasOutput );
         if ( ImGui::Button( ICON_MDI_IMPORT "  Import result", ImVec2( 130.0f, 28.0f ) ) )
             Reimport();
@@ -500,125 +705,104 @@ namespace Desert::Editor
         ImGui::PopStyleColor();
     }
 
-    void PhotogrammetryPanel::DrawSourcePane()
+    void PhotogrammetryPanel::DrawPreviewPane( const ImVec2& size )
     {
-        auto& prefs = EditorPreferences::Get();
+        ImGui::PushStyleColor( ImGuiCol_ChildBg, kColSection );
+        ImGui::BeginChild( "##pgPreview", size, true );
+        ImGui::PopStyleColor();
 
-        ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ), ICON_MDI_IMAGE_MULTIPLE " Source frames" );
-        ImGui::Spacing();
-
-        bool dirty = false;
-        dirty |= PathPicker( "photos", prefs.PhotogrammetryPhotosDir, /*folder=*/true );
-        if ( dirty )
-            m_PhotosDirty = true;
-
-        ImGui::SameLine();
-        if ( ImGui::Button( ICON_MDI_REFRESH "##rescan" ) )
-            m_PhotosDirty = true;
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Rescan the folder" );
-
-        // Validation badge.
-        if ( prefs.PhotogrammetryPhotosDir.empty() )
-            ImGui::TextColored( kColWarn, ICON_MDI_ALERT " No photos folder set." );
-        else if ( m_PhotoFiles.empty() )
-            ImGui::TextColored( kColWarn,
-                                ICON_MDI_ALERT " Folder has no images yet — Capture or drop photos in." );
-        else
-            ImGui::TextColored( kColOk, ICON_MDI_CHECK_CIRCLE " %zu image(s) ready.", m_PhotoFiles.size() );
-
+        ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ), ICON_MDI_CUBE_OUTLINE " Reconstructed model" );
         ImGui::Separator();
 
-        // Thumbnail grid.
-        ImGui::BeginChild( "##pgThumbs", ImVec2( 0.0f, 0.0f ), false );
-        if ( m_PhotoFiles.empty() )
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        if ( static_cast<uint64_t>( m_PreviewMesh ) == 0 )
         {
-            ImGui::TextDisabled( "Captured / dropped frames appear here." );
+            ImGui::Dummy( ImVec2( 0.0f, avail.y * 0.45f ) );
+            const char* msg = "Reconstruct to see the model here.";
+            ImGui::SetCursorPosX( ( ImGui::GetWindowWidth() - ImGui::CalcTextSize( msg ).x ) * 0.5f );
+            ImGui::TextDisabled( "%s", msg );
         }
-        else if ( m_UIHelper && m_Thumbnails )
+        else if ( avail.x > 4.0f && avail.y > 4.0f )
         {
-            const float thumb  = 96.0f;
-            const float avail  = ImGui::GetContentRegionAvail().x;
-            int         perRow = static_cast<int>( avail / ( thumb + 8.0f ) );
-            if ( perRow < 1 )
-                perRow = 1;
-
-            for ( int i = 0; i < static_cast<int>( m_PhotoFiles.size() ); ++i )
-            {
-                ImGui::PushID( i );
-                auto img = m_Thumbnails->Get( m_PhotoFiles[i] );
-                if ( img )
-                {
-                    if ( m_UIHelper->ImageButton( "##t", img, ImVec2( thumb, thumb ) ) )
-                        m_SelectedPhoto = i;
-                }
-                else
-                {
-                    if ( ImGui::Button( ICON_MDI_FILE_IMAGE, ImVec2( thumb, thumb ) ) )
-                        m_SelectedPhoto = i;
-                }
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "%s",
-                                       std::filesystem::path( m_PhotoFiles[i] ).filename().string().c_str() );
-                ImGui::PopID();
-
-                if ( ( i % perRow ) != ( perRow - 1 ) && i != static_cast<int>( m_PhotoFiles.size() ) - 1 )
-                    ImGui::SameLine();
-            }
+            EnsurePreview();
+            RenderPreview( static_cast<uint32_t>( avail.x ), static_cast<uint32_t>( avail.y ) );
+            if ( auto img = m_PreviewScene ? m_PreviewScene->GetFinalImage() : nullptr )
+                m_UIHelper->Image( img, avail );
         }
+
         ImGui::EndChild();
     }
 
-    void PhotogrammetryPanel::DrawSettingsPane()
+    void PhotogrammetryPanel::DrawCameraPane( const ImVec2& size )
+    {
+        ImGui::PushStyleColor( ImGuiCol_ChildBg, kColSection );
+        ImGui::BeginChild( "##pgCamera", size, true );
+        ImGui::PopStyleColor();
+
+        ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ), ICON_MDI_CAMERA " Camera" );
+        ImGui::SameLine();
+        if ( m_CameraOn )
+            ImGui::TextColored( kColOk, ICON_MDI_CIRCLE " live" );
+        else
+            ImGui::TextDisabled( ICON_MDI_CIRCLE_OUTLINE " off" );
+        if ( m_Recording )
+        {
+            ImGui::SameLine();
+            ImGui::TextColored( kColRecord, ICON_MDI_RECORD " %d frames", m_RecordedFrames );
+        }
+        ImGui::Separator();
+
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        if ( m_CameraImage && m_CamW > 0 && m_CamH > 0 )
+        {
+            // Fit the frame into the pane preserving aspect.
+            const float aspect = static_cast<float>( m_CamW ) / static_cast<float>( m_CamH );
+            float       dw     = avail.x;
+            float       dh     = dw / aspect;
+            if ( dh > avail.y )
+            {
+                dh = avail.y;
+                dw = dh * aspect;
+            }
+            ImGui::SetCursorPosX( ImGui::GetCursorPosX() + ( avail.x - dw ) * 0.5f );
+            const ImVec2 cursor = ImGui::GetCursorScreenPos();
+            m_UIHelper->Image( m_CameraImage, ImVec2( dw, dh ) );
+            DrawLandmarks( cursor, ImVec2( cursor.x + dw, cursor.y + dh ) );
+        }
+        else
+        {
+            ImGui::Dummy( ImVec2( 0.0f, avail.y * 0.45f ) );
+            const char* msg = m_CameraOn ? "Waiting for the camera…" : "Press ‘Start camera’.";
+            ImGui::SetCursorPosX( ( ImGui::GetWindowWidth() - ImGui::CalcTextSize( msg ).x ) * 0.5f );
+            ImGui::TextDisabled( "%s", msg );
+        }
+
+        ImGui::EndChild();
+    }
+
+    void PhotogrammetryPanel::DrawBottom( bool running )
     {
         auto& prefs = EditorPreferences::Get();
         bool  dirty = false;
 
-        ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ), ICON_MDI_TUNE " Settings" );
-        ImGui::Spacing();
-
-        const bool face = ( m_Mode == Mode::Face );
-
-        // Capture section.
-        if ( ImGui::CollapsingHeader( ICON_MDI_CAMERA " Capture", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( ImGui::CollapsingHeader( ICON_MDI_TUNE " Reconstruction settings" ) )
         {
-            ImGui::TextDisabled( "{photos} = the photos folder; snaps frames from your camera." );
-            const CmdPreset* list  = face ? kCaptureFace : kCaptureObject;
-            const int        count = face ? static_cast<int>( std::size( kCaptureFace ) )
-                                          : static_cast<int>( std::size( kCaptureObject ) );
-            dirty |= PresetCombo( "##capPreset", list, count, prefs.PhotogrammetryCaptureCommand );
-            dirty |= CommandField( "##capCmd", prefs.PhotogrammetryCaptureCommand );
-        }
-
-        // Reconstruct section.
-        if ( ImGui::CollapsingHeader( ICON_MDI_CUBE_SCAN " Reconstruct", ImGuiTreeNodeFlags_DefaultOpen ) )
-        {
-            ImGui::TextDisabled( "{input}=photos  {output}=mesh file  {outdir}=its folder" );
-            const CmdPreset* list  = face ? kReconstructFace : kReconstructObject;
-            const int        count = face ? static_cast<int>( std::size( kReconstructFace ) )
-                                          : static_cast<int>( std::size( kReconstructObject ) );
-            dirty |= PresetCombo( "##recPreset", list, count, prefs.PhotogrammetryCommand );
+            ImGui::TextDisabled( "{input}=frames folder  {output}=mesh file  {outdir}=its folder" );
+            dirty |= PresetCombo( "##recPreset", prefs.PhotogrammetryCommand );
             dirty |= CommandField( "##recCmd", prefs.PhotogrammetryCommand );
-        }
-
-        // Import section.
-        if ( ImGui::CollapsingHeader( ICON_MDI_IMPORT " Import", ImGuiTreeNodeFlags_DefaultOpen ) )
-        {
-            ImGui::TextDisabled( "Where the tool writes the mesh (what the import reads)." );
+            ImGui::TextDisabled( "Frames folder" );
+            dirty |= PathPicker( "frames", prefs.PhotogrammetryPhotosDir, /*folder=*/true );
+            ImGui::TextDisabled( "Output mesh" );
             dirty |= PathPicker( "outmesh", prefs.PhotogrammetryOutputMesh, /*folder=*/false );
         }
-
         if ( dirty )
             EditorPreferences::Save();
-    }
 
-    void PhotogrammetryPanel::DrawLogPane( bool running )
-    {
+        // Log.
         ImGui::TextColored( ImVec4( 0.70f, 0.78f, 0.90f, 1.0f ), ICON_MDI_CONSOLE " Output log" );
         ImGui::SameLine();
         if ( running )
-            ImGui::TextColored( kColWarn, ICON_MDI_PROGRESS_CLOCK " %s",
-                                m_Job == Job::Capture ? "capturing…" : "running…" );
+            ImGui::TextColored( kColWarn, ICON_MDI_PROGRESS_CLOCK " running…" );
         ImGui::SameLine();
         if ( ImGui::SmallButton( ICON_MDI_DELETE " Clear" ) )
         {
@@ -629,7 +813,7 @@ namespace Desert::Editor
         ImGui::Checkbox( "Auto-scroll", &m_LogAutoScroll );
 
         ImGui::PushStyleColor( ImGuiCol_ChildBg, kColLogBg );
-        ImGui::BeginChild( "##pgLog", ImVec2( 0.0f, 130.0f ), true, ImGuiWindowFlags_HorizontalScrollbar );
+        ImGui::BeginChild( "##pgLog", ImVec2( 0.0f, 110.0f ), true, ImGuiWindowFlags_HorizontalScrollbar );
         {
             std::lock_guard<std::mutex> lk( m_LogMutex );
             for ( const auto& line : m_Log )
@@ -660,34 +844,12 @@ namespace Desert::Editor
         }
     }
 
-    // ---------------------------------------------------------------------------------------------------
-
     void PhotogrammetryPanel::OnUIRender()
     {
-        auto& prefs = EditorPreferences::Get();
-
-        // Header: title + mode segmented control + help.
+        // Header.
         ImGui::TextColored( ImVec4( 0.55f, 0.80f, 1.0f, 1.0f ), ICON_MDI_CAMERA_OUTLINE );
         ImGui::SameLine( 0.0f, 6.0f );
-        ImGui::TextUnformatted( "Model from Photos" );
-        ImGui::SameLine( 0.0f, 16.0f );
-
-        const auto modeButton = [&]( const char* label, Mode m )
-        {
-            const bool active = ( m_Mode == m );
-            ImGui::PushStyleColor( ImGuiCol_Button, active ? kColAccent : ImVec4( 0.2f, 0.2f, 0.22f, 1.0f ) );
-            if ( ImGui::Button( label ) )
-            {
-                m_Mode                   = m;
-                prefs.PhotogrammetryMode = static_cast<int>( m );
-                EditorPreferences::Save();
-            }
-            ImGui::PopStyleColor();
-        };
-        modeButton( ICON_MDI_CUBE_OUTLINE " Object", Mode::Object );
-        ImGui::SameLine( 0.0f, 2.0f );
-        modeButton( ICON_MDI_FACE_MAN " Face", Mode::Face );
-
+        ImGui::TextUnformatted( "Model from Camera" );
         ImGui::SameLine();
         ImGui::TextDisabled( ICON_MDI_HELP_CIRCLE_OUTLINE );
         if ( ImGui::IsItemHovered() )
@@ -695,74 +857,46 @@ namespace Desert::Editor
             ImGui::BeginTooltip();
             ImGui::PushTextWrapPos( 420.0f );
             ImGui::TextUnformatted(
-                 "The engine doesn't reconstruct 3D itself — it drives an EXTERNAL tool you have installed "
-                 "(Meshroom / COLMAP / RealityCapture, or a face solver), streams its output, then imports the "
-                 "produced mesh.\n\n"
-                 "Object mode: photogrammetry of a physical object — shoot it from all sides.\n"
-                 "Face mode: MetaHuman-style head capture — a slow sweep of the face. The solver is still an "
-                 "external tool (facial landmark tracking / solve is not built into the engine).\n\n"
-                 "Placeholders — {input}: photos folder, {output}: mesh file, {outdir}: its folder, "
-                 "{photos}: capture target folder." );
+                 "Capture-to-mesh from the webcam. Start the camera, press Record and slowly move around the "
+                 "subject to collect frames, then Reconstruct — an EXTERNAL tool (Meshroom / COLMAP / ...) "
+                 "turns the frames into a mesh, which is imported and shown spinning on the left.\n\n"
+                 "Landmarks on the camera view are a placeholder; real face tracking is a follow-up external "
+                 "tool." );
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
 
-        // Poll the worker: when it finishes, dispatch by what it was doing.
+        // Poll the reconstruction worker.
         if ( m_Done.exchange( false ) )
         {
             if ( m_Worker.joinable() )
                 m_Worker.join();
             if ( m_Job == Job::Reconstruct )
-            {
                 ImportResult();
-            }
-            else if ( m_Job == Job::Capture )
-            {
-                m_PhotosDirty = true; // fresh frames → rescan the grid
-                m_StatusError = ( m_ExitCode != 0 );
-
-                std::string head;
-                if ( m_ExitCode == 130 )
-                    head = "Capture cancelled. ";
-                else if ( m_ExitCode != 0 )
-                    head = "Capture command exited with code " + std::to_string( m_ExitCode.load() ) + ". ";
-                else
-                    head = "Captured. ";
-                m_Status = head + "See the frames on the left.";
-            }
             m_Job = Job::None;
         }
 
-        if ( m_PhotosDirty || m_ScannedDir != prefs.PhotogrammetryPhotosDir )
-            RescanPhotos();
+        UpdateCamera();
 
         const bool running = m_Running.load();
 
         DrawToolbar( running );
         ImGui::Spacing();
 
-        // Main split: source frames (left) | settings (right).
-        const float totalW = ImGui::GetContentRegionAvail().x;
-        const float bottom = 130.0f + ImGui::GetTextLineHeightWithSpacing() * 3.5f;
+        // Split view: reconstructed model (left) | live camera (right).
+        const float bottom = 110.0f + ImGui::GetTextLineHeightWithSpacing() * 4.0f;
         const float paneH  = ImGui::GetContentRegionAvail().y - bottom;
-        const float leftW  = totalW * m_SplitRatio;
-        const float rightW = totalW - leftW - 8.0f;
+        const float totalW = ImGui::GetContentRegionAvail().x;
+        const float halfW  = ( totalW - 8.0f ) * 0.5f;
 
-        ImGui::PushStyleColor( ImGuiCol_ChildBg, kColSection );
-        ImGui::BeginChild( "##pgSource", ImVec2( leftW, paneH ), true );
-        ImGui::PopStyleColor();
-        DrawSourcePane();
-        ImGui::EndChild();
-
-        ImGui::SameLine( 0.0f, 8.0f );
-
-        ImGui::PushStyleColor( ImGuiCol_ChildBg, kColSection );
-        ImGui::BeginChild( "##pgSettings", ImVec2( rightW, paneH ), true );
-        ImGui::PopStyleColor();
-        DrawSettingsPane();
-        ImGui::EndChild();
+        if ( paneH > 40.0f )
+        {
+            DrawPreviewPane( ImVec2( halfW, paneH ) );
+            ImGui::SameLine( 0.0f, 8.0f );
+            DrawCameraPane( ImVec2( totalW - halfW - 8.0f, paneH ) );
+        }
 
         ImGui::Spacing();
-        DrawLogPane( running );
+        DrawBottom( running );
     }
 } // namespace Desert::Editor
