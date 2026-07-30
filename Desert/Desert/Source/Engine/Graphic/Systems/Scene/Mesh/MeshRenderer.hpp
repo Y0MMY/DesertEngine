@@ -128,6 +128,10 @@ namespace Desert::Graphic::System
         // lighting composite in a LOAD render pass — they have no G-buffer variant, so without
         // this they simply vanish in Deferred. Forward path draws them inside MeshGeometryPass.
         void RenderGenericManual();
+        // Deferred path: draws SKINNED meshes forward over the deferred lighting composite (they have no
+        // G-buffer variant, so without this they only appear in the silhouette/outline pass — invisible
+        // otherwise). Forward path draws them inside MeshGeometryPass.
+        void RenderSkinnedManual();
 
         const std::shared_ptr<Framebuffer>& GetSilhouetteMaskFramebuffer() const
         {
@@ -235,7 +239,7 @@ namespace Desert::Graphic::System
         bool SetupShadowPass();
 
         void DrawStaticMeshes();
-        void DrawSkinnedMeshes();
+        void DrawSkinnedMeshes( bool useLoadPass = false );
         void DrawGenericMeshes( bool useLoadPass = false ); // per-object data-driven materials (v3 slots + overrides)
         void RegisterSilhouettePass( RenderGraphBuilder& builder );
         void RegisterShadowPass( RenderGraphBuilder& builder );

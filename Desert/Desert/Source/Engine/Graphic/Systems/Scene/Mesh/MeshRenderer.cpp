@@ -835,7 +835,7 @@ namespace Desert::Graphic::System
         }
     }
 
-    void MeshRenderer::DrawSkinnedMeshes()
+    void MeshRenderer::DrawSkinnedMeshes( bool useLoadPass )
     {
         if ( m_SkinnedQueue.empty() )
             return;
@@ -844,6 +844,19 @@ namespace Desert::Graphic::System
         const auto  camera      = m_SceneRenderer->GetMainCamera();
         const auto& pointLights = m_SceneRenderer->GetPointLights();
         const auto& spotLights  = m_SceneRenderer->GetSpotLights();
+
+        // Deferred forward-over-composite: a LOAD-render-pass variant of the skinned pipeline (built once via
+        // the pipeline cache), so skinned meshes draw OVER the deferred scene instead of clearing it. Same
+        // mechanism the generic + glass passes use. Forward path keeps the plain pipeline (no load).
+        GraphicsPipeline* pipeline = m_SkinnedPipeline.get();
+        if ( useLoadPass && m_SkinnedPipeline )
+        {
+            GraphicsPipelineSpecification spec = m_SkinnedPipeline->GetSpecification();
+            spec.UseLoadRenderPass             = true;
+            spec.DebugName                     = "SkinnedMesh_Load";
+            if ( auto p = m_SceneRenderer->GetPipelineCache().GetOrCreate( spec ) )
+                pipeline = p.get();
+        }
 
         for ( const auto& data : m_SkinnedQueue )
         {
@@ -858,9 +871,28 @@ namespace Desert::Graphic::System
                                    .SpotLights      = spotLights,
                                    .SkinnedUB       = { .BoneMatrices = data.BoneMatrices } } );
 
-            renderer.RenderMesh( m_SkinnedPipeline.get(), data.Mesh, data.Transform,
-                                 data.Material->GetMaterialExecutor() );
+            renderer.RenderMesh( pipeline, data.Mesh, data.Transform, data.Material->GetMaterialExecutor() );
         }
+    }
+
+    void MeshRenderer::RenderSkinnedManual()
+    {
+        if ( m_SkinnedQueue.empty() )
+            return;
+        const auto& target = m_SceneRenderer ? m_SceneRenderer->GetTargetFramebuffer() : nullptr;
+        if ( !target || !m_SceneRenderer->GetMainCamera() )
+            return;
+
+        auto& renderer = Renderer::GetInstance();
+
+        RenderPassSpecification rpSpec;
+        rpSpec.TargetFramebuffer = target;
+        rpSpec.DebugName         = "SkinnedForwardPass";
+        auto rp                  = RenderPass::Create( rpSpec );
+
+        renderer.BeginRenderPass( rp.get(), false ); // LOAD: over the deferred lighting composite
+        DrawSkinnedMeshes( /*useLoadPass*/ true );
+        renderer.EndRenderPass();
     }
 
     bool MeshRenderer::SetupGeometryPass()

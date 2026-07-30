@@ -355,6 +355,10 @@ namespace Desert::Graphic
             // the deferred composite (before the glass snapshot so glass refracts them too).
             meshRenderer->RenderGenericManual();
 
+            // Skinned meshes also have no G-buffer variant (the G-buffer pass draws static only), so draw
+            // them forward over the composite too — otherwise they only show in the silhouette/outline pass.
+            meshRenderer->RenderSkinnedManual();
+
             // Snapshot the composited opaque scene, then draw the transparent (glass) meshes over it. The
             // snapshot lets the glass sample the scene BEHIND it for refraction without a read+write feedback
             // loop on the target. Uses a dedicated glass material (no double-written per-frame UB ring).
