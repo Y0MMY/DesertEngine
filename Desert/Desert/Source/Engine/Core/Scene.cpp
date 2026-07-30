@@ -7,9 +7,14 @@
 
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Geometry/Mesh.hpp>
+#include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
+#include <Engine/Animation/Skeleton.hpp>
+#include <Engine/Animation/BoneInfo.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
+#include <cfloat>
+#include <functional>
 #include <limits>
 #include <typeinfo>
 
@@ -32,6 +37,70 @@ namespace Desert::Core
                 return Geometry::PrimitiveMeshFactory::GetShared( c.Primitive.value() );
             return nullptr;
         }
+
+        // Editor-built runtime rig takes priority over the cooked asset (mirrors the render path).
+        ::Desert::Mesh* ResolveSkinnedMesh( const ECS::SkinnedMeshComponent& c )
+        {
+            if ( c.RuntimeMesh )
+                return c.RuntimeMesh.get();
+            if ( c.MeshHandle )
+                return Runtime::ResourceRegistry::GetMeshService()->Get( c.MeshHandle );
+            return nullptr;
+        }
+
+        // Bind-pose skinning matrices (skin[i] = chainGlobal_i * OffsetMatrix_i) — identical to the render
+        // path's bind branch in MeshECSSystem, so the picked bounds line up with the drawn bind-pose mesh.
+        std::vector<glm::mat4> BindSkinningMatrices( const Animation::Skeleton& skeleton )
+        {
+            const auto&                        bones = skeleton.GetBones();
+            std::vector<glm::mat4>             g( bones.size(), glm::mat4( 1.0f ) );
+            std::vector<bool>                  done( bones.size(), false );
+            std::function<glm::mat4( size_t )> resolve = [&]( size_t i ) -> glm::mat4
+            {
+                if ( done[i] )
+                    return g[i];
+                glm::mat4 m = bones[i].LocalBindTransform;
+                if ( bones[i].ParentBoneID.has_value() && bones[i].ParentBoneID.value() < bones.size() )
+                    m = resolve( bones[i].ParentBoneID.value() ) * bones[i].LocalBindTransform;
+                g[i]    = m;
+                done[i] = true;
+                return m;
+            };
+            std::vector<glm::mat4> out( bones.size() );
+            for ( size_t i = 0; i < bones.size(); ++i )
+                out[i] = resolve( i ) * bones[i].OffsetMatrix;
+            return out;
+        }
+
+        // Mesh-local AABB of a skinned mesh deformed by `skin` (linear blend). A skinned submesh's stored
+        // BoundingBox is in RAW-vertex space (which only matches the rendered mesh when bind == identity), so
+        // picking must deform the retained CPU vertices by the current pose instead of using that box.
+        Common::Math::AABB SkinnedLocalBounds( const SkinnedMesh& mesh, const std::vector<glm::mat4>& skin )
+        {
+            glm::vec3 mn( FLT_MAX ), mx( -FLT_MAX );
+            for ( const auto& sv : mesh.GetVertices() )
+            {
+                glm::vec3 pos( 0.0f );
+                float     wsum = 0.0f;
+                for ( size_t j = 0; j < SkinnedVertex::MAX_BONE_INFLUENCES; ++j )
+                {
+                    const float w = sv.BoneWeights[j];
+                    if ( w <= 0.0f )
+                        continue;
+                    const uint32_t b = sv.BoneIDs[j];
+                    if ( b < skin.size() )
+                        pos += w * glm::vec3( skin[b] * glm::vec4( sv.StaticVertex.Position, 1.0f ) );
+                    wsum += w;
+                }
+                if ( wsum > 1e-5f )
+                    pos /= wsum; // weighted average (robust to weights that don't sum to exactly 1)
+                else
+                    pos = sv.StaticVertex.Position;
+                mn = glm::min( mn, pos );
+                mx = glm::max( mx, pos );
+            }
+            return { mn, mx };
+        }
     } // namespace
 
     bool Scene::Raycast( const Common::Math::Ray& ray, RaycastHit& outHit ) const
@@ -46,22 +115,62 @@ namespace Desert::Core
 
         for ( const auto& entity : GetAllEntities() )
         {
-            if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
-                continue;
-            auto* mesh = ResolveMesh( entity.GetComponent<ECS::StaticMeshComponent>() );
+            ::Desert::Mesh* mesh    = nullptr;
+            bool            skinned = false;
+            if ( entity.HasComponent<ECS::StaticMeshComponent>() )
+            {
+                mesh = ResolveMesh( entity.GetComponent<ECS::StaticMeshComponent>() );
+            }
+            else if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
+            {
+                mesh    = ResolveSkinnedMesh( entity.GetComponent<ECS::SkinnedMeshComponent>() );
+                skinned = true;
+            }
             if ( !mesh )
                 continue;
 
             const glm::mat4 xf       = entity.GetWorldTransform();
             const auto      localRay = ray.ToLocalSpace( xf );
-            for ( const auto& sm : mesh->GetSubmeshes() )
+
+            if ( !skinned )
             {
-                float t = 0.0f;
-                if ( localRay.IntersectsAABB( sm.BoundingBox, t ) && t > 0.0f && t < closest )
+                for ( const auto& sm : mesh->GetSubmeshes() )
+                {
+                    float t = 0.0f;
+                    if ( localRay.IntersectsAABB( sm.BoundingBox, t ) && t > 0.0f && t < closest )
+                    {
+                        closest    = t;
+                        bestXf     = xf;
+                        bestAABB   = sm.BoundingBox;
+                        bestLocal  = localRay;
+                        bestLocalT = t;
+                        bestUUID   = entity.GetComponent<ECS::UUIDComponent>().UUID;
+                        hit        = true;
+                    }
+                }
+            }
+            else
+            {
+                // Skinned: test the POSED mesh bounds (animator pose if any, else bind) — the stored submesh
+                // box is raw-vertex space and would miss/mis-hit an imported mesh whose bind != identity.
+                auto*                  sk = static_cast<SkinnedMesh*>( mesh );
+                std::vector<glm::mat4> skin;
+                if ( entity.HasComponent<ECS::AnimationComponent>() )
+                {
+                    const auto& anim = entity.GetComponent<ECS::AnimationComponent>();
+                    if ( anim.Animator )
+                        skin = anim.Animator->GetPose().BoneMatrices;
+                }
+                if ( skin.empty() )
+                    skin = BindSkinningMatrices( sk->GetSkeleton() );
+
+                const Common::Math::AABB bounds = SkinnedLocalBounds( *sk, skin );
+                float                    t      = 0.0f;
+                if ( localRay.IntersectsAABB( bounds, t ) && t > 0.0f && t < closest )
                 {
                     closest    = t;
                     bestXf     = xf;
-                    bestAABB   = sm.BoundingBox;
+                    bestAABB   = bounds;
                     bestLocal  = localRay;
                     bestLocalT = t;
                     bestUUID   = entity.GetComponent<ECS::UUIDComponent>().UUID;

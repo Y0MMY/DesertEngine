@@ -37,8 +37,16 @@ namespace Desert
 
         [[nodiscard]] virtual Common::BoolResultWithCodes<MeshError> Invalidate() override;
 
+        // CPU-side skinned vertices, retained for viewport picking (posed-AABB) — mirrors the static mesh's
+        // m_TriangleCache. Bone IDs/weights let a picker deform them by the current pose off the render path.
+        const std::vector<SkinnedVertex>& GetVertices() const
+        {
+            return m_Vertices;
+        }
+
     private:
         const Animation::Skeleton*                m_Skeleton;
         std::unordered_map<std::string, uint32_t> m_BoneNameToIndex;
+        std::vector<SkinnedVertex>                m_Vertices;
     };
 } // namespace Desert

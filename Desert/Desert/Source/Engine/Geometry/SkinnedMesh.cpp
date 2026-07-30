@@ -11,6 +11,7 @@ namespace Desert
          : m_Skeleton( skeleton )
     {
         m_Submeshes = submeshes;
+        m_Vertices  = vertices; // retained on the CPU for viewport picking (posed-AABB)
 
         m_VertexBuffer =
              Graphic::VertexBuffer::Create( (void*)vertices.data(), vertices.size() * sizeof( SkinnedVertex ) );
