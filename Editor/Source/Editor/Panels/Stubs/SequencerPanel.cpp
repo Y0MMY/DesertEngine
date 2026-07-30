@@ -161,13 +161,17 @@ namespace Desert::Editor
                          IM_COL32( 255, 90, 90, 255 ), 2.0f );
 
             // Scrub: click / drag the timeline seeks (and pauses so the pose holds where you left it).
-            ImGui::InvisibleButton( "##seqScrub", ImVec2( width, height ) );
-            if ( ImGui::IsItemActive() )
+            // Guard the zero-size case (a docked/zero-width timeline) — InvisibleButton asserts on it.
+            if ( width > 0.0f && height > 0.0f )
             {
-                const float mx    = ImGui::GetMousePos().x - origin.x;
-                const float tSeek = std::clamp( mx / width, 0.0f, 1.0f ) * duration;
-                anim.Playing      = false;
-                animator->SetTime( tSeek );
+                ImGui::InvisibleButton( "##seqScrub", ImVec2( width, height ) );
+                if ( ImGui::IsItemActive() )
+                {
+                    const float mx    = ImGui::GetMousePos().x - origin.x;
+                    const float tSeek = std::clamp( mx / width, 0.0f, 1.0f ) * duration;
+                    anim.Playing      = false;
+                    animator->SetTime( tSeek );
+                }
             }
         }
         else

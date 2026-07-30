@@ -778,7 +778,11 @@ namespace Desert::Editor
 
             // SPLITTER — a thin invisible handle the user drags to resize the tree pane.
             ImGui::SameLine( 0.0f, 0.0f );
-            ImGui::InvisibleButton( "##cb_splitter", ImVec2( kSplitterW, ImGui::GetContentRegionAvail().y ) );
+            // GetContentRegionAvail().y can be 0 on a first/zero-height frame; InvisibleButton asserts on a
+            // zero size, so floor the height at 1px (harmless — the handle is invisible anyway).
+            const float cbSplitterH = ImGui::GetContentRegionAvail().y;
+            ImGui::InvisibleButton( "##cb_splitter",
+                                    ImVec2( kSplitterW, cbSplitterH > 0.0f ? cbSplitterH : 1.0f ) );
             if ( ImGui::IsItemActive() )
                 m_TreeWidth += ImGui::GetIO().MouseDelta.x;
             if ( ImGui::IsItemHovered() || ImGui::IsItemActive() )
@@ -1060,7 +1064,10 @@ namespace Desert::Editor
 
                     ImVec2       cursorPos = ImGui::GetCursorPos();
                     const ImVec2 region    = ImGui::GetContentRegionAvail();
-                    ImGui::InvisibleButton( "##DragDropTargetAssetPanelBody", region );
+                    // Skip the drop-target background when the body has no area (a zero size asserts inside
+                    // InvisibleButton) — there is nothing to drop onto in a collapsed/zero-size panel.
+                    if ( region.x > 0.0f && region.y > 0.0f )
+                        ImGui::InvisibleButton( "##DragDropTargetAssetPanelBody", region );
 
                     ImGui::SetCursorPos( cursorPos );
 
