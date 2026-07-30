@@ -608,24 +608,25 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
 // Font/Size change (TextECSSystem compares against its Built* cache).
 DESERT_REGISTER_CUSTOM_COMPONENT(
      ::Desert::ECS::TextComponent, "Text", true,
-     ( []( ::Desert::ECS::Entity& e, ::Desert::Core::Scene*, const ::Desert::Editor::ComponentEditContext& )
-       {
-           auto& tc = e.GetComponent<::Desert::ECS::TextComponent>();
+     (
+          []( ::Desert::ECS::Entity& e, ::Desert::Core::Scene*, const ::Desert::Editor::ComponentEditContext& )
+          {
+              auto& tc = e.GetComponent<::Desert::ECS::TextComponent>();
 
-           char buf[512] = { 0 };
-           std::strncpy( buf, tc.Text.c_str(), sizeof( buf ) - 1 );
-           if ( ImGui::InputTextMultiline( "Text", buf, sizeof( buf ), ImVec2( 0, 60 ) ) )
-               tc.Text = buf;
+              char buf[512] = { 0 };
+              std::strncpy( buf, tc.Text.c_str(), sizeof( buf ) - 1 );
+              if ( ImGui::InputTextMultiline( "Text", buf, sizeof( buf ), ImVec2( 0, 60 ) ) )
+                  tc.Text = buf;
 
-           char fontBuf[512] = { 0 };
-           std::strncpy( fontBuf, tc.FontPath.c_str(), sizeof( fontBuf ) - 1 );
-           if ( ImGui::InputText( "Font (.ttf)", fontBuf, sizeof( fontBuf ) ) )
-               tc.FontPath = fontBuf;
+              char fontBuf[512] = { 0 };
+              std::strncpy( fontBuf, tc.FontPath.c_str(), sizeof( fontBuf ) - 1 );
+              if ( ImGui::InputText( "Font (.ttf)", fontBuf, sizeof( fontBuf ) ) )
+                  tc.FontPath = fontBuf;
 
-           ImGui::ColorEdit4( "Color", &tc.Color.x );
-           ImGui::DragFloat( "Size", &tc.Size, 0.01f, 0.01f, 100.0f, "%.2f" );
-           ImGui::DragFloat( "Emissive Intensity", &tc.EmissiveIntensity, 0.05f, 0.0f, 20.0f, "%.2f" );
-           if ( ImGui::IsItemHovered() )
-               ImGui::SetTooltip( "> ~1 makes the text bloom (it renders into the HDR scene)" );
-           ImGui::Checkbox( "Billboard", &tc.Billboard );
-       } ) )
+              ImGui::ColorEdit4( "Color", &tc.Color.x );
+              ImGui::DragFloat( "Size", &tc.Size, 0.01f, 0.01f, 100.0f, "%.2f" );
+              ImGui::DragFloat( "Emissive Intensity", &tc.EmissiveIntensity, 0.05f, 0.0f, 20.0f, "%.2f" );
+              if ( ImGui::IsItemHovered() )
+                  ImGui::SetTooltip( "> ~1 makes the text bloom (it renders into the HDR scene)" );
+              ImGui::Checkbox( "Billboard", &tc.Billboard );
+          } ) )
