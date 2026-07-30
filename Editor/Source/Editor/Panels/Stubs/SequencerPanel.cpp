@@ -230,7 +230,12 @@ namespace Desert::Editor
                 // very next frame (the old bug where the viewport didn't change). Press Play to resume the graph.
                 anim.Playing = false;
                 if ( animator )
+                {
                     animator->Play( clips[currentClipIdx]->GetClip(), anim.Loop );
+                    animator->SetTime( 0.0f ); // Play() only sets the clip; SetTime recomputes the pose NOW
+                                               // (paused => Update never runs, so the viewport would keep the
+                                               // old clip's pose without this)
+                }
             }
         }
 
@@ -252,6 +257,7 @@ namespace Desert::Editor
                         if ( a && a->GetClip().AnimationName == created )
                         {
                             animator->Play( a->GetClip(), false );
+                            animator->SetTime( 0.0f ); // recompute the pose now (see the clip picker note)
                             break;
                         }
                 }
