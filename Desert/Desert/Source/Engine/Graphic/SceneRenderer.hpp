@@ -212,6 +212,10 @@ namespace Desert::Graphic
         void ClearMainFramebuffer();
         void CompositeRenderPass();
         void ExecuteRenderGraph();
+        // Debug-phase passes (bounding boxes, colliders) drawn as a LOAD overlay AFTER the deferred
+        // lighting composite — in Deferred the composite would otherwise paint lit meshes over any
+        // debug lines recorded earlier in the graph, hiding them wherever geometry is present.
+        void ExecuteDebugOverlay();
 
     private:
         struct

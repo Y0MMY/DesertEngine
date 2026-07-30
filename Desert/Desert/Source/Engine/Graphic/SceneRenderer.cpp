@@ -367,6 +367,14 @@ namespace Desert::Graphic
             meshRenderer->RenderGlassManual( sceneCopy );
         }
 
+        // Debug overlays (bounding boxes, colliders) drawn LAST over the finished scene color — in both
+        // paths, but critically in Deferred where the lighting composite above would otherwise cover any
+        // debug lines recorded inside the graph. Runs before the post chain so tonemap treats them uniformly.
+        {
+            DESERT_PROFILE_SCOPE( "Debug: Overlay" );
+            ExecuteDebugOverlay();
+        }
+
         // Explicit post-process chain (runs after the scene graph has produced the scene color and
         // the silhouette mask): Jump Flood outline -> Tonemap.
         {
@@ -740,6 +748,11 @@ namespace Desert::Graphic
             if ( !pass.CachedRenderPass )
                 continue;
 
+            // Debug-phase passes (BB / colliders) are deferred to ExecuteDebugOverlay(), which runs
+            // AFTER the deferred lighting composite so the overlay isn't painted over by lit geometry.
+            if ( pass.Phase == RenderPhase::Debug )
+                continue;
+
             const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
 
             if ( passFb != currentFb )
@@ -754,6 +767,42 @@ namespace Desert::Graphic
             DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
 
             // Debug-utils region: RenderDoc/Xcode show every graph pass by name in the event tree.
+            renderer.BeginDebugLabel( pass.Name.c_str() );
+            pass.ExecuteFunc();
+            renderer.EndDebugLabel();
+        }
+
+        if ( currentFb )
+            renderer.EndRenderPass();
+    }
+
+    void SceneRenderer::ExecuteDebugOverlay()
+    {
+        const auto& sortedPasses = m_RenderGraphBuilder.GetSortedPasses();
+
+        auto& renderer = Renderer::GetInstance();
+
+        // LOAD (clearFrame = false) each debug pass over the finished scene color so the lines sit on
+        // top of both the forward geometry and the deferred lighting composite. Depth-tested against the
+        // target's depth: in Forward that occludes lines behind meshes; in Deferred the target has no
+        // opaque-geometry depth (it lives in the G-buffer), so the debug lines read as a clear overlay —
+        // exactly what's wanted, since the point is to SEE the boxes even where they hug the mesh.
+        std::shared_ptr<Framebuffer> currentFb;
+        for ( const auto& pass : sortedPasses )
+        {
+            if ( !pass.CachedRenderPass || pass.Phase != RenderPhase::Debug )
+                continue;
+
+            const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
+            if ( passFb != currentFb )
+            {
+                if ( currentFb )
+                    renderer.EndRenderPass();
+                renderer.BeginRenderPass( pass.CachedRenderPass.get(), false );
+                currentFb = passFb;
+            }
+
+            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
             renderer.BeginDebugLabel( pass.Name.c_str() );
             pass.ExecuteFunc();
             renderer.EndDebugLabel();
