@@ -775,6 +775,37 @@ namespace Desert::Core::Serialize
             Register( std::move( s ) );
         }
 
+        // ---- Text (custom: only the authored fields; the glyph mesh is transient) ----
+        {
+            ComponentSerializer s;
+            s.Key = "Text";
+            s.Has = []( ECS::Entity e ) { return e.HasComponent<ECS::TextComponent>(); };
+            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            {
+                const auto&               tc = e.GetComponent<ECS::TextComponent>();
+                Assets::TextComponentSer  ser{ tc.Text,    tc.FontPath,          tc.Color,
+                                              tc.Size,     tc.EmissiveIntensity, tc.Billboard };
+                return ToGeneric( ser );
+            };
+            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            {
+                auto parsed = FromGeneric<Assets::TextComponentSer>( g );
+                if ( !parsed.has_value() )
+                    return;
+                const auto& d = parsed.value();
+                auto&       tc =
+                     e.HasComponent<ECS::TextComponent>() ? e.GetComponent<ECS::TextComponent>()
+                                                          : e.AddComponent<ECS::TextComponent>();
+                tc.Text              = d.Text;
+                tc.FontPath          = d.FontPath;
+                tc.Color             = d.Color;
+                tc.Size              = d.Size;
+                tc.EmissiveIntensity = d.EmissiveIntensity;
+                tc.Billboard         = d.Billboard;
+            };
+            Register( std::move( s ) );
+        }
+
         // ---- Reflected data blocks (auto-serialized via reflection) ----
         Register( MakeReflected<ECS::CameraComponent, ECS::CameraData>( "Camera", "CameraData",
                                                                         &ECS::CameraComponent::Data ) );

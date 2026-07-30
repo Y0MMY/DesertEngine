@@ -91,6 +91,17 @@ namespace Desert::Assets
         std::optional<std::vector<MaterialTextureSer>> Textures;
     };
 
+    // TextComponent mirror — only the authored fields (the glyph mesh is transient, rebuilt at runtime).
+    struct TextComponentSer
+    {
+        std::string Text;
+        std::string FontPath;
+        glm::vec4   Color             = glm::vec4( 1.0f );
+        float       Size              = 1.0f;
+        float       EmissiveIntensity = 1.0f;
+        bool        Billboard         = false;
+    };
+
     // NOTE: camera/light/skybox payloads are no longer mirrored here — they serialize generically through
     // the reflection registry (ComponentRegistry + ReflectionSerializer + AssetResolver). Only the mesh
     // mirrors above remain (derived geometry isn't reflectable).
