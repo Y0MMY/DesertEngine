@@ -720,6 +720,17 @@ namespace Desert::Editor
 
             ImGuiID dockspace_id = ::ImGui::GetID( "MyDockSpace" );
 
+            // One-time auto-relayout: when the default layout's window IDs change (panel-title icons add a
+            // ### suffix, changing every window's ImGui ID), old imgui.ini bindings stop matching and panels
+            // scatter. Bump kDockLayoutVersion to force a single clean rebuild for everyone, then persist it.
+            constexpr int kDockLayoutVersion = 1;
+            if ( EditorPreferences::Get().DockLayoutVersion < kDockLayoutVersion )
+            {
+                m_ResetDefaultLayout                       = true;
+                EditorPreferences::Get().DockLayoutVersion = kDockLayoutVersion;
+                EditorPreferences::Save();
+            }
+
             // First run (nothing saved in imgui.ini for this dockspace): lay the panels
             // out into a sensible default instead of leaving them floating in a pile.
             // Checked BEFORE DockSpace() — the call itself creates the node. "Reset to Default
@@ -753,15 +764,18 @@ namespace Desert::Editor
                 ImGuiID leftBottom  = ::ImGui::DockBuilderSplitNode( left, ImGuiDir_Down, 0.40f, nullptr, &left );
                 ImGuiID rightBottom = ::ImGui::DockBuilderSplitNode( right, ImGuiDir_Down, 0.50f, nullptr, &right );
 
-                ::ImGui::DockBuilderDockWindow( "Scene###scene", center );
-                ::ImGui::DockBuilderDockWindow( "Scene Outliner", left );
-                ::ImGui::DockBuilderDockWindow( "Collections", leftBottom );
-                ::ImGui::DockBuilderDockWindow( "Details", right );
-                ::ImGui::DockBuilderDockWindow( "Scene Settings", rightBottom );
+                // Panels routed through the central Begin carry an icon (a ### suffix), so dock them by the
+                // SAME composed title — otherwise the icon-changed ImGui ID wouldn't match this assignment.
+                // Non-panel windows (Profiler / Foliage / Shader Code) self-Begin with plain names.
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Scene###scene" ).c_str(), center );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Scene Outliner" ).c_str(), left );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Collections" ).c_str(), leftBottom );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Details" ).c_str(), right );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Scene Settings" ).c_str(), rightBottom );
                 ::ImGui::DockBuilderDockWindow( "Profiler", rightBottom );
                 ::ImGui::DockBuilderDockWindow( "Foliage##FoliagePanel", rightBottom );
-                ::ImGui::DockBuilderDockWindow( "Assets", bottom );
-                ::ImGui::DockBuilderDockWindow( "Logs", bottom );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Assets" ).c_str(), bottom );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Logs" ).c_str(), bottom );
                 ::ImGui::DockBuilderDockWindow( "Shader Code", bottom );
 
                 ::ImGui::DockBuilderFinish( dockspace_id );

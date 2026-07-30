@@ -18,6 +18,10 @@ namespace Desert::Editor
         bool  PersistentSnap   = false;
         int   AutosaveMinutes  = 5;     // 0 = autosave off
         bool  ShowPerfHud      = false; // in-viewport FPS / frame-graph / top-scopes overlay
+        // Bumped when the default dock layout's window IDs change (e.g. panel-title icons add a ### suffix,
+        // which changes every window's ImGui ID). A stored value below the current forces ONE automatic
+        // "reset to default layout" so panels re-dock cleanly instead of scattering against a stale imgui.ini.
+        int DockLayoutVersion = 0;
         // MSAA for the scene viewport (1 = off, 2/4/8). Applied at STARTUP (pipelines bake their
         // sample count): Load() pushes it into RenderConfig before the SceneRenderer initializes.
         int   MSAASamples      = 1;
