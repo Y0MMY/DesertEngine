@@ -16,14 +16,14 @@ namespace Desert::Geometry
         return glm::length( p - ( a + ab * t ) );
     }
 
-    std::vector<SkinnedVertex> AutoSkinVertices( const std::vector<Vertex>& vertices,
+    std::vector<SkinnedVertex> AutoSkinVertices( const std::vector<Vertex>&  vertices,
                                                  const std::vector<RigBone>& bones, float falloff,
                                                  uint32_t maxInfluences )
     {
         std::vector<SkinnedVertex> out( vertices.size() );
 
-        const uint32_t maxInf = std::min<uint32_t>(
-             maxInfluences ? maxInfluences : 1u, SkinnedVertex::MAX_BONE_INFLUENCES );
+        const uint32_t maxInf =
+             std::min<uint32_t>( maxInfluences ? maxInfluences : 1u, SkinnedVertex::MAX_BONE_INFLUENCES );
 
         std::vector<std::pair<float, uint32_t>> weights; // (weight, boneIndex) scratch, reused per vertex
         weights.reserve( bones.size() );
@@ -46,10 +46,10 @@ namespace Desert::Geometry
             for ( uint32_t bi = 0; bi < bones.size(); ++bi )
             {
                 const int       parent = bones[bi].Parent;
-                const glm::vec3 a = ( parent >= 0 && parent < static_cast<int>( bones.size() ) )
-                                         ? bones[parent].Head
-                                         : bones[bi].Head; // root: weight by the head point alone
-                const float     d = DistancePointToSegment( p, a, bones[bi].Head );
+                const glm::vec3 a      = ( parent >= 0 && parent < static_cast<int>( bones.size() ) )
+                                              ? bones[parent].Head
+                                              : bones[bi].Head; // root: weight by the head point alone
+                const float     d      = DistancePointToSegment( p, a, bones[bi].Head );
                 // 1 / dist^falloff, guarded so a vertex sitting ON a bone gets a large (finite) weight.
                 weights.emplace_back( 1.0f / ( std::pow( d, falloff ) + 1e-4f ), bi );
             }

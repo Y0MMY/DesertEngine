@@ -58,7 +58,7 @@ TEST( AutoRig, VertexBindsToNearestBone )
     const auto nearVertical   = AutoSkinVertices( { At( 0.05f, 1.0f, 0.0f ) }, bones )[0];
     const auto nearHorizontal = AutoSkinVertices( { At( 1.5f, 2.05f, 0.0f ) }, bones )[0];
 
-    EXPECT_GT( WeightOf( nearVertical, 1 ), WeightOf( nearVertical, 2 ) );   // hugs vertical -> bone 1
+    EXPECT_GT( WeightOf( nearVertical, 1 ), WeightOf( nearVertical, 2 ) );     // hugs vertical -> bone 1
     EXPECT_GT( WeightOf( nearHorizontal, 2 ), WeightOf( nearHorizontal, 1 ) ); // hugs horizontal -> bone 2
     EXPECT_NEAR( WeightSum( nearVertical ), 1.0f, 1e-4f );
     EXPECT_NEAR( WeightSum( nearHorizontal ), 1.0f, 1e-4f );

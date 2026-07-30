@@ -28,7 +28,7 @@ namespace Desert::Geometry
     // Assigns each vertex to its nearest bones by distance to the bone segment: weight ~ 1 / dist^falloff,
     // the top maxInfluences kept and normalized to sum 1. A vertex with no usable bone (or an empty rig)
     // falls back to full weight on bone 0. Returns skinned vertices carrying the original static data.
-    std::vector<SkinnedVertex> AutoSkinVertices( const std::vector<Vertex>& vertices,
+    std::vector<SkinnedVertex> AutoSkinVertices( const std::vector<Vertex>&  vertices,
                                                  const std::vector<RigBone>& bones, float falloff = 2.0f,
                                                  uint32_t maxInfluences = SkinnedVertex::MAX_BONE_INFLUENCES );
 } // namespace Desert::Geometry

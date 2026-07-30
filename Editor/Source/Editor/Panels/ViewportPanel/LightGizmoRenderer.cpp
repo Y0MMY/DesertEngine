@@ -502,9 +502,9 @@ namespace Desert::Editor
                         /*recordForPick=*/true );
     }
 
-    void LightGizmoRenderer::DrawBoneGizmos( ImDrawList* drawList,
+    void LightGizmoRenderer::DrawBoneGizmos( ImDrawList*                               drawList,
                                              const std::vector<std::optional<ImVec2>>& screen,
-                                             const std::vector<int>& parents,
+                                             const std::vector<int>&                   parents,
                                              const std::vector<std::string>& names, int selectedBone,
                                              bool showAllNames, bool recordForPick )
     {
@@ -534,7 +534,7 @@ namespace Desert::Editor
             const ImVec2 mid( P.x + dir.x * len * 0.2f, P.y + dir.y * len * 0.2f ); // widest ring
             ImVec2       kite[4] = { P, ImVec2( mid.x + perp.x * w, mid.y + perp.y * w ), C,
                                      ImVec2( mid.x - perp.x * w, mid.y - perp.y * w ) };
-            const bool   sel = ( static_cast<int>( i ) == selectedBone || p == selectedBone );
+            const bool   sel     = ( static_cast<int>( i ) == selectedBone || p == selectedBone );
             drawList->AddConvexPolyFilled( kite, 4, sel ? boneFillSel : boneFill );
             drawList->AddPolyline( kite, 4, sel ? boneEdgeSel : boneEdge, ImDrawFlags_Closed, sel ? 2.0f : 1.5f );
         }
