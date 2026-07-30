@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Animation/Graph/AnimGraph.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
@@ -801,6 +802,51 @@ namespace Desert::Core::Serialize
                 tc.Size              = d.Size;
                 tc.EmissiveIntensity = d.EmissiveIntensity;
                 tc.Billboard         = d.Billboard;
+            };
+            Register( std::move( s ) );
+        }
+
+        // ---- Animation (manual: playback settings + the AnimGraph state machine as JSON) ----
+        {
+            ComponentSerializer s;
+            s.Key       = "Animation";
+            s.Has       = []( ECS::Entity e ) { return e.HasComponent<ECS::AnimationComponent>(); };
+            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            {
+                const auto&                   ac = e.GetComponent<ECS::AnimationComponent>();
+                Assets::AnimationComponentSer ser;
+                ser.CurrentClip      = ac.CurrentClip;
+                ser.Playing          = ac.Playing;
+                ser.Loop             = ac.Loop;
+                ser.PlaybackSpeed    = ac.PlaybackSpeed;
+                ser.EnableRootMotion = ac.EnableRootMotion;
+                if ( ac.Graph )
+                    ser.GraphJson = Animation::Graph::Serialize( *ac.Graph );
+                return ToGeneric( ser );
+            };
+            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            {
+                auto parsed = FromGeneric<Assets::AnimationComponentSer>( g );
+                if ( !parsed.has_value() )
+                    return;
+                const auto& d  = parsed.value();
+                auto&       ac = e.HasComponent<ECS::AnimationComponent>()
+                                      ? e.GetComponent<ECS::AnimationComponent>()
+                                      : e.AddComponent<ECS::AnimationComponent>();
+                ac.CurrentClip      = d.CurrentClip;
+                ac.Playing          = d.Playing;
+                ac.Loop             = d.Loop;
+                ac.PlaybackSpeed    = d.PlaybackSpeed;
+                ac.EnableRootMotion = d.EnableRootMotion;
+                if ( !d.GraphJson.empty() )
+                {
+                    auto graph = Animation::Graph::Deserialize( d.GraphJson );
+                    if ( graph.IsSuccess() )
+                    {
+                        ac.Graph = std::make_shared<Animation::Graph::AnimGraph>( graph.GetValue() );
+                        ac.GraphRevision++;
+                    }
+                }
             };
             Register( std::move( s ) );
         }

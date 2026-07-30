@@ -102,6 +102,19 @@ namespace Desert::Assets
         bool        Billboard         = false;
     };
 
+    // AnimationComponent mirror — playback settings + the AnimGraph as JSON (the Animator + graph evaluator are
+    // transient runtime objects, rebuilt from the mesh skeleton / this JSON). GraphJson is empty when the
+    // entity has no state machine.
+    struct AnimationComponentSer
+    {
+        std::string CurrentClip;
+        bool        Playing          = true;
+        bool        Loop             = true;
+        float       PlaybackSpeed    = 1.0f;
+        bool        EnableRootMotion = false;
+        std::string GraphJson;
+    };
+
     // NOTE: camera/light/skybox payloads are no longer mirrored here — they serialize generically through
     // the reflection registry (ComponentRegistry + ReflectionSerializer + AssetResolver). Only the mesh
     // mirrors above remain (derived geometry isn't reflectable).
