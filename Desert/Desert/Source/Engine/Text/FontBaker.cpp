@@ -28,7 +28,11 @@ namespace Desert::Text
             return out;
 
         stbtt_fontinfo font;
-        if ( !stbtt_InitFont( &font, ttf, stbtt_GetFontOffsetForIndex( ttf, 0 ) ) )
+        // stbtt_GetFontOffsetForIndex returns -1 for non-font data. stbtt_InitFont does NOT re-check it and
+        // stbtt__find_table would then read the table directory at (data - 1 + ...) — a heap-buffer-overflow
+        // on garbage/too-short input (ASan caught this on the RejectsGarbage test). Reject a bad offset first.
+        const int fontOffset = stbtt_GetFontOffsetForIndex( ttf, 0 );
+        if ( fontOffset < 0 || !stbtt_InitFont( &font, ttf, fontOffset ) )
             return out;
 
         const float scale = stbtt_ScaleForPixelHeight( &font, pixelHeight );
