@@ -289,8 +289,7 @@ namespace Desert::Editor::Tools
 
         // The local (parent-relative) transform to build the bone chain from: the animated pose in pose mode,
         // else the bind pose.
-        const auto localOf = [&]( size_t i ) -> glm::mat4
-        {
+        const auto localOf = [&]( size_t i ) -> glm::mat4 {
             return usePose ? animator->GetBoneLocalPose( static_cast<uint32_t>( i ) )
                            : bones[i].LocalBindTransform;
         };
