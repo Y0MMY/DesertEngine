@@ -67,6 +67,21 @@ namespace Desert::Animation
 
         [[nodiscard]] const AnimationClip* GetCurrentClip() const;
 
+        // --- Pose authoring: a separate, EDITABLE animated-pose buffer ----------------------------------
+        // The rig's per-bone LocalBindTransform is the shared REST pose; posing a bone to author a clip must
+        // NOT mutate it. This buffer holds a per-bone LOCAL (parent-relative) transform, independent of bind,
+        // that the editor gizmo writes to and the Sequencer keys from. Init = bind. Normal playback
+        // (Update/SetTime) is UNAFFECTED by it — only ApplyLocalPose() renders it into the skinning matrices.
+        void                    ResetLocalPoseToBind();
+        void                    SetBoneLocalPose( uint32_t boneIndex, const glm::mat4& localTransform );
+        [[nodiscard]] glm::mat4 GetBoneLocalPose( uint32_t boneIndex ) const; // identity if out of range
+        // Loads `clip`'s sampled LOCAL transforms at `time` into the pose buffer (bind for untracked bones),
+        // so the user can edit an existing keyed pose and re-key from it.
+        void SampleClipIntoLocalPose( const AnimationClip& clip, float time );
+        // Rebuilds GetPose() from the pose buffer, ignoring any playing clip — call after editing the buffer
+        // to show the posed skeleton in the viewport.
+        void ApplyLocalPose();
+
         // Returns (and clears) the names of the current clip's notifies crossed during the last Update — for
         // the ECS to dispatch to scripts. Call once per frame after Update. Scrubbing via SetTime does NOT
         // fire notifies (only forward playback does).
@@ -91,10 +106,11 @@ namespace Desert::Animation
         void SetLayerAdditive( int index, bool additive );
         // Restrict the layer to the named bones (and, by default, their descendants — a masked shoulder also
         // masks the whole arm, which is what "upper body" means). Unknown names are ignored.
-        void SetLayerMaskByNames( int index, const std::vector<std::string>& boneNames, bool includeChildren = true );
-        void ClearLayerMask( int index ); // layer affects all bones
-        void RemoveLayer( int index );
-        void ClearLayers();
+        void                 SetLayerMaskByNames( int index, const std::vector<std::string>& boneNames,
+                                                  bool includeChildren = true );
+        void                 ClearLayerMask( int index ); // layer affects all bones
+        void                 RemoveLayer( int index );
+        void                 ClearLayers();
         [[nodiscard]] size_t GetLayerCount() const
         {
             return m_Layers.size();
@@ -128,10 +144,10 @@ namespace Desert::Animation
 
         struct AnimationLayer
         {
-            ClipPlayback         Playback;              // clip + time + loop for this layer
-            float                Weight   = 1.0f;       // 0 = off, 1 = full
-            bool                 Additive = false;      // additive delta vs bind, else override blend
-            std::vector<uint8_t> BoneMask;              // per skeleton bone (1 = affected); empty = all bones
+            ClipPlayback         Playback;         // clip + time + loop for this layer
+            float                Weight   = 1.0f;  // 0 = off, 1 = full
+            bool                 Additive = false; // additive delta vs bind, else override blend
+            std::vector<uint8_t> BoneMask;         // per skeleton bone (1 = affected); empty = all bones
         };
 
     private:
@@ -154,6 +170,10 @@ namespace Desert::Animation
         // the correct idle pose — an all-identity pose would skin the RAW authored vertices and collapse the
         // mesh. Computed at construction so GetPose() is valid before any clip plays.
         void ComputeBindPose();
+
+        // Sizes m_LocalPose to the skeleton and fills it with the bind pose. Called at construction and by
+        // ResetLocalPoseToBind().
+        void InitLocalPose();
 
         // Returns the clip track that drives skeleton bone `boneIndex`, matched by bone NAME (not by the clip's
         // own bone index). This lets a clip authored against a differently-ordered or skinless export of the
@@ -180,6 +200,10 @@ namespace Desert::Animation
 
         // Active animation layers, applied on top of the base clip each frame (see ApplyLayers).
         std::vector<AnimationLayer> m_Layers;
+
+        // Editable per-bone LOCAL transforms for pose authoring (init = bind). Independent of the rig's bind
+        // pose and of clip playback; only ApplyLocalPose() renders it. See the pose-authoring API above.
+        std::vector<glm::mat4> m_LocalPose;
 
         Pose m_CurrentPose;
     };

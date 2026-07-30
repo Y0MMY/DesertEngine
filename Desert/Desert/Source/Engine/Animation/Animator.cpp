@@ -42,7 +42,66 @@ namespace Desert::Animation
 
     Animator::Animator( const Skeleton& skeleton ) : m_Skeleton( skeleton )
     {
+        InitLocalPose();   // editable pose buffer starts at bind
         ComputeBindPose(); // valid rest pose before any clip plays (identity would collapse the mesh)
+    }
+
+    void Animator::InitLocalPose()
+    {
+        const auto& bones = m_Skeleton.GetBones();
+        m_LocalPose.resize( bones.size() );
+        for ( size_t i = 0; i < bones.size(); ++i )
+            m_LocalPose[i] = bones[i].LocalBindTransform;
+    }
+
+    void Animator::ResetLocalPoseToBind()
+    {
+        InitLocalPose();
+    }
+
+    void Animator::SetBoneLocalPose( uint32_t boneIndex, const glm::mat4& localTransform )
+    {
+        if ( boneIndex < m_LocalPose.size() )
+            m_LocalPose[boneIndex] = localTransform;
+    }
+
+    glm::mat4 Animator::GetBoneLocalPose( uint32_t boneIndex ) const
+    {
+        return boneIndex < m_LocalPose.size() ? m_LocalPose[boneIndex] : glm::mat4( 1.0f );
+    }
+
+    void Animator::SampleClipIntoLocalPose( const AnimationClip& clip, float time )
+    {
+        const auto& bones = m_Skeleton.GetBones();
+        if ( m_LocalPose.size() != bones.size() )
+            InitLocalPose();
+        for ( uint32_t i = 0; i < bones.size(); ++i )
+            m_LocalPose[i] = SampleLocalTransform( &clip, i, time );
+    }
+
+    void Animator::ApplyLocalPose()
+    {
+        const auto& bones = m_Skeleton.GetBones();
+        if ( m_LocalPose.size() != bones.size() )
+            InitLocalPose();
+
+        m_CurrentPose.BoneMatrices.assign( bones.size(), glm::mat4( 1.0f ) );
+
+        std::vector<glm::mat4>             global( bones.size(), glm::mat4( 1.0f ) );
+        std::vector<bool>                  done( bones.size(), false );
+        std::function<glm::mat4( size_t )> resolve = [&]( size_t i ) -> glm::mat4
+        {
+            if ( done[i] )
+                return global[i];
+            glm::mat4 m = m_LocalPose[i];
+            if ( bones[i].ParentBoneID.has_value() && bones[i].ParentBoneID.value() < bones.size() )
+                m = resolve( bones[i].ParentBoneID.value() ) * m_LocalPose[i];
+            global[i] = m;
+            done[i]   = true;
+            return m;
+        };
+        for ( size_t i = 0; i < bones.size(); ++i )
+            m_CurrentPose.BoneMatrices[i] = resolve( i ) * bones[i].OffsetMatrix;
     }
 
     void Animator::ComputeBindPose()
@@ -175,8 +234,8 @@ namespace Desert::Animation
             const float newTime = playback.Time;
             for ( const auto& n : playback.Clip->Notifies )
             {
-                const bool fire = looped ? ( n.Time > prev || n.Time <= newTime )
-                                         : ( n.Time > prev && n.Time <= newTime );
+                const bool fire =
+                     looped ? ( n.Time > prev || n.Time <= newTime ) : ( n.Time > prev && n.Time <= newTime );
                 if ( fire )
                     m_FiredNotifies.push_back( n.Name );
             }
@@ -382,12 +441,12 @@ namespace Desert::Animation
                 if ( layer.Additive )
                 {
                     // Additive: apply the layer's delta from the BIND pose, scaled by weight, on top of base.
-                    const TRS bindT     = Decompose( bones[i].LocalBindTransform );
-                    outT.Translation    = baseT.Translation + w * ( layT.Translation - bindT.Translation );
-                    const glm::quat dR  = layT.Rotation * glm::inverse( bindT.Rotation );
-                    outT.Rotation       = glm::slerp( glm::quat( 1.0f, 0.0f, 0.0f, 0.0f ), dR, w ) * baseT.Rotation;
-                    const glm::vec3 dS  = layT.Scale / glm::max( bindT.Scale, glm::vec3( 1e-6f ) );
-                    outT.Scale          = baseT.Scale * glm::mix( glm::vec3( 1.0f ), dS, w );
+                    const TRS bindT    = Decompose( bones[i].LocalBindTransform );
+                    outT.Translation   = baseT.Translation + w * ( layT.Translation - bindT.Translation );
+                    const glm::quat dR = layT.Rotation * glm::inverse( bindT.Rotation );
+                    outT.Rotation      = glm::slerp( glm::quat( 1.0f, 0.0f, 0.0f, 0.0f ), dR, w ) * baseT.Rotation;
+                    const glm::vec3 dS = layT.Scale / glm::max( bindT.Scale, glm::vec3( 1e-6f ) );
+                    outT.Scale         = baseT.Scale * glm::mix( glm::vec3( 1.0f ), dS, w );
                 }
                 else
                 {
@@ -451,7 +510,8 @@ namespace Desert::Animation
             m_Layers[index].Additive = additive;
     }
 
-    void Animator::SetLayerMaskByNames( int index, const std::vector<std::string>& boneNames, bool includeChildren )
+    void Animator::SetLayerMaskByNames( int index, const std::vector<std::string>& boneNames,
+                                        bool includeChildren )
     {
         if ( index < 0 || index >= static_cast<int>( m_Layers.size() ) )
             return;
@@ -469,7 +529,7 @@ namespace Desert::Animation
         if ( includeChildren )
         {
             // A bone is affected if it OR any ancestor was named — masking a shoulder masks the whole arm.
-            std::vector<bool>              done( bones.size(), false );
+            std::vector<bool>                done( bones.size(), false );
             std::function<uint8_t( size_t )> resolve = [&]( size_t i ) -> uint8_t
             {
                 if ( done[i] )
