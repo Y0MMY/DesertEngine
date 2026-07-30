@@ -31,6 +31,7 @@
 #include "Systems/Scene/Deferred/DeferredLightingRenderer.hpp"
 #include "Systems/Scene/Deferred/SSAORenderer.hpp"
 #include "Systems/Scene/Deferred/CopyRenderer.hpp"
+#include "Systems/Scene/Particles/ParticleRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
 
@@ -83,7 +84,7 @@ namespace Desert::Graphic
         void SubmitTerrain( const glm::mat4& transform, float size, int resolution, float heightScale,
                             float noiseFrequency, int seed, const glm::vec3& layerModes = glm::vec3( 0.0f ),
                             Image2D* splatMap = nullptr, const glm::vec4& grassParams = glm::vec4( 0.0f ),
-                            const glm::vec3&          grassTint = glm::vec3( 1.0f ),
+                            const glm::vec3&         grassTint = glm::vec3( 1.0f ),
                             const MaterialOverrides& overrides = {} );
 
         // Submit a mesh drawn with a generic data-driven material (MaterialComponent with a non-PBR shader).
@@ -103,7 +104,7 @@ namespace Desert::Graphic
         void SubmitInstancedMesh( const Mesh* mesh, MaterialInstance* material,
                                   const std::vector<glm::mat4>* transforms );
 
-        const Environment                 CreateEnvironment( const Common::Filepath& filepath );
+        const Environment CreateEnvironment( const Common::Filepath& filepath );
         void SetEnvironment( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );
 
         // Selection-outline (Jump Flood) appearance. Editor-only: pushed each frame from EditorPreferences
@@ -145,7 +146,7 @@ namespace Desert::Graphic
         std::shared_ptr<Image2D> GetShadowCascadeImage( uint32_t cascade );
         uint32_t                 GetShadowCascadeCount();
 
-        const std::shared_ptr<Image2D>     GetFinalImage();
+        const std::shared_ptr<Image2D>      GetFinalImage();
         const std::shared_ptr<Framebuffer>& GetTargetFramebuffer() const
         {
             return m_TargetFramebuffer;
@@ -233,22 +234,22 @@ namespace Desert::Graphic
         glm::vec4 m_GrassInteractor{ 0.0f };
 
         // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
-        Core::AntiAliasingMode m_AAMode      = Core::AntiAliasingMode::FXAA;
+        Core::AntiAliasingMode m_AAMode       = Core::AntiAliasingMode::FXAA;
         bool                   m_BloomEnabled = false;
         bool                   m_ScenePlaying = false; // set per frame in BeginScene (hides authoring aids)
 
     private:
-        std::shared_ptr<Framebuffer>                                    m_TargetFramebuffer;
-        std::shared_ptr<Framebuffer>                                    m_GBuffer; // deferred G-buffer (MRT)
-        std::shared_ptr<Framebuffer>                                    m_SSAOBuffer; // deferred SSAO (AO factor)
-        std::shared_ptr<Framebuffer>                                    m_SceneColorCopy; // scene snapshot for glass refraction
+        std::shared_ptr<Framebuffer> m_TargetFramebuffer;
+        std::shared_ptr<Framebuffer> m_GBuffer;                    // deferred G-buffer (MRT)
+        std::shared_ptr<Framebuffer> m_SSAOBuffer;                 // deferred SSAO (AO factor)
+        std::shared_ptr<Framebuffer> m_SceneColorCopy;             // scene snapshot for glass refraction
         Core::RenderPath m_RenderPath = Core::RenderPath::Forward; // refreshed from SceneSettings each BeginScene
         Core::DeferredDebugMode m_DeferredDebug = Core::DeferredDebugMode::Off; // G-buffer debug view (deferred)
-        bool m_EnableSSAO = true; // deferred SSAO pass on/off (refreshed from SceneSettings)
-        bool m_EnableSSGI = true; // deferred SSGI (indirect bounce) on/off
-        RenderGraphBuilder                                              m_RenderGraphBuilder;
+        bool                    m_EnableSSAO    = true; // deferred SSAO pass on/off (refreshed from SceneSettings)
+        bool                    m_EnableSSGI    = true; // deferred SSGI (indirect bounce) on/off
+        RenderGraphBuilder      m_RenderGraphBuilder;
         std::unordered_map<std::string, std::shared_ptr<IRenderSystem>> m_RenderSystems;
-        PipelineCache                                                  m_PipelineCache;
+        PipelineCache                                                   m_PipelineCache;
 
     private:
         template <typename System, typename... Args>

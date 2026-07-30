@@ -34,7 +34,6 @@ namespace Desert::Graphic
         const auto width  = window ? window->GetWidth() : 1280;
         const auto height = window ? window->GetHeight() : 720;
 
-
         // Framebuffer. MSAA applies HERE only: every scene system renders into this target at N
         // samples and the render pass resolves to single-sample for the post stack. Read once —
         // pipelines bake their sample count, so a change applies on the next start.
@@ -58,9 +57,12 @@ namespace Desert::Graphic
         // reconstruction, which is error-prone under the GL-on-Vulkan depth conventions); shared depth.
         FramebufferSpecification gbufferSpec;
         gbufferSpec.DebugName = "GBuffer";
-        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );  // GBufferA Albedo+Metallic
-        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // GBufferB Normal+Roughness
-        gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // GBufferC WorldPosition.xyz
+        gbufferSpec.Attachments.Attachments.push_back(
+             Core::Formats::ImageFormat::RGBA8F ); // GBufferA Albedo+Metallic
+        gbufferSpec.Attachments.Attachments.push_back(
+             Core::Formats::ImageFormat::RGBA32F ); // GBufferB Normal+Roughness
+        gbufferSpec.Attachments.Attachments.push_back(
+             Core::Formats::ImageFormat::RGBA32F ); // GBufferC WorldPosition.xyz
         gbufferSpec.Attachments.Attachments.push_back(
              Core::Formats::ImageFormat::RGBA32F ); // GBufferEmissive (HDR self-illum)
         gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
@@ -110,8 +112,8 @@ namespace Desert::Graphic
         jumpFloodSystem->SetMaskFramebuffer( meshSystem->GetSilhouetteMaskFramebuffer() );
 
         // Tonemap consumes the Jump Flood output (the outlined scene).
-        RegisterSystem<System::TonemapRenderer>( "TonemapSystem", this,
-                                                 jumpFloodSystem->GetSystemFramebuffer(), m_RenderGraphBuilder );
+        RegisterSystem<System::TonemapRenderer>( "TonemapSystem", this, jumpFloodSystem->GetSystemFramebuffer(),
+                                                 m_RenderGraphBuilder );
         const auto& tonemapSystem = SP_CAST( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
         if ( !tonemapSystem->Initialize() )
             DESERT_VERIFY( false );
@@ -128,23 +130,31 @@ namespace Desert::Graphic
         if ( !SP_CAST( System::SSAORenderer, m_RenderSystems["SSAOSystem"] )->Initialize() )
             LOG_WARN( "[SceneRenderer] SSAO system unavailable." );
 
-        RegisterSystem<System::CopyRenderer>( "SceneColorCopySystem", this, m_SceneColorCopy, m_RenderGraphBuilder );
+        RegisterSystem<System::CopyRenderer>( "SceneColorCopySystem", this, m_SceneColorCopy,
+                                              m_RenderGraphBuilder );
         if ( !SP_CAST( System::CopyRenderer, m_RenderSystems["SceneColorCopySystem"] )->Initialize() )
             LOG_WARN( "[SceneRenderer] Scene-color copy system unavailable (glass refraction off)." );
+
+        // GPU particles: compute-simulated billboards drawn in the Transparency phase. Non-fatal.
+        RegisterSystem<System::ParticleRenderer>( "ParticleSystem", this, m_TargetFramebuffer,
+                                                  m_RenderGraphBuilder );
+        if ( !SP_CAST( System::ParticleRenderer, m_RenderSystems["ParticleSystem"] )->Initialize() )
+            LOG_WARN( "[SceneRenderer] Particle system unavailable." );
 
         // Deferred lighting (fullscreen G-buffer shade + debug view). Runs in the manual chain, only when
         // RenderPath == Deferred. Non-fatal if it fails to init (deferred path is simply unavailable).
         RegisterSystem<System::DeferredLightingRenderer>( "DeferredLightingSystem", this, m_TargetFramebuffer,
                                                           m_RenderGraphBuilder );
         if ( !SP_CAST( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
-                  ->Initialize() )
+                   ->Initialize() )
             LOG_WARN( "[SceneRenderer] Deferred lighting system unavailable." );
         tonemapSystem->SetBloomImage( bloomSystem->GetBloomImage() );
 
         // Auto-exposure measures the HDR scene luminance into a 1x1 buffer that tonemap reads.
         RegisterSystem<System::AutoExposureRenderer>( "AutoExposureSystem", this, m_TargetFramebuffer,
                                                       m_RenderGraphBuilder );
-        const auto& autoExposureSystem = SP_CAST( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
+        const auto& autoExposureSystem =
+             SP_CAST( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
         if ( !autoExposureSystem->Initialize() )
             DESERT_VERIFY( false );
         tonemapSystem->SetAutoExposureImage( autoExposureSystem->GetAdaptedLuminanceImage() );
@@ -175,12 +185,12 @@ namespace Desert::Graphic
 
         m_ScenePlaying = scene.IsPlaying(); // grid & other authoring aids hide while the game runs
 
-        const auto& sceneSettings    = scene.GetSettings();
+        const auto& sceneSettings = scene.GetSettings();
         // Selection-outline appearance is NOT read from the scene: it's an editor-only viewport aid pushed
         // each frame via SetOutlineSettings (from EditorPreferences). Runtime builds never push -> the
         // JumpFlood system keeps its defaults, and MeshRenderer::HasOutline() gates whether it draws.
 
-        m_AAMode       = sceneSettings.AA;
+        m_AAMode = sceneSettings.AA;
         // Wireframe is a FORWARD-only debug view (the deferred G-buffer pipeline has no wireframe
         // variant — that's why turning it on in the default Deferred path did nothing). Force forward
         // while it's active so the wireframe pipeline is actually used and the grid composites over it.
@@ -193,13 +203,12 @@ namespace Desert::Graphic
         // clouds/hair/cloth next) reads one coherent direction + strength via GetWind(). Direction is a
         // compass heading (degrees) on the XZ plane; Time is monotonic seconds so the sway keeps animating.
         {
-            const float rad = glm::radians( sceneSettings.WindDirection );
+            const float       rad       = glm::radians( sceneSettings.WindDirection );
             static const auto windStart = std::chrono::steady_clock::now();
-            m_Wind.Direction  = glm::vec2( std::cos( rad ), std::sin( rad ) );
-            m_Wind.Strength   = sceneSettings.WindStrength;
-            m_Wind.Turbulence = sceneSettings.WindTurbulence;
-            m_Wind.Time =
-                 std::chrono::duration<float>( std::chrono::steady_clock::now() - windStart ).count();
+            m_Wind.Direction            = glm::vec2( std::cos( rad ), std::sin( rad ) );
+            m_Wind.Strength             = sceneSettings.WindStrength;
+            m_Wind.Turbulence           = sceneSettings.WindTurbulence;
+            m_Wind.Time = std::chrono::duration<float>( std::chrono::steady_clock::now() - windStart ).count();
         }
 
         // Grass interactor: the player character bends grass away as it moves. The shader takes ONE influencer,
@@ -209,7 +218,7 @@ namespace Desert::Graphic
             constexpr float kGrassInteractRadius = 1.5f;
             m_GrassInteractor                    = glm::vec4( 0.0f );
             const auto& reg                      = scene.GetRegistry();
-            auto chars = reg.view<const ECS::CharacterControllerComponent, const ECS::TransformComponent>();
+            auto        chars = reg.view<const ECS::CharacterControllerComponent, const ECS::TransformComponent>();
             for ( auto e : chars )
             {
                 const auto& tr    = chars.get<const ECS::TransformComponent>( e );
@@ -217,6 +226,10 @@ namespace Desert::Graphic
                 break;
             }
         }
+
+        // GPU particles: snapshot the scene's emitters (CPU) here; the compute sim is dispatched in OnUpdate
+        // before the render graph, and the billboard pass draws in the Transparency phase.
+        UNIQUE_GET_AS( System::ParticleRenderer, m_RenderSystems["ParticleSystem"] )->PrepareFrame( scene );
 
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetParams( sceneSettings.Exposure, sceneSettings.Gamma );
@@ -235,8 +248,8 @@ namespace Desert::Graphic
 
         // Global texture filter: push into RenderConfig (read by sampler creation). On an actual change,
         // recreate all image samplers so the new filter applies live (no reload).
-        const int desiredFilter = static_cast<int>( sceneSettings.TextureFilterMode );
-        const int desiredAniso  = sceneSettings.Anisotropy;
+        const int  desiredFilter = static_cast<int>( sceneSettings.TextureFilterMode );
+        const int  desiredAniso  = sceneSettings.Anisotropy;
         const bool filterChanged = RenderConfig::TextureFilter.exchange( desiredFilter ) != desiredFilter;
         const bool anisoChanged  = RenderConfig::AnisotropyLevel.exchange( desiredAniso ) != desiredAniso;
         if ( filterChanged || anisoChanged )
@@ -292,6 +305,13 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )->CullGrassInFrame();
         }
 
+        // Particle simulation compute (outside any render pass) BEFORE the graph records the billboard draw,
+        // so the freshly-integrated particle buffer is ready + visible to the vertex stage.
+        {
+            DESERT_PROFILE_SCOPE( "Particles: SimulateInFrame" );
+            UNIQUE_GET_AS( System::ParticleRenderer, m_RenderSystems["ParticleSystem"] )->SimulateInFrame();
+        }
+
         {
             DESERT_PROFILE_SCOPE( "ExecuteRenderGraph" );
             ExecuteRenderGraph();
@@ -343,15 +363,15 @@ namespace Desert::Graphic
                 shadow.CascadeWorldPerTexel = meshRenderer->GetCascadeWorldPerTexel();
                 for ( uint32_t c = 0; c < shadow.Count && c < 4u; ++c )
                 {
-                    const auto img    = meshRenderer->GetCascadeShadowImage( c );
+                    const auto img        = meshRenderer->GetCascadeShadowImage( c );
                     shadow.CascadeMaps[c] = img ? img.get() : nullptr;
                 }
             }
 
             UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
                  ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
-                            GetPointLights(), GetSpotLights(), shadow, aoImage,
-                            m_EnableSSGI ? 2.0f : 0.0f, m_EnableSSAO );
+                            GetPointLights(), GetSpotLights(), shadow, aoImage, m_EnableSSGI ? 2.0f : 0.0f,
+                            m_EnableSSAO );
 
             // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
             // the deferred composite (before the glass snapshot so glass refracts them too).
@@ -393,7 +413,8 @@ namespace Desert::Graphic
         // the silhouette mask): Jump Flood outline -> Tonemap.
         {
             DESERT_PROFILE_SCOPE( "PostFX: JumpFlood" );
-            const auto& jfa = UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
+            const auto& jfa =
+                 UNIQUE_GET_AS( System::JumpFloodOutlineRenderer, m_RenderSystems["JumpFloodSystem"] );
             // Skip the JFA step passes when nothing is outlined (sync is handled by render-pass layouts +
             // the EndRenderPass barrier, not by the steps — see JumpFloodOutlineRenderer::Execute).
             jfa->SetOutlineActive(
@@ -404,7 +425,8 @@ namespace Desert::Graphic
         // Eye adaptation: measure scene luminance into the 1x1 buffer, then point tonemap at the latest
         // (the ping-pong target alternates each frame, so the reference must be refreshed here).
         {
-            const auto& autoExp = UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
+            const auto& autoExp =
+                 UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] );
             autoExp->Execute();
             UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
                  ->SetAutoExposureImage( autoExp->GetAdaptedLuminanceImage() );
@@ -469,8 +491,8 @@ namespace Desert::Graphic
             m_SceneColorCopy->Resize( width, height );
 
         // Keep the post-process chain framebuffers in lock-step with the scene target.
-        if ( const auto& maskFb =
-                  UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )->GetSilhouetteMaskFramebuffer() )
+        if ( const auto& maskFb = UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
+                                       ->GetSilhouetteMaskFramebuffer() )
             maskFb->Resize( width, height );
 
         if ( const auto& overdrawFb =
@@ -522,12 +544,9 @@ namespace Desert::Graphic
                              .ReceiveShadows  = extra.ReceiveShadows } );
     }
 
-    void SceneRenderer::SubmitTerrain( const glm::mat4& transform, float size, int resolution,
-                                       float heightScale, float noiseFrequency, int seed,
-                                       const glm::vec3&                                      layerModes,
-                                       Image2D*                                              splatMap,
-                                       const glm::vec4&                                      grassParams,
-                                       const glm::vec3&         grassTint,
+    void SceneRenderer::SubmitTerrain( const glm::mat4& transform, float size, int resolution, float heightScale,
+                                       float noiseFrequency, int seed, const glm::vec3& layerModes,
+                                       Image2D* splatMap, const glm::vec4& grassParams, const glm::vec3& grassTint,
                                        const MaterialOverrides& overrides )
     {
         UNIQUE_GET_AS( System::TerrainRenderer, m_RenderSystems["TerrainSystem"] )
@@ -559,9 +578,8 @@ namespace Desert::Graphic
                                     .DirectTextureSampler = directTextureSampler } );
     }
 
-    void SceneRenderer::SubmitSlotMaterialMesh( const Mesh* mesh, const glm::mat4& transform,
-                                                Material* material, uint64_t visibleSubmeshMask,
-                                                bool outlined )
+    void SceneRenderer::SubmitSlotMaterialMesh( const Mesh* mesh, const glm::mat4& transform, Material* material,
+                                                uint64_t visibleSubmeshMask, bool outlined )
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SubmitGenericMesh( { .Mesh               = const_cast<Mesh*>( mesh ),
@@ -576,7 +594,7 @@ namespace Desert::Graphic
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SubmitInstancedMesh( { .Mesh       = static_cast<Desert::StaticMesh*>( const_cast<Mesh*>( mesh ) ),
-                                      .Material    = material,
+                                      .Material   = material,
                                       .Transforms = transforms } );
     }
 
@@ -635,7 +653,7 @@ namespace Desert::Graphic
         // FXAA/SMAA write their own framebuffer downstream of tonemap; otherwise tonemap output IS final.
         const char* finalSystem = ( m_AAMode == Core::AntiAliasingMode::FXAA )   ? "FXAASystem"
                                   : ( m_AAMode == Core::AntiAliasingMode::SMAA ) ? "SMAASystem"
-                                                                                : "TonemapSystem";
+                                                                                 : "TonemapSystem";
 
         return std::static_pointer_cast<System::RenderSystem>( m_RenderSystems[finalSystem] )
              ->GetSystemFramebuffer()
@@ -676,7 +694,7 @@ namespace Desert::Graphic
                      m_Spec.Name, m_Spec.Phase,
                      [this]()
                      {
-                         const auto& target = m_Renderer->GetTargetFramebuffer();
+                         const auto&         target = m_Renderer->GetTargetFramebuffer();
                          ExternalPassContext ctx;
                          ctx.Camera       = m_Renderer->GetMainCamera();
                          ctx.Target       = target.get();
@@ -704,7 +722,7 @@ namespace Desert::Graphic
     void SceneRenderer::RegisterExternalPass( ExternalPassSpecification&& spec )
     {
         DESERT_VERIFY( !spec.Name.empty() && spec.Execute );
-        auto key = ExternalSystemKey( spec.Name );
+        auto key             = ExternalSystemKey( spec.Name );
         m_RenderSystems[key] = std::make_shared<ExternalPassSystem>( this, std::move( spec ) );
         RebuildRenderGraph();
     }
