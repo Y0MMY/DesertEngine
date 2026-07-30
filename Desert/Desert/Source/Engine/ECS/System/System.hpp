@@ -1,6 +1,7 @@
 #pragma once
 
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
 #include <Common/Core/Timestep.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Render/RenderCommandBuffer.hpp>
@@ -30,6 +31,13 @@ namespace Desert::ECS
         virtual bool CanRunParallel() const
         {
             return false;
+        }
+
+        // Per-frame active-camera snapshot pushed by the Scene on the main thread BEFORE the (possibly
+        // parallel) system group runs, so camera-relative systems read it race-free. Default no-op —
+        // only systems that lay out geometry relative to the viewer (e.g. billboarded text) override it.
+        virtual void SetCameraSnapshot( const glm::mat4& /*view*/, const glm::vec3& /*position*/ )
+        {
         }
     };
 

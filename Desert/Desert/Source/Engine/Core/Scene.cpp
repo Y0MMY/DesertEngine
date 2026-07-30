@@ -184,6 +184,17 @@ namespace Desert::Core
         const Common::Timestep gameplayTs =
              ( m_State == SceneState::Play ) ? ts : Common::Timestep( 0.0f );
 
+        // Push the active-camera snapshot to systems that lay out camera-relative geometry (billboarded
+        // text). Done on the main thread before ExecuteSystems so the parallel system group reads it
+        // race-free (SetCameraSnapshot is a no-op for every other system).
+        if ( m_ActiveCamera )
+        {
+            const glm::mat4 camView = m_ActiveCamera->GetViewMatrix();
+            const glm::vec3 camPos  = m_ActiveCamera->GetPosition();
+            for ( auto& system : m_Systems )
+                system->SetCameraSnapshot( camView, camPos );
+        }
+
         {
             DESERT_PROFILE_SCOPE( "ECS Systems" );
             ExecuteSystems( gameplayTs );

@@ -21,6 +21,13 @@ namespace Desert::ECS
     public:
         bool CanRunParallel() const override { return true; }
 
+        // Snapshot the active camera's view matrix once per frame (main thread) so the parallel Update
+        // can orient billboarded text toward the viewer without touching shared state.
+        void SetCameraSnapshot( const glm::mat4& view, const glm::vec3& /*position*/ ) override
+        {
+            m_CameraView = view;
+        }
+
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& ts ) override
         {
@@ -64,6 +71,25 @@ namespace Desert::ECS
                                   registry.get<TransformComponent>( current ).GetTransform() * worldTransform;
                      }
 
+                     // Billboard: keep the world translation + scale, but swap the orientation for a
+                     // camera-facing basis so the glyph plane squarely faces the viewer from any angle.
+                     // The mesh was authored for the default camera (at +Z looking -Z), whose world basis
+                     // is exactly the view-matrix rows: row0 = right, row1 = up, row2 = toward-viewer. So
+                     // local +X→right, +Y→up, +Z→row2 reproduces the head-on layout at any camera pose.
+                     if ( text.Billboard )
+                     {
+                         const glm::vec3 translation = glm::vec3( worldTransform[3] );
+                         const glm::vec3 scale( glm::length( glm::vec3( worldTransform[0] ) ),
+                                                glm::length( glm::vec3( worldTransform[1] ) ),
+                                                glm::length( glm::vec3( worldTransform[2] ) ) );
+                         const glm::vec3 right( m_CameraView[0][0], m_CameraView[1][0], m_CameraView[2][0] );
+                         const glm::vec3 up( m_CameraView[0][1], m_CameraView[1][1], m_CameraView[2][1] );
+                         const glm::vec3 toViewer( m_CameraView[0][2], m_CameraView[1][2], m_CameraView[2][2] );
+                         worldTransform =
+                              glm::mat4( glm::vec4( right * scale.x, 0.0f ), glm::vec4( up * scale.y, 0.0f ),
+                                         glm::vec4( toViewer * scale.z, 0.0f ), glm::vec4( translation, 1.0f ) );
+                     }
+
                      Graphic::MaterialOverrides overrides;
                      overrides.Params.emplace_back( "TextColor", text.Color );
                      overrides.Params.emplace_back( "EmissiveIntensity",
@@ -77,6 +103,8 @@ namespace Desert::ECS
         }
 
     private:
+        glm::mat4 m_CameraView{ 1.0f }; // active-camera view matrix snapshot (see SetCameraSnapshot)
+
         static std::shared_ptr<DynamicMesh> BuildTextMesh( const TextComponent& text,
                                                            const Text::BakedFont& font )
         {
