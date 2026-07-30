@@ -1189,7 +1189,8 @@ namespace Desert::Graphic::System
 
         // Full camera-frustum world corners (GL NDC z in [-1,1]). Each near corner shares a ray from the
         // eye with its matching far corner, so a cascade slice = lerp(near,far) by the view-depth fraction.
-        const glm::mat4 invVP = glm::inverse( camera->GetProjectionMatrix() * camera->GetViewMatrix() );
+        const glm::mat4 camProj = camera->GetProjectionMatrix();
+        const glm::mat4 invVP   = glm::inverse( camProj * camera->GetViewMatrix() );
         glm::vec3       nearCorners[4];
         glm::vec3       farCorners[4];
         int             ci = 0;
@@ -1218,9 +1219,16 @@ namespace Desert::Graphic::System
         const glm::vec3 farRingCenter = 0.25f * ( farCorners[0] + farCorners[1] + farCorners[2] + farCorners[3] );
         const glm::vec3 viewFwd       = glm::normalize( farRingCenter - nearRingCenter );
         const glm::vec3 eye           = nearRingCenter - viewFwd * camNear; // frustum apex
-        // k = (corner distance from the view axis) / (axis distance from the eye) — constant per frustum.
-        const float kSlope = glm::length( farCorners[0] - farRingCenter ) / glm::max( camFar, 1e-4f );
-        const float k2     = kSlope * kSlope;
+
+        // k = frustum angular half-slope (corner distance from the view axis per unit axis distance). Taken
+        // from the PROJECTION MATRIX, not the unprojected corners: the corner method carries orientation-
+        // varying FP noise, so the quantized radius (and thus the texel size) wobbles as the camera turns
+        // and the texel-snap can no longer hide it -> the shadow jitters. For a symmetric perspective proj,
+        // tan(fovY/2) = 1/P[1][1] and aspect = P[1][1]/P[0][0], both rotation-independent.
+        const float tanHalfY = 1.0f / glm::max( std::abs( camProj[1][1] ), 1e-6f );
+        const float aspect   = std::abs( camProj[1][1] / camProj[0][0] );
+        const float kSlope   = tanHalfY * std::sqrt( 1.0f + aspect * aspect );
+        const float k2       = kSlope * kSlope;
 
         float lastFar = camNear;
         for ( uint32_t c = 0; c < kNumCascades; ++c )
