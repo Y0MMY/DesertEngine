@@ -155,7 +155,7 @@ namespace Desert::Editor
          { FileType::Script, ICON_MDI_LANGUAGE_LUA },
          { FileType::Shader, ICON_MDI_IMAGE_FILTER_BLACK_WHITE },
          { FileType::Texture, ICON_MDI_FILE_IMAGE },
-         { FileType::Font, ICON_MDI_CARD_TEXT },
+         { FileType::Font, ICON_MDI_FORMAT_FONT },
          { FileType::Cubemap, ICON_MDI_IMAGE_FILTER_HDR },
          { FileType::Model, ICON_MDI_VECTOR_POLYGON },
          { FileType::Audio, ICON_MDI_MICROPHONE },
@@ -1219,6 +1219,8 @@ namespace Desert::Editor
                 type = ::Desert::Editor::DragPayloads::MaterialAsset;
             else if ( entry.Type == FileType::Model )
                 type = ::Desert::Editor::DragPayloads::MeshAsset;
+            else if ( entry.Type == FileType::Font )
+                type = ::Desert::Editor::DragPayloads::FontFile;
 
             ImGui::SetDragDropPayload( type, assetPath.c_str(), assetPath.size() + 1 );
 

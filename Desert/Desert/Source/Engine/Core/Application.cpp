@@ -131,6 +131,13 @@ namespace Desert::Engine
                 m_Window->PresentFinalImage();
             }
         }
+
+        // Window closed: detach layers (top-down) so each releases its resources and clears its
+        // session state — e.g. EditorLayer::OnDetach removes the crash-recovery lock. Nothing else
+        // calls OnDetach (the LayerStack dtor is empty), so without this a normal quit looked like
+        // an unclean exit and the recovery prompt reappeared on every launch.
+        for ( auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )
+            ( *--it )->OnDetach();
     }
 
     void Application::Init()

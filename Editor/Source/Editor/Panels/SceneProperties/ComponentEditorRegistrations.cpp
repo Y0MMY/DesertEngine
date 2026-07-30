@@ -26,6 +26,7 @@
 #include <Engine/Core/Serialize/ComponentRegistry.hpp>
 #include <Engine/Scripting/ScriptEngine.hpp>
 #include <Common/Utilities/FileSystem.hpp>
+#include <Common/Core/Constants.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -618,10 +619,46 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
               if ( ImGui::InputTextMultiline( "Text", buf, sizeof( buf ), ImVec2( 0, 60 ) ) )
                   tc.Text = buf;
 
-              char fontBuf[512] = { 0 };
-              std::strncpy( fontBuf, tc.FontPath.c_str(), sizeof( fontBuf ) - 1 );
-              if ( ImGui::InputText( "Font (.ttf)", fontBuf, sizeof( fontBuf ) ) )
-                  tc.FontPath = fontBuf;
+              // Font: a dropdown of the .ttf files discovered under Resources/Fonts (scanned once) plus a
+              // drop target for dragging a .ttf from the Content Browser. FontPath stays a plain string —
+              // it just gets CHOSEN from real files instead of typed by hand.
+              static std::vector<std::string> s_Fonts;
+              static bool                      s_Scanned = false;
+              if ( !s_Scanned )
+              {
+                  s_Scanned = true;
+                  std::error_code ec;
+                  for ( const auto& de : std::filesystem::recursive_directory_iterator(
+                            Common::Constants::Path::FONTS_PATH, ec ) )
+                      if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".ttf" )
+                          s_Fonts.push_back( de.path().generic_string() );
+                  std::sort( s_Fonts.begin(), s_Fonts.end() );
+              }
+
+              const std::string preview =
+                   tc.FontPath.empty() ? "<none>" : std::filesystem::path( tc.FontPath ).stem().string();
+              if ( ImGui::BeginCombo( "Font", preview.c_str() ) )
+              {
+                  for ( const auto& f : s_Fonts )
+                  {
+                      const bool selected = ( f == tc.FontPath );
+                      if ( ImGui::Selectable( std::filesystem::path( f ).stem().string().c_str(), selected ) )
+                          tc.FontPath = f;
+                      if ( selected )
+                          ImGui::SetItemDefaultFocus();
+                  }
+                  ImGui::EndCombo();
+              }
+              if ( ImGui::BeginDragDropTarget() )
+              {
+                  if ( const ImGuiPayload* pl =
+                            ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::FontFile ) )
+                      tc.FontPath = std::string( static_cast<const char*>( pl->Data ),
+                                                 pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                  ImGui::EndDragDropTarget();
+              }
+              if ( ImGui::IsItemHovered() )
+                  ImGui::SetTooltip( "Pick a font or drag a .ttf here from the Content Browser" );
 
               ImGui::ColorEdit4( "Color", &tc.Color.x );
               ImGui::DragFloat( "Size", &tc.Size, 0.01f, 0.01f, 100.0f, "%.2f" );

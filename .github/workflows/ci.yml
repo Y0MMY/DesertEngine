@@ -70,8 +70,14 @@ jobs:
           UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
         run: ./scripts/MacOS/RunTests.sh "$PWD" Debug
 
+  # The full Debug+Release build, test run, shader lint and packaging only run AFTER both gates
+  # pass — no point spending a 2x macOS matrix build on code that fails formatting or trips a
+  # sanitizer. (format = static; sanitizers = DYNAMIC: it must build instrumented and RUN the
+  # suite to catch memory/UB at runtime, so it necessarily compiles + tests — that is the check,
+  # not a duplicate of this job. This job additionally covers Release + shader lint + the artifact.)
   macos:
     name: macOS ${{ matrix.config }}
+    needs: [ format, sanitizers ]
     runs-on: macos-14 # Apple Silicon (arm64) — matches the supported platform
     timeout-minutes: 60
     strategy:

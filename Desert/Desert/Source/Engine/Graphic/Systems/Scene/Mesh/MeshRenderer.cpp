@@ -1233,14 +1233,18 @@ namespace Desert::Graphic::System
             const glm::mat4 view = glm::lookAt( center - lightDir * ( radius * 2.0f ), center, up );
             glm::mat4       proj = glm::orthoRH_ZO( -radius, radius, -radius, radius, 0.1f, radius * 4.0f );
 
-            // Texel-snap stabilization: round the cascade's origin to whole shadow-map texels in light
-            // space so the sampling grid doesn't crawl/shimmer as the camera moves. (Microsoft CSM trick.)
-            glm::mat4       vp          = proj * view;
-            const float     halfRes     = static_cast<float>( kShadowMapSize ) * 0.5f;
-            glm::vec4       originShadow = vp * glm::vec4( 0.0f, 0.0f, 0.0f, 1.0f );
-            originShadow *= halfRes;
-            glm::vec2       rounded( std::round( originShadow.x ), std::round( originShadow.y ) );
-            glm::vec2       offset = ( rounded - glm::vec2( originShadow ) ) / halfRes;
+            // Texel-snap stabilization: quantize the cascade CENTRE to whole shadow-map texels in
+            // light space so the sampling grid stays world-locked and doesn't crawl/shimmer as the
+            // camera moves. (Microsoft CSM trick.) Snapping the centre (which sits near NDC 0) — not
+            // the world origin, which projects to large light-space coords far from the cascade —
+            // keeps the rounding precise; the world-origin variant loses bits and still shimmers when
+            // the cascade is away from (0,0,0), which is exactly the "walk up to an object" case.
+            glm::mat4       vp           = proj * view;
+            const float     halfRes      = static_cast<float>( kShadowMapSize ) * 0.5f;
+            glm::vec4       centerShadow = vp * glm::vec4( center, 1.0f );
+            centerShadow *= halfRes;
+            glm::vec2       rounded( std::round( centerShadow.x ), std::round( centerShadow.y ) );
+            glm::vec2       offset = ( rounded - glm::vec2( centerShadow ) ) / halfRes;
             proj[3][0] += offset.x;
             proj[3][1] += offset.y;
             m_CascadeVP[c] = proj * view;

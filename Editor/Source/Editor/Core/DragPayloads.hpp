@@ -9,6 +9,7 @@ namespace Desert::Editor::DragPayloads
     inline constexpr const char* MaterialAsset       = "MATERIAL_ASSET";
     inline constexpr const char* TextureAsset        = "TEXTURE_ASSET";
     inline constexpr const char* SkyboxAsset         = "SKYBOX_ASSET";
+    inline constexpr const char* FontFile            = "FONT_FILE";
     inline constexpr const char* PrefabFile          = "PREFAB_FILE";
     inline constexpr const char* AssetFile           = "AssetFile";
     inline constexpr const char* EntityRelationship  = "ENTITY_RELATIONSHIP";
