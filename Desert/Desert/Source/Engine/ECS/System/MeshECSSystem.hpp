@@ -460,8 +460,15 @@ namespace Desert::ECS
                          // Bone matrices: animated pose if an Animator exists, else bind pose (identity = the
                          // skeleton's rest shape, which stays correct after Phase-2 rest-pose edits since
                          // OffsetMatrix is recomputed alongside LocalBindTransform).
+                         // Skeleton Edit (editor) pushes a bind-pose-preview UUID: while set, this entity
+                         // renders in its BIND pose so bone-gizmo edits to LocalBindTransform are visible (an
+                         // auto-playing clip would otherwise override them with the animated pose).
+                         const bool bindPreview = registry.has<UUIDComponent>( entity ) &&
+                                                  Runtime::SelectionContext::IsBindPosePreview(
+                                                       registry.get<UUIDComponent>( entity ).UUID );
+
                          std::vector<glm::mat4> boneMatrices;
-                         if ( registry.has<AnimationComponent>( entity ) )
+                         if ( !bindPreview && registry.has<AnimationComponent>( entity ) )
                          {
                              const auto& anim = registry.get<AnimationComponent>( entity );
                              if ( anim.Animator )

@@ -24,6 +24,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/SelectionContext.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Graphic/Image.hpp>
@@ -126,6 +127,13 @@ namespace Desert::Editor
         // Skeleton edit only makes sense in Select mode on a skinned mesh.
         if ( !canEditSkeleton || Core::ViewportMode::Get() != Core::EditorMode::Select )
             Core::SkeletonEditMode::SetActive( false );
+
+        // While Skeleton Edit is active, ask the engine to render the selected mesh in BIND pose so
+        // bone-gizmo edits are visible (an auto-playing clip would otherwise override them).
+        if ( Core::SkeletonEditMode::IsActive() )
+            Runtime::SelectionContext::SetBindPosePreview( Core::SelectionManager::GetSelected() );
+        else
+            Runtime::SelectionContext::SetBindPosePreview( std::nullopt );
 
         ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 4.0f );
         ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 4.0f, 4.0f ) );

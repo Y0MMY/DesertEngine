@@ -53,7 +53,20 @@ namespace Desert::Runtime
             s_Selected.clear();
         }
 
+        // "Render this entity in its BIND pose, ignoring any animator." Pushed by the editor while Skeleton
+        // Edit is active so bone-gizmo edits to the rest pose are actually visible — an auto-playing clip
+        // would otherwise override them (MeshECSSystem prefers the animator pose). nullopt = normal render.
+        static void SetBindPosePreview( const std::optional<Common::UUID>& uuid )
+        {
+            s_BindPosePreview = uuid;
+        }
+        static bool IsBindPosePreview( const Common::UUID& uuid )
+        {
+            return s_BindPosePreview.has_value() && *s_BindPosePreview == uuid;
+        }
+
     private:
-        static inline std::vector<Common::UUID> s_Selected;
+        static inline std::vector<Common::UUID>   s_Selected;
+        static inline std::optional<Common::UUID> s_BindPosePreview;
     };
 } // namespace Desert::Runtime

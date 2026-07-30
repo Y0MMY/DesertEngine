@@ -458,13 +458,10 @@ namespace Desert::Editor
         // — not the static bind pose. The render skins with BoneMatrices[i] = globalPosed_i * OffsetMatrix_i,
         // so the bone's posed global = BoneMatrices[i] * inverse(OffsetMatrix_i) and its head = that [3]. When
         // there is no Animator, fall back to the bind chain (== what MeshECSSystem feeds as the bind pose).
+        // Skeleton Edit renders the mesh in BIND pose (SelectionContext bind-preview), so overlay the bones
+        // in bind pose too — an animated overlay would sit off the (bind) mesh and the gizmo. Kept nullptr so
+        // the head resolve below uses the bind chain.
         const std::vector<glm::mat4>* poseMatrices = nullptr;
-        if ( entity.HasComponent<ECS::AnimationComponent>() )
-        {
-            const auto& anim = entity.GetComponent<ECS::AnimationComponent>();
-            if ( anim.Animator )
-                poseMatrices = &anim.Animator->GetPose().BoneMatrices;
-        }
 
         std::vector<glm::vec3> heads( bones.size() );
         for ( size_t i = 0; i < bones.size(); ++i )
