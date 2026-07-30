@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <array>
+#include <optional>
 #include <string>
 #include <glm/glm.hpp>
 #include <Common/Core/Math/AABB.hpp>

@@ -4,6 +4,7 @@
 #include "Assimp/AssimpImporter.hpp"
 #include "Blend/BlendImporter.hpp"
 #include "CookPaths.hpp"
+#include "LODFold.hpp"
 
 #include <Common/Core/Constants.hpp>
 
@@ -188,6 +189,9 @@ namespace Desert::Editor
                 return;
             for ( auto& sm : data.Submeshes )
             {
+                if ( !sm.LODs.empty() )
+                    continue; // author LODs already folded in (FoldExternalLODMeshes) -> don't regenerate
+
                 const uint32_t triCount = sm.IndexCount / 3;
                 if ( triCount < 8 || sm.VertexCount == 0 ||
                      sm.VertexOffset + sm.VertexCount > data.StaticVertices.size() )
@@ -234,7 +238,8 @@ namespace Desert::Editor
     {
         // Mutable copy so we can bake the LOD chain into it before writing.
         Desert::Assets::Serialization::MeshAssetData data = dataIn;
-        BakeStaticMeshLODs( data );
+        FoldExternalLODMeshes( data ); // author "<mesh>_LOD<n>" siblings -> SubmeshData.LODs
+        BakeStaticMeshLODs( data );    // generate LODs for submeshes that still have none
 
         std::filesystem::path cookedPath;
         if ( data.IsSkinned )
