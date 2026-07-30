@@ -12,8 +12,55 @@ namespace Desert::Core
     // ─── Camera (base) ──────────────────────────────────────────────────────────
     void Camera::UpdateProjectionMatrix( const uint32_t width, const uint32_t height )
     {
+        m_ViewportWidth         = width;
+        m_ViewportHeight        = height;
         const float aspectRatio = static_cast<float>( width ) / static_cast<float>( height == 0 ? 1 : height );
-        m_ProjectionMatrix      = glm::perspective( glm::radians( m_FOV ), aspectRatio, m_NearPlane, m_FarPlane );
+
+        if ( m_ProjectionType == ProjectionType::Orthographic )
+        {
+            const float halfH  = m_OrthoSize;
+            const float halfW  = m_OrthoSize * aspectRatio;
+            m_ProjectionMatrix = glm::ortho( -halfW, halfW, -halfH, halfH, m_NearPlane, m_FarPlane );
+        }
+        else
+        {
+            m_ProjectionMatrix = glm::perspective( glm::radians( m_FOV ), aspectRatio, m_NearPlane, m_FarPlane );
+        }
+    }
+
+    void Camera::SetFOV( float fovDegrees )
+    {
+        m_FOV = fovDegrees;
+        if ( m_ViewportWidth > 0 )
+            UpdateProjectionMatrix( m_ViewportWidth, m_ViewportHeight );
+    }
+
+    void Camera::SetNear( float nearPlane )
+    {
+        m_NearPlane = nearPlane;
+        if ( m_ViewportWidth > 0 )
+            UpdateProjectionMatrix( m_ViewportWidth, m_ViewportHeight );
+    }
+
+    void Camera::SetFar( float farPlane )
+    {
+        m_FarPlane = farPlane;
+        if ( m_ViewportWidth > 0 )
+            UpdateProjectionMatrix( m_ViewportWidth, m_ViewportHeight );
+    }
+
+    void Camera::SetProjectionType( ProjectionType type )
+    {
+        m_ProjectionType = type;
+        if ( m_ViewportWidth > 0 )
+            UpdateProjectionMatrix( m_ViewportWidth, m_ViewportHeight );
+    }
+
+    void Camera::SetOrthoSize( float halfHeight )
+    {
+        m_OrthoSize = halfHeight;
+        if ( m_ViewportWidth > 0 )
+            UpdateProjectionMatrix( m_ViewportWidth, m_ViewportHeight );
     }
 
     const Frustum& Camera::GetFrustum()

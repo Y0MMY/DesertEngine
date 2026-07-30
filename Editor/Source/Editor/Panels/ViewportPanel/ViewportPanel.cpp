@@ -373,16 +373,53 @@ namespace Desert::Editor
             ImGui::OpenPopup( "##EditorCameraSettings" );
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "Editor camera settings" );
+        // Roomy padding so the settings aren't cramped against the popup border.
+        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 14.0f, 12.0f ) );
         if ( ImGui::BeginPopup( "##EditorCameraSettings" ) )
         {
+            ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8.0f, 8.0f ) );
             ImGui::TextUnformatted( "Editor Camera" );
             ImGui::Separator();
             if ( auto cam = m_Scene->GetMainCamera().lock() )
             {
                 if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( cam.get() ) )
                 {
+                    constexpr float kW = 170.0f;
+
+                    // Projection type: Perspective / Orthographic (view is unchanged; only the projection).
+                    const char* kTypes[] = { "Perspective", "Orthographic" };
+                    int         type     = static_cast<int>( editorCam->GetProjectionType() );
+                    ImGui::SetNextItemWidth( kW );
+                    if ( ImGui::Combo( "Type", &type, kTypes, IM_ARRAYSIZE( kTypes ) ) )
+                        editorCam->SetProjectionType( static_cast<::Desert::Core::ProjectionType>( type ) );
+
+                    if ( editorCam->GetProjectionType() == ::Desert::Core::ProjectionType::Perspective )
+                    {
+                        float fov = editorCam->GetFOV();
+                        ImGui::SetNextItemWidth( kW );
+                        if ( ImGui::SliderFloat( "FOV", &fov, 20.0f, 120.0f, "%.0f" ) )
+                            editorCam->SetFOV( fov );
+                    }
+                    else
+                    {
+                        float size = editorCam->GetOrthoSize();
+                        ImGui::SetNextItemWidth( kW );
+                        if ( ImGui::SliderFloat( "Ortho Size", &size, 1.0f, 100.0f, "%.1f" ) )
+                            editorCam->SetOrthoSize( size );
+                    }
+
+                    float nearP = editorCam->GetNear();
+                    ImGui::SetNextItemWidth( kW );
+                    if ( ImGui::SliderFloat( "Near", &nearP, 0.001f, 10.0f, "%.3f" ) )
+                        editorCam->SetNear( nearP );
+
+                    float farP = editorCam->GetFar();
+                    ImGui::SetNextItemWidth( kW );
+                    if ( ImGui::SliderFloat( "Far", &farP, 100.0f, 5000.0f, "%.0f" ) )
+                        editorCam->SetFar( farP );
+
                     float spd = editorCam->GetMovementSpeed();
-                    ImGui::SetNextItemWidth( 160.0f );
+                    ImGui::SetNextItemWidth( kW );
                     if ( ImGui::SliderFloat( "Speed", &spd, 0.1f, 10.0f, "%.2fx" ) )
                         editorCam->SetMovementSpeed( spd );
                 }
@@ -391,8 +428,10 @@ namespace Desert::Editor
                     ImGui::TextDisabled( "(only in editor view, not Play)" );
                 }
             }
+            ImGui::PopStyleVar();
             ImGui::EndPopup();
         }
+        ImGui::PopStyleVar(); // camera-settings WindowPadding
 
         ImGui::PopStyleVar( 2 );
     }

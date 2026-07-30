@@ -14,6 +14,14 @@
 
 namespace Desert::Core
 {
+    // Projection kind for the viewport camera. Perspective is the default; Orthographic gives a flat
+    // (parallel) projection for CAD-style/axis views (the view matrix is unchanged — only the projection).
+    enum class ProjectionType : int
+    {
+        Perspective  = 0,
+        Orthographic = 1,
+    };
+
     // Base camera: owns the view/projection matrices + frustum. Concrete cameras (EditorCamera, the
     // input-driven viewport camera; GameplayCamera, driven by a scene CameraComponent) fill the matrices.
     // The renderer only ever sees this interface.
@@ -29,10 +37,27 @@ namespace Desert::Core
         [[nodiscard]] float            GetNear() const { return m_NearPlane; }
         [[nodiscard]] float            GetFar() const { return m_FarPlane; }
         [[nodiscard]] float            GetFOV() const { return m_FOV; }
+        [[nodiscard]] ProjectionType   GetProjectionType() const
+        {
+            return m_ProjectionType;
+        }
+        [[nodiscard]] float GetOrthoSize() const
+        {
+            return m_OrthoSize;
+        }
+
+        // Live setters used by the viewport camera-settings popup: update the param and rebuild the
+        // projection at the last known viewport size so the change is visible immediately.
+        void SetFOV( float fovDegrees );
+        void SetNear( float nearPlane );
+        void SetFar( float farPlane );
+        void SetProjectionType( ProjectionType type );
+        void SetOrthoSize( float halfHeight ); // orthographic vertical half-extent in world units
 
         virtual void OnUpdate( const Common::Timestep& timestep ) {}
 
-        // Rebuild the projection from the current FOV/near/far for a new viewport aspect.
+        // Rebuild the projection (perspective or orthographic) for a new viewport aspect. Also caches the
+        // viewport size so the live setters above can rebuild without the caller re-passing it.
         virtual void UpdateProjectionMatrix( const uint32_t width, const uint32_t height );
 
         const Frustum& GetFrustum();
@@ -42,9 +67,14 @@ namespace Desert::Core
         glm::mat4 m_ViewMatrix       = glm::mat4( 1.0f );
         glm::vec3 m_Position         = glm::vec3( 0.0f );
 
-        float m_FOV       = 45.0f;
-        float m_NearPlane = 0.001f;
-        float m_FarPlane  = 1000.0f;
+        float          m_FOV            = 45.0f;
+        float          m_NearPlane      = 0.001f;
+        float          m_FarPlane       = 1000.0f;
+        ProjectionType m_ProjectionType = ProjectionType::Perspective;
+        float          m_OrthoSize      = 10.0f; // world half-height for the orthographic projection
+
+        uint32_t m_ViewportWidth  = 0; // last viewport size (for the live setters to rebuild against)
+        uint32_t m_ViewportHeight = 0;
 
         Frustum m_Frustum;
     };
