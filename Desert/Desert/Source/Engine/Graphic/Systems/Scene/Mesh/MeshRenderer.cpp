@@ -1247,28 +1247,29 @@ namespace Desert::Graphic::System
 
             const glm::vec3 up =
                  glm::abs( lightDir.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 );
-            // Push the light eye back by 2*radius so casters between the light and the slice still cast.
-            const glm::mat4 view = glm::lookAt( center - lightDir * ( radius * 2.0f ), center, up );
-            glm::mat4       proj = glm::orthoRH_ZO( -radius, radius, -radius, radius, 0.1f, radius * 4.0f );
 
-            // Texel-snap stabilization: quantize the cascade CENTRE to whole shadow-map texels in
-            // light space so the sampling grid stays world-locked and doesn't crawl/shimmer as the
-            // camera moves. (Microsoft CSM trick.) Snapping the centre (which sits near NDC 0) — not
-            // the world origin, which projects to large light-space coords far from the cascade —
-            // keeps the rounding precise; the world-origin variant loses bits and still shimmers when
-            // the cascade is away from (0,0,0), which is exactly the "walk up to an object" case.
-            glm::mat4   vp           = proj * view;
-            const float halfRes      = static_cast<float>( kShadowMapSize ) * 0.5f;
-            glm::vec4   centerShadow = vp * glm::vec4( center, 1.0f );
-            centerShadow *= halfRes;
-            glm::vec2 rounded( std::round( centerShadow.x ), std::round( centerShadow.y ) );
-            glm::vec2 offset = ( rounded - glm::vec2( centerShadow ) ) / halfRes;
-            proj[3][0] += offset.x;
-            proj[3][1] += offset.y;
+            // Texel-snap stabilization (the part that actually keeps shadows from crawling). The cascade
+            // centre must move only in WHOLE shadow-map texels along the light's right/up axes, so the
+            // sampling grid stays world-locked as the camera moves/turns. The previous code snapped the
+            // lookAt TARGET, which by construction projects to the shadow-map origin (0,0) — so the round
+            // was always a no-op and no stabilization happened. Instead snap the centre in a FIXED light-
+            // space grid (orientation-only basis, independent of where the cascade sits), then rebuild the
+            // cascade around the snapped centre. radius is constant per cascade (analytic sphere above), so
+            // the texel size is constant and the snap holds frame to frame.
+            const float     worldPerTexel = ( 2.0f * radius ) / static_cast<float>( kShadowMapSize );
+            const glm::mat4 lightBasis    = glm::lookAt( -lightDir, glm::vec3( 0.0f ), up );
+            glm::vec3       centerLS      = glm::vec3( lightBasis * glm::vec4( center, 1.0f ) );
+            centerLS.x                    = std::floor( centerLS.x / worldPerTexel ) * worldPerTexel;
+            centerLS.y                    = std::floor( centerLS.y / worldPerTexel ) * worldPerTexel;
+            const glm::vec3 snappedCenter = glm::vec3( glm::inverse( lightBasis ) * glm::vec4( centerLS, 1.0f ) );
+
+            // Push the light eye back by 2*radius so casters between the light and the slice still cast.
+            const glm::mat4 view = glm::lookAt( snappedCenter - lightDir * ( radius * 2.0f ), snappedCenter, up );
+            const glm::mat4 proj = glm::orthoRH_ZO( -radius, radius, -radius, radius, 0.1f, radius * 4.0f );
             m_CascadeVP[c] = proj * view;
 
             // World size of one texel for this cascade (drives the PBR normal-offset / bias).
-            m_CascadeWorldPerTexel[c] = ( 2.0f * radius ) / static_cast<float>( kShadowMapSize );
+            m_CascadeWorldPerTexel[c] = worldPerTexel;
 
             lastFar = splitFar[c];
         }
