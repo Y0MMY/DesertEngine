@@ -829,10 +829,9 @@ namespace Desert::Core::Serialize
                 auto parsed = FromGeneric<Assets::AnimationComponentSer>( g );
                 if ( !parsed.has_value() )
                     return;
-                const auto& d  = parsed.value();
-                auto&       ac = e.HasComponent<ECS::AnimationComponent>()
-                                      ? e.GetComponent<ECS::AnimationComponent>()
-                                      : e.AddComponent<ECS::AnimationComponent>();
+                const auto& d = parsed.value();
+                auto& ac = e.HasComponent<ECS::AnimationComponent>() ? e.GetComponent<ECS::AnimationComponent>()
+                                                                     : e.AddComponent<ECS::AnimationComponent>();
                 ac.CurrentClip      = d.CurrentClip;
                 ac.Playing          = d.Playing;
                 ac.Loop             = d.Loop;
