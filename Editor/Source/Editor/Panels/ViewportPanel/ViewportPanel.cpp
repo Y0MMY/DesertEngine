@@ -42,6 +42,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 
 namespace Desert::Editor
 {
@@ -98,19 +99,37 @@ namespace Desert::Editor
             }
         }
 
-        // Progress overlay while background cooks are in flight (top-left of the viewport).
+        // Progress overlay while background cooks are in flight (top-left of the viewport). Padded card:
+        // roomy inner margins, a spinner-style title row, and a labelled bar so it reads as a polished toast.
         if ( m_AsyncLoader->IsBusy() )
         {
-            ImGui::SetNextWindowBgAlpha( 0.85f );
-            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 14.0f,
-                                             m_ViewportData.ViewportPos.y + 14.0f ) );
+            ImGui::SetNextWindowBgAlpha( 0.90f );
+            ImGui::SetNextWindowPos( ImVec2( m_ViewportData.ViewportPos.x + 16.0f,
+                                             m_ViewportData.ViewportPos.y + 16.0f ) );
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 18.0f, 14.0f ) );
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowRounding, 8.0f );
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowBorderSize, 1.0f );
             ImGui::Begin( "##AsyncLoadOverlay", nullptr,
                           ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                               ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                               ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing );
-            ImGui::Text( "Loading meshes  %d / %d", m_AsyncLoader->Done2(), m_AsyncLoader->Total() );
-            ImGui::ProgressBar( m_AsyncLoader->Progress(), ImVec2( 220.0f, 0.0f ) );
+
+            const int   done  = m_AsyncLoader->Done2();
+            const int   total = m_AsyncLoader->Total();
+            const float frac  = m_AsyncLoader->Progress();
+
+            ImGui::TextColored( ImVec4( 0.55f, 0.78f, 1.0f, 1.0f ), ICON_MDI_PROGRESS_DOWNLOAD );
+            ImGui::SameLine( 0.0f, 8.0f );
+            ImGui::TextUnformatted( "Loading meshes" );
+
+            ImGui::Dummy( ImVec2( 0.0f, 6.0f ) );
+
+            char overlayText[32];
+            std::snprintf( overlayText, sizeof( overlayText ), "%d / %d", done, total );
+            ImGui::ProgressBar( frac, ImVec2( 240.0f, 14.0f ), overlayText );
+
             ImGui::End();
+            ImGui::PopStyleVar( 3 );
         }
     }
 

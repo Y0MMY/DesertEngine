@@ -10,10 +10,12 @@
 
 #include "../../MeshEditor/MeshEditorPanel.hpp"
 
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
+#include <algorithm>
 #include <cfloat>
 
 namespace Desert::Editor
@@ -172,61 +174,76 @@ namespace Desert::Editor
             }
         }
 
-        ImGui::Separator();
-        if ( !ImGui::CollapsingHeader( "Rigging (Skeleton)" ) )
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        if ( !Utils::ImGuiUtilities::SectionHeader( ICON_MDI_BONE "  Rigging (Skeleton)" ) )
             return;
 
-        const bool   riggingThis = RigBuilder::IsActive() && RigBuilder::Target() == uuid;
-        const ImVec2 full( ImGui::GetContentRegionAvail().x, 0 );
+        const bool riggingThis = RigBuilder::IsActive() && RigBuilder::Target() == uuid;
+
+        ImGui::Indent( 6.0f );
+        ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
 
         if ( !riggingThis )
         {
             if ( RigBuilder::IsActive() )
-                ImGui::TextDisabled( "Another mesh is being rigged." );
-            ImGui::TextWrapped( "Place bones on this static mesh, then convert it to a skinned mesh with "
-                                "automatic vertex weights. Pose the bones afterwards in Skeleton Edit mode." );
-            if ( ImGui::Button( "Add Skeleton / Rig this Mesh", full ) )
+            {
+                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ), ICON_MDI_ALERT " Another mesh is being rigged." );
+                ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
+            }
+            ImGui::PushTextWrapPos( 0.0f );
+            ImGui::TextDisabled( "Place bones on this static mesh, then convert it to a skinned mesh with "
+                                 "automatic vertex weights. Pose the bones afterwards in Skeleton Edit mode." );
+            ImGui::PopTextWrapPos();
+            ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+            if ( Utils::ImGuiUtilities::AccentButton( ICON_MDI_BONE "  Add Skeleton / Rig this Mesh", 28.0f ) )
                 RigBuilder::Begin( uuid, center );
+            ImGui::Unindent( 6.0f );
             return;
         }
 
         const auto& bones = RigBuilder::Bones();
         const int   sel   = RigBuilder::SelectedBone();
 
-        ImGui::TextDisabled( "Bones (%d)", static_cast<int>( bones.size() ) );
+        ImGui::TextDisabled( "BONES  (%d)", static_cast<int>( bones.size() ) );
+        ImGui::BeginChild( "##rigBones", ImVec2( 0.0f, std::min( 140.0f, 8.0f + bones.size() * 20.0f ) ), true );
         for ( int i = 0; i < static_cast<int>( bones.size() ); ++i )
         {
             ImGui::PushID( i );
-            std::string label = bones[i].Name;
+            std::string label = std::string( ICON_MDI_BONE "  " ) + bones[i].Name;
             if ( bones[i].Parent < 0 )
-                label += "  (root)";
+                label += "   (root)";
             if ( ImGui::Selectable( label.c_str(), i == sel ) )
                 RigBuilder::SelectBone( i );
             ImGui::PopID();
         }
+        ImGui::EndChild();
 
-        ImGui::Separator();
+        ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
         if ( sel >= 0 && sel < static_cast<int>( bones.size() ) )
         {
             glm::vec3 head = bones[sel].Head;
-            if ( ImGui::DragFloat3( "Head", &head.x, 0.01f ) )
+            ImGui::SetNextItemWidth( -1.0f );
+            if ( ImGui::DragFloat3( "##head", &head.x, 0.01f, 0.0f, 0.0f, "%.3f" ) )
                 RigBuilder::SetHead( sel, head );
+            ImGui::SameLine( 0.0f, 0.0f );
         }
 
-        if ( ImGui::Button( "Add Child Bone" ) )
+        if ( ImGui::Button( ICON_MDI_PLUS "  Add Child", ImVec2( ImGui::GetContentRegionAvail().x * 0.5f, 0 ) ) )
         {
             const glm::vec3 head = ( sel >= 0 ) ? bones[sel].Head + glm::vec3( 0.0f, 0.5f, 0.0f ) : center;
             RigBuilder::AddBone( sel, head );
         }
         ImGui::SameLine();
-        if ( ImGui::Button( "Delete Bone" ) )
+        if ( ImGui::Button( ICON_MDI_DELETE "  Delete", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
             RigBuilder::DeleteBone( sel );
 
-        ImGui::Separator();
-        if ( ImGui::Button( "Convert to Skinned", full ) )
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        if ( Utils::ImGuiUtilities::AccentButton( ICON_MDI_RUN_FAST "  Convert to Skinned", 30.0f ) )
             RigBuilder::RequestConvert();
-        if ( ImGui::Button( "Cancel", full ) )
+        if ( ImGui::Button( "Cancel", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
             RigBuilder::Cancel();
+
+        ImGui::Unindent( 6.0f );
     }
 
     void StaticMeshComponentWidget::SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle )

@@ -8,6 +8,36 @@ namespace Desert::Editor::Utils
 {
     static int s_UIContextID = 0;
 
+    bool ImGuiUtilities::SectionHeader( const char* label, bool defaultOpen )
+    {
+        ImGui::PushStyleColor( ImGuiCol_Header, ImVec4( 0.26f, 0.42f, 0.62f, 0.55f ) );
+        ImGui::PushStyleColor( ImGuiCol_HeaderHovered, ImVec4( 0.30f, 0.48f, 0.70f, 0.75f ) );
+        ImGui::PushStyleColor( ImGuiCol_HeaderActive, ImVec4( 0.32f, 0.52f, 0.78f, 0.85f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 8.0f, 6.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 5.0f );
+
+        const ImGuiTreeNodeFlags flags =
+             ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap |
+             ( defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0 );
+        const bool open = ImGui::CollapsingHeader( label, flags );
+
+        ImGui::PopStyleVar( 2 );
+        ImGui::PopStyleColor( 3 );
+        return open;
+    }
+
+    bool ImGuiUtilities::AccentButton( const char* label, float height )
+    {
+        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.44f, 0.72f, 1.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.52f, 0.82f, 1.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 0.16f, 0.38f, 0.64f, 1.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 5.0f );
+        const bool clicked = ImGui::Button( label, ImVec2( ImGui::GetContentRegionAvail().x, height ) );
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor( 3 );
+        return clicked;
+    }
+
     void ImGuiUtilities::PushID()
     {
         ImGui::PushID( s_UIContextID++ );

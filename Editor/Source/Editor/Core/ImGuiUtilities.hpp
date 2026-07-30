@@ -46,5 +46,13 @@ namespace Desert::Editor::Utils
         static void   DrawItemActivityOutline( float rounding, bool drawWhenInactive, ImColor colourWhenActive );
 
         static ImRect GetItemRect();
+
+        // A polished sub-section header for the Details panel: an accent-tinted, rounded collapsing header
+        // (open by default). Pass a label optionally prefixed with an MDI icon. Returns whether it is expanded
+        // — wrap the body in `if (SectionHeader(...)) { ImGui::Indent(); ... ImGui::Unindent(); }`.
+        static bool SectionHeader( const char* label, bool defaultOpen = true );
+
+        // A full-width accent ("primary") button — for the one obvious action of a section (Convert, Create…).
+        static bool AccentButton( const char* label, float height = 0.0f );
     };
 } // namespace Desert::Editor::Utils
