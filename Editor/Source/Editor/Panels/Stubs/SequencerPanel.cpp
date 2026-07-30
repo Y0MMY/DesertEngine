@@ -1,7 +1,9 @@
 #include "SequencerPanel.hpp"
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Core/Selection/SkeletonEditMode.hpp>
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -16,7 +18,9 @@
 
 #include <Engine/Animation/AnimationClip.hpp>
 
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
@@ -38,6 +42,68 @@ namespace Desert::Editor
     namespace
     {
         bool s_OpenRequested = false;
+
+        // A hoverable "(?)" that shows a wrapped explanation — used to demystify advanced controls.
+        void HelpMarker( const char* text )
+        {
+            ImGui::TextDisabled( ICON_MDI_HELP_CIRCLE_OUTLINE );
+            if ( ImGui::IsItemHovered() )
+            {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos( 340.0f );
+                ImGui::TextUnformatted( text );
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+        }
+    } // namespace
+
+    void SequencerPanel::KeyBonePose( Animation::AnimationClip* clip, const Animation::Skeleton& skeleton,
+                                      int boneIndex, float time )
+    {
+        if ( !clip || boneIndex < 0 || boneIndex >= static_cast<int>( skeleton.GetBones().size() ) )
+            return;
+        const auto& bone = skeleton.GetBones()[boneIndex];
+
+        glm::vec3 t, s, skew;
+        glm::vec4 persp;
+        glm::quat r;
+        glm::decompose( bone.LocalBindTransform, s, r, t, skew, persp );
+
+        // Find (or create) the track for this bone.
+        Animation::BoneTrack* track = nullptr;
+        for ( auto& tr : clip->Tracks )
+            if ( tr.BoneName == bone.Name )
+            {
+                track = &tr;
+                break;
+            }
+        if ( !track )
+        {
+            Animation::BoneTrack nt;
+            nt.BoneName = bone.Name;
+            clip->Tracks.push_back( std::move( nt ) );
+            track = &clip->Tracks.back();
+        }
+
+        // Upsert one key per channel at `time` (replace a key already within epsilon, else insert + sort).
+        constexpr float eps       = 1e-3f;
+        const auto      upsertPos = [&]( auto& keys, auto value, auto make )
+        {
+            for ( auto& k : keys )
+                if ( std::abs( k.Time - time ) < eps )
+                {
+                    make( k, value );
+                    return;
+                }
+            keys.push_back( {} );
+            keys.back().Time = time;
+            make( keys.back(), value );
+            std::sort( keys.begin(), keys.end() );
+        };
+        upsertPos( track->PositionKeys, t, []( auto& k, const glm::vec3& v ) { k.Position = v; } );
+        upsertPos( track->RotationKeys, r, []( auto& k, const glm::quat& v ) { k.Rotation = v; } );
+        upsertPos( track->ScaleKeys, s, []( auto& k, const glm::vec3& v ) { k.Scale = v; } );
     }
 
     void SequencerPanel::RequestOpen()
@@ -159,10 +225,10 @@ namespace Desert::Editor
             if ( currentClipIdx >= 0 && currentClipIdx < static_cast<int>( clips.size() ) )
             {
                 anim.CurrentClip = clips[currentClipIdx]->GetClip().AnimationName;
-                // Play it RIGHT NOW on the animator instead of only setting CurrentClip: when an AnimGraph is
-                // attached the ECS drives the clip FROM the graph and ignores CurrentClip, so the picker looked
-                // dead. A direct Play previews the picked clip immediately; while paused the graph (which only
-                // runs when Playing) won't override it, so authoring/scrubbing sticks.
+                // PAUSE + Play the picked clip so it previews immediately and STAYS: an attached AnimGraph
+                // drives the clip only while Playing, so pausing stops it from overriding the manual pick the
+                // very next frame (the old bug where the viewport didn't change). Press Play to resume the graph.
+                anim.Playing = false;
                 if ( animator )
                     animator->Play( clips[currentClipIdx]->GetClip(), anim.Loop );
             }
@@ -193,10 +259,21 @@ namespace Desert::Editor
             ImGui::PopStyleColor( 2 );
         }
 
-        // ---- Transport ----
+        const float duration = animator ? animator->GetDuration() : 0.0f;
+        const float playTime = animator ? animator->GetCurrentTime() : 0.0f;
+
+        // ---- Transport toolbar (icon buttons with tooltips) ----
         ImGui::SameLine( 0.0f, 20.0f );
+        if ( ImGui::Button( ICON_MDI_SKIP_PREVIOUS ) && animator )
+        {
+            anim.Playing = false;
+            animator->SetTime( 0.0f );
+        }
+        Utils::ImGuiUtilities::Tooltip( "Go to start" );
+        ImGui::SameLine();
         if ( ImGui::Button( anim.Playing ? ICON_MDI_PAUSE : ICON_MDI_PLAY ) )
             anim.Playing = !anim.Playing;
+        Utils::ImGuiUtilities::Tooltip( anim.Playing ? "Pause" : "Play (resumes the AnimGraph, if any)" );
         ImGui::SameLine();
         if ( ImGui::Button( ICON_MDI_STOP ) )
         {
@@ -204,19 +281,52 @@ namespace Desert::Editor
             if ( animator )
                 animator->SetTime( 0.0f );
         }
+        Utils::ImGuiUtilities::Tooltip( "Stop + rewind" );
         ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_SKIP_NEXT ) && animator )
+        {
+            anim.Playing = false;
+            animator->SetTime( duration );
+        }
+        Utils::ImGuiUtilities::Tooltip( "Go to end" );
+
+        ImGui::SameLine( 0.0f, 16.0f );
         ImGui::Checkbox( "Loop", &anim.Loop );
         ImGui::SameLine( 0.0f, 16.0f );
-        ImGui::SetNextItemWidth( 120.0f );
+        ImGui::SetNextItemWidth( 110.0f );
         ImGui::SliderFloat( "Speed", &anim.PlaybackSpeed, 0.0f, 3.0f, "%.2fx" );
         ImGui::SameLine( 0.0f, 16.0f );
-        ImGui::SetNextItemWidth( 130.0f );
+        ImGui::SetNextItemWidth( 120.0f );
         ImGui::SliderFloat( "Zoom", &m_PxPerSec, 20.0f, 240.0f, "%.0f px/u" );
-
-        const float duration = animator ? animator->GetDuration() : 0.0f;
-        const float playTime = animator ? animator->GetCurrentTime() : 0.0f;
         ImGui::SameLine( 0.0f, 16.0f );
-        ImGui::Text( "%.2f / %.2f", playTime, duration );
+        ImGui::TextColored( ImVec4( 0.80f, 0.86f, 0.98f, 1.0f ), "%.2f / %.2f s", playTime, duration );
+
+        // ---- Keyframe toolbar: author BY MANIPULATION (pose a bone in Skeleton Edit, then record it) ----
+        if ( animator )
+        {
+            auto*      editClip = const_cast<Animation::AnimationClip*>( animator->GetCurrentClip() );
+            const int  selBone  = Core::SkeletonEditMode::GetSelectedBone();
+            const bool canKey   = editClip && Core::SkeletonEditMode::IsActive() && selBone >= 0;
+
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.44f, 0.31f, 0.10f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.58f, 0.41f, 0.14f, 1.0f ) );
+            ImGui::BeginDisabled( !canKey );
+            if ( ImGui::Button( ICON_MDI_KEY_PLUS " Key Bone @ Playhead" ) && canKey )
+            {
+                anim.Playing = false;
+                KeyBonePose( editClip, animator->GetSkeleton(), selBone, playTime );
+                animator->SetTime( playTime ); // re-evaluate so the new key shows immediately
+            }
+            ImGui::EndDisabled();
+            ImGui::PopStyleColor( 2 );
+            ImGui::SameLine();
+            HelpMarker( "Keyframe by MANIPULATION:\n"
+                        "1) In the viewport toolbar, enable Skeleton Edit.\n"
+                        "2) Pick a bone and move/rotate it with the gizmo.\n"
+                        "3) Set the playhead time, then click this to record the pose as a key.\n"
+                        "Repeat at different times to build the motion (or drag the diamond keys below to "
+                        "retime)." );
+        }
 
         // ---- Timeline (gutter-aligned ruler; the track lanes below share the same time mapping) ----
         if ( animator && duration > 0.0f )
@@ -287,12 +397,18 @@ namespace Desert::Editor
             ImGui::TextDisabled( "No clip playing — pick a clip above (or the mesh has no animations)." );
         }
 
-        // ---- Layers preview (override / additive with a bone mask) ----
-        ImGui::Separator();
-        if ( ImGui::CollapsingHeader( "Layers (preview)" ) && animator )
+        // ---- Additive layers (advanced, collapsed by default) ----
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        const bool layersOpen = ImGui::CollapsingHeader( ICON_MDI_LAYERS " Additive Layers  (advanced)" );
+        ImGui::SameLine();
+        HelpMarker( "Play a SECOND clip ON TOP of the current one — e.g. a wave or aim while walking.\n\n"
+                    "- Weight: how strongly it blends in (0..1).\n"
+                    "- Additive: adds the layer's motion as an offset (good for lean/aim); off = it overrides.\n"
+                    "- Mask from bone: restrict the layer to that bone + its children (empty = whole body, so a "
+                    "'wave' would mask e.g. the right shoulder).\n\n"
+                    "This is a preview tool; layers are not saved with the clip." );
+        if ( layersOpen && animator )
         {
-            ImGui::TextDisabled( "Overlay a clip on the base pose. 'Mask from bone' restricts it to that "
-                                 "bone + its children (empty = whole body)." );
             ImGui::SetNextItemWidth( 200.0f );
             ImGui::Combo( "Layer clip", &m_LayerClip, clipNames.empty() ? nullptr : clipNames.data(),
                           static_cast<int>( clipNames.size() ) );
