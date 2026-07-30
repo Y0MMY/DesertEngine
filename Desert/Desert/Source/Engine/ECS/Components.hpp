@@ -519,6 +519,12 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Start Size" ), Category( "Look" ), Range( 0.0f, 10.0f ) )
         float StartSize = 0.25f;
 
+        // Size-over-life ease: the compute shader raises the normalized age t to this power before lerping
+        // Start->End size. 1 = linear; <1 = fast then slow (puffs); >1 = slow then fast (shrinking sparks).
+        // Authored as a curve in the Particle Editor.
+        PROPERTY( DisplayName( "Size Curve Power" ), Category( "Look" ), Range( 0.1f, 8.0f ) )
+        float SizeCurvePower = 1.0f;
+
         PROPERTY( DisplayName( "End Size" ), Category( "Look" ), Range( 0.0f, 10.0f ) )
         float EndSize = 0.0f;
 

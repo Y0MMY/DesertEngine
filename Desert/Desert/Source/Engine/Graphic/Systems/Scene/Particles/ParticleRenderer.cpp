@@ -167,7 +167,7 @@ namespace Desert::Graphic::System
                  fe.Push.Params     = glm::vec4( d.StartSpeed, d.SpeedVariance, d.Lifetime, d.LifetimeVariance );
                  fe.Push.StartColor = glm::vec4( d.StartColor, d.StartAlpha );
                  fe.Push.EndColor   = glm::vec4( d.EndColor, d.EndAlpha );
-                 fe.Push.Sizes      = glm::vec4( d.StartSize, d.EndSize, 0.0f, 0.0f );
+                 fe.Push.Sizes      = glm::vec4( d.StartSize, d.EndSize, d.SizeCurvePower, 0.0f );
                  fe.Push.Counts     = glm::uvec4( static_cast<uint32_t>( gpu.MaxParticles ), budget, 1u, 0u );
 
                  m_FrameEmitters.push_back( fe );

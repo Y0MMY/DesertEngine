@@ -55,6 +55,7 @@
 #include "Editor/Panels/NodeGraph/NodeGraphPanel.hpp"
 #include "Editor/Panels/Animation/AnimGraphPanel.hpp"
 #include "Editor/Panels/Photogrammetry/PhotogrammetryPanel.hpp"
+#include "Editor/Panels/Particles/ParticleEditorPanel.hpp"
 #include "Editor/Panels/AssetReferences/AssetReferencesPanel.hpp"
 #include "Editor/Panels/LuaConsole/LuaConsolePanel.hpp"
 #include "Editor/Panels/Stubs/SequencerPanel.hpp"
@@ -123,6 +124,8 @@ namespace Desert::Editor
             return ICON_MDI_STATE_MACHINE;
         if ( name == "Model from Photos" )
             return ICON_MDI_CUBE_SCAN;
+        if ( name == "Particle Editor" )
+            return ICON_MDI_CREATION;
         if ( name == "Lua Console" )
             return ICON_MDI_CONSOLE;
         if ( name == "Build Settings" )
@@ -168,8 +171,7 @@ namespace Desert::Editor
              { "Cooking meshes...",
                [this] { m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::MESH_PATH ); } } );
         m_StartupStages.push_back(
-             { "Cooking collections...",
-               [this]
+             { "Cooking collections...", [this]
                { m_ImportManager->ImportAllFromDirectory( Common::Constants::Path::COLLECTIONS_PATH ); } } );
         m_StartupStages.push_back( { "Preloading meshes...", [this] { m_AssetPreloader->PreloadMeshes(); } } );
         m_StartupStages.push_back(
@@ -185,8 +187,7 @@ namespace Desert::Editor
         // load/Play/Stop instead).
         Commands::SetContext( m_MainScene.get(), m_AssetManager.get() );
 
-        LOG_INFO( "[Editor] Desert Engine {} ({} branch)", Common::Version::Full(),
-                  Common::Version::Branch() );
+        LOG_INFO( "[Editor] Desert Engine {} ({} branch)", Common::Version::Full(), Common::Version::Branch() );
 
         // User prefs (snap steps, camera speed, autosave) from ~/.desertengine/editor.json. Snap values
         // apply immediately; the camera speed is applied on the first frame (the camera exists by then).
@@ -238,13 +239,13 @@ namespace Desert::Editor
         // (OnDetach) removes it.
         if ( CrashRecovery::WasUncleanExit() )
         {
-            m_RecoveryAutosave = CrashRecovery::LatestAutosave();
+            m_RecoveryAutosave   = CrashRecovery::LatestAutosave();
             m_ShowRecoveryPrompt = !m_RecoveryAutosave.empty();
         }
         CrashRecovery::ArmSession();
 
-        //LoadScene( "Resources/Assets/Scene/HouseDemo.desce" );
-        }
+        // LoadScene( "Resources/Assets/Scene/HouseDemo.desce" );
+    }
 
     EditorLayer::~EditorLayer() = default;
 
@@ -327,9 +328,8 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() ) );
         {
-            auto fileExplorer =
-                 std::make_unique<Editor::FileExplorerPanel>( Common::Constants::Path::ASSETS_PATH, m_AssetManager.get(),
-                                                              m_MainScene );
+            auto fileExplorer = std::make_unique<Editor::FileExplorerPanel>( Common::Constants::Path::ASSETS_PATH,
+                                                                             m_AssetManager.get(), m_MainScene );
             m_FileExplorerPanel = fileExplorer.get();
             m_Panels.emplace_back( std::move( fileExplorer ) );
         }
@@ -347,6 +347,7 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::AnimGraphPanel>( m_MainScene, m_AnimationLibrary.get() ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::PhotogrammetryPanel>( m_MainScene, m_AssetManager.get() ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ParticleEditorPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::AssetReferencesPanel>( m_MainScene, m_AssetManager ) );
         m_Panels.emplace_back(
              std::make_unique<Editor::LuaConsolePanel>( m_MainScene.get(), m_AssetManager.get() ) );
@@ -369,18 +370,18 @@ namespace Desert::Editor
         // scene (own sun+sky) and queued any existing project scene for load (brings its own). Adding
         // a sun here regardless is what produced TWO directional lights — and the engine supports one.
         const bool sceneLoadPending = m_SceneLoadRequested.has_value();
-        const bool hasSun = !m_MainScene->GetRegistry().view<ECS::DirectionLightComponent>().empty();
+        const bool hasSun           = !m_MainScene->GetRegistry().view<ECS::DirectionLightComponent>().empty();
         if ( !sceneLoadPending && !hasSun )
         {
             using namespace ::Desert;
-            auto& sun = m_MainScene->CreateNewEntity( "Sun" );
-            auto& dl  = sun.AddComponent<ECS::DirectionLightComponent>();
+            auto& sun         = m_MainScene->CreateNewEntity( "Sun" );
+            auto& dl          = sun.AddComponent<ECS::DirectionLightComponent>();
             dl.Data.Color     = { 1.0f, 0.97f, 0.9f };
             dl.Data.Intensity = 3.0f;
             sun.GetComponent<ECS::TransformComponent>().Translation = { -0.4f, -1.0f, -0.5f };
 
-            auto& skyEnt   = m_MainScene->CreateNewEntity( "Skybox" );
-            auto& sky      = skyEnt.AddComponent<ECS::SkyboxComponent>();
+            auto& skyEnt    = m_MainScene->CreateNewEntity( "Skybox" );
+            auto& sky       = skyEnt.AddComponent<ECS::SkyboxComponent>();
             sky.Procedural  = true;
             sky.RequestBake = true;
         }
@@ -391,7 +392,6 @@ namespace Desert::Editor
     [[nodiscard]] Common::BoolResultStr EditorLayer::OnUpdate( const Common::Timestep& ts )
     {
         DESERT_PROFILE_SCOPE( "Layer::OnUpdate" );
-
 
         // Staged startup loading: run ONE heavy stage per frame — but only after at least one frame with
         // the loading overlay has been PRESENTED (else the first cook would freeze a blank window anyway).
@@ -407,8 +407,6 @@ namespace Desert::Editor
             }
             return BOOLSUCCESS;
         }
-
-
 
         // Scene loads wait until the startup stages finished (a scene expects cooked/preloaded assets).
         if ( m_SceneLoadRequested && !StartupLoading() )
@@ -444,8 +442,7 @@ namespace Desert::Editor
             static float    s_AutosaveAccum        = 0.0f;
             static uint64_t s_LastAutosaveRevision = 0;
             const auto&     prefs                  = EditorPreferences::Get();
-            if ( prefs.AutosaveMinutes > 0 &&
-                 m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
+            if ( prefs.AutosaveMinutes > 0 && m_MainScene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
             {
                 s_AutosaveAccum += ts.GetSeconds();
                 if ( s_AutosaveAccum >= static_cast<float>( prefs.AutosaveMinutes ) * 60.0f )
@@ -456,15 +453,15 @@ namespace Desert::Editor
                     {
                         s_LastAutosaveRevision = rev;
                         Desert::Core::SceneSerializer serializer( m_MainScene.get(), m_AssetManager.get() );
-                        std::string name = m_MainScene->GetSceneName();
+                        std::string                   name = m_MainScene->GetSceneName();
                         for ( auto& ch : name )
                             if ( ch == ' ' )
                                 ch = '_';
-                        const auto dir = Common::Constants::Path::SCENE_PATH / "Autosave";
+                        const auto      dir = Common::Constants::Path::SCENE_PATH / "Autosave";
                         std::error_code ec;
                         std::filesystem::create_directories( dir, ec );
-                        const auto path = dir / ( name + "_autosave" +
-                                                  Common::Constants::Extensions::SCENE_EXTENSION );
+                        const auto path =
+                             dir / ( name + "_autosave" + Common::Constants::Extensions::SCENE_EXTENSION );
                         Common::Utils::FileSystem::WriteContentToFile( path, serializer.SerializeToJson() );
                         LOG_INFO( "[Autosave] {}", path.string() );
                     }
@@ -543,7 +540,6 @@ namespace Desert::Editor
             }
             s_f9Prev = f9;
         }
-
 
         Common::BoolResultStr endResult = BOOLSUCCESS;
         {
@@ -730,9 +726,9 @@ namespace Desert::Editor
         {
             // Reserve the bottom status-bar height so the DockSpace fills only the area between the toolbar
             // and the status bar (a full-height DockSpace(0,0) would sit under the status bar).
-            const float  statusBarHeight = ::ImGui::GetFrameHeight() + 4.0f;
-            ImVec2       dockSize        = ::ImGui::GetContentRegionAvail();
-            dockSize.y                   = ( dockSize.y > statusBarHeight ) ? dockSize.y - statusBarHeight : 0.0f;
+            const float statusBarHeight = ::ImGui::GetFrameHeight() + 4.0f;
+            ImVec2      dockSize        = ::ImGui::GetContentRegionAvail();
+            dockSize.y                  = ( dockSize.y > statusBarHeight ) ? dockSize.y - statusBarHeight : 0.0f;
 
             ImGuiID dockspace_id = ::ImGui::GetID( "MyDockSpace" );
 
@@ -761,10 +757,9 @@ namespace Desert::Editor
             {
                 ::ImGui::DockBuilderRemoveNode( dockspace_id );
                 ::ImGui::DockBuilderAddNode( dockspace_id, dockspace_flags | ImGuiDockNodeFlags_DockSpace );
-                ::ImGui::DockBuilderSetNodeSize( dockspace_id,
-                                                 ( dockSize.x > 0 && dockSize.y > 0 )
-                                                      ? dockSize
-                                                      : ::ImGui::GetMainViewport()->Size );
+                ::ImGui::DockBuilderSetNodeSize( dockspace_id, ( dockSize.x > 0 && dockSize.y > 0 )
+                                                                    ? dockSize
+                                                                    : ::ImGui::GetMainViewport()->Size );
 
                 //  ┌───────────┬──────────────────────┬──────────────┐
                 //  │ Scene     │                      │ Details      │
@@ -773,12 +768,13 @@ namespace Desert::Editor
                 //  │Collections├──────────────────────┤ / Profiler   │
                 //  │           │ Assets / Logs        │ / Foliage    │
                 //  └───────────┴──────────────────────┴──────────────┘
-                ImGuiID center      = dockspace_id;
-                ImGuiID right       = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Right, 0.20f, nullptr, &center );
-                ImGuiID left        = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Left, 0.22f, nullptr, &center );
-                ImGuiID bottom      = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Down, 0.28f, nullptr, &center );
-                ImGuiID leftBottom  = ::ImGui::DockBuilderSplitNode( left, ImGuiDir_Down, 0.40f, nullptr, &left );
-                ImGuiID rightBottom = ::ImGui::DockBuilderSplitNode( right, ImGuiDir_Down, 0.50f, nullptr, &right );
+                ImGuiID center = dockspace_id;
+                ImGuiID right  = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Right, 0.20f, nullptr, &center );
+                ImGuiID left   = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Left, 0.22f, nullptr, &center );
+                ImGuiID bottom = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Down, 0.28f, nullptr, &center );
+                ImGuiID leftBottom = ::ImGui::DockBuilderSplitNode( left, ImGuiDir_Down, 0.40f, nullptr, &left );
+                ImGuiID rightBottom =
+                     ::ImGui::DockBuilderSplitNode( right, ImGuiDir_Down, 0.50f, nullptr, &right );
 
                 // Panels routed through the central Begin carry an icon (a ### suffix), so dock them by the
                 // SAME composed title — otherwise the icon-changed ImGui ID wouldn't match this assignment.
@@ -883,8 +879,8 @@ namespace Desert::Editor
                 std::string        name = entity.HasComponent<ECS::TagComponent>()
                                                ? entity.GetComponent<ECS::TagComponent>().Tag
                                                : std::string( "Entity" );
-                commands.push_back( { "Entity", std::move( name ),
-                                      [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
+                commands.push_back(
+                     { "Entity", std::move( name ), [uuid] { Core::SelectionManager::SetSelected( uuid ); } } );
             }
         }
 
@@ -915,8 +911,7 @@ namespace Desert::Editor
         {
             ImGui::TextUnformatted( "The previous session ended unexpectedly." );
             ImGui::Spacing();
-            ImGui::Text( "Reopen the latest autosave?\n%s",
-                         m_RecoveryAutosave.filename().string().c_str() );
+            ImGui::Text( "Reopen the latest autosave?\n%s", m_RecoveryAutosave.filename().string().c_str() );
             ImGui::Spacing();
             ImGui::TextDisabled( "It opens as an unsaved scene — Save to keep it." );
             ImGui::Separator();
@@ -1210,10 +1205,10 @@ namespace Desert::Editor
         namespace ImGui  = ::ImGui;
         using SceneState = ::Desert::Core::Scene::SceneState;
 
-        const auto state = m_MainScene->GetState();
-        const char* stateText = ( state == SceneState::Play )     ? ICON_MDI_PLAY " Play"
-                                : ( state == SceneState::Paused ) ? ICON_MDI_PAUSE " Paused"
-                                                                  : ICON_MDI_PENCIL " Edit";
+        const auto   state     = m_MainScene->GetState();
+        const char*  stateText = ( state == SceneState::Play )     ? ICON_MDI_PLAY " Play"
+                                 : ( state == SceneState::Paused ) ? ICON_MDI_PAUSE " Paused"
+                                                                   : ICON_MDI_PENCIL " Edit";
         const ImVec4 stateColor =
              ( state == SceneState::Edit ) ? ThemeManager::GetIconColor() : ThemeManager::GetSelectedColor();
 
@@ -1278,7 +1273,7 @@ namespace Desert::Editor
 #else
         constexpr const char* kBuildConfig = "Release";
 #endif
-        const float fps    = ImGui::GetIO().Framerate;
+        const float fps = ImGui::GetIO().Framerate;
         char        stats[160];
         std::snprintf( stats, sizeof( stats ), "%s  %s   " ICON_MDI_SPEEDOMETER " %.0f FPS   %.2f ms",
                        Common::Version::Full(), kBuildConfig, fps, fps > 0.0f ? 1000.0f / fps : 0.0f );
@@ -1339,7 +1334,7 @@ namespace Desert::Editor
     void EditorLayer::DrawProfilerWindow()
     {
         namespace ImGui = ::ImGui;
-        auto&     prof  = ::Common::Profiling::Profiler::Get();
+        auto& prof      = ::Common::Profiling::Profiler::Get();
 
         if ( !m_ShowProfiler )
             return;
@@ -1374,7 +1369,8 @@ namespace Desert::Editor
         ImGui::Separator();
 
         if ( ImGui::BeginTable( "##prof", 4,
-                                ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp ) )
+                                ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders |
+                                     ImGuiTableFlags_SizingStretchProp ) )
         {
             ImGui::TableSetupColumn( "Scope" );
             ImGui::TableSetupColumn( "ms" );
@@ -1455,8 +1451,7 @@ namespace Desert::Editor
         }
         if ( ImGui::MenuItem( "Duplicate", "Ctrl+D", false, editMode && hasSelection ) )
         {
-            if ( auto dups = Commands::DuplicateEntities( Core::SelectionManager::GetSelection() );
-                 !dups.empty() )
+            if ( auto dups = Commands::DuplicateEntities( Core::SelectionManager::GetSelection() ); !dups.empty() )
                 Core::SelectionManager::SetSelection( std::move( dups ) );
         }
         if ( ImGui::MenuItem( "Delete", "Del", false, editMode && hasSelection ) )
@@ -1507,7 +1502,8 @@ namespace Desert::Editor
             ImGui::Spacing();
             ImGui::TextDisabled( "Autosave" );
             ImGui::Separator();
-            ImGui::SliderInt( "Interval (min)", &prefs.AutosaveMinutes, 0, 30, prefs.AutosaveMinutes == 0 ? "Off" : "%d min" );
+            ImGui::SliderInt( "Interval (min)", &prefs.AutosaveMinutes, 0, 30,
+                              prefs.AutosaveMinutes == 0 ? "Off" : "%d min" );
             ImGui::TextDisabled( "Autosaves land in Scene/Autosave/, the main file is never touched." );
 
             ImGui::Spacing();
@@ -1592,8 +1588,8 @@ namespace Desert::Editor
         // bloom probe, a shadow-caster cluster, coloured fill lights and a playable camera. Only
         // primitives + REAL material assets (created by name in the project's Materials/), so a new
         // project has zero external dependencies and every render feature has something to show on.
-        auto prim = [&]( const std::string& name, Geometry::PrimitiveType type, glm::vec3 pos,
-                         glm::vec3 scale, Assets::AssetHandle material = Common::UUID::Null() )
+        auto prim = [&]( const std::string& name, Geometry::PrimitiveType type, glm::vec3 pos, glm::vec3 scale,
+                         Assets::AssetHandle material = Common::UUID::Null() )
         {
             auto& e       = m_MainScene->CreateNewEntity( std::string( name ) );
             auto& smc     = e.AddComponent<ECS::StaticMeshComponent>();
@@ -1604,8 +1600,7 @@ namespace Desert::Editor
             tf.Translation = pos;
             tf.Scale       = scale;
         };
-        auto mat = [&]( const std::string&                                       name,
-                        std::initializer_list<std::pair<const char*, glm::vec4>> params )
+        auto mat = [&]( const std::string& name, std::initializer_list<std::pair<const char*, glm::vec4>> params )
         { return Editor::MaterialAssetUtils::CreatePBRMaterialAsset( m_AssetManager.get(), name, params ); };
 
         // Sun (Translation encodes the direction; shading uses -normalize(T)) + procedural sky.
@@ -1614,7 +1609,7 @@ namespace Desert::Editor
         sun.GetComponent<ECS::TransformComponent>().Translation =
              glm::normalize( glm::vec3( 0.35f, 0.9f, 0.25f ) );
 
-        auto& sky = m_MainScene->CreateNewEntity( "Sky" );
+        auto& sky                                           = m_MainScene->CreateNewEntity( "Sky" );
         sky.AddComponent<ECS::SkyboxComponent>().Procedural = true;
 
         prim( "Ground", Geometry::PrimitiveType::Cube, { 0.0f, -0.1f, 0.0f }, { 24.0f, 0.2f, 24.0f },
@@ -1633,8 +1628,7 @@ namespace Desert::Editor
                   mat( "PBR_D_R" + suffix, { { "AlbedoColor", { 0.85f, 0.20f, 0.15f, 1.0f } },
                                              { "RoughnessFactor", { roughness, 0, 0, 0 } },
                                              { "MetallicFactor", { 0.0f, 0, 0, 0 } } } ) );
-            prim( "PBR_Metal_" + suffix, Geometry::PrimitiveType::Sphere, { x, 0.6f, -4.6f },
-                  glm::vec3( 0.55f ),
+            prim( "PBR_Metal_" + suffix, Geometry::PrimitiveType::Sphere, { x, 0.6f, -4.6f }, glm::vec3( 0.55f ),
                   mat( "PBR_M_R" + suffix, { { "AlbedoColor", { 0.95f, 0.93f, 0.88f, 1.0f } },
                                              { "RoughnessFactor", { roughness, 0, 0, 0 } },
                                              { "MetallicFactor", { 1.0f, 0, 0, 0 } } } ) );
@@ -1674,8 +1668,8 @@ namespace Desert::Editor
 
         // SDF text probe: emissive so it blooms like any emissive surface (no special path).
         {
-            auto& label = m_MainScene->CreateNewEntity( "Text" );
-            auto& tc    = label.AddComponent<ECS::TextComponent>();
+            auto& label          = m_MainScene->CreateNewEntity( "Text" );
+            auto& tc             = label.AddComponent<ECS::TextComponent>();
             tc.Text              = "Desert Engine";
             tc.Color             = { 0.55f, 0.85f, 1.0f, 1.0f };
             tc.Size              = 0.8f;
@@ -1694,11 +1688,11 @@ namespace Desert::Editor
         // Cornell-Box GI + glass showcase. Red/green walls bleed onto the white objects (SSGI); a
         // clear glass sphere sits in front of an orange cube (visible THROUGH it); a point light
         // backlights the set. Colours live in REAL material assets in the mesh slots.
-        auto tinted = [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const char* matName,
-                           glm::vec4 albedo )
+        auto tinted =
+             [&]( const char* name, glm::vec3 pos, glm::vec3 scale, const char* matName, glm::vec4 albedo )
         {
-            auto& e   = m_MainScene->CreateNewEntity( std::string( name ) );
-            auto& smc = e.AddComponent<ECS::StaticMeshComponent>();
+            auto& e       = m_MainScene->CreateNewEntity( std::string( name ) );
+            auto& smc     = e.AddComponent<ECS::StaticMeshComponent>();
             smc.Primitive = Geometry::PrimitiveType::Cube;
             smc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
                  m_AssetManager.get(), matName, albedo, 0.9f ) );
@@ -1717,8 +1711,8 @@ namespace Desert::Editor
                 glm::vec4( 0.95f, 0.5f, 0.08f, 1 ) );
 
         // Clear glass sphere in front of the cube.
-        auto& glass = m_MainScene->CreateNewEntity( std::string( "CB_GlassSphere" ) );
-        auto& gsmc  = glass.AddComponent<ECS::StaticMeshComponent>();
+        auto& glass    = m_MainScene->CreateNewEntity( std::string( "CB_GlassSphere" ) );
+        auto& gsmc     = glass.AddComponent<ECS::StaticMeshComponent>();
         gsmc.Primitive = Geometry::PrimitiveType::Sphere;
         gsmc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
              m_AssetManager.get(), "CB_Glass",
@@ -1730,8 +1724,8 @@ namespace Desert::Editor
         gtf.Scale       = glm::vec3( 1.6f );
 
         // Point light BEHIND the objects (backlight / rim).
-        auto& pl  = m_MainScene->CreateNewEntity( std::string( "CB_BackLight" ) );
-        auto& pld = pl.AddComponent<ECS::PointLightComponent>().Data;
+        auto& pl      = m_MainScene->CreateNewEntity( std::string( "CB_BackLight" ) );
+        auto& pld     = pl.AddComponent<ECS::PointLightComponent>().Data;
         pld.Color     = glm::vec3( 1.0f, 0.85f, 0.6f );
         pld.Intensity = 8.0f;
         pld.Radius    = 12.0f;
@@ -1879,8 +1873,8 @@ namespace Desert::Editor
 
     void EditorLayer::DrawPauseButton( const ImVec2& size )
     {
-        namespace ImGui  = ::ImGui;
-        using SceneState = ::Desert::Core::Scene::SceneState;
+        namespace ImGui   = ::ImGui;
+        using SceneState  = ::Desert::Core::Scene::SceneState;
         const bool paused = m_MainScene->GetState() == SceneState::Paused;
         const bool active = m_MainScene->GetState() != SceneState::Edit; // pause only matters while playing
 
@@ -1909,18 +1903,18 @@ namespace Desert::Editor
                            const glm::vec3& localPos, const glm::vec3& scale )
         {
             using namespace ::Desert;
-            auto& e = scene->CreateNewEntity( std::string( name ) );
+            auto& e                                              = scene->CreateNewEntity( std::string( name ) );
             e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
-            auto& t       = e.GetComponent<ECS::TransformComponent>();
-            t.Translation = localPos;
-            t.Scale       = scale;
-            auto& col           = e.AddComponent<ECS::ColliderComponent>();
-            col.Data.Shape       = Physics::ShapeType::Box;
-            col.Data.HalfExtents = scale; // 2-unit cube -> half-extents == scale
-            e.AddComponent<ECS::RigidBodyComponent>().Data.Type = Physics::BodyType::Static;
+            auto& t                                              = e.GetComponent<ECS::TransformComponent>();
+            t.Translation                                        = localPos;
+            t.Scale                                              = scale;
+            auto& col                                            = e.AddComponent<ECS::ColliderComponent>();
+            col.Data.Shape                                       = Physics::ShapeType::Box;
+            col.Data.HalfExtents                                 = scale; // 2-unit cube -> half-extents == scale
+            e.AddComponent<ECS::RigidBodyComponent>().Data.Type  = Physics::BodyType::Static;
             scene->Attach( parent, e );
         }
-    }
+    } // namespace
 
     // Builds a walkable greybox HOUSE (floor-less; sits on the demo ground): 4 walls (front wall has a
     // doorway) + a flat roof, each a static collider so the character walks in through the door and is blocked
@@ -1930,7 +1924,7 @@ namespace Desert::Editor
         using namespace ::Desert;
 
         // By VALUE: creating the wall children below reallocates the entity store; a reference would dangle.
-        ECS::Entity house = m_MainScene->CreateNewEntity( "House" );
+        ECS::Entity house                                         = m_MainScene->CreateNewEntity( "House" );
         house.GetComponent<ECS::TransformComponent>().Translation = origin;
 
         // Interior ~8x8 m, walls 3 m tall, 0.2 m thick. Half-sizes (= scale, since the cube is 2 units):
@@ -1954,8 +1948,8 @@ namespace Desert::Editor
 
         // --- Sun (directional light) — DirectionLight stores its DIRECTION in TransformComponent.Translation
         {
-            auto& sun = m_MainScene->CreateNewEntity( "Sun" );
-            auto& dl  = sun.AddComponent<ECS::DirectionLightComponent>();
+            auto& sun         = m_MainScene->CreateNewEntity( "Sun" );
+            auto& dl          = sun.AddComponent<ECS::DirectionLightComponent>();
             dl.Data.Color     = { 1.0f, 0.97f, 0.9f };
             dl.Data.Intensity = 3.0f;
             sun.GetComponent<ECS::TransformComponent>().Translation = { -0.4f, -1.0f, -0.5f }; // direction
@@ -1963,12 +1957,12 @@ namespace Desert::Editor
 
         // --- Ground: a flat static box the character stands on (mesh + Box collider + Static body)
         {
-            auto& ground = m_MainScene->CreateNewEntity( "Ground" );
+            auto& ground                                              = m_MainScene->CreateNewEntity( "Ground" );
             ground.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
-            auto& gt        = ground.GetComponent<ECS::TransformComponent>();
-            gt.Translation  = { 0.0f, -0.5f, 0.0f }; // top surface at y = 0
-            gt.Scale        = { 20.0f, 0.5f, 20.0f };
-            auto& gcol      = ground.AddComponent<ECS::ColliderComponent>();
+            auto& gt              = ground.GetComponent<ECS::TransformComponent>();
+            gt.Translation        = { 0.0f, -0.5f, 0.0f }; // top surface at y = 0
+            gt.Scale              = { 20.0f, 0.5f, 20.0f };
+            auto& gcol            = ground.AddComponent<ECS::ColliderComponent>();
             gcol.Data.Shape       = Physics::ShapeType::Box;
             gcol.Data.HalfExtents = { 20.0f, 0.5f, 20.0f }; // matches the scaled cube (world units)
             ground.AddComponent<ECS::RigidBodyComponent>().Data.Type = Physics::BodyType::Static;
@@ -1979,12 +1973,12 @@ namespace Desert::Editor
         {
             auto& box = m_MainScene->CreateNewEntity( "Obstacle" + std::to_string( i ) );
             box.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
-            auto& bt       = box.GetComponent<ECS::TransformComponent>();
-            bt.Translation = { -4.0f + i * 4.0f, 0.5f, -5.0f };
-            auto& bcol     = box.AddComponent<ECS::ColliderComponent>();
-            bcol.Data.Shape       = Physics::ShapeType::Box;
-            bcol.Data.HalfExtents = { 0.5f, 0.5f, 0.5f };
-            box.AddComponent<ECS::RigidBodyComponent>().Data.Type = Physics::BodyType::Static;
+            auto& bt                                               = box.GetComponent<ECS::TransformComponent>();
+            bt.Translation                                         = { -4.0f + i * 4.0f, 0.5f, -5.0f };
+            auto& bcol                                             = box.AddComponent<ECS::ColliderComponent>();
+            bcol.Data.Shape                                        = Physics::ShapeType::Box;
+            bcol.Data.HalfExtents                                  = { 0.5f, 0.5f, 0.5f };
+            box.AddComponent<ECS::RigidBodyComponent>().Data.Type  = Physics::BodyType::Static;
         }
 
         // --- Player: a Character Controller (the physics capsule). NO RigidBody/Collider — the controller
@@ -2021,12 +2015,12 @@ namespace Desert::Editor
         // --- Camera: a CHILD of the (unscaled) player. Offset behind+above = 3rd person; move it to ~(0,
         // 0.7, 0) with rotation 0 for 1st person. Follows the player via the hierarchy (WORLD transform).
         {
-            auto& cam = m_MainScene->CreateNewEntity( "PlayerCamera" );
-            auto& cd  = cam.AddComponent<ECS::CameraComponent>();
+            auto& cam            = m_MainScene->CreateNewEntity( "PlayerCamera" );
+            auto& cd             = cam.AddComponent<ECS::CameraComponent>();
             cd.Data.IsMainCamera = true;
-            auto& ct       = cam.GetComponent<ECS::TransformComponent>();
-            ct.Translation = { 0.0f, 1.5f, 7.0f };                   // behind (+Z) and above the player
-            ct.Rotation    = { glm::radians( -10.0f ), 0.0f, 0.0f }; // look slightly down at the player
+            auto& ct             = cam.GetComponent<ECS::TransformComponent>();
+            ct.Translation       = { 0.0f, 1.5f, 7.0f };                   // behind (+Z) and above the player
+            ct.Rotation          = { glm::radians( -10.0f ), 0.0f, 0.0f }; // look slightly down at the player
             m_MainScene->Attach( player, cam );
         }
 
@@ -2176,7 +2170,7 @@ namespace Desert::Editor
         {
             if ( event.m_Handled )
                 break;
-            panel->OnEvent(event);
+            panel->OnEvent( event );
         }
 #endif
     }

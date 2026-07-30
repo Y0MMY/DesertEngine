@@ -37,7 +37,7 @@ Shader "ParticleSimulate"
             vec4  u_Params;     // x = startSpeed, y = speedVar, z = lifetime, w = lifetimeVar
             vec4  u_StartColor; // rgb + start alpha (w)
             vec4  u_EndColor;   // rgb + end alpha (w)
-            vec4  u_Sizes;      // x = start size, y = end size
+            vec4  u_Sizes;      // x = start size, y = end size, z = size-curve power, w = unused
             uvec4 u_Counts;     // x = maxParticles, y = spawnBudget, z = enabled(0/1), w = unused
         };
 
@@ -113,7 +113,8 @@ Shader "ParticleSimulate"
 
             // Bake the current size + colour from the particle's normalized age (0..1 over its life).
             float t     = ( p.VelLife.w > 0.0 ) ? clamp( p.Age.x / p.VelLife.w, 0.0, 1.0 ) : 0.0;
-            p.PosSize.w = mix( u_Sizes.x, u_Sizes.y, t );
+            float st    = pow( t, u_Sizes.z > 0.0 ? u_Sizes.z : 1.0 ); // size-over-life ease curve
+            p.PosSize.w = mix( u_Sizes.x, u_Sizes.y, st );
             p.Color     = mix( u_StartColor, u_EndColor, t );
             if ( p.VelLife.w <= 0.0 )
                 p.Color.a = 0.0; // dead => invisible
