@@ -90,6 +90,58 @@ namespace Desert::Editor
 
     static bool s_ShowPreferences = false; // Edit -> Preferences... window
 
+    // Icon shown before a panel's tab/title + its View-menu entry. Keyed by the panel's STABLE name
+    // (GetName(), which is also the ImGui dock ID) so we never touch that ID.
+    static const char* PanelIcon( const std::string& name )
+    {
+        if ( name == "Scene###scene" )
+            return ICON_MDI_MONITOR;
+        if ( name == "Scene Outliner" )
+            return ICON_MDI_FILE_TREE;
+        if ( name == "Details" )
+            return ICON_MDI_TUNE;
+        if ( name == "Assets" )
+            return ICON_MDI_FOLDER_OUTLINE;
+        if ( name == "Scene Settings" )
+            return ICON_MDI_COG;
+        if ( name == "Logs" )
+            return ICON_MDI_TEXT_BOX_OUTLINE;
+        if ( name == "History" )
+            return ICON_MDI_HISTORY;
+        if ( name == "Collections" )
+            return ICON_MDI_SHAPE_OUTLINE;
+        if ( name == "Sequencer" )
+            return ICON_MDI_CHART_TIMELINE;
+        if ( name == "Anim Layers" )
+            return ICON_MDI_ANIMATION;
+        if ( name == "Node Graph" )
+            return ICON_MDI_GRAPH;
+        if ( name == "Lua Console" )
+            return ICON_MDI_CONSOLE;
+        if ( name == "Build Settings" )
+            return ICON_MDI_HAMMER_WRENCH;
+        if ( name == "Asset References" )
+            return ICON_MDI_LINK_VARIANT;
+        if ( name == "Mesh Editor" )
+            return ICON_MDI_VECTOR_TRIANGLE;
+        if ( name == "Scene Validation" )
+            return ICON_MDI_CLIPBOARD_CHECK_OUTLINE;
+        if ( name == "Shader Library" )
+            return ICON_MDI_PALETTE;
+        return ICON_MDI_VIEW_DASHBOARD; // sensible default for any future panel
+    }
+
+    // Composes "<icon>  <label>###<stable id>". The visible part gets the icon; the trailing ###<name>
+    // keeps the ImGui window ID EXACTLY panel->GetName(), so saved dock layouts and every GetName()==...
+    // lookup keep working unchanged.
+    static std::string PanelDisplayTitle( const std::string& name )
+    {
+        std::string label = name;
+        if ( const auto pos = label.find( "###" ); pos != std::string::npos )
+            label.erase( pos ); // visible part only (drop any existing ###id)
+        return std::string( PanelIcon( name ) ) + "  " + label + "###" + name;
+    }
+
     EditorLayer::EditorLayer( const Engine::Application* application, const std::string& layerName )
          : Common::Layer( layerName ), m_Application( application )
 
@@ -739,8 +791,9 @@ namespace Desert::Editor
                 ImGui::SetNextWindowPos( center, ImGuiCond_FirstUseEver, ImVec2( 0.5f, 0.5f ) );
             }
 
-            // p_open: the title-bar X closes the panel and stays in sync with the View menu.
-            ImGui::Begin( panel->GetName().c_str(), &panel->GetVisibility() );
+            // p_open: the title-bar X closes the panel and stays in sync with the View menu. The display
+            // title carries an icon but keeps the ImGui ID == GetName() (see PanelDisplayTitle).
+            ImGui::Begin( PanelDisplayTitle( panel->GetName() ).c_str(), &panel->GetVisibility() );
             {
                 DESERT_PROFILE_SCOPE_DYNAMIC( panel->GetName().c_str() );
                 panel->OnUIRender();
@@ -1459,7 +1512,8 @@ namespace Desert::Editor
 
         for ( auto& panel : m_Panels )
         {
-            ImGui::MenuItem( panel->GetName().c_str(), "", &panel->GetVisibility(), true );
+            // Same icon + stable ID as the panel title (the ###id keeps each menu entry unique/stable).
+            ImGui::MenuItem( PanelDisplayTitle( panel->GetName() ).c_str(), "", &panel->GetVisibility(), true );
         }
 
         ImGui::Separator();
