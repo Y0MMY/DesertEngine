@@ -34,6 +34,7 @@ Shader "DeferredLighting"
         Uniform(2) sampler2D u_GBufferA; // rgb = albedo, a = metallic
         Uniform(3) sampler2D u_GBufferB; // rgb = world normal, a = roughness
         Uniform(8) sampler2D u_SSAO;     // r = ambient-occlusion factor (1 = lit)
+        Uniform(9) sampler2D u_GBufferEmissive; // rgb = HDR emissive (self-illumination, added below)
 
         Out(0) vec4 oColor;
 
@@ -309,7 +310,11 @@ Shader "DeferredLighting"
         	// Ambient = small flat sky term + the indirect bounce, modulated by receiver albedo and SSAO.
         	vec3 ambient = albedo * ao * (vec3(0.08) + indirect);
 
-        	oColor = vec4(result + ambient, 1.0);
+        	// Self-illumination (view-independent) — added here (not lit) so HDR emissive reaches the composite
+        	// and blooms, matching the forward path. GBufferEmissive is 0 where the material has none.
+        	vec3 emissive = texture(u_GBufferEmissive, v_TexCoord).rgb;
+
+        	oColor = vec4(result + ambient + emissive, 1.0);
         }
     }
 }

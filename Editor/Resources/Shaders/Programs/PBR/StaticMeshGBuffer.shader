@@ -81,7 +81,8 @@ Shader "StaticMeshGBuffer"
 
         Out(0) vec4 oGBufferA; // Albedo.rgb, Metallic.a
         Out(1) vec4 oGBufferB; // Normal.rgb, Roughness.a
-        Out(2) vec4 oGBufferC; // WorldPosition.xyz (w unused)
+        Out(2) vec4 oGBufferC; // WorldPosition.xyz, texCount.w
+        Out(3) vec4 oGBufferEmissive; // Emissive.rgb (HDR, self-illumination added in the deferred resolve)
 
         PushConstant PushConstants
         {
@@ -168,6 +169,9 @@ Shader "StaticMeshGBuffer"
         	oGBufferA = vec4(albedo + keep, metallic);
         	oGBufferB = vec4(N, roughness);
         	oGBufferC = vec4(inVertex.WorldPosition, float(texCount));
+        	// Emissive is view-independent self-illumination; the deferred lighting resolve ADDS it, matching the
+        	// forward StaticMeshPBR path so emissive materials reach the HDR composite and bloom (values > 1).
+        	oGBufferEmissive = vec4(mat.EmissionColor.rgb * mat.MetalRoughEmission.z, 1.0);
         }
     }
 }

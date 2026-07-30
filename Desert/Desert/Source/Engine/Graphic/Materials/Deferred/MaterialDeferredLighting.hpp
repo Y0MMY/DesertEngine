@@ -34,18 +34,20 @@ namespace Desert::Graphic
     public:
         MaterialDeferredLighting() : Material( "MaterialDeferredLighting", "DeferredLighting" )
         {
-            m_GBufferA = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferA" ).get();
-            m_GBufferB = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferB" ).get();
-            m_GBufferC = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferC" ).get();
-            m_SSAO     = m_MaterialExecutor->GetTexture2DProperty( "u_SSAO" ).get();
+            m_GBufferA        = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferA" ).get();
+            m_GBufferB        = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferB" ).get();
+            m_GBufferC        = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferC" ).get();
+            m_GBufferEmissive = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferEmissive" ).get();
+            m_SSAO            = m_MaterialExecutor->GetTexture2DProperty( "u_SSAO" ).get();
         }
 
         // gA = Albedo+Metallic, gB = Normal+Roughness, gC = WorldPosition; lightDir.xyz = direction the sun
         // travels; lightColor.rgb/.a = colour/intensity; cameraPos.xyz = camera world pos (view vector);
         // debugMode 0=Lit,1=Albedo,2=Normal,3=Metallic,4=Roughness; point/spot = the scene's dynamic lights.
         void Bind( const std::shared_ptr<Image2D>& gA, const std::shared_ptr<Image2D>& gB,
-                   const std::shared_ptr<Image2D>& gC, const glm::vec4& lightDir, const glm::vec4& lightColor,
-                   const glm::vec4& cameraPos, int debugMode, const ShaderProtocols::PointLight& pointLights,
+                   const std::shared_ptr<Image2D>& gC, const std::shared_ptr<Image2D>& gE,
+                   const glm::vec4& lightDir, const glm::vec4& lightColor, const glm::vec4& cameraPos,
+                   int debugMode, const ShaderProtocols::PointLight& pointLights,
                    const ShaderProtocols::SpotLight& spotLights, const DeferredShadowInput& shadow,
                    const std::shared_ptr<Image2D>& aoImage, float giIntensity, bool ssaoEnabled )
         {
@@ -55,6 +57,8 @@ namespace Desert::Graphic
                 m_GBufferB->SetImage( gB.get() );
             if ( m_GBufferC && gC )
                 m_GBufferC->SetImage( gC.get() );
+            if ( m_GBufferEmissive && gE )
+                m_GBufferEmissive->SetImage( gE.get() );
             if ( m_SSAO && aoImage )
                 m_SSAO->SetImage( aoImage.get() );
 
@@ -137,9 +141,10 @@ namespace Desert::Graphic
         MPROPERTY( glm::vec4, CameraPos,  "u_CameraPos",  ( glm::vec4( 0.0f ) ) )
 
     private:
-        Texture2DProperty* m_GBufferA = nullptr;
-        Texture2DProperty* m_GBufferB = nullptr;
-        Texture2DProperty* m_GBufferC = nullptr;
+        Texture2DProperty* m_GBufferA        = nullptr;
+        Texture2DProperty* m_GBufferB        = nullptr;
+        Texture2DProperty* m_GBufferC        = nullptr;
+        Texture2DProperty* m_GBufferEmissive = nullptr;
         Texture2DProperty* m_SSAO     = nullptr;
     };
 } // namespace Desert::Graphic

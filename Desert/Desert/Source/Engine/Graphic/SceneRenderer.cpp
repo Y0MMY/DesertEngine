@@ -61,6 +61,8 @@ namespace Desert::Graphic
         gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );  // GBufferA Albedo+Metallic
         gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // GBufferB Normal+Roughness
         gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // GBufferC WorldPosition.xyz
+        gbufferSpec.Attachments.Attachments.push_back(
+             Core::Formats::ImageFormat::RGBA32F ); // GBufferEmissive (HDR self-illum)
         gbufferSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
         m_GBuffer = Graphic::Framebuffer::Create( gbufferSpec );
         m_GBuffer->Resize( width, height );
