@@ -18,6 +18,29 @@ namespace Desert::Animation::Graph
             m_Current = 0; // entry named a missing state -> fall back to the first
     }
 
+    void Evaluator::SyncGraph( AnimGraph graph )
+    {
+        const std::string currentName = CurrentState() ? CurrentState()->Name : std::string();
+        auto              savedParams = m_Params;
+
+        m_Graph = std::move( graph );
+
+        // Keep running the same state if it still exists; otherwise re-enter (entry / first).
+        m_Current = FindState( currentName );
+        if ( m_Current < 0 )
+        {
+            m_Current = m_Graph.Entry.empty() ? ( m_Graph.States.empty() ? -1 : 0 ) : FindState( m_Graph.Entry );
+            if ( m_Current < 0 && !m_Graph.States.empty() )
+                m_Current = 0;
+        }
+
+        // Preserve live parameter values; seed only parameters that are new.
+        for ( const auto& p : m_Graph.Parameters )
+            if ( savedParams.find( p.Name ) == savedParams.end() )
+                savedParams[p.Name] = p.Default;
+        m_Params = std::move( savedParams );
+    }
+
     void Evaluator::SetFloat( const std::string& name, float value )
     {
         m_Params[name] = value;

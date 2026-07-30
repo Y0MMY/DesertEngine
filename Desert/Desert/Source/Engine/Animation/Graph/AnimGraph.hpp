@@ -88,6 +88,11 @@ namespace Desert::Animation::Graph
 
         void Reset(); // jump to the entry state and seed parameters to their defaults
 
+        // Replaces the graph in place while PRESERVING the running state (matched by name) and live parameter
+        // values (new parameters get their defaults). Lets the editor edit a live graph without the state
+        // machine snapping back to entry. Falls back to entry only if the active state was removed/renamed.
+        void SyncGraph( AnimGraph graph );
+
         void  SetFloat( const std::string& name, float value );
         void  SetBool( const std::string& name, bool value );
         void  SetInt( const std::string& name, int value );

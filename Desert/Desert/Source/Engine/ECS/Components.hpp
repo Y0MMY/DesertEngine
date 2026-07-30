@@ -33,6 +33,11 @@ namespace Desert
     namespace Animation
     {
         class Skeleton;
+        namespace Graph
+        {
+            struct AnimGraph;
+            class Evaluator;
+        } // namespace Graph
     }
 }
 
@@ -306,6 +311,15 @@ namespace Desert::ECS
         // Notify names fired by the Animator THIS frame (crossed clip markers). Filled by AnimationECSSystem,
         // drained + dispatched to the entity's scripts (OnAnimationNotify) by ScriptSystem. Transient.
         std::vector<std::string> PendingNotifies;
+
+        // AnimGraph (Phase 4): a data-driven state machine that PICKS the clip to play from live parameters.
+        // When Graph is set, AnimationECSSystem drives the Animator from the evaluator instead of CurrentClip.
+        // In-memory only for now (not serialized with the scene). GraphRevision is bumped by the editor on any
+        // structural edit so the ECS rebuilds the transient evaluator; parameters are set live on the evaluator.
+        std::shared_ptr<Animation::Graph::AnimGraph> Graph;
+        std::shared_ptr<Animation::Graph::Evaluator> GraphEvaluator; // transient runtime state
+        uint32_t                                     GraphRevision      = 0;
+        uint32_t                                     BuiltGraphRevision = 0; // ECS: rev the evaluator was built at
 
         AnimationComponent() = default;
 

@@ -3,6 +3,7 @@
 #include "System.hpp"
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Animation/Graph/AnimGraph.hpp>
 
 #include <chrono>
 #include <algorithm>
@@ -37,7 +38,12 @@ namespace Desert::ECS
                 auto& skinnedMesh = view.get<ECS::SkinnedMeshComponent>( entity );
                 auto& anim        = view.get<ECS::AnimationComponent>( entity );
 
-                auto meshBase = Runtime::ResourceRegistry::GetMeshService()->Get( skinnedMesh.MeshHandle );
+                // Editor-built runtime rig (Convert to Skinned) has no MeshHandle — prefer it (mirrors the
+                // render/pick paths) so a converted mesh can still animate.
+                Desert::Mesh* meshBase =
+                     skinnedMesh.RuntimeMesh
+                          ? static_cast<Desert::Mesh*>( skinnedMesh.RuntimeMesh.get() )
+                          : Runtime::ResourceRegistry::GetMeshService()->Get( skinnedMesh.MeshHandle );
 
                 if ( !meshBase || !meshBase->IsSkinned() )
                 {
@@ -52,10 +58,57 @@ namespace Desert::ECS
                     anim.Animator = std::make_unique<Animation::Animator>( skinnedMeshPtr->GetSkeleton() );
                 }
 
+                const uint64_t sig = skinnedMeshPtr->GetSkeleton().GetSignature();
+
+                // AnimGraph path: the state machine PICKS the clip; the Animator just plays it. Falls back to
+                // the CurrentClip path below when no graph is attached.
+                if ( anim.Graph && !anim.Graph->States.empty() )
+                {
+                    if ( !anim.GraphEvaluator )
+                    {
+                        anim.GraphEvaluator     = std::make_shared<Animation::Graph::Evaluator>( *anim.Graph );
+                        anim.BuiltGraphRevision = anim.GraphRevision;
+                    }
+                    else if ( anim.BuiltGraphRevision != anim.GraphRevision )
+                    {
+                        // Re-sync after an editor edit WITHOUT resetting the active state / live parameters.
+                        anim.GraphEvaluator->SyncGraph( *anim.Graph );
+                        anim.BuiltGraphRevision = anim.GraphRevision;
+                    }
+
+                    if ( anim.Playing )
+                    {
+                        // Clip fraction [0,1] drives exit-time transitions.
+                        float       norm = 0.0f;
+                        const float dur  = anim.Animator->GetDuration();
+                        if ( dur > 1e-4f )
+                            norm = anim.Animator->GetCurrentTime() / dur;
+
+                        const auto res = anim.GraphEvaluator->Update( norm );
+                        if ( res.Current )
+                        {
+                            if ( const auto* clip = FindClip( sig, res.Current->Clip ) )
+                            {
+                                const auto* cur = anim.Animator->GetCurrentClip();
+                                if ( !cur || cur->AnimationName != clip->AnimationName )
+                                {
+                                    if ( res.Changed && res.Blend > 0.0f )
+                                        anim.Animator->CrossFade( *clip, res.Blend, res.Current->Loop );
+                                    else
+                                        anim.Animator->Play( *clip, res.Current->Loop );
+                                }
+                            }
+                            anim.Animator->SetPlaybackSpeed( anim.PlaybackSpeed * res.Current->Speed );
+                        }
+
+                        anim.Animator->Update( animTs );
+                        anim.PendingNotifies = anim.Animator->ConsumeNotifies();
+                    }
+                    continue;
+                }
+
                 if ( !anim.CurrentClip.empty() )
                 {
-                    const uint64_t sig = skinnedMeshPtr->GetSkeleton().GetSignature();
-
                     const auto animations = m_AnimationLibrary->GetBySkeleton( sig );
 
                     for ( const auto& animAsset : animations )
@@ -78,8 +131,6 @@ namespace Desert::ECS
 
                 else
                 {
-                    const uint64_t sig = skinnedMeshPtr->GetSkeleton().GetSignature();
-
                     const auto animations = m_AnimationLibrary->GetBySkeleton( sig );
 
                     if ( !animations.empty() )
@@ -108,6 +159,19 @@ namespace Desert::ECS
                     }
                 }
             }
+        }
+
+    private:
+        // Resolves a clip by name for the given skeleton signature (AnimGraph state -> clip). Returns a stable
+        // pointer into the owning AnimationAsset, or null if the library has no such clip.
+        const Animation::AnimationClip* FindClip( uint64_t skeletonSignature, const std::string& name ) const
+        {
+            if ( name.empty() )
+                return nullptr;
+            for ( const auto& animAsset : m_AnimationLibrary->GetBySkeleton( skeletonSignature ) )
+                if ( animAsset->GetClip().AnimationName == name )
+                    return &animAsset->GetClip();
+            return nullptr;
         }
 
     private:

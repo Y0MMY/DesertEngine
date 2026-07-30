@@ -2,6 +2,10 @@
 
 #include "IComponentWidget.hpp"
 
+#include <Engine/Assets/Mesh/AnimationAsset.hpp>
+
+#include <vector>
+
 namespace Desert::Editor
 {
     class AnimationComponentWidget final : public ComponentWidget<ECS::AnimationComponent>
@@ -16,6 +20,12 @@ namespace Desert::Editor
         }
 
         void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr ) override;
+
+    private:
+        // AnimGraph (Phase 4) authoring UI: parameters (with live value controls), states (name/clip/loop/speed
+        // + entry), and per-state transitions (target + blend + exit-time + parameter conditions).
+        void RenderAnimGraph( ECS::AnimationComponent&                                  animation,
+                              const std::vector<Assets::Asset<Assets::AnimationAsset>>& clips );
 
     private:
         const Assets::AssetManager*        m_AssetManager;

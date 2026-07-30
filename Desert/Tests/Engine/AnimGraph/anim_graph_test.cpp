@@ -117,6 +117,31 @@ TEST( AnimGraph, DanglingAndSelfTargetsIgnored )
     EXPECT_EQ( r.Current->Name, "Only" );
 }
 
+TEST( AnimGraph, SyncGraphPreservesStateAndParams )
+{
+    Evaluator eval( LocomotionGraph() );
+    eval.SetFloat( "Speed", 1.0f );
+    ASSERT_EQ( eval.Update( 0.0f ).Current->Name, "Run" ); // now in Run, Speed = 1
+
+    // Edit the graph (bump a blend duration) and re-sync: the active state + live param must survive.
+    AnimGraph edited                      = LocomotionGraph();
+    edited.States[0].Transitions[0].Blend = 0.9f;
+    eval.SyncGraph( edited );
+
+    EXPECT_EQ( eval.CurrentState()->Name, "Run" );     // preserved by name
+    EXPECT_FLOAT_EQ( eval.GetFloat( "Speed" ), 1.0f ); // live value preserved
+
+    // Removing the active state re-enters at the entry.
+    AnimGraph idleOnly;
+    idleOnly.Entry = "Idle";
+    State idle;
+    idle.Name       = "Idle";
+    idle.Clip       = "idle_clip";
+    idleOnly.States = { idle };
+    eval.SyncGraph( idleOnly );
+    EXPECT_EQ( eval.CurrentState()->Name, "Idle" );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
