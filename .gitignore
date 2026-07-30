@@ -57,3 +57,6 @@ Cooked/
 # Fetched by scripts/MacOS/Setup.sh (not a submodule)
 ThirdParty/meshoptimizer/
 dist/
+
+# Optional: cloned by the user to enable dlib face tracking (see BuildScripts/ThirdParty/Dlib.lua)
+ThirdParty/dlib/

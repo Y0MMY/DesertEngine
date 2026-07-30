@@ -5,6 +5,8 @@
 #include <Engine/Assets/Common.hpp>
 #include <Engine/ECS/Entity.hpp>
 
+#include <glm/glm.hpp>
+
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -36,6 +38,7 @@ namespace Desert::Editor
     {
         class UIHelper;
     }
+    class FaceTracker;
 } // namespace Desert::Editor
 
 namespace Desert::Editor
@@ -108,6 +111,11 @@ namespace Desert::Editor
         int                                           m_RecordedFrames = 0;
         double                                        m_LastTexTime    = 0.0; // throttle clock (ImGui time)
         double                                        m_LastSaveTime   = 0.0;
+
+        // Face tracking (optional, dlib). m_Landmarks are in camera-image pixel coordinates.
+        std::unique_ptr<FaceTracker> m_FaceTracker;
+        std::vector<glm::vec2>       m_Landmarks;
+        std::string                  m_LoadedFaceModel; // path currently loaded (to detect changes)
 
         // Reconstruction worker.
         std::thread       m_Worker;

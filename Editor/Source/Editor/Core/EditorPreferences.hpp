@@ -44,6 +44,9 @@ namespace Desert::Editor
         // 0 = Object (generic photogrammetry), 1 = Face (MetaHuman-style capture). Only swaps the tool
         // presets + on-screen guidance; the engine still delegates the heavy lifting to the external CLI.
         int PhotogrammetryMode = 0;
+        // Path to the dlib 68-point model (shape_predictor_68_face_landmarks.dat) for real face tracking on
+        // the camera overlay. Empty / dlib-not-built => a placeholder overlay is drawn instead.
+        std::string PhotogrammetryFaceModel = "";
 
         static EditorPreferences& Get();
 

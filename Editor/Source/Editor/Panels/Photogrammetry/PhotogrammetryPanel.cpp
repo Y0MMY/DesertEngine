@@ -3,6 +3,7 @@
 #include <Editor/Core/EditorPreferences.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Import/MeshDnD.hpp>
+#include <Editor/Widgets/FaceTracker.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
 #include <Common/Utilities/CameraCapture.hpp>
@@ -250,7 +251,12 @@ namespace Desert::Editor
     {
         m_UIHelper = std::make_unique<UI::UIHelper>();
         m_UIHelper->Init();
-        m_Camera = std::make_unique<Common::Utils::CameraCapture>();
+        m_Camera      = std::make_unique<Common::Utils::CameraCapture>();
+        m_FaceTracker = std::make_unique<FaceTracker>();
+
+        auto& prefs = EditorPreferences::Get();
+        if ( !prefs.PhotogrammetryFaceModel.empty() && m_FaceTracker->LoadModel( prefs.PhotogrammetryFaceModel ) )
+            m_LoadedFaceModel = prefs.PhotogrammetryFaceModel;
     }
 
     PhotogrammetryPanel::~PhotogrammetryPanel()
@@ -319,6 +325,10 @@ namespace Desert::Editor
                      .Properties = Core::Formats::Sample,
                 };
                 m_CameraImage = Graphic::Image2D::Create( spec, nullptr );
+
+                // Real face-landmark tracking (dlib) on the same throttled cadence, if a model is loaded.
+                if ( m_FaceTracker && m_FaceTracker->Ready() )
+                    m_Landmarks = m_FaceTracker->Detect( m_FrameBuf.data(), w, h );
 
                 // Save the frame to the photos folder while recording (also throttled).
                 if ( m_Recording && now - m_LastSaveTime >= kSaveInterval )
@@ -461,9 +471,10 @@ namespace Desert::Editor
         if ( !CommandExists( prefs.PhotogrammetryCommand ) )
         {
             const std::string tok = FirstToken( prefs.PhotogrammetryCommand );
-            m_Status      = "Reconstruction tool '" + tok +
-                            "' is not installed / not on PATH. Install a photogrammetry tool (Meshroom, COLMAP, "
-                            "RealityCapture) and pick it in Reconstruction settings. Nothing was run.";
+            m_Status              = "Reconstruction tool '";
+            m_Status += tok;
+            m_Status += "' is not installed / not on PATH. Install a photogrammetry tool (Meshroom, COLMAP, "
+                        "RealityCapture) and pick it in Reconstruction settings. Nothing was run.";
             m_StatusError = true;
             PushLog( "[preflight] '" + tok + "' not found — is it installed and on PATH?" );
             return;
@@ -491,8 +502,11 @@ namespace Desert::Editor
             else if ( m_ExitCode == 130 )
                 m_Status = "Reconstruction was cancelled.";
             else
-                m_Status = "The external tool exited with code " + std::to_string( m_ExitCode.load() ) +
-                           ". See the log below.";
+            {
+                m_Status = "The external tool exited with code ";
+                m_Status += std::to_string( m_ExitCode.load() );
+                m_Status += ". See the log below.";
+            }
             m_StatusError = true;
             return;
         }
@@ -852,7 +866,23 @@ namespace Desert::Editor
             ImGui::SetCursorPosX( ImGui::GetCursorPosX() + ( avail.x - dw ) * 0.5f );
             const ImVec2 cursor = ImGui::GetCursorScreenPos();
             m_UIHelper->Image( m_CameraImage, ImVec2( dw, dh ) );
-            DrawLandmarks( cursor, ImVec2( cursor.x + dw, cursor.y + dh ) );
+
+            if ( !m_Landmarks.empty() && m_CamW > 0 && m_CamH > 0 )
+            {
+                // Real tracked points: map image-pixel coords into the displayed rect.
+                ImDrawList* dl  = ImGui::GetWindowDrawList();
+                const float sx  = dw / static_cast<float>( m_CamW );
+                const float sy  = dh / static_cast<float>( m_CamH );
+                const ImU32 col = IM_COL32( 70, 245, 90, 255 );
+                for ( const auto& p : m_Landmarks )
+                    dl->AddCircleFilled( ImVec2( cursor.x + p.x * sx, cursor.y + p.y * sy ), 2.6f, col );
+                dl->AddText( ImVec2( cursor.x + 6.0f, cursor.y + 4.0f ), IM_COL32( 150, 245, 150, 235 ),
+                             "landmarks (dlib)" );
+            }
+            else
+            {
+                DrawLandmarks( cursor, ImVec2( cursor.x + dw, cursor.y + dh ) );
+            }
         }
         else
         {
@@ -880,6 +910,34 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Output mesh" );
             dirty |= PathPicker( "outmesh", prefs.PhotogrammetryOutputMesh, /*folder=*/false );
         }
+
+        if ( ImGui::CollapsingHeader( ICON_MDI_FACE_RECOGNITION " Face tracking (landmarks)" ) )
+        {
+            if ( !FaceTracker::Compiled() )
+            {
+                ImGui::TextColored( kColWarn,
+                                    ICON_MDI_ALERT " dlib not built in — the overlay is a placeholder." );
+                ImGui::TextDisabled( "Clone https://github.com/davisking/dlib into ThirdParty/dlib and rebuild "
+                                     "(premake auto-enables it)." );
+            }
+            else
+            {
+                ImGui::TextDisabled( "dlib 68-point model (shape_predictor_68_face_landmarks.dat)." );
+                if ( PathPicker( "facemodel", prefs.PhotogrammetryFaceModel, /*folder=*/false ) )
+                {
+                    dirty = true;
+                    if ( m_FaceTracker && m_FaceTracker->LoadModel( prefs.PhotogrammetryFaceModel ) )
+                        m_LoadedFaceModel = prefs.PhotogrammetryFaceModel;
+                    else
+                        m_LoadedFaceModel.clear();
+                }
+                if ( m_FaceTracker && m_FaceTracker->Ready() )
+                    ImGui::TextColored( kColOk, ICON_MDI_CHECK_CIRCLE " Tracking model loaded." );
+                else
+                    ImGui::TextColored( kColWarn, ICON_MDI_ALERT " No model loaded — pick the .dat file above." );
+            }
+        }
+
         if ( dirty )
             EditorPreferences::Save();
 

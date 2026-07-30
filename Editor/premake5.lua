@@ -47,6 +47,15 @@ project "Editor"
         "ImGuiNodeEditor",
     }
 
+    -- Optional: real face tracking via dlib (davisking/dlib). Auto-enabled when the sources are present
+    -- at ThirdParty/dlib (clone it there). Absent => Editor/Widgets/FaceTracker compiles as a no-op stub,
+    -- so CI and fresh checkouts build without it.
+    if os.isdir( _MAIN_SCRIPT_DIR .. "/ThirdParty/dlib" ) then
+        defines     { "DESERT_WITH_DLIB" }
+        includedirs { "%{wks.location}/ThirdParty/dlib/" }
+        links       { "Dlib" }
+    end
+
     filter "configurations:Debug"
     for name, path in pairs(deps.EditorSpecific.Libraries.Debug) do
         links { path }
