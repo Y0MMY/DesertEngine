@@ -17,6 +17,13 @@
 #include <Engine/Assets/Mesh/AnimationAsset.hpp>
 
 #include <Engine/Animation/AnimationClip.hpp>
+#include <Engine/Assets/Serialization/Animation.hpp>
+
+#include <Common/Core/Constants.hpp>
+#include <Common/Core/Logger.hpp>
+#include <Common/Core/Serialization/GlmReflection.hpp>
+
+#include <rflcpp/rfl/json.hpp>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/quaternion.hpp>
@@ -25,7 +32,10 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace Desert::Editor
@@ -164,6 +174,47 @@ namespace Desert::Editor
         return name;
     }
 
+    std::string SequencerPanel::SaveClipToDisk( const Animation::AnimationClip& clip )
+    {
+        namespace Ser = Assets::Serialization;
+
+        Ser::AnimationAssetData data;
+        data.Name              = clip.AnimationName;
+        data.Duration          = clip.Duration;
+        data.TicksPerSecond    = clip.TicksPerSecond;
+        data.SkeletonSignature = clip.SkeletonSignature;
+        for ( const auto& tr : clip.Tracks )
+        {
+            Ser::ChannelData ch;
+            ch.BoneName  = tr.BoneName;
+            ch.BoneIndex = tr.BoneIndex;
+            for ( const auto& k : tr.PositionKeys )
+                ch.Positions.push_back( { k.Time, k.Position } );
+            for ( const auto& k : tr.RotationKeys )
+                ch.Rotations.push_back( { k.Time, k.Rotation } );
+            for ( const auto& k : tr.ScaleKeys )
+                ch.Scales.push_back( { k.Time, k.Scale } );
+            data.Channels.push_back( std::move( ch ) );
+        }
+        for ( const auto& n : clip.Notifies )
+            data.Notifies.push_back( { n.Name, n.Time } );
+
+        std::error_code ec;
+        std::filesystem::create_directories( Common::Constants::Path::MESH_PATH_COOKED, ec );
+        const std::filesystem::path path =
+             Common::Constants::Path::MESH_PATH_COOKED / ( "_" + clip.AnimationName + ".anim" );
+
+        std::ofstream out( path, std::ios::binary );
+        if ( !out )
+        {
+            LOG_WARN( "[Sequencer] Could not write clip to {}", path.string() );
+            return {};
+        }
+        out << rfl::json::write( data );
+        LOG_INFO( "[Sequencer] Saved clip '{}' -> {}", clip.AnimationName, path.string() );
+        return path.string();
+    }
+
     void SequencerPanel::OnUIRender()
     {
         if ( !m_Scene )
@@ -192,9 +243,12 @@ namespace Desert::Editor
             return;
         }
 
-        auto& anim = entity.GetComponent<ECS::AnimationComponent>();
-        auto* mesh = Runtime::ResourceRegistry::GetMeshService()->Get(
-             entity.GetComponent<ECS::SkinnedMeshComponent>().MeshHandle );
+        auto&       anim = entity.GetComponent<ECS::AnimationComponent>();
+        const auto& smc  = entity.GetComponent<ECS::SkinnedMeshComponent>();
+        // Editor-built runtime rig (Convert to Skinned) has no MeshHandle — prefer it (mirrors the render /
+        // pick / animation paths) so a just-converted character animates in the Sequencer too.
+        Desert::Mesh* mesh = smc.RuntimeMesh ? static_cast<Desert::Mesh*>( smc.RuntimeMesh.get() )
+                                             : Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
         if ( !mesh || !mesh->IsSkinned() )
         {
             ImGui::TextDisabled( "Skinned mesh not resolved yet." );
@@ -263,6 +317,17 @@ namespace Desert::Editor
                 }
             }
             ImGui::PopStyleColor( 2 );
+        }
+
+        // ---- Save the authored clip to disk so it persists across sessions ----
+        if ( animator && animator->GetCurrentClip() )
+        {
+            ImGui::SameLine();
+            if ( ImGui::Button( ICON_MDI_CONTENT_SAVE " Save" ) )
+                SaveClipToDisk( *animator->GetCurrentClip() );
+            Utils::ImGuiUtilities::Tooltip(
+                 "Write this clip to Cooked/Meshes/_<name>.anim so it survives a restart\n"
+                 "(rediscovered by the asset preloader next session)." );
         }
 
         const float duration = animator ? animator->GetDuration() : 0.0f;

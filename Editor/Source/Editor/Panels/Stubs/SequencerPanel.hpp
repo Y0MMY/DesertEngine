@@ -53,6 +53,11 @@ namespace Desert::Editor
         // in-memory AnimationAsset so it shows in the picker, and returns its name (empty on failure).
         std::string CreateEmptyClip( const Animation::Skeleton& skeleton );
 
+        // Writes the clip to Cooked/Meshes/_<name>.anim (rfl::json, same format the importer cooks) so an
+        // in-editor-authored clip PERSISTS and is rediscovered by the AssetPreloader next session. Returns the
+        // written path (empty on failure).
+        std::string SaveClipToDisk( const Animation::AnimationClip& clip );
+
         // Records the bone's CURRENT local transform (posed in the viewport via Skeleton Edit) as position +
         // rotation + scale keyframes at `time` in `clip` (upserting any key already at that time). This is the
         // "keyframe by manipulation" path: pose with the gizmo, then key. boneIndex is a Skeleton bone index.
