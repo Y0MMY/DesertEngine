@@ -3,7 +3,10 @@
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
+#include <Editor/Core/CommandHistory.hpp>
 #include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
+
+#include <memory>
 
 #include <ImGui/imgui.h>
 
@@ -20,6 +23,48 @@
 
 namespace Desert::Editor::Tools
 {
+    namespace
+    {
+        // Undoable single-bone rest-pose edit. Re-resolves the skeleton via the mesh handle on each Undo/Redo,
+        // so it stays valid across skeleton reloads (unlike a raw pointer into the bone array). The mesh
+        // re-skins from LocalBindTransform every frame, so restoring the matrix is all that's needed.
+        class BoneTransformCommand final : public ICommand
+        {
+        public:
+            BoneTransformCommand( Assets::AssetHandle mesh, int bone, const glm::mat4& oldM,
+                                  const glm::mat4& newM )
+                 : m_Mesh( mesh ), m_Bone( bone ), m_Old( oldM ), m_New( newM )
+            {
+            }
+
+            bool Undo() override
+            {
+                return Apply( m_Old );
+            }
+            bool Redo() override
+            {
+                return Apply( m_New );
+            }
+
+        private:
+            bool Apply( const glm::mat4& m )
+            {
+                auto* base = Runtime::ResourceRegistry::GetMeshService()->Get( m_Mesh );
+                if ( !base || !base->IsSkinned() )
+                    return false;
+                auto& bones = static_cast<SkinnedMesh*>( base )->GetSkeletonMutable()->GetBonesMutable();
+                if ( m_Bone < 0 || m_Bone >= static_cast<int>( bones.size() ) )
+                    return false;
+                bones[m_Bone].LocalBindTransform = m;
+                return true;
+            }
+
+            Assets::AssetHandle m_Mesh;
+            int                 m_Bone;
+            glm::mat4           m_Old, m_New;
+        };
+    } // namespace
+
     void GizmoController::RenderObject( ::Desert::Core::Scene& scene, const glm::vec2& viewportPos,
                                         const glm::vec2& viewportSize )
     {
@@ -270,6 +315,17 @@ namespace Desert::Editor::Tools
         if ( ImGuizmo::IsOver() || ImGuizmo::IsUsing() )
             m_Hovered = true;
 
+        // One undo entry per drag: capture the bone's pre-drag rest transform when the drag STARTS, before
+        // this frame's edit is written below.
+        const bool usingNow = ImGuizmo::IsUsing();
+        if ( usingNow && !m_BoneDragActive )
+        {
+            m_BoneDragActive = true;
+            m_BoneDragIndex  = boneIdx;
+            m_BoneDragMesh   = smc.MeshHandle;
+            m_BoneDragOld    = bones[boneIdx].LocalBindTransform;
+        }
+
         if ( boneManipulated )
         {
             // Edit ONLY this bone's LocalBindTransform (relative to its parent's unchanged chain global).
@@ -279,6 +335,15 @@ namespace Desert::Editor::Tools
                  bones[boneIdx].ParentBoneID.value() < bones.size() )
                 parentGlobal = resolve( bones[boneIdx].ParentBoneID.value() );
             bones[boneIdx].LocalBindTransform = glm::inverse( parentGlobal ) * newGlobalMesh;
+        }
+
+        // On release: record the net change (old -> current) as one undoable command.
+        if ( !usingNow && m_BoneDragActive )
+        {
+            m_BoneDragActive = false;
+            if ( m_BoneDragIndex == boneIdx && bones[boneIdx].LocalBindTransform != m_BoneDragOld )
+                CommandHistory::Get().PushCommand( std::make_unique<BoneTransformCommand>(
+                     m_BoneDragMesh, boneIdx, m_BoneDragOld, bones[boneIdx].LocalBindTransform ) );
         }
     }
 } // namespace Desert::Editor::Tools

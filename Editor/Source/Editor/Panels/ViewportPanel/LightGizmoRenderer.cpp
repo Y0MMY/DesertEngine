@@ -541,10 +541,19 @@ namespace Desert::Editor
             const float r       = sel ? 6.0f : ( hovered ? 5.5f : 4.0f );
             const ImU32 fill    = sel ? jointSel : ( isRoot ? jointRoot : jointCol );
 
-            drawList->AddCircleFilled( c, r, fill, 16 );
-            drawList->AddCircle( c, r, jointRim, 16, 1.5f ); // dark rim -> reads as a small sphere
+            // Soft outer glow on the interactive handle so it reads as grabbable (accent when selected).
             if ( sel || hovered )
-                drawList->AddCircle( c, r + 2.0f, sel ? jointSel : labelCol, 16, 1.0f ); // selection halo
+                drawList->AddCircleFilled(
+                     c, r + 4.0f, sel ? IM_COL32( 255, 140, 40, 55 ) : IM_COL32( 255, 255, 255, 40 ), 24 );
+            drawList->AddCircleFilled( c, r, fill, 24 );
+            // Sphere shine: a small offset highlight so the disc reads as a 3D ball, not a flat dot.
+            drawList->AddCircleFilled( ImVec2( c.x - r * 0.3f, c.y - r * 0.3f ), r * 0.35f,
+                                       IM_COL32( 255, 255, 255, 150 ), 12 );
+            drawList->AddCircle( c, r, jointRim, 24, 1.5f ); // dark rim -> depth
+            if ( sel )
+                drawList->AddCircle( c, r + 2.5f, IM_COL32( 255, 255, 255, 220 ), 24, 1.5f ); // selected ring
+            else if ( hovered )
+                drawList->AddCircle( c, r + 2.5f, IM_COL32( 255, 255, 255, 140 ), 24, 1.0f ); // hover ring
 
             // Label the selected/hovered bone by default; "Names" toggle shows them all (dense rigs blob).
             if ( !bones[i].Name.empty() && ( sel || hovered || Core::SkeletonEditMode::ShowAllNames() ) )

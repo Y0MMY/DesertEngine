@@ -43,5 +43,12 @@ namespace Desert::Editor::Tools
         bool                                     m_DragActive = false;
         Common::UUID                             m_DragEntity = Common::UUID::Null(); // primary at drag start
         std::vector<Commands::TransformSnapshot> m_DragSnapshots;
+
+        // Bone-gizmo undo: the selected bone's LocalBindTransform captured at drag start, committed as one
+        // re-resolvable command on release (keyed by mesh handle + bone index, so it survives skeleton reloads).
+        bool                m_BoneDragActive = false;
+        int                 m_BoneDragIndex  = -1;
+        Assets::AssetHandle m_BoneDragMesh;
+        glm::mat4           m_BoneDragOld{ 1.0f };
     };
 } // namespace Desert::Editor::Tools
