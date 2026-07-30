@@ -87,8 +87,11 @@ namespace Desert::Graphic
                             const MaterialOverrides& overrides = {} );
 
         // Submit a mesh drawn with a generic data-driven material (MaterialComponent with a non-PBR shader).
+        // directTexture (optional): a runtime-owned Image2D bound to `directTextureSampler`, for
+        // procedural textures with no TextureAsset handle (the text SDF atlas).
         void SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform, const std::string& shaderName,
-                                const MaterialOverrides& overrides, bool outlined = false );
+                                const MaterialOverrides& overrides, bool outlined = false,
+                                Image2D* directTexture = nullptr, const std::string& directTextureSampler = {} );
 
         // v3 per-slot custom shaders: draw only @p visibleSubmeshMask submeshes of the mesh with the
         // slot's own runtime material (a MaterialService-owned DataDrivenMaterial).

@@ -21,16 +21,25 @@ namespace Desert::Graphic::Render
         Graphic::MaterialOverrides Overrides;
         bool                     Outlined = false;
 
+        // Optional runtime-owned texture (no asset handle) bound to DirectTextureSampler — the text
+        // system feeds its SDF atlas here. Non-owning: the producer keeps it alive for the frame.
+        Graphic::Image2D* DirectTexture = nullptr;
+        std::string       DirectTextureSampler;
+
         DrawGenericMeshCommand( Desert::Mesh* mesh, const glm::mat4& transform, std::string shaderName,
-                                Graphic::MaterialOverrides overrides, bool outlined )
+                                Graphic::MaterialOverrides overrides, bool outlined,
+                                Graphic::Image2D* directTexture = nullptr,
+                                std::string       directTextureSampler = {} )
              : Mesh( mesh ), Transform( transform ), ShaderName( std::move( shaderName ) ),
-               Overrides( std::move( overrides ) ), Outlined( outlined )
+               Overrides( std::move( overrides ) ), Outlined( outlined ), DirectTexture( directTexture ),
+               DirectTextureSampler( std::move( directTextureSampler ) )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
-            renderer.SubmitGenericMesh( Mesh, Transform, ShaderName, Overrides, Outlined );
+            renderer.SubmitGenericMesh( Mesh, Transform, ShaderName, Overrides, Outlined, DirectTexture,
+                                        DirectTextureSampler );
         }
     };
 } // namespace Desert::Graphic::Render

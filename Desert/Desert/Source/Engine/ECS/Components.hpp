@@ -103,6 +103,25 @@ namespace Desert::ECS
         uint32_t                                  SeenMaterialsVersion = 0;
     };
 
+    // World-space SDF text. FontService bakes the .ttf into an SDF atlas; TextECSSystem lays the
+    // string out into a per-entity quad mesh and draws it through the generic path with the TextSDF
+    // shader — into the HDR composite, so EmissiveIntensity > ~1 blooms like any emissive surface.
+    struct TextComponent
+    {
+        std::string Text     = "Text";
+        std::string FontPath = "Resources/Fonts/Roboto-Regular.ttf";
+        glm::vec4   Color     = glm::vec4( 1.0f );
+        float       Size      = 1.0f;  // world units per em (scales the baked metrics)
+        float       EmissiveIntensity = 1.0f; // >1 => the text blooms
+        bool        Billboard = false; // face the camera (added by the system per frame)
+
+        // Transient: the laid-out glyph-quad mesh, rebuilt only when the text/font/size changes.
+        std::shared_ptr<DynamicMesh> RuntimeMesh;
+        std::string                  BuiltText;
+        std::string                  BuiltFont;
+        float                        BuiltSize = 0.0f;
+    };
+
     struct SkinnedMeshComponent
     {
         Assets::AssetHandle                       MeshHandle;

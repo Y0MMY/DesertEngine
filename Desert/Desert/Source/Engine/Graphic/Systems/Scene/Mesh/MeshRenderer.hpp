@@ -95,6 +95,12 @@ namespace Desert::Graphic::System
 
             Graphic::Material*        SlotMaterial      = nullptr; // owned by MaterialService (stable)
             uint64_t                  VisibleSubmeshMask = ~0ull;  // bit i = submesh i drawn
+
+            // A RUNTIME-owned texture bound straight to a sampler (bypasses the asset-handle
+            // texture-override path). For procedural textures with no TextureAsset — e.g. the text
+            // system's SDF font atlas. Non-owning: the producer keeps it alive for the frame.
+            Graphic::Image2D* DirectTexture        = nullptr;
+            std::string       DirectTextureSampler;
         };
 
         using RenderSystem::RenderSystem;

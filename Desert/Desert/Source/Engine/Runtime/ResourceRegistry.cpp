@@ -38,4 +38,10 @@ namespace Desert::Runtime
         return &materialService;
     }
 
+    FontService* ResourceRegistry::GetFontService()
+    {
+        static FontService fontService;
+        return &fontService;
+    }
+
 } // namespace Desert::Runtime

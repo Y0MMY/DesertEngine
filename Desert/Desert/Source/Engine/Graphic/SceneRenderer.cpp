@@ -517,14 +517,17 @@ namespace Desert::Graphic
 
     void SceneRenderer::SubmitGenericMesh( const Mesh* mesh, const glm::mat4& transform,
                                            const std::string& shaderName, const MaterialOverrides& overrides,
-                                           bool outlined )
+                                           bool outlined, Image2D* directTexture,
+                                           const std::string& directTextureSampler )
     {
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
-             ->SubmitGenericMesh( { .Mesh       = const_cast<Mesh*>( mesh ),
-                                    .Transform  = transform,
-                                    .ShaderName = shaderName,
-                                    .Overrides  = overrides,
-                                    .Outlined   = outlined } );
+             ->SubmitGenericMesh( { .Mesh                 = const_cast<Mesh*>( mesh ),
+                                    .Transform            = transform,
+                                    .ShaderName           = shaderName,
+                                    .Overrides            = overrides,
+                                    .Outlined             = outlined,
+                                    .DirectTexture        = directTexture,
+                                    .DirectTextureSampler = directTextureSampler } );
     }
 
     void SceneRenderer::SubmitSlotMaterialMesh( const Mesh* mesh, const glm::mat4& transform,

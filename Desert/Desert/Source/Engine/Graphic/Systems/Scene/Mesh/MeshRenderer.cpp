@@ -344,6 +344,11 @@ namespace Desert::Graphic::System
                     if ( img )
                         material->SetTexture( name, img );
                 }
+
+                // Runtime-owned texture (no asset handle) bound straight to its sampler — the text
+                // SDF atlas takes this path.
+                if ( g.DirectTexture && !g.DirectTextureSampler.empty() )
+                    material->SetTexture( g.DirectTextureSampler, g.DirectTexture );
             }
 
             Renderer::GetInstance().RenderMesh( pipeline.get(), g.Mesh, g.Transform,

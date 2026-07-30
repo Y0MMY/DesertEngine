@@ -66,6 +66,7 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
+#include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
@@ -226,6 +227,7 @@ namespace Desert::Editor
         m_AssetPreloader->PreloadShaders();
 
         m_MainScene->AddSystem<ECS::MeshECSSystem>();
+        m_MainScene->AddSystem<ECS::TextECSSystem>();
         m_MainScene->AddSystem<ECS::SkyboxECSSystem>();
         m_MainScene->AddSystem<ECS::TerrainECSSystem>();
         m_MainScene->AddSystem<ECS::PointLightECSSystem>();
@@ -1585,6 +1587,18 @@ namespace Desert::Editor
         };
         pointLight( "FillWarm", { 4.0f, 3.0f, 3.0f }, { 1.0f, 0.85f, 0.6f }, 5.0f );
         pointLight( "FillCool", { -4.0f, 2.5f, -1.0f }, { 0.4f, 0.6f, 1.0f }, 4.0f );
+
+        // SDF text probe: emissive so it blooms like any emissive surface (no special path).
+        {
+            auto& label = m_MainScene->CreateNewEntity( "Text" );
+            auto& tc    = label.AddComponent<ECS::TextComponent>();
+            tc.Text              = "Desert Engine";
+            tc.Color             = { 0.55f, 0.85f, 1.0f, 1.0f };
+            tc.Size              = 0.8f;
+            tc.EmissiveIntensity = 2.5f; // past the bloom threshold -> the title glows
+            auto& ttf            = label.GetComponent<ECS::TransformComponent>();
+            ttf.Translation      = { -2.2f, 3.4f, -3.0f }; // floating title behind the calibration rows
+        }
 
         auto& camera = m_MainScene->CreateNewEntity( "Camera" );
         camera.AddComponent<ECS::CameraComponent>();
