@@ -142,15 +142,16 @@ namespace Desert::Core
         float     BoundingBoxLineWidth = 1.5f;
         PROPERTY( DisplayName( "Show Colliders" ), Category( "Debug" ) )
         bool      ShowColliders        = true; // green physics-collider wireframes (editor aid, UE-style)
-        PROPERTY( DisplayName( "Show Normals" ), Category( "Debug" ) )
+        // ShowNormals / LightingDebug are driven by the viewport View Mode dropdown (Normals /
+        // Light Complexity), not a Scene Settings toggle — kept as plain fields (no PROPERTY, so they
+        // neither serialize nor show in a reflected panel), still consumed by the mesh renderer.
         bool      ShowNormals          = false;
         PROPERTY( DisplayName( "Wireframe" ), Category( "Debug" ) )
         bool      WireframeMode        = false;
         PROPERTY( DisplayName( "Mesh LOD (auto)" ), Category( "Debug" ),
                   Tooltip( "Distance-based mesh level of detail. LOD0 (near) is identical geometry." ) )
         bool      MeshLOD              = true;
-        PROPERTY( DisplayName( "Light Debug" ), Category( "Debug" ) )
-        bool      LightingDebug        = false;
+        bool      LightingDebug        = false; // see note above — no longer a Scene Settings property
 
         // Other scene-wide settings
         PROPERTY( DisplayName( "Gravity" ), Category( "Physics" ), Range( 0.0f, 50.0f ) )

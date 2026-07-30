@@ -197,11 +197,8 @@ namespace Desert::Editor
             ImGui::Checkbox( "Show Colliders", &s.ShowColliders );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Draw green wireframes for physics colliders (Box/Sphere/Capsule)." );
-            ImGui::Checkbox( "Show Normals", &s.ShowNormals );
-            ImGui::Checkbox( "Light Debug", &s.LightingDebug );
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Tint surfaces by which light reaches them (a distinct color per source;\n"
-                                   "brightness = light strength). Unlit areas are black." );
+            // "Show Normals" and "Light Debug" moved to the viewport View Mode dropdown (Normals /
+            // Light Complexity) — they are no longer standalone Scene Settings toggles.
         }
 
         if ( ImGui::CollapsingHeader( "Rendering", ImGuiTreeNodeFlags_DefaultOpen ) )

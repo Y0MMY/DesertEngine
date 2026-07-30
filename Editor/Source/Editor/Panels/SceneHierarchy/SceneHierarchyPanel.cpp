@@ -103,6 +103,8 @@ namespace Desert::Editor
             icon = ICON_MDI_EARTH;
         else if ( entity.HasComponent<ECS::TerrainComponent>() )
             icon = ICON_MDI_TERRAIN;
+        else if ( entity.HasComponent<ECS::TextComponent>() )
+            icon = ICON_MDI_FORMAT_TEXT;
         else if ( isPrefab )
             icon = ICON_MDI_PACKAGE_VARIANT;
 

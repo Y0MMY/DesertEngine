@@ -53,6 +53,8 @@ namespace Desert::Editor
                 return ICON_MDI_EARTH;
             if ( entity.HasComponent<ECS::TerrainComponent>() )
                 return ICON_MDI_TERRAIN;
+            if ( entity.HasComponent<ECS::TextComponent>() )
+                return ICON_MDI_FORMAT_TEXT;
             return ICON_MDI_CUBE_OUTLINE;
         }
     } // namespace
