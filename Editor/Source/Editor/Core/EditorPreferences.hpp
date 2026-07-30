@@ -33,6 +33,12 @@ namespace Desert::Editor
         float     OutlineSmoothness = 2.0f;
         bool      EnableOutline     = true;
 
+        // Photogrammetry (Model-from-Photos panel): a TOOL-AGNOSTIC external command. {input} = the photos
+        // folder, {output} = the produced mesh file, {outdir} = its directory. Plug in Meshroom/COLMAP/etc.
+        std::string PhotogrammetryCommand    = "meshroom_batch --input {input} --output {outdir}";
+        std::string PhotogrammetryPhotosDir  = "";
+        std::string PhotogrammetryOutputMesh = "Cooked/Photogrammetry/model.obj";
+
         static EditorPreferences& Get();
 
         // ~/.desertengine (created on demand); shared with the Project Hub's projects.json.
