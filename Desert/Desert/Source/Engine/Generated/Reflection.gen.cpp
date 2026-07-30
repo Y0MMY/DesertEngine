@@ -22,44 +22,457 @@ namespace
             {
                 using T = ::Desert::Core::SceneSettings;
                 TypeBuilder( "SceneSettings", sizeof( T ) )
-                    .Field( FieldInfo{ .Name = "RenderingPath", .Type = FieldType::Enum, .Offset = offsetof( T, RenderingPath ), .Size = sizeof( T::RenderingPath ), .TypeName = "RenderPath", .Meta = PropertyMetadata{ .DisplayName = "Render Path", .Category = "Rendering", }, .EnumValues = { EnumValue{ "Forward", 0 }, EnumValue{ "Deferred", 1 }, } } )
-                    .Field( FieldInfo{ .Name = "DeferredDebug", .Type = FieldType::Enum, .Offset = offsetof( T, DeferredDebug ), .Size = sizeof( T::DeferredDebug ), .TypeName = "DeferredDebugMode", .Meta = PropertyMetadata{ .DisplayName = "Deferred Debug", .Category = "Rendering", }, .EnumValues = { EnumValue{ "Off", 0 }, EnumValue{ "Albedo", 1 }, EnumValue{ "Normal", 2 }, EnumValue{ "Metallic", 3 }, EnumValue{ "Roughness", 4 }, EnumValue{ "AO", 5 }, } } )
-                    .Field( FieldInfo{ .Name = "EnableSSAO", .Type = FieldType::Bool, .Offset = offsetof( T, EnableSSAO ), .Size = sizeof( T::EnableSSAO ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Enable SSAO", .Category = "Rendering", } } )
-                    .Field( FieldInfo{ .Name = "EnableSSGI", .Type = FieldType::Bool, .Offset = offsetof( T, EnableSSGI ), .Size = sizeof( T::EnableSSGI ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Enable SSGI", .Category = "Rendering", } } )
-                    .Field( FieldInfo{ .Name = "EnableShadows", .Type = FieldType::Bool, .Offset = offsetof( T, EnableShadows ), .Size = sizeof( T::EnableShadows ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Enable Shadows", .Category = "Shadows", } } )
-                    .Field( FieldInfo{ .Name = "ShadowBias", .Type = FieldType::Float, .Offset = offsetof( T, ShadowBias ), .Size = sizeof( T::ShadowBias ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Shadow Bias", .Category = "Shadows", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 0.05f, } } )
-                    .Field( FieldInfo{ .Name = "CascadeSplitLambda", .Type = FieldType::Float, .Offset = offsetof( T, CascadeSplitLambda ), .Size = sizeof( T::CascadeSplitLambda ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Cascade Split Lambda", .Category = "Shadows", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "ShadowDebug", .Type = FieldType::Enum, .Offset = offsetof( T, ShadowDebug ), .Size = sizeof( T::ShadowDebug ), .TypeName = "ShadowDebugMode", .Meta = PropertyMetadata{ .DisplayName = "Shadow Debug", .Category = "Shadows", }, .EnumValues = { EnumValue{ "Off", 0 }, EnumValue{ "ShadowFactor", 1 }, EnumValue{ "Cascades", 2 }, } } )
-                    .Field( FieldInfo{ .Name = "Exposure", .Type = FieldType::Float, .Offset = offsetof( T, Exposure ), .Size = sizeof( T::Exposure ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Exposure", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 10.0f, } } )
-                    .Field( FieldInfo{ .Name = "Gamma", .Type = FieldType::Float, .Offset = offsetof( T, Gamma ), .Size = sizeof( T::Gamma ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Gamma", .Category = "Post Processing", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 3.0f, } } )
-                    .Field( FieldInfo{ .Name = "AutoExposure", .Type = FieldType::Bool, .Offset = offsetof( T, AutoExposure ), .Size = sizeof( T::AutoExposure ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Auto Exposure", .Category = "Post Processing", } } )
-                    .Field( FieldInfo{ .Name = "AutoExposureKey", .Type = FieldType::Float, .Offset = offsetof( T, AutoExposureKey ), .Size = sizeof( T::AutoExposureKey ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Auto Exposure Key", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "AutoExposureSpeed", .Type = FieldType::Float, .Offset = offsetof( T, AutoExposureSpeed ), .Size = sizeof( T::AutoExposureSpeed ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Auto Exposure Speed", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 10.0f, } } )
-                    .Field( FieldInfo{ .Name = "AutoExposureMin", .Type = FieldType::Float, .Offset = offsetof( T, AutoExposureMin ), .Size = sizeof( T::AutoExposureMin ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Auto Exposure Min", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 5.0f, } } )
-                    .Field( FieldInfo{ .Name = "AutoExposureMax", .Type = FieldType::Float, .Offset = offsetof( T, AutoExposureMax ), .Size = sizeof( T::AutoExposureMax ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Auto Exposure Max", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 20.0f, } } )
-                    .Field( FieldInfo{ .Name = "AA", .Type = FieldType::Enum, .Offset = offsetof( T, AA ), .Size = sizeof( T::AA ), .TypeName = "AntiAliasingMode", .Meta = PropertyMetadata{ .DisplayName = "Anti-Aliasing", .Category = "Post Processing", }, .EnumValues = { EnumValue{ "None", 0 }, EnumValue{ "FXAA", 1 }, EnumValue{ "SMAA", 2 }, } } )
-                    .Field( FieldInfo{ .Name = "EnableBloom", .Type = FieldType::Bool, .Offset = offsetof( T, EnableBloom ), .Size = sizeof( T::EnableBloom ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Enable Bloom", .Category = "Post Processing", } } )
-                    .Field( FieldInfo{ .Name = "BloomThreshold", .Type = FieldType::Float, .Offset = offsetof( T, BloomThreshold ), .Size = sizeof( T::BloomThreshold ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Bloom Threshold", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 10.0f, } } )
-                    .Field( FieldInfo{ .Name = "BloomIntensity", .Type = FieldType::Float, .Offset = offsetof( T, BloomIntensity ), .Size = sizeof( T::BloomIntensity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Bloom Intensity", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 5.0f, } } )
-                    .Field( FieldInfo{ .Name = "LensDispersion", .Type = FieldType::Float, .Offset = offsetof( T, LensDispersion ), .Size = sizeof( T::LensDispersion ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Lens Dispersion", .Category = "Post Processing", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 3.0f, } } )
-                    .Field( FieldInfo{ .Name = "TextureFilterMode", .Type = FieldType::Enum, .Offset = offsetof( T, TextureFilterMode ), .Size = sizeof( T::TextureFilterMode ), .TypeName = "TextureFilter", .Meta = PropertyMetadata{ .DisplayName = "Texture Filter", .Category = "Textures", }, .EnumValues = { EnumValue{ "Nearest", 0 }, EnumValue{ "Bilinear", 1 }, EnumValue{ "Trilinear", 2 }, EnumValue{ "Anisotropic", 3 }, } } )
-                    .Field( FieldInfo{ .Name = "Anisotropy", .Type = FieldType::Int, .Offset = offsetof( T, Anisotropy ), .Size = sizeof( T::Anisotropy ), .TypeName = "int", .Meta = PropertyMetadata{ .DisplayName = "Anisotropy", .Category = "Textures", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 16.0f, } } )
-                    .Field( FieldInfo{ .Name = "ShowGrid", .Type = FieldType::Bool, .Offset = offsetof( T, ShowGrid ), .Size = sizeof( T::ShowGrid ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Grid", .Category = "Debug", } } )
-                    .Field( FieldInfo{ .Name = "ShowBoundingBoxes", .Type = FieldType::Bool, .Offset = offsetof( T, ShowBoundingBoxes ), .Size = sizeof( T::ShowBoundingBoxes ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Bounding Boxes", .Category = "Debug", } } )
-                    .Field( FieldInfo{ .Name = "BoundingBoxColor", .Type = FieldType::Vec3, .Offset = offsetof( T, BoundingBoxColor ), .Size = sizeof( T::BoundingBoxColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "BB Color", .Category = "Debug", .IsColor = true, } } )
-                    .Field( FieldInfo{ .Name = "BoundingBoxLineWidth", .Type = FieldType::Float, .Offset = offsetof( T, BoundingBoxLineWidth ), .Size = sizeof( T::BoundingBoxLineWidth ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "BB Line Width", .Category = "Debug", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 10.0f, } } )
-                    .Field( FieldInfo{ .Name = "ShowColliders", .Type = FieldType::Bool, .Offset = offsetof( T, ShowColliders ), .Size = sizeof( T::ShowColliders ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Colliders", .Category = "Debug", } } )
-                    .Field( FieldInfo{ .Name = "ShowNormals", .Type = FieldType::Bool, .Offset = offsetof( T, ShowNormals ), .Size = sizeof( T::ShowNormals ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Normals", .Category = "Debug", } } )
-                    .Field( FieldInfo{ .Name = "WireframeMode", .Type = FieldType::Bool, .Offset = offsetof( T, WireframeMode ), .Size = sizeof( T::WireframeMode ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Wireframe", .Category = "Debug", } } )
-                    .Field( FieldInfo{ .Name = "MeshLOD", .Type = FieldType::Bool, .Offset = offsetof( T, MeshLOD ), .Size = sizeof( T::MeshLOD ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Mesh LOD (auto)", .Category = "Debug", .Tooltip = "Distance-based mesh level of detail. LOD0 (near) is identical geometry.", } } )
-                    .Field( FieldInfo{ .Name = "LightingDebug", .Type = FieldType::Bool, .Offset = offsetof( T, LightingDebug ), .Size = sizeof( T::LightingDebug ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Light Debug", .Category = "Debug", } } )
-                    .Field( FieldInfo{ .Name = "Gravity", .Type = FieldType::Float, .Offset = offsetof( T, Gravity ), .Size = sizeof( T::Gravity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Gravity", .Category = "Physics", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 50.0f, } } )
-                    .Field( FieldInfo{ .Name = "PauseSimulation", .Type = FieldType::Bool, .Offset = offsetof( T, PauseSimulation ), .Size = sizeof( T::PauseSimulation ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Pause Simulation", .Category = "Physics", } } )
-                    .Field( FieldInfo{ .Name = "WindDirection", .Type = FieldType::Float, .Offset = offsetof( T, WindDirection ), .Size = sizeof( T::WindDirection ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Direction", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 360.0f, } } )
-                    .Field( FieldInfo{ .Name = "WindStrength", .Type = FieldType::Float, .Offset = offsetof( T, WindStrength ), .Size = sizeof( T::WindStrength ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Strength", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
-                    .Field( FieldInfo{ .Name = "WindTurbulence", .Type = FieldType::Float, .Offset = offsetof( T, WindTurbulence ), .Size = sizeof( T::WindTurbulence ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Turbulence", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 3.0f, } } )
-                    .WithDefault<T>()
-                    .Register();
+                     .Field( FieldInfo{ .Name     = "RenderingPath",
+                                        .Type     = FieldType::Enum,
+                                        .Offset   = offsetof( T, RenderingPath ),
+                                        .Size     = sizeof( T::RenderingPath ),
+                                        .TypeName = "RenderPath",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Render Path",
+                                                  .Category    = "Rendering",
+                                             },
+                                        .EnumValues =
+                                             {
+                                                  EnumValue{ "Forward", 0 },
+                                                  EnumValue{ "Deferred", 1 },
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "DeferredDebug",
+                                        .Type     = FieldType::Enum,
+                                        .Offset   = offsetof( T, DeferredDebug ),
+                                        .Size     = sizeof( T::DeferredDebug ),
+                                        .TypeName = "DeferredDebugMode",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Deferred Debug",
+                                                  .Category    = "Rendering",
+                                             },
+                                        .EnumValues =
+                                             {
+                                                  EnumValue{ "Off", 0 },
+                                                  EnumValue{ "Albedo", 1 },
+                                                  EnumValue{ "Normal", 2 },
+                                                  EnumValue{ "Metallic", 3 },
+                                                  EnumValue{ "Roughness", 4 },
+                                                  EnumValue{ "AO", 5 },
+                                                  EnumValue{ "LightComplexity", 7 },
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "EnableSSAO",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, EnableSSAO ),
+                                        .Size     = sizeof( T::EnableSSAO ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Enable SSAO",
+                                                  .Category    = "Rendering",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "EnableSSGI",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, EnableSSGI ),
+                                        .Size     = sizeof( T::EnableSSGI ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Enable SSGI",
+                                                  .Category    = "Rendering",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "EnableShadows",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, EnableShadows ),
+                                        .Size     = sizeof( T::EnableShadows ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Enable Shadows",
+                                                  .Category    = "Shadows",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "ShadowBias",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, ShadowBias ),
+                                        .Size     = sizeof( T::ShadowBias ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Shadow Bias",
+                                                  .Category    = "Shadows",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 0.05f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "CascadeSplitLambda",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, CascadeSplitLambda ),
+                                        .Size     = sizeof( T::CascadeSplitLambda ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Cascade Split Lambda",
+                                                  .Category    = "Shadows",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 1.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "ShadowDebug",
+                                        .Type     = FieldType::Enum,
+                                        .Offset   = offsetof( T, ShadowDebug ),
+                                        .Size     = sizeof( T::ShadowDebug ),
+                                        .TypeName = "ShadowDebugMode",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Shadow Debug",
+                                                  .Category    = "Shadows",
+                                             },
+                                        .EnumValues =
+                                             {
+                                                  EnumValue{ "Off", 0 },
+                                                  EnumValue{ "ShadowFactor", 1 },
+                                                  EnumValue{ "Cascades", 2 },
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "Exposure",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, Exposure ),
+                                        .Size     = sizeof( T::Exposure ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Exposure",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 10.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "Gamma",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, Gamma ),
+                                        .Size     = sizeof( T::Gamma ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Gamma",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 1.0f,
+                                                  .RangeMax    = 3.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "AutoExposure",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, AutoExposure ),
+                                        .Size     = sizeof( T::AutoExposure ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Auto Exposure",
+                                                  .Category    = "Post Processing",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "AutoExposureKey",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, AutoExposureKey ),
+                                        .Size     = sizeof( T::AutoExposureKey ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Auto Exposure Key",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 1.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "AutoExposureSpeed",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, AutoExposureSpeed ),
+                                        .Size     = sizeof( T::AutoExposureSpeed ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Auto Exposure Speed",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 10.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "AutoExposureMin",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, AutoExposureMin ),
+                                        .Size     = sizeof( T::AutoExposureMin ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Auto Exposure Min",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 5.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "AutoExposureMax",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, AutoExposureMax ),
+                                        .Size     = sizeof( T::AutoExposureMax ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Auto Exposure Max",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 20.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "AA",
+                                        .Type     = FieldType::Enum,
+                                        .Offset   = offsetof( T, AA ),
+                                        .Size     = sizeof( T::AA ),
+                                        .TypeName = "AntiAliasingMode",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Anti-Aliasing",
+                                                  .Category    = "Post Processing",
+                                             },
+                                        .EnumValues =
+                                             {
+                                                  EnumValue{ "None", 0 },
+                                                  EnumValue{ "FXAA", 1 },
+                                                  EnumValue{ "SMAA", 2 },
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "EnableBloom",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, EnableBloom ),
+                                        .Size     = sizeof( T::EnableBloom ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Enable Bloom",
+                                                  .Category    = "Post Processing",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "BloomThreshold",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, BloomThreshold ),
+                                        .Size     = sizeof( T::BloomThreshold ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Bloom Threshold",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 10.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "BloomIntensity",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, BloomIntensity ),
+                                        .Size     = sizeof( T::BloomIntensity ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Bloom Intensity",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 5.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "LensDispersion",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, LensDispersion ),
+                                        .Size     = sizeof( T::LensDispersion ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Lens Dispersion",
+                                                  .Category    = "Post Processing",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 3.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "TextureFilterMode",
+                                        .Type     = FieldType::Enum,
+                                        .Offset   = offsetof( T, TextureFilterMode ),
+                                        .Size     = sizeof( T::TextureFilterMode ),
+                                        .TypeName = "TextureFilter",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Texture Filter",
+                                                  .Category    = "Textures",
+                                             },
+                                        .EnumValues =
+                                             {
+                                                  EnumValue{ "Nearest", 0 },
+                                                  EnumValue{ "Bilinear", 1 },
+                                                  EnumValue{ "Trilinear", 2 },
+                                                  EnumValue{ "Anisotropic", 3 },
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "Anisotropy",
+                                        .Type     = FieldType::Int,
+                                        .Offset   = offsetof( T, Anisotropy ),
+                                        .Size     = sizeof( T::Anisotropy ),
+                                        .TypeName = "int",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Anisotropy",
+                                                  .Category    = "Textures",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 1.0f,
+                                                  .RangeMax    = 16.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "ShowGrid",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, ShowGrid ),
+                                        .Size     = sizeof( T::ShowGrid ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Show Grid",
+                                                  .Category    = "Debug",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "ShowBoundingBoxes",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, ShowBoundingBoxes ),
+                                        .Size     = sizeof( T::ShowBoundingBoxes ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Show Bounding Boxes",
+                                                  .Category    = "Debug",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "BoundingBoxColor",
+                                        .Type     = FieldType::Vec3,
+                                        .Offset   = offsetof( T, BoundingBoxColor ),
+                                        .Size     = sizeof( T::BoundingBoxColor ),
+                                        .TypeName = "glm::vec3",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "BB Color",
+                                                  .Category    = "Debug",
+                                                  .IsColor     = true,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "BoundingBoxLineWidth",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, BoundingBoxLineWidth ),
+                                        .Size     = sizeof( T::BoundingBoxLineWidth ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "BB Line Width",
+                                                  .Category    = "Debug",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 1.0f,
+                                                  .RangeMax    = 10.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "ShowColliders",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, ShowColliders ),
+                                        .Size     = sizeof( T::ShowColliders ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Show Colliders",
+                                                  .Category    = "Debug",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "ShowNormals",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, ShowNormals ),
+                                        .Size     = sizeof( T::ShowNormals ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Show Normals",
+                                                  .Category    = "Debug",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "WireframeMode",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, WireframeMode ),
+                                        .Size     = sizeof( T::WireframeMode ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Wireframe",
+                                                  .Category    = "Debug",
+                                             } } )
+                     .Field( FieldInfo{
+                          .Name     = "MeshLOD",
+                          .Type     = FieldType::Bool,
+                          .Offset   = offsetof( T, MeshLOD ),
+                          .Size     = sizeof( T::MeshLOD ),
+                          .TypeName = "bool",
+                          .Meta =
+                               PropertyMetadata{
+                                    .DisplayName = "Mesh LOD (auto)",
+                                    .Category    = "Debug",
+                                    .Tooltip =
+                                         "Distance-based mesh level of detail. LOD0 (near) is identical geometry.",
+                               } } )
+                     .Field( FieldInfo{ .Name     = "LightingDebug",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, LightingDebug ),
+                                        .Size     = sizeof( T::LightingDebug ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Light Debug",
+                                                  .Category    = "Debug",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "Gravity",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, Gravity ),
+                                        .Size     = sizeof( T::Gravity ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Gravity",
+                                                  .Category    = "Physics",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 50.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "PauseSimulation",
+                                        .Type     = FieldType::Bool,
+                                        .Offset   = offsetof( T, PauseSimulation ),
+                                        .Size     = sizeof( T::PauseSimulation ),
+                                        .TypeName = "bool",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Pause Simulation",
+                                                  .Category    = "Physics",
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "WindDirection",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, WindDirection ),
+                                        .Size     = sizeof( T::WindDirection ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Wind Direction",
+                                                  .Category    = "Wind",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 360.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "WindStrength",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, WindStrength ),
+                                        .Size     = sizeof( T::WindStrength ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Wind Strength",
+                                                  .Category    = "Wind",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 1.0f,
+                                             } } )
+                     .Field( FieldInfo{ .Name     = "WindTurbulence",
+                                        .Type     = FieldType::Float,
+                                        .Offset   = offsetof( T, WindTurbulence ),
+                                        .Size     = sizeof( T::WindTurbulence ),
+                                        .TypeName = "float",
+                                        .Meta =
+                                             PropertyMetadata{
+                                                  .DisplayName = "Wind Turbulence",
+                                                  .Category    = "Wind",
+                                                  .HasRange    = true,
+                                                  .RangeMin    = 0.0f,
+                                                  .RangeMax    = 3.0f,
+                                             } } )
+                     .WithDefault<T>()
+                     .Register();
             }
             {
                 using T = ::Desert::ECS::CameraData;

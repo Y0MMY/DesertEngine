@@ -67,7 +67,7 @@ Shader "DeferredLighting"
         {
         	vec4 u_LightDir;   // xyz = direction the light travels (away from the sun); w unused
         	vec4 u_LightColor; // rgb = colour, a = intensity
-        	vec4 u_Params;     // x = debug mode (0..6), y = SSGI intensity (0 = off), zw reserved
+        	vec4 u_Params;     // x = debug mode (0..7; 7 = Light Complexity), y = SSGI intensity (0 = off), zw reserved
         	vec4 u_CameraPos;  // xyz = camera world position (for the view vector); w unused
         };
 
@@ -214,6 +214,16 @@ Shader "DeferredLighting"
         	return shadow;
         }
 
+        // Heat ramp for the Light-Complexity debug view: 0 -> dark blue, up through cyan/green/yellow -> red.
+        // Standard "jet"-style piecewise map so overlapping light volumes read as hotter pixels.
+        vec3 HeatColor(float t)
+        {
+        	t = clamp(t, 0.0, 1.0);
+        	return clamp(vec3(1.5 - abs(4.0 * t - 3.0),
+        	                  1.5 - abs(4.0 * t - 2.0),
+        	                  1.5 - abs(4.0 * t - 1.0)), 0.0, 1.0);
+        }
+
         void main()
         {
         	vec4 ga = texture(u_GBufferA, v_TexCoord);
@@ -244,6 +254,25 @@ Shader "DeferredLighting"
         	if (dbg == 3) { oColor = vec4(vec3(metallic),  1.0); return; }                 // Metallic
         	if (dbg == 4) { oColor = vec4(vec3(roughness), 1.0); return; }                 // Roughness
         	if (dbg == 5) { oColor = vec4(vec3(ao),        1.0); return; }                 // Ambient Occlusion
+
+        	// Light Complexity: count how many point/spot light VOLUMES cover this pixel (by radius/range +
+        	// cone), then map the count to a heat colour. Cheap in deferred — the light data is already bound.
+        	if (dbg == 7)
+        	{
+        		uint lights = 0u;
+        		for (uint i = 0u; i < lightsMetadata.PointLightCount; i++)
+        			if (distance(pointLights[i].position, worldPos) < pointLights[i].radius)
+        				lights++;
+        		for (uint i = 0u; i < lightsMetadata.SpotLightCount; i++)
+        		{
+        			vec3  toL = spotLights[i].position - worldPos;
+        			if (length(toL) < spotLights[i].range && SpotConeFactor(spotLights[i], normalize(toL)) > 0.0)
+        				lights++;
+        		}
+        		// Normalize by a fixed budget (8 overlapping lights = full red) so the scale is stable.
+        		oColor = vec4(HeatColor(float(lights) / 8.0), 1.0);
+        		return;
+        	}
 
         	// --- Lit: shadow-mapped directional sun (N·L) + full PBR point/spot lights ---
         	vec3 N    = normalize(normal);

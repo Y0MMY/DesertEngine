@@ -54,6 +54,8 @@ namespace Desert::Core
         Metallic  = 3,
         Roughness = 4,
         AO        = 5,
+        // 6 is reserved (an internal GI-only debug in the deferred shader).
+        LightComplexity = 7, // per-pixel count of point/spot light volumes, heat-mapped (UE-style)
     };
 
     // Reflected (REFLECT/PROPERTY) so the whole block (de)serializes generically via the reflection
