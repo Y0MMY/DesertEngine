@@ -1201,31 +1201,45 @@ namespace Desert::Graphic::System
                 ++ci;
             }
 
-        // Corner lerp fractions are relative to the CAMERA's full range (the range invVP encodes), NOT
-        // the capped shadow range — otherwise the slice corners scale to the wrong (1000u) frustum.
-        const float frustumRange = camFar - camNear;
-        float       lastFar      = camNear;
+        // ANALYTICAL slice bounding sphere (canonical stable-CSM). The 8 corners of a symmetric
+        // perspective slice all lie on a sphere whose centre is ON the view axis and whose radius is a
+        // pure function of the slice near/far distances and the frustum's angular half-slope k — it does
+        // NOT depend on camera orientation. Computing it from scalars (vs the old centroid + max-corner-
+        // distance, which is analytically rotation-invariant but accumulates orientation-varying FP noise)
+        // makes the radius bit-stable frame to frame, so the ceil() quantization never flip-flops → the
+        // ortho extent is constant → texel-snap keeps the grid world-locked → no shimmer on a static
+        // receiver as the camera turns.
+        const glm::vec3 nearRingCenter =
+             0.25f * ( nearCorners[0] + nearCorners[1] + nearCorners[2] + nearCorners[3] );
+        const glm::vec3 farRingCenter = 0.25f * ( farCorners[0] + farCorners[1] + farCorners[2] + farCorners[3] );
+        const glm::vec3 viewFwd       = glm::normalize( farRingCenter - nearRingCenter );
+        const glm::vec3 eye           = nearRingCenter - viewFwd * camNear; // frustum apex
+        // k = (corner distance from the view axis) / (axis distance from the eye) — constant per frustum.
+        const float kSlope = glm::length( farCorners[0] - farRingCenter ) / glm::max( camFar, 1e-4f );
+        const float k2     = kSlope * kSlope;
+
+        float lastFar = camNear;
         for ( uint32_t c = 0; c < kNumCascades; ++c )
         {
-            const float tNear = ( lastFar - camNear ) / frustumRange;
-            const float tFar  = ( splitFar[c] - camNear ) / frustumRange;
+            const float zNear = lastFar;     // slice near distance from the eye
+            const float zFar  = splitFar[c]; // slice far distance from the eye
 
-            glm::vec3 corners[8];
-            glm::vec3 center( 0.0f );
-            for ( int i = 0; i < 4; ++i )
+            float sphereZ, radius;
+            if ( k2 * ( zFar + zNear ) >= ( zFar - zNear ) )
             {
-                const glm::vec3 edge = farCorners[i] - nearCorners[i];
-                corners[i]           = nearCorners[i] + edge * tNear;
-                corners[i + 4]       = nearCorners[i] + edge * tFar;
-                center += corners[i] + corners[i + 4];
+                // Near ring already enclosed by the far-ring sphere → the far ring alone bounds the slice.
+                sphereZ = zFar;
+                radius  = kSlope * zFar;
             }
-            center /= 8.0f;
-
-            // Bounding-sphere fit → cascade extent is rotation-invariant (reduces shimmer).
-            float radius = 0.0f;
-            for ( const auto& corner : corners )
-                radius = glm::max( radius, glm::length( corner - center ) );
-            radius = std::ceil( radius * 16.0f ) / 16.0f; // quantize a bit for stability
+            else
+            {
+                // General case: the sphere passes through both the near and far corner rings.
+                sphereZ        = 0.5f * ( zFar + zNear ) * ( 1.0f + k2 );
+                const float dz = sphereZ - zFar;
+                radius         = std::sqrt( dz * dz + k2 * zFar * zFar );
+            }
+            glm::vec3 center = eye + viewFwd * sphereZ;
+            radius           = std::ceil( radius * 16.0f ) / 16.0f; // quantize a bit for stability
 
             const glm::vec3 up =
                  glm::abs( lightDir.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 );
