@@ -43,4 +43,13 @@ namespace Desert::Text
     // BakedFont (Valid() == false) if the TTF cannot be parsed. Never throws.
     BakedFont BakeFontSDF( const uint8_t* ttf, size_t ttfSize, float pixelHeight = 48.0f,
                            int padding = 5, uint32_t atlasWidth = 512 );
+
+    // Binary (de)serialization of a BakedFont for the on-disk font cache — pure stdlib so it stays
+    // engine-independent and unit-testable. Little-endian, layout-tagged: bump kBakedFontCacheVersion
+    // if BakedFont/Glyph change and every cached file is treated as a miss. Deserialize returns false on
+    // any truncation / bad magic / version mismatch (a corrupt cache is simply re-baked, never fatal).
+    inline constexpr uint32_t kBakedFontCacheVersion = 1;
+
+    std::vector<uint8_t> SerializeBakedFont( const BakedFont& font );
+    bool                 DeserializeBakedFont( const uint8_t* data, size_t size, BakedFont& out );
 } // namespace Desert::Text

@@ -73,6 +73,47 @@ TEST( FontBaker, RejectsGarbage )
     EXPECT_FALSE( Desert::Text::BakeFontSDF( nullptr, 0 ).Valid() );
 }
 
+TEST( FontBaker, SerializeRoundTrip )
+{
+    const auto ttf = LoadRoboto();
+    ASSERT_FALSE( ttf.empty() );
+    const auto font = Desert::Text::BakeFontSDF( ttf.data(), ttf.size(), 48.0f );
+    ASSERT_TRUE( font.Valid() );
+
+    const std::vector<uint8_t> blob = Desert::Text::SerializeBakedFont( font );
+    ASSERT_FALSE( blob.empty() );
+
+    Desert::Text::BakedFont restored;
+    ASSERT_TRUE( Desert::Text::DeserializeBakedFont( blob.data(), blob.size(), restored ) );
+
+    // Structural equality: metrics, atlas dimensions/pixels, and every glyph survive the round trip.
+    EXPECT_EQ( restored.AtlasWidth, font.AtlasWidth );
+    EXPECT_EQ( restored.AtlasHeight, font.AtlasHeight );
+    EXPECT_FLOAT_EQ( restored.PixelHeight, font.PixelHeight );
+    EXPECT_FLOAT_EQ( restored.Ascent, font.Ascent );
+    EXPECT_FLOAT_EQ( restored.Descent, font.Descent );
+    EXPECT_EQ( restored.AtlasR8, font.AtlasR8 );
+    ASSERT_EQ( restored.Glyphs.size(), font.Glyphs.size() );
+    ASSERT_TRUE( restored.Glyphs.count( 'A' ) );
+    EXPECT_FLOAT_EQ( restored.Glyphs.at( 'A' ).Advance, font.Glyphs.at( 'A' ).Advance );
+    EXPECT_FLOAT_EQ( restored.Glyphs.at( 'A' ).U1, font.Glyphs.at( 'A' ).U1 );
+}
+
+TEST( FontBaker, DeserializeRejectsCorruptBlob )
+{
+    Desert::Text::BakedFont out;
+    // Empty, too-short, and wrong-magic inputs must all fail cleanly (never over-read).
+    EXPECT_FALSE( Desert::Text::DeserializeBakedFont( nullptr, 0, out ) );
+    const std::vector<uint8_t> junk( 32, 0xCD );
+    EXPECT_FALSE( Desert::Text::DeserializeBakedFont( junk.data(), junk.size(), out ) );
+
+    // A valid blob truncated to half its length is a miss, not a crash.
+    const auto ttf = LoadRoboto();
+    ASSERT_FALSE( ttf.empty() );
+    const auto blob = Desert::Text::SerializeBakedFont( Desert::Text::BakeFontSDF( ttf.data(), ttf.size() ) );
+    EXPECT_FALSE( Desert::Text::DeserializeBakedFont( blob.data(), blob.size() / 2, out ) );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

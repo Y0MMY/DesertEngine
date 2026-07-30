@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 
 namespace Desert::Text
 {
@@ -140,5 +141,117 @@ namespace Desert::Text
                 stbtt_FreeSDF( rg.Bitmap, nullptr );
 
         return out;
+    }
+
+    namespace
+    {
+        template <class T>
+        void PutPod( std::vector<uint8_t>& out, const T& v )
+        {
+            const auto* b = reinterpret_cast<const uint8_t*>( &v );
+            out.insert( out.end(), b, b + sizeof( T ) );
+        }
+
+        // Bounded reader over a byte span: every Get checks the remaining size, so a truncated/corrupt
+        // cache file can never over-read — it just makes DeserializeBakedFont return false (a cache miss).
+        struct Reader
+        {
+            const uint8_t* p;
+            size_t         remaining;
+            bool           ok = true;
+
+            template <class T>
+            T Get()
+            {
+                T v{};
+                if ( remaining < sizeof( T ) )
+                {
+                    ok = false;
+                    return v;
+                }
+                std::memcpy( &v, p, sizeof( T ) );
+                p += sizeof( T );
+                remaining -= sizeof( T );
+                return v;
+            }
+
+            void GetBytes( void* dst, size_t n )
+            {
+                if ( remaining < n )
+                {
+                    ok = false;
+                    return;
+                }
+                std::memcpy( dst, p, n );
+                p += n;
+                remaining -= n;
+            }
+        };
+
+        constexpr char kFontMagic[4] = { 'D', 'F', 'N', 'T' };
+    } // namespace
+
+    std::vector<uint8_t> SerializeBakedFont( const BakedFont& font )
+    {
+        std::vector<uint8_t> out;
+        out.insert( out.end(), kFontMagic, kFontMagic + 4 );
+        PutPod( out, kBakedFontCacheVersion );
+        PutPod( out, font.AtlasWidth );
+        PutPod( out, font.AtlasHeight );
+        PutPod( out, font.PixelHeight );
+        PutPod( out, font.Ascent );
+        PutPod( out, font.Descent );
+        PutPod( out, font.LineGap );
+        PutPod( out, static_cast<uint32_t>( font.Glyphs.size() ) );
+        for ( const auto& [codepoint, glyph] : font.Glyphs )
+        {
+            PutPod( out, codepoint );
+            PutPod( out, glyph ); // Glyph is a POD of floats — no padding to worry about
+        }
+        PutPod( out, static_cast<uint64_t>( font.AtlasR8.size() ) );
+        out.insert( out.end(), font.AtlasR8.begin(), font.AtlasR8.end() );
+        return out;
+    }
+
+    bool DeserializeBakedFont( const uint8_t* data, size_t size, BakedFont& out )
+    {
+        Reader r{ data, size };
+        char   magic[4] = {};
+        r.GetBytes( magic, 4 );
+        if ( !r.ok || std::memcmp( magic, kFontMagic, 4 ) != 0 )
+            return false;
+        if ( r.Get<uint32_t>() != kBakedFontCacheVersion )
+            return false;
+
+        BakedFont f;
+        f.AtlasWidth  = r.Get<uint32_t>();
+        f.AtlasHeight = r.Get<uint32_t>();
+        f.PixelHeight = r.Get<float>();
+        f.Ascent      = r.Get<float>();
+        f.Descent     = r.Get<float>();
+        f.LineGap     = r.Get<float>();
+
+        const uint32_t glyphCount = r.Get<uint32_t>();
+        if ( !r.ok )
+            return false;
+        for ( uint32_t i = 0; i < glyphCount; ++i )
+        {
+            const uint32_t codepoint = r.Get<uint32_t>();
+            const Glyph    glyph     = r.Get<Glyph>();
+            if ( !r.ok )
+                return false;
+            f.Glyphs.emplace( codepoint, glyph );
+        }
+
+        const uint64_t atlasSize = r.Get<uint64_t>();
+        if ( !r.ok || atlasSize != r.remaining )
+            return false; // trailing bytes must be exactly the atlas — anything else is corrupt
+        f.AtlasR8.resize( static_cast<size_t>( atlasSize ) );
+        r.GetBytes( f.AtlasR8.data(), f.AtlasR8.size() );
+
+        if ( !r.ok || !f.Valid() )
+            return false;
+        out = std::move( f );
+        return true;
     }
 } // namespace Desert::Text
