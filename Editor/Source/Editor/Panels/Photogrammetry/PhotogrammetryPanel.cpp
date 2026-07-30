@@ -993,6 +993,8 @@ namespace Desert::Editor
         ImGui::TextColored( ImVec4( 0.55f, 0.80f, 1.0f, 1.0f ), ICON_MDI_CAMERA_OUTLINE );
         ImGui::SameLine( 0.0f, 6.0f );
         ImGui::TextUnformatted( "Model from Camera" );
+        ImGui::SameLine( 0.0f, 6.0f );
+        ImGui::TextColored( kColWarn, "(WIP)" );
         ImGui::SameLine();
         ImGui::TextDisabled( ICON_MDI_HELP_CIRCLE_OUTLINE );
         if ( ImGui::IsItemHovered() )
