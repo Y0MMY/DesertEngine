@@ -372,12 +372,26 @@ namespace Desert::Editor
         ImGui::SameLine( 0.0f, 16.0f );
         ImGui::TextColored( ImVec4( 0.80f, 0.86f, 0.98f, 1.0f ), "%.2f / %.2f s", playTime, duration );
 
-        // ---- Keyframe toolbar: author BY MANIPULATION (pose a bone in Skeleton Edit, then record it) ----
+        // ---- Keyframe toolbar: author BY MANIPULATION (pose a bone in Skeleton Edit, then key/record) ----
         if ( animator )
         {
             auto*      editClip = const_cast<Animation::AnimationClip*>( animator->GetCurrentClip() );
             const int  selBone  = Core::SkeletonEditMode::GetSelectedBone();
             const bool canKey   = editClip && Core::SkeletonEditMode::IsActive() && selBone >= 0;
+
+            // Record toggle (red when armed) — auto-keys while the gizmo moves the selected bone.
+            if ( m_Record )
+            {
+                ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.70f, 0.15f, 0.15f, 1.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.82f, 0.20f, 0.20f, 1.0f ) );
+            }
+            if ( ImGui::Button( m_Record ? ICON_MDI_RECORD_CIRCLE " REC" : ICON_MDI_RECORD " Record" ) )
+                m_Record = !m_Record;
+            if ( m_Record )
+                ImGui::PopStyleColor( 2 );
+            Utils::ImGuiUtilities::Tooltip( "Auto-key: while ON (and in Skeleton Edit), moving the selected bone "
+                                            "with the gizmo writes a key at the playhead automatically." );
+            ImGui::SameLine();
 
             ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.44f, 0.31f, 0.10f, 1.0f ) );
             ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.58f, 0.41f, 0.14f, 1.0f ) );
@@ -394,9 +408,30 @@ namespace Desert::Editor
             HelpMarker( "Keyframe by MANIPULATION:\n"
                         "1) In the viewport toolbar, enable Skeleton Edit.\n"
                         "2) Pick a bone and move/rotate it with the gizmo.\n"
-                        "3) Set the playhead time, then click this to record the pose as a key.\n"
-                        "Repeat at different times to build the motion (or drag the diamond keys below to "
-                        "retime)." );
+                        "3) Turn on Record (auto-key as you move) OR click Key Bone at the playhead.\n"
+                        "Repeat at different times to build the motion (drag the diamond keys below to retime)." );
+
+            // Record mode: detect the selected bone's transform CHANGING (a gizmo drag) and auto-key it.
+            if ( m_Record && canKey )
+            {
+                const glm::mat4 cur = animator->GetSkeleton().GetBones()[selBone].LocalBindTransform;
+                if ( selBone != m_RecordBone )
+                {
+                    m_RecordBone = selBone; // switched bone -> seed the baseline, don't key yet
+                    m_RecordLast = cur;
+                }
+                else if ( cur != m_RecordLast )
+                {
+                    anim.Playing = false;
+                    KeyBonePose( editClip, animator->GetSkeleton(), selBone, playTime );
+                    animator->SetTime( playTime );
+                    m_RecordLast = cur;
+                }
+            }
+            else
+            {
+                m_RecordBone = -1; // drop the baseline when not recording
+            }
         }
 
         // ---- Timeline (gutter-aligned ruler; the track lanes below share the same time mapping) ----

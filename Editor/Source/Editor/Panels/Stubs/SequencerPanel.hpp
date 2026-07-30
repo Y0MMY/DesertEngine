@@ -2,6 +2,8 @@
 
 #include "../IPanel.hpp"
 
+#include <glm/glm.hpp>
+
 #include <memory>
 
 namespace Desert::Core
@@ -69,6 +71,12 @@ namespace Desert::Editor
         Assets::AssetManager*                  m_AssetManager = nullptr;
 
         float m_PxPerSec = 90.0f; // timeline zoom
+
+        // Record mode: while ON (and in Skeleton Edit), moving the selected bone with the gizmo AUTO-keys it at
+        // the playhead. m_RecordBone/m_RecordLast track the last-seen transform to detect a change.
+        bool      m_Record     = false;
+        int       m_RecordBone = -1;
+        glm::mat4 m_RecordLast = glm::mat4( 1.0f );
 
         // Keyframe-editor selection (m_SelChannel: 0 = Position, 1 = Rotation, 2 = Scale).
         int   m_SelTrack   = -1;
