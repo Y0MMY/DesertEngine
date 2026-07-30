@@ -38,8 +38,8 @@ namespace Desert
             struct AnimGraph;
             class Evaluator;
         } // namespace Graph
-    }
-}
+    } // namespace Animation
+} // namespace Desert
 
 namespace Desert::Graphic
 {
@@ -94,23 +94,27 @@ namespace Desert::ECS
 
     struct StaticMeshComponent
     {
-        Assets::AssetHandle                       MeshHandle;
-        std::vector<Assets::AssetHandle>          MaterialSlots;
-        std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
-        std::vector<Graphic::MaterialInstance*>   RuntimeSlotPtrs;          // Raw-pointer view of RuntimeMaterialInstances, rebuilt only when instances change so the per-frame render path passes a pointer instead of allocating+copying a slot vector every frame (Debug-heavy)
-        std::optional<Geometry::PrimitiveType>    Primitive;                // Optional primitive type for dynamic generation
-        std::shared_ptr<DynamicMesh>              RuntimeMesh;              // Unique mesh instance for modifications
-        bool                                      OutlineDraw = false;
-        int                                       ForcedLOD   = -1;         // -1 = auto (by distance); 0..N pins a LOD
-        int                                       LODBias     = 0;          // shifts the AUTO-picked LOD (+coarser, -finer); ignored when ForcedLOD >= 0
-        bool                                      CastShadows    = true;    // false = skipped by the shadow (depth) passes
-        bool                                      ReceiveShadows = true;    // false = sun shadows are not applied to this mesh (forward path)
+        Assets::AssetHandle              MeshHandle;
+        std::vector<Assets::AssetHandle> MaterialSlots;
+        std::vector<Graphic::MaterialInstancePtr>
+             RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+        std::vector<Graphic::MaterialInstance*>
+             RuntimeSlotPtrs; // Raw-pointer view of RuntimeMaterialInstances, rebuilt only when instances change
+                              // so the per-frame render path passes a pointer instead of allocating+copying a slot
+                              // vector every frame (Debug-heavy)
+        std::optional<Geometry::PrimitiveType> Primitive;   // Optional primitive type for dynamic generation
+        std::shared_ptr<DynamicMesh>           RuntimeMesh; // Unique mesh instance for modifications
+        bool                                   OutlineDraw = false;
+        int                                    ForcedLOD   = -1; // -1 = auto (by distance); 0..N pins a LOD
+        int  LODBias        = 0;    // shifts the AUTO-picked LOD (+coarser, -finer); ignored when ForcedLOD >= 0
+        bool CastShadows    = true; // false = skipped by the shadow (depth) passes
+        bool ReceiveShadows = true; // false = sun shadows are not applied to this mesh (forward path)
         // Per-submesh visibility: bit i set = submesh i is HIDDEN (skipped at draw). 0 = all visible. Up to
         // 64 submeshes; edited per Element in the Materials panel.
-        uint64_t                                  HiddenSubmeshes = 0;
+        uint64_t HiddenSubmeshes = 0;
         // Transient: MaterialService invalidation stamp the runtime instances were built against;
         // a mismatch forces a rebuild (see MeshECSSystem) so parent Material* can never dangle.
-        uint32_t                                  SeenMaterialsVersion = 0;
+        uint32_t SeenMaterialsVersion = 0;
     };
 
     // World-space SDF text. FontService bakes the .ttf into an SDF atlas; TextECSSystem lays the
@@ -118,12 +122,12 @@ namespace Desert::ECS
     // shader — into the HDR composite, so EmissiveIntensity > ~1 blooms like any emissive surface.
     struct TextComponent
     {
-        std::string Text     = "Text";
-        std::string FontPath = "Resources/Fonts/Roboto-Regular.ttf";
-        glm::vec4   Color     = glm::vec4( 1.0f );
-        float       Size      = 1.0f;  // world units per em (scales the baked metrics)
-        float       EmissiveIntensity = 1.0f; // >1 => the text blooms
-        bool        Billboard = false; // face the camera (added by the system per frame)
+        std::string Text              = "Text";
+        std::string FontPath          = "Resources/Fonts/Roboto-Regular.ttf";
+        glm::vec4   Color             = glm::vec4( 1.0f );
+        float       Size              = 1.0f;  // world units per em (scales the baked metrics)
+        float       EmissiveIntensity = 1.0f;  // >1 => the text blooms
+        bool        Billboard         = false; // face the camera (added by the system per frame)
 
         // Transient: the laid-out glyph-quad mesh, rebuilt only when the text/font/size changes.
         std::shared_ptr<DynamicMesh> RuntimeMesh;
@@ -134,10 +138,11 @@ namespace Desert::ECS
 
     struct SkinnedMeshComponent
     {
-        Assets::AssetHandle                       MeshHandle;
-        std::vector<Assets::AssetHandle>          MaterialSlots;
-        std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
-        uint32_t                                  SeenMaterialsVersion = 0; // see StaticMeshComponent
+        Assets::AssetHandle              MeshHandle;
+        std::vector<Assets::AssetHandle> MaterialSlots;
+        std::vector<Graphic::MaterialInstancePtr>
+                 RuntimeMaterialInstances; // Cache to keep instances alive and avoid per-frame allocations
+        uint32_t SeenMaterialsVersion = 0; // see StaticMeshComponent
 
         // In-editor rig: a skinned mesh built at runtime by "Convert to Skinned" (from a static mesh + placed
         // bones, auto-weighted), NOT yet a cooked asset. When set, RuntimeMesh overrides MeshHandle in the
@@ -153,16 +158,16 @@ namespace Desert::ECS
     // of N. Use for repeated static props / NPCs / buildings in the city.
     struct InstancedStaticMeshComponent
     {
-        Assets::AssetHandle                       MeshHandle;
-        std::vector<Assets::AssetHandle>          MaterialSlots;
-        std::vector<glm::mat4>                    InstanceTransforms; // per-instance world matrices
+        Assets::AssetHandle              MeshHandle;
+        std::vector<Assets::AssetHandle> MaterialSlots;
+        std::vector<glm::mat4>           InstanceTransforms; // per-instance world matrices
 
         // Transient runtime state (not serialized): generated mesh for primitives, the material instance,
         // and a dirty flag so the renderer re-uploads the instance SSBO only when the transforms change.
         std::optional<Geometry::PrimitiveType>    Primitive;
         std::shared_ptr<DynamicMesh>              RuntimeMesh;
         std::vector<Graphic::MaterialInstancePtr> RuntimeMaterialInstances;
-        bool                                      InstancesDirty = true;
+        bool                                      InstancesDirty       = true;
         uint32_t                                  SeenMaterialsVersion = 0; // see StaticMeshComponent
     };
 
@@ -171,16 +176,16 @@ namespace Desert::ECS
     // (raycast brush). These are the per-type scatter params.
     struct FoliageComponent
     {
-        float Density       = 6.0f;   // instances scattered per paint dab (in the brush disk)
+        float Density       = 6.0f; // instances scattered per paint dab (in the brush disk)
         float ScaleMin      = 0.8f;
         float ScaleMax      = 1.3f;
-        float ZOffsetMin    = 0.0f;   // sink(-)/raise(+) along world up, randomized per instance
+        float ZOffsetMin    = 0.0f; // sink(-)/raise(+) along world up, randomized per instance
         float ZOffsetMax    = 0.0f;
-        float MaxPitchDeg   = 0.0f;   // random tilt off the up/normal axis (0 = upright)
-        float SlopeMinDeg   = 0.0f;   // only paint where the surface slope is within [min,max] degrees
+        float MaxPitchDeg   = 0.0f; // random tilt off the up/normal axis (0 = upright)
+        float SlopeMinDeg   = 0.0f; // only paint where the surface slope is within [min,max] degrees
         float SlopeMaxDeg   = 90.0f;
-        bool  AlignToNormal = true;   // tilt instances to the surface normal
-        bool  RandomYaw     = true;   // random rotation about the up axis
+        bool  AlignToNormal = true; // tilt instances to the surface normal
+        bool  RandomYaw     = true; // random rotation about the up axis
     };
 
     // Per-layer splat mode. Auto = weight from height/slope rules (in-shader); Manual = weight painted
@@ -260,7 +265,7 @@ namespace Desert::ECS
         // --- Splat painting (Stage 3b, runtime only; not yet serialized) ---
         // RGBA8 splat map: R=grass, G=rock, B=snow weights. Manual-mode layers sample this. The CPU mirror
         // is the brush's edit target; SplatDirty triggers a safe GPU re-upload (ViewportPanel::OnPreUpdate).
-        static constexpr uint32_t        SplatResolution = 256;
+        static constexpr uint32_t         SplatResolution = 256;
         std::shared_ptr<Graphic::Image2D> SplatMap;
         std::vector<unsigned char>        SplatPixels; // size = SplatResolution^2 * 4, lazily allocated
         bool                              SplatDirty = false;
@@ -459,6 +464,85 @@ namespace Desert::ECS
         SpotLightData Data;
     };
 
+    // How particle billboards composite into the scene. Additive = glowing FX (fire/sparks/magic);
+    // AlphaBlend = soft opaque puffs (smoke/dust). Reflected enum -> editor combo + serialization.
+    enum class ParticleBlendMode
+    {
+        Additive,
+        AlphaBlend
+    };
+
+    // GPU-simulated billboard particle emitter. The reflected fields below are the AUTHORING parameters
+    // (Details UI + scene serialization are generated from them); the actual simulation runs in a compute
+    // shader and the quads are drawn camera-facing in the Transparency phase (ParticleRenderer). Emits from
+    // the entity's transform. Runtime GPU buffers live on the render system, keyed by the entity — not here.
+    struct ParticleEmitterData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Enabled" ), Category( "Emitter" ) )
+        bool Enabled = true;
+
+        PROPERTY( DisplayName( "Max Particles" ), Category( "Emitter" ), Range( 1.0f, 100000.0f ) )
+        int MaxParticles = 2000;
+
+        PROPERTY( DisplayName( "Spawn Rate" ), Category( "Emitter" ), Range( 0.0f, 10000.0f ) )
+        float SpawnRate = 200.0f; // particles per second
+
+        PROPERTY( DisplayName( "Looping" ), Category( "Emitter" ) )
+        bool Looping = true;
+
+        PROPERTY( DisplayName( "Simulate In World" ), Category( "Emitter" ) )
+        bool WorldSpace = true; // world = particles trail behind a moving emitter; local = ride with it
+
+        PROPERTY( DisplayName( "Lifetime" ), Category( "Particle" ), Range( 0.01f, 60.0f ) )
+        float Lifetime = 3.0f; // seconds
+
+        PROPERTY( DisplayName( "Lifetime Variance" ), Category( "Particle" ), Range( 0.0f, 1.0f ) )
+        float LifetimeVariance = 0.2f;
+
+        PROPERTY( DisplayName( "Start Speed" ), Category( "Motion" ), Range( 0.0f, 100.0f ) )
+        float StartSpeed = 2.0f;
+
+        PROPERTY( DisplayName( "Speed Variance" ), Category( "Motion" ), Range( 0.0f, 1.0f ) )
+        float SpeedVariance = 0.3f;
+
+        PROPERTY( DisplayName( "Emit Direction" ), Category( "Motion" ) )
+        glm::vec3 Direction = glm::vec3( 0.0f, 1.0f, 0.0f ); // normalized emit axis
+
+        PROPERTY( DisplayName( "Cone Angle" ), Category( "Motion" ), Range( 0.0f, 180.0f ) )
+        float ConeAngle = 25.0f; // degrees of spread around Direction
+
+        PROPERTY( DisplayName( "Gravity" ), Category( "Motion" ) )
+        glm::vec3 Gravity = glm::vec3( 0.0f, -2.0f, 0.0f );
+
+        PROPERTY( DisplayName( "Start Size" ), Category( "Look" ), Range( 0.0f, 10.0f ) )
+        float StartSize = 0.25f;
+
+        PROPERTY( DisplayName( "End Size" ), Category( "Look" ), Range( 0.0f, 10.0f ) )
+        float EndSize = 0.0f;
+
+        PROPERTY( DisplayName( "Start Color" ), Category( "Look" ), Color )
+        glm::vec3 StartColor = glm::vec3( 1.0f, 0.6f, 0.15f );
+
+        PROPERTY( DisplayName( "End Color" ), Category( "Look" ), Color )
+        glm::vec3 EndColor = glm::vec3( 0.6f, 0.1f, 0.0f );
+
+        PROPERTY( DisplayName( "Start Alpha" ), Category( "Look" ), Range( 0.0f, 1.0f ) )
+        float StartAlpha = 1.0f;
+
+        PROPERTY( DisplayName( "End Alpha" ), Category( "Look" ), Range( 0.0f, 1.0f ) )
+        float EndAlpha = 0.0f;
+
+        PROPERTY( DisplayName( "Blend" ), Category( "Look" ) )
+        ParticleBlendMode Blend = ParticleBlendMode::Additive;
+    };
+
+    struct ParticleEmitterComponent
+    {
+        ParticleEmitterData Data;
+    };
+
     // Reflected (REFLECT/PROPERTY) so it (de)serializes generically — the SkyboxHandle round-trips as an
     // asset PATH via the serializer's AssetResolver. RequestBake has NO PROPERTY → excluded from
     // reflection (transient). All fields kept flat (no Data sub-struct) so existing accessors are unchanged.
@@ -476,11 +560,11 @@ namespace Desert::ECS
 
         // Engine-generated procedural atmosphere (Rayleigh+Mie).
         PROPERTY( DisplayName( "Procedural" ), Category( "Skybox" ) )
-        bool  Procedural    = false;
+        bool Procedural = false;
         PROPERTY( DisplayName( "Sun Intensity" ), Category( "Skybox" ), Range( 1.0f, 50.0f ) )
-        float SunIntensity  = 22.0f;  // atmosphere sun radiance scale
+        float SunIntensity = 22.0f; // atmosphere sun radiance scale
         PROPERTY( DisplayName( "Sun Disk Size" ), Category( "Skybox" ), Range( 0.002f, 0.1f ) )
-        float SunDiskRadius = 0.02f;  // sun angular radius (radians)
+        float SunDiskRadius = 0.02f; // sun angular radius (radians)
 
         // --- Artistic sky palette + scalars (the day/sunset/night look is driven by the sun elevation; these
         // tune the colours/intensities). See ProceduralSky shader / Atmosphere.glslh SkyConfig. ---
@@ -510,20 +594,20 @@ namespace Desert::ECS
 
         // Procedural flat-layer clouds (e2gamedev-style; painted in the sky shader, visual only).
         PROPERTY( DisplayName( "Clouds" ), Category( "Clouds" ) )
-        bool  EnableClouds   = false;
+        bool EnableClouds = false;
         PROPERTY( DisplayName( "Coverage" ), Category( "Clouds" ), Range( 0.0f, 1.0f ) )
-        float CloudCoverage  = 0.5f;   // 0 = clear sky, 1 = overcast
+        float CloudCoverage = 0.5f; // 0 = clear sky, 1 = overcast
         PROPERTY( DisplayName( "Density" ), Category( "Clouds" ), Range( 0.0f, 2.0f ) )
-        float CloudDensity   = 1.0f;   // opacity multiplier
+        float CloudDensity = 1.0f; // opacity multiplier
         PROPERTY( DisplayName( "Tiling" ), Category( "Clouds" ), Range( 0.2f, 10.0f ) )
-        float CloudTiling    = 1.5f;   // cloud scale (bigger = smaller cells)
+        float CloudTiling = 1.5f; // cloud scale (bigger = smaller cells)
         PROPERTY( DisplayName( "Brightness" ), Category( "Clouds" ), Range( 0.0f, 3.0f ) )
-        float CloudBrightness = 1.0f;  // cloud albedo multiplier
+        float CloudBrightness = 1.0f; // cloud albedo multiplier
         PROPERTY( DisplayName( "Wind Speed" ), Category( "Clouds" ), Range( 0.0f, 50.0f ) )
-        float CloudWindSpeed = 8.0f;   // horizontal drift speed (animation)
+        float CloudWindSpeed = 8.0f; // horizontal drift speed (animation)
 
         // Transient (not serialized — no PROPERTY): set by the editor's "Bake" button.
-        bool  RequestBake   = false;
+        bool RequestBake = false;
     };
 
     // Scene-outliner grouping node: an otherwise-empty entity that acts as a FOLDER for organizing the
@@ -666,7 +750,7 @@ namespace Desert::ECS
         float     DesiredSpeed  = 0.0f;           // m/s the script asked for (sprint etc. is script policy)
         bool      JumpRequested = false;          // set by script:jump(strength), consumed + cleared by physics
         float     JumpStrength  = 5.0f;           // launch velocity the script passed to self:jump()
-        bool      OnGround       = false;         // last physics result, exposed to scripts (self:isOnGround())
+        bool      OnGround      = false;          // last physics result, exposed to scripts (self:isOnGround())
         glm::vec2 AirVelocity   = { 0.0f, 0.0f }; // horizontal velocity locked at takeoff (no air control)
 
         // Swimming (set by the controller SCRIPT when it detects the body is below the water level). While
@@ -720,10 +804,10 @@ namespace Desert::ECS
     // Mechanism (movement + collision) is C++; the DECISION to fire + what a hit MEANS stay in Lua.
     struct ProjectileComponent
     {
-        glm::vec3    Velocity     = { 0.0f, 0.0f, 0.0f }; // world units/s
-        float        GravityScale = 0.0f;                 // 0 = straight line, 1 = full gravity (arc)
-        float        LifeRemaining = 5.0f;                // seconds before auto-despawn
+        glm::vec3    Velocity      = { 0.0f, 0.0f, 0.0f }; // world units/s
+        float        GravityScale  = 0.0f;                 // 0 = straight line, 1 = full gravity (arc)
+        float        LifeRemaining = 5.0f;                 // seconds before auto-despawn
         float        Damage        = 10.0f;
-        Common::UUID Owner;                               // shooter (so we can skip self-hits)
+        Common::UUID Owner; // shooter (so we can skip self-hits)
     };
 } // namespace Desert::ECS

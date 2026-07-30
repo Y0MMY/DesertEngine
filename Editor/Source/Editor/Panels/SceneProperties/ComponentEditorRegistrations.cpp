@@ -45,10 +45,11 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CameraComponent, Data, "Came
 // Collider is registered as a CUSTOM component below (auto-fit to mesh bounds on add) instead of the
 // plain reflected one-liner — see MakeColliderEntry.
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::RigidBodyComponent, Data, "RigidBodyData", "Rigid Body" )
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CharacterControllerComponent, Data,
-                                     "CharacterControllerData", "Character Controller" )
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, "AudioSourceData",
-                                     "Audio Source" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CharacterControllerComponent, Data, "CharacterControllerData",
+                                     "Character Controller" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, "AudioSourceData", "Audio Source" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ParticleEmitterComponent, Data, "ParticleEmitterData",
+                                     "Particle Emitter" )
 
 namespace Desert::Editor
 {
@@ -57,7 +58,7 @@ namespace Desert::Editor
     // component (mesh entities author materials in their slots; there the component is only a
     // runtime override channel for scripts). Schema-driven from the Terrain-domain shader, laid
     // out as a two-column table (label cell never overlaps the control).
-    static void DrawTerrainMaterialWidget( ::Desert::ECS::Entity& entity,
+    static void DrawTerrainMaterialWidget( ::Desert::ECS::Entity&          entity,
                                            ::Desert::Assets::AssetManager* assetMgr )
     {
         namespace ImGui = ::ImGui;
@@ -89,8 +90,8 @@ namespace Desert::Editor
             for ( const auto& name : shaderService->GetAllNames() )
             {
                 auto candidate = shaderService->GetByName( name );
-                if ( !candidate || candidate->GetProgramMeta().Domain !=
-                                        ::Desert::Core::Formats::ShaderDomain::Terrain )
+                if ( !candidate ||
+                     candidate->GetProgramMeta().Domain != ::Desert::Core::Formats::ShaderDomain::Terrain )
                     continue;
                 const bool selected = ( name == mat.ShaderName );
                 if ( ImGui::Selectable( name.c_str(), selected ) && !selected )
@@ -177,15 +178,14 @@ namespace Desert::Editor
                 ImGui::Button( ( disp + hiddenId ).c_str(), ImVec2( -FLT_MIN, 0.0f ) );
                 if ( ImGui::BeginDragDropTarget() )
                 {
-                    if ( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload(
-                              ::Desert::Editor::DragPayloads::TextureAsset ) )
+                    if ( const ImGuiPayload* pl =
+                              ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::TextureAsset ) )
                     {
                         const std::string path( static_cast<const char*>( pl->Data ),
                                                 pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
                         if ( assetMgr )
                         {
-                            const auto resolved =
-                                 ::Desert::Editor::TextureDnD::ResolveOrImport( *assetMgr, path );
+                            const auto resolved = ::Desert::Editor::TextureDnD::ResolveOrImport( *assetMgr, path );
                             if ( static_cast<uint64_t>( resolved ) != 0 )
                                 texOv->TextureHandle = static_cast<uint64_t>( resolved );
                         }
@@ -213,8 +213,7 @@ namespace Desert::Editor
                 if ( p.Min.has_value() && p.Max.has_value() )
                 {
                     float mn = *p.Min, mx = *p.Max;
-                    ImGui::SliderScalarN( hiddenId.c_str(), ImGuiDataType_Float, &ov.Value.x, comps, &mn,
-                                          &mx );
+                    ImGui::SliderScalarN( hiddenId.c_str(), ImGuiDataType_Float, &ov.Value.x, comps, &mn, &mx );
                 }
                 else
                 {
@@ -235,7 +234,7 @@ namespace Desert::Editor
         if ( !entity.HasComponent<::Desert::ECS::StaticMeshComponent>() )
             return;
 
-        const auto&    smc  = entity.GetComponent<::Desert::ECS::StaticMeshComponent>();
+        const auto&     smc  = entity.GetComponent<::Desert::ECS::StaticMeshComponent>();
         ::Desert::Mesh* mesh = nullptr;
         if ( smc.MeshHandle )
             mesh = ::Desert::Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
@@ -262,7 +261,7 @@ namespace Desert::Editor
         col.HalfExtents = half;
         col.Radius      = glm::max( half.x, glm::max( half.y, half.z ) );
         // Capsule cylinder half-height = total half-height minus the two hemispherical caps (radius).
-        col.HalfHeight  = glm::max( 0.01f, half.y - col.Radius );
+        col.HalfHeight = glm::max( 0.01f, half.y - col.Radius );
     }
 
     // Collider editor: same auto-built reflected UI as the one-liner, PLUS a one-time auto-fit on Add and
@@ -275,8 +274,8 @@ namespace Desert::Editor
         ComponentEditorEntry e;
         e.Name      = "Terrain";
         e.CanRemove = true;
-        e.Has = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<::Desert::ECS::TerrainComponent>(); };
-        e.Add = []( ::Desert::ECS::Entity& en ) { en.AddComponent<::Desert::ECS::TerrainComponent>(); };
+        e.Has    = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<::Desert::ECS::TerrainComponent>(); };
+        e.Add    = []( ::Desert::ECS::Entity& en ) { en.AddComponent<::Desert::ECS::TerrainComponent>(); };
         e.Remove = []( ::Desert::ECS::Entity& en )
         {
             en.RemoveComponent<::Desert::ECS::TerrainComponent>();
@@ -303,8 +302,8 @@ namespace Desert::Editor
         ComponentEditorEntry e;
         e.Name      = "Collider";
         e.CanRemove = true;
-        e.Has       = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<::Desert::ECS::ColliderComponent>(); };
-        e.Add       = []( ::Desert::ECS::Entity& en )
+        e.Has = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<::Desert::ECS::ColliderComponent>(); };
+        e.Add = []( ::Desert::ECS::Entity& en )
         {
             auto& c = en.AddComponent<::Desert::ECS::ColliderComponent>();
             FitColliderToMesh( en, c.Data );
@@ -354,12 +353,13 @@ namespace Desert::Editor
                              ImVec2( -1.0f, 0.0f ) );
             if ( ::ImGui::BeginDragDropTarget() )
             {
-                if ( const ImGuiPayload* pl = ::ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MeshAsset );
+                if ( const ImGuiPayload* pl =
+                          ::ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MeshAsset );
                      pl && ctx.AssetMgr() )
                 {
                     const std::string path( static_cast<const char*>( pl->Data ),
                                             pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
-                    const auto handle = ::Desert::Editor::MeshDnD::ResolveOrImport( *ctx.AssetMgr(), path );
+                    const auto        handle = ::Desert::Editor::MeshDnD::ResolveOrImport( *ctx.AssetMgr(), path );
                     if ( !handle.IsNull() )
                     {
                         c.MeshHandle = handle;
@@ -471,7 +471,7 @@ namespace
 
     const int _desert_morph_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeMorphEntry() );
-}
+} // namespace
 
 // SINGLE SOURCE OF TRUTH: for MESH entities, materials (shader + params) are authored ONLY in
 // the material slots (PBR Materials -> Shader picker inside each material). The old standalone
@@ -483,127 +483,128 @@ namespace
 // the script's exposed Properties. "+ Add Script" appends a slot; the X removes one.
 DESERT_REGISTER_CUSTOM_COMPONENT(
      ::Desert::ECS::ScriptComponent, "Script", true,
-     ( []( ::Desert::ECS::Entity& e, ::Desert::Core::Scene*, const ::Desert::Editor::ComponentEditContext& )
-       {
-           namespace fs = std::filesystem;
-           auto& sc     = e.GetComponent<::Desert::ECS::ScriptComponent>();
+     (
+          []( ::Desert::ECS::Entity& e, ::Desert::Core::Scene*, const ::Desert::Editor::ComponentEditContext& )
+          {
+              namespace fs = std::filesystem;
+              auto& sc     = e.GetComponent<::Desert::ECS::ScriptComponent>();
 
-           int removeIndex = -1;
-           for ( size_t i = 0; i < sc.Scripts.size(); ++i )
-           {
-               ImGui::PushID( static_cast<int>( i ) );
-               auto& slot = sc.Scripts[i];
+              int removeIndex = -1;
+              for ( size_t i = 0; i < sc.Scripts.size(); ++i )
+              {
+                  ImGui::PushID( static_cast<int>( i ) );
+                  auto& slot = sc.Scripts[i];
 
-               const std::string preview = slot.ScriptPath.empty()
-                                                ? "Select script..."
-                                                : fs::path( slot.ScriptPath ).filename().string();
+                  const std::string preview = slot.ScriptPath.empty()
+                                                   ? "Select script..."
+                                                   : fs::path( slot.ScriptPath ).filename().string();
 
-               ImGui::SetNextItemWidth( -60.0f ); // leave room for the remove button
-               if ( ImGui::BeginCombo( "##ScriptSel", preview.c_str() ) )
-               {
-                   std::error_code ec;
-                   if ( fs::exists( "Resources", ec ) )
-                   {
-                       for ( const auto& it : fs::recursive_directory_iterator( "Resources", ec ) )
-                       {
-                           if ( !it.is_regular_file() || it.path().extension() != ".lua" )
-                               continue;
-                           const std::string rel = it.path().generic_string();
-                           if ( ImGui::Selectable( it.path().filename().string().c_str(),
-                                                   slot.ScriptPath == rel ) )
-                           {
-                               slot.ScriptPath = rel;
-                               slot.Started    = false;
-                               slot.Properties.clear(); // re-seed from the new script's schema below
-                           }
-                       }
-                   }
-                   ImGui::EndCombo();
-               }
+                  ImGui::SetNextItemWidth( -60.0f ); // leave room for the remove button
+                  if ( ImGui::BeginCombo( "##ScriptSel", preview.c_str() ) )
+                  {
+                      std::error_code ec;
+                      if ( fs::exists( "Resources", ec ) )
+                      {
+                          for ( const auto& it : fs::recursive_directory_iterator( "Resources", ec ) )
+                          {
+                              if ( !it.is_regular_file() || it.path().extension() != ".lua" )
+                                  continue;
+                              const std::string rel = it.path().generic_string();
+                              if ( ImGui::Selectable( it.path().filename().string().c_str(),
+                                                      slot.ScriptPath == rel ) )
+                              {
+                                  slot.ScriptPath = rel;
+                                  slot.Started    = false;
+                                  slot.Properties.clear(); // re-seed from the new script's schema below
+                              }
+                          }
+                      }
+                      ImGui::EndCombo();
+                  }
 
-               // Drag a .lua from the File Explorer onto the combo.
-               if ( ImGui::BeginDragDropTarget() )
-               {
-                   if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "AssetFile" ) )
-                   {
-                       const std::string dropped( static_cast<const char*>( payload->Data ) );
-                       if ( dropped.size() > 4 && dropped.substr( dropped.size() - 4 ) == ".lua" )
-                       {
-                           slot.ScriptPath = fs::path( dropped ).generic_string();
-                           slot.Started    = false;
-                           slot.Properties.clear();
-                       }
-                   }
-                   ImGui::EndDragDropTarget();
-               }
+                  // Drag a .lua from the File Explorer onto the combo.
+                  if ( ImGui::BeginDragDropTarget() )
+                  {
+                      if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( "AssetFile" ) )
+                      {
+                          const std::string dropped( static_cast<const char*>( payload->Data ) );
+                          if ( dropped.size() > 4 && dropped.substr( dropped.size() - 4 ) == ".lua" )
+                          {
+                              slot.ScriptPath = fs::path( dropped ).generic_string();
+                              slot.Started    = false;
+                              slot.Properties.clear();
+                          }
+                      }
+                      ImGui::EndDragDropTarget();
+                  }
 
-               ImGui::SameLine();
-               if ( ImGui::Button( "X" ) )
-                   removeIndex = static_cast<int>( i );
+                  ImGui::SameLine();
+                  if ( ImGui::Button( "X" ) )
+                      removeIndex = static_cast<int>( i );
 
-               if ( !slot.ScriptPath.empty() )
-               {
-                   ImGui::TextDisabled( "%s", slot.ScriptPath.c_str() );
+                  if ( !slot.ScriptPath.empty() )
+                  {
+                      ImGui::TextDisabled( "%s", slot.ScriptPath.c_str() );
 
-                   if ( ImGui::Button( "Reload" ) )
-                       slot.Started = false; // re-read on the next Play frame (hot-reload)
+                      if ( ImGui::Button( "Reload" ) )
+                          slot.Started = false; // re-read on the next Play frame (hot-reload)
 
-                   // ---- Exposed properties (the script's `Properties` table) ----
-                   if ( slot.Properties.empty() )
-                       slot.Properties = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
+                      // ---- Exposed properties (the script's `Properties` table) ----
+                      if ( slot.Properties.empty() )
+                          slot.Properties = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
 
-                   ImGui::SameLine();
-                   if ( ImGui::Button( "Refresh Props" ) )
-                   {
-                       // Re-read the schema, keeping existing values for properties that still exist.
-                       auto schema = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
-                       for ( auto& s : schema )
-                       {
-                           auto old = std::find_if( slot.Properties.begin(), slot.Properties.end(),
-                                                    [&]( const auto& p )
-                                                    { return p.Name == s.Name && p.Type == s.Type; } );
-                           if ( old != slot.Properties.end() )
-                               s = *old;
-                       }
-                       slot.Properties = std::move( schema );
-                   }
+                      ImGui::SameLine();
+                      if ( ImGui::Button( "Refresh Props" ) )
+                      {
+                          // Re-read the schema, keeping existing values for properties that still exist.
+                          auto schema = ::Desert::Scripting::ReadScriptProperties( slot.ScriptPath );
+                          for ( auto& s : schema )
+                          {
+                              auto old = std::find_if( slot.Properties.begin(), slot.Properties.end(),
+                                                       [&]( const auto& p )
+                                                       { return p.Name == s.Name && p.Type == s.Type; } );
+                              if ( old != slot.Properties.end() )
+                                  s = *old;
+                          }
+                          slot.Properties = std::move( schema );
+                      }
 
-                   for ( auto& p : slot.Properties )
-                   {
-                       switch ( p.Type )
-                       {
-                           case ::Desert::Scripting::PropertyType::Number:
-                           {
-                               float v = static_cast<float>( p.Number );
-                               if ( ImGui::DragFloat( p.Name.c_str(), &v, 0.01f ) )
-                                   p.Number = v;
-                               break;
-                           }
-                           case ::Desert::Scripting::PropertyType::Bool:
-                               ImGui::Checkbox( p.Name.c_str(), &p.Bool );
-                               break;
-                           case ::Desert::Scripting::PropertyType::String:
-                           {
-                               char buf[256] = { 0 };
-                               std::strncpy( buf, p.Str.c_str(), sizeof( buf ) - 1 );
-                               if ( ImGui::InputText( p.Name.c_str(), buf, sizeof( buf ) ) )
-                                   p.Str = buf;
-                               break;
-                           }
-                       }
-                   }
-               }
+                      for ( auto& p : slot.Properties )
+                      {
+                          switch ( p.Type )
+                          {
+                              case ::Desert::Scripting::PropertyType::Number:
+                              {
+                                  float v = static_cast<float>( p.Number );
+                                  if ( ImGui::DragFloat( p.Name.c_str(), &v, 0.01f ) )
+                                      p.Number = v;
+                                  break;
+                              }
+                              case ::Desert::Scripting::PropertyType::Bool:
+                                  ImGui::Checkbox( p.Name.c_str(), &p.Bool );
+                                  break;
+                              case ::Desert::Scripting::PropertyType::String:
+                              {
+                                  char buf[256] = { 0 };
+                                  std::strncpy( buf, p.Str.c_str(), sizeof( buf ) - 1 );
+                                  if ( ImGui::InputText( p.Name.c_str(), buf, sizeof( buf ) ) )
+                                      p.Str = buf;
+                                  break;
+                              }
+                          }
+                      }
+                  }
 
-               ImGui::Separator();
-               ImGui::PopID();
-           }
+                  ImGui::Separator();
+                  ImGui::PopID();
+              }
 
-           if ( removeIndex >= 0 )
-               sc.Scripts.erase( sc.Scripts.begin() + removeIndex );
+              if ( removeIndex >= 0 )
+                  sc.Scripts.erase( sc.Scripts.begin() + removeIndex );
 
-           if ( ImGui::Button( "+ Add Script" ) )
-               sc.Scripts.emplace_back();
-       } ) )
+              if ( ImGui::Button( "+ Add Script" ) )
+                  sc.Scripts.emplace_back();
+          } ) )
 
 // Text (SDF world-space label). Simple field editor; the mesh rebuilds automatically when Text/
 // Font/Size change (TextECSSystem compares against its Built* cache).

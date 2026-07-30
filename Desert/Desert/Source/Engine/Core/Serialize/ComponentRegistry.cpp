@@ -103,9 +103,9 @@ namespace Desert::Core::Serialize
         struct ScriptPropSer
         {
             std::string Name;
-            int         Type = 0;
+            int         Type   = 0;
             double      Number = 0.0;
-            bool        Bool = false;
+            bool        Bool   = false;
             std::string Str;
         };
         struct ScriptSlotSer
@@ -144,8 +144,8 @@ namespace Desert::Core::Serialize
 
             s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
             {
-                const auto&   sc = e.GetComponent<ECS::ScriptComponent>();
-                ScriptCompSer ser;
+                const auto&                sc = e.GetComponent<ECS::ScriptComponent>();
+                ScriptCompSer              ser;
                 std::vector<ScriptSlotSer> slots;
                 for ( const auto& slot : sc.Scripts )
                 {
@@ -243,7 +243,8 @@ namespace Desert::Core::Serialize
                         // Not preloaded (e.g. an editor .demat the preloader's .mat scan missed). Create +
                         // load + register from the path so materials survive a cold restart, not just an
                         // in-session reload.
-                        auto created = m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, path );
+                        auto created =
+                             m.CreateAsset<Assets::SurfaceMaterialAsset>( Assets::AssetPriority::High, path );
                         if ( created )
                         {
                             if ( !created->IsReadyForUse() )
@@ -313,8 +314,7 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByHandle<Assets::MeshAsset>( handle );
                     if ( !a )
                         return 0;
-                    if ( auto* svc = Runtime::ResourceRegistry::GetMeshService();
-                         svc && !svc->GetAsset( handle ) )
+                    if ( auto* svc = Runtime::ResourceRegistry::GetMeshService(); svc && !svc->GetAsset( handle ) )
                     {
                         svc->Register( a );
                         a->Load();
@@ -491,8 +491,7 @@ namespace Desert::Core::Serialize
                     for ( size_t i = 0; i < slotCount; ++i )
                     {
                         uint64_t h = 0;
-                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() &&
-                             resolver.FromGuid )
+                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() && resolver.FromGuid )
                             h = resolver.FromGuid( ( *meshData.MaterialGuids )[i], "MaterialAsset" );
                         if ( h == 0 && meshData.MaterialPaths && i < meshData.MaterialPaths->size() )
                             h = resolver.FromPath( ( *meshData.MaterialPaths )[i], "MaterialAsset" );
@@ -544,9 +543,9 @@ namespace Desert::Core::Serialize
                         aabb.Max = glm::vec3( 0.0f );
                     }
 
-                    std::vector<Submesh> submeshes = {
-                        { "Mesh", 0, static_cast<uint32_t>( vertices.size() ), 0,
-                          static_cast<uint32_t>( indices.size() ) * 3, glm::mat4( 1.0f ), aabb } };
+                    std::vector<Submesh> submeshes = { { "Mesh", 0, static_cast<uint32_t>( vertices.size() ), 0,
+                                                         static_cast<uint32_t>( indices.size() ) * 3,
+                                                         glm::mat4( 1.0f ), aabb } };
 
                     smc.RuntimeMesh = std::make_shared<DynamicMesh>( vertices, indices, submeshes );
                     smc.RuntimeMesh->Invalidate();
@@ -564,7 +563,7 @@ namespace Desert::Core::Serialize
 
             s.Serialize = []( ECS::Entity entity, const Assets::AssetManager& assetManager ) -> rfl::Generic
             {
-                const auto&                             ism = entity.GetComponent<ECS::InstancedStaticMeshComponent>();
+                const auto& ism = entity.GetComponent<ECS::InstancedStaticMeshComponent>();
                 Assets::InstancedStaticMeshComponentSer ser;
 
                 auto resolver = MakeAssetResolver( assetManager );
@@ -658,8 +657,8 @@ namespace Desert::Core::Serialize
                     auto                                    resolver = MakeAssetResolver( assetManager );
                     std::vector<Assets::MaterialTextureSer> ts;
                     for ( const auto& t : mc.Textures )
-                        ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ),
-                                        t.TextureHandle } );
+                        ts.push_back(
+                             { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ), t.TextureHandle } );
                     ser.Textures = std::move( ts );
                 }
 
@@ -687,9 +686,8 @@ namespace Desert::Core::Serialize
                     for ( const auto& t : *data.Textures )
                     {
                         // GUID first (rename-safe), then the legacy path.
-                        uint64_t h = ( t.Guid && resolver.FromGuid )
-                                          ? resolver.FromGuid( *t.Guid, "TextureAsset" )
-                                          : 0;
+                        uint64_t h =
+                             ( t.Guid && resolver.FromGuid ) ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
                         if ( h == 0 )
                             h = resolver.FromPath( t.Path, "TextureAsset" );
                         mc.Textures.push_back( { t.Name, h } );
@@ -763,8 +761,7 @@ namespace Desert::Core::Serialize
                     for ( size_t i = 0; i < slotCount; ++i )
                     {
                         uint64_t h = 0;
-                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() &&
-                             resolver.FromGuid )
+                        if ( meshData.MaterialGuids && i < meshData.MaterialGuids->size() && resolver.FromGuid )
                             h = resolver.FromGuid( ( *meshData.MaterialGuids )[i], "MaterialAsset" );
                         if ( h == 0 && meshData.MaterialPaths && i < meshData.MaterialPaths->size() )
                             h = resolver.FromPath( ( *meshData.MaterialPaths )[i], "MaterialAsset" );
@@ -857,8 +854,8 @@ namespace Desert::Core::Serialize
              "DirectionLight", "DirectionalLightData", &ECS::DirectionLightComponent::Data ) );
         Register( MakeReflected<ECS::PointLightComponent, ECS::PointLightData>(
              "PointLight", "PointLightData", &ECS::PointLightComponent::Data ) );
-        Register( MakeReflected<ECS::SpotLightComponent, ECS::SpotLightData>(
-             "SpotLight", "SpotLightData", &ECS::SpotLightComponent::Data ) );
+        Register( MakeReflected<ECS::SpotLightComponent, ECS::SpotLightData>( "SpotLight", "SpotLightData",
+                                                                              &ECS::SpotLightComponent::Data ) );
         Register( MakeReflected<ECS::TerrainComponent, ECS::TerrainData>( "Terrain", "TerrainData",
                                                                           &ECS::TerrainComponent::Data ) );
         Register( MakeReflected<ECS::ColliderComponent, ECS::ColliderData>( "Collider", "ColliderData",
@@ -869,6 +866,8 @@ namespace Desert::Core::Serialize
              "CharacterController", "CharacterControllerData", &ECS::CharacterControllerComponent::Data ) );
         Register( MakeReflected<ECS::AudioSourceComponent, ECS::AudioSourceData>(
              "AudioSource", "AudioSourceData", &ECS::AudioSourceComponent::Data ) );
+        Register( MakeReflected<ECS::ParticleEmitterComponent, ECS::ParticleEmitterData>(
+             "ParticleEmitter", "ParticleEmitterData", &ECS::ParticleEmitterComponent::Data ) );
 
         // ---- Marker components (presence is the state) ----
         Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );
@@ -902,8 +901,7 @@ namespace Desert::Core::Serialize
             auto                                    resolver = MakeAssetResolver( mgr );
             std::vector<Assets::MaterialTextureSer> ts;
             for ( const auto& t : mc.Textures )
-                ts.push_back(
-                     { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ), t.TextureHandle } );
+                ts.push_back( { t.Name, resolver.ToPath( t.TextureHandle, "TextureAsset" ), t.TextureHandle } );
             ser.Textures = std::move( ts );
         }
         return rfl::json::write( ser );
@@ -930,8 +928,7 @@ namespace Desert::Core::Serialize
             auto resolver = MakeAssetResolver( mgr );
             for ( const auto& t : *data.Textures )
             {
-                uint64_t h =
-                     ( t.Guid && resolver.FromGuid ) ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
+                uint64_t h = ( t.Guid && resolver.FromGuid ) ? resolver.FromGuid( *t.Guid, "TextureAsset" ) : 0;
                 if ( h == 0 )
                     h = resolver.FromPath( t.Path, "TextureAsset" );
                 mc.Textures.push_back( { t.Name, h } );
