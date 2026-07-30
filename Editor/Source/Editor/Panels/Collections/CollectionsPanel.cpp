@@ -231,29 +231,27 @@ namespace Desert::Editor
         if ( m_ThumbRenderer )
             m_ThumbRenderer->Tick();
 
-        if ( ImGui::Begin( m_PanelName.c_str(), &m_SowPanel ) )
+        // Content renders inside the window EditorLayer's central loop already opened for this panel. A
+        // self-Begin here opened a SECOND, icon-less "Collections" window (different ImGui id) once panel
+        // titles gained an icon (### suffix) — so it's removed.
+        if ( ImGui::Button( ICON_MDI_REFRESH " Rescan" ) )
         {
-            if ( ImGui::Button( ICON_MDI_REFRESH " Rescan" ) )
-            {
-                Rescan();
-                m_OpenCollection = -1;
-            }
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( 220.0f );
-            ImGui::InputTextWithHint( "##collsearch", ICON_MDI_MAGNIFY " Search...", m_Search,
-                                      sizeof( m_Search ) );
-
-            if ( m_OpenCollection < 0 || m_OpenCollection >= (int)m_Collections.size() )
-            {
-                m_OpenCollection = -1;
-                DrawCollectionList(); // top level: the collections themselves
-            }
-            else
-            {
-                DrawCollectionContents( m_Collections[m_OpenCollection] ); // inside one collection: its meshes
-            }
+            Rescan();
+            m_OpenCollection = -1;
         }
-        ImGui::End();
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( 220.0f );
+        ImGui::InputTextWithHint( "##collsearch", ICON_MDI_MAGNIFY " Search...", m_Search, sizeof( m_Search ) );
+
+        if ( m_OpenCollection < 0 || m_OpenCollection >= (int)m_Collections.size() )
+        {
+            m_OpenCollection = -1;
+            DrawCollectionList(); // top level: the collections themselves
+        }
+        else
+        {
+            DrawCollectionContents( m_Collections[m_OpenCollection] ); // inside one collection: its meshes
+        }
     }
 
     // Reusable wrapping grid; calls drawCell(index) for each cell. Returns nothing.
