@@ -69,9 +69,9 @@ namespace Desert::Editor
 
         Utils::ImGuiUtilities::PushID();
 
-        std::string uuidStr      = UUID.ToString();
-        bool        hasChildren  = entity.HasComponent<ECS::RelationshipComponent>() &&
-                                   !entity.GetComponent<ECS::RelationshipComponent>().Children.empty();
+        std::string uuidStr     = UUID.ToString();
+        bool        hasChildren = entity.HasComponent<ECS::RelationshipComponent>() &&
+                           !entity.GetComponent<ECS::RelationshipComponent>().Children.empty();
 
         m_VisibleOrder.push_back( UUID ); // visible draw order (Shift+click range source)
 
@@ -113,9 +113,7 @@ namespace Desert::Editor
         ImGui::TableSetColumnIndex( 0 );
 
         // Prefab root entities get a distinctive teal tint
-        const ImVec4 iconColor = isPrefab
-            ? ImVec4( 0.3f, 0.9f, 0.8f, 1.0f )
-            : ThemeManager::GetIconColor();
+        const ImVec4 iconColor = isPrefab ? ImVec4( 0.3f, 0.9f, 0.8f, 1.0f ) : ThemeManager::GetIconColor();
 
         ImGui::PushStyleColor( ImGuiCol_Text, iconColor );
         bool nodeOpen = ImGui::TreeNodeEx( (void*)(uint64_t)entity.GetHandle(), nodeFlags, "%s", icon );
@@ -135,21 +133,23 @@ namespace Desert::Editor
 
         if ( ImGui::BeginDragDropSource() )
         {
-            ImGui::SetDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship, &UUID, sizeof( Common::UUID ) );
+            ImGui::SetDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship, &UUID,
+                                       sizeof( Common::UUID ) );
             ImGui::TextUnformatted( name.c_str() );
             ImGui::EndDragDropSource();
         }
 
         if ( ImGui::BeginDragDropTarget() )
         {
-            if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
+            if ( const ImGuiPayload* payload =
+                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
             {
                 // Dragging a multi-selected entity drags the whole selection. Applied after iteration.
                 Common::UUID childUUID = *(const Common::UUID*)payload->Data;
                 m_PendingReparent      = { Core::SelectionManager::IsSelected( childUUID )
                                                 ? Core::SelectionManager::GetSelection()
                                                 : std::vector<Common::UUID>{ childUUID },
-                                           UUID };
+                                      UUID };
             }
             ImGui::EndDragDropTarget();
         }
@@ -197,6 +197,15 @@ namespace Desert::Editor
             ImGui::SameLine();
             ImGui::TextDisabled( "[Prefab]" );
         }
+        // Lua-script badge: a small green script glyph when the entity carries a ScriptComponent, so scripted
+        // entities are spottable at a glance in the hierarchy.
+        if ( entity.HasComponent<ECS::ScriptComponent>() )
+        {
+            ImGui::SameLine();
+            ImGui::TextColored( ImVec4( 0.45f, 0.85f, 0.45f, 1.0f ), ICON_MDI_LANGUAGE_LUA );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Has a Lua script" );
+        }
 
         bool deleteEntity = false;
         if ( ImGui::BeginPopupContextItem( uuidStr.c_str() ) )
@@ -215,12 +224,12 @@ namespace Desert::Editor
                 return { UUID };
             };
             if ( ImGui::Selectable( Core::SelectionManager::Count() > 1 &&
-                                             Core::SelectionManager::IsSelected( UUID )
+                                              Core::SelectionManager::IsSelected( UUID )
                                          ? "Duplicate (selection)"
                                          : "Duplicate" ) )
                 m_PendingDuplicate = targetSet(); // deferred: cloning creates entities mid-iteration
             if ( ImGui::Selectable( Core::SelectionManager::Count() > 1 &&
-                                             Core::SelectionManager::IsSelected( UUID )
+                                              Core::SelectionManager::IsSelected( UUID )
                                          ? "Delete (selection)"
                                          : "Delete" ) )
                 deleteEntity = true;
@@ -242,8 +251,8 @@ namespace Desert::Editor
                     if ( ch == ' ' )
                         ch = '_';
                 m_SavePrefabTarget = UUID;
-                m_SavePrefabPath   = "Resources/Assets/Prefabs/" + stem +
-                                   Common::Constants::Extensions::PREFAB_EXTENSION;
+                m_SavePrefabPath =
+                     "Resources/Assets/Prefabs/" + stem + Common::Constants::Extensions::PREFAB_EXTENSION;
                 m_OpenSavePrefab = true; // deferred: OpenPopup at panel scope (see OnUIRender)
             }
             if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT " Instantiate Prefab..." ) )
@@ -296,9 +305,8 @@ namespace Desert::Editor
         // (deleting a parent destroys its whole subtree at once). Process after EndTable.
         if ( deleteEntity )
         {
-            m_PendingDelete = Core::SelectionManager::IsSelected( UUID )
-                                   ? Core::SelectionManager::GetSelection()
-                                   : std::vector<Common::UUID>{ UUID };
+            m_PendingDelete = Core::SelectionManager::IsSelected( UUID ) ? Core::SelectionManager::GetSelection()
+                                                                         : std::vector<Common::UUID>{ UUID };
         }
 
         Utils::ImGuiUtilities::PopID();
@@ -343,7 +351,7 @@ namespace Desert::Editor
 
         ImRect windowRect = { ImGui::GetWindowContentRegionMin(), ImGui::GetWindowContentRegionMax() };
 
-        auto AddEntity = []( const std::shared_ptr<Desert::Core::Scene>&    scene,
+        auto AddEntity = []( const std::shared_ptr<Desert::Core::Scene>&  scene,
                              const std::shared_ptr<Assets::AssetManager>& assetManager )
         {
             // Every menu spawn is recorded as one undo step (Ctrl+Z removes what was just added).
@@ -367,7 +375,7 @@ namespace Desert::Editor
                 if ( Core::SelectionManager::Count() > 0 &&
                      ImGui::Selectable( ICON_MDI_FOLDER_PLUS " Group Selected into Folder" ) )
                 {
-                    auto  folder = track( scene->CreateNewEntity( "Folder" ) );
+                    auto folder = track( scene->CreateNewEntity( "Folder" ) );
                     folder.AddComponent<ECS::FolderComponent>();
                     for ( const auto& id : Core::SelectionManager::GetSelection() )
                         if ( const auto e = scene->FindEntityByID( id ) )
@@ -453,7 +461,7 @@ namespace Desert::Editor
 
                         auto& tf       = camEntity.GetComponent<ECS::TransformComponent>();
                         tf.Translation = eye + fwd * 4.0f;
-                        tf.Rotation = glm::eulerAngles( glm::quatLookAt( fwd, glm::vec3( 0.0f, 1.0f, 0.0f ) ) );
+                        tf.Rotation    = glm::eulerAngles( glm::quatLookAt( fwd, glm::vec3( 0.0f, 1.0f, 0.0f ) ) );
                     }
                     track( camEntity );
                 }
@@ -637,8 +645,7 @@ namespace Desert::Editor
             // Resizable: the Name|Type divider is draggable (long component-type names were unreadable
             // behind the old fixed 110px column).
             constexpr ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
-                                                   ImGuiTableFlags_SizingStretchProp |
-                                                   ImGuiTableFlags_Resizable;
+                                                   ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Resizable;
 
             ImGui::PushStyleVar( ImGuiStyleVar_CellPadding, ImVec2( 4.0f, 2.0f ) );
             if ( ImGui::BeginTable( "##outliner", 2, tableFlags ) )
@@ -652,7 +659,7 @@ namespace Desert::Editor
                 for ( auto entityHandle : view )
                 {
                     ECS::Entity entity( entityHandle, registry );
-                    bool hasParent = entity.HasComponent<ECS::RelationshipComponent>() &&
+                    bool        hasParent = entity.HasComponent<ECS::RelationshipComponent>() &&
                                      entity.GetComponent<ECS::RelationshipComponent>().Parent != entt::null;
                     if ( !hasParent )
                         DrawEntityNode( entity );
@@ -664,7 +671,8 @@ namespace Desert::Editor
 
             if ( ImGui::BeginDragDropTargetCustom( windowRect, ImGui::GetCurrentWindow()->ID ) )
             {
-                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
+                if ( const ImGuiPayload* payload =
+                          ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::EntityRelationship ) )
                 {
                     // Drop on empty space = unparent to scene root (undoable, applied after iteration).
                     Common::UUID uuid = *(const Common::UUID*)payload->Data;
@@ -674,7 +682,8 @@ namespace Desert::Editor
                                           Common::UUID::Null() };
                 }
 
-                if ( const ImGuiPayload* payload = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::PrefabFile ) )
+                if ( const ImGuiPayload* payload =
+                          ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::PrefabFile ) )
                 {
                     std::string path( static_cast<const char*>( payload->Data ),
                                       static_cast<size_t>( payload->DataSize ) - 1 );
@@ -683,8 +692,9 @@ namespace Desert::Editor
                         auto prefabAsset = m_AssetManager->FindByPath<Assets::PrefabAsset>( path );
                         if ( !prefabAsset )
                         {
-                            prefabAsset = const_cast<Assets::AssetManager&>( *m_AssetManager )
-                                .CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High, path );
+                            prefabAsset =
+                                 const_cast<Assets::AssetManager&>( *m_AssetManager )
+                                      .CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High, path );
                         }
                         if ( prefabAsset )
                         {
@@ -746,8 +756,8 @@ namespace Desert::Editor
         if ( ImGui::Button( "Save", ImVec2( 120, 0 ) ) && !m_SavePrefabPath.empty() )
         {
             namespace fs = std::filesystem;
-            const bool rightExt = fs::path( m_SavePrefabPath ).extension() ==
-                                  Common::Constants::Extensions::PREFAB_EXTENSION;
+            const bool rightExt =
+                 fs::path( m_SavePrefabPath ).extension() == Common::Constants::Extensions::PREFAB_EXTENSION;
             std::optional<std::reference_wrapper<const ECS::Entity>> entityRef;
             if ( m_SavePrefabTarget )
                 entityRef = m_Scene->FindEntityByID( *m_SavePrefabTarget );
@@ -787,8 +797,8 @@ namespace Desert::Editor
                         root.AddComponent<ECS::PrefabComponent>();
                     root.GetComponent<ECS::PrefabComponent>().Prefab = prefabAsset->GetMetadata().Handle;
 
-                    LOG_INFO( "[Prefab] Saved '{}' -> {}",
-                              root.GetComponent<ECS::TagComponent>().Tag, m_SavePrefabPath );
+                    LOG_INFO( "[Prefab] Saved '{}' -> {}", root.GetComponent<ECS::TagComponent>().Tag,
+                              m_SavePrefabPath );
                     s_error.clear();
                     ImGui::CloseCurrentPopup();
                 }
@@ -823,11 +833,10 @@ namespace Desert::Editor
             {
                 namespace fs = std::filesystem;
                 std::error_code ec;
-                const bool exists  = fs::exists( m_PrefabInstantiatePath, ec ) &&
-                                     fs::is_regular_file( m_PrefabInstantiatePath, ec );
-                const bool rightExt =
-                     fs::path( m_PrefabInstantiatePath ).extension() ==
-                     Common::Constants::Extensions::PREFAB_EXTENSION;
+                const bool      exists = fs::exists( m_PrefabInstantiatePath, ec ) &&
+                                    fs::is_regular_file( m_PrefabInstantiatePath, ec );
+                const bool rightExt = fs::path( m_PrefabInstantiatePath ).extension() ==
+                                      Common::Constants::Extensions::PREFAB_EXTENSION;
 
                 if ( !exists )
                 {
@@ -846,8 +855,8 @@ namespace Desert::Editor
                     if ( !prefabAsset )
                     {
                         prefabAsset = const_cast<Assets::AssetManager&>( *m_AssetManager )
-                            .CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High,
-                                                               m_PrefabInstantiatePath );
+                                           .CreateAsset<Assets::PrefabAsset>( Assets::AssetPriority::High,
+                                                                              m_PrefabInstantiatePath );
                     }
                     if ( prefabAsset )
                     {

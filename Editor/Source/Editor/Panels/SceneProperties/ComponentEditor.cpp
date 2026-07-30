@@ -1,5 +1,8 @@
 #include "ComponentEditor.hpp"
 
+#include <cstring>
+#include <string>
+
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
@@ -47,32 +50,106 @@ namespace Desert::Editor
         RenderAddComponentPopup( entity );
     }
 
+    namespace
+    {
+        // Bucket a component (by its display name) into an Add-Component menu category. Keyword-based so it is
+        // robust to the exact registered names. Order here = menu order.
+        struct AddCategory
+        {
+            const char* Icon;
+            const char* Name;
+        };
+        constexpr AddCategory kAddCategories[] = {
+             { ICON_MDI_SHAPE, "Rendering" },   { ICON_MDI_LIGHTBULB, "Lighting" },
+             { ICON_MDI_VIEW_DASHBOARD, "UI" }, { ICON_MDI_ATOM, "Physics" },
+             { ICON_MDI_RUN, "Animation" },     { ICON_MDI_VOLUME_HIGH, "Audio" },
+             { ICON_MDI_VIDEO, "Camera" },      { ICON_MDI_DOTS_HORIZONTAL, "Other" },
+        };
+
+        const char* CategoryOf( const std::string& name )
+        {
+            const auto has = [&]( const char* s ) { return name.find( s ) != std::string::npos; };
+            if ( has( "UI " ) || has( "Panel" ) || has( "Button" ) || has( "Layout" ) || has( "Canvas" ) ||
+                 has( "Anchor" ) )
+                return "UI";
+            if ( has( "Light" ) )
+                return "Lighting";
+            if ( has( "Mesh" ) || has( "Text" ) || has( "Particle" ) || has( "Skybox" ) || has( "Terrain" ) ||
+                 has( "Sprite" ) || has( "Decal" ) )
+                return "Rendering";
+            if ( has( "Collider" ) || has( "Rigid" ) || has( "Character" ) || has( "Physics" ) )
+                return "Physics";
+            if ( has( "Anim" ) || has( "Skeleton" ) )
+                return "Animation";
+            if ( has( "Audio" ) || has( "Sound" ) )
+                return "Audio";
+            if ( has( "Camera" ) )
+                return "Camera";
+            return "Other";
+        }
+    } // namespace
+
     void ComponentEditor::RenderAddComponentPopup( ECS::Entity& entity )
     {
         if ( ImGui::BeginPopup( "addComponent" ) )
         {
-            ImGui::Separator();
-
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted( ICON_MDI_MAGNIFY );
             ImGui::SameLine();
 
             float filterSize = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().IndentSpacing;
-            filterSize       = filterSize < 200 ? 200 : filterSize;
+            filterSize       = filterSize < 220 ? 220 : filterSize;
             m_ComponentFilter.Draw( "##ComponentFilter", filterSize );
+            ImGui::Separator();
 
-            for ( const auto& entry : ComponentWidgetRegistry::Get().Entries() )
+            const bool filtering = m_ComponentFilter.IsActive();
+
+            const auto addEntry = [&]( const ComponentEditorEntry& entry )
             {
-                if ( entry.Has && entry.Has( entity ) )
-                    continue;
-                if ( !m_ComponentFilter.PassFilter( entry.Name.c_str() ) )
-                    continue;
-
                 if ( ImGui::Selectable( entry.Name.c_str() ) && entry.Add )
-                {
-                    // Undoable: Ctrl+Z removes the just-added component again.
                     Commands::MutateEntityUndoable( entity.GetComponent<ECS::UUIDComponent>().UUID,
                                                     [&] { entry.Add( entity ); } );
+            };
+
+            if ( filtering )
+            {
+                // Flat filtered list while searching — categories only get in the way of a text query.
+                for ( const auto& entry : ComponentWidgetRegistry::Get().Entries() )
+                {
+                    if ( entry.Has && entry.Has( entity ) )
+                        continue;
+                    if ( m_ComponentFilter.PassFilter( entry.Name.c_str() ) )
+                        addEntry( entry );
+                }
+            }
+            else
+            {
+                // Grouped into collapsible category submenus (Rendering / Lighting / UI / Physics / ...).
+                for ( const auto& cat : kAddCategories )
+                {
+                    // Does this category have any addable entries? (skip empty submenus)
+                    bool any = false;
+                    for ( const auto& entry : ComponentWidgetRegistry::Get().Entries() )
+                        if ( ( !entry.Has || !entry.Has( entity ) ) &&
+                             std::strcmp( CategoryOf( entry.Name ), cat.Name ) == 0 )
+                        {
+                            any = true;
+                            break;
+                        }
+                    if ( !any )
+                        continue;
+
+                    if ( ImGui::BeginMenu( ( std::string( cat.Icon ) + "  " + cat.Name ).c_str() ) )
+                    {
+                        for ( const auto& entry : ComponentWidgetRegistry::Get().Entries() )
+                        {
+                            if ( entry.Has && entry.Has( entity ) )
+                                continue;
+                            if ( std::strcmp( CategoryOf( entry.Name ), cat.Name ) == 0 )
+                                addEntry( entry );
+                        }
+                        ImGui::EndMenu();
+                    }
                 }
             }
 
