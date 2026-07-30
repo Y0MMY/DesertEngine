@@ -48,6 +48,11 @@ namespace Desert::Assets::Serialization
         Common::Math::AABB BoundingBox;
 
         Common::UUID MaterialHandle;
+
+        // Baked LOD triangle sets (cooked at import, submesh-local, coarsest last). Empty => LODs are
+        // generated at load. New field — meshes cooked before it exists load via rfl::DefaultIfMissing with an
+        // empty list (so they fall back to load-time generation, unchanged).
+        std::vector<std::vector<IndexData>> LODs;
     };
 
     // Blendshape / morph target on disk: per-vertex deltas index-aligned with the mesh's global vertex array

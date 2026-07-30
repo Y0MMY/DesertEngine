@@ -88,6 +88,18 @@ namespace Desert::Assets
             submesh.Transform    = s.Transform;
             submesh.BoundingBox  = s.BoundingBox;
 
+            // Baked LOD chain (if the asset was cooked with LODs): copy the simplified triangle sets so
+            // StaticMesh appends them instead of re-simplifying at load. Empty -> generated at load.
+            submesh.BakedLODs.reserve( s.LODs.size() );
+            for ( const auto& lvl : s.LODs )
+            {
+                std::vector<Index> tris;
+                tris.reserve( lvl.size() );
+                for ( const auto& t : lvl )
+                    tris.push_back( { t.V1, t.V2, t.V3 } );
+                submesh.BakedLODs.push_back( std::move( tris ) );
+            }
+
             m_MaterialAssetHandles.emplace_back( s.MaterialHandle );
             m_Submeshes.emplace_back( std::move( submesh ) );
         }
