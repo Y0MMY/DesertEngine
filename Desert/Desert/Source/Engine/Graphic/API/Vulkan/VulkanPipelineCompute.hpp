@@ -71,7 +71,7 @@ namespace Desert::Graphic::API::Vulkan
         ComputePipelineSpecification m_Specification;
         VkPipeline                   m_ComputePipeline       = VK_NULL_HANDLE;
         VkPipelineLayout             m_ComputePipelineLayout = VK_NULL_HANDLE;
-        VkPipelineCache              m_PipelineCache         = VK_NULL_HANDLE;
+        // Pipeline cache is now the shared device-wide one (VulkanLogicalDevice::GetPipelineCache).
 
         std::unique_ptr<VulkanMaterialBackend> m_VulkanMaterialBackend;
 

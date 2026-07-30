@@ -254,14 +254,17 @@ namespace Desert::Graphic::API::Vulkan
 
         VK_CHECK_RESULT( vkCreatePipelineLayout( device, &pipelineLayoutCreateInfo, nullptr, &m_ComputePipelineLayout ) );
 
-        VkPipelineCacheCreateInfo pipelineCacheCreateInfo{ .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
-        VK_CHECK_RESULT( vkCreatePipelineCache( device, &pipelineCacheCreateInfo, nullptr, &m_PipelineCache ) );
+        // Shared device-wide, disk-persisted pipeline cache — the old per-pipeline cache created here was
+        // empty every time and cached nothing across (or within) runs.
+        const VkPipelineCache pipelineCache =
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetPipelineCache();
 
         VkComputePipelineCreateInfo pipelineInfo{ .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
                                                   .stage  = vulkanShader->GetPipelineShaderStageCreateInfos()[0],
                                                   .layout = m_ComputePipelineLayout };
 
-        VK_CHECK_RESULT( vkCreateComputePipelines( device, m_PipelineCache, 1, &pipelineInfo, nullptr, &m_ComputePipeline ) );
+        VK_CHECK_RESULT(
+             vkCreateComputePipelines( device, pipelineCache, 1, &pipelineInfo, nullptr, &m_ComputePipeline ) );
 
         VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_PIPELINE, m_Specification.Shader->GetName(), m_ComputePipeline );
 
@@ -282,12 +285,6 @@ namespace Desert::Graphic::API::Vulkan
         {
             vkDestroyPipelineLayout( device, m_ComputePipelineLayout, nullptr );
             m_ComputePipelineLayout = VK_NULL_HANDLE;
-        }
-
-        if ( m_PipelineCache != VK_NULL_HANDLE )
-        {
-            vkDestroyPipelineCache( device, m_PipelineCache, nullptr );
-            m_PipelineCache = VK_NULL_HANDLE;
         }
 
         if ( m_InFramePool != VK_NULL_HANDLE )

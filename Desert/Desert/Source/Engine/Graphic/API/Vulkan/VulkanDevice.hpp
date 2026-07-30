@@ -98,6 +98,15 @@ namespace Desert::Graphic::API::Vulkan
             return m_LogicalDevice;
         }
 
+        // ONE device-wide pipeline cache, seeded from Cooked/PipelineCache.bin on create and written
+        // back on Destroy — so the driver reuses previously-built pipeline binaries across runs instead
+        // of rebuilding every graphics/compute pipeline from scratch each startup. Passed to every
+        // vkCreate*Pipelines call (graphics + compute).
+        VkPipelineCache GetPipelineCache() const
+        {
+            return m_PipelineCache;
+        }
+
         VkQueue GetGraphicsQueue()
         {
             return m_GraphicsQueue;
@@ -112,8 +121,16 @@ namespace Desert::Graphic::API::Vulkan
         Common::ResultStr<bool> CreateDevice();
 
     private:
+        // Create the device-wide VkPipelineCache, seeding it from the on-disk cache if present. The driver
+        // validates the header (vendor/device/UUID) and silently ignores mismatched or corrupt data.
+        void CreatePipelineCache();
+        // Serialize the current pipeline cache to disk (best-effort — read-only installs just skip it).
+        void SavePipelineCache() const;
+
+    private:
         std::shared_ptr<VulkanPhysicalDevice> m_PhysicalDevice;
         VkDevice                              m_LogicalDevice;
+        VkPipelineCache                       m_PipelineCache = VK_NULL_HANDLE;
         std::string                           m_DeviceName;
 
         VkQueue m_GraphicsQueue;

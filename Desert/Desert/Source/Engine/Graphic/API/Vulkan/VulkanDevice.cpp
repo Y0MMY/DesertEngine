@@ -7,8 +7,21 @@
 
 #include <Engine/Core/EngineContext.hpp>
 
+#include <Common/Core/Constants.hpp>
+
+#include <filesystem>
+#include <fstream>
+
 namespace Desert::Graphic::API::Vulkan
 {
+    namespace
+    {
+        std::filesystem::path PipelineCacheDiskPath()
+        {
+            return Common::Constants::Path::COOKED_PATH / "PipelineCache.bin";
+        }
+    } // namespace
+
     VulkanPhysicalDevice::VulkanPhysicalDevice()
     {
         CreateDevice();
@@ -220,6 +233,12 @@ namespace Desert::Graphic::API::Vulkan
         if ( m_LogicalDevice != VK_NULL_HANDLE )
         {
             vkDeviceWaitIdle( m_LogicalDevice );
+            if ( m_PipelineCache != VK_NULL_HANDLE )
+            {
+                SavePipelineCache(); // persist the driver's accumulated pipeline binaries for next run
+                vkDestroyPipelineCache( m_LogicalDevice, m_PipelineCache, nullptr );
+                m_PipelineCache = VK_NULL_HANDLE;
+            }
             vkDestroyDevice( m_LogicalDevice, nullptr );
             m_LogicalDevice = VK_NULL_HANDLE;
         }
@@ -273,7 +292,60 @@ namespace Desert::Graphic::API::Vulkan
         vkGetDeviceQueue( m_LogicalDevice, *m_PhysicalDevice->m_QueueFamilyIndices.TransferFamily, 0,
                           &m_TransferQueue );
 
+        CreatePipelineCache();
+
         return Common::MakeSuccess( true );
+    }
+
+    void VulkanLogicalDevice::CreatePipelineCache()
+    {
+        // Seed the cache from the previous run's blob if present. The driver checks the header
+        // (vendorID/deviceID/pipelineCacheUUID) and ignores it if it doesn't match this GPU/driver, so a
+        // stale or cross-machine file is harmless — it just starts the cache empty again.
+        std::vector<char> initial;
+        {
+            std::error_code ec;
+            const auto      path = PipelineCacheDiskPath();
+            const auto      size = std::filesystem::file_size( path, ec );
+            if ( !ec && size > 0 )
+            {
+                std::ifstream in( path, std::ios::binary );
+                if ( in )
+                {
+                    initial.resize( static_cast<size_t>( size ) );
+                    in.read( initial.data(), static_cast<std::streamsize>( size ) );
+                    if ( !in )
+                        initial.clear();
+                }
+            }
+        }
+
+        VkPipelineCacheCreateInfo info{ .sType           = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+                                        .initialDataSize = initial.size(),
+                                        .pInitialData    = initial.empty() ? nullptr : initial.data() };
+        if ( vkCreatePipelineCache( m_LogicalDevice, &info, nullptr, &m_PipelineCache ) != VK_SUCCESS )
+            m_PipelineCache = VK_NULL_HANDLE; // non-fatal: pipeline creation just falls back to no cache
+    }
+
+    void VulkanLogicalDevice::SavePipelineCache() const
+    {
+        if ( m_PipelineCache == VK_NULL_HANDLE )
+            return;
+
+        size_t size = 0;
+        if ( vkGetPipelineCacheData( m_LogicalDevice, m_PipelineCache, &size, nullptr ) != VK_SUCCESS ||
+             size == 0 )
+            return;
+        std::vector<char> data( size );
+        if ( vkGetPipelineCacheData( m_LogicalDevice, m_PipelineCache, &size, data.data() ) != VK_SUCCESS )
+            return;
+
+        const auto      path = PipelineCacheDiskPath();
+        std::error_code ec;
+        std::filesystem::create_directories( path.parent_path(), ec );
+        std::ofstream out( path, std::ios::binary | std::ios::trunc );
+        if ( out ) // read-only install (e.g. inside an .app bundle) — cache is best-effort
+            out.write( data.data(), static_cast<std::streamsize>( size ) );
     }
 
     VulkanPhysicalDevice::QueueFamilyIndices VulkanPhysicalDevice::GetQueueFamilyIndices( int flags )

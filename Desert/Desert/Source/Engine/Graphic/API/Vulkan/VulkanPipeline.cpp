@@ -387,8 +387,12 @@ namespace Desert::Graphic::API::Vulkan
              .basePipelineHandle  = VK_NULL_HANDLE,
              .basePipelineIndex   = -1 };
 
+        // Use the device-wide, disk-persisted pipeline cache so the driver reuses previously-built
+        // pipeline binaries across runs instead of compiling this graphics pipeline from scratch.
+        const VkPipelineCache pipelineCache =
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetPipelineCache();
         VK_CHECK_RESULT(
-             vkCreateGraphicsPipelines( device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline ) );
+             vkCreateGraphicsPipelines( device, pipelineCache, 1, &pipelineInfo, nullptr, &m_Pipeline ) );
 
         // Debug name so RenderDoc/validation identify the pipeline by its spec name.
         if ( !m_Specification.DebugName.empty() )
