@@ -19,7 +19,10 @@ namespace Desert::Editor::Utils
         const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth |
                                          ImGuiTreeNodeFlags_AllowItemOverlap |
                                          ( defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0 );
-        const bool               open  = ImGui::CollapsingHeader( label, flags );
+
+        // NOTE: keep the blank line above — it stops clang-format's consecutive-declaration alignment from
+        // padding `open` across the multi-line `flags` init (v18 and v22 disagree on that, tripping the gate).
+        const bool open = ImGui::CollapsingHeader( label, flags );
 
         ImGui::PopStyleVar( 2 );
         ImGui::PopStyleColor( 3 );
