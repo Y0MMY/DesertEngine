@@ -1068,6 +1068,113 @@ namespace Desert::Editor
                     if ( eB )
                         oMax.y += d.y;
                 }
+
+                // Snapping: align the element's edges/centre to the parent's edges/centre (hold Alt to
+                // disable). Computed in screen space, the winning snap is converted back to design offsets,
+                // and a cyan guide line is drawn. The dragged edge(s) / whole box shift onto the guide.
+                if ( !ImGui::GetIO().KeyAlt )
+                {
+                    const entt::entity parent = reg.has<ECS::RelationshipComponent>( e )
+                                                     ? reg.get<ECS::RelationshipComponent>( e ).Parent
+                                                     : entt::null;
+                    ::Desert::UI::Rect pr;
+                    if ( parent != entt::null && ::Desert::UI::GetElementRect( reg, parent, viewRect, pr ) )
+                    {
+                        const auto& L0     = reg.get<ECS::UILayoutComponent>( e ).Data;
+                        const float eLeft  = pr.X + L0.AnchorMin.x * pr.W + oMin.x * scale;
+                        const float eRight = pr.X + L0.AnchorMax.x * pr.W + oMax.x * scale;
+                        const float eTop   = pr.Y + L0.AnchorMin.y * pr.H + oMin.y * scale;
+                        const float eBot   = pr.Y + L0.AnchorMax.y * pr.H + oMax.y * scale;
+                        const float gx[3]  = { pr.X, pr.X + pr.W * 0.5f, pr.X + pr.W };
+                        const float gy[3]  = { pr.Y, pr.Y + pr.H * 0.5f, pr.Y + pr.H };
+                        const float thr    = 6.0f;
+                        const bool  move   = m_UIDrag == UIHandle::Body;
+
+                        struct Cand
+                        {
+                            float Pos;
+                            bool  Min;
+                            bool  Max;
+                        };
+
+                        Cand xs[3];
+                        int  nx = 0;
+                        if ( move )
+                        {
+                            xs[nx++] = { eLeft, true, true };
+                            xs[nx++] = { ( eLeft + eRight ) * 0.5f, true, true };
+                            xs[nx++] = { eRight, true, true };
+                        }
+                        else
+                        {
+                            if ( eL )
+                                xs[nx++] = { eLeft, true, false };
+                            if ( eR )
+                                xs[nx++] = { eRight, false, true };
+                        }
+                        float bestX = thr, gXpos = 0.0f, addX = 0.0f;
+                        bool  hitX = false, minX = false, maxX = false;
+                        for ( int i = 0; i < nx; ++i )
+                            for ( float g : gx )
+                                if ( std::abs( xs[i].Pos - g ) < bestX )
+                                {
+                                    bestX = std::abs( xs[i].Pos - g );
+                                    addX  = ( g - xs[i].Pos ) / scale;
+                                    minX  = xs[i].Min;
+                                    maxX  = xs[i].Max;
+                                    gXpos = g;
+                                    hitX  = true;
+                                }
+                        if ( hitX )
+                        {
+                            if ( minX )
+                                oMin.x += addX;
+                            if ( maxX )
+                                oMax.x += addX;
+                            dl->AddLine( ImVec2( gXpos, r.Y - 40.0f ), ImVec2( gXpos, r.Y + r.H + 40.0f ),
+                                         IM_COL32( 90, 200, 255, 200 ), 1.0f );
+                        }
+
+                        Cand ys[3];
+                        int  ny = 0;
+                        if ( move )
+                        {
+                            ys[ny++] = { eTop, true, true };
+                            ys[ny++] = { ( eTop + eBot ) * 0.5f, true, true };
+                            ys[ny++] = { eBot, true, true };
+                        }
+                        else
+                        {
+                            if ( eT )
+                                ys[ny++] = { eTop, true, false };
+                            if ( eB )
+                                ys[ny++] = { eBot, false, true };
+                        }
+                        float bestY = thr, gYpos = 0.0f, addY = 0.0f;
+                        bool  hitY = false, minY = false, maxY = false;
+                        for ( int i = 0; i < ny; ++i )
+                            for ( float g : gy )
+                                if ( std::abs( ys[i].Pos - g ) < bestY )
+                                {
+                                    bestY = std::abs( ys[i].Pos - g );
+                                    addY  = ( g - ys[i].Pos ) / scale;
+                                    minY  = ys[i].Min;
+                                    maxY  = ys[i].Max;
+                                    gYpos = g;
+                                    hitY  = true;
+                                }
+                        if ( hitY )
+                        {
+                            if ( minY )
+                                oMin.y += addY;
+                            if ( maxY )
+                                oMax.y += addY;
+                            dl->AddLine( ImVec2( r.X - 40.0f, gYpos ), ImVec2( r.X + r.W + 40.0f, gYpos ),
+                                         IM_COL32( 90, 200, 255, 200 ), 1.0f );
+                        }
+                    }
+                }
+
                 auto& L     = reg.get<ECS::UILayoutComponent>( e ).Data;
                 L.OffsetMin = oMin;
                 L.OffsetMax = oMax;
