@@ -101,9 +101,21 @@ namespace Desert::UI
             }
 
             if ( reg.has<ECS::RelationshipComponent>( e ) )
+            {
+                // Clip Contents (opt-in per element, like Unity's RectMask2D): children are clipped to this
+                // element's rect. Overflow is allowed by default — a panel CAN extend past its parent/canvas
+                // unless you enable this. Intersects the current clip so nested masks compose.
+                const bool clip = reg.has<ECS::UILayoutComponent>( e ) &&
+                                  reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents;
+                if ( clip )
+                    dl->PushClipRect( ImVec2( rect.X, rect.Y ), ImVec2( rect.X + rect.W, rect.Y + rect.H ),
+                                      true );
                 for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                     if ( reg.valid( c ) )
                         DrawElement( reg, c, rect, scale, dl, interactive, outClicked );
+                if ( clip )
+                    dl->PopClipRect();
+            }
         }
 
         // Resolves the canvas root rect (letterboxed into viewportPx) exactly like RenderCanvas. false if the
