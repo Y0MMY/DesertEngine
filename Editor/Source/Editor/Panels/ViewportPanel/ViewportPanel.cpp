@@ -149,6 +149,29 @@ namespace Desert::Editor
             L.OffsetMin = glm::vec2( oMinX, oMinY );
             L.OffsetMax = glm::vec2( oMaxX, oMaxY );
         }
+
+        ImGuiMouseCursor CursorForHandle( UIHandle h )
+        {
+            switch ( h )
+            {
+                case UIHandle::L:
+                case UIHandle::R:
+                    return ImGuiMouseCursor_ResizeEW;
+                case UIHandle::T:
+                case UIHandle::B:
+                    return ImGuiMouseCursor_ResizeNS;
+                case UIHandle::TL:
+                case UIHandle::BR:
+                    return ImGuiMouseCursor_ResizeNWSE;
+                case UIHandle::TR:
+                case UIHandle::BL:
+                    return ImGuiMouseCursor_ResizeNESW;
+                case UIHandle::Body:
+                    return ImGuiMouseCursor_ResizeAll;
+                default:
+                    return ImGuiMouseCursor_Arrow;
+            }
+        }
     } // namespace
 
     ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
@@ -737,25 +760,9 @@ namespace Desert::Editor
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
 
-        // In-scene UI (WYSIWYG): draw the scene's UICanvas directly over the viewport image, like Unity/UE,
-        // using the exact runtime draw path. Non-interactive here — clicks SELECT the element (OnMousePressed)
-        // so you author it in place. A marquee marks the selected element.
-        {
-            const ::Desert::UI::Rect viewRect{ m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y,
-                                               m_ViewportData.Size.x, m_ViewportData.Size.y };
-            auto&                    reg = m_Scene->GetRegistry();
-            ::Desert::UI::RenderCanvas( reg, ImGui::GetWindowDrawList(), viewRect, /*interactive=*/false,
-                                        /*outClicked=*/nullptr );
-
-            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
-                if ( auto ref = m_Scene->FindEntityByID( *sel ) )
-                {
-                    ::Desert::UI::Rect r;
-                    if ( ::Desert::UI::GetElementRect( reg, ref->get().GetHandle(), viewRect, r ) )
-                        ImGui::GetWindowDrawList()->AddRect( ImVec2( r.X, r.Y ), ImVec2( r.X + r.W, r.Y + r.H ),
-                                                             IM_COL32( 255, 170, 40, 255 ), 0.0f, 0, 2.0f );
-                }
-        }
+        // In-scene UI (WYSIWYG): draw the scene's UICanvas over the viewport image (runtime draw path) plus
+        // the selection marquee + drag/resize handles, and apply mouse drag — Unity/UE-style in-scene editing.
+        DrawUIInScene();
 
         // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
         if ( ImGui::BeginDragDropTarget() )
@@ -829,6 +836,13 @@ namespace Desert::Editor
 
         const bool foliageMode = Core::ViewportMode::Get() == Core::EditorMode::Foliage;
 
+        // UI elements are edited with the in-scene UILayout handles (DrawUIInScene), not the 3D transform
+        // gizmo — suppress the object gizmo for them so the two don't overlap and fight for the mouse.
+        bool selectedIsUI = false;
+        if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+            if ( auto ref = m_Scene->FindEntityByID( *sel ) )
+                selectedIsUI = m_Scene->GetRegistry().has<ECS::UILayoutComponent>( ref->get().GetHandle() );
+
         // Handle gizmos (Select mode only — Foliage mode uses LMB to paint, not to gizmo/pick).
         m_Gizmo.ResetHovered();
         if ( !foliageMode )
@@ -838,7 +852,7 @@ namespace Desert::Editor
                 // skeleton edit owns the gizmo (edits the selected bone, not the object)
                 m_Gizmo.RenderBone( *m_Scene, m_ViewportData.ViewportPos, m_ViewportData.Size );
             }
-            else if ( m_Gizmo.IsActive() && !painting )
+            else if ( m_Gizmo.IsActive() && !painting && !selectedIsUI )
             {
                 m_Gizmo.RenderObject( *m_Scene, m_ViewportData.ViewportPos, m_ViewportData.Size );
             }
@@ -917,6 +931,145 @@ namespace Desert::Editor
     std::pair<float, float> ViewportPanel::GetMouseViewportSpace() const
     {
         return { m_ViewportData.MousePosition.x, m_ViewportData.MousePosition.y };
+    }
+
+    void ViewportPanel::DrawUIInScene()
+    {
+        if ( !m_Scene )
+            return;
+
+        auto&                    reg = m_Scene->GetRegistry();
+        const ::Desert::UI::Rect viewRect{ m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y,
+                                           m_ViewportData.Size.x, m_ViewportData.Size.y };
+        ImDrawList*              dl = ImGui::GetWindowDrawList();
+
+        // The canvas overlay itself (all viewports / both modes) — same path as the runtime.
+        ::Desert::UI::RenderCanvas( reg, dl, viewRect, /*interactive=*/false, /*outClicked=*/nullptr );
+
+        // Editing handles only for a selected UI element.
+        const auto& sel = Core::SelectionManager::GetSelected();
+        if ( !sel.has_value() )
+            return;
+        auto ref = m_Scene->FindEntityByID( *sel );
+        if ( !ref )
+            return;
+        const entt::entity e = ref->get().GetHandle();
+        if ( !reg.has<ECS::UILayoutComponent>( e ) )
+            return;
+
+        ::Desert::UI::Rect r;
+        if ( !::Desert::UI::GetElementRect( reg, e, viewRect, r ) )
+            return;
+
+        // Selection marquee.
+        dl->AddRect( ImVec2( r.X, r.Y ), ImVec2( r.X + r.W, r.Y + r.H ), IM_COL32( 255, 170, 40, 255 ), 0.0f, 0,
+                     2.0f );
+
+        // Edit only in Select mode, over the viewport, and not while grabbing a 3D gizmo.
+        const bool canEdit = Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered &&
+                             !m_Gizmo.IsHovered();
+
+        // 8 resize handles (corners + edge midpoints), screen px.
+        const float cx = r.X + r.W * 0.5f, cy = r.Y + r.H * 0.5f;
+        struct HandlePt
+        {
+            UIHandle Id;
+            ImVec2   P;
+        };
+        const HandlePt handles[8] = {
+             { UIHandle::TL, ImVec2( r.X, r.Y ) },
+             { UIHandle::T, ImVec2( cx, r.Y ) },
+             { UIHandle::TR, ImVec2( r.X + r.W, r.Y ) },
+             { UIHandle::R, ImVec2( r.X + r.W, cy ) },
+             { UIHandle::BR, ImVec2( r.X + r.W, r.Y + r.H ) },
+             { UIHandle::B, ImVec2( cx, r.Y + r.H ) },
+             { UIHandle::BL, ImVec2( r.X, r.Y + r.H ) },
+             { UIHandle::L, ImVec2( r.X, cy ) },
+        };
+        const float hs = 4.0f; // half handle size
+
+        if ( canEdit )
+            for ( const auto& h : handles )
+            {
+                dl->AddRectFilled( ImVec2( h.P.x - hs, h.P.y - hs ), ImVec2( h.P.x + hs, h.P.y + hs ),
+                                   IM_COL32( 255, 170, 40, 255 ) );
+                dl->AddRect( ImVec2( h.P.x - hs, h.P.y - hs ), ImVec2( h.P.x + hs, h.P.y + hs ),
+                             IM_COL32( 20, 20, 20, 255 ) );
+            }
+
+        const ImVec2 mouse = ImGui::GetMousePos();
+        const float  scale = std::max( 0.0001f, ::Desert::UI::CanvasScale( reg, viewRect ) );
+
+        // Handle under the cursor this frame (drives the cursor + starts a drag).
+        UIHandle hovered = UIHandle::None;
+        for ( const auto& h : handles )
+            if ( mouse.x >= h.P.x - hs - 1.0f && mouse.x <= h.P.x + hs + 1.0f && mouse.y >= h.P.y - hs - 1.0f &&
+                 mouse.y <= h.P.y + hs + 1.0f )
+            {
+                hovered = h.Id;
+                break;
+            }
+        if ( hovered == UIHandle::None && mouse.x >= r.X && mouse.x <= r.X + r.W && mouse.y >= r.Y &&
+             mouse.y <= r.Y + r.H )
+            hovered = UIHandle::Body;
+
+        if ( canEdit && m_UIDrag == UIHandle::None && hovered != UIHandle::None &&
+             ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+        {
+            m_UIDrag            = hovered;
+            m_UIDragStartMouse  = glm::vec2( mouse.x, mouse.y );
+            const auto& L       = reg.get<ECS::UILayoutComponent>( e ).Data;
+            m_UIDragStartOffMin = L.OffsetMin;
+            m_UIDragStartOffMax = L.OffsetMax;
+        }
+
+        if ( m_UIDrag != UIHandle::None )
+        {
+            if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+            {
+                glm::vec2 d = ( glm::vec2( mouse.x, mouse.y ) - m_UIDragStartMouse ) / scale; // design px
+                if ( ImGui::GetIO().KeyShift && m_UIDrag == UIHandle::Body ) // Shift = lock the dominant axis
+                {
+                    if ( std::abs( d.x ) >= std::abs( d.y ) )
+                        d.y = 0.0f;
+                    else
+                        d.x = 0.0f;
+                }
+
+                const bool eL = m_UIDrag == UIHandle::L || m_UIDrag == UIHandle::TL || m_UIDrag == UIHandle::BL;
+                const bool eR = m_UIDrag == UIHandle::R || m_UIDrag == UIHandle::TR || m_UIDrag == UIHandle::BR;
+                const bool eT = m_UIDrag == UIHandle::T || m_UIDrag == UIHandle::TL || m_UIDrag == UIHandle::TR;
+                const bool eB = m_UIDrag == UIHandle::B || m_UIDrag == UIHandle::BL || m_UIDrag == UIHandle::BR;
+
+                glm::vec2 oMin = m_UIDragStartOffMin, oMax = m_UIDragStartOffMax;
+                if ( m_UIDrag == UIHandle::Body )
+                {
+                    oMin += d; // move: shift both edges so the element slides, whatever its anchors
+                    oMax += d;
+                }
+                else
+                {
+                    if ( eL )
+                        oMin.x += d.x;
+                    if ( eR )
+                        oMax.x += d.x;
+                    if ( eT )
+                        oMin.y += d.y;
+                    if ( eB )
+                        oMax.y += d.y;
+                }
+                auto& L     = reg.get<ECS::UILayoutComponent>( e ).Data;
+                L.OffsetMin = oMin;
+                L.OffsetMax = oMax;
+            }
+            ImGui::SetMouseCursor( CursorForHandle( m_UIDrag ) );
+            if ( ImGui::IsMouseReleased( ImGuiMouseButton_Left ) )
+                m_UIDrag = UIHandle::None;
+        }
+        else if ( canEdit && hovered != UIHandle::None )
+        {
+            ImGui::SetMouseCursor( CursorForHandle( hovered ) );
+        }
     }
 
     void ViewportPanel::DrawViewAxisGizmo( const glm::vec2& viewportPos, const glm::vec2& viewportSize )

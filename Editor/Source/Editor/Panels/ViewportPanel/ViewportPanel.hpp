@@ -20,6 +20,22 @@ namespace Desert::Editor
 {
     class AsyncMeshLoader; // async cook of dropped meshes (defined in Import/AsyncMeshLoader.hpp)
 
+    // Which handle of a selected UI element is being dragged in the viewport (in-scene UI editing).
+    // Body = move; the rest are the 8 resize handles (corners + edge midpoints).
+    enum class UIHandle
+    {
+        None,
+        Body,
+        L,
+        R,
+        T,
+        B,
+        TL,
+        TR,
+        BL,
+        BR
+    };
+
     class ViewportPanel : public IPanel, public Common::EventHandler
     {
     public:
@@ -74,6 +90,10 @@ namespace Desert::Editor
         // which way world X/Y/Z point in the current view. Overlay only — pure ImGui, no scene interaction.
         void DrawViewAxisGizmo( const glm::vec2& viewportPos, const glm::vec2& viewportSize );
 
+        // Draws the active scene's UICanvas over the viewport + (for a selected UI element) a selection marquee
+        // and 8 drag/resize handles, and applies mouse drag to its UILayout offsets. In-scene UI editing.
+        void DrawUIInScene();
+
     private:
         std::pair<float, float> GetMouseViewportSpace() const;
 
@@ -96,6 +116,12 @@ namespace Desert::Editor
         // reads like a UI designer. m_SavedShowGrid restores the scene's grid setting when toggled off.
         bool m_UIMode        = false;
         bool m_SavedShowGrid = true;
+
+        // In-scene UI drag/resize state. Offsets are captured at drag start so the drag is absolute (no drift).
+        UIHandle  m_UIDrag = UIHandle::None;
+        glm::vec2 m_UIDragStartMouse{};
+        glm::vec2 m_UIDragStartOffMin{};
+        glm::vec2 m_UIDragStartOffMax{};
 
         // Resize is deferred from OnUIRender (within the recording window) to OnPreUpdate
         // (start of next frame, before any rendering) to avoid destroying descriptor set pools
