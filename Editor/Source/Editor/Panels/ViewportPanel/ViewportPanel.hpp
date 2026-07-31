@@ -92,6 +92,11 @@ namespace Desert::Editor
         // OnMousePressed to suppress scene picking (a click there snaps the camera, it doesn't select).
         bool m_ViewAxisGizmoHovered = false;
 
+        // 2D UI-editing mode (toolbar "2D"): hides the grid + orientation gizmo so a screen-space canvas
+        // reads like a UI designer. m_SavedShowGrid restores the scene's grid setting when toggled off.
+        bool m_UIMode        = false;
+        bool m_SavedShowGrid = true;
+
         // Resize is deferred from OnUIRender (within the recording window) to OnPreUpdate
         // (start of next frame, before any rendering) to avoid destroying descriptor set pools
         // while they are bound to a recording command buffer.

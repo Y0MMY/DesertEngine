@@ -77,6 +77,68 @@ namespace Desert::Editor
             reg.get<ECS::RelationshipComponent>( parent ).Children.push_back( handle );
             return handle;
         }
+
+        // Unity/UE-style anchor presets. Each axis is Min/Center/Max (a fixed-size box pinned to that edge,
+        // keeping the element's current size) or Stretch (anchors 0..1, zero offsets -> fills the parent on
+        // that axis). Stretch+Stretch = "fill parent" (the full-quad the UI needs). Offsets are in the same
+        // screen-px space UICanvasRenderer resolves layout in.
+        enum class AnchorAxis
+        {
+            Min,
+            Center,
+            Max,
+            Stretch
+        };
+
+        void AnchorAxisValues( AnchorAxis m, float size, float& aMin, float& aMax, float& offMin, float& offMax )
+        {
+            switch ( m )
+            {
+                case AnchorAxis::Stretch:
+                    aMin   = 0.0f;
+                    aMax   = 1.0f;
+                    offMin = 0.0f;
+                    offMax = 0.0f;
+                    break;
+                case AnchorAxis::Min:
+                    aMin   = 0.0f;
+                    aMax   = 0.0f;
+                    offMin = 0.0f;
+                    offMax = size;
+                    break;
+                case AnchorAxis::Center:
+                    aMin   = 0.5f;
+                    aMax   = 0.5f;
+                    offMin = -size * 0.5f;
+                    offMax = size * 0.5f;
+                    break;
+                case AnchorAxis::Max:
+                    aMin   = 1.0f;
+                    aMax   = 1.0f;
+                    offMin = -size;
+                    offMax = 0.0f;
+                    break;
+            }
+        }
+
+        void ApplyAnchorPreset( entt::registry& reg, entt::entity e, const ::Desert::UI::Rect& viewRect,
+                                AnchorAxis hx, AnchorAxis vy )
+        {
+            if ( !reg.has<ECS::UILayoutComponent>( e ) )
+                return;
+            ::Desert::UI::Rect er;
+            if ( !::Desert::UI::GetElementRect( reg, e, viewRect, er ) )
+                return;
+
+            auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
+            float axMin, axMax, oMinX, oMaxX, ayMin, ayMax, oMinY, oMaxY;
+            AnchorAxisValues( hx, er.W, axMin, axMax, oMinX, oMaxX );
+            AnchorAxisValues( vy, er.H, ayMin, ayMax, oMinY, oMaxY );
+            L.AnchorMin = glm::vec2( axMin, ayMin );
+            L.AnchorMax = glm::vec2( axMax, ayMax );
+            L.OffsetMin = glm::vec2( oMinX, oMinY );
+            L.OffsetMax = glm::vec2( oMaxX, oMaxY );
+        }
     } // namespace
 
     ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
@@ -323,6 +385,76 @@ namespace Desert::Editor
                         select( AddUIChild<ECS::UIButtonComponent>( *m_Scene, parent, "UI Button" ) );
                 }
                 ImGui::EndPopup();
+            }
+        }
+
+        // --- In-scene UI: anchor presets (Unity/UE RectTransform) + 2D toggle. Shown only when relevant so
+        // the toolbar stays clean for pure-3D scenes. ---
+        {
+            auto&              reg    = m_Scene->GetRegistry();
+            const entt::entity canvas = FindCanvas( reg );
+            entt::entity       selUI  = entt::null;
+            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+                if ( auto ref = m_Scene->FindEntityByID( *sel ) )
+                    if ( reg.has<ECS::UILayoutComponent>( ref->get().GetHandle() ) )
+                        selUI = ref->get().GetHandle();
+
+            const ::Desert::UI::Rect viewRect{ m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y,
+                                               m_ViewportData.Size.x, m_ViewportData.Size.y };
+
+            if ( selUI != entt::null && viewRect.W > 1.0f )
+            {
+                ImGui::SameLine();
+                if ( ImGui::Button( ICON_MDI_ARROW_EXPAND_ALL "  Fill" ) )
+                    ApplyAnchorPreset( reg, selUI, viewRect, AnchorAxis::Stretch, AnchorAxis::Stretch );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Stretch to fill the parent (anchors 0,0 - 1,1, offsets 0)" );
+
+                ImGui::SameLine();
+                if ( ImGui::Button( ICON_MDI_ANCHOR "  Anchors" ) )
+                    ImGui::OpenPopup( "ui_anchors" );
+                if ( ImGui::BeginPopup( "ui_anchors" ) )
+                {
+                    const AnchorAxis modes[4] = { AnchorAxis::Min, AnchorAxis::Center, AnchorAxis::Max,
+                                                  AnchorAxis::Stretch };
+                    const char*      cl[4]    = { "L", "C", "R", "<->" };
+                    const char*      rl[4]    = { "T", "M", "B", "^v" };
+                    ImGui::TextDisabled( "Anchor preset (keeps size; stretch fills the axis)" );
+                    for ( int r = 0; r < 4; ++r )
+                        for ( int c = 0; c < 4; ++c )
+                        {
+                            if ( c > 0 )
+                                ImGui::SameLine();
+                            const std::string lbl =
+                                 std::string( rl[r] ) + cl[c] + "##a" + std::to_string( r * 4 + c );
+                            if ( ImGui::Button( lbl.c_str(), ImVec2( 40.0f, 28.0f ) ) )
+                            {
+                                ApplyAnchorPreset( reg, selUI, viewRect, modes[c], modes[r] );
+                                ImGui::CloseCurrentPopup();
+                            }
+                        }
+                    ImGui::EndPopup();
+                }
+            }
+
+            if ( canvas != entt::null )
+            {
+                ImGui::SameLine();
+                if ( ImGui::Checkbox( "2D", &m_UIMode ) )
+                {
+                    auto& s = m_Scene->GetSettings();
+                    if ( m_UIMode )
+                    {
+                        m_SavedShowGrid = s.ShowGrid;
+                        s.ShowGrid      = false;
+                    }
+                    else
+                    {
+                        s.ShowGrid = m_SavedShowGrid;
+                    }
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "2D UI mode: hide the grid + orientation gizmo" );
             }
         }
 
@@ -748,8 +880,9 @@ namespace Desert::Editor
             m_LightGizmoRenderer->Render( m_ViewportData.Size.x, m_ViewportData.Size.y,
                                           m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y );
 
-        // Corner XYZ orientation triad — always shown so the world axes are readable at a glance.
-        DrawViewAxisGizmo( m_ViewportData.ViewportPos, m_ViewportData.Size );
+        // Corner XYZ orientation triad — a 3D aid, so hide it in 2D UI mode (like Unity's 2D scene view).
+        if ( !m_UIMode )
+            DrawViewAxisGizmo( m_ViewportData.ViewportPos, m_ViewportData.Size );
 
         // Perf HUD (View -> Perf HUD): FPS + frame graph + top CPU scopes, useful in Play too.
         if ( EditorPreferences::Get().ShowPerfHud )
