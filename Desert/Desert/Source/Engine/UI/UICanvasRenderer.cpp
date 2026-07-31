@@ -4,6 +4,7 @@
 
 #include <ImGui/imgui.h>
 
+#include <algorithm>
 #include <cfloat>
 
 namespace Desert::UI
@@ -17,6 +18,38 @@ namespace Desert::UI
             return ImGui::ColorConvertFloat4ToU32( ImVec4( c.r, c.g, c.b, a ) );
         }
 
+        // Maps the canvas to the viewport per its scale mode (see UICanvasScaleMode). Returns the canvas root
+        // rect (screen px) + a uniform scale applied to every element's offsets/min-size/font — so Stretch is
+        // 1:1 (anchors drive layout, no resize zoom), ScaleWithScreen scales the whole design from the
+        // reference resolution, and Letterbox fits + centres it. SHARED by draw + hit-test so they agree.
+        struct CanvasFit
+        {
+            Rect  Root;
+            float Scale;
+        };
+        CanvasFit ResolveCanvas( const ECS::UICanvasData& d, const Rect& viewportPx )
+        {
+            switch ( d.ScaleMode )
+            {
+                case ECS::UICanvasScaleMode::ScaleWithScreen:
+                {
+                    const float sx = d.ReferenceWidth > 0.0f ? viewportPx.W / d.ReferenceWidth : 1.0f;
+                    const float sy = d.ReferenceHeight > 0.0f ? viewportPx.H / d.ReferenceHeight : 1.0f;
+                    const float m  = std::clamp( d.MatchWidthHeight, 0.0f, 1.0f );
+                    return { viewportPx, sx * ( 1.0f - m ) + sy * m };
+                }
+                case ECS::UICanvasScaleMode::Letterbox:
+                {
+                    const Rect fit = CanvasRect( d.ReferenceWidth, d.ReferenceHeight, viewportPx.W, viewportPx.H );
+                    const float scale = d.ReferenceWidth > 0.0f ? fit.W / d.ReferenceWidth : 1.0f;
+                    return { Rect{ viewportPx.X + fit.X, viewportPx.Y + fit.Y, fit.W, fit.H }, scale };
+                }
+                case ECS::UICanvasScaleMode::Stretch:
+                default:
+                    return { viewportPx, 1.0f }; // canvas == viewport, 1:1 px
+            }
+        }
+
         // Recursively resolve + draw one element and its children. `parent` is the parent rect in SCREEN
         // pixels; `scale` maps design px -> screen px (font sizing). A hovered+released button writes its
         // OnClickMessage to *outClicked. This is the SINGLE draw path shared by the editor preview and the
@@ -28,8 +61,8 @@ namespace Desert::UI
             if ( reg.has<ECS::UILayoutComponent>( e ) )
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
-                rect = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin, L.OffsetMax, L.CustomMinimumSize,
-                                    parent );
+                rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
+                                             L.CustomMinimumSize * scale, parent );
 
                 const ImVec2 mn( rect.X, rect.Y );
                 const ImVec2 mx( rect.X + rect.W, rect.Y + rect.H );
@@ -75,7 +108,8 @@ namespace Desert::UI
 
         // Resolves the canvas root rect (letterboxed into viewportPx) exactly like RenderCanvas. false if the
         // scene has no visible canvas. Shared by PickElement / GetElementRect so hit-testing matches drawing.
-        bool CanvasRootRect( entt::registry& reg, const Rect& viewportPx, entt::entity& canvasOut, Rect& rectOut )
+        bool CanvasRootRect( entt::registry& reg, const Rect& viewportPx, entt::entity& canvasOut, Rect& rectOut,
+                             float& scaleOut )
         {
             auto canvasView = reg.view<ECS::UICanvasComponent>();
             if ( canvasView.begin() == canvasView.end() )
@@ -86,22 +120,22 @@ namespace Desert::UI
             if ( !canvasData.Visible )
                 return false;
 
-            const Rect fit =
-                 CanvasRect( canvasData.ReferenceWidth, canvasData.ReferenceHeight, viewportPx.W, viewportPx.H );
-            rectOut   = Rect{ viewportPx.X + fit.X, viewportPx.Y + fit.Y, fit.W, fit.H };
-            canvasOut = canvasEntity;
+            const CanvasFit fit = ResolveCanvas( canvasData, viewportPx );
+            rectOut             = fit.Root;
+            scaleOut            = fit.Scale;
+            canvasOut           = canvasEntity;
             return true;
         }
 
-        void PickRecurse( entt::registry& reg, entt::entity e, const Rect& parent, const glm::vec2& p,
+        void PickRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale, const glm::vec2& p,
                           entt::entity& hit )
         {
             Rect rect = parent;
             if ( reg.has<ECS::UILayoutComponent>( e ) )
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
-                rect = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin, L.OffsetMax, L.CustomMinimumSize,
-                                    parent );
+                rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
+                                             L.CustomMinimumSize * scale, parent );
                 const bool drawable = reg.has<ECS::UIPanelComponent>( e ) ||
                                       reg.has<ECS::UITextComponent2D>( e ) || reg.has<ECS::UIButtonComponent>( e );
                 if ( drawable && p.x >= rect.X && p.x <= rect.X + rect.W && p.y >= rect.Y &&
@@ -111,18 +145,18 @@ namespace Desert::UI
             if ( reg.has<ECS::RelationshipComponent>( e ) )
                 for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                     if ( reg.valid( c ) )
-                        PickRecurse( reg, c, rect, p, hit );
+                        PickRecurse( reg, c, rect, scale, p, hit );
         }
 
-        void RectRecurse( entt::registry& reg, entt::entity e, const Rect& parent, entt::entity target, Rect& out,
-                          bool& found )
+        void RectRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
+                          entt::entity target, Rect& out, bool& found )
         {
             Rect rect = parent;
             if ( reg.has<ECS::UILayoutComponent>( e ) )
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
-                rect = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin, L.OffsetMax, L.CustomMinimumSize,
-                                    parent );
+                rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
+                                             L.CustomMinimumSize * scale, parent );
             }
             if ( e == target )
             {
@@ -133,7 +167,7 @@ namespace Desert::UI
             if ( reg.has<ECS::RelationshipComponent>( e ) )
                 for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                     if ( reg.valid( c ) && !found )
-                        RectRecurse( reg, c, rect, target, out, found );
+                        RectRecurse( reg, c, rect, scale, target, out, found );
         }
     } // namespace
 
@@ -149,11 +183,11 @@ namespace Desert::UI
         if ( !canvasData.Visible )
             return false;
 
-        // Letterbox the design resolution into the target viewport, matching the editor preview exactly.
-        const Rect fit =
-             CanvasRect( canvasData.ReferenceWidth, canvasData.ReferenceHeight, viewportPx.W, viewportPx.H );
-        const Rect  canvasRect{ viewportPx.X + fit.X, viewportPx.Y + fit.Y, fit.W, fit.H };
-        const float scale = ( canvasData.ReferenceWidth > 0.0f ) ? fit.W / canvasData.ReferenceWidth : 1.0f;
+        // Map the canvas to the viewport per its scale mode (Stretch fills 1:1, ScaleWithScreen scales the
+        // design, Letterbox fits + centres). Offsets/fonts are multiplied by scale inside DrawElement.
+        const CanvasFit fit        = ResolveCanvas( canvasData, viewportPx );
+        const Rect      canvasRect = fit.Root;
+        const float     scale      = fit.Scale;
 
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
@@ -167,14 +201,15 @@ namespace Desert::UI
     {
         entt::entity canvas;
         Rect         canvasRect;
-        if ( !CanvasRootRect( reg, viewportPx, canvas, canvasRect ) )
+        float        scale = 1.0f;
+        if ( !CanvasRootRect( reg, viewportPx, canvas, canvasRect, scale ) )
             return entt::null;
 
         entt::entity hit = entt::null;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) )
-                    PickRecurse( reg, c, canvasRect, pointPx, hit );
+                    PickRecurse( reg, c, canvasRect, scale, pointPx, hit );
         return hit;
     }
 
@@ -182,7 +217,8 @@ namespace Desert::UI
     {
         entt::entity canvas;
         Rect         canvasRect;
-        if ( !CanvasRootRect( reg, viewportPx, canvas, canvasRect ) )
+        float        scale = 1.0f;
+        if ( !CanvasRootRect( reg, viewportPx, canvas, canvasRect, scale ) )
             return false;
 
         if ( target == canvas )
@@ -194,7 +230,16 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) && !found )
-                    RectRecurse( reg, c, canvasRect, target, out, found );
+                    RectRecurse( reg, c, canvasRect, scale, target, out, found );
         return found;
+    }
+
+    float CanvasScale( entt::registry& reg, const Rect& viewportPx )
+    {
+        entt::entity canvas;
+        Rect         canvasRect;
+        float        scale = 1.0f;
+        CanvasRootRect( reg, viewportPx, canvas, canvasRect, scale );
+        return scale;
     }
 } // namespace Desert::UI

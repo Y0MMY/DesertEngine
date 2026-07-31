@@ -565,17 +565,39 @@ namespace Desert::ECS
         Right
     };
 
-    // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas, whose
-    // design resolution is scaled to fit the viewport. Add UI elements as children of the canvas entity.
+    // How the canvas maps to the viewport (Unity CanvasScaler-style):
+    //  Stretch        - canvas == the WHOLE viewport, 1:1 pixels. Layout is driven by anchors, so a full-screen
+    //                   element (anchors 0,0-1,1) fills any resolution and nothing "zooms" when the window
+    //                   resizes. The resolution-independent default.
+    //  ScaleWithScreen- canvas == the whole viewport too, but the ENTIRE design is scaled from the reference
+    //                   resolution (offsets + font sizes multiplied), so a layout authored at 1280x720 keeps
+    //                   its proportions on any screen. MatchWidthHeight blends width- vs height-based scaling.
+    //  Letterbox      - the reference resolution scaled to FIT inside the viewport and centred (black bars).
+    //                   For fixed-aspect, pixel-perfect designs.
+    enum class UICanvasScaleMode
+    {
+        Stretch,
+        ScaleWithScreen,
+        Letterbox
+    };
+
+    // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas. Add UI
+    // elements as CHILDREN of the canvas entity (the viewport "UI" menu / UI Editor do this for you).
     struct UICanvasData
     {
         REFLECT()
+
+        PROPERTY( DisplayName( "Scale Mode" ), Category( "UI Canvas" ) )
+        UICanvasScaleMode ScaleMode = UICanvasScaleMode::Stretch;
 
         PROPERTY( DisplayName( "Reference Width" ), Category( "UI Canvas" ), Range( 64.0f, 7680.0f ) )
         float ReferenceWidth = 1280.0f;
 
         PROPERTY( DisplayName( "Reference Height" ), Category( "UI Canvas" ), Range( 64.0f, 4320.0f ) )
         float ReferenceHeight = 720.0f;
+
+        PROPERTY( DisplayName( "Match Width/Height" ), Category( "UI Canvas" ), Range( 0.0f, 1.0f ) )
+        float MatchWidthHeight = 0.5f; // ScaleWithScreen only: 0 = match width, 1 = match height
 
         PROPERTY( DisplayName( "Visible" ), Category( "UI Canvas" ) )
         bool Visible = true;

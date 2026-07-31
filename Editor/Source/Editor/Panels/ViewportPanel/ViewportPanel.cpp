@@ -126,14 +126,24 @@ namespace Desert::Editor
         {
             if ( !reg.has<ECS::UILayoutComponent>( e ) )
                 return;
-            ::Desert::UI::Rect er;
-            if ( !::Desert::UI::GetElementRect( reg, e, viewRect, er ) )
-                return;
-
             auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
+
+            // Element size in DESIGN space (the space UILayout offsets are stored in). GetElementRect returns
+            // the on-screen rect, so divide by the canvas scale. Fall back to the element's authored size when
+            // it isn't resolvable (e.g. not parented under a canvas yet) so Fill/presets never silently no-op.
+            const float scale = ::Desert::UI::CanvasScale( reg, viewRect );
+            const float inv   = scale > 0.0001f ? 1.0f / scale : 1.0f;
+            float       sizeX = std::max( 1.0f, L.OffsetMax.x - L.OffsetMin.x );
+            float       sizeY = std::max( 1.0f, L.OffsetMax.y - L.OffsetMin.y );
+            if ( ::Desert::UI::Rect er; ::Desert::UI::GetElementRect( reg, e, viewRect, er ) )
+            {
+                sizeX = er.W * inv;
+                sizeY = er.H * inv;
+            }
+
             float axMin, axMax, oMinX, oMaxX, ayMin, ayMax, oMinY, oMaxY;
-            AnchorAxisValues( hx, er.W, axMin, axMax, oMinX, oMaxX );
-            AnchorAxisValues( vy, er.H, ayMin, ayMax, oMinY, oMaxY );
+            AnchorAxisValues( hx, sizeX, axMin, axMax, oMinX, oMaxX );
+            AnchorAxisValues( vy, sizeY, ayMin, ayMax, oMinY, oMaxY );
             L.AnchorMin = glm::vec2( axMin, ayMin );
             L.AnchorMax = glm::vec2( axMax, ayMax );
             L.OffsetMin = glm::vec2( oMinX, oMinY );

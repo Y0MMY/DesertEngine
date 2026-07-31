@@ -152,8 +152,10 @@ namespace
             {
                 using T = ::Desert::ECS::UICanvasData;
                 TypeBuilder( "UICanvasData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "ScaleMode", .Type = FieldType::Enum, .Offset = offsetof( T, ScaleMode ), .Size = sizeof( T::ScaleMode ), .TypeName = "UICanvasScaleMode", .Meta = PropertyMetadata{ .DisplayName = "Scale Mode", .Category = "UI Canvas", }, .EnumValues = { EnumValue{ "Stretch", 0 }, EnumValue{ "ScaleWithScreen", 1 }, EnumValue{ "Letterbox", 2 }, } } )
                     .Field( FieldInfo{ .Name = "ReferenceWidth", .Type = FieldType::Float, .Offset = offsetof( T, ReferenceWidth ), .Size = sizeof( T::ReferenceWidth ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Reference Width", .Category = "UI Canvas", .HasRange = true, .RangeMin = 64.0f, .RangeMax = 7680.0f, } } )
                     .Field( FieldInfo{ .Name = "ReferenceHeight", .Type = FieldType::Float, .Offset = offsetof( T, ReferenceHeight ), .Size = sizeof( T::ReferenceHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Reference Height", .Category = "UI Canvas", .HasRange = true, .RangeMin = 64.0f, .RangeMax = 4320.0f, } } )
+                    .Field( FieldInfo{ .Name = "MatchWidthHeight", .Type = FieldType::Float, .Offset = offsetof( T, MatchWidthHeight ), .Size = sizeof( T::MatchWidthHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Match Width/Height", .Category = "UI Canvas", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
                     .Field( FieldInfo{ .Name = "Visible", .Type = FieldType::Bool, .Offset = offsetof( T, Visible ), .Size = sizeof( T::Visible ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Visible", .Category = "UI Canvas", } } )
                     .WithDefault<T>()
                     .Register();

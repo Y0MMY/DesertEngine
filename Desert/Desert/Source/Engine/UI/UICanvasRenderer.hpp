@@ -28,4 +28,9 @@ namespace Desert::UI
     // Resolves the on-screen rect of a specific UI element (or the canvas itself) under the same layout as
     // RenderCanvas — used to draw a selection marquee around the selected element. false if not found.
     bool GetElementRect( entt::registry& reg, entt::entity target, const Rect& viewportPx, Rect& out );
+
+    // The canvas's current uniform scale (design px -> screen px) for the given viewport, per its scale mode
+    // (1 in Stretch). The editor divides on-screen sizes by this when writing UILayout offsets so a value it
+    // computes from GetElementRect round-trips instead of being scaled twice. 1 if there is no canvas.
+    float CanvasScale( entt::registry& reg, const Rect& viewportPx );
 } // namespace Desert::UI
