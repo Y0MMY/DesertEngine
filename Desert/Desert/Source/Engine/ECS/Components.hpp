@@ -581,6 +581,15 @@ namespace Desert::ECS
         Letterbox
     };
 
+    // Where the canvas lives. ScreenSpace = a flat overlay (menus/HUD). WorldSpace = billboarded at the
+    // canvas entity's 3D position, projected to the screen + distance-scaled each frame (nameplate over an
+    // NPC, a floating panel). WorldSpace needs the camera's view-proj (passed by the renderer's caller).
+    enum class UICanvasRenderMode
+    {
+        ScreenSpace,
+        WorldSpace
+    };
+
     // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas. Add UI
     // elements as CHILDREN of the canvas entity (the viewport "UI" menu / UI Editor do this for you).
     struct UICanvasData
@@ -589,6 +598,12 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Scale Mode" ), Category( "UI Canvas" ) )
         UICanvasScaleMode ScaleMode = UICanvasScaleMode::Stretch;
+
+        PROPERTY( DisplayName( "Render Mode" ), Category( "UI Canvas" ) )
+        UICanvasRenderMode RenderMode = UICanvasRenderMode::ScreenSpace;
+
+        PROPERTY( DisplayName( "World Scale" ), Category( "UI Canvas" ), Range( 1.0f, 4000.0f ) )
+        float WorldScale = 400.0f; // WorldSpace: on-screen px per reference-unit at distance 1
 
         PROPERTY( DisplayName( "Reference Width" ), Category( "UI Canvas" ), Range( 64.0f, 7680.0f ) )
         float ReferenceWidth = 1280.0f;
@@ -679,6 +694,12 @@ namespace Desert::ECS
         glm::vec3 ShadowColor = glm::vec3( 0.0f );
         PROPERTY( DisplayName( "Shadow Offset" ), Category( "Effects" ) )
         glm::vec2 ShadowOffset = glm::vec2( 3.0f, 4.0f );
+        PROPERTY( DisplayName( "Glow" ), Category( "Effects" ) )
+        bool Glow = false; // cheap ImDrawList glow: layered expanded rects behind, alpha falloff
+        PROPERTY( DisplayName( "Glow Color" ), Category( "Effects" ), Color )
+        glm::vec3 GlowColor = glm::vec3( 0.3f, 0.6f, 1.0f );
+        PROPERTY( DisplayName( "Glow Size" ), Category( "Effects" ), Range( 0.0f, 48.0f ) )
+        float GlowSize = 12.0f;
     };
     struct UIPanelComponent
     {

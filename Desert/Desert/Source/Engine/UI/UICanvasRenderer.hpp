@@ -29,8 +29,12 @@ namespace Desert::UI
     // interactive: buttons tint on hover / press. outClicked (optional): a button clicked THIS frame writes its
     // OnClickMessage here (empty otherwise) — the caller acts on it (e.g. "scene:MainLevel" -> load a scene).
     // Returns true if a canvas was found + drawn.
+    // worldViewProj (optional): the camera's projection * view. Required for a WorldSpace canvas — it is
+    // billboarded at its entity's 3D position, projected into viewportPx and distance-scaled. null / a
+    // ScreenSpace canvas ignores it.
     bool RenderCanvas( entt::registry& reg, ImDrawList* dl, const Rect& viewportPx, bool interactive,
-                       std::string* outClicked = nullptr, const SpriteResolver& sprites = {} );
+                       std::string* outClicked = nullptr, const SpriteResolver& sprites = {},
+                       const glm::mat4* worldViewProj = nullptr );
 
     // In-scene UI editing (viewport WYSIWYG). Returns the topmost UI element (Panel/Text/Button) whose
     // resolved rect contains `pointPx`, or entt::null. `viewportPx` must be the SAME rect passed to

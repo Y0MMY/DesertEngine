@@ -183,6 +183,18 @@ namespace Desert::UI
                 {
                     const auto& p = reg.get<ECS::UIPanelComponent>( e ).Data;
 
+                    if ( p.Glow && p.GlowSize > 0.0f )
+                    {
+                        const int   layers = 6;
+                        const float gs     = p.GlowSize * scale;
+                        for ( int i = 0; i < layers; ++i ) // large faint -> small; they overlap into a soft glow
+                        {
+                            const float ex = gs * ( 1.0f - static_cast<float>( i ) / layers );
+                            dl->AddRectFilled( ImVec2( mn.x - ex, mn.y - ex ), ImVec2( mx.x + ex, mx.y + ex ),
+                                               Col( p.GlowColor, 0.10f * p.Opacity ), p.CornerRadius + ex );
+                        }
+                    }
+
                     if ( p.Shadow )
                         dl->AddRectFilled(
                              ImVec2( mn.x + p.ShadowOffset.x * scale, mn.y + p.ShadowOffset.y * scale ),
@@ -320,7 +332,7 @@ namespace Desert::UI
     } // namespace
 
     bool RenderCanvas( entt::registry& reg, ImDrawList* dl, const Rect& viewportPx, bool interactive,
-                       std::string* outClicked, const SpriteResolver& sprites )
+                       std::string* outClicked, const SpriteResolver& sprites, const glm::mat4* worldViewProj )
     {
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
@@ -333,9 +345,30 @@ namespace Desert::UI
 
         // Map the canvas to the viewport per its scale mode (Stretch fills 1:1, ScaleWithScreen scales the
         // design, Letterbox fits + centres). Offsets/fonts are multiplied by scale inside DrawElement.
-        const CanvasFit fit        = ResolveCanvas( canvasData, viewportPx );
-        const Rect      canvasRect = fit.Root;
-        const float     scale      = fit.Scale;
+        Rect  canvasRect;
+        float scale;
+        if ( canvasData.RenderMode == ECS::UICanvasRenderMode::WorldSpace && worldViewProj &&
+             reg.has<ECS::TransformComponent>( canvasEntity ) )
+        {
+            // Billboard: project the canvas entity's world position to the screen, centre + distance-scale it.
+            const glm::vec3 wpos = glm::vec3( reg.get<ECS::TransformComponent>( canvasEntity ).GetTransform()[3] );
+            const glm::vec4 clip = ( *worldViewProj ) * glm::vec4( wpos, 1.0f );
+            if ( clip.w <= 0.0001f )
+                return true; // behind the camera — a canvas exists, just nothing to draw
+            const float sx = viewportPx.X + ( clip.x / clip.w * 0.5f + 0.5f ) * viewportPx.W;
+            const float sy = viewportPx.Y + ( 1.0f - ( clip.y / clip.w * 0.5f + 0.5f ) ) * viewportPx.H;
+            const float k  = canvasData.WorldScale / clip.w;
+            const float w  = canvasData.ReferenceWidth * k;
+            const float h  = canvasData.ReferenceHeight * k;
+            canvasRect     = Rect{ sx - w * 0.5f, sy - h * 0.5f, w, h };
+            scale          = k;
+        }
+        else
+        {
+            const CanvasFit fit = ResolveCanvas( canvasData, viewportPx );
+            canvasRect          = fit.Root;
+            scale               = fit.Scale;
+        }
 
         // Optional full-canvas background image (drawn under the element tree).
         if ( sprites )

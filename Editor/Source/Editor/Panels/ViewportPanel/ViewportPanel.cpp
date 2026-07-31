@@ -951,7 +951,17 @@ namespace Desert::Editor
         // render in-place.
         const ::Desert::UI::SpriteResolver sprites = [this]( const std::shared_ptr<Graphic::Image2D>& img )
         { return m_UIHelper ? m_UIHelper->GetTextureID( img ) : nullptr; };
-        ::Desert::UI::RenderCanvas( reg, dl, viewRect, /*interactive=*/false, /*outClicked=*/nullptr, sprites );
+
+        // Camera view-proj so a WorldSpace canvas projects onto the 3D view.
+        glm::mat4        vp( 1.0f );
+        const glm::mat4* vpPtr = nullptr;
+        if ( auto cam = m_Scene->GetMainCamera().lock() )
+        {
+            vp    = cam->GetProjectionMatrix() * cam->GetViewMatrix();
+            vpPtr = &vp;
+        }
+        ::Desert::UI::RenderCanvas( reg, dl, viewRect, /*interactive=*/false, /*outClicked=*/nullptr, sprites,
+                                    vpPtr );
 
         // Canvas bounds outline so an EMPTY canvas (no Panel yet) is still visible + selectable — you can
         // see where it maps on screen. Dashed-ish subtle frame, drawn under the element handles.
