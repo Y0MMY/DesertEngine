@@ -663,6 +663,22 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Panel" ) )
         glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
+
+        // Effects (Phase 4). All in design px; scaled by the canvas scale at draw time.
+        PROPERTY( DisplayName( "Use Gradient" ), Category( "Effects" ) )
+        bool UseGradient = false; // vertical Color (top) -> Gradient Color (bottom); ignored when a sprite is set
+        PROPERTY( DisplayName( "Gradient Color" ), Category( "Effects" ), Color )
+        glm::vec3 GradientColor = glm::vec3( 0.10f, 0.11f, 0.14f );
+        PROPERTY( DisplayName( "Border Width" ), Category( "Effects" ), Range( 0.0f, 16.0f ) )
+        float BorderWidth = 0.0f; // 0 = no border
+        PROPERTY( DisplayName( "Border Color" ), Category( "Effects" ), Color )
+        glm::vec3 BorderColor = glm::vec3( 0.0f );
+        PROPERTY( DisplayName( "Shadow" ), Category( "Effects" ) )
+        bool Shadow = false;
+        PROPERTY( DisplayName( "Shadow Color" ), Category( "Effects" ), Color )
+        glm::vec3 ShadowColor = glm::vec3( 0.0f );
+        PROPERTY( DisplayName( "Shadow Offset" ), Category( "Effects" ) )
+        glm::vec2 ShadowOffset = glm::vec2( 3.0f, 4.0f );
     };
     struct UIPanelComponent
     {
@@ -685,6 +701,18 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Alignment" ), Category( "UI Text" ) )
         UITextAlign Align = UITextAlign::Center;
+
+        // Effects (Phase 4).
+        PROPERTY( DisplayName( "Shadow" ), Category( "Effects" ) )
+        bool Shadow = false;
+        PROPERTY( DisplayName( "Shadow Color" ), Category( "Effects" ), Color )
+        glm::vec3 ShadowColor = glm::vec3( 0.0f );
+        PROPERTY( DisplayName( "Shadow Offset" ), Category( "Effects" ) )
+        glm::vec2 ShadowOffset = glm::vec2( 1.0f, 1.0f );
+        PROPERTY( DisplayName( "Outline" ), Category( "Effects" ) )
+        bool Outline = false;
+        PROPERTY( DisplayName( "Outline Color" ), Category( "Effects" ), Color )
+        glm::vec3 OutlineColor = glm::vec3( 0.0f );
     };
     struct UITextComponent2D
     {
