@@ -689,6 +689,18 @@ namespace Desert::ECS
     };
 
     // Interactive button: tints its panel by pointer state and dispatches OnClickMessage to Lua on click.
+    // What a UI Button does when clicked. The target/payload is the button's "Action Target" string:
+    //  LoadScene   -> load that scene path        SendMessage -> gameplay event name (Lua/scripts)
+    //  QuitGame    -> quit (target ignored)        OpenURL     -> open the URL
+    enum class UIButtonAction
+    {
+        None,
+        SendMessage,
+        LoadScene,
+        QuitGame,
+        OpenURL
+    };
+
     struct UIButtonData
     {
         REFLECT()
@@ -702,8 +714,11 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Pressed" ), Category( "UI Button" ), Color )
         glm::vec3 PressedColor = glm::vec3( 0.15f, 0.30f, 0.55f );
 
-        PROPERTY( DisplayName( "On Click Message" ), Category( "UI Button" ) )
-        std::string OnClickMessage = ""; // event name dispatched to the entity's Lua script on click
+        PROPERTY( DisplayName( "Click Action" ), Category( "UI Button" ) )
+        UIButtonAction Action = UIButtonAction::SendMessage;
+
+        PROPERTY( DisplayName( "Action Target" ), Category( "UI Button" ) )
+        std::string OnClickMessage = ""; // scene path / message name / URL, depending on Action
 
         PROPERTY( DisplayName( "Sprite" ), Category( "UI Button" ) )
         Assets::AssetHandle Sprite; // normal-state image, tinted by the state colour. Unset = flat colour.

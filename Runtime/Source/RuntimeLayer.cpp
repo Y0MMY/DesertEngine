@@ -30,6 +30,7 @@
 
 #include <ImGui/imgui.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <string_view>
 
@@ -217,11 +218,36 @@ namespace Desert::Player
                           /*interactive=*/true, &clicked, sprites );
         if ( !clicked.empty() )
         {
-            constexpr std::string_view kScenePrefix = "scene:";
-            if ( clicked.rfind( kScenePrefix, 0 ) == 0 )
-                m_PendingSceneLoad = clicked.substr( kScenePrefix.size() );
+            // Dispatch the button's Click Action (encoded by UICanvasRenderer): scene switch / quit / open a
+            // URL / a plain gameplay message a ScriptSystem can consume.
+            constexpr std::string_view kScene = "scene:";
+            constexpr std::string_view kUrl   = "url:";
+            if ( clicked.rfind( kScene, 0 ) == 0 )
+            {
+                m_PendingSceneLoad = clicked.substr( kScene.size() );
+            }
+            else if ( clicked == "quit" )
+            {
+                LOG_INFO( "[Runtime] UI quit requested" );
+                std::exit( 0 ); // standalone player: a game "Quit to desktop" button
+            }
+            else if ( clicked.rfind( kUrl, 0 ) == 0 )
+            {
+                const std::string url = clicked.substr( kUrl.size() );
+#if defined( _WIN32 )
+                const std::string cmd = "start \"\" \"" + url + "\"";
+#elif defined( __APPLE__ )
+                const std::string cmd = "open \"" + url + "\"";
+#else
+                const std::string cmd = "xdg-open \"" + url + "\"";
+#endif
+                if ( std::system( cmd.c_str() ) != 0 )
+                    LOG_WARN( "[Runtime] OpenURL failed: {}", url );
+            }
             else
-                LOG_INFO( "[Runtime] UI button clicked: '{}' (no handler — wire it in a ScriptSystem)", clicked );
+            {
+                LOG_INFO( "[Runtime] UI message: '{}' (consume it in a ScriptSystem)", clicked );
+            }
         }
 
         ::ImGui::End();

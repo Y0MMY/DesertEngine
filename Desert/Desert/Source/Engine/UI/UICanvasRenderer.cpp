@@ -129,7 +129,27 @@ namespace Desert::UI
                     DrawBox( dl, mn, mx, c, 1.0f, 6.0f, spr, sprites );
 
                     if ( hover && outClicked && ImGui::IsMouseReleased( ImGuiMouseButton_Left ) )
-                        *outClicked = b.OnClickMessage;
+                    {
+                        // Encode the structured action into the click message the runtime dispatches.
+                        switch ( b.Action )
+                        {
+                            case ECS::UIButtonAction::LoadScene:
+                                *outClicked = "scene:" + b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::QuitGame:
+                                *outClicked = "quit";
+                                break;
+                            case ECS::UIButtonAction::OpenURL:
+                                *outClicked = "url:" + b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::SendMessage:
+                                *outClicked = b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::None:
+                            default:
+                                break;
+                        }
+                    }
                 }
                 else if ( reg.has<ECS::UIPanelComponent>( e ) )
                 {
