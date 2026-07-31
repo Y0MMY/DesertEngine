@@ -31,6 +31,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <cstring>
 
 namespace Desert::Editor
 {
@@ -363,8 +364,8 @@ namespace Desert::Editor
 
         ImRect windowRect = { ImGui::GetWindowContentRegionMin(), ImGui::GetWindowContentRegionMax() };
 
-        auto AddEntity = []( const std::shared_ptr<Desert::Core::Scene>&  scene,
-                             const std::shared_ptr<Assets::AssetManager>& assetManager )
+        auto AddEntity = [this]( const std::shared_ptr<Desert::Core::Scene>&  scene,
+                                 const std::shared_ptr<Assets::AssetManager>& assetManager )
         {
             // Every menu spawn is recorded as one undo step (Ctrl+Z removes what was just added).
             auto track = []( ECS::Entity& e ) -> ECS::Entity&
@@ -373,158 +374,186 @@ namespace Desert::Editor
                 return e;
             };
 
-            if ( ImGui::BeginMenu( "Add" ) )
+            // Data-driven archetype catalogue: one row per creatable actor, grouped the SAME way as the
+            // Details "Add Component" menu (Rendering / Lighting / Animation / Physics / Camera / Other) with
+            // a shared search box. Adding a spawnable is one entry here — no menu plumbing to touch.
+            struct Archetype
             {
-                if ( ImGui::Selectable( "Empty Entity" ) )
-                    track( scene->CreateNewEntity( "Empty Entity" ) );
+                const char*           Category;
+                const char*           Icon;
+                const char*           Label;
+                std::function<void()> Create;
+            };
+            const std::vector<Archetype> archetypes = {
+                 { "Rendering", ICON_MDI_CUBE, "Cube",
+                   [&]
+                   {
+                       // Primitive path (RuntimeMesh generated + Invalidated by MeshECSSystem) — renders +
+                       // serializes reliably, unlike the builtin procedural-handle path.
+                       track( scene->CreateNewEntity( "Cube" ) )
+                            .AddComponent<ECS::StaticMeshComponent>()
+                            .Primitive = Geometry::PrimitiveType::Cube;
+                   } },
+                 { "Rendering", ICON_MDI_CUBE_OUTLINE, "3D Model",
+                   [&]
+                   {
+                       track( scene->CreateNewEntity( "3D Model" ) )
+                            .AddComponent<ECS::StaticMeshComponent>()
+                            .MeshHandle = Assets::AssetHandle{ 0 };
+                   } },
+                 { "Rendering", ICON_MDI_EARTH, "Skybox",
+                   [&] { track( scene->CreateNewEntity( "Skybox" ) ).AddComponent<ECS::SkyboxComponent>(); } },
+                 { "Rendering", ICON_MDI_TERRAIN, "Terrain",
+                   [&] { track( scene->CreateNewEntity( "Terrain" ) ).AddComponent<ECS::TerrainComponent>(); } },
 
-                // Folder: an empty grouping node. Drag entities onto it in the outliner to group them
-                // (e.g. all Cornell Box parts under one "Cornell Box" folder). Or select entities first and
-                // use "Group Selected into Folder" below to auto-parent them.
-                if ( ImGui::Selectable( ICON_MDI_FOLDER " Folder" ) )
-                    track( scene->CreateNewEntity( "Folder" ) ).AddComponent<ECS::FolderComponent>();
+                 { "Lighting", ICON_MDI_LIGHTBULB, "Directional Light",
+                   [&]
+                   {
+                       track( scene->CreateNewEntity( "Directional Light" ) )
+                            .AddComponent<ECS::DirectionLightComponent>();
+                   } },
+                 { "Lighting", ICON_MDI_LIGHTBULB, "Point Light",
+                   [&]
+                   {
+                       track( scene->CreateNewEntity( "Point Light" ) ).AddComponent<ECS::PointLightComponent>();
+                   } },
+                 { "Lighting", ICON_MDI_SPOTLIGHT, "Spot Light", [&]
+                   { track( scene->CreateNewEntity( "Spot Light" ) ).AddComponent<ECS::SpotLightComponent>(); } },
 
-                if ( Core::SelectionManager::Count() > 0 &&
-                     ImGui::Selectable( ICON_MDI_FOLDER_PLUS " Group Selected into Folder" ) )
-                {
-                    auto folder = track( scene->CreateNewEntity( "Folder" ) );
-                    folder.AddComponent<ECS::FolderComponent>();
-                    for ( const auto& id : Core::SelectionManager::GetSelection() )
-                        if ( const auto e = scene->FindEntityByID( id ) )
-                            scene->Attach( folder, e->get() );
-                }
+                 { "Animation", ICON_MDI_RUN, "Skinned Model",
+                   [&]
+                   {
+                       auto entity = scene->CreateNewEntity( "Skinned Model" );
+                       entity.AddComponent<ECS::SkinnedMeshComponent>();
+                       entity.AddComponent<ECS::AnimationComponent>();
+                       track( entity );
+                   } },
+                 // Code-generated rounded humanoid mannequin (no import needed). Renders in its bind/A-pose;
+                 // pick Idle/Walk/Run/Jump in Details ▸ Animation, or parent it to a Character Controller so
+                 // LocomotionSystem drives it from movement.
+                 { "Animation", ICON_MDI_HUMAN, "Character (Procedural)",
+                   [&]
+                   {
+                       auto entity = scene->CreateNewEntity( "Character" );
+                       entity.AddComponent<ECS::SkinnedMeshComponent>().MeshHandle =
+                            Geometry::ProceduralCharacterFactory::GetHumanoidMesh();
+                       entity.AddComponent<ECS::AnimationComponent>();
+                       track( entity );
+                   } },
 
-                if ( ImGui::BeginMenu( "Light" ) )
-                {
-                    if ( ImGui::Selectable( "Directional Light" ) )
-                    {
-                        auto entity = scene->CreateNewEntity( "Directional Light" );
-                        entity.AddComponent<ECS::DirectionLightComponent>();
-                        track( entity );
-                    }
-                    if ( ImGui::Selectable( "Point Light" ) )
-                    {
-                        auto entity = scene->CreateNewEntity( "Point Light" );
-                        entity.AddComponent<ECS::PointLightComponent>();
-                        track( entity );
-                    }
-                    if ( ImGui::Selectable( "Spot Light" ) )
-                    {
-                        auto entity = scene->CreateNewEntity( "Spot Light" );
-                        entity.AddComponent<ECS::SpotLightComponent>();
-                        track( entity );
-                    }
-                    ImGui::EndMenu();
-                }
+                 { "Camera", ICON_MDI_VIDEO, "Camera",
+                   [&]
+                   {
+                       // Spawn at the editor viewpoint (UE "Create Camera Here") instead of the origin — a
+                       // camera at (0,0,0) sits on top of / behind the editor camera, so its gizmo would be
+                       // clipped at the near plane and look "missing". Placed a few units ahead of the eye so
+                       // its icon + frustum are immediately visible and frame the current view.
+                       auto camEntity = scene->CreateNewEntity( "Camera" );
+                       camEntity.AddComponent<ECS::CameraComponent>();
+                       if ( auto active = scene->GetActiveCamera() )
+                       {
+                           const glm::mat4 world = glm::inverse( active->GetViewMatrix() );
+                           const glm::vec3 eye   = glm::vec3( world[3] );
+                           const glm::vec3 fwd   = -glm::normalize( glm::vec3( world[2] ) );
 
-                if ( ImGui::Selectable( "Skybox" ) )
-                    track( scene->CreateNewEntity( "Skybox" ) ).AddComponent<ECS::SkyboxComponent>();
+                           auto& tf       = camEntity.GetComponent<ECS::TransformComponent>();
+                           tf.Translation = eye + fwd * 4.0f;
+                           tf.Rotation = glm::eulerAngles( glm::quatLookAt( fwd, glm::vec3( 0.0f, 1.0f, 0.0f ) ) );
+                       }
+                       track( camEntity );
+                   } },
+            };
 
-                if ( ImGui::Selectable( "Terrain" ) )
-                    track( scene->CreateNewEntity( "Terrain" ) ).AddComponent<ECS::TerrainComponent>();
+            // NOTE: no standalone "Material" entity — a MaterialComponent is meaningless without geometry.
+            // It is added ONTO a renderable entity via Details -> Add Component. The Cornell Box / LOD-grid
+            // demo builders were removed on purpose — showcase content is DATA now (Assets/Scenes/*.desce).
 
-                // NOTE: no standalone "Material" entity — a MaterialComponent is meaningless without
-                // geometry. It is added ONTO a renderable entity via Details -> Add Component.
+            if ( !ImGui::BeginMenu( "Add" ) )
+                return;
 
-                if ( ImGui::Selectable( "3D Model" ) )
-                {
-                    track( scene->CreateNewEntity( "3D Model" ) )
-                         .AddComponent<ECS::StaticMeshComponent>()
-                         .MeshHandle = Assets::AssetHandle{ 0 };
-                }
+            // Search box (mirrors the Details Add-Component menu).
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted( ICON_MDI_MAGNIFY );
+            ImGui::SameLine();
+            float filterW = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().IndentSpacing;
+            m_AddEntityFilter.Draw( "##AddEntityFilter", filterW < 220.0f ? 220.0f : filterW );
+            ImGui::Separator();
 
-                if ( ImGui::Selectable( "Skinned Model" ) )
-                {
-                    auto entity = scene->CreateNewEntity( "Skinned Model" );
-                    entity.AddComponent<ECS::SkinnedMeshComponent>();
-                    entity.AddComponent<ECS::AnimationComponent>();
-                    track( entity );
-                }
+            const auto spawn = [&]( const Archetype& a )
+            {
+                if ( ImGui::Selectable( ( std::string( a.Icon ) + "  " + a.Label ).c_str() ) )
+                    a.Create();
+            };
+            // Empty + Folder are common enough to live at the top (Folder must stay reachable, never buried).
+            const auto empty  = [&] { track( scene->CreateNewEntity( "Empty Entity" ) ); };
+            const auto folder = [&]
+            { track( scene->CreateNewEntity( "Folder" ) ).AddComponent<ECS::FolderComponent>(); };
 
-                // Code-generated rounded humanoid mannequin (no import needed). Renders in its bind/A-pose;
-                // pick Idle/Walk/Run/Jump in Details ▸ Animation, or parent it to a Character Controller so
-                // LocomotionSystem drives it from movement.
-                if ( ImGui::Selectable( "Character (Procedural)" ) )
-                {
-                    auto entity = scene->CreateNewEntity( "Character" );
-                    entity.AddComponent<ECS::SkinnedMeshComponent>().MeshHandle =
-                         Geometry::ProceduralCharacterFactory::GetHumanoidMesh();
-                    entity.AddComponent<ECS::AnimationComponent>();
-                    track( entity );
-                }
-
-                if ( ImGui::Selectable( "Rigid Body" ) )
-                {
-                }
-
-                if ( ImGui::Selectable( "Camera" ) )
-                {
-                    // Spawn at the editor viewpoint (UE "Create Camera Here") instead of the origin — a
-                    // camera at (0,0,0) sits on top of / behind the editor camera, so its gizmo would be
-                    // clipped at the near plane and look "missing". Placed a few units ahead of the eye so
-                    // its icon + frustum are immediately visible and frame the current view.
-                    auto camEntity = scene->CreateNewEntity( "Camera" );
-                    camEntity.AddComponent<ECS::CameraComponent>();
-                    if ( auto active = scene->GetActiveCamera() )
-                    {
-                        const glm::mat4 world = glm::inverse( active->GetViewMatrix() );
-                        const glm::vec3 eye   = glm::vec3( world[3] );
-                        const glm::vec3 fwd   = -glm::normalize( glm::vec3( world[2] ) );
-
-                        auto& tf       = camEntity.GetComponent<ECS::TransformComponent>();
-                        tf.Translation = eye + fwd * 4.0f;
-                        tf.Rotation    = glm::eulerAngles( glm::quatLookAt( fwd, glm::vec3( 0.0f, 1.0f, 0.0f ) ) );
-                    }
-                    track( camEntity );
-                }
-
-                if ( ImGui::Selectable( "Sprite" ) )
-                {
-                }
-
-                if ( ImGui::Selectable( "Lua Script" ) )
-                {
-                }
-
-                // NOTE: the Cornell Box and LOD-grid demo builders were removed on purpose —
-                // showcase content is DATA now (Assets/Scenes/CornellDemo.desce, baked once at
-                // sandbox startup), not code behind a menu item.
-
-                if ( ImGui::BeginMenu( "Primitive" ) )
-                {
-                    if ( ImGui::MenuItem( "Cube" ) )
-                    {
-                        // Use the Primitive path (RuntimeMesh generated + Invalidated by MeshECSSystem) —
-                        // it renders + serializes reliably, unlike the builtin procedural-handle path.
-                        auto& cubeMesh =
-                             track( scene->CreateNewEntity( "Cube" ) ).AddComponent<ECS::StaticMeshComponent>();
-                        cubeMesh.Primitive = Geometry::PrimitiveType::Cube;
-                    }
-                    if ( ImGui::MenuItem( "Sphere" ) )
-                    {
-                    }
-                    if ( ImGui::MenuItem( "Pyramid" ) )
-                    {
-                    }
-                    if ( ImGui::MenuItem( "Plane" ) )
-                    {
-                    }
-                    if ( ImGui::MenuItem( "Cylinder" ) )
-                    {
-                    }
-                    if ( ImGui::MenuItem( "Capsule" ) )
-                    {
-                    }
-                    if ( ImGui::MenuItem( "Terrain" ) )
-                    {
-                    }
-                    if ( ImGui::MenuItem( "Light Cube" ) )
-                    {
-                    }
-                    ImGui::EndMenu();
-                }
+            if ( m_AddEntityFilter.IsActive() )
+            {
+                // Flat filtered list while searching — categories only get in the way of a query.
+                if ( m_AddEntityFilter.PassFilter( "Empty Entity" ) &&
+                     ImGui::Selectable( ICON_MDI_CUBE_OUTLINE "  Empty Entity" ) )
+                    empty();
+                if ( m_AddEntityFilter.PassFilter( "Folder" ) && ImGui::Selectable( ICON_MDI_FOLDER "  Folder" ) )
+                    folder();
+                for ( const auto& a : archetypes )
+                    if ( m_AddEntityFilter.PassFilter( a.Label ) )
+                        spawn( a );
                 ImGui::EndMenu();
+                return;
             }
+
+            if ( ImGui::Selectable( ICON_MDI_CUBE_OUTLINE "  Empty Entity" ) )
+                empty();
+            // Folder: an empty grouping node. Drag entities onto it to group them, or select entities first
+            // and use "Group Selected into Folder" to auto-parent them.
+            if ( ImGui::Selectable( ICON_MDI_FOLDER "  Folder" ) )
+                folder();
+            if ( Core::SelectionManager::Count() > 0 &&
+                 ImGui::Selectable( ICON_MDI_FOLDER_PLUS "  Group Selected into Folder" ) )
+            {
+                auto grp = track( scene->CreateNewEntity( "Folder" ) );
+                grp.AddComponent<ECS::FolderComponent>();
+                for ( const auto& id : Core::SelectionManager::GetSelection() )
+                    if ( const auto e = scene->FindEntityByID( id ) )
+                        scene->Attach( grp, e->get() );
+            }
+
+            ImGui::Separator();
+
+            struct Cat
+            {
+                const char* Icon;
+                const char* Name;
+            };
+            static constexpr Cat kCats[] = {
+                 { ICON_MDI_SHAPE, "Rendering" }, { ICON_MDI_LIGHTBULB, "Lighting" },
+                 { ICON_MDI_RUN, "Animation" },   { ICON_MDI_VIDEO, "Camera" },
+                 { ICON_MDI_ATOM, "Physics" },    { ICON_MDI_DOTS_HORIZONTAL, "Other" },
+            };
+            for ( const auto& cat : kCats )
+            {
+                bool any = false;
+                for ( const auto& a : archetypes )
+                    if ( std::strcmp( a.Category, cat.Name ) == 0 )
+                    {
+                        any = true;
+                        break;
+                    }
+                if ( !any )
+                    continue;
+
+                if ( ImGui::BeginMenu( ( std::string( cat.Icon ) + "  " + cat.Name ).c_str() ) )
+                {
+                    for ( const auto& a : archetypes )
+                        if ( std::strcmp( a.Category, cat.Name ) == 0 )
+                            spawn( a );
+                    ImGui::EndMenu();
+                }
+            }
+
+            ImGui::EndMenu();
         };
 
         ImGui::PushStyleColor( ImGuiCol_MenuBarBg, ImGui::GetStyleColorVec4( ImGuiCol_TabActive ) );
