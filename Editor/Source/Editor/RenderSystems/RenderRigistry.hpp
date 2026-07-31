@@ -3,6 +3,7 @@
 #include "IRender.hpp"
 #include "Passes/EditorGridPass.hpp"
 #include "Passes/EditorColliderPass.hpp"
+#include "Passes/EditorUIPass.hpp"
 
 namespace Desert::Editor::Render
 {
@@ -23,5 +24,6 @@ namespace Desert::Editor::Render
 
         std::unique_ptr<EditorGridPass>     m_GridPass;
         std::unique_ptr<EditorColliderPass> m_ColliderPass;
+        std::unique_ptr<EditorUIPass>       m_UIPass;
     };
 } // namespace Desert::Editor::Render

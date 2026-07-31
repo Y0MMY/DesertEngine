@@ -17,6 +17,13 @@ namespace Desert::Editor::Render
             LOG_WARN( "[RenderRegistry] {}", result.GetError() );
             m_ColliderPass.reset();
         }
+
+        m_UIPass = std::make_unique<EditorUIPass>();
+        if ( const auto result = m_UIPass->Install( scene ); !result )
+        {
+            LOG_WARN( "[RenderRegistry] {}", result.GetError() );
+            m_UIPass.reset();
+        }
     }
 
     void RenderRegistry::Render()
