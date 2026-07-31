@@ -168,6 +168,9 @@ namespace Desert::Editor
                     return ImGuiMouseCursor_ResizeNESW;
                 case UIHandle::Body:
                     return ImGuiMouseCursor_ResizeAll;
+                case UIHandle::AnchorMin:
+                case UIHandle::AnchorMax:
+                    return ImGuiMouseCursor_Hand;
                 default:
                     return ImGuiMouseCursor_Arrow;
             }
@@ -1010,15 +1013,48 @@ namespace Desert::Editor
         const ImVec2 mouse = ImGui::GetMousePos();
         const float  scale = std::max( 0.0001f, ::Desert::UI::CanvasScale( reg, viewRect ) );
 
-        // Handle under the cursor this frame (drives the cursor + starts a drag).
+        // Parent rect: anchors are fractions of it. Draggable anchor markers let you re-anchor the element
+        // (change how it pins to the parent) WITHOUT moving it — same idea as Unity's RectTransform anchors.
+        const entt::entity parentE = reg.has<ECS::RelationshipComponent>( e )
+                                          ? reg.get<ECS::RelationshipComponent>( e ).Parent
+                                          : entt::null;
+        ::Desert::UI::Rect pr;
+        const bool         haveParent =
+             parentE != entt::null && ::Desert::UI::GetElementRect( reg, parentE, viewRect, pr );
+
+        const auto&  aL    = reg.get<ECS::UILayoutComponent>( e ).Data;
+        const ImVec2 aMinP = haveParent ? ImVec2( pr.X + aL.AnchorMin.x * pr.W, pr.Y + aL.AnchorMin.y * pr.H )
+                                        : ImVec2( 0.0f, 0.0f );
+        const ImVec2 aMaxP = haveParent ? ImVec2( pr.X + aL.AnchorMax.x * pr.W, pr.Y + aL.AnchorMax.y * pr.H )
+                                        : ImVec2( 0.0f, 0.0f );
+        const float  ar    = 5.0f;
+        if ( canEdit && haveParent )
+        {
+            dl->AddCircleFilled( aMinP, ar, IM_COL32( 90, 200, 255, 235 ) );
+            dl->AddCircle( aMinP, ar, IM_COL32( 15, 15, 15, 255 ) );
+            dl->AddCircleFilled( aMaxP, ar, IM_COL32( 90, 200, 255, 235 ) );
+            dl->AddCircle( aMaxP, ar, IM_COL32( 15, 15, 15, 255 ) );
+        }
+
+        // Handle under the cursor this frame (drives the cursor + starts a drag). Anchor markers first, then
+        // the resize handles, then the body.
         UIHandle hovered = UIHandle::None;
-        for ( const auto& h : handles )
-            if ( mouse.x >= h.P.x - hs - 1.0f && mouse.x <= h.P.x + hs + 1.0f && mouse.y >= h.P.y - hs - 1.0f &&
-                 mouse.y <= h.P.y + hs + 1.0f )
-            {
-                hovered = h.Id;
-                break;
-            }
+        if ( canEdit && haveParent )
+        {
+            const float ah = ar + 2.0f;
+            if ( std::abs( mouse.x - aMaxP.x ) <= ah && std::abs( mouse.y - aMaxP.y ) <= ah )
+                hovered = UIHandle::AnchorMax;
+            else if ( std::abs( mouse.x - aMinP.x ) <= ah && std::abs( mouse.y - aMinP.y ) <= ah )
+                hovered = UIHandle::AnchorMin;
+        }
+        if ( hovered == UIHandle::None )
+            for ( const auto& h : handles )
+                if ( mouse.x >= h.P.x - hs - 1.0f && mouse.x <= h.P.x + hs + 1.0f &&
+                     mouse.y >= h.P.y - hs - 1.0f && mouse.y <= h.P.y + hs + 1.0f )
+                {
+                    hovered = h.Id;
+                    break;
+                }
         if ( hovered == UIHandle::None && mouse.x >= r.X && mouse.x <= r.X + r.W && mouse.y >= r.Y &&
              mouse.y <= r.Y + r.H )
             hovered = UIHandle::Body;
@@ -1031,9 +1067,48 @@ namespace Desert::Editor
             const auto& L       = reg.get<ECS::UILayoutComponent>( e ).Data;
             m_UIDragStartOffMin = L.OffsetMin;
             m_UIDragStartOffMax = L.OffsetMax;
+            m_UIDragStartRect   = glm::vec4( r.X, r.Y, r.X + r.W, r.Y + r.H ); // edges to preserve on re-anchor
         }
 
-        if ( m_UIDrag != UIHandle::None )
+        // Dragging an anchor marker re-anchors the element (changes AnchorMin/Max) while KEEPING its on-screen
+        // rect — offsets are recomputed to hold the preserved edges. Anchors snap to 0/0.5/1 (Alt disables).
+        if ( m_UIDrag == UIHandle::AnchorMin || m_UIDrag == UIHandle::AnchorMax )
+        {
+            if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) && haveParent && pr.W > 0.0f && pr.H > 0.0f )
+            {
+                auto& L  = reg.get<ECS::UILayoutComponent>( e ).Data;
+                float fx = std::clamp( ( mouse.x - pr.X ) / pr.W, 0.0f, 1.0f );
+                float fy = std::clamp( ( mouse.y - pr.Y ) / pr.H, 0.0f, 1.0f );
+                if ( !ImGui::GetIO().KeyAlt )
+                    for ( float s : { 0.0f, 0.5f, 1.0f } )
+                    {
+                        if ( std::abs( fx - s ) < 0.03f )
+                            fx = s;
+                        if ( std::abs( fy - s ) < 0.03f )
+                            fy = s;
+                    }
+                if ( m_UIDrag == UIHandle::AnchorMin )
+                {
+                    fx          = std::min( fx, L.AnchorMax.x );
+                    fy          = std::min( fy, L.AnchorMax.y );
+                    L.OffsetMin = glm::vec2( ( m_UIDragStartRect.x - pr.X - fx * pr.W ) / scale,
+                                             ( m_UIDragStartRect.y - pr.Y - fy * pr.H ) / scale );
+                    L.AnchorMin = glm::vec2( fx, fy );
+                }
+                else
+                {
+                    fx          = std::max( fx, L.AnchorMin.x );
+                    fy          = std::max( fy, L.AnchorMin.y );
+                    L.OffsetMax = glm::vec2( ( m_UIDragStartRect.z - pr.X - fx * pr.W ) / scale,
+                                             ( m_UIDragStartRect.w - pr.Y - fy * pr.H ) / scale );
+                    L.AnchorMax = glm::vec2( fx, fy );
+                }
+            }
+            ImGui::SetMouseCursor( ImGuiMouseCursor_Hand );
+            if ( ImGui::IsMouseReleased( ImGuiMouseButton_Left ) )
+                m_UIDrag = UIHandle::None;
+        }
+        else if ( m_UIDrag != UIHandle::None )
         {
             if ( ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
             {

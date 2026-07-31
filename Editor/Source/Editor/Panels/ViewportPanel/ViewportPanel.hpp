@@ -33,7 +33,9 @@ namespace Desert::Editor
         TL,
         TR,
         BL,
-        BR
+        BR,
+        AnchorMin, // draggable anchor markers on the parent rect (re-anchor without moving the element)
+        AnchorMax
     };
 
     class ViewportPanel : public IPanel, public Common::EventHandler
@@ -122,6 +124,7 @@ namespace Desert::Editor
         glm::vec2 m_UIDragStartMouse{};
         glm::vec2 m_UIDragStartOffMin{};
         glm::vec2 m_UIDragStartOffMax{};
+        glm::vec4 m_UIDragStartRect{}; // element screen edges (left,top,right,bottom) at anchor-drag start
 
         // Resize is deferred from OnUIRender (within the recording window) to OnPreUpdate
         // (start of next frame, before any rendering) to avoid destroying descriptor set pools

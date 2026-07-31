@@ -662,7 +662,10 @@ namespace Desert::Editor
                  entity.HasComponent<ECS::SpotLightComponent>() ||
                  entity.HasComponent<ECS::DirectionLightComponent>() ||
                  entity.HasComponent<ECS::CameraComponent>() || entity.HasComponent<ECS::SkyboxComponent>() ||
-                 entity.HasComponent<ECS::TextComponent>() ) // Text has its own big billboard (RenderTextIcons)
+                 entity.HasComponent<ECS::TextComponent>() || // Text has its own big billboard (RenderTextIcons)
+                 entity.HasComponent<ECS::UICanvasComponent>() ||
+                 entity.HasComponent<ECS::UILayoutComponent>() ) // screen-space UI: edited via the canvas
+                                                                 // overlay, a world billboard just confuses
                 continue;
 
             // Pick the icon by the most specific "invisible" role the entity plays.
