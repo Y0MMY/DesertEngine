@@ -511,7 +511,7 @@ namespace Desert::ECS
         glm::vec3 Direction = glm::vec3( 0.0f, 1.0f, 0.0f ); // normalized emit axis
 
         PROPERTY( DisplayName( "Cone Angle" ), Category( "Motion" ), Range( 0.0f, 180.0f ) )
-        float ConeAngle = 25.0f; // degrees of spread around Direction
+        float ConeAngle = 45.0f; // degrees of spread around Direction (wide enough to read from any angle)
 
         PROPERTY( DisplayName( "Gravity" ), Category( "Motion" ) )
         glm::vec3 Gravity = glm::vec3( 0.0f, -2.0f, 0.0f );
@@ -526,7 +526,7 @@ namespace Desert::ECS
         float SizeCurvePower = 1.0f;
 
         PROPERTY( DisplayName( "End Size" ), Category( "Look" ), Range( 0.0f, 10.0f ) )
-        float EndSize = 0.0f;
+        float EndSize = 0.06f; // keep a sliver of size so particles stay readable instead of vanishing mid-life
 
         PROPERTY( DisplayName( "Start Color" ), Category( "Look" ), Color )
         glm::vec3 StartColor = glm::vec3( 1.0f, 0.6f, 0.15f );
@@ -540,8 +540,12 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "End Alpha" ), Category( "Look" ), Range( 0.0f, 1.0f ) )
         float EndAlpha = 0.0f;
 
+        // AlphaBlend (over) by default: it shows the particle colour against ANY background. Additive glow
+        // washes out against bright/lit surfaces — looked down at a sunlit floor the fountain "disappeared"
+        // even though it was drawn, while it popped against the dark sky from below. Fire/sparks presets in
+        // the Particle Editor still switch this to Additive where the scene behind them is dark.
         PROPERTY( DisplayName( "Blend" ), Category( "Look" ) )
-        ParticleBlendMode Blend = ParticleBlendMode::Additive;
+        ParticleBlendMode Blend = ParticleBlendMode::AlphaBlend;
     };
 
     struct ParticleEmitterComponent
