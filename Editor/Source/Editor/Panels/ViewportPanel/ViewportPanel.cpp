@@ -946,8 +946,12 @@ namespace Desert::Editor
                                            m_ViewportData.Size.x, m_ViewportData.Size.y };
         ImDrawList*              dl = ImGui::GetWindowDrawList();
 
-        // The canvas overlay itself (all viewports / both modes) — same path as the runtime.
-        ::Desert::UI::RenderCanvas( reg, dl, viewRect, /*interactive=*/false, /*outClicked=*/nullptr );
+        // The canvas overlay itself (all viewports / both modes) — same path as the runtime. The sprite
+        // resolver wraps engine images for THIS ImGui context (our UIHelper cacher) so Panel/Button sprites
+        // render in-place.
+        const ::Desert::UI::SpriteResolver sprites = [this]( const std::shared_ptr<Graphic::Image2D>& img )
+        { return m_UIHelper ? m_UIHelper->GetTextureID( img ) : nullptr; };
+        ::Desert::UI::RenderCanvas( reg, dl, viewRect, /*interactive=*/false, /*outClicked=*/nullptr, sprites );
 
         // Canvas bounds outline so an EMPTY canvas (no Panel yet) is still visible + selectable — you can
         // see where it maps on screen. Dashed-ish subtle frame, drawn under the element handles.

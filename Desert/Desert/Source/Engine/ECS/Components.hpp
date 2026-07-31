@@ -654,6 +654,9 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Corner Radius" ), Category( "UI Panel" ), Range( 0.0f, 64.0f ) )
         float CornerRadius = 6.0f;
+
+        PROPERTY( DisplayName( "Sprite" ), Category( "UI Panel" ) )
+        Assets::AssetHandle Sprite; // optional background image, tinted by Color * Opacity. Unset = flat colour.
     };
     struct UIPanelComponent
     {
@@ -698,6 +701,9 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "On Click Message" ), Category( "UI Button" ) )
         std::string OnClickMessage = ""; // event name dispatched to the entity's Lua script on click
+
+        PROPERTY( DisplayName( "Sprite" ), Category( "UI Button" ) )
+        Assets::AssetHandle Sprite; // optional image, tinted by the state colour. Unset = flat colour.
     };
     struct UIButtonComponent
     {

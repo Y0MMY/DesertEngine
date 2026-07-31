@@ -4,12 +4,24 @@
 
 #include <entt/entt.hpp>
 
+#include <functional>
+#include <memory>
 #include <string>
 
 struct ImDrawList;
 
+namespace Desert::Graphic
+{
+    class Image2D;
+}
+
 namespace Desert::UI
 {
+    // Maps an engine UI Image2D to its ImGui texture id (VkDescriptorSet) for the CURRENT ImGui context. The
+    // engine resolves a sprite's AssetHandle -> Image2D itself (TextureService + ImageService); the caller
+    // only wraps that image for its own ImGui backend (its UICacheTexture). Pass {} to render flat colours.
+    using SpriteResolver = std::function<const void*( const std::shared_ptr<Graphic::Image2D>& )>;
+
     // Draws the scene's FIRST UICanvas + its UILayout/UIPanel/UIText/UIButton child tree into `dl`, letterboxed
     // to the canvas design resolution inside `viewportPx` (screen pixels). SHARED by the editor's UI Editor
     // panel (authoring/preview) and the game Runtime (in-game menu) so the exact same layout renders in both.
@@ -18,7 +30,7 @@ namespace Desert::UI
     // OnClickMessage here (empty otherwise) — the caller acts on it (e.g. "scene:MainLevel" -> load a scene).
     // Returns true if a canvas was found + drawn.
     bool RenderCanvas( entt::registry& reg, ImDrawList* dl, const Rect& viewportPx, bool interactive,
-                       std::string* outClicked = nullptr );
+                       std::string* outClicked = nullptr, const SpriteResolver& sprites = {} );
 
     // In-scene UI editing (viewport WYSIWYG). Returns the topmost UI element (Panel/Text/Button) whose
     // resolved rect contains `pointPx`, or entt::null. `viewportPx` must be the SAME rect passed to

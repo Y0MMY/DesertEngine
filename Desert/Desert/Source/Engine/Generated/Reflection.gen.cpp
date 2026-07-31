@@ -179,6 +179,7 @@ namespace
                     .Field( FieldInfo{ .Name = "Color", .Type = FieldType::Vec3, .Offset = offsetof( T, Color ), .Size = sizeof( T::Color ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Color", .Category = "UI Panel", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "Opacity", .Type = FieldType::Float, .Offset = offsetof( T, Opacity ), .Size = sizeof( T::Opacity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Opacity", .Category = "UI Panel", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
                     .Field( FieldInfo{ .Name = "CornerRadius", .Type = FieldType::Float, .Offset = offsetof( T, CornerRadius ), .Size = sizeof( T::CornerRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Corner Radius", .Category = "UI Panel", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 64.0f, } } )
+                    .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Sprite", .Category = "UI Panel", } } )
                     .WithDefault<T>()
                     .Register();
             }
@@ -199,6 +200,7 @@ namespace
                     .Field( FieldInfo{ .Name = "HoverColor", .Type = FieldType::Vec3, .Offset = offsetof( T, HoverColor ), .Size = sizeof( T::HoverColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Hover", .Category = "UI Button", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "PressedColor", .Type = FieldType::Vec3, .Offset = offsetof( T, PressedColor ), .Size = sizeof( T::PressedColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Pressed", .Category = "UI Button", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "OnClickMessage", .Type = FieldType::String, .Offset = offsetof( T, OnClickMessage ), .Size = sizeof( T::OnClickMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Click Message", .Category = "UI Button", } } )
+                    .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Sprite", .Category = "UI Button", } } )
                     .WithDefault<T>()
                     .Register();
             }

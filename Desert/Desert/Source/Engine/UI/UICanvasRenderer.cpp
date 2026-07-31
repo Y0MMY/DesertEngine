@@ -1,6 +1,10 @@
 #include "UICanvasRenderer.hpp"
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Assets/Common.hpp>
+#include <Engine/Graphic/Texture.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <ImGui/imgui.h>
 
@@ -16,6 +20,41 @@ namespace Desert::UI
         ImU32 Col( const glm::vec3& c, float a = 1.0f )
         {
             return ImGui::ColorConvertFloat4ToU32( ImVec4( c.r, c.g, c.b, a ) );
+        }
+
+        // Engine-side sprite resolution: AssetHandle -> runtime GPU texture -> Image2D. Returns a non-owning
+        // shared_ptr (the image is owned by the image service; UICacheTexture keys ImGui descriptors by
+        // VkImageView, so re-wrapping each frame is safe). nullptr when unset / unresolvable.
+        std::shared_ptr<Graphic::Image2D> ResolveSpriteImage( const Assets::AssetHandle& handle )
+        {
+            auto* service = Runtime::ResourceRegistry::GetTextureService();
+            if ( !service )
+                return nullptr;
+            auto* tex = service->Get( handle );
+            if ( !tex )
+                return nullptr;
+            auto* imgService = Runtime::ResourceRegistry::GetImageService();
+            if ( !imgService )
+                return nullptr;
+            auto* img = static_cast<Graphic::Image2D*>( imgService->Resolve( tex->GetImageHandle() ) );
+            if ( !img )
+                return nullptr;
+            return std::shared_ptr<Graphic::Image2D>( img, []( Graphic::Image2D* ) {} );
+        }
+
+        // Draw a filled UI box: a sprite (tinted by `col`) when one is bound + resolvable, else a flat colour.
+        void DrawBox( ImDrawList* dl, const ImVec2& mn, const ImVec2& mx, const glm::vec3& col, float alpha,
+                      float rounding, const Assets::AssetHandle& sprite, const SpriteResolver& resolver )
+        {
+            const void* tex = nullptr;
+            if ( resolver )
+                if ( auto img = ResolveSpriteImage( sprite ) )
+                    tex = resolver( img );
+            if ( tex )
+                dl->AddImage( (ImTextureID)tex, mn, mx, ImVec2( 0.0f, 0.0f ), ImVec2( 1.0f, 1.0f ),
+                              Col( col, alpha ) );
+            else
+                dl->AddRectFilled( mn, mx, Col( col, alpha ), rounding );
         }
 
         // Maps the canvas to the viewport per its scale mode (see UICanvasScaleMode). Returns the canvas root
@@ -55,7 +94,7 @@ namespace Desert::UI
         // OnClickMessage to *outClicked. This is the SINGLE draw path shared by the editor preview and the
         // in-game runtime, so a canvas looks identical in both.
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale, ImDrawList* dl,
-                          bool interactive, std::string* outClicked )
+                          bool interactive, std::string* outClicked, const SpriteResolver& sprites )
         {
             Rect rect = parent;
             if ( reg.has<ECS::UILayoutComponent>( e ) )
@@ -74,7 +113,7 @@ namespace Desert::UI
                     const bool   hover = interactive && m.x >= mn.x && m.x <= mx.x && m.y >= mn.y && m.y <= mx.y;
                     const bool   down  = hover && ImGui::IsMouseDown( ImGuiMouseButton_Left );
                     const glm::vec3 c  = down ? b.PressedColor : ( hover ? b.HoverColor : b.NormalColor );
-                    dl->AddRectFilled( mn, mx, Col( c, 1.0f ), 6.0f );
+                    DrawBox( dl, mn, mx, c, 1.0f, 6.0f, b.Sprite, sprites );
 
                     if ( hover && outClicked && ImGui::IsMouseReleased( ImGuiMouseButton_Left ) )
                         *outClicked = b.OnClickMessage;
@@ -82,7 +121,7 @@ namespace Desert::UI
                 else if ( reg.has<ECS::UIPanelComponent>( e ) )
                 {
                     const auto& p = reg.get<ECS::UIPanelComponent>( e ).Data;
-                    dl->AddRectFilled( mn, mx, Col( p.Color, p.Opacity ), p.CornerRadius );
+                    DrawBox( dl, mn, mx, p.Color, p.Opacity, p.CornerRadius, p.Sprite, sprites );
                 }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
@@ -108,11 +147,10 @@ namespace Desert::UI
                 const bool clip = reg.has<ECS::UILayoutComponent>( e ) &&
                                   reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents;
                 if ( clip )
-                    dl->PushClipRect( ImVec2( rect.X, rect.Y ), ImVec2( rect.X + rect.W, rect.Y + rect.H ),
-                                      true );
+                    dl->PushClipRect( ImVec2( rect.X, rect.Y ), ImVec2( rect.X + rect.W, rect.Y + rect.H ), true );
                 for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                     if ( reg.valid( c ) )
-                        DrawElement( reg, c, rect, scale, dl, interactive, outClicked );
+                        DrawElement( reg, c, rect, scale, dl, interactive, outClicked, sprites );
                 if ( clip )
                     dl->PopClipRect();
             }
@@ -184,7 +222,7 @@ namespace Desert::UI
     } // namespace
 
     bool RenderCanvas( entt::registry& reg, ImDrawList* dl, const Rect& viewportPx, bool interactive,
-                       std::string* outClicked )
+                       std::string* outClicked, const SpriteResolver& sprites )
     {
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
@@ -204,7 +242,7 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, canvasRect, scale, dl, interactive, outClicked );
+                    DrawElement( reg, c, canvasRect, scale, dl, interactive, outClicked, sprites );
 
         return true;
     }

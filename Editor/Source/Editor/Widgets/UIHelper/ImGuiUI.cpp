@@ -11,6 +11,11 @@ namespace Desert::Editor::UI
         m_CacherTexture = Graphic::UICacheTexture::Create();
     }
 
+    const void* UIHelper::GetTextureID( const std::shared_ptr<Graphic::Image2D>& image )
+    {
+        return ( m_CacherTexture && image ) ? m_CacherTexture->AddTextureCache( image ) : nullptr;
+    }
+
     void UIHelper::Image( const std::shared_ptr<Graphic::Image2D>& image, const ImVec2& size, const ImVec2& uv0,
                           const ImVec2& uv1, const ImVec4& tint_col, const ImVec4& border_col )
     {

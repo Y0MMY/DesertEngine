@@ -23,6 +23,10 @@ namespace Desert::Editor::UI
         bool ImageButton( const char* strId, const std::shared_ptr<Graphic::Image2D>& image,
                           const ImVec2& size );
 
+        // The ImGui texture id (VkDescriptorSet) for an engine image, cached by VkImageView. Lets callers
+        // draw engine images straight into an ImDrawList (e.g. UI sprites) instead of via Image().
+        const void* GetTextureID( const std::shared_ptr<Graphic::Image2D>& image );
+
     private:
         std::unique_ptr<Graphic::UICacheTexture> m_CacherTexture;
     };
