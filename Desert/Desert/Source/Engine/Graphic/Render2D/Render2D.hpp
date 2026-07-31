@@ -34,11 +34,17 @@ namespace Desert::Graphic::Render2D
         // Call after every Scene::Init — the framebuffers are recreated there. Idempotent.
         Common::BoolResultStr Init( const std::shared_ptr<Framebuffer>& target );
 
-        bool IsInitialized() const { return m_Pipeline != nullptr; }
+        bool IsInitialized() const
+        {
+            return m_Pipeline != nullptr;
+        }
 
         // The UI2D pipeline (built against the scene target). External-pass registration needs its spec so
         // the render graph sets up the matching load render pass this backend's draws record into.
-        const std::shared_ptr<GraphicsPipeline>& GetPipeline() const { return m_Pipeline; }
+        const std::shared_ptr<GraphicsPipeline>& GetPipeline() const
+        {
+            return m_Pipeline;
+        }
 
         // Start a frame: set the pixel->clip projection for @p viewportPx (x,y,w,h) and clear the draw list.
         void BeginFrame( const glm::vec4& viewportPx );

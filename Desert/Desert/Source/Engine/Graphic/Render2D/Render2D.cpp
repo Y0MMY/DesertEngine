@@ -92,13 +92,15 @@ namespace Desert::Graphic::Render2D
         {
             const uint32_t cap = std::max( vertexCount, m_VertexCapacity ? m_VertexCapacity * 2 : 4096u );
             m_VertexBuffer     = VertexBuffer::Create( cap * (uint32_t)sizeof( Vertex2D ), BufferUsage::Dynamic );
-            m_VertexCapacity   = cap;
+            m_VertexBuffer->Invalidate(); // Create() only constructs; Invalidate() allocates GPU memory
+            m_VertexCapacity = cap;
         }
         if ( indexCount > m_IndexCapacity )
         {
             const uint32_t cap = std::max( indexCount, m_IndexCapacity ? m_IndexCapacity * 2 : 8192u );
             m_IndexBuffer      = IndexBuffer::Create( cap * (uint32_t)sizeof( uint32_t ), BufferUsage::Dynamic );
-            m_IndexCapacity    = cap;
+            m_IndexBuffer->Invalidate();
+            m_IndexCapacity = cap;
         }
     }
 
