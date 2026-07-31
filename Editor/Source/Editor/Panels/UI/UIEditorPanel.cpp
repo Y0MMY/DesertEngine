@@ -7,6 +7,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/UI/UILayout.hpp>
+#include <Engine/UI/UICanvasRenderer.hpp>
 
 #include <ImGui/imgui.h>
 
@@ -18,64 +19,6 @@ namespace Desert::Editor
 
     namespace
     {
-        ImU32 Col( const glm::vec3& c, float a = 1.0f )
-        {
-            return ImGui::ColorConvertFloat4ToU32( ImVec4( c.r, c.g, c.b, a ) );
-        }
-
-        // Recursively draw one UI element + its children. `parent` is the element's parent rect in SCREEN
-        // pixels; `scale` maps design px -> screen px (for font sizing).
-        void DrawElement( entt::registry& reg, entt::entity e, const UI::Rect& parent, float scale, ImDrawList* dl,
-                          bool interactive )
-        {
-            UI::Rect rect = parent;
-            if ( reg.has<ECS::UILayoutComponent>( e ) )
-            {
-                const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
-                rect = UI::ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin, L.OffsetMax, L.CustomMinimumSize,
-                                        parent );
-
-                const ImVec2 mn( rect.X, rect.Y );
-                const ImVec2 mx( rect.X + rect.W, rect.Y + rect.H );
-
-                // Button = a tinted, hover-reactive rounded rect.
-                if ( reg.has<ECS::UIButtonComponent>( e ) )
-                {
-                    const auto&  b     = reg.get<ECS::UIButtonComponent>( e ).Data;
-                    const ImVec2 m     = ImGui::GetMousePos();
-                    const bool   hover = interactive && m.x >= mn.x && m.x <= mx.x && m.y >= mn.y && m.y <= mx.y;
-                    const bool   down  = hover && ImGui::IsMouseDown( ImGuiMouseButton_Left );
-                    const glm::vec3 c  = down ? b.PressedColor : ( hover ? b.HoverColor : b.NormalColor );
-                    dl->AddRectFilled( mn, mx, Col( c, 1.0f ), 6.0f );
-                }
-                else if ( reg.has<ECS::UIPanelComponent>( e ) )
-                {
-                    const auto& p = reg.get<ECS::UIPanelComponent>( e ).Data;
-                    dl->AddRectFilled( mn, mx, Col( p.Color, p.Opacity ), p.CornerRadius );
-                }
-
-                // Text label (may sit on top of a panel/button).
-                if ( reg.has<ECS::UITextComponent2D>( e ) )
-                {
-                    const auto&  t  = reg.get<ECS::UITextComponent2D>( e ).Data;
-                    const float  fs = t.FontSize * scale;
-                    const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA( fs, FLT_MAX, 0.0f, t.Text.c_str() );
-                    float        tx = mn.x + 6.0f;
-                    if ( t.Align == ECS::UITextAlign::Center )
-                        tx = mn.x + ( rect.W - ts.x ) * 0.5f;
-                    else if ( t.Align == ECS::UITextAlign::Right )
-                        tx = mx.x - ts.x - 6.0f;
-                    const float ty = mn.y + ( rect.H - ts.y ) * 0.5f;
-                    dl->AddText( ImGui::GetFont(), fs, ImVec2( tx, ty ), Col( t.Color, 1.0f ), t.Text.c_str() );
-                }
-            }
-
-            if ( reg.has<ECS::RelationshipComponent>( e ) )
-                for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
-                    if ( reg.valid( c ) )
-                        DrawElement( reg, c, rect, scale, dl, interactive );
-        }
-
         // Create a UI child entity (with a UILayout) parented to `parent`, and attach `element` to it.
         template <typename ElementComponent>
         void AddUIChild( ::Desert::Core::Scene& scene, entt::entity parent, const char* name )
@@ -150,7 +93,6 @@ namespace Desert::Editor
         const UI::Rect fit =
              UI::CanvasRect( canvasData.ReferenceWidth, canvasData.ReferenceHeight, avail.x, avail.y );
         const UI::Rect canvasRect{ origin.x + fit.X, origin.y + fit.Y, fit.W, fit.H };
-        const float    scale = ( canvasData.ReferenceWidth > 0.0f ) ? fit.W / canvasData.ReferenceWidth : 1.0f;
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
         // Canvas backdrop (checkerboard-ish dark) + border.
@@ -161,11 +103,12 @@ namespace Desert::Editor
                      ImVec2( canvasRect.X + canvasRect.W, canvasRect.Y + canvasRect.H ),
                      IM_COL32( 90, 90, 100, 200 ) );
 
+        // Same draw path as the in-game runtime (Engine/UI/UICanvasRenderer) — the preview is pixel-identical
+        // to what ships. Hover tinting on buttons is enabled, but clicks are inert here (outClicked = nullptr)
+        // so previewing a menu never fires its actions.
         const bool interactive = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows );
-        if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
-            for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
-                if ( reg.valid( c ) )
-                    DrawElement( reg, c, canvasRect, scale, dl, interactive );
+        UI::RenderCanvas( reg, dl, UI::Rect{ origin.x, origin.y, avail.x, avail.y }, interactive,
+                          /*outClicked=*/nullptr );
 
         ImGui::Dummy( avail );
     }

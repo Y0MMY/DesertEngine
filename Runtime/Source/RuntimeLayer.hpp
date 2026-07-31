@@ -27,6 +27,11 @@ namespace Desert::Player
         void                                OnEvent( Common::Event& event ) override;
 
     private:
+        // Tear down the current scene and deserialize `path` in its place (systems survive Clear()). Runs
+        // between frames from OnUpdate — a UI button's "scene:<path>" click queues it into m_PendingSceneLoad.
+        void LoadSceneInternal( const std::string& path );
+
+    private:
         std::string m_ScenePathOverride;
 
         std::shared_ptr<Assets::AssetManager>        m_AssetManager;
@@ -42,5 +47,8 @@ namespace Desert::Player
         // editor's viewport panel).
         std::optional<std::pair<uint32_t, uint32_t>> m_PendingResize;
         uint32_t                                     m_LastWidth = 0, m_LastHeight = 0;
+
+        // A UI button clicked this frame with an "scene:<path>" OnClickMessage — applied next OnUpdate.
+        std::optional<std::string> m_PendingSceneLoad;
     };
 } // namespace Desert::Player

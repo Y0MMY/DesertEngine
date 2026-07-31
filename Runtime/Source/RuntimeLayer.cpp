@@ -1,8 +1,10 @@
 #include "RuntimeLayer.hpp"
 
 #include <Engine/Core/Scene.hpp>
+#include <Engine/Core/EngineContext.hpp>
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include <Engine/Project/ProjectContext.hpp>
+#include <Engine/UI/UICanvasRenderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/UICacheTexture.hpp>
 #include <Engine/Graphic/Image.hpp>
@@ -29,6 +31,7 @@
 #include <ImGui/imgui.h>
 
 #include <filesystem>
+#include <string_view>
 
 namespace Desert::Player
 {
@@ -111,8 +114,41 @@ namespace Desert::Player
         return BOOLSUCCESS;
     }
 
+    void RuntimeLayer::LoadSceneInternal( const std::string& path )
+    {
+        if ( !Common::Utils::FileSystem::Exists( path ) ) // VFS-aware
+        {
+            LOG_WARN( "[Runtime] Scene switch target not found: '{}' (a button's OnClickMessage is "
+                      "'scene:<path>' — the path must resolve in the cooked project)",
+                      path );
+            return;
+        }
+
+        EngineContext::GetInstance().GetDevice()->WaitIdle(); // scene teardown frees GPU resources
+        m_Scene->Clear();                                     // keeps the gameplay systems, drops the entities
+
+        Core::SceneSerializer serializer( m_Scene.get(), m_AssetManager.get() );
+        serializer.DeserializeFromJson( Common::Utils::FileSystem::ReadFileContent( path ) );
+        if ( const auto init = m_Scene->Init(); !init )
+        {
+            LOG_ERROR( "[Runtime] Scene switch init failed: {}", init.GetError() );
+            return;
+        }
+        m_Scene->SetState( Core::Scene::SceneState::Play );
+        LOG_INFO( "[Runtime] Switched scene: {}", path );
+    }
+
     Common::BoolResultStr RuntimeLayer::OnUpdate( const Common::Timestep& ts )
     {
+        // A UI button requested a scene switch last frame: apply it here, between frames, before any
+        // recording starts (Clear() destroys GPU resources — same rule as the resize below).
+        if ( m_PendingSceneLoad )
+        {
+            const std::string path = *m_PendingSceneLoad;
+            m_PendingSceneLoad.reset();
+            LoadSceneInternal( path );
+        }
+
         // Window-size changes resize the scene target here — before any recording starts (destroying
         // framebuffers mid-frame is a device loss).
         if ( m_PendingResize )
@@ -158,8 +194,8 @@ namespace Desert::Player
         const uint32_t height = static_cast<uint32_t>( viewport->Size.y );
         if ( width > 0 && height > 0 && ( width != m_LastWidth || height != m_LastHeight ) )
         {
-            m_LastWidth  = width;
-            m_LastHeight = height;
+            m_LastWidth     = width;
+            m_LastHeight    = height;
             m_PendingResize = { width, height };
         }
 
@@ -167,6 +203,23 @@ namespace Desert::Player
         {
             const auto* id = m_UITextureCache->AddTextureCache( image );
             ::ImGui::Image( (ImTextureID)id, viewport->Size );
+        }
+
+        // In-game UI overlay: the scene's UICanvas drawn on top of the frame with the SAME renderer the
+        // editor previews (Engine/UI/UICanvasRenderer). Buttons are live — a click whose OnClickMessage is
+        // "scene:<path>" queues a scene switch (applied next OnUpdate). Other messages are gameplay events a
+        // ScriptSystem can consume later.
+        std::string clicked;
+        UI::RenderCanvas( m_Scene->GetRegistry(), ::ImGui::GetWindowDrawList(),
+                          UI::Rect{ viewport->Pos.x, viewport->Pos.y, viewport->Size.x, viewport->Size.y },
+                          /*interactive=*/true, &clicked );
+        if ( !clicked.empty() )
+        {
+            constexpr std::string_view kScenePrefix = "scene:";
+            if ( clicked.rfind( kScenePrefix, 0 ) == 0 )
+                m_PendingSceneLoad = clicked.substr( kScenePrefix.size() );
+            else
+                LOG_INFO( "[Runtime] UI button clicked: '{}' (no handler — wire it in a ScriptSystem)", clicked );
         }
 
         ::ImGui::End();
