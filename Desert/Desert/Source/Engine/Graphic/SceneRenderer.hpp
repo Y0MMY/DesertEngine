@@ -217,6 +217,11 @@ namespace Desert::Graphic
         // lighting composite — in Deferred the composite would otherwise paint lit meshes over any
         // debug lines recorded earlier in the graph, hiding them wherever geometry is present.
         void ExecuteDebugOverlay();
+        // Transparency-phase passes (GPU particles, ...) drawn as a LOAD overlay AFTER the deferred
+        // lighting composite, for the exact same reason as ExecuteDebugOverlay: recorded inside the
+        // graph they land on the target BEFORE the composite and get painted over wherever geometry
+        // exists (visible against sky, gone against the ground — the particle "top-down" bug).
+        void ExecuteTransparency();
 
     private:
         struct

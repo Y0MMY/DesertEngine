@@ -393,6 +393,15 @@ namespace Desert::Graphic
             meshRenderer->RenderGlassManual( sceneCopy );
         }
 
+        // Transparent billboards (GPU particles) over the finished opaque scene. Runs in BOTH paths here,
+        // after the deferred composite (Deferred) / after the forward geometry graph (Forward), but BEFORE
+        // the post chain so particles are tonemapped + bloom'd like everything else. Deferred recorded them
+        // inside the graph and the composite painted over them wherever geometry existed (the top-down bug).
+        {
+            DESERT_PROFILE_SCOPE( "Transparency" );
+            ExecuteTransparency();
+        }
+
         // Overdraw debug view: re-rasterize all meshes additively into a heat map over the finished scene
         // color. Path-independent (redraws geometry, ignores the G-buffer), so it runs for Forward too.
         if ( m_DeferredDebug == Core::DeferredDebugMode::Overdraw )
@@ -784,9 +793,10 @@ namespace Desert::Graphic
             if ( !pass.CachedRenderPass )
                 continue;
 
-            // Debug-phase passes (BB / colliders) are deferred to ExecuteDebugOverlay(), which runs
-            // AFTER the deferred lighting composite so the overlay isn't painted over by lit geometry.
-            if ( pass.Phase == RenderPhase::Debug )
+            // Debug-phase passes (BB / colliders) are deferred to ExecuteDebugOverlay(), and
+            // Transparency-phase passes (particles) to ExecuteTransparency(): both run AFTER the deferred
+            // lighting composite so they aren't painted over by lit geometry (the particle top-down bug).
+            if ( pass.Phase == RenderPhase::Debug || pass.Phase == RenderPhase::Transparency )
                 continue;
 
             const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
@@ -827,6 +837,43 @@ namespace Desert::Graphic
         for ( const auto& pass : sortedPasses )
         {
             if ( !pass.CachedRenderPass || pass.Phase != RenderPhase::Debug )
+                continue;
+
+            const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
+            if ( passFb != currentFb )
+            {
+                if ( currentFb )
+                    renderer.EndRenderPass();
+                renderer.BeginRenderPass( pass.CachedRenderPass.get(), false );
+                currentFb = passFb;
+            }
+
+            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
+            renderer.BeginDebugLabel( pass.Name.c_str() );
+            pass.ExecuteFunc();
+            renderer.EndDebugLabel();
+        }
+
+        if ( currentFb )
+            renderer.EndRenderPass();
+    }
+
+    void SceneRenderer::ExecuteTransparency()
+    {
+        const auto& sortedPasses = m_RenderGraphBuilder.GetSortedPasses();
+
+        auto& renderer = Renderer::GetInstance();
+
+        // LOAD (clearFrame = false) each transparency pass over the finished scene color so billboards
+        // (particles) sit on top of the composited opaque scene instead of under it. In Deferred the
+        // lighting composite runs AFTER the graph, so recording these inside the graph made them show only
+        // against the sky (no geometry to overwrite them) and vanish against the ground — see the header.
+        // Depth against the target is intentionally NOT tested (the particle pipelines set DepthTest off),
+        // so glow/sparks read as "always on top"; a per-emitter occlude toggle can bring it back later.
+        std::shared_ptr<Framebuffer> currentFb;
+        for ( const auto& pass : sortedPasses )
+        {
+            if ( !pass.CachedRenderPass || pass.Phase != RenderPhase::Transparency )
                 continue;
 
             const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
