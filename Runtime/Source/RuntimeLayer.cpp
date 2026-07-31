@@ -209,10 +209,12 @@ namespace Desert::Player
         // editor previews (Engine/UI/UICanvasRenderer). Buttons are live — a click whose OnClickMessage is
         // "scene:<path>" queues a scene switch (applied next OnUpdate). Other messages are gameplay events a
         // ScriptSystem can consume later.
-        std::string clicked;
+        std::string              clicked;
+        const UI::SpriteResolver sprites = [this]( const std::shared_ptr<Graphic::Image2D>& img )
+        { return m_UITextureCache ? m_UITextureCache->AddTextureCache( img ) : nullptr; };
         UI::RenderCanvas( m_Scene->GetRegistry(), ::ImGui::GetWindowDrawList(),
                           UI::Rect{ viewport->Pos.x, viewport->Pos.y, viewport->Size.x, viewport->Size.y },
-                          /*interactive=*/true, &clicked );
+                          /*interactive=*/true, &clicked, sprites );
         if ( !clicked.empty() )
         {
             constexpr std::string_view kScenePrefix = "scene:";

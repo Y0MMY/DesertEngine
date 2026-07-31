@@ -156,6 +156,7 @@ namespace
                     .Field( FieldInfo{ .Name = "ReferenceWidth", .Type = FieldType::Float, .Offset = offsetof( T, ReferenceWidth ), .Size = sizeof( T::ReferenceWidth ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Reference Width", .Category = "UI Canvas", .HasRange = true, .RangeMin = 64.0f, .RangeMax = 7680.0f, } } )
                     .Field( FieldInfo{ .Name = "ReferenceHeight", .Type = FieldType::Float, .Offset = offsetof( T, ReferenceHeight ), .Size = sizeof( T::ReferenceHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Reference Height", .Category = "UI Canvas", .HasRange = true, .RangeMin = 64.0f, .RangeMax = 4320.0f, } } )
                     .Field( FieldInfo{ .Name = "MatchWidthHeight", .Type = FieldType::Float, .Offset = offsetof( T, MatchWidthHeight ), .Size = sizeof( T::MatchWidthHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Match Width/Height", .Category = "UI Canvas", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Background Sprite", .Category = "UI Canvas", } } )
                     .Field( FieldInfo{ .Name = "Visible", .Type = FieldType::Bool, .Offset = offsetof( T, Visible ), .Size = sizeof( T::Visible ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Visible", .Category = "UI Canvas", } } )
                     .WithDefault<T>()
                     .Register();
@@ -201,6 +202,8 @@ namespace
                     .Field( FieldInfo{ .Name = "PressedColor", .Type = FieldType::Vec3, .Offset = offsetof( T, PressedColor ), .Size = sizeof( T::PressedColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Pressed", .Category = "UI Button", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "OnClickMessage", .Type = FieldType::String, .Offset = offsetof( T, OnClickMessage ), .Size = sizeof( T::OnClickMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Click Message", .Category = "UI Button", } } )
                     .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Sprite", .Category = "UI Button", } } )
+                    .Field( FieldInfo{ .Name = "HoverSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, HoverSprite ), .Size = sizeof( T::HoverSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Hover Sprite", .Category = "UI Button", } } )
+                    .Field( FieldInfo{ .Name = "PressedSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, PressedSprite ), .Size = sizeof( T::PressedSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Pressed Sprite", .Category = "UI Button", } } )
                     .WithDefault<T>()
                     .Register();
             }

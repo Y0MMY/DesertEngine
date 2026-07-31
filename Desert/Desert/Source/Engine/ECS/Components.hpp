@@ -599,6 +599,9 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Match Width/Height" ), Category( "UI Canvas" ), Range( 0.0f, 1.0f ) )
         float MatchWidthHeight = 0.5f; // ScaleWithScreen only: 0 = match width, 1 = match height
 
+        PROPERTY( DisplayName( "Background Sprite" ), Category( "UI Canvas" ) )
+        Assets::AssetHandle Sprite; // optional full-canvas background image (unset = transparent)
+
         PROPERTY( DisplayName( "Visible" ), Category( "UI Canvas" ) )
         bool Visible = true;
     };
@@ -703,7 +706,13 @@ namespace Desert::ECS
         std::string OnClickMessage = ""; // event name dispatched to the entity's Lua script on click
 
         PROPERTY( DisplayName( "Sprite" ), Category( "UI Button" ) )
-        Assets::AssetHandle Sprite; // optional image, tinted by the state colour. Unset = flat colour.
+        Assets::AssetHandle Sprite; // normal-state image, tinted by the state colour. Unset = flat colour.
+
+        PROPERTY( DisplayName( "Hover Sprite" ), Category( "UI Button" ) )
+        Assets::AssetHandle HoverSprite; // shown on hover (falls back to Sprite if unset)
+
+        PROPERTY( DisplayName( "Pressed Sprite" ), Category( "UI Button" ) )
+        Assets::AssetHandle PressedSprite; // shown while pressed (falls back to Sprite if unset)
     };
     struct UIButtonComponent
     {

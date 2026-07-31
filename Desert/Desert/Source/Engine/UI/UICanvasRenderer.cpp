@@ -42,6 +42,11 @@ namespace Desert::UI
             return std::shared_ptr<Graphic::Image2D>( img, []( Graphic::Image2D* ) {} );
         }
 
+        bool HandleSet( const Assets::AssetHandle& h )
+        {
+            return static_cast<uint64_t>( h ) != 0;
+        }
+
         // Draw a filled UI box: a sprite (tinted by `col`) when one is bound + resolvable, else a flat colour.
         void DrawBox( ImDrawList* dl, const ImVec2& mn, const ImVec2& mx, const glm::vec3& col, float alpha,
                       float rounding, const Assets::AssetHandle& sprite, const SpriteResolver& resolver )
@@ -113,7 +118,15 @@ namespace Desert::UI
                     const bool   hover = interactive && m.x >= mn.x && m.x <= mx.x && m.y >= mn.y && m.y <= mx.y;
                     const bool   down  = hover && ImGui::IsMouseDown( ImGuiMouseButton_Left );
                     const glm::vec3 c  = down ? b.PressedColor : ( hover ? b.HoverColor : b.NormalColor );
-                    DrawBox( dl, mn, mx, c, 1.0f, 6.0f, b.Sprite, sprites );
+
+                    // Image can change with state (hover / press) — falls back to the normal Sprite if a
+                    // per-state one isn't set. This is the "hover -> change image" without any graph.
+                    Assets::AssetHandle spr = b.Sprite;
+                    if ( down && HandleSet( b.PressedSprite ) )
+                        spr = b.PressedSprite;
+                    else if ( hover && HandleSet( b.HoverSprite ) )
+                        spr = b.HoverSprite;
+                    DrawBox( dl, mn, mx, c, 1.0f, 6.0f, spr, sprites );
 
                     if ( hover && outClicked && ImGui::IsMouseReleased( ImGuiMouseButton_Left ) )
                         *outClicked = b.OnClickMessage;
@@ -238,6 +251,13 @@ namespace Desert::UI
         const CanvasFit fit        = ResolveCanvas( canvasData, viewportPx );
         const Rect      canvasRect = fit.Root;
         const float     scale      = fit.Scale;
+
+        // Optional full-canvas background image (drawn under the element tree).
+        if ( sprites )
+            if ( auto img = ResolveSpriteImage( canvasData.Sprite ) )
+                if ( const void* tex = sprites( img ) )
+                    dl->AddImage( (ImTextureID)tex, ImVec2( canvasRect.X, canvasRect.Y ),
+                                  ImVec2( canvasRect.X + canvasRect.W, canvasRect.Y + canvasRect.H ) );
 
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
