@@ -27,6 +27,8 @@
 #include <Engine/Runtime/SelectionContext.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/UI/UICanvasRenderer.hpp>
+#include <Engine/UI/UILayout.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Core/Formats/ImageFormat.hpp>
@@ -47,6 +49,36 @@
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
+
+    namespace
+    {
+        // In-scene UI authoring — same structure the UI Editor panel builds (a UILayout + the element,
+        // parented under the canvas) so a canvas authored in the viewport is identical to one from the panel.
+        entt::entity FindCanvas( entt::registry& reg )
+        {
+            auto view = reg.view<ECS::UICanvasComponent>();
+            return view.begin() == view.end() ? entt::null : *view.begin();
+        }
+
+        template <typename ElementComponent>
+        entt::entity AddUIChild( ::Desert::Core::Scene& scene, entt::entity parent, const char* name )
+        {
+            auto& e      = scene.CreateNewEntity( std::string( name ) );
+            auto  handle = e.GetHandle();
+            e.AddComponent<ECS::UILayoutComponent>();
+            e.AddComponent<ElementComponent>();
+
+            auto& reg = scene.GetRegistry();
+            if ( !reg.has<ECS::RelationshipComponent>( handle ) )
+                reg.emplace<ECS::RelationshipComponent>( handle );
+            reg.get<ECS::RelationshipComponent>( handle ).Parent = parent;
+            if ( !reg.has<ECS::RelationshipComponent>( parent ) )
+                reg.emplace<ECS::RelationshipComponent>( parent );
+            reg.get<ECS::RelationshipComponent>( parent ).Children.push_back( handle );
+            return handle;
+        }
+    } // namespace
+
     ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
                                   const Assets::AssetManager* assetManager, std::string title )
          : IPanel( std::move( title ) ), m_Scene( scene ), m_AssetManager( assetManager )
@@ -249,6 +281,48 @@ namespace Desert::Editor
                 bool showNames = Core::SkeletonEditMode::ShowAllNames();
                 if ( ImGui::Checkbox( "Names", &showNames ) )
                     Core::SkeletonEditMode::SetShowAllNames( showNames );
+            }
+        }
+
+        // --- In-scene UI authoring (Godot/UE-style): create + parent UI elements without the UI Editor panel.
+        // New elements parent under the selected UI element if one is selected, else under the canvas. ---
+        {
+            ImGui::SameLine();
+            if ( ImGui::Button( ICON_MDI_VIEW_DASHBOARD "  UI" ) )
+                ImGui::OpenPopup( "ui_create" );
+            if ( ImGui::BeginPopup( "ui_create" ) )
+            {
+                auto&              reg    = m_Scene->GetRegistry();
+                const entt::entity canvas = FindCanvas( reg );
+                if ( canvas == entt::null )
+                {
+                    if ( ImGui::MenuItem( ICON_MDI_PLUS "  UI Canvas" ) )
+                    {
+                        auto& e = m_Scene->CreateNewEntity( "UI Canvas" );
+                        e.AddComponent<ECS::UICanvasComponent>();
+                        Core::SelectionManager::SetSelected( e.GetComponent<ECS::UUIDComponent>().UUID );
+                    }
+                }
+                else
+                {
+                    entt::entity parent = canvas;
+                    if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+                        if ( auto ref = m_Scene->FindEntityByID( *sel ) )
+                        {
+                            const entt::entity h = ref->get().GetHandle();
+                            if ( h == canvas || reg.has<ECS::UILayoutComponent>( h ) )
+                                parent = h; // nest under the selected element
+                        }
+                    const auto select = [&]( entt::entity h )
+                    { Core::SelectionManager::SetSelected( reg.get<ECS::UUIDComponent>( h ).UUID ); };
+                    if ( ImGui::MenuItem( ICON_MDI_CARD_OUTLINE "  Panel" ) )
+                        select( AddUIChild<ECS::UIPanelComponent>( *m_Scene, parent, "UI Panel" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_FORMAT_TEXT "  Text" ) )
+                        select( AddUIChild<ECS::UITextComponent2D>( *m_Scene, parent, "UI Text" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_BUTTON_POINTER "  Button" ) )
+                        select( AddUIChild<ECS::UIButtonComponent>( *m_Scene, parent, "UI Button" ) );
+                }
+                ImGui::EndPopup();
             }
         }
 
@@ -520,6 +594,26 @@ namespace Desert::Editor
 
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
+
+        // In-scene UI (WYSIWYG): draw the scene's UICanvas directly over the viewport image, like Unity/UE,
+        // using the exact runtime draw path. Non-interactive here — clicks SELECT the element (OnMousePressed)
+        // so you author it in place. A marquee marks the selected element.
+        {
+            const ::Desert::UI::Rect viewRect{ m_ViewportData.ViewportPos.x, m_ViewportData.ViewportPos.y,
+                                               m_ViewportData.Size.x, m_ViewportData.Size.y };
+            auto&                    reg = m_Scene->GetRegistry();
+            ::Desert::UI::RenderCanvas( reg, ImGui::GetWindowDrawList(), viewRect, /*interactive=*/false,
+                                        /*outClicked=*/nullptr );
+
+            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+                if ( auto ref = m_Scene->FindEntityByID( *sel ) )
+                {
+                    ::Desert::UI::Rect r;
+                    if ( ::Desert::UI::GetElementRect( reg, ref->get().GetHandle(), viewRect, r ) )
+                        ImGui::GetWindowDrawList()->AddRect( ImVec2( r.X, r.Y ), ImVec2( r.X + r.W, r.Y + r.H ),
+                                                             IM_COL32( 255, 170, 40, 255 ), 0.0f, 0, 2.0f );
+                }
+        }
 
         // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
         if ( ImGui::BeginDragDropTarget() )
@@ -825,6 +919,25 @@ namespace Desert::Editor
         if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() &&
              Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered && overImage )
         {
+            // In-scene UI: the 2D canvas overlays the 3D scene, so a click on a UI element selects it and
+            // skips the 3D raycast (unless a 3D gizmo handle is being grabbed). Edit anchors/colour in Details.
+            if ( !m_Gizmo.IsHovered() )
+            {
+                auto&              reg   = m_Scene->GetRegistry();
+                const entt::entity uiHit = ::Desert::UI::PickElement(
+                     reg, glm::vec2( mp.x, mp.y ),
+                     ::Desert::UI::Rect{ vp.ViewportPos.x, vp.ViewportPos.y, vp.Size.x, vp.Size.y } );
+                if ( uiHit != entt::null && reg.has<ECS::UUIDComponent>( uiHit ) )
+                {
+                    const auto uuid = reg.get<ECS::UUIDComponent>( uiHit ).UUID;
+                    if ( ::ImGui::GetIO().KeyCtrl )
+                        Core::SelectionManager::Toggle( uuid );
+                    else
+                        Core::SelectionManager::SetSelected( uuid );
+                    return false;
+                }
+            }
+
             // Skeleton Edit mode: LMB selects the nearest bone joint under the cursor (keeping the skinned
             // mesh selected) rather than picking a new entity — unless the bone gizmo is being interacted with.
             if ( Core::SkeletonEditMode::IsActive() && !m_Gizmo.IsHovered() )
