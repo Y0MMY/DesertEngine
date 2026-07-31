@@ -36,6 +36,10 @@ namespace Desert::Graphic::API::Vulkan
         virtual void SubmitFullscreenQuad( const GraphicsPipeline*         pipeline,
                                            const MaterialExecutor* materialExecutor ) override;
 
+        virtual void SubmitIndexed( const GraphicsPipeline* pipeline, VertexBuffer* vertexBuffer,
+                                    IndexBuffer* indexBuffer, uint32_t indexCount,
+                                    const MaterialExecutor* materialExecutor ) override;
+
         virtual void SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
                                   const MaterialExecutor* materialExecutor ) override;
 

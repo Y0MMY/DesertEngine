@@ -103,6 +103,13 @@ namespace Desert::Graphic
         s_RendererAPI->SubmitFullscreenQuad( pipeline, materialExecutor );
     }
 
+    void Renderer::SubmitIndexed( const GraphicsPipeline* pipeline, VertexBuffer* vertexBuffer,
+                                  IndexBuffer* indexBuffer, uint32_t indexCount,
+                                  const MaterialExecutor* materialExecutor )
+    {
+        s_RendererAPI->SubmitIndexed( pipeline, vertexBuffer, indexBuffer, indexCount, materialExecutor );
+    }
+
     void Renderer::SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
                                 const MaterialExecutor* materialExecutor )
     {

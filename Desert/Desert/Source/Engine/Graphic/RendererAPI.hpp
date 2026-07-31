@@ -61,6 +61,13 @@ namespace Desert::Graphic
         virtual void SubmitFullscreenQuad( const GraphicsPipeline* pipeline,
                                            const MaterialExecutor* materialExecutor )                  = 0;
 
+        // Indexed draw from caller-supplied vertex + index buffers. The 2D/UI batcher fills a dynamic
+        // VB+IB each frame (one buffer, many quads) and issues one SubmitIndexed per state batch;
+        // @p materialExecutor supplies the batch's texture and push constants (the ortho projection).
+        virtual void SubmitIndexed( const GraphicsPipeline* pipeline, VertexBuffer* vertexBuffer,
+                                    IndexBuffer* indexBuffer, uint32_t indexCount,
+                                    const MaterialExecutor* materialExecutor ) = 0;
+
         // Vertexless line draw (Lines-topology pipeline pulls vertices from a storage buffer by index).
         virtual void SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,
                                   const MaterialExecutor* materialExecutor )                            = 0;

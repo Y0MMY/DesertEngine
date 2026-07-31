@@ -341,6 +341,53 @@ namespace Desert::Graphic::API::Vulkan
         vkCmdDraw( m_CurrentCommandBuffer, 6, 1, 0, 0 );
     }
 
+    void VulkanRendererAPI::SubmitIndexed( const GraphicsPipeline* pipeline, VertexBuffer* vertexBuffer,
+                                           IndexBuffer* indexBuffer, uint32_t indexCount,
+                                           const MaterialExecutor* materialExecutor )
+    {
+        if ( !m_CurrentCommandBuffer || !vertexBuffer || !indexBuffer || indexCount == 0 )
+            return;
+        const auto vulkanPipeline = static_cast<const VulkanPipeline*>( pipeline );
+        vkCmdBindPipeline( m_CurrentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           vulkanPipeline->GetVkPipeline() );
+
+        // Bind Descriptor Sets (the batch's texture + any UBOs)
+        if ( materialExecutor )
+        {
+            materialExecutor->Apply();
+            auto vkBackend = static_cast<VulkanMaterialBackend*>( materialExecutor->GetMaterialBackend().get() );
+
+            if ( !vkBackend->HasDescriptorSets() )
+            {
+                LOG_WARN( "VulkanRendererAPI::SubmitIndexed: MaterialExecutor has no valid descriptor sets!" );
+                return;
+            }
+
+            uint32_t frameIndex = Engine::FrameManager::GetInstance().GetCurrentFrameIndex();
+            vkBackend->BindDescriptorSets( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                           VK_PIPELINE_BIND_POINT_GRAPHICS, frameIndex );
+
+            const auto&   pcBuffer     = materialExecutor->GetPushConstantBuffer();
+            VulkanShader* vulkanShader = (VulkanShader*)pipeline->GetSpecification().Shader.get();
+            if ( pcBuffer.Size && vulkanShader->GetShaderPushConstant().has_value() )
+            {
+                auto pcInfo = vulkanShader->GetShaderPushConstant().value();
+                vkCmdPushConstants( m_CurrentCommandBuffer, vulkanPipeline->GetVkPipelineLayout(),
+                                    (VkShaderStageFlags)pcInfo.ShaderStage, 0, (uint32_t)pcBuffer.Size,
+                                    pcBuffer.Data );
+            }
+        }
+
+        VkDeviceSize offsets[] = { 0 };
+        auto         vbuffer   = static_cast<API::Vulkan::VulkanVertexBuffer*>( vertexBuffer )->GetVulkanBuffer();
+        vkCmdBindVertexBuffers( m_CurrentCommandBuffer, 0, 1, &vbuffer, offsets );
+
+        auto ibuffer = static_cast<API::Vulkan::VulkanIndexBuffer*>( indexBuffer )->GetVulkanBuffer();
+        vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
+
+        vkCmdDrawIndexed( m_CurrentCommandBuffer, indexCount, 1, 0, 0, 0 );
+    }
+
     void VulkanRendererAPI::SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount,
                                          float lineWidth, const MaterialExecutor* materialExecutor )
     {
