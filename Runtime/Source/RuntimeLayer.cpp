@@ -297,10 +297,10 @@ namespace Desert::Player
                 {
                     std::shared_ptr<Graphic::Image2D> imgPtr( img, []( Graphic::Image2D* ) {} );
                     const void*                       id = m_UITextureCache->AddTextureCache( imgPtr );
-                    const float                       iw = static_cast<float>( img->GetWidth() ),
-                                                      ih = static_cast<float>( img->GetHeight() );
-                    const float  fit = std::min( viewport->Size.x / iw, viewport->Size.y / ih );
-                    const float  w = iw * fit, h = ih * fit;
+                    const float iw  = static_cast<float>( img->GetWidth() );
+                    const float ih  = static_cast<float>( img->GetHeight() );
+                    const float fit = std::min( viewport->Size.x / iw, viewport->Size.y / ih );
+                    const float w = iw * fit, h = ih * fit;
                     const ImVec2 cc( viewport->Pos.x + viewport->Size.x * 0.5f,
                                      viewport->Pos.y + viewport->Size.y * 0.5f );
                     fdl->AddImage( (ImTextureID)id, ImVec2( cc.x - w * 0.5f, cc.y - h * 0.5f ),
