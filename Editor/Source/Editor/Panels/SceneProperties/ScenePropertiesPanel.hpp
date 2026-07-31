@@ -19,6 +19,10 @@ namespace Desert::Editor
         {
         }
         void OnUIRender() override;
+        void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
+        {
+            m_Scene = scene;
+        }
 
     private:
         void DrawMaterialEntity( const ECS::Entity& entity );

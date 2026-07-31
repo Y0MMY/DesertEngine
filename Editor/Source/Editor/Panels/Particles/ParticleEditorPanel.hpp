@@ -27,6 +27,10 @@ namespace Desert::Editor
         }
         void OnUIRender() override;
         void OnPreUpdate() override;
+        void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
+        {
+            m_Scene = scene;
+        }
 
         static void RequestOpen();
 

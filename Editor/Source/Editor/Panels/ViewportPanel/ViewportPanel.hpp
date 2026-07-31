@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 
 #include <Engine/Desert.hpp>
@@ -22,13 +23,22 @@ namespace Desert::Editor
     class ViewportPanel : public IPanel, public Common::EventHandler
     {
     public:
+        // `title` is the ImGui window title/id. Multi-scene editing spawns extra viewports, so each needs
+        // its own unique "###id" (two windows sharing one id merge into a single dockable window).
         ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
-                       const Assets::AssetManager*                 assetManager = nullptr );
+                       const Assets::AssetManager* assetManager = nullptr, std::string title = "Scene###scene" );
         ~ViewportPanel() override; // defined in the .cpp (unique_ptr<AsyncMeshLoader> needs the complete type)
         void OnUIRender() override;
         void OnPreUpdate() override;
 
         void OnEvent( Common::Event& e ) override;
+
+        // Called (once, while this viewport window has ImGui focus) so the editor can make this viewport's
+        // scene the active one — the Outliner/Details/gizmo then follow whichever viewport you work in.
+        void SetOnActivate( std::function<void()> cb )
+        {
+            m_OnActivate = std::move( cb );
+        }
 
     private:
         bool OnWindowResize( Common::EventWindowResize& e );
@@ -88,6 +98,7 @@ namespace Desert::Editor
         std::optional<glm::vec2> m_PendingViewportSize;
 
         std::shared_ptr<Desert::Core::Scene>  m_Scene;
+        std::function<void()>                 m_OnActivate; // fired while this viewport window is focused
         const Assets::AssetManager*           m_AssetManager = nullptr; // for prefab drag-drop instantiate
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
         std::unique_ptr<LightGizmoRenderer>   m_LightGizmoRenderer;

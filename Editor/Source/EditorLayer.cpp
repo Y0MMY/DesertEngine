@@ -184,6 +184,7 @@ namespace Desert::Editor
         m_AnimationLibrary = std::make_unique<Animation::AnimationLibrary>( m_AssetManager.get() );
         m_SceneRenderer    = std::make_unique<Graphic::SceneRenderer>();
         m_MainScene        = std::make_shared<Desert::Core::Scene>( "New Scene", m_SceneRenderer.get() );
+        m_PrimaryScene     = m_MainScene; // the always-present document #-1 (see SetActiveScene)
 
         // The scene/asset-manager the undoable structural commands operate on (the scene OBJECT is reused
         // across loads — Clear() + deserialize — so this stays valid; the history itself is cleared on
@@ -289,23 +290,7 @@ namespace Desert::Editor
         // resolve shaders in the ctor). Meshes/skyboxes are staged behind the loading overlay instead.
         m_AssetPreloader->PreloadShaders();
 
-        m_MainScene->AddSystem<ECS::MeshECSSystem>();
-        m_MainScene->AddSystem<ECS::TextECSSystem>();
-        m_MainScene->AddSystem<ECS::SkyboxECSSystem>();
-        m_MainScene->AddSystem<ECS::TerrainECSSystem>();
-        m_MainScene->AddSystem<ECS::PointLightECSSystem>();
-        m_MainScene->AddSystem<ECS::SpotLightECSSystem>();
-        m_MainScene->AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
-        // AttachmentSystem runs right AFTER animation: weapons-in-hand follow the freshly-posed bone this frame.
-        m_MainScene->AddSystem<ECS::AttachmentSystem>( m_MainScene.get() );
-        // ScriptSystem runs BEFORE physics: scripts set the character's move intent (+ look) which
-        // PhysicsECSSystem then executes the same frame.
-        m_MainScene->AddSystem<ECS::ScriptSystem>( m_MainScene.get(), m_AssetManager.get() );
-        m_MainScene->AddSystem<ECS::PhysicsECSSystem>( m_MainScene.get() );
-        // Maps character movement state (speed/onGround from physics) -> locomotion clip. Kept OUT of physics
-        // (mechanism vs behaviour); runs after it so it reads this frame's state.
-        m_MainScene->AddSystem<ECS::LocomotionSystem>( m_MainScene.get() );
-        m_MainScene->AddSystem<ECS::AudioECSSystem>( m_MainScene.get() );
+        BuildSceneSystems( *m_MainScene );
 
         const auto animations = m_AssetManager->FindAllByType<Assets::AnimationAsset>();
 
@@ -329,7 +314,12 @@ namespace Desert::Editor
         m_Panels.emplace_back( std::make_unique<Editor::ScenePropertiesPanel>( m_MainScene, m_AssetManager,
                                                                                m_AnimationLibrary.get() ) );
         m_Panels.emplace_back( std::make_unique<Editor::ShaderLibraryPanel>() );
-        m_Panels.emplace_back( std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() ) );
+        {
+            auto primaryViewport = std::make_unique<Editor::ViewportPanel>( m_MainScene, m_AssetManager.get() );
+            // Focusing the main viewport rebinds the editor back to the primary scene (index -1).
+            primaryViewport->SetOnActivate( [this] { SetActiveScene( -1 ); } );
+            m_Panels.emplace_back( std::move( primaryViewport ) );
+        }
         {
             auto fileExplorer = std::make_unique<Editor::FileExplorerPanel>( Common::Constants::Path::ASSETS_PATH,
                                                                              m_AssetManager.get(), m_MainScene );
@@ -427,6 +417,14 @@ namespace Desert::Editor
             NewSceneInternal();
         }
 
+        // Opening an extra scene view allocates a fresh SceneRenderer + Init() (WaitDeviceIdle + framebuffer
+        // creation) — deferred here, between frames, for the same reason as scene load/stop above.
+        if ( m_AddSceneViewRequested && !StartupLoading() )
+        {
+            m_AddSceneViewRequested = false;
+            AddSceneView();
+        }
+
         // Stop is deferred here (between frames) so it never destroys/recreates render resources while a
         // command buffer that references them is in flight — see m_PendingSceneStop.
         if ( m_PendingSceneStop )
@@ -498,30 +496,15 @@ namespace Desert::Editor
         if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
             materialService->CollectGarbage();
 
-        // Push the editor-only selection-outline appearance into the renderer before it records this frame.
-        // Outline lives in EditorPreferences (viewport aid), not in the scene, so it is fed here per-frame.
-        if ( auto* sceneRenderer = m_MainScene->GetSceneRenderer() )
-        {
-            const auto& prefs = EditorPreferences::Get();
-            sceneRenderer->SetOutlineSettings( prefs.OutlineColor, prefs.OutlineWidth, prefs.OutlineSmoothness,
-                                               prefs.EnableOutline );
-        }
-
-        Common::BoolResultStr beginResult = BOOLSUCCESS;
-        {
-            DESERT_PROFILE_SCOPE( "Scene::BeginScene" );
-            beginResult = m_MainScene->BeginScene();
-        }
-        if ( !beginResult )
-        {
-            return Common::MakeError( beginResult.GetError() );
-        }
-        m_RenderRegistry->Render();
-
-        {
-            DESERT_PROFILE_SCOPE( "Scene::OnUpdate" );
-            m_MainScene->OnUpdate( ts );
-        }
+        // Multi-scene editing: drive EVERY open document each frame so all viewports render live. The active
+        // one is m_MainScene (rebound on viewport focus); RigBuilder / F9 below act on it only. The outline
+        // aid + Begin/RegistryRender/OnUpdate/End are folded into UpdateSceneFrame (see below), applied per
+        // scene so a secondary viewport is a full, independent render — not a static snapshot.
+        if ( auto r = UpdateSceneFrame( *m_PrimaryScene, m_RenderRegistry.get(), ts ); !r )
+            return Common::MakeError( r.GetError() );
+        for ( auto& doc : m_ExtraScenes )
+            if ( auto r = UpdateSceneFrame( *doc->Scene, doc->Registry.get(), ts ); !r )
+                return Common::MakeError( r.GetError() );
 
         // Runs a queued "Convert to Skinned" (rig builder) here, outside ImGui component iteration — the swap
         // removes the StaticMeshComponent the Details panel is drawing, so it must not happen mid-render.
@@ -552,18 +535,108 @@ namespace Desert::Editor
             s_f9Prev = f9;
         }
 
-        Common::BoolResultStr endResult = BOOLSUCCESS;
+        return BOOLSUCCESS;
+    }
+
+    void EditorLayer::BuildSceneSystems( Desert::Core::Scene& scene )
+    {
+        scene.AddSystem<ECS::MeshECSSystem>();
+        scene.AddSystem<ECS::TextECSSystem>();
+        scene.AddSystem<ECS::SkyboxECSSystem>();
+        scene.AddSystem<ECS::TerrainECSSystem>();
+        scene.AddSystem<ECS::PointLightECSSystem>();
+        scene.AddSystem<ECS::SpotLightECSSystem>();
+        scene.AddSystem<ECS::AnimationECSSystem>( m_AnimationLibrary.get() );
+        // AttachmentSystem runs right AFTER animation: weapons-in-hand follow the freshly-posed bone this frame.
+        scene.AddSystem<ECS::AttachmentSystem>( &scene );
+        // ScriptSystem runs BEFORE physics: scripts set the character's move intent (+ look) which
+        // PhysicsECSSystem then executes the same frame.
+        scene.AddSystem<ECS::ScriptSystem>( &scene, m_AssetManager.get() );
+        scene.AddSystem<ECS::PhysicsECSSystem>( &scene );
+        // Maps character movement state (speed/onGround from physics) -> locomotion clip. Kept OUT of physics
+        // (mechanism vs behaviour); runs after it so it reads this frame's state.
+        scene.AddSystem<ECS::LocomotionSystem>( &scene );
+        scene.AddSystem<ECS::AudioECSSystem>( &scene );
+    }
+
+    Common::BoolResultStr EditorLayer::UpdateSceneFrame( Desert::Core::Scene&    scene,
+                                                         Render::RenderRegistry* registry,
+                                                         const Common::Timestep& ts )
+    {
+        // Editor-only selection-outline appearance (from EditorPreferences, not scene data) is pushed per
+        // scene before it records this frame.
+        if ( auto* sr = scene.GetSceneRenderer() )
         {
-            DESERT_PROFILE_SCOPE( "Scene::EndScene" );
-            endResult = m_MainScene->EndScene();
+            const auto& prefs = EditorPreferences::Get();
+            sr->SetOutlineSettings( prefs.OutlineColor, prefs.OutlineWidth, prefs.OutlineSmoothness,
+                                    prefs.EnableOutline );
         }
 
-        if ( !endResult )
         {
-            return Common::MakeError( endResult.GetError() );
+            DESERT_PROFILE_SCOPE( "Scene::BeginScene" );
+            if ( auto begin = scene.BeginScene(); !begin )
+                return Common::MakeError( begin.GetError() );
+        }
+
+        if ( registry )
+            registry->Render();
+
+        {
+            DESERT_PROFILE_SCOPE( "Scene::OnUpdate" );
+            scene.OnUpdate( ts );
+        }
+
+        {
+            DESERT_PROFILE_SCOPE( "Scene::EndScene" );
+            if ( auto end = scene.EndScene(); !end )
+                return Common::MakeError( end.GetError() );
         }
 
         return BOOLSUCCESS;
+    }
+
+    void EditorLayer::AddSceneView()
+    {
+        auto      doc = std::make_unique<SceneDocument>();
+        const int idx = static_cast<int>( m_ExtraScenes.size() );
+        doc->Name     = "Scene " + std::to_string( idx + 2 ); // the main scene reads as "Scene 1"
+
+        doc->Renderer = std::make_unique<Graphic::SceneRenderer>();
+        doc->Scene    = std::make_shared<Desert::Core::Scene>( std::string( doc->Name ), doc->Renderer.get() );
+        BuildSceneSystems( *doc->Scene );
+        doc->Scene->Init();
+        doc->Registry = std::make_unique<Render::RenderRegistry>( doc->Scene );
+
+        // Unique ImGui id per viewport — two windows sharing an id would merge into a single dockable window.
+        const std::string title = doc->Name + "###sceneview" + std::to_string( idx );
+        auto              vp = std::make_unique<Editor::ViewportPanel>( doc->Scene, m_AssetManager.get(), title );
+        vp->SetOnActivate( [this, idx] { SetActiveScene( idx ); } );
+        vp->GetVisibility() = true;
+        doc->Viewport       = vp.get();
+        m_Panels.emplace_back( std::move( vp ) );
+
+        m_ExtraScenes.emplace_back( std::move( doc ) );
+        LOG_INFO( "[Editor] Opened a new scene view (now {} scenes open)", m_ExtraScenes.size() + 1 );
+    }
+
+    void EditorLayer::SetActiveScene( int index )
+    {
+        if ( index == m_ActiveSceneIndex || index >= static_cast<int>( m_ExtraScenes.size() ) )
+            return;
+
+        m_ActiveSceneIndex = index;
+        m_MainScene        = ( index < 0 ) ? m_PrimaryScene : m_ExtraScenes[index]->Scene;
+
+        // Structural undo/redo context + the scene-bound editing panels follow the active document, so the
+        // Outliner / Details / Settings / Particle editor all show whichever viewport you are working in.
+        Commands::SetContext( m_MainScene.get(), m_AssetManager.get() );
+        for ( auto& panel : m_Panels )
+            panel->SetScene( m_MainScene );
+
+        // Selection is per-scene (entity UUIDs belong to one registry) — don't carry a stale one across.
+        Core::SelectionManager::ClearSelection();
+
+        LOG_INFO( "[Editor] Active scene -> '{}'", m_MainScene->GetSceneName() );
     }
 
     Common::BoolResultStr EditorLayer::OnImGuiRender()
@@ -1840,6 +1913,15 @@ namespace Desert::Editor
             PrepareScenePopup();
             m_OpenScenePopup = true;
         }
+
+        ImGui::Separator();
+        // Multi-scene editing: open a second, independent scene in its own live viewport (own SceneRenderer)
+        // so a UI/main-menu scene and the game scene can be worked on side by side without switching. Focus a
+        // viewport to make its scene active — the Outliner/Details/gizmo follow it.
+        if ( ImGui::MenuItem( ICON_MDI_PLUS_BOX_MULTIPLE " New Scene View" ) )
+            m_AddSceneViewRequested = true; // deferred to OnUpdate (allocates GPU resources) — see there
+        if ( !m_ExtraScenes.empty() )
+            ImGui::TextDisabled( "%d scene view(s) open + main", static_cast<int>( m_ExtraScenes.size() ) );
 
         if ( !m_RecentScenes.empty() )
         {

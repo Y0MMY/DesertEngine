@@ -14,6 +14,7 @@ namespace Desert::Editor
 {
     class ImportManager;
     class FileExplorerPanel;
+    class ViewportPanel;
 
     class EditorLayer : public Common::Layer
     {
@@ -93,6 +94,20 @@ namespace Desert::Editor
         void LoadSceneInternal( const Common::Filepath& path );
         void NewSceneInternal(); // clears the current scene to a fresh empty one (File -> New Scene / Ctrl+N)
 
+        // ===== Multi-scene editing (independent SceneRenderers) =====
+        // Adds the standard ECS systems to a scene (shared by the main scene and any extra scene views).
+        void BuildSceneSystems( Desert::Core::Scene& scene );
+        // Opens a new, empty scene alongside the main one — its own SceneRenderer + RenderRegistry + a live
+        // dockable viewport. Work on a UI/main-menu scene next to the game scene without switching.
+        void AddSceneView();
+        // Rebinds the editor to a focused document: m_MainScene (and thus every play/save/gizmo call site)
+        // points at it, Commands + the scene-bound panels follow. index < 0 = the primary/main scene.
+        void SetActiveScene( int index );
+        // Runs one render frame for a scene (outline aid + Begin/RegistryRender/OnUpdate/End). Called for
+        // every open document each frame so all viewports stay live.
+        Common::BoolResultStr UpdateSceneFrame( Desert::Core::Scene& scene, Render::RenderRegistry* registry,
+                                                const Common::Timestep& ts );
+
         // Startup content is DATA, not code — these build entities into m_MainScene so the result
         // can be serialized to a .desce ONCE and loaded like any scene afterwards.
         void BuildStarterScene();    // fresh Hub project's DefaultScene: sun/ground/cube/light/camera
@@ -124,9 +139,26 @@ namespace Desert::Editor
 
         FileExplorerPanel* m_FileExplorerPanel = nullptr; // non-owning (lives in m_Panels)
 
+        // m_MainScene is the ACTIVE document — rebound to the focused viewport's scene so the 100+ existing
+        // call sites (play/save/gizmo/autosave) operate on it without change. m_PrimaryScene keeps a handle
+        // to the original (index -1) so we can rebind back to it.
         std::shared_ptr<Desert::Core::Scene> m_MainScene;
+        std::shared_ptr<Desert::Core::Scene> m_PrimaryScene;
 
         std::unique_ptr<Render::RenderRegistry> m_RenderRegistry;
+
+        // Extra scenes opened alongside the main one (Scenes -> New Scene View). Each owns its own renderer,
+        // editor render-registry and a live ViewportPanel (non-owning ptr; the panel lives in m_Panels).
+        struct SceneDocument
+        {
+            std::string                             Name;
+            std::shared_ptr<Desert::Core::Scene>    Scene;
+            std::unique_ptr<Graphic::SceneRenderer> Renderer;
+            std::unique_ptr<Render::RenderRegistry> Registry;
+            ViewportPanel*                          Viewport = nullptr;
+        };
+        std::vector<std::unique_ptr<SceneDocument>> m_ExtraScenes;
+        int                                         m_ActiveSceneIndex = -1; // -1 = primary; else m_ExtraScenes[i]
 
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
@@ -144,9 +176,10 @@ namespace Desert::Editor
         char m_LayoutNameBuf[64]   = {};
 #endif
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
-        bool                                    m_OpenScenePopup     = false;
-        bool                                    m_SaveSceneRequested = false;
-        bool                                    m_NewSceneRequested  = false;
+        bool                                    m_OpenScenePopup        = false;
+        bool                                    m_SaveSceneRequested    = false;
+        bool                                    m_NewSceneRequested     = false;
+        bool                                    m_AddSceneViewRequested = false; // Scenes -> New Scene View
 
         // Staged startup loading (UI loader): the heavy boot work (mesh cooking, asset preload) runs one
         // stage per frame from OnUpdate while OnImGuiRender shows a fullscreen progress overlay — instead

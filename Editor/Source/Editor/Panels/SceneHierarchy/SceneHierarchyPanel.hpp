@@ -18,6 +18,10 @@ namespace Desert::Editor
         {
         }
         void OnUIRender() override;
+        void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
+        {
+            m_Scene = scene;
+        }
 
     private:
         static const char* GetEntityTypeName( const ECS::Entity& entity );
@@ -27,7 +31,7 @@ namespace Desert::Editor
         void               SelectRangeTo( const Common::UUID& target ); // Shift+click
 
     private:
-        const std::shared_ptr<Desert::Core::Scene>  m_Scene;
+        std::shared_ptr<Desert::Core::Scene>        m_Scene;
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
         ImGuiTextFilter                             m_HierarchyFilter;
         ImGuiTextFilter                             m_AddComponentFilter; // shared grouped Add-Component menu

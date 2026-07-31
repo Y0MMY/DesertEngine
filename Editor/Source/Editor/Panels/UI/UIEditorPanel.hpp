@@ -26,6 +26,10 @@ namespace Desert::Editor
             return ImVec2( 900.0f, 560.0f );
         }
         void OnUIRender() override;
+        void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
+        {
+            m_Scene = scene;
+        }
 
     private:
         std::shared_ptr<::Desert::Core::Scene> m_Scene;

@@ -21,6 +21,10 @@ namespace Desert::Editor
         explicit SceneSettingsPanel( std::shared_ptr<::Desert::Core::Scene> scene );
 
         void OnUIRender() override;
+        void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
+        {
+            m_Scene = scene;
+        }
 
     private:
         std::shared_ptr<::Desert::Core::Scene> m_Scene;

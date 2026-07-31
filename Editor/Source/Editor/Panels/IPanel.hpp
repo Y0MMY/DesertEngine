@@ -1,10 +1,16 @@
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include <ImGui/imgui.h>
 
 #include <Common/Core/Events/Event.hpp>
+
+namespace Desert::Core
+{
+    class Scene;
+}
 
 namespace Desert::Editor
 {
@@ -20,6 +26,13 @@ namespace Desert::Editor
         virtual void OnPreUpdate()               {}
         virtual ~IPanel()                        = default;
         virtual void       OnUIRender()          = 0;
+
+        // Multi-scene editing: rebind a scene-bound panel to the newly-focused scene so the Outliner,
+        // Details, Settings, etc. follow whichever viewport the user is working in. No-op for panels that
+        // are not tied to a specific scene (asset browser, logs, ...). See EditorLayer::SetActiveScene.
+        virtual void SetScene( const std::shared_ptr<Desert::Core::Scene>& /*scene*/ )
+        {
+        }
         const std::string& GetName() const
         {
             return m_PanelName;

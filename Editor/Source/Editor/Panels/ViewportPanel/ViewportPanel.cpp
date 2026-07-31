@@ -48,8 +48,8 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
     ViewportPanel::ViewportPanel( const std::shared_ptr<Desert::Core::Scene>& scene,
-                                  const Assets::AssetManager*                 assetManager )
-         : IPanel( "Scene###scene" ), m_Scene( scene ), m_AssetManager( assetManager )
+                                  const Assets::AssetManager* assetManager, std::string title )
+         : IPanel( std::move( title ) ), m_Scene( scene ), m_AssetManager( assetManager )
     {
         m_UIHelper = std::make_unique<Editor::UI::UIHelper>();
         m_UIHelper->Init();
@@ -505,6 +505,11 @@ namespace Desert::Editor
         }
 
         m_ViewportData.IsHovered = ImGui::IsWindowHovered();
+
+        // Multi-scene: focusing this viewport makes ITS scene the active one (Outliner/Details/gizmo
+        // follow). Idempotent on the editor side, so calling it every focused frame is fine.
+        if ( m_OnActivate && ImGui::IsWindowFocused() )
+            m_OnActivate();
 
         // Feed the fly-camera its input gate: WASD/QE/arrows work while the viewport is hovered
         // and no text field owns the keyboard (otherwise typing "wasd" in a search box flies away).
