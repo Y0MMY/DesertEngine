@@ -420,6 +420,13 @@ namespace Desert::Editor
             LoadSceneInternal( path );
         }
 
+        // New (empty) scene — deferred like a load so it never tears down resources mid-frame.
+        if ( m_NewSceneRequested && !StartupLoading() )
+        {
+            m_NewSceneRequested = false;
+            NewSceneInternal();
+        }
+
         // Stop is deferred here (between frames) so it never destroys/recreates render resources while a
         // command buffer that references them is in flight — see m_PendingSceneStop.
         if ( m_PendingSceneStop )
@@ -646,6 +653,9 @@ namespace Desert::Editor
                 if ( ::ImGui::IsKeyPressed( ImGuiKey_V, false ) )
                     if ( auto pasted = Commands::PasteClipboard(); !pasted.empty() )
                         Core::SelectionManager::SetSelection( std::move( pasted ) );
+
+                if ( ::ImGui::IsKeyPressed( ImGuiKey_N, false ) )
+                    m_NewSceneRequested = true; // Ctrl+N -> fresh empty scene (deferred, see OnUpdate)
 
                 if ( ::ImGui::IsKeyPressed( ImGuiKey_S, false ) )
                 {
@@ -1023,6 +1033,7 @@ namespace Desert::Editor
 
         if ( ImGui::MenuItem( "New Scene", "CTRL+N" ) )
         {
+            m_NewSceneRequested = true;
         }
         if ( ImGui::MenuItem( "Save Scene", "CTRL+S" ) )
         {
@@ -1749,6 +1760,28 @@ namespace Desert::Editor
     void EditorLayer::LoadScene( const Common::Filepath& path )
     {
         m_SceneLoadRequested = path;
+    }
+
+    void EditorLayer::NewSceneInternal()
+    {
+        // Same teardown as a load, minus the deserialize: clear the current scene to empty and re-init. The
+        // Scene object is REUSED (panels hold its shared_ptr), so their references stay valid.
+        EngineContext::GetInstance().GetDevice()->WaitIdle();
+
+        CommandHistory::Get().Clear();
+        s_SavedRevision = CommandHistory::Get().Revision();
+
+        Core::SelectionManager::ClearSelection();
+        m_MainScene->Clear();
+        m_MainScene->SetSceneName( "New Scene" );
+        m_MainScene->Init();
+
+        // Rebuild the render registry against the fresh registry (its dtor unregisters editor passes by name).
+        m_RenderRegistry.reset();
+        m_RenderRegistry = std::make_unique<Render::RenderRegistry>( m_MainScene );
+
+        Editor::ToastManager::Push( "New scene", Editor::ToastLevel::Success );
+        LOG_INFO( "[Scene] New empty scene" );
     }
 
     void EditorLayer::LoadSceneInternal( const Common::Filepath& path )

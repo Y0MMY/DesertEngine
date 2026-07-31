@@ -91,6 +91,7 @@ namespace Desert::Editor
         void PrepareScenePopup();
         void LoadScene( const Common::Filepath& path );
         void LoadSceneInternal( const Common::Filepath& path );
+        void NewSceneInternal(); // clears the current scene to a fresh empty one (File -> New Scene / Ctrl+N)
 
         // Startup content is DATA, not code — these build entities into m_MainScene so the result
         // can be serialized to a .desce ONCE and loaded like any scene afterwards.
@@ -109,7 +110,7 @@ namespace Desert::Editor
         };
 
         EditorState m_EditorState;
-        std::string m_PlaySnapshot; // serialized scene captured on Play, restored on Stop
+        std::string m_PlaySnapshot;        // serialized scene captured on Play, restored on Stop
         bool        m_ShowProfiler = true; // View ▸ Profiler toggles the profiler window
 
     private:
@@ -145,6 +146,7 @@ namespace Desert::Editor
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;
         bool                                    m_OpenScenePopup     = false;
         bool                                    m_SaveSceneRequested = false;
+        bool                                    m_NewSceneRequested  = false;
 
         // Staged startup loading (UI loader): the heavy boot work (mesh cooking, asset preload) runs one
         // stage per frame from OnUpdate while OnImGuiRender shows a fullscreen progress overlay — instead
@@ -157,18 +159,18 @@ namespace Desert::Editor
         std::vector<StartupStage> m_StartupStages;
         size_t                    m_StartupNext           = 0;
         int                       m_StartupFramesRendered = 0;
-        bool StartupLoading() const
+        bool                      StartupLoading() const
         {
             return m_StartupNext < m_StartupStages.size();
         }
-        std::optional<Common::Filepath>         m_SceneLoadRequested;
+        std::optional<Common::Filepath> m_SceneLoadRequested;
         // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run
         // BETWEEN frames (like a scene load), never inline in the ImGui Stop-button handler — otherwise the
         // next frame begins a render pass against a just-destroyed framebuffer (driver access violation in
         // vkCmdBeginRenderPass). Deferred to the top of OnUpdate.
-        bool                                    m_PendingSceneStop = false;
-        std::vector<Common::Filepath>           m_AvailableScenes;
-        std::vector<Common::Filepath>           m_RecentScenes;
-        int                                     m_SelectedSceneIndex = -1;
+        bool                          m_PendingSceneStop = false;
+        std::vector<Common::Filepath> m_AvailableScenes;
+        std::vector<Common::Filepath> m_RecentScenes;
+        int                           m_SelectedSceneIndex = -1;
     };
 } // namespace Desert::Editor
