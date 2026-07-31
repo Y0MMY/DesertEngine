@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 
+#include <Engine/Assets/Common.hpp>
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
 namespace Desert::Core
@@ -178,5 +179,14 @@ namespace Desert::Core
         // Time of Day was removed: the sun's single source of truth is the directional-light ENTITY
         // (its position encodes the direction; sky + lighting follow it). Old scene files may still
         // carry the fields — unknown keys are ignored on load.
+
+        // Splash screen: an image the standalone Runtime shows full-screen when THIS scene loads (the boot
+        // scene's splash is the game's startup splash). Duration 0 = no splash; Fade = in/out seconds.
+        PROPERTY( DisplayName( "Splash Sprite" ), Category( "Splash" ) )
+        Assets::AssetHandle SplashSprite;
+        PROPERTY( DisplayName( "Splash Duration" ), Category( "Splash" ), Range( 0.0f, 10.0f ) )
+        float SplashDuration = 0.0f;
+        PROPERTY( DisplayName( "Splash Fade" ), Category( "Splash" ), Range( 0.0f, 3.0f ) )
+        float SplashFade = 0.4f;
     };
 } // namespace Desert::Core

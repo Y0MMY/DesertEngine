@@ -660,6 +660,9 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Sprite" ), Category( "UI Panel" ) )
         Assets::AssetHandle Sprite; // optional background image, tinted by Color * Opacity. Unset = flat colour.
+
+        PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Panel" ) )
+        glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
     };
     struct UIPanelComponent
     {
@@ -728,6 +731,9 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Pressed Sprite" ), Category( "UI Button" ) )
         Assets::AssetHandle PressedSprite; // shown while pressed (falls back to Sprite if unset)
+
+        PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Button" ) )
+        glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
     };
     struct UIButtonComponent
     {

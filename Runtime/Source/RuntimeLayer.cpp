@@ -30,6 +30,9 @@
 
 #include <ImGui/imgui.h>
 
+#include <Engine/Graphic/Texture.hpp>
+
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <string_view>
@@ -102,6 +105,7 @@ namespace Desert::Player
 
         // Straight into gameplay: scripts tick, physics runs, the main CameraComponent drives the view.
         m_Scene->SetState( Core::Scene::SceneState::Play );
+        TriggerSplash(); // the boot scene's splash is the game's startup splash
         return BOOLSUCCESS;
     }
 
@@ -136,11 +140,27 @@ namespace Desert::Player
             return;
         }
         m_Scene->SetState( Core::Scene::SceneState::Play );
+        TriggerSplash();
         LOG_INFO( "[Runtime] Switched scene: {}", path );
+    }
+
+    void RuntimeLayer::TriggerSplash()
+    {
+        const auto& s = m_Scene->GetSettings();
+        if ( s.SplashDuration > 0.0f )
+        {
+            m_SplashSprite   = s.SplashSprite;
+            m_SplashDuration = s.SplashDuration;
+            m_SplashFade     = s.SplashFade;
+            m_SplashTimer    = s.SplashDuration;
+        }
     }
 
     Common::BoolResultStr RuntimeLayer::OnUpdate( const Common::Timestep& ts )
     {
+        if ( m_SplashTimer > 0.0f )
+            m_SplashTimer -= ts.GetMilliseconds() * 0.001f;
+
         // A UI button requested a scene switch last frame: apply it here, between frames, before any
         // recording starts (Clear() destroys GPU resources — same rule as the resize below).
         if ( m_PendingSceneLoad )
@@ -247,6 +267,46 @@ namespace Desert::Player
             else
             {
                 LOG_INFO( "[Runtime] UI message: '{}' (consume it in a ScriptSystem)", clicked );
+            }
+        }
+
+        // Splash screen overlay (topmost): a full-screen fade + centred image while m_SplashTimer runs.
+        if ( m_SplashTimer > 0.0f )
+        {
+            const float elapsed = m_SplashDuration - m_SplashTimer;
+            float       a       = 1.0f;
+            if ( m_SplashFade > 0.0f )
+            {
+                if ( elapsed < m_SplashFade )
+                    a = elapsed / m_SplashFade; // fade in
+                else if ( m_SplashTimer < m_SplashFade )
+                    a = m_SplashTimer / m_SplashFade; // fade out
+            }
+            a = std::clamp( a, 0.0f, 1.0f );
+
+            ImDrawList*  fdl = ::ImGui::GetWindowDrawList();
+            const ImVec2 p0  = viewport->Pos;
+            const ImVec2 p1( viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y );
+            fdl->AddRectFilled( p0, p1, IM_COL32( 0, 0, 0, static_cast<int>( a * 255.0f ) ) );
+
+            if ( auto* tex = ::Desert::Runtime::ResourceRegistry::GetTextureService()->Get( m_SplashSprite ) )
+            {
+                auto* img = static_cast<Graphic::Image2D*>(
+                     ::Desert::Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+                if ( img && img->GetWidth() > 0 && img->GetHeight() > 0 )
+                {
+                    std::shared_ptr<Graphic::Image2D> imgPtr( img, []( Graphic::Image2D* ) {} );
+                    const void*                       id = m_UITextureCache->AddTextureCache( imgPtr );
+                    const float                       iw = static_cast<float>( img->GetWidth() ),
+                                                      ih = static_cast<float>( img->GetHeight() );
+                    const float  fit = std::min( viewport->Size.x / iw, viewport->Size.y / ih );
+                    const float  w = iw * fit, h = ih * fit;
+                    const ImVec2 cc( viewport->Pos.x + viewport->Size.x * 0.5f,
+                                     viewport->Pos.y + viewport->Size.y * 0.5f );
+                    fdl->AddImage( (ImTextureID)id, ImVec2( cc.x - w * 0.5f, cc.y - h * 0.5f ),
+                                   ImVec2( cc.x + w * 0.5f, cc.y + h * 0.5f ), ImVec2( 0, 0 ), ImVec2( 1, 1 ),
+                                   IM_COL32( 255, 255, 255, static_cast<int>( a * 255.0f ) ) );
+                }
             }
         }
 

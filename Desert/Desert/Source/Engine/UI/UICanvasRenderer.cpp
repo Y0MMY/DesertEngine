@@ -48,18 +48,46 @@ namespace Desert::UI
         }
 
         // Draw a filled UI box: a sprite (tinted by `col`) when one is bound + resolvable, else a flat colour.
+        // srcBorder (L,T,R,B in SOURCE pixels) enables 9-slice: corners stay unstretched (x canvas scale),
+        // edges/centre stretch — so image buttons/panels resize without distorting their borders.
         void DrawBox( ImDrawList* dl, const ImVec2& mn, const ImVec2& mx, const glm::vec3& col, float alpha,
-                      float rounding, const Assets::AssetHandle& sprite, const SpriteResolver& resolver )
+                      float rounding, const Assets::AssetHandle& sprite, const SpriteResolver& resolver,
+                      const glm::vec4& srcBorder = glm::vec4( 0.0f ), float scale = 1.0f )
         {
-            const void* tex = nullptr;
+            std::shared_ptr<Graphic::Image2D> img;
+            const void*                       tex = nullptr;
             if ( resolver )
-                if ( auto img = ResolveSpriteImage( sprite ) )
+                if ( ( img = ResolveSpriteImage( sprite ) ) )
                     tex = resolver( img );
-            if ( tex )
-                dl->AddImage( (ImTextureID)tex, mn, mx, ImVec2( 0.0f, 0.0f ), ImVec2( 1.0f, 1.0f ),
-                              Col( col, alpha ) );
-            else
+            if ( !tex )
+            {
                 dl->AddRectFilled( mn, mx, Col( col, alpha ), rounding );
+                return;
+            }
+
+            const ImU32 tint = Col( col, alpha );
+            const float tw   = img ? static_cast<float>( img->GetWidth() ) : 0.0f;
+            const float th   = img ? static_cast<float>( img->GetHeight() ) : 0.0f;
+            const bool  nine =
+                 tw > 0.0f && th > 0.0f &&
+                 ( srcBorder.x > 0.0f || srcBorder.y > 0.0f || srcBorder.z > 0.0f || srcBorder.w > 0.0f );
+            if ( !nine )
+            {
+                dl->AddImage( (ImTextureID)tex, mn, mx, ImVec2( 0.0f, 0.0f ), ImVec2( 1.0f, 1.0f ), tint );
+                return;
+            }
+
+            const float hw = ( mx.x - mn.x ) * 0.5f, hh = ( mx.y - mn.y ) * 0.5f;
+            const float pl = std::min( srcBorder.x * scale, hw ), pt = std::min( srcBorder.y * scale, hh );
+            const float pr = std::min( srcBorder.z * scale, hw ), pb = std::min( srcBorder.w * scale, hh );
+            const float xs[4] = { mn.x, mn.x + pl, mx.x - pr, mx.x };
+            const float ys[4] = { mn.y, mn.y + pt, mx.y - pb, mx.y };
+            const float us[4] = { 0.0f, srcBorder.x / tw, 1.0f - srcBorder.z / tw, 1.0f };
+            const float vs[4] = { 0.0f, srcBorder.y / th, 1.0f - srcBorder.w / th, 1.0f };
+            for ( int r = 0; r < 3; ++r )
+                for ( int c = 0; c < 3; ++c )
+                    dl->AddImage( (ImTextureID)tex, ImVec2( xs[c], ys[r] ), ImVec2( xs[c + 1], ys[r + 1] ),
+                                  ImVec2( us[c], vs[r] ), ImVec2( us[c + 1], vs[r + 1] ), tint );
         }
 
         // Maps the canvas to the viewport per its scale mode (see UICanvasScaleMode). Returns the canvas root
@@ -126,7 +154,7 @@ namespace Desert::UI
                         spr = b.PressedSprite;
                     else if ( hover && HandleSet( b.HoverSprite ) )
                         spr = b.HoverSprite;
-                    DrawBox( dl, mn, mx, c, 1.0f, 6.0f, spr, sprites );
+                    DrawBox( dl, mn, mx, c, 1.0f, 6.0f, spr, sprites, b.SpriteBorder, scale );
 
                     if ( hover && outClicked && ImGui::IsMouseReleased( ImGuiMouseButton_Left ) )
                     {
@@ -154,7 +182,8 @@ namespace Desert::UI
                 else if ( reg.has<ECS::UIPanelComponent>( e ) )
                 {
                     const auto& p = reg.get<ECS::UIPanelComponent>( e ).Data;
-                    DrawBox( dl, mn, mx, p.Color, p.Opacity, p.CornerRadius, p.Sprite, sprites );
+                    DrawBox( dl, mn, mx, p.Color, p.Opacity, p.CornerRadius, p.Sprite, sprites, p.SpriteBorder,
+                             scale );
                 }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )

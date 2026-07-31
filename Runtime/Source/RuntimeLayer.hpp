@@ -50,5 +50,13 @@ namespace Desert::Player
 
         // A UI button clicked this frame with an "scene:<path>" OnClickMessage — applied next OnUpdate.
         std::optional<std::string> m_PendingSceneLoad;
+
+        // Splash screen (SceneSettings.Splash*): a full-screen image shown when a scene loads, fading in/out.
+        // Armed by TriggerSplash() on load; m_SplashTimer counts down each frame.
+        Assets::AssetHandle m_SplashSprite;
+        float               m_SplashTimer    = 0.0f;
+        float               m_SplashDuration = 0.0f;
+        float               m_SplashFade     = 0.4f;
+        void                TriggerSplash();
     };
 } // namespace Desert::Player

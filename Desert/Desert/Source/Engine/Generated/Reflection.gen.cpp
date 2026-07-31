@@ -57,6 +57,9 @@ namespace
                     .Field( FieldInfo{ .Name = "WindDirection", .Type = FieldType::Float, .Offset = offsetof( T, WindDirection ), .Size = sizeof( T::WindDirection ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Direction", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 360.0f, } } )
                     .Field( FieldInfo{ .Name = "WindStrength", .Type = FieldType::Float, .Offset = offsetof( T, WindStrength ), .Size = sizeof( T::WindStrength ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Strength", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
                     .Field( FieldInfo{ .Name = "WindTurbulence", .Type = FieldType::Float, .Offset = offsetof( T, WindTurbulence ), .Size = sizeof( T::WindTurbulence ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Wind Turbulence", .Category = "Wind", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 3.0f, } } )
+                    .Field( FieldInfo{ .Name = "SplashSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, SplashSprite ), .Size = sizeof( T::SplashSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Splash Sprite", .Category = "Splash", } } )
+                    .Field( FieldInfo{ .Name = "SplashDuration", .Type = FieldType::Float, .Offset = offsetof( T, SplashDuration ), .Size = sizeof( T::SplashDuration ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Splash Duration", .Category = "Splash", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 10.0f, } } )
+                    .Field( FieldInfo{ .Name = "SplashFade", .Type = FieldType::Float, .Offset = offsetof( T, SplashFade ), .Size = sizeof( T::SplashFade ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Splash Fade", .Category = "Splash", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 3.0f, } } )
                     .WithDefault<T>()
                     .Register();
             }
@@ -181,6 +184,7 @@ namespace
                     .Field( FieldInfo{ .Name = "Opacity", .Type = FieldType::Float, .Offset = offsetof( T, Opacity ), .Size = sizeof( T::Opacity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Opacity", .Category = "UI Panel", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
                     .Field( FieldInfo{ .Name = "CornerRadius", .Type = FieldType::Float, .Offset = offsetof( T, CornerRadius ), .Size = sizeof( T::CornerRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Corner Radius", .Category = "UI Panel", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 64.0f, } } )
                     .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Sprite", .Category = "UI Panel", } } )
+                    .Field( FieldInfo{ .Name = "SpriteBorder", .Type = FieldType::Vec4, .Offset = offsetof( T, SpriteBorder ), .Size = sizeof( T::SpriteBorder ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Sprite Border L/T/R/B", .Category = "UI Panel", } } )
                     .WithDefault<T>()
                     .Register();
             }
@@ -205,6 +209,7 @@ namespace
                     .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Sprite", .Category = "UI Button", } } )
                     .Field( FieldInfo{ .Name = "HoverSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, HoverSprite ), .Size = sizeof( T::HoverSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Hover Sprite", .Category = "UI Button", } } )
                     .Field( FieldInfo{ .Name = "PressedSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, PressedSprite ), .Size = sizeof( T::PressedSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Pressed Sprite", .Category = "UI Button", } } )
+                    .Field( FieldInfo{ .Name = "SpriteBorder", .Type = FieldType::Vec4, .Offset = offsetof( T, SpriteBorder ), .Size = sizeof( T::SpriteBorder ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Sprite Border L/T/R/B", .Category = "UI Button", } } )
                     .WithDefault<T>()
                     .Register();
             }
