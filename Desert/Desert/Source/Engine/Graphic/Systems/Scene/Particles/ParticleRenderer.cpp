@@ -72,11 +72,15 @@ namespace Desert::Graphic::System
             return false;
 
         GraphicsPipelineSpecification base;
-        base.Shader            = billShader;
-        base.Framebuffer       = target;
-        base.DepthTestEnabled  = true;  // occlude behind opaque geometry
-        base.DepthWriteEnabled = false; // transparent: never write depth
-        base.DepthCompareOp    = CompareOp::LessOrEqual;
+        base.Shader      = billShader;
+        base.Framebuffer = target;
+        // Additive FX read as "always visible": depth-testing billboards against the scene made them vanish
+        // when the camera looked DOWN at particles sitting near a surface (the surface occluded them), while
+        // they showed when looking up (nothing behind). Draw them without a depth test (never write depth
+        // either), in the Transparency phase — the common default for glow/fire/sparks. (A per-emitter
+        // "occlude" toggle can bring depth testing back for smoke/dust that should hide behind walls.)
+        base.DepthTestEnabled  = false;
+        base.DepthWriteEnabled = false;
         base.CullMode          = CullMode::None;
         base.Topology          = PrimitiveTopology::Triangles;
         base.BlendEnable       = true;

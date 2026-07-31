@@ -30,6 +30,7 @@ namespace Desert::Editor
         const std::shared_ptr<Desert::Core::Scene>  m_Scene;
         const std::shared_ptr<Assets::AssetManager> m_AssetManager;
         ImGuiTextFilter                             m_HierarchyFilter;
+        ImGuiTextFilter                             m_AddComponentFilter; // shared grouped Add-Component menu
         // Member default -> evaluated at panel construction, i.e. AFTER the project path remap.
         std::string m_PrefabInstantiatePath =
              ( Common::Constants::Path::PREFAB_PATH / "MyPrefab.deprefab" ).string();

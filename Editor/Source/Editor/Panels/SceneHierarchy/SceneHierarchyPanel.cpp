@@ -1,6 +1,7 @@
 #include "SceneHierarchyPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
 #include <Editor/Core/MaterialAssetUtils.hpp>
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Assets/MaterialData.hpp>
@@ -244,6 +245,14 @@ namespace Desert::Editor
             }
 
             ImGui::Separator();
+            // Add a component straight from the outliner, using the SAME grouped menu as Details (shared
+            // DrawAddComponentMenu — the categorization is defined in exactly one place).
+            if ( ImGui::BeginMenu( ICON_MDI_PLUS_BOX_OUTLINE " Add Component" ) )
+            {
+                DrawAddComponentMenu( entity, m_AddComponentFilter );
+                ImGui::EndMenu();
+            }
+
             if ( ImGui::Selectable( ICON_MDI_PACKAGE_VARIANT " Save as Prefab..." ) )
             {
                 // Default path from the entity's tag (spaces -> underscores).

@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+struct ImGuiTextFilter;
+
 namespace Desert::Core
 {
     class Scene;
@@ -46,9 +48,9 @@ namespace Desert::Editor
         std::string Name;
         bool        CanRemove = true;
 
-        std::function<bool( ECS::Entity& )> Has;
-        std::function<void( ECS::Entity& )> Add;
-        std::function<void( ECS::Entity& )> Remove;
+        std::function<bool( ECS::Entity& )>                                                      Has;
+        std::function<void( ECS::Entity& )>                                                      Add;
+        std::function<void( ECS::Entity& )>                                                      Remove;
         std::function<void( ECS::Entity&, ::Desert::Core::Scene*, const ComponentEditContext& )> Draw;
     };
 
@@ -73,9 +75,14 @@ namespace Desert::Editor
     // Collects the field-pointers of the SAME reflected data block on every OTHER selected entity that
     // has the component. @p fieldPtrOrNull maps an entity to its field pointer (or nullptr when the
     // entity lacks the component). Defined in ComponentMultiEdit.cpp so this header stays light.
-    std::vector<void*> GatherSelectionFieldPtrs(
-         ::Desert::Core::Scene* scene, const ECS::Entity& primary,
-         const std::function<void*( const ECS::Entity& )>& fieldPtrOrNull );
+    std::vector<void*>
+    GatherSelectionFieldPtrs( ::Desert::Core::Scene* scene, const ECS::Entity& primary,
+                              const std::function<void*( const ECS::Entity& )>& fieldPtrOrNull );
+
+    // Renders the search box + the grouped (category submenus) / filtered-flat list of components addable to
+    // @p entity, adding the chosen one (undoable). SINGLE source of truth for the categorization — reused by
+    // the Details "Add Component" popup AND the scene-outliner context menu, so the buckets live in one place.
+    void DrawAddComponentMenu( ECS::Entity& entity, ImGuiTextFilter& filter );
 
     // Reflected component: ZERO UI code — the panel is auto-built from the data block's REFLECT() metadata.
     // When several entities are selected, edits broadcast to all of them (multi-select Details).
@@ -94,14 +101,14 @@ namespace Desert::Editor
         {
             auto& comp = en.GetComponent<ComponentT>();
 
-            const std::vector<void*> siblings = GatherSelectionFieldPtrs(
-                 scene, en,
-                 [member]( const ECS::Entity& other ) -> void*
-                 {
-                     if ( !other.HasComponent<ComponentT>() )
-                         return nullptr;
-                     return &( other.GetComponent<ComponentT>().*member );
-                 } );
+            const std::vector<void*> siblings =
+                 GatherSelectionFieldPtrs( scene, en,
+                                           [member]( const ECS::Entity& other ) -> void*
+                                           {
+                                               if ( !other.HasComponent<ComponentT>() )
+                                                   return nullptr;
+                                               return &( other.GetComponent<ComponentT>().*member );
+                                           } );
 
             PropertyEditorBuilder::DrawMulti( &( comp.*member ), siblings, dataTypeName, ctx.AssetMgr(),
                                               ctx.UIHelper );
@@ -112,9 +119,9 @@ namespace Desert::Editor
     // Custom component: bespoke UI (asset pickers, vector controls, ...). The draw lambda gets the context.
     template <class ComponentT>
     ComponentEditorEntry MakeCustomComponentEntry(
-         std::string                                                                                 name,
+         std::string                                                                              name,
          std::function<void( ECS::Entity&, ::Desert::Core::Scene*, const ComponentEditContext& )> draw,
-         bool                                                                                        canRemove = true )
+         bool canRemove = true )
     {
         ComponentEditorEntry e;
         e.Name      = std::move( name );
@@ -132,22 +139,21 @@ namespace Desert::Editor
 
 // Reflected component: one line, no widget class. Auto UI from `DataTypeName`'s reflection metadata.
 //   DESERT_REGISTER_REFLECTED_COMPONENT( ECS::FooComponent, Data, "FooData", "Foo" )
-#define DESERT_REGISTER_REFLECTED_COMPONENT( ComponentT, Member, DataTypeName, DisplayName )                  \
-    namespace                                                                                                \
-    {                                                                                                        \
-        const int DESERT_COMPONENT_CONCAT( _desert_component_reg_, __COUNTER__ ) =                           \
-             ::Desert::Editor::ComponentWidgetRegistry::Get().Register(                                      \
-                  ::Desert::Editor::MakeReflectedComponentEntry<ComponentT>( DisplayName, DataTypeName,      \
-                                                                             &ComponentT::Member ) );        \
+#define DESERT_REGISTER_REFLECTED_COMPONENT( ComponentT, Member, DataTypeName, DisplayName )                      \
+    namespace                                                                                                     \
+    {                                                                                                             \
+        const int DESERT_COMPONENT_CONCAT( _desert_component_reg_, __COUNTER__ ) =                                \
+             ::Desert::Editor::ComponentWidgetRegistry::Get().Register(                                           \
+                  ::Desert::Editor::MakeReflectedComponentEntry<ComponentT>( DisplayName, DataTypeName,           \
+                                                                             &ComponentT::Member ) );             \
     }
 
 // Custom component: provide a draw lambda ( ECS::Entity&, Core::Scene*, const ComponentEditContext& ).
 // Wrap the lambda in parentheses so its commas don't split the macro arguments.
-#define DESERT_REGISTER_CUSTOM_COMPONENT( ComponentT, DisplayName, CanRemove, DrawLambda )                    \
-    namespace                                                                                                \
-    {                                                                                                        \
-        const int DESERT_COMPONENT_CONCAT( _desert_component_reg_, __COUNTER__ ) =                           \
-             ::Desert::Editor::ComponentWidgetRegistry::Get().Register(                                      \
-                  ::Desert::Editor::MakeCustomComponentEntry<ComponentT>( DisplayName, DrawLambda,           \
-                                                                          CanRemove ) );                     \
+#define DESERT_REGISTER_CUSTOM_COMPONENT( ComponentT, DisplayName, CanRemove, DrawLambda )                        \
+    namespace                                                                                                     \
+    {                                                                                                             \
+        const int DESERT_COMPONENT_CONCAT( _desert_component_reg_, __COUNTER__ ) =                                \
+             ::Desert::Editor::ComponentWidgetRegistry::Get().Register(                                           \
+                  ::Desert::Editor::MakeCustomComponentEntry<ComponentT>( DisplayName, DrawLambda, CanRemove ) ); \
     }
