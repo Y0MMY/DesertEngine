@@ -946,6 +946,16 @@ namespace Desert::Editor
         // The canvas overlay itself (all viewports / both modes) — same path as the runtime.
         ::Desert::UI::RenderCanvas( reg, dl, viewRect, /*interactive=*/false, /*outClicked=*/nullptr );
 
+        // Canvas bounds outline so an EMPTY canvas (no Panel yet) is still visible + selectable — you can
+        // see where it maps on screen. Dashed-ish subtle frame, drawn under the element handles.
+        if ( const entt::entity canvas = FindCanvas( reg ); canvas != entt::null )
+        {
+            ::Desert::UI::Rect cr;
+            if ( ::Desert::UI::GetElementRect( reg, canvas, viewRect, cr ) )
+                dl->AddRect( ImVec2( cr.X, cr.Y ), ImVec2( cr.X + cr.W, cr.Y + cr.H ),
+                             IM_COL32( 120, 135, 160, 170 ), 0.0f, 0, 1.5f );
+        }
+
         // Editing handles only for a selected UI element.
         const auto& sel = Core::SelectionManager::GetSelected();
         if ( !sel.has_value() )

@@ -3,6 +3,7 @@
 // reflected component in the editor, copy one line below.
 
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
+#include <Editor/Panels/UI/UIAnchorControls.hpp>
 #include <Editor/Core/DragPayloads.hpp>
 
 #include <Engine/ECS/Components.hpp>
@@ -51,7 +52,8 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, 
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ParticleEmitterComponent, Data, "ParticleEmitterData",
                                      "Particle Emitter" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UICanvasComponent, Data, "UICanvasData", "UI Canvas" )
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UILayoutComponent, Data, "UILayoutData", "UI Layout" )
+// UI Layout is a CUSTOM entry (not the reflected one-liner) so the Details panel gets Unity-style anchor
+// presets ("Fill / Match Parent" + a 4x4 grid) above the raw anchor/offset fields. See MakeUILayoutEntry.
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIPanelComponent, Data, "UIPanelData", "UI Panel" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UITextComponent2D, Data, "UITextData", "UI Text" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIButtonComponent, Data, "UIButtonData", "UI Button" )
@@ -323,6 +325,27 @@ namespace Desert::Editor
         };
         return e;
     }
+
+    // UI Layout (RectTransform): anchor-preset controls ("Fill / Match Parent" + 4x4 grid) on top of the
+    // reflected anchor/offset/pivot fields, so you can match the parent from the inspector (not just the
+    // viewport toolbar). Presets act in design space (keep the authored size; stretch fills the axis).
+    static ComponentEditorEntry MakeUILayoutEntry()
+    {
+        using C = ::Desert::ECS::UILayoutComponent;
+        ComponentEditorEntry e;
+        e.Name      = "UI Layout";
+        e.CanRemove = true;
+        e.Has       = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<C>(); };
+        e.Add       = []( ::Desert::ECS::Entity& en ) { en.AddComponent<C>(); };
+        e.Remove    = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<C>(); };
+        e.Draw      = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<C>();
+            UIAnchors::DrawControls( c.Data );
+            PropertyEditorBuilder::Draw( &c.Data, "UILayoutData", ctx.AssetMgr(), ctx.UIHelper );
+        };
+        return e;
+    }
     // UE-style Instanced Static Mesh editor: pick a primitive (or drop an asset mesh) + add/clear instances.
     // Instances are WORLD-space; all of them render as ONE instanced draw (+1 per shadow cascade).
     static ComponentEditorEntry MakeInstancedStaticMeshEntry()
@@ -476,6 +499,9 @@ namespace
 
     const int _desert_morph_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeMorphEntry() );
+
+    const int _desert_uilayout_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeUILayoutEntry() );
 } // namespace
 
 // SINGLE SOURCE OF TRUTH: for MESH entities, materials (shader + params) are authored ONLY in
