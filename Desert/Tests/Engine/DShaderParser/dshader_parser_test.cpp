@@ -147,7 +147,7 @@ Shader "Manual"
     }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
     EXPECT_EQ( res.GetValue().Stages.at( ShaderStage::Fragment ).find( "MaterialUB" ), std::string::npos );
     ASSERT_EQ( res.GetValue().Meta.Params.size(), 1u );
@@ -166,7 +166,7 @@ Shader "WithInclude"
     Fragment { layout( location = 0 ) out vec4 c; void main() { c = vec4( shared_helper( 2.0 ) ); } }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
     EXPECT_NE( res.GetValue().Stages.at( ShaderStage::Vertex ).find( "shared_helper" ), std::string::npos );
     EXPECT_NE( res.GetValue().Stages.at( ShaderStage::Fragment ).find( "shared_helper" ), std::string::npos );
@@ -194,7 +194,7 @@ Shader "Versioned"
     }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_FALSE( res.IsSuccess() );
     EXPECT_NE( res.GetError().find( "#version" ), std::string::npos );
 }
@@ -219,7 +219,7 @@ Shader "Tricky"
     }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
     EXPECT_NE( res.GetValue().Stages.at( ShaderStage::Fragment ).find( "void main()" ), std::string::npos );
 }
@@ -307,8 +307,8 @@ TEST( DShaderParserPasses, PassStateInheritsAndOverrides )
     const auto* shadow = res.GetValue().FindPass( "Shadow" );
     ASSERT_NE( shadow, nullptr );
 
-    EXPECT_EQ( shadow->State.Cull, StateCull::Front );        // overridden
-    EXPECT_EQ( shadow->State.Blend, false );                  // overridden (On -> Off)
+    EXPECT_EQ( shadow->State.Cull, StateCull::Front );           // overridden
+    EXPECT_EQ( shadow->State.Blend, false );                     // overridden (On -> Off)
     EXPECT_EQ( shadow->State.DepthCompare, StateCompare::Less ); // inherited from file State
     EXPECT_EQ( shadow->State.DepthTest, true );                  // inherited
 
@@ -348,7 +348,7 @@ Shader "PassOnly"
     }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
     const auto& p = res.GetValue();
 
@@ -368,7 +368,7 @@ Shader "Dup"
     Pass "A" { Vertex { void main() {} } }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_FALSE( res.IsSuccess() );
     EXPECT_NE( res.GetError().find( "duplicate Pass" ), std::string::npos ) << res.GetError();
 }
@@ -381,7 +381,7 @@ Shader "Empty"
     Pass "NoStages" { State { Cull None } }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_FALSE( res.IsSuccess() );
     EXPECT_NE( res.GetError().find( "no stage blocks" ), std::string::npos ) << res.GetError();
 }
@@ -398,7 +398,7 @@ Shader "Bad"
     }
 }
 )";
-    auto res = DShaderParser::Parse( src );
+    auto        res = DShaderParser::Parse( src );
     ASSERT_FALSE( res.IsSuccess() );
     EXPECT_NE( res.GetError().find( "unknown Pass section" ), std::string::npos ) << res.GetError();
 }
@@ -440,7 +440,7 @@ Shader "Sugar"
     }
 }
 )";
-    auto res = DShaderParser::Parse( kSugar );
+    auto        res    = DShaderParser::Parse( kSugar );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
 
     const auto& stages = res.GetValue().Stages;
@@ -474,7 +474,7 @@ Shader "BS"
     Fragment { Out(0) vec4 o; void main() { o = vec4(1.0); } }
 }
 )";
-    auto res = DShaderParser::Parse( kSrc );
+    auto        res  = DShaderParser::Parse( kSrc );
     ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
     const auto& s = res.GetValue().Meta.State;
 
@@ -489,6 +489,68 @@ Shader "BS"
     EXPECT_EQ( *s.StencilCompare, StateCompare::Equal );
     EXPECT_EQ( *s.StencilRef, 1u );
     EXPECT_EQ( *s.StencilPass, StateStencilOp::Replace );
+}
+
+// --- Auto-allocated layout numbers (drop the parentheses) ------------------------------------------------
+
+static const char* kAutoLoc = R"(
+Shader "AutoLoc"
+{
+    Vertex
+    {
+        In vec3 a_Position;
+        Out vec2 v_UV;
+        Out vec4 v_Color;
+        void main() { gl_Position = vec4( a_Position, 1.0 ); v_UV = vec2( 0.0 ); v_Color = vec4( 1.0 ); }
+    }
+    Fragment
+    {
+        In vec2 v_UV;
+        In vec4 v_Color;
+        Out vec4 o_Color;
+        void main() { o_Color = v_Color; }
+    }
+}
+)";
+
+TEST( DShaderParser, AutoAllocatesLocations )
+{
+    auto res = DShaderParser::Parse( kAutoLoc );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& v = res.GetValue().Stages.at( ShaderStage::Vertex );
+    // `in` (attributes) and `out` (varyings) are independent spaces, each allocated from 0 in order.
+    EXPECT_NE( v.find( "layout(location = 0) in vec3 a_Position" ), std::string::npos );
+    EXPECT_NE( v.find( "layout(location = 0) out vec2 v_UV" ), std::string::npos );
+    EXPECT_NE( v.find( "layout(location = 1) out vec4 v_Color" ), std::string::npos );
+
+    const auto& f = res.GetValue().Stages.at( ShaderStage::Fragment );
+    EXPECT_NE( f.find( "layout(location = 0) in vec2 v_UV" ), std::string::npos );
+    EXPECT_NE( f.find( "layout(location = 1) in vec4 v_Color" ), std::string::npos );
+    EXPECT_NE( f.find( "layout(location = 0) out vec4 o_Color" ), std::string::npos );
+}
+
+static const char* kAutoBind = R"(
+Shader "AutoBind"
+{
+    Compute
+    {
+        LocalSize( 64, 1, 1 );
+        Uniform(0) CameraUB { mat4 vp; };
+        Buffer Particles { vec4 p[]; };
+        Buffer Counter { uint c; };
+        void main() {}
+    }
+}
+)";
+
+TEST( DShaderParser, AutoBindingsSkipExplicit )
+{
+    auto res = DShaderParser::Parse( kAutoBind );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& c = res.GetValue().Stages.at( ShaderStage::Compute );
+    EXPECT_NE( c.find( "layout(binding = 0) uniform CameraUB" ), std::string::npos );         // explicit kept
+    EXPECT_NE( c.find( "layout(std430, binding = 1) buffer Particles" ), std::string::npos ); // auto skips 0
+    EXPECT_NE( c.find( "layout(std430, binding = 2) buffer Counter" ), std::string::npos );   // auto next free
 }
 
 int main( int argc, char** argv )

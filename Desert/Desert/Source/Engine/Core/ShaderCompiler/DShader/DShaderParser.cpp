@@ -2,7 +2,9 @@
 
 #include <cctype>
 #include <charconv>
+#include <functional>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -62,7 +64,8 @@ namespace Desert::Core::Preprocess
                 {
                     c.Advance();
                     c.Advance();
-                    while ( !c.AtEnd() && !( c.Peek() == '*' && c.Pos + 1 < c.Src.size() && c.Src[c.Pos + 1] == '/' ) )
+                    while ( !c.AtEnd() &&
+                            !( c.Peek() == '*' && c.Pos + 1 < c.Src.size() && c.Src[c.Pos + 1] == '/' ) )
                         c.Advance();
                     if ( !c.AtEnd() )
                     {
@@ -162,7 +165,8 @@ namespace Desert::Core::Preprocess
             while ( !c.AtEnd() )
             {
                 const char ch = c.Peek();
-                if ( ch == '/' && c.Pos + 1 < c.Src.size() && ( c.Src[c.Pos + 1] == '/' || c.Src[c.Pos + 1] == '*' ) )
+                if ( ch == '/' && c.Pos + 1 < c.Src.size() &&
+                     ( c.Src[c.Pos + 1] == '/' || c.Src[c.Pos + 1] == '*' ) )
                 {
                     SkipTrivia( c ); // consumes the whole comment; keeps line counting exact
                     continue;
@@ -284,9 +288,9 @@ namespace Desert::Core::Preprocess
 
         struct PropertiesInfo
         {
-            std::optional<uint32_t> UBBinding;      // Binding(n)
-            std::optional<uint32_t> TextureBinding; // TextureBinding(n)
-            std::vector<PropertyExtra> Extras;      // parallel to Meta.Params
+            std::optional<uint32_t>    UBBinding;      // Binding(n)
+            std::optional<uint32_t>    TextureBinding; // TextureBinding(n)
+            std::vector<PropertyExtra> Extras;         // parallel to Meta.Params
         };
 
         bool ParsePropertyAttributes( Cursor& c, ShaderParam& param, ParseError& err )
@@ -406,7 +410,8 @@ namespace Desert::Core::Preprocess
                 }
                 else
                 {
-                    err = { c.Line, "unknown Properties option '" + opt + "' (expected Binding or TextureBinding)" };
+                    err = { c.Line,
+                            "unknown Properties option '" + opt + "' (expected Binding or TextureBinding)" };
                     return false;
                 }
                 SkipTrivia( c );
@@ -481,9 +486,9 @@ namespace Desert::Core::Preprocess
                     return false;
                 }
 
-                const uint32_t    line    = c.Line;
-                const std::string rawCmd  = ReadIdent( c );
-                const std::string cmd     = Lower( rawCmd );
+                const uint32_t    line   = c.Line;
+                const std::string rawCmd = ReadIdent( c );
+                const std::string cmd    = Lower( rawCmd );
 
                 if ( cmd == "cull" )
                 {
@@ -545,17 +550,28 @@ namespace Desert::Core::Preprocess
                 {
                     // `Blend Off | On | Alpha` OR custom factors `Blend <src> <dst>` (e.g.
                     // `Blend SrcAlpha OneMinusSrcAlpha`, `Blend One One` for additive).
-                    const auto factor = []( const std::string& v ) -> std::optional<StateBlendFactor> {
-                        if ( v == "zero" )             return StateBlendFactor::Zero;
-                        if ( v == "one" )              return StateBlendFactor::One;
-                        if ( v == "srccolor" )         return StateBlendFactor::SrcColor;
-                        if ( v == "oneminussrccolor" ) return StateBlendFactor::OneMinusSrcColor;
-                        if ( v == "dstcolor" )         return StateBlendFactor::DstColor;
-                        if ( v == "oneminusdstcolor" ) return StateBlendFactor::OneMinusDstColor;
-                        if ( v == "srcalpha" )         return StateBlendFactor::SrcAlpha;
-                        if ( v == "oneminussrcalpha" ) return StateBlendFactor::OneMinusSrcAlpha;
-                        if ( v == "dstalpha" )         return StateBlendFactor::DstAlpha;
-                        if ( v == "oneminusdstalpha" ) return StateBlendFactor::OneMinusDstAlpha;
+                    const auto factor = []( const std::string& v ) -> std::optional<StateBlendFactor>
+                    {
+                        if ( v == "zero" )
+                            return StateBlendFactor::Zero;
+                        if ( v == "one" )
+                            return StateBlendFactor::One;
+                        if ( v == "srccolor" )
+                            return StateBlendFactor::SrcColor;
+                        if ( v == "oneminussrccolor" )
+                            return StateBlendFactor::OneMinusSrcColor;
+                        if ( v == "dstcolor" )
+                            return StateBlendFactor::DstColor;
+                        if ( v == "oneminusdstcolor" )
+                            return StateBlendFactor::OneMinusDstColor;
+                        if ( v == "srcalpha" )
+                            return StateBlendFactor::SrcAlpha;
+                        if ( v == "oneminussrcalpha" )
+                            return StateBlendFactor::OneMinusSrcAlpha;
+                        if ( v == "dstalpha" )
+                            return StateBlendFactor::DstAlpha;
+                        if ( v == "oneminusdstalpha" )
+                            return StateBlendFactor::OneMinusDstAlpha;
                         return std::nullopt;
                     };
                     const std::string v = Lower( ReadIdent( c ) );
@@ -586,26 +602,44 @@ namespace Desert::Core::Preprocess
                 {
                     // `Stencil <compare> <ref> [<fail> <pass> <depthFail>]`. Ops default Keep/Replace/Keep
                     // (write the ref where the test passes — the outline-mask idiom).
-                    const auto compare = []( const std::string& v ) -> std::optional<StateCompare> {
-                        if ( v == "never" )                        return StateCompare::Never;
-                        if ( v == "less" )                         return StateCompare::Less;
-                        if ( v == "equal" )                        return StateCompare::Equal;
-                        if ( v == "lequal" || v == "lessorequal" ) return StateCompare::LessOrEqual;
-                        if ( v == "greater" )                      return StateCompare::Greater;
-                        if ( v == "notequal" )                     return StateCompare::NotEqual;
-                        if ( v == "gequal" || v == "greaterorequal" ) return StateCompare::GreaterOrEqual;
-                        if ( v == "always" )                       return StateCompare::Always;
+                    const auto compare = []( const std::string& v ) -> std::optional<StateCompare>
+                    {
+                        if ( v == "never" )
+                            return StateCompare::Never;
+                        if ( v == "less" )
+                            return StateCompare::Less;
+                        if ( v == "equal" )
+                            return StateCompare::Equal;
+                        if ( v == "lequal" || v == "lessorequal" )
+                            return StateCompare::LessOrEqual;
+                        if ( v == "greater" )
+                            return StateCompare::Greater;
+                        if ( v == "notequal" )
+                            return StateCompare::NotEqual;
+                        if ( v == "gequal" || v == "greaterorequal" )
+                            return StateCompare::GreaterOrEqual;
+                        if ( v == "always" )
+                            return StateCompare::Always;
                         return std::nullopt;
                     };
-                    const auto stencilOp = []( const std::string& v ) -> std::optional<StateStencilOp> {
-                        if ( v == "keep" )    return StateStencilOp::Keep;
-                        if ( v == "zero" )    return StateStencilOp::Zero;
-                        if ( v == "replace" ) return StateStencilOp::Replace;
-                        if ( v == "incrclamp" || v == "incrementclamp" ) return StateStencilOp::IncrementClamp;
-                        if ( v == "decrclamp" || v == "decrementclamp" ) return StateStencilOp::DecrementClamp;
-                        if ( v == "invert" )  return StateStencilOp::Invert;
-                        if ( v == "incrwrap" || v == "incrementwrap" ) return StateStencilOp::IncrementWrap;
-                        if ( v == "decrwrap" || v == "decrementwrap" ) return StateStencilOp::DecrementWrap;
+                    const auto stencilOp = []( const std::string& v ) -> std::optional<StateStencilOp>
+                    {
+                        if ( v == "keep" )
+                            return StateStencilOp::Keep;
+                        if ( v == "zero" )
+                            return StateStencilOp::Zero;
+                        if ( v == "replace" )
+                            return StateStencilOp::Replace;
+                        if ( v == "incrclamp" || v == "incrementclamp" )
+                            return StateStencilOp::IncrementClamp;
+                        if ( v == "decrclamp" || v == "decrementclamp" )
+                            return StateStencilOp::DecrementClamp;
+                        if ( v == "invert" )
+                            return StateStencilOp::Invert;
+                        if ( v == "incrwrap" || v == "incrementwrap" )
+                            return StateStencilOp::IncrementWrap;
+                        if ( v == "decrwrap" || v == "decrementwrap" )
+                            return StateStencilOp::DecrementWrap;
                         return std::nullopt;
                     };
 
@@ -779,29 +813,90 @@ namespace Desert::Core::Preprocess
         //   WriteBuffer(n) ...  -> layout(std430, binding = n) writeonly buffer ...
         //   LocalSize(x, y, z)  -> layout(local_size_x = x, local_size_y = y, local_size_z = z) in
         //   PushConstant ...    -> layout(push_constant) uniform ...          (block name + instance kept)
+        //
+        // AUTO NUMBERS (drop the parentheses): `In T x;` / `Out T x;` / `Uniform Name {}` / `Buffer Name {}`
+        // / `ReadBuffer`/`WriteBuffer` with NO (n) auto-allocate the lowest free slot, in declaration order,
+        // per STAGE. Three independent spaces: `in` locations, `out` locations, and descriptor bindings; auto
+        // slots skip any EXPLICIT numbers already used in the stage so the two can be mixed. Caveat (per-stage,
+        // by design): a resource SHARED across stages (e.g. the camera UB from an include) or one a C++ site
+        // binds by a fixed number must keep its EXPLICIT (n) so every stage / the host agree — auto can't
+        // coordinate across stages.
+        //
         // Storage-image format qualifiers (`layout(binding=n, rgba32f) uniform imageCube`) and tessellation
         // layout (`layout(vertices=n) out`, `layout(quads,...) in`) are inherently GLSL-structural and stay
         // as raw `layout(...)` — the only sanctioned escape (DShaderTool allows exactly these forms).
         std::string TranslateLayoutSugar( const std::string& src )
         {
+            // (1) EXPLICIT forms first — a numbered declaration always wins and is left untouched by the
+            // auto pass below (the capitalized keyword is consumed here).
             static const std::pair<std::regex, std::string> kRules[] = {
-                { std::regex( R"(\bIn\s*\(\s*(\d+)\s*\))" ),  "layout(location = $1) in" },
-                { std::regex( R"(\bOut\s*\(\s*(\d+)\s*\))" ), "layout(location = $1) out" },
-                { std::regex( R"(\bUniform\s*\(\s*(\d+)\s*,\s*(\d+)\s*\))" ),
-                  "layout(set = $1, binding = $2) uniform" },
-                { std::regex( R"(\bUniform\s*\(\s*(\d+)\s*\))" ), "layout(binding = $1) uniform" },
-                { std::regex( R"(\bReadBuffer\s*\(\s*(\d+)\s*\))" ),
-                  "layout(std430, binding = $1) readonly buffer" },
-                { std::regex( R"(\bWriteBuffer\s*\(\s*(\d+)\s*\))" ),
-                  "layout(std430, binding = $1) writeonly buffer" },
-                { std::regex( R"(\bBuffer\s*\(\s*(\d+)\s*\))" ), "layout(std430, binding = $1) buffer" },
-                { std::regex( R"(\bLocalSize\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\))" ),
-                  "layout(local_size_x = $1, local_size_y = $2, local_size_z = $3) in" },
-                { std::regex( R"(\bPushConstant\b)" ), "layout(push_constant) uniform" },
+                 { std::regex( R"(\bIn\s*\(\s*(\d+)\s*\))" ), "layout(location = $1) in" },
+                 { std::regex( R"(\bOut\s*\(\s*(\d+)\s*\))" ), "layout(location = $1) out" },
+                 { std::regex( R"(\bUniform\s*\(\s*(\d+)\s*,\s*(\d+)\s*\))" ),
+                   "layout(set = $1, binding = $2) uniform" },
+                 { std::regex( R"(\bUniform\s*\(\s*(\d+)\s*\))" ), "layout(binding = $1) uniform" },
+                 { std::regex( R"(\bReadBuffer\s*\(\s*(\d+)\s*\))" ),
+                   "layout(std430, binding = $1) readonly buffer" },
+                 { std::regex( R"(\bWriteBuffer\s*\(\s*(\d+)\s*\))" ),
+                   "layout(std430, binding = $1) writeonly buffer" },
+                 { std::regex( R"(\bBuffer\s*\(\s*(\d+)\s*\))" ), "layout(std430, binding = $1) buffer" },
+                 { std::regex( R"(\bLocalSize\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\))" ),
+                   "layout(local_size_x = $1, local_size_y = $2, local_size_z = $3) in" },
+                 { std::regex( R"(\bPushConstant\b)" ), "layout(push_constant) uniform" },
             };
             std::string out = src;
             for ( const auto& [re, rep] : kRules )
                 out = std::regex_replace( out, re, rep );
+
+            // (2) Seed each auto-allocator with the EXPLICIT numbers already present so auto never collides.
+            const auto collect = [&]( const std::regex& re, std::set<int>& used )
+            {
+                for ( std::sregex_iterator it( out.begin(), out.end(), re ), end; it != end; ++it )
+                    used.insert( std::stoi( ( *it )[1].str() ) );
+            };
+            std::set<int> usedIn, usedOut, usedBind;
+            collect( std::regex( R"(location\s*=\s*(\d+)\s*\)\s*in\b)" ), usedIn );
+            collect( std::regex( R"(location\s*=\s*(\d+)\s*\)\s*out\b)" ), usedOut );
+            collect( std::regex( R"(binding\s*=\s*(\d+))" ), usedBind );
+
+            const auto alloc = []( std::set<int>& used )
+            {
+                int n = 0;
+                while ( used.count( n ) )
+                    ++n;
+                used.insert( n );
+                return n;
+            };
+
+            // (3) Replace paren-less forms left-to-right (declaration order). Replacing the FIRST occurrence
+            // each pass consumes the capitalized keyword, so the next search advances to the next one; the
+            // lowercase `in`/`out`/`uniform`/`buffer` in the replacement is never re-matched.
+            const auto replaceFirst =
+                 [&]( const std::regex& re, const std::function<std::string( const std::smatch& )>& make )
+            {
+                std::smatch m;
+                while ( std::regex_search( out, m, re ) )
+                    out = m.prefix().str() + make( m ) + m.suffix().str();
+            };
+
+            replaceFirst( std::regex( R"(\bIn\b(?!\s*\())" ), [&]( const std::smatch& )
+                          { return "layout(location = " + std::to_string( alloc( usedIn ) ) + ") in"; } );
+            replaceFirst( std::regex( R"(\bOut\b(?!\s*\())" ), [&]( const std::smatch& )
+                          { return "layout(location = " + std::to_string( alloc( usedOut ) ) + ") out"; } );
+            // One combined pass over the four binding keywords so they share ONE binding space in text order.
+            replaceFirst( std::regex( R"(\b(Uniform|ReadBuffer|WriteBuffer|Buffer)\b(?!\s*\())" ),
+                          [&]( const std::smatch& m )
+                          {
+                              const int         n  = alloc( usedBind );
+                              const std::string kw = m[1].str();
+                              if ( kw == "Uniform" )
+                                  return "layout(binding = " + std::to_string( n ) + ") uniform";
+                              if ( kw == "ReadBuffer" )
+                                  return "layout(std430, binding = " + std::to_string( n ) + ") readonly buffer";
+                              if ( kw == "WriteBuffer" )
+                                  return "layout(std430, binding = " + std::to_string( n ) + ") writeonly buffer";
+                              return "layout(std430, binding = " + std::to_string( n ) + ") buffer";
+                          } );
             return out;
         }
 
@@ -852,7 +947,8 @@ namespace Desert::Core::Preprocess
         DShaderParseResult result;
         ParseError         err{ 0, "" };
 
-        const auto fail = [&err]() {
+        const auto fail = [&err]()
+        {
             return Common::MakeFormattedError<DShaderParseResult>( "DShader parse error (line {}): {}", err.Line,
                                                                    err.Message );
         };
@@ -887,7 +983,8 @@ namespace Desert::Core::Preprocess
 
         // Reads one stage block into the given pass. Returns false + err on problems.
         const auto readStageBlock = [&]( Cursor& cur, PendingPass& pass, ShaderStage stage,
-                                         const std::string& section, uint32_t line ) -> bool {
+                                         const std::string& section, uint32_t line ) -> bool
+        {
             if ( pass.Blocks.count( stage ) )
             {
                 err = { line, "duplicate stage block '" + section + "'" };
@@ -1007,8 +1104,8 @@ namespace Desert::Core::Preprocess
                     }
                     else
                     {
-                        err = { passLine, "unknown Pass section '" + passSection +
-                                              "' (expected State or a stage block)" };
+                        err = { passLine,
+                                "unknown Pass section '" + passSection + "' (expected State or a stage block)" };
                         return fail();
                     }
                 }
@@ -1040,7 +1137,8 @@ namespace Desert::Core::Preprocess
 
         const std::string autoDecls = BuildAutoDeclarations( result.Meta, propInfo );
 
-        const auto assemblePass = [&]( const PendingPass& pending, const ShaderRenderState& state ) {
+        const auto assemblePass = [&]( const PendingPass& pending, const ShaderRenderState& state )
+        {
             DShaderPass out;
             out.Name  = pending.Name;
             out.State = state;
