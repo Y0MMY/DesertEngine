@@ -90,6 +90,11 @@ namespace Desert::Core
         void OnUpdate( const Common::Timestep& timestep ) override;
         void OnEvent( Common::Event& e ) override;
 
+        // Editor projection anchors the apparent object SIZE to a reference height, so resizing the
+        // viewport shows MORE of the scene instead of zooming objects in/out (UE/Unity editor feel).
+        // Gameplay keeps the base (standard vertical-FOV) behaviour.
+        void UpdateProjectionMatrix( const uint32_t width, const uint32_t height ) override;
+
         [[nodiscard]] const auto& GetDirection() const { return m_Direction; }
 
         // Editor fly-camera movement speed multiplier (1.0 = default). Exposed in the viewport overlay.
