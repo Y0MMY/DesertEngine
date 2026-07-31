@@ -104,10 +104,11 @@ namespace Desert::Graphic
     }
 
     void Renderer::SubmitIndexed( const GraphicsPipeline* pipeline, VertexBuffer* vertexBuffer,
-                                  IndexBuffer* indexBuffer, uint32_t indexCount,
+                                  IndexBuffer* indexBuffer, uint32_t indexCount, uint32_t firstIndex,
                                   const MaterialExecutor* materialExecutor )
     {
-        s_RendererAPI->SubmitIndexed( pipeline, vertexBuffer, indexBuffer, indexCount, materialExecutor );
+        s_RendererAPI->SubmitIndexed( pipeline, vertexBuffer, indexBuffer, indexCount, firstIndex,
+                                      materialExecutor );
     }
 
     void Renderer::SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount, float lineWidth,

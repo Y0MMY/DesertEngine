@@ -342,7 +342,7 @@ namespace Desert::Graphic::API::Vulkan
     }
 
     void VulkanRendererAPI::SubmitIndexed( const GraphicsPipeline* pipeline, VertexBuffer* vertexBuffer,
-                                           IndexBuffer* indexBuffer, uint32_t indexCount,
+                                           IndexBuffer* indexBuffer, uint32_t indexCount, uint32_t firstIndex,
                                            const MaterialExecutor* materialExecutor )
     {
         if ( !m_CurrentCommandBuffer || !vertexBuffer || !indexBuffer || indexCount == 0 )
@@ -385,7 +385,9 @@ namespace Desert::Graphic::API::Vulkan
         auto ibuffer = static_cast<API::Vulkan::VulkanIndexBuffer*>( indexBuffer )->GetVulkanBuffer();
         vkCmdBindIndexBuffer( m_CurrentCommandBuffer, ibuffer, 0, VK_INDEX_TYPE_UINT32 );
 
-        vkCmdDrawIndexed( m_CurrentCommandBuffer, indexCount, 1, 0, 0, 0 );
+        // Vertices are addressed absolutely (the batcher bakes base offsets into the indices), so the
+        // vertex offset stays 0 and only firstIndex selects this batch's slice of the shared buffer.
+        vkCmdDrawIndexed( m_CurrentCommandBuffer, indexCount, 1, firstIndex, 0, 0 );
     }
 
     void VulkanRendererAPI::SubmitLines( const GraphicsPipeline* pipeline, uint32_t vertexCount,

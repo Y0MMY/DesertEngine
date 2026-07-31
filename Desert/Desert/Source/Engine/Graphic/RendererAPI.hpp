@@ -65,7 +65,7 @@ namespace Desert::Graphic
         // VB+IB each frame (one buffer, many quads) and issues one SubmitIndexed per state batch;
         // @p materialExecutor supplies the batch's texture and push constants (the ortho projection).
         virtual void SubmitIndexed( const GraphicsPipeline* pipeline, VertexBuffer* vertexBuffer,
-                                    IndexBuffer* indexBuffer, uint32_t indexCount,
+                                    IndexBuffer* indexBuffer, uint32_t indexCount, uint32_t firstIndex,
                                     const MaterialExecutor* materialExecutor ) = 0;
 
         // Vertexless line draw (Lines-topology pipeline pulls vertices from a storage buffer by index).
