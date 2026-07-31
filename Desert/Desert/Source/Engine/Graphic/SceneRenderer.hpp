@@ -222,6 +222,11 @@ namespace Desert::Graphic
         // graph they land on the target BEFORE the composite and get painted over wherever geometry
         // exists (visible against sky, gone against the ground — the particle "top-down" bug).
         void ExecuteTransparency();
+        // UI-phase passes (the Render2D canvas) drawn as a LOAD overlay AFTER the deferred lighting
+        // composite — same reason as ExecuteTransparency/ExecuteDebugOverlay: recorded inside the graph
+        // they land on the target BEFORE the composite (painted over) AND a CLEAR begin would wipe the
+        // depth the grid/overlays load afterwards. Runs on top of the finished scene.
+        void ExecuteUI();
 
     private:
         struct

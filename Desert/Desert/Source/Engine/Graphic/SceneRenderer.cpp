@@ -418,6 +418,13 @@ namespace Desert::Graphic
             ExecuteDebugOverlay();
         }
 
+        // UI canvas (Render2D) on top of the finished scene, as a LOAD overlay — see ExecuteUI(). Kept out of
+        // the main graph so its CLEAR begin can't wipe the depth the grid/overlays above load.
+        {
+            DESERT_PROFILE_SCOPE( "UI" );
+            ExecuteUI();
+        }
+
         // Explicit post-process chain (runs after the scene graph has produced the scene color and
         // the silhouette mask): Jump Flood outline -> Tonemap.
         {
@@ -793,10 +800,13 @@ namespace Desert::Graphic
             if ( !pass.CachedRenderPass )
                 continue;
 
-            // Debug-phase passes (BB / colliders) are deferred to ExecuteDebugOverlay(), and
-            // Transparency-phase passes (particles) to ExecuteTransparency(): both run AFTER the deferred
-            // lighting composite so they aren't painted over by lit geometry (the particle top-down bug).
-            if ( pass.Phase == RenderPhase::Debug || pass.Phase == RenderPhase::Transparency )
+            // Debug-phase passes (BB / colliders) are deferred to ExecuteDebugOverlay(), Transparency-phase
+            // (particles) to ExecuteTransparency(), and UI-phase (Render2D canvas) to ExecuteUI(): all run
+            // AFTER the deferred lighting composite so they aren't painted over by lit geometry, and as LOAD
+            // overlays so a CLEAR begin here never wipes the depth later overlays test against (the particle
+            // top-down bug / grid-through-meshes).
+            if ( pass.Phase == RenderPhase::Debug || pass.Phase == RenderPhase::Transparency ||
+                 pass.Phase == RenderPhase::UI )
                 continue;
 
             const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
@@ -874,6 +884,40 @@ namespace Desert::Graphic
         for ( const auto& pass : sortedPasses )
         {
             if ( !pass.CachedRenderPass || pass.Phase != RenderPhase::Transparency )
+                continue;
+
+            const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
+            if ( passFb != currentFb )
+            {
+                if ( currentFb )
+                    renderer.EndRenderPass();
+                renderer.BeginRenderPass( pass.CachedRenderPass.get(), false );
+                currentFb = passFb;
+            }
+
+            DESERT_PROFILE_SCOPE_DYNAMIC( pass.Name.c_str() );
+            renderer.BeginDebugLabel( pass.Name.c_str() );
+            pass.ExecuteFunc();
+            renderer.EndDebugLabel();
+        }
+
+        if ( currentFb )
+            renderer.EndRenderPass();
+    }
+
+    void SceneRenderer::ExecuteUI()
+    {
+        const auto& sortedPasses = m_RenderGraphBuilder.GetSortedPasses();
+
+        auto& renderer = Renderer::GetInstance();
+
+        // LOAD (clearFrame = false) each UI pass over the finished scene so the Render2D canvas sits on top
+        // of everything. A CLEAR begin (as the main graph loop uses) would wipe the target's depth, which
+        // the grid/debug overlays LOAD afterwards — that clear was the grid-through-meshes regression.
+        std::shared_ptr<Framebuffer> currentFb;
+        for ( const auto& pass : sortedPasses )
+        {
+            if ( !pass.CachedRenderPass || pass.Phase != RenderPhase::UI )
                 continue;
 
             const auto passFb = pass.CachedRenderPass->GetSpecification().TargetFramebuffer;
