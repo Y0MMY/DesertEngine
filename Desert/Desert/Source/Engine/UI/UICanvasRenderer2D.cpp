@@ -181,16 +181,25 @@ namespace Desert::UI
             }
         }
 
+        // Recursively draw one element. `forcedRect` (non-null) is the rect assigned by a parent auto-layout
+        // group — it overrides the element's own anchors for position + size.
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
-                          Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked )
+                          Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked,
+                          const Rect* forcedRect = nullptr )
         {
-            Rect rect = parent;
-            if ( reg.has<ECS::UILayoutComponent>( e ) )
+            Rect       rect      = parent;
+            const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
+            if ( forcedRect )
+                rect = *forcedRect; // positioned + sized by the parent's layout group
+            else if ( hasLayout )
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
                 rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
                                              L.CustomMinimumSize * scale, parent );
+            }
 
+            if ( forcedRect || hasLayout )
+            {
                 const glm::vec2 mn( rect.X, rect.Y );
                 const glm::vec2 mx( rect.X + rect.W, rect.Y + rect.H );
 
@@ -281,9 +290,52 @@ namespace Desert::UI
                                   reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents;
                 if ( clip )
                     dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
-                for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
-                    if ( reg.valid( c ) )
-                        DrawElement( reg, c, rect, scale, dl, input, outClicked );
+
+                const auto& children = reg.get<ECS::RelationshipComponent>( e ).Children;
+                if ( reg.has<ECS::UILayoutGroupComponent>( e ) )
+                {
+                    // Auto-layout: the group positions + sizes its children (overriding their anchors). Each
+                    // child's preferred size = CustomMinimumSize, else its authored offset size (design px).
+                    const auto&               g = reg.get<ECS::UILayoutGroupComponent>( e ).Data;
+                    std::vector<entt::entity> kids;
+                    std::vector<glm::vec2>    sizes;
+                    for ( auto c : children )
+                    {
+                        if ( !reg.valid( c ) )
+                            continue;
+                        glm::vec2 pref( 0.0f );
+                        if ( reg.has<ECS::UILayoutComponent>( c ) )
+                        {
+                            const auto& L = reg.get<ECS::UILayoutComponent>( c ).Data;
+                            pref          = glm::max( L.CustomMinimumSize, L.OffsetMax - L.OffsetMin );
+                        }
+                        kids.push_back( c );
+                        sizes.push_back( pref * scale );
+                    }
+
+                    LayoutGroupParams params;
+                    params.Type         = g.Type == ECS::UILayoutType::Horizontal ? LayoutGroupType::Horizontal
+                                          : g.Type == ECS::UILayoutType::Grid     ? LayoutGroupType::Grid
+                                                                                  : LayoutGroupType::Vertical;
+                    params.PaddingL     = g.Padding.x * scale;
+                    params.PaddingT     = g.Padding.y * scale;
+                    params.PaddingR     = g.Padding.z * scale;
+                    params.PaddingB     = g.Padding.w * scale;
+                    params.Spacing      = g.Spacing * scale;
+                    params.StretchCross = g.StretchCross;
+                    params.CellSize     = g.CellSize * scale;
+                    params.Columns      = g.Columns;
+
+                    const auto rects = SolveLayoutGroup( rect, params, sizes );
+                    for ( std::size_t i = 0; i < kids.size(); ++i )
+                        DrawElement( reg, kids[i], rect, scale, dl, input, outClicked, &rects[i] );
+                }
+                else
+                {
+                    for ( auto c : children )
+                        if ( reg.valid( c ) )
+                            DrawElement( reg, c, rect, scale, dl, input, outClicked );
+                }
                 if ( clip )
                     dl.PopClipRect();
             }

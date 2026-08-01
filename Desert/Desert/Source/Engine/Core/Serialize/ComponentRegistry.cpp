@@ -878,6 +878,8 @@ namespace Desert::Core::Serialize
                                                                           &ECS::UITextComponent2D::Data ) );
         Register( MakeReflected<ECS::UIButtonComponent, ECS::UIButtonData>( "UIButton", "UIButtonData",
                                                                             &ECS::UIButtonComponent::Data ) );
+        Register( MakeReflected<ECS::UILayoutGroupComponent, ECS::UILayoutGroupData>(
+             "UILayoutGroup", "UILayoutGroupData", &ECS::UILayoutGroupComponent::Data ) );
 
         // ---- Marker components (presence is the state) ----
         Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );

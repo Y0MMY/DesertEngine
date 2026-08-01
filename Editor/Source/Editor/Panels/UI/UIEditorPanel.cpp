@@ -78,6 +78,9 @@ namespace Desert::Editor
         if ( ImGui::Button( ICON_MDI_BUTTON_POINTER " + Button" ) )
             AddUIChild<ECS::UIButtonComponent>( *m_Scene, canvasEntity, "UI Button" );
         ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_VIEW_GRID " + Layout Group" ) )
+            AddUIChild<ECS::UILayoutGroupComponent>( *m_Scene, canvasEntity, "UI Layout Group" );
+        ImGui::SameLine();
         ImGui::TextDisabled( "add UI elements, then edit anchors/colour in Details" );
         ImGui::Separator();
 

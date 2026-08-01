@@ -153,6 +153,18 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UILayoutGroupData;
+                TypeBuilder( "UILayoutGroupData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Type", .Type = FieldType::Enum, .Offset = offsetof( T, Type ), .Size = sizeof( T::Type ), .TypeName = "UILayoutType", .Meta = PropertyMetadata{ .DisplayName = "Type", .Category = "UI Layout Group", }, .EnumValues = { EnumValue{ "Vertical", 0 }, EnumValue{ "Horizontal", 1 }, EnumValue{ "Grid", 2 }, } } )
+                    .Field( FieldInfo{ .Name = "Padding", .Type = FieldType::Vec4, .Offset = offsetof( T, Padding ), .Size = sizeof( T::Padding ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Padding L/T/R/B", .Category = "UI Layout Group", } } )
+                    .Field( FieldInfo{ .Name = "Spacing", .Type = FieldType::Float, .Offset = offsetof( T, Spacing ), .Size = sizeof( T::Spacing ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Spacing", .Category = "UI Layout Group", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 128.0f, } } )
+                    .Field( FieldInfo{ .Name = "StretchCross", .Type = FieldType::Bool, .Offset = offsetof( T, StretchCross ), .Size = sizeof( T::StretchCross ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Stretch Children (cross axis)", .Category = "UI Layout Group", } } )
+                    .Field( FieldInfo{ .Name = "CellSize", .Type = FieldType::Vec2, .Offset = offsetof( T, CellSize ), .Size = sizeof( T::CellSize ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Grid Cell Size", .Category = "UI Layout Group", } } )
+                    .Field( FieldInfo{ .Name = "Columns", .Type = FieldType::Int, .Offset = offsetof( T, Columns ), .Size = sizeof( T::Columns ), .TypeName = "int", .Meta = PropertyMetadata{ .DisplayName = "Grid Columns (0 = auto)", .Category = "UI Layout Group", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 64.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UICanvasData;
                 TypeBuilder( "UICanvasData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "ScaleMode", .Type = FieldType::Enum, .Offset = offsetof( T, ScaleMode ), .Size = sizeof( T::ScaleMode ), .TypeName = "UICanvasScaleMode", .Meta = PropertyMetadata{ .DisplayName = "Scale Mode", .Category = "UI Canvas", }, .EnumValues = { EnumValue{ "Stretch", 0 }, EnumValue{ "ScaleWithScreen", 1 }, EnumValue{ "Letterbox", 2 }, } } )

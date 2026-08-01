@@ -590,6 +590,44 @@ namespace Desert::ECS
         WorldSpace
     };
 
+    // Auto-layout container type. A UILayoutGroup on an element positions + sizes its DIRECT children
+    // automatically (overriding their anchors) — the Unity/Godot "layout group" model.
+    enum class UILayoutType
+    {
+        Vertical,   // VBox: children top -> bottom
+        Horizontal, // HBox: children left -> right
+        Grid        // fixed cells, wrapping into rows
+    };
+
+    // Add to an element to auto-arrange its children. Children keep their UILayout for appearance + preferred
+    // size (from CustomMinimumSize, else the offset size), but their POSITION/size comes from the group.
+    struct UILayoutGroupData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Type" ), Category( "UI Layout Group" ) )
+        UILayoutType Type = UILayoutType::Vertical;
+
+        PROPERTY( DisplayName( "Padding L/T/R/B" ), Category( "UI Layout Group" ) )
+        glm::vec4 Padding = glm::vec4( 8.0f );
+
+        PROPERTY( DisplayName( "Spacing" ), Category( "UI Layout Group" ), Range( 0.0f, 128.0f ) )
+        float Spacing = 6.0f;
+
+        PROPERTY( DisplayName( "Stretch Children (cross axis)" ), Category( "UI Layout Group" ) )
+        bool StretchCross = true;
+
+        PROPERTY( DisplayName( "Grid Cell Size" ), Category( "UI Layout Group" ) )
+        glm::vec2 CellSize = glm::vec2( 100.0f, 100.0f );
+
+        PROPERTY( DisplayName( "Grid Columns (0 = auto)" ), Category( "UI Layout Group" ), Range( 0.0f, 64.0f ) )
+        int Columns = 0;
+    };
+    struct UILayoutGroupComponent
+    {
+        UILayoutGroupData Data;
+    };
+
     // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas. Add UI
     // elements as CHILDREN of the canvas entity (the viewport "UI" menu / UI Editor do this for you).
     struct UICanvasData
