@@ -254,7 +254,8 @@ namespace Desert::UI
         }
     } // namespace
 
-    bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx )
+    bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
+                         const glm::mat4* worldViewProj )
     {
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
@@ -265,16 +266,36 @@ namespace Desert::UI
         if ( !canvasData.Visible )
             return false;
 
-        // World-space canvases need the camera view-proj (billboarding) — deferred to a later slice.
-        if ( canvasData.RenderMode != ECS::UICanvasRenderMode::ScreenSpace )
-            return false;
-
-        const CanvasFit fit = ResolveCanvas( canvasData, viewportPx );
+        Rect  canvasRect;
+        float scale;
+        if ( canvasData.RenderMode == ECS::UICanvasRenderMode::WorldSpace && worldViewProj &&
+             reg.has<ECS::TransformComponent>( canvasEntity ) )
+        {
+            // Billboard: project the canvas entity's world position to the screen, centre + distance-scale it
+            // (mirrors the ImGui renderer so world-space UI matches).
+            const glm::vec3 wpos = glm::vec3( reg.get<ECS::TransformComponent>( canvasEntity ).GetTransform()[3] );
+            const glm::vec4 clip = ( *worldViewProj ) * glm::vec4( wpos, 1.0f );
+            if ( clip.w <= 0.0001f )
+                return true; // behind the camera — a canvas exists, just nothing to draw
+            const float sx = viewportPx.X + ( clip.x / clip.w * 0.5f + 0.5f ) * viewportPx.W;
+            const float sy = viewportPx.Y + ( 1.0f - ( clip.y / clip.w * 0.5f + 0.5f ) ) * viewportPx.H;
+            const float k  = canvasData.WorldScale / clip.w;
+            const float w  = canvasData.ReferenceWidth * k;
+            const float h  = canvasData.ReferenceHeight * k;
+            canvasRect     = Rect{ sx - w * 0.5f, sy - h * 0.5f, w, h };
+            scale          = k;
+        }
+        else
+        {
+            const CanvasFit fit = ResolveCanvas( canvasData, viewportPx );
+            canvasRect          = fit.Root;
+            scale               = fit.Scale;
+        }
 
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, fit.Root, fit.Scale, dl );
+                    DrawElement( reg, c, canvasRect, scale, dl );
 
         return true;
     }

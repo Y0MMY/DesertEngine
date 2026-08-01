@@ -32,8 +32,18 @@ namespace Desert::Editor::Render
             const float w = static_cast<float>( ctx.Target->GetFramebufferWidth() );
             const float h = static_cast<float>( ctx.Target->GetFramebufferHeight() );
 
+            // Camera view-proj for world-space canvases (screen-space ignores it).
+            glm::mat4        vp( 1.0f );
+            const glm::mat4* vpPtr = nullptr;
+            if ( ctx.Camera )
+            {
+                vp    = ctx.Camera->GetProjectionMatrix() * ctx.Camera->GetViewMatrix();
+                vpPtr = &vp;
+            }
+
             m_Render2D.BeginFrame( { 0.0f, 0.0f, w, h } );
-            UI::RenderCanvas2D( scene->GetRegistry(), m_Render2D.GetDrawList(), UI::Rect{ 0.0f, 0.0f, w, h } );
+            UI::RenderCanvas2D( scene->GetRegistry(), m_Render2D.GetDrawList(), UI::Rect{ 0.0f, 0.0f, w, h },
+                                vpPtr );
             m_Render2D.Flush();
         };
 
