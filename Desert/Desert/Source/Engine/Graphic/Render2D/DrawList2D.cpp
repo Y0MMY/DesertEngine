@@ -55,6 +55,32 @@ namespace Desert::Graphic::Render2D
         AddQuad( texture, min, max, uv0, uv1, tint, false );
     }
 
+    void DrawList2D::AddRectFilledMultiColor( const glm::vec2& min, const glm::vec2& max,
+                                              const glm::vec4& topColor, const glm::vec4& bottomColor )
+    {
+        DrawCommand&   cmd  = CurrentCommand( nullptr, false );
+        const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
+
+        // TL / TR carry the top colour, BR / BL the bottom colour -> a vertical gradient.
+        m_Vertices.push_back( { { min.x, min.y }, { 0.0f, 0.0f }, topColor } );
+        m_Vertices.push_back( { { max.x, min.y }, { 1.0f, 0.0f }, topColor } );
+        m_Vertices.push_back( { { max.x, max.y }, { 1.0f, 1.0f }, bottomColor } );
+        m_Vertices.push_back( { { min.x, max.y }, { 0.0f, 1.0f }, bottomColor } );
+
+        const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
+        m_Indices.insert( m_Indices.end(), quad, quad + 6 );
+        cmd.IndexCount += 6;
+    }
+
+    void DrawList2D::AddRect( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color, float thickness )
+    {
+        const float t = thickness;
+        AddRectFilled( { min.x, min.y }, { max.x, min.y + t }, color );         // top
+        AddRectFilled( { min.x, max.y - t }, { max.x, max.y }, color );         // bottom
+        AddRectFilled( { min.x, min.y + t }, { min.x + t, max.y - t }, color ); // left
+        AddRectFilled( { max.x - t, min.y + t }, { max.x, max.y - t }, color ); // right
+    }
+
     void DrawList2D::AddText( const void* atlas, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
                               const glm::vec2& uv1, const glm::vec4& color )
     {

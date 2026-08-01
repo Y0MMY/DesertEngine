@@ -39,6 +39,13 @@ namespace Desert::Graphic::Render2D
         // Filled axis-aligned rectangle. `min`/`max` are top-left / bottom-right pixel corners.
         void AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color );
 
+        // Vertical two-colour gradient fill (top -> bottom). Solid batch (white texture).
+        void AddRectFilledMultiColor( const glm::vec2& min, const glm::vec2& max, const glm::vec4& topColor,
+                                      const glm::vec4& bottomColor );
+
+        // Rectangle outline of the given pixel `thickness`, drawn as four filled bars (sharp corners).
+        void AddRect( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color, float thickness );
+
         // Textured axis-aligned quad. `texture` is an opaque id (engine Image2D*) the backend binds; `uv0`/
         // `uv1` are the top-left / bottom-right texture coordinates (0..1), `tint` multiplies the sampled
         // texel (white = unchanged). Same-texture quads batch together; a new texture opens a new command.

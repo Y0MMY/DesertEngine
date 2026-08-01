@@ -153,6 +153,31 @@ TEST( DrawList2D, AddTextMarksBatchAndSplitsFromImage )
     EXPECT_EQ( dl.GetCommands()[1].IndexCount, 12u );
 }
 
+TEST( DrawList2D, MultiColorRectGradesTopToBottom )
+{
+    DrawList2D dl;
+    dl.AddRectFilledMultiColor( { 0, 0 }, { 10, 10 }, { 1, 0, 0, 1 }, { 0, 0, 1, 1 } );
+
+    ASSERT_EQ( dl.GetVertices().size(), 4u );
+    const auto& v = dl.GetVertices();
+    EXPECT_NEAR( v[0].Color.r, 1.0f, kEps ); // TL top colour
+    EXPECT_NEAR( v[1].Color.r, 1.0f, kEps ); // TR top colour
+    EXPECT_NEAR( v[2].Color.b, 1.0f, kEps ); // BR bottom colour
+    EXPECT_NEAR( v[3].Color.b, 1.0f, kEps ); // BL bottom colour
+}
+
+TEST( DrawList2D, RectOutlineEmitsFourBars )
+{
+    DrawList2D dl;
+    dl.AddRect( { 0, 0 }, { 100, 50 }, { 1, 1, 1, 1 }, 2.0f );
+
+    // Four filled bars, all solid (white) => one merged batch of 4 quads.
+    EXPECT_EQ( dl.GetVertices().size(), 16u );
+    EXPECT_EQ( dl.GetIndices().size(), 24u );
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_EQ( dl.GetCommands()[0].IndexCount, 24u );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

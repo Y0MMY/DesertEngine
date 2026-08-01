@@ -115,23 +115,40 @@ namespace Desert::UI
                 startX = rect.X + rect.W - textW - 6.0f;
             const float baselineY = rect.Y + ( rect.H - textH ) * 0.5f + bf.Ascent * s;
 
-            const glm::vec4 color( t.Color, 1.0f );
-            float           penX = startX;
-            for ( char ch : t.Text )
+            // Emit the whole line, offset by `off` px and tinted `col`. Reused for shadow / outline / main so
+            // all three stay in perfect glyph lock-step.
+            auto emit = [&]( const glm::vec2& off, const glm::vec4& col )
             {
-                const Text::Glyph* g = glyph( ch );
-                if ( !g )
-                    continue;
-                if ( g->Width > 0.0f && g->Height > 0.0f )
+                float penX = startX;
+                for ( char ch : t.Text )
                 {
-                    // OffsetY is the glyph top relative to the baseline, Y-down (negative above baseline).
-                    const float x0 = penX + g->OffsetX * s;
-                    const float y0 = baselineY + g->OffsetY * s;
-                    dl.AddText( atlas, { x0, y0 }, { x0 + g->Width * s, y0 + g->Height * s }, { g->U0, g->V0 },
-                                { g->U1, g->V1 }, color );
+                    const Text::Glyph* g = glyph( ch );
+                    if ( !g )
+                        continue;
+                    if ( g->Width > 0.0f && g->Height > 0.0f )
+                    {
+                        // OffsetY is the glyph top relative to the baseline, Y-down (negative above baseline).
+                        const float x0 = penX + g->OffsetX * s + off.x;
+                        const float y0 = baselineY + g->OffsetY * s + off.y;
+                        dl.AddText( atlas, { x0, y0 }, { x0 + g->Width * s, y0 + g->Height * s }, { g->U0, g->V0 },
+                                    { g->U1, g->V1 }, col );
+                    }
+                    penX += g->Advance * s;
                 }
-                penX += g->Advance * s;
+            };
+
+            if ( t.Shadow )
+                emit( t.ShadowOffset * scale, glm::vec4( t.ShadowColor, 1.0f ) );
+            if ( t.Outline )
+            {
+                const glm::vec4 oc( t.OutlineColor, 1.0f );
+                const float     ow = std::max( 1.0f, scale );
+                for ( int ox = -1; ox <= 1; ++ox )
+                    for ( int oy = -1; oy <= 1; ++oy )
+                        if ( ox != 0 || oy != 0 )
+                            emit( { ox * ow, oy * ow }, oc );
             }
+            emit( { 0.0f, 0.0f }, glm::vec4( t.Color, 1.0f ) );
         }
         // Maps the canvas to the viewport per its scale mode — mirrors ResolveCanvas in the ImGui renderer so
         // both paths agree on layout. Returns the canvas root rect (screen px) + the uniform scale applied to
@@ -188,7 +205,32 @@ namespace Desert::UI
                 else if ( reg.has<ECS::UIPanelComponent>( e ) )
                 {
                     const auto& p = reg.get<ECS::UIPanelComponent>( e ).Data;
-                    DrawBox( dl, mn, mx, glm::vec4( p.Color, p.Opacity ), p.Sprite, p.SpriteBorder, scale );
+
+                    if ( p.Glow && p.GlowSize > 0.0f )
+                    {
+                        const int   layers = 6;
+                        const float gs     = p.GlowSize * scale;
+                        for ( int i = 0; i < layers; ++i ) // large faint -> small; overlap into a soft glow
+                        {
+                            const float ex = gs * ( 1.0f - static_cast<float>( i ) / layers );
+                            dl.AddRectFilled( { mn.x - ex, mn.y - ex }, { mx.x + ex, mx.y + ex },
+                                              glm::vec4( p.GlowColor, 0.10f * p.Opacity ) );
+                        }
+                    }
+
+                    if ( p.Shadow )
+                        dl.AddRectFilled( { mn.x + p.ShadowOffset.x * scale, mn.y + p.ShadowOffset.y * scale },
+                                          { mx.x + p.ShadowOffset.x * scale, mx.y + p.ShadowOffset.y * scale },
+                                          glm::vec4( p.ShadowColor, p.Opacity ) );
+
+                    if ( p.UseGradient && !HandleSet( p.Sprite ) )
+                        dl.AddRectFilledMultiColor( mn, mx, glm::vec4( p.Color, p.Opacity ),
+                                                    glm::vec4( p.GradientColor, p.Opacity ) );
+                    else
+                        DrawBox( dl, mn, mx, glm::vec4( p.Color, p.Opacity ), p.Sprite, p.SpriteBorder, scale );
+
+                    if ( p.BorderWidth > 0.0f )
+                        dl.AddRect( mn, mx, glm::vec4( p.BorderColor, 1.0f ), p.BorderWidth * scale );
                 }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
