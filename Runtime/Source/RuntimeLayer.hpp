@@ -7,6 +7,16 @@
 #include <string>
 #include <utility>
 
+namespace Desert::Graphic
+{
+    class GraphicsPipeline;
+    class MaterialExecutor;
+} // namespace Desert::Graphic
+namespace Desert::Graphic::Render2D
+{
+    class Render2D;
+}
+
 namespace Desert::Player
 {
     // The PLAYER layer: loads the opened project's scene, flips it straight into Play (scripts, physics,
@@ -40,8 +50,15 @@ namespace Desert::Player
         std::unique_ptr<Graphic::SceneRenderer>      m_SceneRenderer;
         std::shared_ptr<Core::Scene>                 m_Scene;
 
-        std::shared_ptr<::Desert::ImGui::ImGuiLayer> m_ImGuiLayer;
-        std::unique_ptr<Graphic::UICacheTexture>     m_UITextureCache;
+        // No-ImGui present: the runtime opens the swapchain pass itself, blits the scene's final image with a
+        // fullscreen quad, then draws the UI + splash with the engine's own Render2D batcher. Lazily created on
+        // the first present (the swapchain framebuffer only exists after the first BeginSwapChainRenderPass).
+        std::unique_ptr<Graphic::Render2D::Render2D> m_Render2D;
+        std::shared_ptr<Graphic::GraphicsPipeline>   m_BlitPipeline;
+        std::unique_ptr<Graphic::MaterialExecutor>   m_BlitExecutor;
+        bool                                         m_PresentReady  = false;
+        bool                                         m_PrevMouseDown = false; // for the click (down->up) edge
+        Common::BoolResultStr InitPresent( const std::shared_ptr<Graphic::Framebuffer>& swapFb );
 
         // Scene::Resize destroys GPU resources — deferred to the top of OnUpdate (same rule as the
         // editor's viewport panel).

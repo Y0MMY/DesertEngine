@@ -28,9 +28,18 @@
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Logger.hpp>
 
-#include <ImGui/imgui.h>
-
 #include <Engine/Graphic/Texture.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/Pipeline.hpp>
+#include <Engine/Graphic/Framebuffer.hpp>
+#include <Engine/Graphic/Render2D/Render2D.hpp>
+#include <Engine/Graphic/Materials/MaterialExecutor.hpp>
+#include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
+#include <Engine/UI/UICanvasRenderer2D.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/Shader/ShaderService.hpp>
+#include <Engine/Core/Input.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -53,12 +62,8 @@ namespace Desert::Player
 
     Common::BoolResultStr RuntimeLayer::OnAttach()
     {
-        // Minimal ImGui setup — the runtime uses it ONLY as the fullscreen presenter of the rendered frame.
-        ::ImGui::CreateContext();
-        m_ImGuiLayer = ::Desert::ImGui::ImGuiLayer::Create();
-        m_ImGuiLayer->OnAttach();
-
-        m_UITextureCache = Graphic::UICacheTexture::Create();
+        // No ImGui: the runtime presents the frame + draws UI/splash with the engine's own Render2D (set up
+        // lazily on the first present, once the swapchain framebuffer exists).
 
         // The runtime does NOT cook: it plays what the editor cooked. Assets load from the project's
         // Cooked/ tree (missing cooked content = open the project in the editor once).
@@ -111,11 +116,6 @@ namespace Desert::Player
 
     Common::BoolResultStr RuntimeLayer::OnDetach()
     {
-        if ( m_ImGuiLayer )
-        {
-            m_ImGuiLayer->OnDetach();
-            m_ImGuiLayer.reset();
-        }
         return BOOLSUCCESS;
     }
 
@@ -196,58 +196,139 @@ namespace Desert::Player
         return BOOLSUCCESS;
     }
 
+    Common::BoolResultStr RuntimeLayer::InitPresent( const std::shared_ptr<Graphic::Framebuffer>& swapFb )
+    {
+        auto* shaderService = Runtime::ResourceRegistry::GetShaderService();
+        if ( !shaderService )
+            return Common::MakeError( "InitPresent: no shader service" );
+        auto blitShader = shaderService->GetByName( "SwapchainBlit" );
+        if ( !blitShader )
+            return Common::MakeError( "InitPresent: missing shader 'SwapchainBlit'" );
+
+        // Fullscreen blit pipeline (vertexless: the VS synthesizes the quad), opaque, into the swapchain.
+        Graphic::GraphicsPipelineSpecification spec;
+        spec.DebugName         = "SwapchainBlitPipeline";
+        spec.Shader            = blitShader;
+        spec.Framebuffer       = swapFb;
+        spec.DepthTestEnabled  = false;
+        spec.DepthWriteEnabled = false;
+        spec.CullMode          = Graphic::CullMode::None;
+        m_BlitPipeline         = Graphic::GraphicsPipeline::Create( spec );
+        if ( !m_BlitPipeline )
+            return Common::MakeError( "InitPresent: failed to create blit pipeline" );
+        m_BlitPipeline->Invalidate();
+        m_BlitExecutor = Graphic::MaterialExecutor::Create( "SwapchainBlit", blitShader );
+
+        m_Render2D = std::make_unique<Graphic::Render2D::Render2D>();
+        if ( const auto r = m_Render2D->Init( swapFb ); !r )
+            return r;
+
+        m_PresentReady = true;
+        return BOOLSUCCESS;
+    }
+
+    // The runtime's frame present — no ImGui. Opens the swapchain pass, blits the scene's final image
+    // fullscreen, then draws the UI canvas + splash with the engine's Render2D batcher. (Named OnImGuiRender
+    // only because that's the per-frame Layer hook the Application invokes between BeginFrame and Present.)
     Common::BoolResultStr RuntimeLayer::OnImGuiRender()
     {
-        m_ImGuiLayer->Begin();
+        auto& renderer = Graphic::Renderer::GetInstance();
+        renderer.BeginSwapChainRenderPass();
 
-        // One chrome-less fullscreen window whose whole content is the scene's final image.
-        const ImGuiViewport* viewport = ::ImGui::GetMainViewport();
-        ::ImGui::SetNextWindowPos( viewport->Pos );
-        ::ImGui::SetNextWindowSize( viewport->Size );
-        ::ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
-        ::ImGui::PushStyleVar( ImGuiStyleVar_WindowBorderSize, 0.0f );
-        ::ImGui::Begin( "##game", nullptr,
-                        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
-                             ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground );
-
-        const uint32_t width  = static_cast<uint32_t>( viewport->Size.x );
-        const uint32_t height = static_cast<uint32_t>( viewport->Size.y );
-        if ( width > 0 && height > 0 && ( width != m_LastWidth || height != m_LastHeight ) )
+        std::string clicked;
+        if ( const auto swapFb = renderer.GetCompositeFramebuffer() )
         {
-            m_LastWidth     = width;
-            m_LastHeight    = height;
-            m_PendingResize = { width, height };
+            if ( !m_PresentReady )
+                if ( const auto r = InitPresent( swapFb ); !r )
+                    LOG_ERROR( "[Runtime] present init failed: {}", r.GetError() );
+
+            const uint32_t width  = swapFb->GetFramebufferWidth();
+            const uint32_t height = swapFb->GetFramebufferHeight();
+            if ( width > 0 && height > 0 && ( width != m_LastWidth || height != m_LastHeight ) )
+            {
+                m_LastWidth     = width;
+                m_LastHeight    = height;
+                m_PendingResize = { width, height };
+            }
+            const float w = static_cast<float>( width );
+            const float h = static_cast<float>( height );
+
+            if ( m_PresentReady )
+            {
+                // 1) Present the scene: blit its final (tonemapped) image over the whole swapchain.
+                if ( const auto image = m_Scene->GetFinalImage() )
+                {
+                    if ( auto tp = m_BlitExecutor->GetTexture2DProperty( "u_Texture" ) )
+                        tp->SetImage( image.get() );
+                    renderer.SubmitFullscreenQuad( m_BlitPipeline.get(), m_BlitExecutor.get() );
+                }
+
+                // 2) UI + splash via Render2D, on top.
+                m_Render2D->BeginFrame( { 0.0f, 0.0f, w, h } );
+                auto& dl = m_Render2D->GetDrawList();
+
+                glm::mat4        vp( 1.0f );
+                const glm::mat4* vpPtr = nullptr;
+                if ( auto cam = m_Scene->GetMainCamera().lock() )
+                {
+                    vp    = cam->GetProjectionMatrix() * cam->GetViewMatrix();
+                    vpPtr = &vp;
+                }
+
+                // Fullscreen: window mouse px == framebuffer px. MouseReleased is the down->up edge.
+                const auto [mx, my] = Input::Mouse::Get().GetMousePosition();
+                const bool  down    = Input::Mouse::Get().IsMouseButtonPressed( Common::MouseButton::Left );
+                UI::UIInput input;
+                input.MousePx       = { mx, my };
+                input.MouseDown     = down;
+                input.MouseReleased = m_PrevMouseDown && !down;
+                m_PrevMouseDown     = down;
+
+                UI::RenderCanvas2D( m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
+                                    &clicked );
+
+                if ( m_SplashTimer > 0.0f )
+                {
+                    const float elapsed = m_SplashDuration - m_SplashTimer;
+                    float       a       = 1.0f;
+                    if ( m_SplashFade > 0.0f )
+                    {
+                        if ( elapsed < m_SplashFade )
+                            a = elapsed / m_SplashFade; // fade in
+                        else if ( m_SplashTimer < m_SplashFade )
+                            a = m_SplashTimer / m_SplashFade; // fade out
+                    }
+                    a = std::clamp( a, 0.0f, 1.0f );
+
+                    dl.AddRectFilled( { 0.0f, 0.0f }, { w, h }, glm::vec4( 0.0f, 0.0f, 0.0f, a ) ); // fade
+                    if ( auto* tex = Runtime::ResourceRegistry::GetTextureService()->Get( m_SplashSprite ) )
+                    {
+                        auto* img = static_cast<Graphic::Image2D*>(
+                             Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
+                        if ( img && img->GetWidth() > 0 && img->GetHeight() > 0 )
+                        {
+                            const float iw  = static_cast<float>( img->GetWidth() );
+                            const float ih  = static_cast<float>( img->GetHeight() );
+                            const float fit = std::min( w / iw, h / ih );
+                            const float sw = iw * fit, sh = ih * fit;
+                            const float cx = w * 0.5f, cy = h * 0.5f;
+                            dl.AddImage( img, { cx - sw * 0.5f, cy - sh * 0.5f },
+                                         { cx + sw * 0.5f, cy + sh * 0.5f }, { 0.0f, 0.0f }, { 1.0f, 1.0f },
+                                         glm::vec4( 1.0f, 1.0f, 1.0f, a ) );
+                        }
+                    }
+                }
+
+                m_Render2D->Flush();
+            }
         }
 
-        if ( const auto image = m_Scene->GetFinalImage() )
-        {
-            const auto* id = m_UITextureCache->AddTextureCache( image );
-            ::ImGui::Image( (ImTextureID)id, viewport->Size );
-        }
+        renderer.EndRenderPass();
 
-        // In-game UI overlay: the scene's UICanvas drawn on top of the frame with the SAME renderer the
-        // editor previews (Engine/UI/UICanvasRenderer). Buttons are live — a click whose OnClickMessage is
-        // "scene:<path>" queues a scene switch (applied next OnUpdate). Other messages are gameplay events a
-        // ScriptSystem can consume later.
-        std::string              clicked;
-        const UI::SpriteResolver sprites = [this]( const std::shared_ptr<Graphic::Image2D>& img )
-        { return m_UITextureCache ? m_UITextureCache->AddTextureCache( img ) : nullptr; };
-
-        glm::mat4        vp( 1.0f );
-        const glm::mat4* vpPtr = nullptr;
-        if ( auto cam = m_Scene->GetMainCamera().lock() )
-        {
-            vp    = cam->GetProjectionMatrix() * cam->GetViewMatrix();
-            vpPtr = &vp;
-        }
-        UI::RenderCanvas( m_Scene->GetRegistry(), ::ImGui::GetWindowDrawList(),
-                          UI::Rect{ viewport->Pos.x, viewport->Pos.y, viewport->Size.x, viewport->Size.y },
-                          /*interactive=*/true, &clicked, sprites, vpPtr );
+        // Dispatch the clicked button's action AFTER the pass (scene switch queued for next OnUpdate; quit /
+        // URL are process-level). Same encoding the UI walker produces.
         if ( !clicked.empty() )
         {
-            // Dispatch the button's Click Action (encoded by UICanvasRenderer): scene switch / quit / open a
-            // URL / a plain gameplay message a ScriptSystem can consume.
             constexpr std::string_view kScene = "scene:";
             constexpr std::string_view kUrl   = "url:";
             if ( clicked.rfind( kScene, 0 ) == 0 )
@@ -257,7 +338,7 @@ namespace Desert::Player
             else if ( clicked == "quit" )
             {
                 LOG_INFO( "[Runtime] UI quit requested" );
-                std::exit( 0 ); // standalone player: a game "Quit to desktop" button
+                std::exit( 0 );
             }
             else if ( clicked.rfind( kUrl, 0 ) == 0 )
             {
@@ -278,54 +359,6 @@ namespace Desert::Player
             }
         }
 
-        // Splash screen overlay (topmost): a full-screen fade + centred image while m_SplashTimer runs.
-        if ( m_SplashTimer > 0.0f )
-        {
-            const float elapsed = m_SplashDuration - m_SplashTimer;
-            float       a       = 1.0f;
-            if ( m_SplashFade > 0.0f )
-            {
-                if ( elapsed < m_SplashFade )
-                    a = elapsed / m_SplashFade; // fade in
-                else if ( m_SplashTimer < m_SplashFade )
-                    a = m_SplashTimer / m_SplashFade; // fade out
-            }
-            a = std::clamp( a, 0.0f, 1.0f );
-
-            ImDrawList*  fdl = ::ImGui::GetWindowDrawList();
-            const ImVec2 p0  = viewport->Pos;
-            const ImVec2 p1( viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y );
-            fdl->AddRectFilled( p0, p1, IM_COL32( 0, 0, 0, static_cast<int>( a * 255.0f ) ) );
-
-            if ( auto* tex = ::Desert::Runtime::ResourceRegistry::GetTextureService()->Get( m_SplashSprite ) )
-            {
-                auto* img = static_cast<Graphic::Image2D*>(
-                     ::Desert::Runtime::ResourceRegistry::GetImageService()->Resolve( tex->GetImageHandle() ) );
-                if ( img && img->GetWidth() > 0 && img->GetHeight() > 0 )
-                {
-                    // clang-format v18/v22 disagree on aligning this const block — pin it.
-                    // clang-format off
-                    std::shared_ptr<Graphic::Image2D> imgPtr( img, []( Graphic::Image2D* ) {} );
-                    const void* id  = m_UITextureCache->AddTextureCache( imgPtr );
-                    const float iw  = static_cast<float>( img->GetWidth() );
-                    const float ih  = static_cast<float>( img->GetHeight() );
-                    const float fit = std::min( viewport->Size.x / iw, viewport->Size.y / ih );
-                    const float w   = iw * fit;
-                    const float h   = ih * fit;
-                    // clang-format on
-                    const ImVec2 cc( viewport->Pos.x + viewport->Size.x * 0.5f,
-                                     viewport->Pos.y + viewport->Size.y * 0.5f );
-                    fdl->AddImage( (ImTextureID)id, ImVec2( cc.x - w * 0.5f, cc.y - h * 0.5f ),
-                                   ImVec2( cc.x + w * 0.5f, cc.y + h * 0.5f ), ImVec2( 0, 0 ), ImVec2( 1, 1 ),
-                                   IM_COL32( 255, 255, 255, static_cast<int>( a * 255.0f ) ) );
-                }
-            }
-        }
-
-        ::ImGui::End();
-        ::ImGui::PopStyleVar( 2 );
-
-        m_ImGuiLayer->End();
         return BOOLSUCCESS;
     }
 

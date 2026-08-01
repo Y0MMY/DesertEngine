@@ -23,7 +23,6 @@ project "Runtime"
         "%{wks.location}/ThirdParty/GLFW/include/",
         "%{wks.location}/ThirdParty/Glad/include/",
         "%{wks.location}/ThirdParty/entt/include/",
-        "%{wks.location}/ThirdParty/ImGui/",
         "%{wks.location}/ThirdParty/glm/",
         "%{wks.location}/ThirdParty/optick/src/",
         "%{wks.location}/ThirdParty/",
@@ -69,7 +68,6 @@ project "Runtime"
 
         links {
             "Common",
-            "ImGui",
             "Jolt",
             "Lua",
             "ReflectCpp",
