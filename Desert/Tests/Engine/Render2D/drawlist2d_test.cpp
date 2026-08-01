@@ -211,6 +211,27 @@ TEST( DrawList2D, NestedClipIntersects )
     EXPECT_NEAR( clip.w, 50.0f, kEps );
 }
 
+TEST( DrawList2D, RoundedRectFansFromCentre )
+{
+    DrawList2D dl;
+    dl.AddRectFilled( { 0, 0 }, { 100, 100 }, { 1, 1, 1, 1 }, 12.0f );
+
+    // Centre vertex + 4 corners * (segments+1) perimeter vertices (kSeg=6 -> 7 each).
+    EXPECT_EQ( dl.GetVertices().size(), 1u + 4u * 7u );
+    // One fan triangle per perimeter vertex.
+    EXPECT_EQ( dl.GetIndices().size(), ( 4u * 7u ) * 3u );
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_EQ( dl.GetCommands()[0].Texture, nullptr );
+}
+
+TEST( DrawList2D, ZeroRoundingStaysSharpQuad )
+{
+    DrawList2D dl;
+    dl.AddRectFilled( { 0, 0 }, { 10, 10 }, { 1, 1, 1, 1 }, 0.0f );
+    EXPECT_EQ( dl.GetVertices().size(), 4u ); // sharp path
+    EXPECT_EQ( dl.GetIndices().size(), 6u );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

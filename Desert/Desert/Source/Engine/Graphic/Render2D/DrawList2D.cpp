@@ -1,6 +1,7 @@
 #include "DrawList2D.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace Desert::Graphic::Render2D
 {
@@ -75,10 +76,50 @@ namespace Desert::Graphic::Render2D
         cmd.IndexCount += 6;
     }
 
-    void DrawList2D::AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color )
+    void DrawList2D::AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color,
+                                    float rounding )
     {
-        // Solid fill: null texture -> the backend binds its 1x1 white texel, so UVs are irrelevant (0..1).
-        AddQuad( nullptr, min, max, { 0.0f, 0.0f }, { 1.0f, 1.0f }, color, false );
+        const float w = max.x - min.x, h = max.y - min.y;
+        const float r = std::min( rounding, std::min( w, h ) * 0.5f );
+        if ( r <= 0.5f )
+        {
+            // Sharp: null texture -> the backend binds its 1x1 white texel, so UVs are irrelevant (0..1).
+            AddQuad( nullptr, min, max, { 0.0f, 0.0f }, { 1.0f, 1.0f }, color, false );
+            return;
+        }
+
+        // Rounded: a triangle fan from the centre around a perimeter of four quarter-circle corner arcs (the
+        // straight edges fall out between consecutive corner endpoints). y-down: angle 0=+x, PI/2=+y(down).
+        constexpr float PI     = 3.14159265358979323846f;
+        constexpr int   kSeg   = 6; // segments per corner
+        DrawCommand&    cmd    = CurrentCommand( nullptr, false );
+        const uint32_t  base   = static_cast<uint32_t>( m_Vertices.size() );
+        const glm::vec2 centre = ( min + max ) * 0.5f;
+        m_Vertices.push_back( { centre, { 0.5f, 0.5f }, color } );
+
+        const glm::vec2 cc[4] = { { min.x + r, min.y + r },
+                                  { max.x - r, min.y + r },
+                                  { max.x - r, max.y - r },
+                                  { min.x + r, max.y - r } };
+        const float     a0[4] = { PI, PI * 1.5f, 0.0f, PI * 0.5f }; // each arc sweeps +PI/2, clockwise (y-down)
+
+        uint32_t perim = 0;
+        for ( int c = 0; c < 4; ++c )
+            for ( int s = 0; s <= kSeg; ++s )
+            {
+                const float     a = a0[c] + ( PI * 0.5f ) * ( static_cast<float>( s ) / kSeg );
+                const glm::vec2 p = cc[c] + glm::vec2( std::cos( a ), std::sin( a ) ) * r;
+                m_Vertices.push_back( { p, { 0.5f, 0.5f }, color } );
+                ++perim;
+            }
+
+        for ( uint32_t i = 0; i < perim; ++i ) // fan, closing the loop back to the first perimeter vertex
+        {
+            m_Indices.push_back( base );
+            m_Indices.push_back( base + 1 + i );
+            m_Indices.push_back( base + 1 + ( ( i + 1 ) % perim ) );
+        }
+        cmd.IndexCount += perim * 3;
     }
 
     void DrawList2D::AddImage( const void* texture, const glm::vec2& min, const glm::vec2& max,

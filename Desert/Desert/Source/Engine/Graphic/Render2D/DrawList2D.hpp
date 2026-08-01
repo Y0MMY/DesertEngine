@@ -36,8 +36,10 @@ namespace Desert::Graphic::Render2D
         // Clear geometry for a new frame while keeping the allocated capacity (no per-frame reallocation).
         void Reset();
 
-        // Filled axis-aligned rectangle. `min`/`max` are top-left / bottom-right pixel corners.
-        void AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color );
+        // Filled axis-aligned rectangle. `min`/`max` are top-left / bottom-right pixel corners. `rounding` >0
+        // rounds the corners (radius px, clamped to half the shorter side) via a triangle fan.
+        void AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color,
+                            float rounding = 0.0f );
 
         // Vertical two-colour gradient fill (top -> bottom). Solid batch (white texture).
         void AddRectFilledMultiColor( const glm::vec2& min, const glm::vec2& max, const glm::vec4& topColor,

@@ -42,12 +42,12 @@ namespace Desert::UI
         // Mirrors the ImGui DrawBox so both render paths look identical.
         void DrawBox( Graphic::Render2D::DrawList2D& dl, const glm::vec2& mn, const glm::vec2& mx,
                       const glm::vec4& color, const Assets::AssetHandle& sprite, const glm::vec4& srcBorder,
-                      float scale )
+                      float scale, float rounding )
         {
             Graphic::Image2D* img = ResolveSpriteImage( sprite );
             if ( !img )
             {
-                dl.AddRectFilled( mn, mx, color );
+                dl.AddRectFilled( mn, mx, color, rounding );
                 return;
             }
 
@@ -211,7 +211,7 @@ namespace Desert::UI
                         spr = b.PressedSprite;
                     else if ( hover && HandleSet( b.HoverSprite ) )
                         spr = b.HoverSprite;
-                    DrawBox( dl, mn, mx, glm::vec4( c, 1.0f ), spr, b.SpriteBorder, scale );
+                    DrawBox( dl, mn, mx, glm::vec4( c, 1.0f ), spr, b.SpriteBorder, scale, 6.0f * scale );
 
                     if ( hover && outClicked && input->MouseReleased )
                     {
@@ -249,20 +249,21 @@ namespace Desert::UI
                         {
                             const float ex = gs * ( 1.0f - static_cast<float>( i ) / layers );
                             dl.AddRectFilled( { mn.x - ex, mn.y - ex }, { mx.x + ex, mx.y + ex },
-                                              glm::vec4( p.GlowColor, 0.10f * p.Opacity ) );
+                                              glm::vec4( p.GlowColor, 0.10f * p.Opacity ), p.CornerRadius + ex );
                         }
                     }
 
                     if ( p.Shadow )
                         dl.AddRectFilled( { mn.x + p.ShadowOffset.x * scale, mn.y + p.ShadowOffset.y * scale },
                                           { mx.x + p.ShadowOffset.x * scale, mx.y + p.ShadowOffset.y * scale },
-                                          glm::vec4( p.ShadowColor, p.Opacity ) );
+                                          glm::vec4( p.ShadowColor, p.Opacity ), p.CornerRadius * scale );
 
                     if ( p.UseGradient && !HandleSet( p.Sprite ) )
                         dl.AddRectFilledMultiColor( mn, mx, glm::vec4( p.Color, p.Opacity ),
                                                     glm::vec4( p.GradientColor, p.Opacity ) );
                     else
-                        DrawBox( dl, mn, mx, glm::vec4( p.Color, p.Opacity ), p.Sprite, p.SpriteBorder, scale );
+                        DrawBox( dl, mn, mx, glm::vec4( p.Color, p.Opacity ), p.Sprite, p.SpriteBorder, scale,
+                                 p.CornerRadius * scale );
 
                     if ( p.BorderWidth > 0.0f )
                         dl.AddRect( mn, mx, glm::vec4( p.BorderColor, 1.0f ), p.BorderWidth * scale );
