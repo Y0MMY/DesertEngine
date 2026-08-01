@@ -50,12 +50,12 @@ namespace Desert::UI
                 return;
             }
 
-            const void* tex  = img;
-            const float tw   = static_cast<float>( img->GetWidth() );
-            const float th   = static_cast<float>( img->GetHeight() );
-            const bool  nine = tw > 0.0f && th > 0.0f &&
-                              ( srcBorder.x > 0.0f || srcBorder.y > 0.0f || srcBorder.z > 0.0f ||
-                                srcBorder.w > 0.0f );
+            const void* tex = img;
+            const float tw  = static_cast<float>( img->GetWidth() );
+            const float th  = static_cast<float>( img->GetHeight() );
+            const bool  nine =
+                 tw > 0.0f && th > 0.0f &&
+                 ( srcBorder.x > 0.0f || srcBorder.y > 0.0f || srcBorder.z > 0.0f || srcBorder.w > 0.0f );
             if ( !nine )
             {
                 dl.AddImage( tex, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f }, color );

@@ -101,8 +101,7 @@ TEST( DrawList2D, AddImageCarriesUVsAndTexture )
     DrawList2D  dl;
     int         tex = 0; // any non-null opaque id
     const void* id  = &tex;
-    dl.AddImage( id, { 0.0f, 0.0f }, { 100.0f, 100.0f }, { 0.25f, 0.5f }, { 0.75f, 1.0f },
-                 { 1, 1, 1, 1 } );
+    dl.AddImage( id, { 0.0f, 0.0f }, { 100.0f, 100.0f }, { 0.25f, 0.5f }, { 0.75f, 1.0f }, { 1, 1, 1, 1 } );
 
     ASSERT_EQ( dl.GetVertices().size(), 4u );
     ASSERT_EQ( dl.GetCommands().size(), 1u );
