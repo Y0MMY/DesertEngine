@@ -946,22 +946,9 @@ namespace Desert::Editor
                                            m_ViewportData.Size.x, m_ViewportData.Size.y };
         ImDrawList*              dl = ImGui::GetWindowDrawList();
 
-        // The canvas overlay itself (all viewports / both modes) — same path as the runtime. The sprite
-        // resolver wraps engine images for THIS ImGui context (our UIHelper cacher) so Panel/Button sprites
-        // render in-place.
-        const ::Desert::UI::SpriteResolver sprites = [this]( const std::shared_ptr<Graphic::Image2D>& img )
-        { return m_UIHelper ? m_UIHelper->GetTextureID( img ) : nullptr; };
-
-        // Camera view-proj so a WorldSpace canvas projects onto the 3D view.
-        glm::mat4        vp( 1.0f );
-        const glm::mat4* vpPtr = nullptr;
-        if ( auto cam = m_Scene->GetMainCamera().lock() )
-        {
-            vp    = cam->GetProjectionMatrix() * cam->GetViewMatrix();
-            vpPtr = &vp;
-        }
-        ::Desert::UI::RenderCanvas( reg, dl, viewRect, /*interactive=*/false, /*outClicked=*/nullptr, sprites,
-                                    vpPtr );
+        // The canvas CONTENT is drawn by the engine's own Render2D batcher (EditorUIPass, into the scene image
+        // shown here) — no longer re-drawn with ImGui. This function now only adds the editor-authoring
+        // overlays (canvas bounds, selection handles, anchor markers) on top of that image.
 
         // Canvas bounds outline so an EMPTY canvas (no Panel yet) is still visible + selectable — you can
         // see where it maps on screen. Dashed-ish subtle frame, drawn under the element handles.
