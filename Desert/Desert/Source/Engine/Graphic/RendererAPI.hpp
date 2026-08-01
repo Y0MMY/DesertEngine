@@ -111,6 +111,12 @@ namespace Desert::Graphic
         // making the compute writes visible to the fragment stage.
         virtual void ComputeImageEndWrite( Image2D* image ) = 0;
 
+        // Copy the DEPTH aspect of @p src into @p dst (same format + extent). Must be called OUTSIDE any
+        // render pass. Used by the Deferred path to resolve the G-buffer depth into the scene target depth
+        // so depth-tested overlays (grid, colliders) occlude against the static geometry that the deferred
+        // composite never wrote to the target depth.
+        virtual void CopyDepthImage( Image2D* src, Image2D* dst ) = 0;
+
         virtual void                         ResizeWindowEvent( uint32_t width, uint32_t height ) = 0;
         virtual void                         WaitDeviceIdle()                                     = 0;
         virtual std::shared_ptr<Framebuffer> GetCompositeFramebuffer() const                      = 0;

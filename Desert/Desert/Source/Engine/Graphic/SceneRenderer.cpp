@@ -326,6 +326,18 @@ namespace Desert::Graphic
             auto* meshRenderer = UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] );
             meshRenderer->RenderGBufferManual();
 
+            // Resolve the G-buffer depth (static opaque geometry) into the scene target depth. The deferred
+            // composite writes only colour, so without this the target depth stays empty and depth-tested
+            // overlays (grid, colliders) never get occluded by static meshes — they drew "through" them.
+            // Done here, outside any render pass, before the forward-over-composite draws so they too test
+            // against real geometry depth.
+            if ( m_TargetFramebuffer && m_TargetFramebuffer->GetDepthAttachmentCount() > 0 &&
+                 m_GBuffer->GetDepthAttachmentCount() > 0 )
+            {
+                Renderer::GetInstance().CopyDepthImage( m_GBuffer->GetDepthAttachmentImage().get(),
+                                                        m_TargetFramebuffer->GetDepthAttachmentImage().get() );
+            }
+
             glm::vec4 lightDir( 0.0f, -1.0f, 0.0f, 0.0f );
             glm::vec4 lightColor( 1.0f, 0.98f, 0.92f, 3.0f );
             if ( const auto& dl = m_DirectionLights.DirectionLights; !dl.empty() )

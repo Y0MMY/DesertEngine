@@ -60,6 +60,8 @@ namespace Desert::Graphic::API::Vulkan
         virtual void ComputeImageBeginWrite( Image2D* image ) override;
         virtual void ComputeImageEndWrite( Image2D* image ) override;
 
+        virtual void CopyDepthImage( Image2D* src, Image2D* dst ) override;
+
         virtual void ResizeWindowEvent( uint32_t width, uint32_t height ) override;
         virtual void WaitDeviceIdle() override;
 

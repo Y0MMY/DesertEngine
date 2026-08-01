@@ -74,6 +74,10 @@ namespace Desert::Graphic
         void ComputeImageBeginWrite( Image2D* image );
         void ComputeImageEndWrite( Image2D* image );
 
+        // Copy the depth aspect of @p src into @p dst (Deferred: G-buffer depth -> scene target depth so
+        // depth-tested overlays occlude against static geometry). Call outside a render pass.
+        void CopyDepthImage( Image2D* src, Image2D* dst );
+
         void PrepareNextFrame();
         void PresentFinalImage();
 

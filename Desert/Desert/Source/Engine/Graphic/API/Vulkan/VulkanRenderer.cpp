@@ -583,6 +583,38 @@ namespace Desert::Graphic::API::Vulkan
                                    VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT );
     }
 
+    void VulkanRendererAPI::CopyDepthImage( Image2D* src, Image2D* dst )
+    {
+        if ( !m_CurrentCommandBuffer || !src || !dst )
+            return;
+        // Same extent required (a multisampled target depth vs the single-sample G-buffer would be an
+        // illegal copy — skip rather than fault; the grid just stays non-occluded under MSAA until a proper
+        // resolve is added).
+        if ( src->GetWidth() != dst->GetWidth() || src->GetHeight() != dst->GetHeight() )
+            return;
+
+        auto* vsrc = dynamic_cast<VulkanImage2D*>( src );
+        auto* vdst = dynamic_cast<VulkanImage2D*>( dst );
+        if ( !vsrc || !vdst )
+            return;
+
+        vsrc->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
+        vdst->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
+
+        VkImageCopy region{};
+        region.srcSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 };
+        region.dstSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 };
+        region.extent         = { src->GetWidth(), src->GetHeight(), 1 };
+
+        vkCmdCopyImage( m_CurrentCommandBuffer, vsrc->GetResource().Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        vdst->GetResource().Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region );
+
+        // Both back to the depth-attachment layout so the subsequent LOAD passes (forward-over-composite
+        // meshes, then the grid/collider overlays) read + test them normally.
+        vsrc->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
+        vdst->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
+    }
+
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
     }

@@ -152,6 +152,11 @@ namespace Desert::Graphic
         s_RendererAPI->ComputeImageEndWrite( image );
     }
 
+    void Renderer::CopyDepthImage( Image2D* src, Image2D* dst )
+    {
+        s_RendererAPI->CopyDepthImage( src, dst );
+    }
+
     void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
     {
         s_RendererAPI->BeginRenderPass( renderPass, clearFrame );
