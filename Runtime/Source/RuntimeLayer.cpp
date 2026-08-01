@@ -116,6 +116,11 @@ namespace Desert::Player
 
     Common::BoolResultStr RuntimeLayer::OnDetach()
     {
+        // Release the present GPU resources while the device is still alive (before engine teardown).
+        m_Render2D.reset();
+        m_BlitExecutor.reset();
+        m_BlitPipeline.reset();
+        m_PresentReady = false;
         return BOOLSUCCESS;
     }
 

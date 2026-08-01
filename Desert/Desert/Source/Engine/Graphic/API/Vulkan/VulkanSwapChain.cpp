@@ -164,7 +164,11 @@ namespace Desert::Graphic::API::Vulkan
         fbSpec.Width = m_Width;
         fbSpec.Height = m_Height;
         fbSpec.DebugName = "SwapchainFramebufferWrapper";
-        fbSpec.Attachments.Attachments = { (Core::Formats::ImageFormat)0 };
+        // BGRA8F to match the actual swapchain colour format (VK_FORMAT_B8G8R8A8_UNORM). This wrapper's render
+        // pass is what the runtime builds its present/UI pipelines against, so its attachment format must match
+        // the swapchain pass BeginSwapChainRenderPass draws into — else the pipeline is render-pass-incompatible
+        // (was (ImageFormat)0 == RGBA8F, tripping VUID-vkCmdDraw-renderPass-02684 on the SwapchainBlit pipeline).
+        fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::BGRA8F };
         m_CompositeFramebuffer = std::make_shared<VulkanFramebuffer>( fbSpec );
         std::static_pointer_cast<VulkanFramebuffer>( m_CompositeFramebuffer )->RT_Invalidate();
 
