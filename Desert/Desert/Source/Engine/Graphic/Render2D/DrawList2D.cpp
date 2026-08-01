@@ -1,5 +1,7 @@
 #include "DrawList2D.hpp"
 
+#include <algorithm>
+
 namespace Desert::Graphic::Render2D
 {
     void DrawList2D::Reset()
@@ -7,16 +9,46 @@ namespace Desert::Graphic::Render2D
         m_Vertices.clear();
         m_Indices.clear();
         m_Commands.clear();
+        m_ClipStack.clear();
+        m_CurrentClip = { 0.0f, 0.0f, 0.0f, 0.0f };
+    }
+
+    void DrawList2D::PushClipRect( const glm::vec2& min, const glm::vec2& max )
+    {
+        glm::vec4 r( min.x, min.y, max.x - min.x, max.y - min.y );
+        if ( m_CurrentClip.z > 0.0f ) // intersect with the active clip so nested masks compose
+        {
+            const float x0 = std::max( m_CurrentClip.x, r.x );
+            const float y0 = std::max( m_CurrentClip.y, r.y );
+            const float x1 = std::min( m_CurrentClip.x + m_CurrentClip.z, r.x + r.z );
+            const float y1 = std::min( m_CurrentClip.y + m_CurrentClip.w, r.y + r.w );
+            r              = glm::vec4( x0, y0, std::max( 0.0f, x1 - x0 ), std::max( 0.0f, y1 - y0 ) );
+        }
+        m_ClipStack.push_back( m_CurrentClip );
+        m_CurrentClip = r;
+    }
+
+    void DrawList2D::PopClipRect()
+    {
+        if ( m_ClipStack.empty() )
+        {
+            m_CurrentClip = { 0.0f, 0.0f, 0.0f, 0.0f };
+            return;
+        }
+        m_CurrentClip = m_ClipStack.back();
+        m_ClipStack.pop_back();
     }
 
     DrawCommand& DrawList2D::CurrentCommand( const void* texture, bool text )
     {
-        if ( !m_Commands.empty() && m_Commands.back().Texture == texture && m_Commands.back().Text == text )
+        if ( !m_Commands.empty() && m_Commands.back().Texture == texture && m_Commands.back().Text == text &&
+             m_Commands.back().ClipRect == m_CurrentClip )
             return m_Commands.back();
 
         DrawCommand cmd;
         cmd.Texture     = texture;
         cmd.Text        = text;
+        cmd.ClipRect    = m_CurrentClip;
         cmd.IndexOffset = static_cast<uint32_t>( m_Indices.size() );
         cmd.IndexCount  = 0;
         m_Commands.push_back( cmd );

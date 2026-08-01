@@ -157,6 +157,11 @@ namespace Desert::Graphic
         s_RendererAPI->CopyDepthImage( src, dst );
     }
 
+    void Renderer::SetScissor( int32_t x, int32_t y, uint32_t width, uint32_t height )
+    {
+        s_RendererAPI->SetScissor( x, y, width, height );
+    }
+
     void Renderer::BeginRenderPass( const RenderPass* renderPass, bool clearFrame )
     {
         s_RendererAPI->BeginRenderPass( renderPass, clearFrame );

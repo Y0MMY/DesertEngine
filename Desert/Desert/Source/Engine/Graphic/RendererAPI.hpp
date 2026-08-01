@@ -111,6 +111,11 @@ namespace Desert::Graphic
         // making the compute writes visible to the fragment stage.
         virtual void ComputeImageEndWrite( Image2D* image ) = 0;
 
+        // Set the scissor rectangle (framebuffer pixels, top-left origin) on the current command buffer —
+        // used by the 2D batcher to clip UI children to a parent rect. Reset by passing the full viewport;
+        // every BeginRenderPass also resets it. No-op outside a recording command buffer.
+        virtual void SetScissor( int32_t x, int32_t y, uint32_t width, uint32_t height ) = 0;
+
         // Copy the DEPTH aspect of @p src into @p dst (same format + extent). Must be called OUTSIDE any
         // render pass. Used by the Deferred path to resolve the G-buffer depth into the scene target depth
         // so depth-tested overlays (grid, colliders) occlude against the static geometry that the deferred

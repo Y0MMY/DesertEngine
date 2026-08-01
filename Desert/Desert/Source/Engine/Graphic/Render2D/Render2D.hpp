@@ -90,5 +90,6 @@ namespace Desert::Graphic::Render2D
 
         DrawList2D m_DrawList;
         glm::mat4  m_Projection = glm::mat4( 1.0f );
+        glm::vec4  m_ViewportPx = { 0.0f, 0.0f, 0.0f, 0.0f }; // x,y,w,h — the unclipped scissor / reset rect
     };
 } // namespace Desert::Graphic::Render2D

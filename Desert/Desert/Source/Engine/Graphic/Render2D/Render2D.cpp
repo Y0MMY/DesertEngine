@@ -96,6 +96,7 @@ namespace Desert::Graphic::Render2D
         // Y-up NDC), so mapping bottom=y+h to NDC -1 and top=y to NDC +1 lands the origin at the top-left.
         m_Projection =
              glm::ortho( viewportPx.x, viewportPx.x + viewportPx.z, viewportPx.y + viewportPx.w, viewportPx.y );
+        m_ViewportPx = viewportPx;
         m_DrawList.Reset();
     }
 
@@ -175,9 +176,21 @@ namespace Desert::Graphic::Render2D
             if ( !exec )
                 continue;
 
+            // Clip this batch (UILayout ClipContents) via the scissor, or reset to the full viewport.
+            if ( cmd.ClipRect.z > 0.0f && cmd.ClipRect.w > 0.0f )
+                renderer.SetScissor( (int32_t)cmd.ClipRect.x, (int32_t)cmd.ClipRect.y, (uint32_t)cmd.ClipRect.z,
+                                     (uint32_t)cmd.ClipRect.w );
+            else
+                renderer.SetScissor( (int32_t)m_ViewportPx.x, (int32_t)m_ViewportPx.y, (uint32_t)m_ViewportPx.z,
+                                     (uint32_t)m_ViewportPx.w );
+
             exec->PushConstant( &m_Projection, (uint32_t)sizeof( glm::mat4 ) );
             renderer.SubmitIndexed( pipeline, m_VertexBuffer.get(), m_IndexBuffer.get(), cmd.IndexCount,
                                     cmd.IndexOffset, exec );
         }
+
+        // Leave the scissor at the full viewport so nothing downstream inherits a UI clip.
+        renderer.SetScissor( (int32_t)m_ViewportPx.x, (int32_t)m_ViewportPx.y, (uint32_t)m_ViewportPx.z,
+                             (uint32_t)m_ViewportPx.w );
     }
 } // namespace Desert::Graphic::Render2D

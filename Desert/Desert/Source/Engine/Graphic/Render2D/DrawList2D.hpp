@@ -46,6 +46,11 @@ namespace Desert::Graphic::Render2D
         // Rectangle outline of the given pixel `thickness`, drawn as four filled bars (sharp corners).
         void AddRect( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color, float thickness );
 
+        // Clip subsequently-added primitives to `min`..`max` (px), intersected with the current clip (so
+        // nested masks compose). Pair with PopClipRect. The backend applies it as a scissor per batch.
+        void PushClipRect( const glm::vec2& min, const glm::vec2& max );
+        void PopClipRect();
+
         // Textured axis-aligned quad. `texture` is an opaque id (engine Image2D*) the backend binds; `uv0`/
         // `uv1` are the top-left / bottom-right texture coordinates (0..1), `tint` multiplies the sampled
         // texel (white = unchanged). Same-texture quads batch together; a new texture opens a new command.
@@ -88,5 +93,8 @@ namespace Desert::Graphic::Render2D
         std::vector<Vertex2D>    m_Vertices;
         std::vector<uint32_t>    m_Indices;
         std::vector<DrawCommand> m_Commands;
+
+        glm::vec4              m_CurrentClip = { 0.0f, 0.0f, 0.0f, 0.0f }; // x,y,w,h px; W<=0 => unclipped
+        std::vector<glm::vec4> m_ClipStack;
     };
 } // namespace Desert::Graphic::Render2D

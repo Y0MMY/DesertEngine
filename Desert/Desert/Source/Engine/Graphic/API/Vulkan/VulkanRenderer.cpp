@@ -615,6 +615,14 @@ namespace Desert::Graphic::API::Vulkan
         vdst->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
     }
 
+    void VulkanRendererAPI::SetScissor( int32_t x, int32_t y, uint32_t width, uint32_t height )
+    {
+        if ( !m_CurrentCommandBuffer )
+            return;
+        VkRect2D scissor = { .offset = { x, y }, .extent = { width, height } };
+        vkCmdSetScissor( m_CurrentCommandBuffer, 0, 1, &scissor );
+    }
+
     void VulkanRendererAPI::ResizeWindowEvent( uint32_t width, uint32_t height )
     {
     }

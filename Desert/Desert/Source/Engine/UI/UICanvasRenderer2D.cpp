@@ -238,9 +238,19 @@ namespace Desert::UI
             }
 
             if ( reg.has<ECS::RelationshipComponent>( e ) )
+            {
+                // Clip Contents (opt-in per element, like Unity's RectMask2D): children are scissored to this
+                // element's rect. Intersects the current clip so nested masks compose.
+                const bool clip = reg.has<ECS::UILayoutComponent>( e ) &&
+                                  reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents;
+                if ( clip )
+                    dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
                 for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                     if ( reg.valid( c ) )
                         DrawElement( reg, c, rect, scale, dl );
+                if ( clip )
+                    dl.PopClipRect();
+            }
         }
     } // namespace
 

@@ -178,6 +178,39 @@ TEST( DrawList2D, RectOutlineEmitsFourBars )
     EXPECT_EQ( dl.GetCommands()[0].IndexCount, 24u );
 }
 
+TEST( DrawList2D, ClipRectSplitsBatchAndRestores )
+{
+    DrawList2D dl;
+    dl.AddRectFilled( { 0, 0 }, { 10, 10 }, { 1, 1, 1, 1 } ); // unclipped -> cmd 0
+    dl.PushClipRect( { 0, 0 }, { 5, 5 } );
+    dl.AddRectFilled( { 0, 0 }, { 10, 10 }, { 1, 1, 1, 1 } ); // clipped -> cmd 1
+    dl.PopClipRect();
+    dl.AddRectFilled( { 0, 0 }, { 10, 10 }, { 1, 1, 1, 1 } ); // unclipped again -> cmd 2
+
+    ASSERT_EQ( dl.GetCommands().size(), 3u );
+    EXPECT_LE( dl.GetCommands()[0].ClipRect.z, 0.0f ); // no clip
+    EXPECT_NEAR( dl.GetCommands()[1].ClipRect.z, 5.0f, kEps );
+    EXPECT_NEAR( dl.GetCommands()[1].ClipRect.w, 5.0f, kEps );
+    EXPECT_LE( dl.GetCommands()[2].ClipRect.z, 0.0f );
+}
+
+TEST( DrawList2D, NestedClipIntersects )
+{
+    DrawList2D dl;
+    dl.PushClipRect( { 0, 0 }, { 100, 100 } );
+    dl.PushClipRect( { 50, 50 }, { 200, 200 } ); // intersect -> (50,50)-(100,100)
+    dl.AddRectFilled( { 0, 0 }, { 10, 10 }, { 1, 1, 1, 1 } );
+    dl.PopClipRect();
+    dl.PopClipRect();
+
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    const auto& clip = dl.GetCommands()[0].ClipRect;
+    EXPECT_NEAR( clip.x, 50.0f, kEps );
+    EXPECT_NEAR( clip.y, 50.0f, kEps );
+    EXPECT_NEAR( clip.z, 50.0f, kEps ); // width 100-50
+    EXPECT_NEAR( clip.w, 50.0f, kEps );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
