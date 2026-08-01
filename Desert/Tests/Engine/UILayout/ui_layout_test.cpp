@@ -72,6 +72,66 @@ TEST( UILayout, CanvasFitScalesDown )
     EXPECT_TRUE( RectNear( r, { 0.0f, 0.0f, 640.0f, 360.0f } ) );
 }
 
+TEST( UILayoutGroup, HorizontalPacksLeftToRightAndStretchesHeight )
+{
+    using Desert::UI::LayoutGroupParams;
+    using Desert::UI::LayoutGroupType;
+    using Desert::UI::SolveLayoutGroup;
+
+    LayoutGroupParams p;
+    p.Type         = LayoutGroupType::Horizontal;
+    p.Spacing      = 10.0f;
+    p.PaddingL     = 5.0f;
+    p.PaddingT     = 5.0f;
+    p.PaddingR     = 5.0f;
+    p.PaddingB     = 5.0f;
+    p.StretchCross = true;
+
+    const Rect                   box{ 0, 0, 500, 100 };
+    const std::vector<glm::vec2> sizes = { { 40, 30 }, { 60, 30 } };
+    const auto                   out   = SolveLayoutGroup( box, p, sizes );
+
+    ASSERT_EQ( out.size(), 2u );
+    EXPECT_TRUE( RectNear( out[0], { 5, 5, 40, 90 } ) );           // padded start; height stretched (100-5-5)
+    EXPECT_TRUE( RectNear( out[1], { 5 + 40 + 10, 5, 60, 90 } ) ); // after first + spacing
+}
+
+TEST( UILayoutGroup, VerticalPacksTopToBottom )
+{
+    using namespace Desert::UI;
+    LayoutGroupParams p;
+    p.Type         = LayoutGroupType::Vertical;
+    p.Spacing      = 8.0f;
+    p.StretchCross = true;
+
+    const Rect                   box{ 0, 0, 200, 500 };
+    const std::vector<glm::vec2> sizes = { { 50, 40 }, { 50, 60 } };
+    const auto                   out   = SolveLayoutGroup( box, p, sizes );
+
+    ASSERT_EQ( out.size(), 2u );
+    EXPECT_TRUE( RectNear( out[0], { 0, 0, 200, 40 } ) );  // width stretched to container
+    EXPECT_TRUE( RectNear( out[1], { 0, 48, 200, 60 } ) ); // 40 + 8 spacing
+}
+
+TEST( UILayoutGroup, GridWrapsByColumns )
+{
+    using namespace Desert::UI;
+    LayoutGroupParams p;
+    p.Type     = LayoutGroupType::Grid;
+    p.Spacing  = 10.0f;
+    p.CellSize = { 50, 50 };
+    p.Columns  = 2;
+
+    const Rect                   box{ 0, 0, 500, 500 };
+    const std::vector<glm::vec2> sizes( 3, glm::vec2( 0 ) ); // grid ignores child sizes (fixed cells)
+    const auto                   out = SolveLayoutGroup( box, p, sizes );
+
+    ASSERT_EQ( out.size(), 3u );
+    EXPECT_TRUE( RectNear( out[0], { 0, 0, 50, 50 } ) );  // r0 c0
+    EXPECT_TRUE( RectNear( out[1], { 60, 0, 50, 50 } ) ); // r0 c1 (50+10)
+    EXPECT_TRUE( RectNear( out[2], { 0, 60, 50, 50 } ) ); // r1 c0 (wrapped)
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
