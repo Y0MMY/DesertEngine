@@ -77,6 +77,11 @@ namespace Desert::Graphic
         std::string                        DebugName;
         bool                               NoResizeble = false;
 
+        // Swapchain-present wrapper: build the render pass with the swapchain's simple color subpass
+        // dependency (src COLOR_OUTPUT/access 0, dst COLOR_OUTPUT/WRITE) instead of the offscreen one, so
+        // pipelines built against this framebuffer are render-pass-compatible with the actual present pass.
+        bool PresentTarget = false;
+
         ExternalFramebuffer ExternalAttachments;
     };
 

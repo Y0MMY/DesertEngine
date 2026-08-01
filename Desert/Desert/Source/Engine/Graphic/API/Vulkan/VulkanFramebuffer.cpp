@@ -144,13 +144,26 @@ namespace Desert::Graphic::API::Vulkan
             // (without it, LOAD-based accumulate passes read stale/uninitialised content — e.g. the sky colour
             // bleeding through what should be shadowed forward geometry).
             VkSubpassDependency& dependency = dependencies.emplace_back();
-            dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
-            dependency.dstSubpass    = 0;
-            dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-                                     | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-            dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-            dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            dependency.srcSubpass           = VK_SUBPASS_EXTERNAL;
+            dependency.dstSubpass           = 0;
+            if ( m_FramebufferSpecification.PresentTarget )
+            {
+                // Match the swapchain's present render pass EXACTLY (see VulkanSwapChain) so pipelines built
+                // against this wrapper are render-pass-compatible with BeginSwapChainRenderPass's pass.
+                dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                dependency.srcAccessMask = 0;
+                dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            }
+            else
+            {
+                dependency.srcStageMask =
+                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+                dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                dependency.dstAccessMask =
+                     VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            }
         }
 
         if ( hasDepth )

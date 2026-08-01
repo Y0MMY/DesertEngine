@@ -169,6 +169,7 @@ namespace Desert::Graphic::API::Vulkan
         // the swapchain pass BeginSwapChainRenderPass draws into — else the pipeline is render-pass-incompatible
         // (was (ImageFormat)0 == RGBA8F, tripping VUID-vkCmdDraw-renderPass-02684 on the SwapchainBlit pipeline).
         fbSpec.Attachments.Attachments = { Core::Formats::ImageFormat::BGRA8F };
+        fbSpec.PresentTarget           = true; // build its render pass to match the actual present pass
         m_CompositeFramebuffer = std::make_shared<VulkanFramebuffer>( fbSpec );
         std::static_pointer_cast<VulkanFramebuffer>( m_CompositeFramebuffer )->RT_Invalidate();
 
