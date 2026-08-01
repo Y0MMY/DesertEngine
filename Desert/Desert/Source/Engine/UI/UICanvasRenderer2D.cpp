@@ -182,7 +182,7 @@ namespace Desert::UI
         }
 
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
-                          Graphic::Render2D::DrawList2D& dl )
+                          Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked )
         {
             Rect rect = parent;
             if ( reg.has<ECS::UILayoutComponent>( e ) )
@@ -199,8 +199,43 @@ namespace Desert::UI
                 // so the normal state is drawn for now. Rounding / gradient / effects also come later.
                 if ( reg.has<ECS::UIButtonComponent>( e ) )
                 {
-                    const auto& b = reg.get<ECS::UIButtonComponent>( e ).Data;
-                    DrawBox( dl, mn, mx, glm::vec4( b.NormalColor, 1.0f ), b.Sprite, b.SpriteBorder, scale );
+                    const auto& b     = reg.get<ECS::UIButtonComponent>( e ).Data;
+                    const bool  hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
+                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    const bool      down = hover && input->MouseDown;
+                    const glm::vec3 c    = down ? b.PressedColor : ( hover ? b.HoverColor : b.NormalColor );
+
+                    // Image can change with state (hover / press), falling back to the normal Sprite.
+                    Assets::AssetHandle spr = b.Sprite;
+                    if ( down && HandleSet( b.PressedSprite ) )
+                        spr = b.PressedSprite;
+                    else if ( hover && HandleSet( b.HoverSprite ) )
+                        spr = b.HoverSprite;
+                    DrawBox( dl, mn, mx, glm::vec4( c, 1.0f ), spr, b.SpriteBorder, scale );
+
+                    if ( hover && outClicked && input->MouseReleased )
+                    {
+                        // Encode the structured action into the click message the runtime dispatches (same
+                        // encoding as the ImGui renderer, so the host dispatcher is unchanged).
+                        switch ( b.Action )
+                        {
+                            case ECS::UIButtonAction::LoadScene:
+                                *outClicked = "scene:" + b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::QuitGame:
+                                *outClicked = "quit";
+                                break;
+                            case ECS::UIButtonAction::OpenURL:
+                                *outClicked = "url:" + b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::SendMessage:
+                                *outClicked = b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::None:
+                            default:
+                                break;
+                        }
+                    }
                 }
                 else if ( reg.has<ECS::UIPanelComponent>( e ) )
                 {
@@ -247,7 +282,7 @@ namespace Desert::UI
                     dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
                 for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
                     if ( reg.valid( c ) )
-                        DrawElement( reg, c, rect, scale, dl );
+                        DrawElement( reg, c, rect, scale, dl, input, outClicked );
                 if ( clip )
                     dl.PopClipRect();
             }
@@ -255,7 +290,7 @@ namespace Desert::UI
     } // namespace
 
     bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
-                         const glm::mat4* worldViewProj )
+                         const glm::mat4* worldViewProj, const UIInput* input, std::string* outClicked )
     {
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
@@ -295,7 +330,7 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, canvasRect, scale, dl );
+                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked );
 
         return true;
     }
