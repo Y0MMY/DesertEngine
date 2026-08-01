@@ -38,29 +38,42 @@ namespace Desert::Graphic::Render2D
                                            VertexBufferElement( ShaderDataType::Float4, "a_Color" ) } );
 
         GraphicsPipelineSpecification spec;
-        spec.DebugName          = "UI2DPipeline";
-        spec.Shader             = m_Shader;
-        spec.Framebuffer        = target;
-        spec.Layout             = layout;
-        spec.Topology           = PrimitiveTopology::Triangles;
-        spec.CullMode           = CullMode::None;
-        spec.DepthTestEnabled   = false; // UI is a flat overlay — no depth
-        spec.DepthWriteEnabled  = false;
-        spec.BlendEnable        = true; // straight-alpha composite over the scene
-        spec.UseLoadRenderPass  = true; // draw ON TOP of the composited scene, don't clear it
+        spec.DebugName         = "UI2DPipeline";
+        spec.Shader            = m_Shader;
+        spec.Framebuffer       = target;
+        spec.Layout            = layout;
+        spec.Topology          = PrimitiveTopology::Triangles;
+        spec.CullMode          = CullMode::None;
+        spec.DepthTestEnabled  = false; // UI is a flat overlay — no depth
+        spec.DepthWriteEnabled = false;
+        spec.BlendEnable       = true; // straight-alpha composite over the scene
+        spec.UseLoadRenderPass = true; // draw ON TOP of the composited scene, don't clear it
 
         m_Pipeline = GraphicsPipeline::Create( spec );
         if ( !m_Pipeline )
             return Common::MakeError( "Render2D::Init: failed to create UI2D pipeline" );
         m_Pipeline->Invalidate();
 
+        // Text pipeline: identical state, but the UIText shader samples the SDF glyph atlas. Same vertex
+        // layout (pos/uv/colour), so text and shape quads share the one dynamic vertex buffer.
+        m_TextShader = shaderService->GetByName( "UIText" );
+        if ( !m_TextShader )
+            return Common::MakeError( "Render2D::Init: missing shader 'UIText'" );
+
+        GraphicsPipelineSpecification textSpec = spec;
+        textSpec.DebugName                     = "UITextPipeline";
+        textSpec.Shader                        = m_TextShader;
+        m_TextPipeline                         = GraphicsPipeline::Create( textSpec );
+        if ( !m_TextPipeline )
+            return Common::MakeError( "Render2D::Init: failed to create UIText pipeline" );
+        m_TextPipeline->Invalidate();
+
         // 1x1 white texture so solid shapes collapse to their vertex colour (texture * colour == colour).
         // Created once and reused; the pipeline is rebuilt every Init but the texture/buffers persist.
         if ( !m_WhiteTexture )
         {
-            const unsigned char       whitePixel[4] = { 255, 255, 255, 255 };
-            Core::Formats::ImagePixelData data =
-                 std::vector<unsigned char>( whitePixel, whitePixel + 4 );
+            const unsigned char           whitePixel[4] = { 255, 255, 255, 255 };
+            Core::Formats::ImagePixelData data          = std::vector<unsigned char>( whitePixel, whitePixel + 4 );
 
             TextureSpecification texSpec;
             texSpec.GenerateMips = false;
@@ -81,8 +94,8 @@ namespace Desert::Graphic::Render2D
     {
         // Pixel -> clip. Top-left origin, y down: the engine uses a negative-height viewport (GL-style
         // Y-up NDC), so mapping bottom=y+h to NDC -1 and top=y to NDC +1 lands the origin at the top-left.
-        m_Projection = glm::ortho( viewportPx.x, viewportPx.x + viewportPx.z, viewportPx.y + viewportPx.w,
-                                   viewportPx.y );
+        m_Projection =
+             glm::ortho( viewportPx.x, viewportPx.x + viewportPx.z, viewportPx.y + viewportPx.w, viewportPx.y );
         m_DrawList.Reset();
     }
 
@@ -104,21 +117,30 @@ namespace Desert::Graphic::Render2D
         }
     }
 
-    MaterialExecutor* Render2D::ExecutorForTexture( const void* texture )
+    MaterialExecutor* Render2D::ExecutorFor( ExecutorCache& cache, const std::shared_ptr<Shader>& shader,
+                                             const char* sampler, const void* texture, Image2D* image )
     {
-        auto it = m_Executors.find( texture );
-        if ( it != m_Executors.end() )
-            return it->second.get();
+        auto              it = cache.find( texture );
+        MaterialExecutor* exec;
+        if ( it != cache.end() )
+        {
+            exec = it->second.get();
+        }
+        else
+        {
+            auto owned = MaterialExecutor::Create( "Render2D", shader );
+            exec       = owned.get();
+            cache.emplace( texture, std::move( owned ) );
+        }
 
-        auto exec = MaterialExecutor::Create( "Render2D_UI2D", m_Shader );
-        auto* raw = exec.get();
-        m_Executors.emplace( texture, std::move( exec ) );
-        return raw;
+        if ( auto texProp = exec->GetTexture2DProperty( sampler ) )
+            texProp->SetImage( image );
+        return exec;
     }
 
     void Render2D::Flush()
     {
-        if ( !m_Pipeline || m_DrawList.Empty() )
+        if ( !m_Pipeline || !m_TextPipeline || m_DrawList.Empty() )
             return;
 
         const auto& verts = m_DrawList.GetVertices();
@@ -134,16 +156,27 @@ namespace Desert::Graphic::Render2D
             if ( cmd.IndexCount == 0 )
                 continue;
 
-            MaterialExecutor* exec = ExecutorForTexture( cmd.Texture );
+            MaterialExecutor* exec;
+            GraphicsPipeline* pipeline;
+            if ( cmd.Text )
+            {
+                // Text always carries a valid font-atlas texture; route it to the SDF pipeline.
+                exec     = ExecutorFor( m_TextExecutors, m_TextShader, "u_SDFAtlas", cmd.Texture,
+                                        const_cast<Image2D*>( static_cast<const Image2D*>( cmd.Texture ) ) );
+                pipeline = m_TextPipeline.get();
+            }
+            else
+            {
+                Image2D* img = cmd.Texture ? const_cast<Image2D*>( static_cast<const Image2D*>( cmd.Texture ) )
+                                           : m_WhiteImage;
+                exec         = ExecutorFor( m_Executors, m_Shader, "u_Texture", cmd.Texture, img );
+                pipeline     = m_Pipeline.get();
+            }
             if ( !exec )
                 continue;
 
-            const Image2D* img = cmd.Texture ? static_cast<const Image2D*>( cmd.Texture ) : m_WhiteImage;
-            if ( auto texProp = exec->GetTexture2DProperty( "u_Texture" ) )
-                texProp->SetImage( img );
             exec->PushConstant( &m_Projection, (uint32_t)sizeof( glm::mat4 ) );
-
-            renderer.SubmitIndexed( m_Pipeline.get(), m_VertexBuffer.get(), m_IndexBuffer.get(), cmd.IndexCount,
+            renderer.SubmitIndexed( pipeline, m_VertexBuffer.get(), m_IndexBuffer.get(), cmd.IndexCount,
                                     cmd.IndexOffset, exec );
         }
     }

@@ -27,6 +27,7 @@ namespace Desert::Graphic::Render2D
         glm::vec4   ClipRect    = { 0.0f, 0.0f, 0.0f, 0.0f }; // x,y,w,h px; W<=0 => unclipped
         uint32_t    IndexOffset = 0;                          // first index into GetIndices()
         uint32_t    IndexCount  = 0;                          // number of indices in this batch
+        bool        Text        = false;                      // true => SDF glyph atlas (text pipeline), else UI2D
     };
 
     class DrawList2D
@@ -43,6 +44,12 @@ namespace Desert::Graphic::Render2D
         // texel (white = unchanged). Same-texture quads batch together; a new texture opens a new command.
         void AddImage( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
                        const glm::vec2& uv1, const glm::vec4& tint );
+
+        // Textured quad sampled as an SDF glyph (the backend routes these to the text pipeline). Same args as
+        // AddImage; `atlas` is the font's SDF atlas id, `uv0`/`uv1` the glyph's atlas sub-rect, `color` the
+        // text colour. Text quads batch separately from image/solid quads even on the same texture.
+        void AddText( const void* atlas, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
+                      const glm::vec2& uv1, const glm::vec4& color );
 
         const std::vector<Vertex2D>& GetVertices() const
         {
@@ -63,13 +70,13 @@ namespace Desert::Graphic::Render2D
         }
 
     private:
-        // Returns a command matching the given state, extending the last one when possible or opening a new
-        // one anchored at the current end of the index buffer.
-        DrawCommand& CurrentCommand( const void* texture );
+        // Returns a command matching the given state (texture + text mode), extending the last one when
+        // possible or opening a new one anchored at the current end of the index buffer.
+        DrawCommand& CurrentCommand( const void* texture, bool text );
 
-        // Append one textured/tinted quad (the shared path behind AddRectFilled / AddImage).
+        // Append one textured/tinted quad (the shared path behind AddRectFilled / AddImage / AddText).
         void AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
-                      const glm::vec2& uv1, const glm::vec4& color );
+                      const glm::vec2& uv1, const glm::vec4& color, bool text );
 
         std::vector<Vertex2D>    m_Vertices;
         std::vector<uint32_t>    m_Indices;

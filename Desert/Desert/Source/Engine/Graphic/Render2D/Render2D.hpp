@@ -49,8 +49,14 @@ namespace Desert::Graphic::Render2D
         // Start a frame: set the pixel->clip projection for @p viewportPx (x,y,w,h) and clear the draw list.
         void BeginFrame( const glm::vec4& viewportPx );
 
-        DrawList2D&       GetDrawList() { return m_DrawList; }
-        const DrawList2D& GetDrawList() const { return m_DrawList; }
+        DrawList2D& GetDrawList()
+        {
+            return m_DrawList;
+        }
+        const DrawList2D& GetDrawList() const
+        {
+            return m_DrawList;
+        }
 
         // Upload the recorded geometry and draw it into the current render pass. No-op when nothing was recorded.
         void Flush();
@@ -59,12 +65,18 @@ namespace Desert::Graphic::Render2D
         // Grow the dynamic buffers to hold at least the given counts (reused across frames otherwise).
         void EnsureCapacity( uint32_t vertexCount, uint32_t indexCount );
 
-        // Lazily-created MaterialExecutor per bound texture (null => the shared white texture). Each executor
-        // owns its own descriptor set, so switching textures across batches never overwrites a live binding.
-        MaterialExecutor* ExecutorForTexture( const void* texture );
+        using ExecutorCache = std::unordered_map<const void*, std::unique_ptr<MaterialExecutor>>;
 
-        std::shared_ptr<Shader>           m_Shader;
+        // Lazily-created MaterialExecutor per bound texture, one @p cache per shader (UI2D vs UIText). Each
+        // executor owns its own descriptor set, so switching textures across batches never overwrites a live
+        // binding. @p sampler is the shader's sampler2D name the texture is bound to.
+        MaterialExecutor* ExecutorFor( ExecutorCache& cache, const std::shared_ptr<Shader>& shader,
+                                       const char* sampler, const void* texture, Image2D* image );
+
+        std::shared_ptr<Shader>           m_Shader;     // UI2D  (solid / image)
+        std::shared_ptr<Shader>           m_TextShader; // UIText (SDF glyphs)
         std::shared_ptr<GraphicsPipeline> m_Pipeline;
+        std::shared_ptr<GraphicsPipeline> m_TextPipeline;
         std::shared_ptr<VertexBuffer>     m_VertexBuffer;
         std::shared_ptr<IndexBuffer>      m_IndexBuffer;
         uint32_t                          m_VertexCapacity = 0;
@@ -73,7 +85,8 @@ namespace Desert::Graphic::Render2D
         std::shared_ptr<Texture2D> m_WhiteTexture;
         Image2D*                   m_WhiteImage = nullptr;
 
-        std::unordered_map<const void*, std::unique_ptr<MaterialExecutor>> m_Executors;
+        ExecutorCache m_Executors;     // UI2D, keyed by bound Image2D* (null => white)
+        ExecutorCache m_TextExecutors; // UIText, keyed by font atlas Image2D*
 
         DrawList2D m_DrawList;
         glm::mat4  m_Projection = glm::mat4( 1.0f );

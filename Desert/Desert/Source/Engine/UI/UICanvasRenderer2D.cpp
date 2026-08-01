@@ -5,6 +5,7 @@
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Text/FontBaker.hpp>
 
 #include <algorithm>
 
@@ -74,6 +75,64 @@ namespace Desert::UI
                     dl.AddImage( tex, { xs[c], ys[r] }, { xs[c + 1], ys[r + 1] }, { us[c], vs[r] },
                                  { us[c + 1], vs[r + 1] }, color );
         }
+
+        // Lay a single line of text out into SDF glyph quads inside `rect`, aligned per the element. Uses the
+        // FontService default font (TODO: a per-UIText font asset field, Roadmap Phase 5). `scale` maps design
+        // px -> screen px; the SDF renders crisp at any resulting size.
+        void DrawText2D( Graphic::Render2D::DrawList2D& dl, const ECS::UITextData& t, const Rect& rect,
+                         float scale )
+        {
+            auto* fontService = Runtime::ResourceRegistry::GetFontService();
+            if ( !fontService )
+                return;
+            Runtime::Font* font = fontService->Get( "Resources/Fonts/Roboto-Regular.ttf", 48.0f );
+            if ( !font || !font->Atlas || !font->Baked.Valid() )
+                return;
+
+            const Text::BakedFont& bf    = font->Baked;
+            const void*            atlas = font->Atlas.get();
+            const float            s     = bf.PixelHeight > 0.0f ? ( t.FontSize * scale ) / bf.PixelHeight : 0.0f;
+            if ( s <= 0.0f )
+                return;
+
+            auto glyph = [&]( char ch ) -> const Text::Glyph*
+            {
+                const auto it = bf.Glyphs.find( static_cast<uint32_t>( static_cast<unsigned char>( ch ) ) );
+                return it == bf.Glyphs.end() ? nullptr : &it->second;
+            };
+
+            // Measure the line for horizontal alignment; vertical-centre in the element rect.
+            float textW = 0.0f;
+            for ( char ch : t.Text )
+                if ( const Text::Glyph* g = glyph( ch ) )
+                    textW += g->Advance * s;
+            const float textH = ( bf.Ascent - bf.Descent ) * s;
+
+            float startX = rect.X + 6.0f;
+            if ( t.Align == ECS::UITextAlign::Center )
+                startX = rect.X + ( rect.W - textW ) * 0.5f;
+            else if ( t.Align == ECS::UITextAlign::Right )
+                startX = rect.X + rect.W - textW - 6.0f;
+            const float baselineY = rect.Y + ( rect.H - textH ) * 0.5f + bf.Ascent * s;
+
+            const glm::vec4 color( t.Color, 1.0f );
+            float           penX = startX;
+            for ( char ch : t.Text )
+            {
+                const Text::Glyph* g = glyph( ch );
+                if ( !g )
+                    continue;
+                if ( g->Width > 0.0f && g->Height > 0.0f )
+                {
+                    // OffsetY is the glyph top relative to the baseline, Y-down (negative above baseline).
+                    const float x0 = penX + g->OffsetX * s;
+                    const float y0 = baselineY + g->OffsetY * s;
+                    dl.AddText( atlas, { x0, y0 }, { x0 + g->Width * s, y0 + g->Height * s }, { g->U0, g->V0 },
+                                { g->U1, g->V1 }, color );
+                }
+                penX += g->Advance * s;
+            }
+        }
         // Maps the canvas to the viewport per its scale mode — mirrors ResolveCanvas in the ImGui renderer so
         // both paths agree on layout. Returns the canvas root rect (screen px) + the uniform scale applied to
         // every element's offsets / min-size.
@@ -131,6 +190,9 @@ namespace Desert::UI
                     const auto& p = reg.get<ECS::UIPanelComponent>( e ).Data;
                     DrawBox( dl, mn, mx, glm::vec4( p.Color, p.Opacity ), p.Sprite, p.SpriteBorder, scale );
                 }
+
+                if ( reg.has<ECS::UITextComponent2D>( e ) )
+                    DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );
             }
 
             if ( reg.has<ECS::RelationshipComponent>( e ) )

@@ -135,6 +135,24 @@ TEST( DrawList2D, DifferentTexturesSplitBatches )
     EXPECT_EQ( dl.GetCommands()[2].IndexOffset, 12u );
 }
 
+TEST( DrawList2D, AddTextMarksBatchAndSplitsFromImage )
+{
+    DrawList2D dl;
+    int        atlas = 0;
+
+    // Same texture id, but image vs text are distinct GPU states (different pipeline) => two batches.
+    dl.AddImage( &atlas, { 0, 0 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 } );
+    dl.AddText( &atlas, { 0, 0 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 } );
+    dl.AddText( &atlas, { 2, 0 }, { 3, 1 }, { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 } );
+
+    ASSERT_EQ( dl.GetCommands().size(), 2u );
+    EXPECT_FALSE( dl.GetCommands()[0].Text );
+    EXPECT_TRUE( dl.GetCommands()[1].Text );
+    EXPECT_EQ( dl.GetCommands()[1].Texture, &atlas );
+    // The two glyph quads share one text batch.
+    EXPECT_EQ( dl.GetCommands()[1].IndexCount, 12u );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
