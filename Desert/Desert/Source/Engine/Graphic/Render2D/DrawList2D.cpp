@@ -22,22 +22,35 @@ namespace Desert::Graphic::Render2D
         return m_Commands.back();
     }
 
-    void DrawList2D::AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color )
+    void DrawList2D::AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max,
+                              const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec4& color )
     {
         // Open/extend the batch BEFORE appending indices so a freshly opened command anchors its
         // IndexOffset at this quad's first index (not past it).
-        DrawCommand&   cmd  = CurrentCommand( nullptr );
+        DrawCommand&   cmd  = CurrentCommand( texture );
         const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
 
         // Corners: top-left, top-right, bottom-right, bottom-left (CW in a top-left-origin, y-down space).
-        m_Vertices.push_back( { { min.x, min.y }, { 0.0f, 0.0f }, color } );
-        m_Vertices.push_back( { { max.x, min.y }, { 1.0f, 0.0f }, color } );
-        m_Vertices.push_back( { { max.x, max.y }, { 1.0f, 1.0f }, color } );
-        m_Vertices.push_back( { { min.x, max.y }, { 0.0f, 1.0f }, color } );
+        m_Vertices.push_back( { { min.x, min.y }, { uv0.x, uv0.y }, color } );
+        m_Vertices.push_back( { { max.x, min.y }, { uv1.x, uv0.y }, color } );
+        m_Vertices.push_back( { { max.x, max.y }, { uv1.x, uv1.y }, color } );
+        m_Vertices.push_back( { { min.x, max.y }, { uv0.x, uv1.y }, color } );
 
         const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
         m_Indices.insert( m_Indices.end(), quad, quad + 6 );
 
         cmd.IndexCount += 6;
+    }
+
+    void DrawList2D::AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color )
+    {
+        // Solid fill: null texture -> the backend binds its 1x1 white texel, so UVs are irrelevant (0..1).
+        AddQuad( nullptr, min, max, { 0.0f, 0.0f }, { 1.0f, 1.0f }, color );
+    }
+
+    void DrawList2D::AddImage( const void* texture, const glm::vec2& min, const glm::vec2& max,
+                               const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec4& tint )
+    {
+        AddQuad( texture, min, max, uv0, uv1, tint );
     }
 } // namespace Desert::Graphic::Render2D

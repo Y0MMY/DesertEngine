@@ -96,6 +96,46 @@ TEST( DrawList2D, ResetClearsGeometryKeepsUsable )
     EXPECT_EQ( dl.GetIndices()[0], 0u ); // indices re-based after reset
 }
 
+TEST( DrawList2D, AddImageCarriesUVsAndTexture )
+{
+    DrawList2D  dl;
+    int         tex = 0; // any non-null opaque id
+    const void* id  = &tex;
+    dl.AddImage( id, { 0.0f, 0.0f }, { 100.0f, 100.0f }, { 0.25f, 0.5f }, { 0.75f, 1.0f },
+                 { 1, 1, 1, 1 } );
+
+    ASSERT_EQ( dl.GetVertices().size(), 4u );
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_EQ( dl.GetCommands()[0].Texture, id );
+
+    const auto& v = dl.GetVertices();
+    EXPECT_NEAR( v[0].UV.x, 0.25f, kEps ); // TL = uv0
+    EXPECT_NEAR( v[0].UV.y, 0.5f, kEps );
+    EXPECT_NEAR( v[2].UV.x, 0.75f, kEps ); // BR = uv1
+    EXPECT_NEAR( v[2].UV.y, 1.0f, kEps );
+    EXPECT_NEAR( v[1].UV.x, 0.75f, kEps ); // TR = (uv1.x, uv0.y)
+    EXPECT_NEAR( v[1].UV.y, 0.5f, kEps );
+}
+
+TEST( DrawList2D, DifferentTexturesSplitBatches )
+{
+    DrawList2D dl;
+    int        a = 0, b = 0;
+
+    dl.AddRectFilled( { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 } ); // solid (null texture)
+    dl.AddImage( &a, { 0, 0 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 } );
+    dl.AddImage( &b, { 0, 0 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 1, 1, 1, 1 } );
+
+    // Three distinct textures (null, &a, &b) => three commands, each 6 indices at increasing offsets.
+    ASSERT_EQ( dl.GetCommands().size(), 3u );
+    EXPECT_EQ( dl.GetCommands()[0].Texture, nullptr );
+    EXPECT_EQ( dl.GetCommands()[1].Texture, &a );
+    EXPECT_EQ( dl.GetCommands()[2].Texture, &b );
+    EXPECT_EQ( dl.GetCommands()[0].IndexOffset, 0u );
+    EXPECT_EQ( dl.GetCommands()[1].IndexOffset, 6u );
+    EXPECT_EQ( dl.GetCommands()[2].IndexOffset, 12u );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

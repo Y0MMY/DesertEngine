@@ -38,6 +38,12 @@ namespace Desert::Graphic::Render2D
         // Filled axis-aligned rectangle. `min`/`max` are top-left / bottom-right pixel corners.
         void AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color );
 
+        // Textured axis-aligned quad. `texture` is an opaque id (engine Image2D*) the backend binds; `uv0`/
+        // `uv1` are the top-left / bottom-right texture coordinates (0..1), `tint` multiplies the sampled
+        // texel (white = unchanged). Same-texture quads batch together; a new texture opens a new command.
+        void AddImage( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
+                       const glm::vec2& uv1, const glm::vec4& tint );
+
         const std::vector<Vertex2D>& GetVertices() const
         {
             return m_Vertices;
@@ -60,6 +66,10 @@ namespace Desert::Graphic::Render2D
         // Returns a command matching the given state, extending the last one when possible or opening a new
         // one anchored at the current end of the index buffer.
         DrawCommand& CurrentCommand( const void* texture );
+
+        // Append one textured/tinted quad (the shared path behind AddRectFilled / AddImage).
+        void AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max, const glm::vec2& uv0,
+                      const glm::vec2& uv1, const glm::vec4& color );
 
         std::vector<Vertex2D>    m_Vertices;
         std::vector<uint32_t>    m_Indices;
