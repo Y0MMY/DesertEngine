@@ -241,10 +241,9 @@ namespace Desert::Editor::Tools
                 }
         };
 
+        // Start a stroke only when the viewport is genuinely hovered/active.
         if ( interact )
         {
-            const bool lmb = ::ImGui::IsMouseDown( ImGuiMouseButton_Left );
-            const bool rmb = ::ImGui::IsMouseDown( ImGuiMouseButton_Right );
             if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
             {
                 m_Painting     = !removeMode;
@@ -257,11 +256,19 @@ namespace Desert::Editor::Tools
                 m_Erasing      = true;
                 m_HasLastPaint = false;
             }
-            const bool stroke = ( m_Painting && lmb ) || ( m_Erasing && ( lmb || rmb ) );
-            if ( stroke && m_HasCell )
+        }
+        // Once started, keep painting for as long as the button is PHYSICALLY held — even if the window stops
+        // reporting "hovered" mid-drag (a common ImGui behaviour that otherwise stamps only the first cell).
+        // The ground cell is tracked from the live cursor every frame, so the sweep follows the mouse.
+        if ( toolActive && ( m_Painting || m_Erasing ) )
+        {
+            const bool lmb  = ::ImGui::IsMouseDown( ImGuiMouseButton_Left );
+            const bool rmb  = ::ImGui::IsMouseDown( ImGuiMouseButton_Right );
+            const bool held = m_Erasing ? ( lmb || rmb ) : lmb;
+            if ( held && m_HasCell )
             {
                 const bool erase = m_Erasing;
-                if ( m_HasLastPaint && m_LastPaintCell != m_Cell ) // interpolate the swept line
+                if ( m_HasLastPaint && m_LastPaintCell != m_Cell ) // interpolate the swept line -> no gaps
                 {
                     const glm::ivec2 a = m_LastPaintCell, b = m_Cell;
                     const int        steps = std::max( std::abs( b.x - a.x ), std::abs( b.y - a.y ) );
@@ -280,7 +287,7 @@ namespace Desert::Editor::Tools
                 m_LastPaintCell = m_Cell;
                 m_HasLastPaint  = true;
             }
-            if ( !lmb && !rmb )
+            if ( !held )
             {
                 m_Painting     = false;
                 m_Erasing      = false;
