@@ -37,6 +37,29 @@ namespace Desert::UI
         return r;
     }
 
+    // Aspect Ratio Fitter: reshape `r` to a target width/height ratio, keeping it centred on its resolved
+    // centre. mode 1 = derive WIDTH from height; mode 2 = derive HEIGHT from width. ratio<=0 / mode 0 = off.
+    // Shared by the renderer + the editor hit-test so a fitted element draws and picks with the same rect.
+    inline Rect ApplyAspectFit( const Rect& r, float ratio, int mode )
+    {
+        if ( ratio <= 0.0f || mode == 0 )
+            return r;
+        Rect out = r;
+        if ( mode == 1 )
+        {
+            const float w = r.H * ratio;
+            out.X         = r.X + ( r.W - w ) * 0.5f;
+            out.W         = w;
+        }
+        else if ( mode == 2 )
+        {
+            const float h = r.W / ratio;
+            out.Y         = r.Y + ( r.H - h ) * 0.5f;
+            out.H         = h;
+        }
+        return out;
+    }
+
     // Canvas root rect: the design (reference) resolution scaled uniformly to FIT the viewport, centred
     // (letterboxed) — so a layout authored at the reference size keeps its proportions on any window size.
     inline Rect CanvasRect( float refW, float refH, float viewW, float viewH )

@@ -259,6 +259,8 @@ namespace
                     .Field( FieldInfo{ .Name = "CustomMinimumSize", .Type = FieldType::Vec2, .Offset = offsetof( T, CustomMinimumSize ), .Size = sizeof( T::CustomMinimumSize ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Custom Minimum Size", .Category = "UI Layout", } } )
                     .Field( FieldInfo{ .Name = "Pivot", .Type = FieldType::Vec2, .Offset = offsetof( T, Pivot ), .Size = sizeof( T::Pivot ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Pivot", .Category = "UI Layout", } } )
                     .Field( FieldInfo{ .Name = "ClipContents", .Type = FieldType::Bool, .Offset = offsetof( T, ClipContents ), .Size = sizeof( T::ClipContents ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Clip Contents", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "AspectRatio", .Type = FieldType::Float, .Offset = offsetof( T, AspectRatio ), .Size = sizeof( T::AspectRatio ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Aspect Ratio (W/H)", .Category = "Fitter", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 8.0f, } } )
+                    .Field( FieldInfo{ .Name = "AspectMode", .Type = FieldType::Enum, .Offset = offsetof( T, AspectMode ), .Size = sizeof( T::AspectMode ), .TypeName = "UIAspectMode", .Meta = PropertyMetadata{ .DisplayName = "Aspect Mode", .Category = "Fitter", }, .EnumValues = { EnumValue{ "Off", 0 }, EnumValue{ "HeightControlsWidth", 1 }, EnumValue{ "WidthControlsHeight", 2 }, } } )
                     .WithDefault<T>()
                     .Register();
             }

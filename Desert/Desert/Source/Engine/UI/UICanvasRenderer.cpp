@@ -338,6 +338,11 @@ namespace Desert::UI
                 rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
                                              L.CustomMinimumSize * scale, parent );
             }
+            if ( hasLayout ) // match the renderer's Aspect Ratio Fitter so hit-testing lines up
+            {
+                const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
+                rect          = ApplyAspectFit( rect, L.AspectRatio, static_cast<int>( L.AspectMode ) );
+            }
             // Any element with a rect is selectable; later/deeper hits overwrite (matches draw order), so a
             // small button on top of a full-screen panel wins the pick instead of the panel behind it.
             if ( ( forcedRect || hasLayout ) && p.x >= rect.X && p.x <= rect.X + rect.W && p.y >= rect.Y &&
@@ -370,6 +375,11 @@ namespace Desert::UI
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
                 rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
                                              L.CustomMinimumSize * scale, parent );
+            }
+            if ( reg.has<ECS::UILayoutComponent>( e ) )
+            {
+                const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
+                rect          = ApplyAspectFit( rect, L.AspectRatio, static_cast<int>( L.AspectMode ) );
             }
             if ( e == target )
             {

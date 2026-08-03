@@ -852,6 +852,14 @@ namespace Desert::ECS
         UICanvasData Data;
     };
 
+    // Aspect Ratio Fitter mode: which axis is derived from the other to hold the ratio (or off).
+    enum class UIAspectMode
+    {
+        Off,
+        HeightControlsWidth, // width = height * ratio
+        WidthControlsHeight  // height = width / ratio
+    };
+
     // Godot Control-like rect: anchors (fraction of the parent rect, 0..1), offsets (pixels from the anchored
     // edges), a custom minimum size, a pivot and content clipping. The layout solver turns these into a screen
     // rect each frame. AnchorMin==AnchorMax => fixed-size element positioned by offsets; spread anchors =>
@@ -880,6 +888,12 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Clip Contents" ), Category( "UI Layout" ) )
         bool ClipContents = false;
+
+        // Aspect Ratio Fitter (Phase B): keep this width/height ratio, deriving the free axis about the centre.
+        PROPERTY( DisplayName( "Aspect Ratio (W/H)" ), Category( "Fitter" ), Range( 0.0f, 8.0f ) )
+        float AspectRatio = 0.0f; // 0 = off
+        PROPERTY( DisplayName( "Aspect Mode" ), Category( "Fitter" ) )
+        UIAspectMode AspectMode = UIAspectMode::HeightControlsWidth;
     };
     struct UILayoutComponent
     {
