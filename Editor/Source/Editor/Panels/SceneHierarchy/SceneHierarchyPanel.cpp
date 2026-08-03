@@ -277,9 +277,20 @@ namespace Desert::Editor
         // Prefab root entities get a distinctive teal tint
         const ImVec4 iconColor = isPrefab ? ImVec4( 0.3f, 0.9f, 0.8f, 1.0f ) : ThemeManager::GetIconColor();
 
+        // Reveal-on-select: open this node once if it's an ancestor of the newly-selected entity, and scroll
+        // the selected row into view. Applied a single frame so the user can still collapse afterwards.
+        if ( m_ExpandToSelection.erase( static_cast<uint64_t>( UUID ) ) > 0 )
+            ImGui::SetNextItemOpen( true );
+
         ImGui::PushStyleColor( ImGuiCol_Text, iconColor );
         bool nodeOpen = ImGui::TreeNodeEx( (void*)(uint64_t)entity.GetHandle(), nodeFlags, "%s", icon );
         ImGui::PopStyleColor();
+
+        if ( isSelected && m_ScrollToSelection )
+        {
+            ImGui::SetScrollHereY( 0.5f );
+            m_ScrollToSelection = false;
+        }
 
         if ( ImGui::IsItemClicked() )
         {
@@ -755,7 +766,38 @@ namespace Desert::Editor
                 ImGui::TableHeadersRow();
 
                 auto& registry = m_Scene->GetRegistry();
-                auto  view     = registry.view<ECS::UUIDComponent>();
+
+                // Reveal-on-select: when the primary selection changed since last frame, collect its ancestor
+                // chain so DrawEntityNode force-opens those nodes (and scrolls to the selected one) — a UI
+                // element picked in the viewport unfolds to it in the outliner instead of staying hidden.
+                {
+                    const auto&  sel = Core::SelectionManager::GetSelected();
+                    Common::UUID cur = sel.has_value() ? *sel : Common::UUID::Null();
+                    if ( static_cast<uint64_t>( cur ) != static_cast<uint64_t>( m_LastRevealedSelection ) )
+                    {
+                        m_LastRevealedSelection = cur;
+                        m_ExpandToSelection.clear();
+                        m_ScrollToSelection = false;
+                        if ( static_cast<uint64_t>( cur ) != 0 )
+                            if ( auto ref = m_Scene->FindEntityByID( cur ) )
+                            {
+                                entt::entity e = ref->get().GetHandle();
+                                while ( registry.has<ECS::RelationshipComponent>( e ) )
+                                {
+                                    const entt::entity p = registry.get<ECS::RelationshipComponent>( e ).Parent;
+                                    if ( p == entt::null )
+                                        break;
+                                    if ( registry.has<ECS::UUIDComponent>( p ) )
+                                        m_ExpandToSelection.insert(
+                                             static_cast<uint64_t>( registry.get<ECS::UUIDComponent>( p ).UUID ) );
+                                    e = p;
+                                }
+                                m_ScrollToSelection = true;
+                            }
+                    }
+                }
+
+                auto view = registry.view<ECS::UUIDComponent>();
                 for ( auto entityHandle : view )
                 {
                     ECS::Entity entity( entityHandle, registry );

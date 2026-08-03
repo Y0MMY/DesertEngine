@@ -7,6 +7,8 @@
 
 #include "../IPanel.hpp"
 
+#include <unordered_set>
+
 namespace Desert::Editor
 {
     class SceneHierarchyPanel final : public IPanel
@@ -70,5 +72,11 @@ namespace Desert::Editor
         // (the list the user is actually looking at).
         std::vector<Common::UUID> m_VisibleOrder;
         std::vector<Common::UUID> m_VisibleOrderLast;
+
+        // Reveal-on-select: when the primary selection changes (e.g. a UI element picked in the viewport),
+        // force-expand its ancestor chain and scroll it into view so a collapsed/hidden node is revealed.
+        Common::UUID                 m_LastRevealedSelection = Common::UUID::Null();
+        std::unordered_set<uint64_t> m_ExpandToSelection; // ancestor UUIDs to open once, this frame
+        bool                         m_ScrollToSelection = false;
     };
 } // namespace Desert::Editor
