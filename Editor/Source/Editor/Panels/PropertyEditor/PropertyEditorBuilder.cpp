@@ -306,6 +306,47 @@ namespace Desert::Editor
                     break;
                 }
 
+                // Video slot: a video is referenced by asset handle (never a raw path). Drag a .mpg from the
+                // Content Browser (a generic AssetFile payload). VideoService owns the handle<->path registry.
+                if ( field.Meta.AssetType == "VideoAsset" )
+                {
+                    uint64_t* handle = static_cast<uint64_t*>( p );
+                    auto*     vs     = Runtime::ResourceRegistry::GetVideoService();
+
+                    const std::string curPath = vs ? vs->PathForHandle( *handle ) : "";
+                    const std::string display = *handle == 0 ? "None"
+                                                : curPath.empty()
+                                                     ? "(missing)"
+                                                     : std::filesystem::path( curPath ).filename().string();
+                    ImGui::Button( display.c_str(), ImVec2( -1.0f, 0.0f ) );
+                    if ( ImGui::BeginDragDropTarget() )
+                    {
+                        if ( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload( "AssetFile" ) )
+                        {
+                            const std::string path( static_cast<const char*>( pl->Data ),
+                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                            if ( vs && !path.empty() )
+                            {
+                                *handle = vs->RegisterVideo( path );
+                                changed = true;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Drag a .mpg (MPEG1) here from the Content Browser" );
+                    if ( *handle != 0 )
+                    {
+                        ImGui::SameLine();
+                        if ( ImGui::SmallButton( "x##clearvideo" ) )
+                        {
+                            *handle = 0;
+                            changed = true;
+                        }
+                    }
+                    break;
+                }
+
                 // Texture slot: shows the bound asset name, accepts a drag-dropped TEXTURE_ASSET (asset
                 // path payload, emitted by the FileExplorer) and has a Clear button. Thumbnails are a
                 // later visual pass (resolving handle -> Image2D needs runtime verification).

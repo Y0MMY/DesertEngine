@@ -41,9 +41,21 @@ namespace Desert::Runtime
     public:
         ~VideoService();
 
-        // GPU image for `path`'s current frame, opening the video on first use. nullptr when the file
-        // can't be opened / decoded (negatively cached so the check stays cheap).
-        Graphic::Image2D* Resolve( const std::string& path );
+        // --- Videos as ASSETS (handle-referenced, mirrors FontService) ----------------------------------
+        // UI references a video by an AssetHandle, never a raw path: the user drags a .mpg from the Content
+        // Browser (RegisterVideo on drop) and the (de)serializer round-trips it as a path through the shared
+        // AssetResolver. The handle is AssetHandle::FromKey(path) — deterministic & path-derived, so the same
+        // file always maps to the same handle and a saved scene resolves without an import step.
+
+        // Record handle=FromKey(path) -> path and return the handle (idempotent). "" -> 0.
+        uint64_t RegisterVideo( const std::string& path );
+
+        // Reverse lookup for display / serialization. "" if unknown.
+        std::string PathForHandle( uint64_t handle ) const;
+
+        // GPU image for `handle`'s current video frame, opening the file on first use. nullptr when the
+        // handle is unregistered / the file can't be opened (negatively cached so the check stays cheap).
+        Graphic::Image2D* Resolve( uint64_t handle );
 
         // Advance every open video by real elapsed time and upload its newest frame. Call once per frame
         // from the host update loop (runtime layer + editor).
@@ -54,6 +66,7 @@ namespace Desert::Runtime
     private:
         VideoPlayback* GetOrOpen( const std::string& path );
 
-        std::unordered_map<std::string, VideoPlayback> m_Videos;
+        std::unordered_map<std::string, VideoPlayback> m_Videos;       // open decoders keyed by path
+        std::unordered_map<uint64_t, std::string>      m_HandleToPath; // video asset handle -> path
     };
 } // namespace Desert::Runtime

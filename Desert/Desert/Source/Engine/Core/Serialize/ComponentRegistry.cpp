@@ -214,6 +214,11 @@ namespace Desert::Core::Serialize
                     // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
                     return Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle );
                 }
+                if ( type == "VideoAsset" )
+                {
+                    // Videos aren't AssetManager assets — the VideoService owns the handle<->path registry.
+                    return Runtime::ResourceRegistry::GetVideoService()->PathForHandle( handle );
+                }
                 // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
                 auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
                 return a ? a->GetMetadata().Filepath.string() : "";
@@ -272,6 +277,11 @@ namespace Desert::Core::Serialize
                 {
                     // Register the path with the FontService (idempotent) and return its deterministic handle.
                     return Runtime::ResourceRegistry::GetFontService()->RegisterFont( path );
+                }
+                if ( type == "VideoAsset" )
+                {
+                    // Register the path with the VideoService (idempotent) and return its deterministic handle.
+                    return Runtime::ResourceRegistry::GetVideoService()->RegisterVideo( path );
                 }
                 // Meshes: find, else cook-create as the concrete type + register + load.
                 if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )

@@ -906,9 +906,10 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Panel" ) )
         glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
 
-        PROPERTY( DisplayName( "Video Path (.mpg)" ), Category( "UI Panel" ) )
-        std::string VideoPath; // MPEG1 .mpg/.mpeg streamed into this panel (loops, tinted by Color*Opacity).
-                               // Overrides the sprite/gradient fill while set. Empty = no video.
+        PROPERTY( DisplayName( "Video" ), Category( "UI Panel" ), Asset<VideoAsset> )
+        Assets::AssetHandle Video; // MPEG1 .mpg/.mpeg streamed into this panel (loops, tinted by Color*Opacity).
+                                   // Drag a .mpg from the Content Browser. Overrides the sprite/gradient fill
+                                   // while set. Unset = no video. (Handle<->path owned by the VideoService.)
 
         // --- Shape (Phase C) ------------------------------------------------------------------------------
         PROPERTY( DisplayName( "Circle" ), Category( "UI Panel" ) )

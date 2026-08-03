@@ -4,6 +4,7 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <Common/Utilities/FileSystem.hpp>
+#include <Common/Core/AssetHandle.hpp>
 
 #include <pl_mpeg/pl_mpeg.h>
 
@@ -95,8 +96,26 @@ namespace Desert::Runtime
         return &vp;
     }
 
-    Graphic::Image2D* VideoService::Resolve( const std::string& path )
+    uint64_t VideoService::RegisterVideo( const std::string& path )
     {
+        if ( path.empty() )
+            return 0;
+        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromKey( path ) );
+        m_HandleToPath.emplace( handle, path );
+        return handle;
+    }
+
+    std::string VideoService::PathForHandle( uint64_t handle ) const
+    {
+        const auto it = m_HandleToPath.find( handle );
+        return it == m_HandleToPath.end() ? std::string() : it->second;
+    }
+
+    Graphic::Image2D* VideoService::Resolve( uint64_t handle )
+    {
+        if ( handle == 0 )
+            return nullptr;
+        const std::string path = PathForHandle( handle );
         if ( path.empty() )
             return nullptr;
         VideoPlayback* vp = GetOrOpen( path );

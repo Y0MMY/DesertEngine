@@ -835,10 +835,10 @@ namespace Desert::UI
 
                     // A streamed video fills the panel (its stable texture is updated outside the pass by the
                     // VideoService); it takes precedence over the sprite/gradient fill while a path is set.
-                    Graphic::Image2D* video =
-                         p.VideoPath.empty()
-                              ? nullptr
-                              : Runtime::ResourceRegistry::GetVideoService()->Resolve( p.VideoPath );
+                    Graphic::Image2D* video = HandleSet( p.Video )
+                                                   ? Runtime::ResourceRegistry::GetVideoService()->Resolve(
+                                                          static_cast<uint64_t>( p.Video ) )
+                                                   : nullptr;
                     if ( video )
                         dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f }, glm::vec4( p.Color, op ) );
                     else if ( p.UseGradient && !HandleSet( p.Sprite ) )
