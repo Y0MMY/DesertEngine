@@ -179,9 +179,9 @@ namespace Desert::Editor
                     ms.ReqClear = true;
             }
             ImGui::Separator();
-            ImGui::TextDisabled( "LMB drag: paint cells" );
-            ImGui::TextDisabled( "Shift / RMB: erase" );
-            ImGui::TextDisabled( "E / Q: extrude stroke out / in" );
+            ImGui::TextDisabled( "LMB click a cell, drag up/down = height" );
+            ImGui::TextDisabled( "Shift+LMB / RMB: erase a cube" );
+            ImGui::TextDisabled( "E / Q: extrude last column out / in" );
             ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
             ImGui::TextDisabled( "Accept / Cancel: bottom of the viewport" );
         }

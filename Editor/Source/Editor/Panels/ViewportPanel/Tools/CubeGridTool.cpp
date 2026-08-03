@@ -102,6 +102,8 @@ namespace Desert::Editor::Tools
         Core::ModelingState& ms         = Core::ModelingState::Get();
         const float          cs         = ms.CellSize;
         const bool           toolActive = ms.ActiveTool == Core::ModelingState::Tool::CubeGrid;
+        m_CellSize = cs; // keep the generated mesh's cell size in lockstep with the panel's grid step (else
+                         // the overlay uses `cs` while RegenMesh bakes a mismatched-scale mesh -> "big cube")
         if ( ms.ReqClear )
         {
             ms.ReqClear = false;
@@ -159,32 +161,55 @@ namespace Desert::Editor::Tools
             }
         }
 
-        // --- Overlay: wire box spanning inclusive cell range [cmin, cmax]. ---
-        ImDrawList* dl      = ::ImGui::GetWindowDrawList();
-        auto        drawBox = [&]( const glm::ivec3& cmin, const glm::ivec3& cmax, ImU32 col )
+        ImDrawList* dl = ::ImGui::GetWindowDrawList();
+
+        auto occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
+
+        // Draw a cell as SOLID shaded faces — only outward, camera-facing, non-internal faces — so the
+        // blockout reads as solid boxes in the viewport (independent of the generated mesh). `isOcc` decides
+        // which neighbours hide a face (existing cells vs. the live extrude preview); checkerboard shading
+        // makes individual cells legible.
+        auto drawCellSolid = [&]( const glm::ivec3& c, auto&& isOcc, ImU32 fillEven, ImU32 fillOdd,
+                                  ImU32 outline )
         {
-            const glm::vec3 mn = glm::vec3( cmin ) * cs;
-            const glm::vec3 mx = ( glm::vec3( cmax ) + 1.0f ) * cs;
-            glm::vec2       s[8];
-            bool            ok = true;
-            for ( int i = 0; i < 8; ++i )
+            const ImU32 fill = ( ( c.x + c.y + c.z ) & 1 ) ? fillOdd : fillEven;
+            for ( int f = 0; f < 6; ++f )
             {
-                const glm::vec3 w( ( i & 1 ) ? mx.x : mn.x, ( i & 2 ) ? mx.y : mn.y, ( i & 4 ) ? mx.z : mn.z );
-                if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[i] ) )
-                    ok = false;
+                if ( isOcc( c + kNeighbor[f] ) )
+                    continue; // internal face — hidden
+                const glm::vec3 fn = glm::vec3( kNeighbor[f] );
+                const glm::vec3 fc = ( glm::vec3( c ) + 0.5f ) * cs + 0.5f * cs * fn;
+                if ( glm::dot( fn, ray.Origin - fc ) <= 0.0f )
+                    continue; // back face (points away from the camera)
+                glm::vec2 s[4];
+                bool      ok = true;
+                for ( int k = 0; k < 4; ++k )
+                    if ( !WorldToScreen( ( glm::vec3( c ) + kFace[f][k].P + 0.5f ) * cs, viewProj, viewportPos,
+                                         viewportSize, s[k] ) )
+                    {
+                        ok = false;
+                        break;
+                    }
+                if ( !ok )
+                    continue;
+                dl->AddQuadFilled( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ),
+                                   ImVec2( s[2].x, s[2].y ), ImVec2( s[3].x, s[3].y ), fill );
+                dl->AddQuad( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
+                             ImVec2( s[3].x, s[3].y ), outline, 1.0f );
             }
-            if ( !ok )
-                return;
-            const int edges[12][2] = { { 0, 1 }, { 1, 3 }, { 3, 2 }, { 2, 0 }, { 4, 5 }, { 5, 7 },
-                                       { 7, 6 }, { 6, 4 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
-            for ( auto& e : edges )
-                dl->AddLine( ImVec2( s[e[0]].x, s[e[0]].y ), ImVec2( s[e[1]].x, s[e[1]].y ), col, 2.0f );
         };
+
         const bool removeMode = ::ImGui::GetIO().KeyShift;
         const bool interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
         bool       changed    = false;
 
-        if ( toolActive && m_HasAdd )
+        // Existing cells: grey checkerboard solid boxes.
+        if ( toolActive && m_Cells.size() < 6000 )
+            for ( uint64_t k : m_Cells )
+                drawCellSolid( Unpack( k ), occupied, IM_COL32( 150, 155, 165, 190 ),
+                               IM_COL32( 120, 125, 135, 190 ), IM_COL32( 90, 95, 105, 220 ) );
+
+        if ( toolActive && m_HasAdd && !m_Dragging )
         {
             // Visible working grid on the target plane around the cursor (UE5-style) so you see where cells go.
             const glm::ivec3 nrm        = m_AddNormal;
@@ -218,35 +243,32 @@ namespace Desert::Editor::Tools
             }
         }
 
-        // Overlay every placed cell as a faint wire box — the blockout stays visible in the viewport even
-        // before/independent of the generated mesh (and confirms exactly where cubes landed).
-        if ( toolActive && m_Cells.size() < 4000 )
-            for ( uint64_t k : m_Cells )
-                drawBox( Unpack( k ), Unpack( k ), IM_COL32( 180, 195, 215, 70 ) );
+        // In-plane axes for the current target face + the WxD brush footprint on it.
+        const int na = m_AddNormal.x ? 0 : m_AddNormal.y ? 1 : 2;
+        const int ua = ( na + 1 ) % 3;
+        const int va = ( na + 2 ) % 3;
+        const int bw = std::max( 1, ms.BrushW );
+        const int bd = std::max( 1, ms.BrushD );
 
-        // In-plane axes of the target face + its plane coordinate, and the WxD brush footprint.
-        const int   na        = m_AddNormal.x ? 0 : m_AddNormal.y ? 1 : 2;
-        const int   ua        = ( na + 1 ) % 3;
-        const int   va        = ( na + 2 ) % 3;
-        const float pcrd      = static_cast<float>( m_HasAdd ? m_Add[na] : 0 ) * cs;
-        const int   bw        = std::max( 1, ms.BrushW );
-        const int   bd        = std::max( 1, ms.BrushD );
-        auto        footprint = [&]( std::vector<glm::ivec3>& out )
+        // WxD footprint at an anchor cell across two in-plane axes.
+        auto footprintAt = [&]( const glm::ivec3& anchor, int axisU, int axisV, std::vector<glm::ivec3>& out )
         {
             out.clear();
             for ( int i = 0; i < bw; ++i )
                 for ( int j = 0; j < bd; ++j )
                 {
-                    glm::ivec3 c = m_Add;
-                    c[ua] += i;
-                    c[va] += j;
+                    glm::ivec3 c = anchor;
+                    c[axisU] += i;
+                    c[axisV] += j;
                     out.push_back( c );
                 }
         };
-        // Flat cell face on the grid plane (a square) — reads as a GRID CELL, not a 3D cube.
+
+        // Flat cell face on the current target plane (a square) — the hover footprint reads as a GRID CELL.
         auto drawCellFace = [&]( const glm::ivec3& c, ImU32 fill, ImU32 outline )
         {
-            glm::vec2 s[4];
+            const float pcrd = static_cast<float>( m_Add[na] ) * cs;
+            glm::vec2   s[4];
             for ( int k = 0; k < 4; ++k )
             {
                 glm::vec3 w( 0.0f );
@@ -262,52 +284,86 @@ namespace Desert::Editor::Tools
                          ImVec2( s[3].x, s[3].y ), outline, 1.5f );
         };
 
-        // Highlight the target as flat grid cells (green = the WxD paint footprint, red = erase).
-        if ( toolActive )
+        // --- Interaction: click a cell, then drag along the face normal (up / down) to set the extrude
+        //     HEIGHT — a clean column of cells that NEVER overlaps. The live preview is drawn in a distinct
+        //     colour; existing cells stay grey. Shift+LMB / RMB removes the hovered cube. ---
+        if ( m_Dragging )
         {
+            // Height from the cursor's position along the drag normal (closest point of the cursor ray to the
+            // extrude line through the anchor footprint's centre).
+            const glm::vec3 nrmW = glm::normalize( glm::vec3( m_DragNormal ) );
+            const int       dna  = m_DragNormal.x ? 0 : m_DragNormal.y ? 1 : 2;
+            const int       dua  = ( dna + 1 ) % 3;
+            const int       dva  = ( dna + 2 ) % 3;
+            glm::vec3       baseW( 0.0f );
+            baseW[dna] = ( static_cast<float>( m_DragAnchor[dna] ) + 0.5f ) * cs;
+            baseW[dua] = ( static_cast<float>( m_DragAnchor[dua] ) + bw * 0.5f ) * cs;
+            baseW[dva] = ( static_cast<float>( m_DragAnchor[dva] ) + bd * 0.5f ) * cs;
+
+            const glm::vec3 O = ray.Origin, D = ray.Direction, w0 = O - baseW;
+            const float     a = glm::dot( D, D ), b = glm::dot( D, nrmW );
+            const float     dd = glm::dot( D, w0 ), e = glm::dot( nrmW, w0 );
+            const float     denom = a - b * b;
+            const float     tc    = std::abs( denom ) > 1e-6f ? ( a * e - b * dd ) / denom : 0.0f;
+            const int       N     = std::clamp( static_cast<int>( std::floor( tc / cs + 0.5f ) ) + 1, 1, 512 );
+
+            std::vector<glm::ivec3> fp;
+            footprintAt( m_DragAnchor, dua, dva, fp );
+            std::unordered_set<uint64_t> preview;
+            for ( const auto& c : fp )
+                for ( int L = 0; L < N; ++L )
+                    preview.insert( Pack( c + m_DragNormal * L ) );
+
+            auto isPrev = [&]( const glm::ivec3& c ) { return preview.count( Pack( c ) ) > 0; };
+            for ( uint64_t k : preview )
+                drawCellSolid( Unpack( k ), isPrev, IM_COL32( 90, 195, 240, 200 ),
+                               IM_COL32( 60, 165, 215, 200 ), IM_COL32( 220, 245, 255, 235 ) );
+
+            char htxt[24];
+            std::snprintf( htxt, sizeof( htxt ), "H %d", N );
+            const ImVec2 mp = ::ImGui::GetMousePos();
+            dl->AddText( ImVec2( mp.x + 14.0f, mp.y - 4.0f ), IM_COL32( 230, 245, 255, 255 ), htxt );
+
+            if ( !::ImGui::IsMouseDown( ImGuiMouseButton_Left ) ) // release -> commit the column
+            {
+                m_Region.clear();
+                m_RegionNormal = m_DragNormal;
+                for ( uint64_t k : preview )
+                    if ( m_Cells.insert( k ).second )
+                        m_Region.push_back( Unpack( k ) );
+                m_Dragging = false;
+                changed    = true;
+            }
+        }
+        else if ( toolActive )
+        {
+            // Hover preview of the footprint (green = add, red = erase).
             if ( removeMode && m_HasRemove )
                 drawCellFace( m_Remove, IM_COL32( 240, 80, 60, 70 ), IM_COL32( 240, 90, 70, 255 ) );
             else if ( m_HasAdd )
             {
                 std::vector<glm::ivec3> fp;
-                footprint( fp );
+                footprintAt( m_Add, ua, va, fp );
                 for ( const auto& c : fp )
                     drawCellFace( c, IM_COL32( 70, 220, 100, 70 ), IM_COL32( 90, 240, 120, 255 ) );
             }
-        }
 
-        // --- Continuous painting: hold LMB and move to add the WxD footprint under the cursor; Shift/RMB
-        //     erases. Each stroke's painted cells become the region for E/Q. ---
-        if ( interact )
-        {
-            const bool lmb   = ::ImGui::IsMouseDown( ImGuiMouseButton_Left );
-            const bool rmb   = ::ImGui::IsMouseDown( ImGuiMouseButton_Right );
-            const bool erase = ( lmb && removeMode ) || rmb;
-
-            if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && !removeMode ) // begin an ADD stroke
+            if ( interact )
             {
-                m_Dragging = true;
-                m_Region.clear();
-                m_RegionNormal = m_AddNormal;
-            }
-            if ( erase )
-            {
-                if ( m_HasRemove && m_Cells.erase( Pack( m_Remove ) ) > 0 )
-                    changed = true;
-            }
-            else if ( m_Dragging && lmb && m_HasAdd )
-            {
-                std::vector<glm::ivec3> fp;
-                footprint( fp );
-                for ( const auto& c : fp )
-                    if ( m_Cells.insert( Pack( c ) ).second )
-                    {
-                        m_Region.push_back( c );
+                const bool lmbClick = ::ImGui::IsMouseClicked( ImGuiMouseButton_Left );
+                const bool rmbClick = ::ImGui::IsMouseClicked( ImGuiMouseButton_Right );
+                if ( ( ( lmbClick && removeMode ) || rmbClick ) && m_HasRemove ) // erase hovered cube
+                {
+                    if ( m_Cells.erase( Pack( m_Remove ) ) > 0 )
                         changed = true;
-                    }
+                }
+                else if ( lmbClick && !removeMode && m_HasAdd ) // begin an extrude drag
+                {
+                    m_Dragging   = true;
+                    m_DragAnchor = m_Add;
+                    m_DragNormal = m_AddNormal;
+                }
             }
-            if ( !lmb )
-                m_Dragging = false;
         }
 
         // --- Keys: E/Q extrude the last region out/in; Ctrl+E/Q grow/shrink the grid step. ---

@@ -37,7 +37,7 @@ namespace Desert::Editor::Tools
                                    const glm::vec2& size, glm::vec2& out );
 
         std::unordered_set<uint64_t> m_Cells;                           // occupied grid cells (packed ivec3)
-        float                        m_CellSize = 100.0f;               // grid step (Ctrl+E/Q => x2 / /2)
+        float                        m_CellSize = 1.0f;                 // grid step (mirrors ModelingState)
         Common::UUID                 m_Entity   = Common::UUID::Null(); // live blockout entity
 
         // Frame targeting (nearest cube face / ground).
@@ -47,11 +47,11 @@ namespace Desert::Editor::Tools
         glm::ivec3 m_Remove{ 0 };          // cell a click would REMOVE
         glm::ivec3 m_AddNormal{ 0, 1, 0 }; // outward face normal of the add cell (extrude / drag-plane axis)
 
-        // Rectangle drag-fill (LMB press-drag-release across a plane) — builds floors/walls in one stroke.
+        // Extrude drag (LMB press on a cell, drag along the face normal to set the column HEIGHT, release to
+        // commit) — clean columns that never overlap existing cells.
         bool       m_Dragging = false;
-        glm::ivec3 m_DragAnchor{ 0 }; // first cell of the drag
-        glm::ivec3 m_DragNormal{ 0, 1, 0 };
-        glm::ivec3 m_DragFar{ 0 }; // current far corner cell (updated while dragging)
+        glm::ivec3 m_DragAnchor{ 0 };       // footprint anchor cell captured at press
+        glm::ivec3 m_DragNormal{ 0, 1, 0 }; // extrude axis (the pressed face's outward normal)
 
         // Last placed region + its normal — E/Q extrude it out / in along the normal (repeat to raise walls).
         std::vector<glm::ivec3> m_Region;
