@@ -97,8 +97,11 @@ namespace Desert::UI
     };
 
     // Lay `childSizes` (each child's preferred px size) out inside `container`, returning one rect per child.
+    // `childFlex` (Layout Element grow weights; empty = all 0) share the leftover MAIN-axis space among the
+    // flexible children proportionally, so a child can stretch to fill or act as a spacer.
     inline std::vector<Rect> SolveLayoutGroup( const Rect& container, const LayoutGroupParams& p,
-                                               const std::vector<glm::vec2>& childSizes )
+                                               const std::vector<glm::vec2>& childSizes,
+                                               const std::vector<float>&     childFlex = {} )
     {
         std::vector<Rect> out;
         out.reserve( childSizes.size() );
@@ -108,26 +111,43 @@ namespace Desert::UI
         const float innerW = std::max( 0.0f, container.W - p.PaddingL - p.PaddingR );
         const float innerH = std::max( 0.0f, container.H - p.PaddingT - p.PaddingB );
 
-        if ( p.Type == LayoutGroupType::Horizontal )
+        // Leftover main-axis space to hand to flexible children (linear box model, Horizontal/Vertical only).
+        auto flexOf = [&]( std::size_t i )
+        { return i < childFlex.size() ? std::max( 0.0f, childFlex[i] ) : 0.0f; };
+        float flexTotal = 0.0f;
+        for ( std::size_t i = 0; i < childSizes.size(); ++i )
+            flexTotal += flexOf( i );
+
+        if ( p.Type == LayoutGroupType::Horizontal || p.Type == LayoutGroupType::Vertical )
         {
-            float x = x0;
+            const bool horiz = p.Type == LayoutGroupType::Horizontal;
+            const int  n     = static_cast<int>( childSizes.size() );
+            float      used  = ( n > 1 ? p.Spacing * ( n - 1 ) : 0.0f );
             for ( const glm::vec2& s : childSizes )
+                used += horiz ? s.x : s.y;
+            const float leftover = std::max( 0.0f, ( horiz ? innerW : innerH ) - used );
+
+            float pos = horiz ? x0 : y0;
+            for ( std::size_t i = 0; i < childSizes.size(); ++i )
             {
-                const float h = p.StretchCross ? innerH : s.y;
-                const float y = p.StretchCross ? y0 : y0 + ( innerH - h ) * 0.5f;
-                out.push_back( { x, y, s.x, h } );
-                x += s.x + p.Spacing;
-            }
-        }
-        else if ( p.Type == LayoutGroupType::Vertical )
-        {
-            float y = y0;
-            for ( const glm::vec2& s : childSizes )
-            {
-                const float w = p.StretchCross ? innerW : s.x;
-                const float x = p.StretchCross ? x0 : x0 + ( innerW - w ) * 0.5f;
-                out.push_back( { x, y, w, s.y } );
-                y += s.y + p.Spacing;
+                const glm::vec2& s     = childSizes[i];
+                const float      extra = flexTotal > 0.0f ? leftover * flexOf( i ) / flexTotal : 0.0f;
+                if ( horiz )
+                {
+                    const float w = s.x + extra;
+                    const float h = p.StretchCross ? innerH : s.y;
+                    const float y = p.StretchCross ? y0 : y0 + ( innerH - h ) * 0.5f;
+                    out.push_back( { pos, y, w, h } );
+                    pos += w + p.Spacing;
+                }
+                else
+                {
+                    const float h = s.y + extra;
+                    const float w = p.StretchCross ? innerW : s.x;
+                    const float x = p.StretchCross ? x0 : x0 + ( innerW - w ) * 0.5f;
+                    out.push_back( { x, pos, w, h } );
+                    pos += h + p.Spacing;
+                }
             }
         }
         else // Grid

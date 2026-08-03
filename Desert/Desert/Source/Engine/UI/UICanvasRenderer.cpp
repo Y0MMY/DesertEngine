@@ -297,18 +297,22 @@ namespace Desert::UI
                 return;
             const auto&            g = reg.get<ECS::UILayoutGroupComponent>( e ).Data;
             std::vector<glm::vec2> sizes;
+            std::vector<float>     flex;
             for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
             {
                 if ( !reg.valid( c ) )
                     continue;
                 glm::vec2 pref( 0.0f );
+                float     fg = 0.0f;
                 if ( reg.has<ECS::UILayoutComponent>( c ) )
                 {
                     const auto& L = reg.get<ECS::UILayoutComponent>( c ).Data;
                     pref          = glm::max( L.CustomMinimumSize, L.OffsetMax - L.OffsetMin );
+                    fg            = L.FlexGrow;
                 }
                 kids.push_back( c );
                 sizes.push_back( pref * scale );
+                flex.push_back( fg );
             }
             LayoutGroupParams params;
             params.Type         = g.Type == ECS::UILayoutType::Horizontal ? LayoutGroupType::Horizontal
@@ -322,7 +326,7 @@ namespace Desert::UI
             params.StretchCross = g.StretchCross;
             params.CellSize     = g.CellSize * scale;
             params.Columns      = g.Columns;
-            rects               = SolveLayoutGroup( container, params, sizes );
+            rects               = SolveLayoutGroup( container, params, sizes, flex );
         }
 
         void PickRecurse( entt::registry& reg, entt::entity e, const Rect& parent, float scale, const glm::vec2& p,

@@ -1055,18 +1055,22 @@ namespace Desert::UI
                     const auto&               g = reg.get<ECS::UILayoutGroupComponent>( e ).Data;
                     std::vector<entt::entity> kids;
                     std::vector<glm::vec2>    sizes;
+                    std::vector<float>        flex;
                     for ( auto c : children )
                     {
                         if ( !reg.valid( c ) )
                             continue;
                         glm::vec2 pref( 0.0f );
+                        float     fg = 0.0f;
                         if ( reg.has<ECS::UILayoutComponent>( c ) )
                         {
                             const auto& L = reg.get<ECS::UILayoutComponent>( c ).Data;
                             pref          = glm::max( L.CustomMinimumSize, L.OffsetMax - L.OffsetMin );
+                            fg            = L.FlexGrow;
                         }
                         kids.push_back( c );
                         sizes.push_back( pref * scale );
+                        flex.push_back( fg );
                     }
 
                     LayoutGroupParams params;
@@ -1082,7 +1086,7 @@ namespace Desert::UI
                     params.CellSize     = g.CellSize * scale;
                     params.Columns      = g.Columns;
 
-                    const auto rects = SolveLayoutGroup( childParent, params, sizes );
+                    const auto rects = SolveLayoutGroup( childParent, params, sizes, flex );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
                         DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, focused, popups,
                                      focusables, &rects[i] );

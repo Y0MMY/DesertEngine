@@ -261,6 +261,7 @@ namespace
                     .Field( FieldInfo{ .Name = "ClipContents", .Type = FieldType::Bool, .Offset = offsetof( T, ClipContents ), .Size = sizeof( T::ClipContents ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Clip Contents", .Category = "UI Layout", } } )
                     .Field( FieldInfo{ .Name = "AspectRatio", .Type = FieldType::Float, .Offset = offsetof( T, AspectRatio ), .Size = sizeof( T::AspectRatio ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Aspect Ratio (W/H)", .Category = "Fitter", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 8.0f, } } )
                     .Field( FieldInfo{ .Name = "AspectMode", .Type = FieldType::Enum, .Offset = offsetof( T, AspectMode ), .Size = sizeof( T::AspectMode ), .TypeName = "UIAspectMode", .Meta = PropertyMetadata{ .DisplayName = "Aspect Mode", .Category = "Fitter", }, .EnumValues = { EnumValue{ "Off", 0 }, EnumValue{ "HeightControlsWidth", 1 }, EnumValue{ "WidthControlsHeight", 2 }, } } )
+                    .Field( FieldInfo{ .Name = "FlexGrow", .Type = FieldType::Float, .Offset = offsetof( T, FlexGrow ), .Size = sizeof( T::FlexGrow ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Flex Grow", .Category = "Fitter", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 8.0f, } } )
                     .WithDefault<T>()
                     .Register();
             }

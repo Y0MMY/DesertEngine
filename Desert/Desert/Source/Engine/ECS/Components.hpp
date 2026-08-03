@@ -894,6 +894,11 @@ namespace Desert::ECS
         float AspectRatio = 0.0f; // 0 = off
         PROPERTY( DisplayName( "Aspect Mode" ), Category( "Fitter" ) )
         UIAspectMode AspectMode = UIAspectMode::HeightControlsWidth;
+
+        // Layout Element (Phase B): inside a parent VBox/HBox, flexible children share the leftover main-axis
+        // space by weight — >0 stretches this child to fill (or acts as a spacer). 0 = fixed preferred size.
+        PROPERTY( DisplayName( "Flex Grow" ), Category( "Fitter" ), Range( 0.0f, 8.0f ) )
+        float FlexGrow = 0.0f;
     };
     struct UILayoutComponent
     {
