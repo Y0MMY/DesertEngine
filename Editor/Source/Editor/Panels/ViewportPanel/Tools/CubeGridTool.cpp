@@ -169,8 +169,7 @@ namespace Desert::Editor::Tools
         // blockout reads as solid boxes in the viewport (independent of the generated mesh). `isOcc` decides
         // which neighbours hide a face (existing cells vs. the live extrude preview); checkerboard shading
         // makes individual cells legible.
-        auto drawCellSolid = [&]( const glm::ivec3& c, auto&& isOcc, ImU32 fillEven, ImU32 fillOdd,
-                                  ImU32 outline )
+        auto drawCellSolid = [&]( const glm::ivec3& c, auto&& isOcc, ImU32 fillEven, ImU32 fillOdd, ImU32 outline )
         {
             const ImU32 fill = ( ( c.x + c.y + c.z ) & 1 ) ? fillOdd : fillEven;
             for ( int f = 0; f < 6; ++f )
@@ -192,8 +191,8 @@ namespace Desert::Editor::Tools
                     }
                 if ( !ok )
                     continue;
-                dl->AddQuadFilled( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ),
-                                   ImVec2( s[2].x, s[2].y ), ImVec2( s[3].x, s[3].y ), fill );
+                dl->AddQuadFilled( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
+                                   ImVec2( s[3].x, s[3].y ), fill );
                 dl->AddQuad( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
                              ImVec2( s[3].x, s[3].y ), outline, 1.0f );
             }
@@ -316,8 +315,8 @@ namespace Desert::Editor::Tools
 
             auto isPrev = [&]( const glm::ivec3& c ) { return preview.count( Pack( c ) ) > 0; };
             for ( uint64_t k : preview )
-                drawCellSolid( Unpack( k ), isPrev, IM_COL32( 90, 195, 240, 200 ),
-                               IM_COL32( 60, 165, 215, 200 ), IM_COL32( 220, 245, 255, 235 ) );
+                drawCellSolid( Unpack( k ), isPrev, IM_COL32( 90, 195, 240, 200 ), IM_COL32( 60, 165, 215, 200 ),
+                               IM_COL32( 220, 245, 255, 235 ) );
 
             char htxt[24];
             std::snprintf( htxt, sizeof( htxt ), "H %d", N );
