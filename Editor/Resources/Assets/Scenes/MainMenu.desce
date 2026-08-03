@@ -356,15 +356,13 @@
     ],
     "ClipContents": false
    },
-   "UIIcon": {
-    "Icon": 0,
-    "Color": [
-     0.9,
-     0.93,
-     0.98
+   "UIImage": {
+    "Tint": [
+     1.0,
+     1.0,
+     1.0
     ],
-    "Thickness": 3.0,
-    "Scale": 0.8
+    "Opacity": 1.0
    }
   },
   {
@@ -479,15 +477,13 @@
     ],
     "ClipContents": false
    },
-   "UIIcon": {
-    "Icon": 1,
-    "Color": [
-     0.9,
-     0.93,
-     0.98
+   "UIImage": {
+    "Tint": [
+     1.0,
+     1.0,
+     1.0
     ],
-    "Thickness": 3.0,
-    "Scale": 0.8
+    "Opacity": 1.0
    }
   },
   {
@@ -602,15 +598,13 @@
     ],
     "ClipContents": false
    },
-   "UIIcon": {
-    "Icon": 2,
-    "Color": [
-     0.9,
-     0.93,
-     0.98
+   "UIImage": {
+    "Tint": [
+     1.0,
+     1.0,
+     1.0
     ],
-    "Thickness": 3.0,
-    "Scale": 0.8
+    "Opacity": 1.0
    }
   },
   {
@@ -725,15 +719,13 @@
     ],
     "ClipContents": false
    },
-   "UIIcon": {
-    "Icon": 3,
-    "Color": [
-     0.9,
-     0.93,
-     0.98
+   "UIImage": {
+    "Tint": [
+     1.0,
+     1.0,
+     1.0
     ],
-    "Thickness": 3.0,
-    "Scale": 0.8
+    "Opacity": 1.0
    }
   },
   {
@@ -848,15 +840,13 @@
     ],
     "ClipContents": false
    },
-   "UIIcon": {
-    "Icon": 4,
-    "Color": [
-     0.9,
-     0.93,
-     0.98
+   "UIImage": {
+    "Tint": [
+     1.0,
+     1.0,
+     1.0
     ],
-    "Thickness": 3.0,
-    "Scale": 0.8
+    "Opacity": 1.0
    }
   },
   {
@@ -971,15 +961,13 @@
     ],
     "ClipContents": false
    },
-   "UIIcon": {
-    "Icon": 5,
-    "Color": [
-     0.9,
-     0.93,
-     0.98
+   "UIImage": {
+    "Tint": [
+     1.0,
+     1.0,
+     1.0
     ],
-    "Thickness": 3.0,
-    "Scale": 0.8
+    "Opacity": 1.0
    }
   },
   {
@@ -1183,15 +1171,13 @@
     ],
     "ClipContents": false
    },
-   "UIIcon": {
-    "Icon": 1,
-    "Color": [
-     0.8,
-     0.86,
-     0.95
+   "UIImage": {
+    "Tint": [
+     1.0,
+     1.0,
+     1.0
     ],
-    "Thickness": 3.0,
-    "Scale": 0.9
+    "Opacity": 1.0
    }
   },
   {

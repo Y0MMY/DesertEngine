@@ -992,8 +992,11 @@ namespace Desert::UI
                 if ( reg.has<ECS::UIImageComponent>( e ) )
                 {
                     // A sprite block — reuses DrawBox so it gets GIF playback, 9-slice and the static path.
+                    // With no sprite bound it draws nothing (an empty Image is invisible, not a solid box).
                     const auto& im = reg.get<ECS::UIImageComponent>( e ).Data;
-                    DrawBox( dl, mn, mx, glm::vec4( im.Tint, im.Opacity ), im.Sprite, im.SpriteBorder, scale, 0.0f );
+                    if ( HandleSet( im.Sprite ) )
+                        DrawBox( dl, mn, mx, glm::vec4( im.Tint, im.Opacity ), im.Sprite, im.SpriteBorder, scale,
+                                 0.0f );
                 }
 
                 // Keyboard focus: record this control for Tab-cycling, and draw a focus ring when it holds
