@@ -12,6 +12,7 @@
 #include "LightGizmoRenderer.hpp"
 #include "PerfHudOverlay.hpp"
 #include "Tools/FoliagePaintTool.hpp"
+#include "Tools/CubeGridTool.hpp"
 #include "Tools/TerrainPaintTool.hpp"
 #include "Tools/GizmoController.hpp"
 #include "Tools/PickingController.hpp"
@@ -138,8 +139,9 @@ namespace Desert::Editor
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
         std::unique_ptr<LightGizmoRenderer>   m_LightGizmoRenderer;
         PerfHudOverlay                        m_PerfHud; // View -> Perf HUD viewport overlay
-        Tools::FoliagePaintTool               m_FoliageTool; // UE5-style foliage painting (extracted)
-        Tools::TerrainPaintTool               m_TerrainTool; // terrain splat-layer painting (extracted)
+        Tools::FoliagePaintTool               m_FoliageTool;  // UE5-style foliage painting (extracted)
+        Tools::CubeGridTool                   m_CubeGridTool; // UE5-style CubeGrid blockout (Modeling mode)
+        Tools::TerrainPaintTool               m_TerrainTool;  // terrain splat-layer painting (extracted)
         Tools::GizmoController                m_Gizmo;       // object + bone transform gizmos (extracted)
         Tools::PickingController              m_Picking;     // ray-pick + select (extracted)
         std::unique_ptr<AsyncMeshLoader>      m_AsyncLoader; // background cook of dropped meshes (no hitch)

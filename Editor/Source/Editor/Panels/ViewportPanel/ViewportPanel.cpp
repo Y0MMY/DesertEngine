@@ -292,7 +292,8 @@ namespace Desert::Editor
         ImGui::SetCursorPosX( ImGui::GetCursorPosX() + 6.0f );
 
         // --- Mode dropdown ---
-        const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage" };
+        const char* kModes[] = { ICON_MDI_CURSOR_DEFAULT "  Select", ICON_MDI_GRASS "  Foliage",
+                                 ICON_MDI_CUBE_OUTLINE "  Modeling" };
         int         mode     = static_cast<int>( Core::ViewportMode::Get() );
         ImGui::SetNextItemWidth( 118.0f );
         // WindowPadding is captured when the combo POPUP begins — push it here so the dropdown's
@@ -896,7 +897,8 @@ namespace Desert::Editor
 
         const bool painting = terrainEntity && m_TerrainTool.BrushEnabled();
 
-        const bool foliageMode = Core::ViewportMode::Get() == Core::EditorMode::Foliage;
+        const bool foliageMode  = Core::ViewportMode::Get() == Core::EditorMode::Foliage;
+        const bool modelingMode = Core::ViewportMode::Get() == Core::EditorMode::Modeling;
 
         // UI elements are edited with the in-scene UILayout handles (DrawUIInScene), not the 3D transform
         // gizmo — suppress the object gizmo for them so the two don't overlap and fight for the mouse.
@@ -905,9 +907,9 @@ namespace Desert::Editor
             if ( auto ref = m_Scene->FindEntityByID( *sel ) )
                 selectedIsUI = m_Scene->GetRegistry().has<ECS::UILayoutComponent>( ref->get().GetHandle() );
 
-        // Handle gizmos (Select mode only — Foliage mode uses LMB to paint, not to gizmo/pick).
+        // Handle gizmos (Select mode only — Foliage/Modeling use LMB for their own tools, not gizmo/pick).
         m_Gizmo.ResetHovered();
-        if ( !foliageMode )
+        if ( !foliageMode && !modelingMode )
         {
             if ( Core::SkeletonEditMode::IsActive() )
             {
@@ -957,6 +959,22 @@ namespace Desert::Editor
                          static_cast<uint32_t>( m_ViewportData.Size.y ) );
                     m_FoliageTool.Paint( *m_Scene, ray );
                 }
+            }
+        }
+
+        // --- Modeling mode: UE5-style CubeGrid blockout (add/remove grid cubes -> live DynamicMesh). ---
+        if ( modelingMode )
+        {
+            if ( const auto& camera = m_Scene->GetMainCamera().lock() )
+            {
+                auto [mx, my]  = GetMouseViewportSpace();
+                const auto ray = Common::Math::Ray::FromScreenPosition(
+                     { mx, my }, camera->GetProjectionMatrix(), camera->GetViewMatrix(), camera->GetPosition(),
+                     static_cast<uint32_t>( m_ViewportData.Size.x ),
+                     static_cast<uint32_t>( m_ViewportData.Size.y ) );
+                const glm::mat4 viewProj = camera->GetProjectionMatrix() * camera->GetViewMatrix();
+                m_CubeGridTool.Update( *m_Scene, ray, viewProj, m_ViewportData.ViewportPos, m_ViewportData.Size,
+                                       m_ViewportData.IsHovered );
             }
         }
 
