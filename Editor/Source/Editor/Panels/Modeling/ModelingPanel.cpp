@@ -161,25 +161,19 @@ namespace Desert::Editor
                 if ( ImGui::Combo( "##out", &o, outs, IM_ARRAYSIZE( outs ) ) )
                     ms.OutputType = static_cast<MS::Output>( o );
             }
-            if ( ImGui::CollapsingHeader( "Grid", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( ImGui::CollapsingHeader( "Brush Size", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
-                ImGui::Text( "Grid Step: %.0f", ms.CellSize );
-                ImGui::SameLine();
-                if ( ImGui::SmallButton( "-##gs" ) )
-                    ms.CellSize = std::max( ms.CellSize * 0.5f, 1.0f );
-                ImGui::SameLine();
-                if ( ImGui::SmallButton( "+##gs" ) )
-                    ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
-                ImGui::SetNextItemWidth( 90.0f );
-                ImGui::SliderInt( "Brush W", &ms.BrushW, 1, 8 );
-                ImGui::SetNextItemWidth( 90.0f );
-                ImGui::SliderInt( "Brush D", &ms.BrushD, 1, 8 );
-
-                // Brush Height: how many cells thick each painted stamp is, along the surface normal.
-                int h = std::max( 1, static_cast<int>( std::lround( ms.Height ) ) );
+                // FREE world-space brush dimensions (not tied to any grid) — each painted stamp is a
+                // Width × Height × Depth box; the paint lattice tiles on these sizes so sweeps stay seamless.
                 ImGui::SetNextItemWidth( 120.0f );
-                if ( ImGui::SliderInt( "Brush Height", &h, 1, 64 ) )
-                    ms.Height = static_cast<float>( h );
+                if ( ImGui::DragFloat( "Width", &ms.BrushW, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
+                    ms.BrushW = std::max( 0.02f, ms.BrushW );
+                ImGui::SetNextItemWidth( 120.0f );
+                if ( ImGui::DragFloat( "Depth", &ms.BrushD, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
+                    ms.BrushD = std::max( 0.02f, ms.BrushD );
+                ImGui::SetNextItemWidth( 120.0f );
+                if ( ImGui::DragFloat( "Height", &ms.Height, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
+                    ms.Height = std::max( 0.02f, ms.Height );
 
                 ImGui::Text( "Cells: %d", ms.Cubes );
                 if ( ImGui::Button( "Clear" ) )
@@ -189,9 +183,8 @@ namespace Desert::Editor
             ImGui::TextDisabled( "LMB drag: paint on the surface you point at" );
             ImGui::TextDisabled( "(ground, or a face of what you built)" );
             ImGui::TextDisabled( "Shift+LMB / RMB: erase" );
-            ImGui::TextDisabled( "E / Q or Up / Down: brush height +/-" );
-            ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
-            ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
+            ImGui::TextDisabled( "Width / Depth / Height: free box size (world units)" );
+            ImGui::TextDisabled( "E / Q or Up / Down: height x1.25 / x0.8" );
             ImGui::TextDisabled( "Accept / Cancel: bottom of the viewport" );
         }
         else

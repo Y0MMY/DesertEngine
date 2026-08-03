@@ -34,9 +34,10 @@ namespace Desert::Editor::Tools
         static bool WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
                                    const glm::vec2& size, glm::vec2& out );
 
-        std::unordered_set<uint64_t> m_Cells;                           // occupied 3D grid cells (packed ivec3)
-        float                        m_CellSize = 1.0f;                 // grid step / cube size (mirrors state)
-        Common::UUID                 m_Entity   = Common::UUID::Null(); // live blockout entity
+        std::unordered_set<uint64_t> m_Cells;                         // occupied lattice cells (packed ivec3)
+        glm::vec3                    m_CellSize{ 1.0f };              // per-axis box size W×H×D (mirrors state)
+        glm::vec3                    m_BakedSize{ -1.0f };            // box size the live mesh was last baked at
+        Common::UUID                 m_Entity = Common::UUID::Null(); // live blockout entity
 
         // Frame targeting: the surface under the cursor — the empty cell an ADD would fill (+ its face normal),
         // and the filled cell an ERASE would remove.

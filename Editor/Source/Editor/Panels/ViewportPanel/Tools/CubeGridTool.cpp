@@ -22,7 +22,7 @@ namespace Desert::Editor::Tools
 {
     namespace
     {
-        // Pack/unpack a 3D grid cell into a 63-bit key (21 bits/axis, centred so negatives fit).
+        // Pack/unpack a lattice cell into a 63-bit key (21 bits/axis, centred so negatives fit).
         constexpr int OFF = 1 << 20;
         uint64_t      Pack( const glm::ivec3& c )
         {
@@ -38,7 +38,8 @@ namespace Desert::Editor::Tools
         }
 
         // The 6 faces of a unit cube (position in [-0.5,0.5] + the engine's cube normals/tangents/UVs), each as
-        // 4 CCW corners — copied from PrimitiveMeshFactory::CreateCube so winding/normals are known-good.
+        // 4 CCW corners — copied from PrimitiveMeshFactory::CreateCube. Corners map onto a box of ANY per-axis
+        // size (P+0.5 -> [0,1], * boxSize + boxMin), so a cell can be Width×Height×Depth.
         struct FaceVert
         {
             glm::vec3 P, N, T, B;
@@ -79,6 +80,8 @@ namespace Desert::Editor::Tools
         // Outward neighbour offset per face — a face is internal (culled) when that neighbour is filled.
         const glm::ivec3 kNeighbor[6] = { { 0, 0, 1 },  { 0, 0, -1 }, { 0, 1, 0 },
                                           { 0, -1, 0 }, { -1, 0, 0 }, { 1, 0, 0 } };
+
+        constexpr float kMinDim = 0.02f; // smallest brush dimension (world units)
     } // namespace
 
     bool CubeGridTool::WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
@@ -98,10 +101,13 @@ namespace Desert::Editor::Tools
                                const glm::vec2& viewportSize, bool interactive )
     {
         Core::ModelingState& ms         = Core::ModelingState::Get();
-        const float          cs         = ms.CellSize;
         const bool           toolActive = ms.ActiveTool == Core::ModelingState::Tool::CubeGrid;
-        const int            layers     = std::max( 1, static_cast<int>( std::lround( ms.Height ) ) );
-        m_CellSize                      = cs;
+
+        // Per-axis brush box size (Width, Height, Depth) in world units — fully free, not tied to any grid.
+        const glm::vec3 sz( std::max( ms.BrushW, kMinDim ), std::max( ms.Height, kMinDim ),
+                            std::max( ms.BrushD, kMinDim ) );
+        m_CellSize = sz;
+
         if ( ms.ReqClear )
         {
             ms.ReqClear = false;
@@ -112,7 +118,7 @@ namespace Desert::Editor::Tools
 
         auto occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
 
-        // --- Targeting: nearest occupied cube face under the cursor, else the ground plane (y=0). ---
+        // --- Targeting: nearest filled cell's face under the cursor, else the ground plane (y=0). ---
         m_HasTarget = m_HasErase = false;
         float      bestT         = FLT_MAX;
         glm::ivec3 hitCell{ 0 };
@@ -121,8 +127,8 @@ namespace Desert::Editor::Tools
         {
             const glm::ivec3   c = Unpack( key );
             Common::Math::AABB box;
-            box.Min = glm::vec3( c ) * cs;
-            box.Max = box.Min + cs;
+            box.Min = glm::vec3( c ) * sz;
+            box.Max = box.Min + sz;
             float t;
             if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
             {
@@ -134,7 +140,7 @@ namespace Desert::Editor::Tools
         if ( hit )
         {
             const glm::vec3 p  = ray.Origin + ray.Direction * bestT;
-            const glm::vec3 d  = p - ( glm::vec3( hitCell ) + 0.5f ) * cs;
+            const glm::vec3 d  = ( p - ( glm::vec3( hitCell ) + 0.5f ) * sz ) / ( sz * 0.5f ); // face-normalised
             const glm::vec3 ad = glm::abs( d );
             glm::ivec3      n{ 0 };
             if ( ad.x >= ad.y && ad.x >= ad.z )
@@ -154,32 +160,31 @@ namespace Desert::Editor::Tools
             if ( t > 0.0f )
             {
                 const glm::vec3 p = ray.Origin + ray.Direction * t;
-                m_TargetCell      = { static_cast<int>( std::floor( p.x / cs ) ), 0,
-                                      static_cast<int>( std::floor( p.z / cs ) ) };
+                m_TargetCell      = { static_cast<int>( std::floor( p.x / sz.x ) ), 0,
+                                      static_cast<int>( std::floor( p.z / sz.z ) ) };
                 m_TargetNormal    = { 0, 1, 0 };
                 m_HasTarget       = true;
             }
         }
 
-        // --- Overlay draw list + helpers. ---
         ImDrawList* dl = ::ImGui::GetWindowDrawList();
 
         // Draw a cell as SOLID shaded faces (only outward, camera-facing, non-internal faces).
         auto drawCellSolid = [&]( const glm::ivec3& c, ImU32 fill, ImU32 outline )
         {
-            const glm::vec3 mn = glm::vec3( c ) * cs;
+            const glm::vec3 mn = glm::vec3( c ) * sz;
             for ( int f = 0; f < 6; ++f )
             {
                 if ( occupied( c + kNeighbor[f] ) )
                     continue; // internal face
                 const glm::vec3 fn = kFace[f][0].N;
-                const glm::vec3 fc = mn + 0.5f * cs + 0.5f * cs * fn;
+                const glm::vec3 fc = mn + 0.5f * sz + 0.5f * sz * fn;
                 if ( glm::dot( fn, ray.Origin - fc ) <= 0.0f )
                     continue; // back face
                 glm::vec2 s[4];
                 bool      ok = true;
                 for ( int k = 0; k < 4; ++k )
-                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * cs, viewProj, viewportPos, viewportSize,
+                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * sz, viewProj, viewportPos, viewportSize,
                                          s[k] ) )
                     {
                         ok = false;
@@ -206,8 +211,8 @@ namespace Desert::Editor::Tools
             {
                 glm::vec3 w( 0.0f );
                 w[na] = planeW;
-                w[ua] = static_cast<float>( uc + du[k] ) * cs;
-                w[va] = static_cast<float>( vc + dv[k] ) * cs;
+                w[ua] = static_cast<float>( uc + du[k] ) * sz[ua];
+                w[va] = static_cast<float>( vc + dv[k] ) * sz[va];
                 if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[k] ) )
                     return;
             }
@@ -233,12 +238,9 @@ namespace Desert::Editor::Tools
                 drawCellSolid( c, fill, IM_COL32( 90, 95, 105, 230 ) );
             }
 
-        const int bw = std::max( 1, ms.BrushW );
-        const int bd = std::max( 1, ms.BrushD );
-
         // World coord of the plane that fills `cell` along axis `na` with outward normal sign `sgn`.
-        auto planeWorld = [cs]( const glm::ivec3& cell, int na, int sgn )
-        { return ( sgn > 0 ? static_cast<float>( cell[na] ) : static_cast<float>( cell[na] + 1 ) ) * cs; };
+        auto planeWorld = [&]( const glm::ivec3& cell, int na, int sgn )
+        { return ( sgn > 0 ? static_cast<float>( cell[na] ) : static_cast<float>( cell[na] + 1 ) ) * sz[na]; };
 
         // Hover footprint on the target surface (green = add, red = erase).
         if ( toolActive && !m_Painting && !m_Erasing && m_HasTarget )
@@ -250,31 +252,24 @@ namespace Desert::Editor::Tools
             const float pw  = planeWorld( m_TargetCell, na, sgn );
             const ImU32 ff  = removeMode ? IM_COL32( 240, 80, 60, 70 ) : IM_COL32( 70, 220, 100, 70 );
             const ImU32 fo  = removeMode ? IM_COL32( 240, 90, 70, 255 ) : IM_COL32( 90, 240, 120, 255 );
-            for ( int i = 0; i < bw; ++i )
-                for ( int j = 0; j < bd; ++j )
-                    drawPlaneCell( m_TargetCell[ua] + i, m_TargetCell[va] + j, na, pw, ff, fo );
+            drawPlaneCell( m_TargetCell[ua], m_TargetCell[va], na, pw, ff, fo );
         }
 
-        // Stamp a W×D footprint (`layers` cells thick along the stroke normal) at plane cell (uc,vc).
+        // Stamp one box cell at plane (uc,vc) of the locked stroke plane.
         auto stampUV = [&]( int uc, int vc, bool erase )
         {
-            const int na = m_StrokeNa;
-            const int ua = ( na + 1 ) % 3;
-            const int va = ( na + 2 ) % 3;
-            for ( int i = 0; i < bw; ++i )
-                for ( int j = 0; j < bd; ++j )
-                    for ( int L = 0; L < layers; ++L )
-                    {
-                        glm::ivec3 c{ 0 };
-                        c[na]              = m_StrokePlaneCell + L * m_StrokeSign;
-                        c[ua]              = uc + i;
-                        c[va]              = vc + j;
-                        const uint64_t key = Pack( c );
-                        if ( erase )
-                            changed |= m_Cells.erase( key ) > 0;
-                        else
-                            changed |= m_Cells.insert( key ).second;
-                    }
+            const int  na = m_StrokeNa;
+            const int  ua = ( na + 1 ) % 3;
+            const int  va = ( na + 2 ) % 3;
+            glm::ivec3 c{ 0 };
+            c[na]              = m_StrokePlaneCell;
+            c[ua]              = uc;
+            c[va]              = vc;
+            const uint64_t key = Pack( c );
+            if ( erase )
+                changed |= m_Cells.erase( key ) > 0;
+            else
+                changed |= m_Cells.insert( key ).second;
         };
 
         // --- Start a stroke only when the viewport is genuinely hovered/active. ---
@@ -316,8 +311,8 @@ namespace Desert::Editor::Tools
                     const int        ua = ( m_StrokeNa + 1 ) % 3;
                     const int        va = ( m_StrokeNa + 2 ) % 3;
                     const glm::vec3  p  = ray.Origin + ray.Direction * t;
-                    const glm::ivec2 uv{ static_cast<int>( std::floor( p[ua] / cs ) ),
-                                         static_cast<int>( std::floor( p[va] / cs ) ) };
+                    const glm::ivec2 uv{ static_cast<int>( std::floor( p[ua] / sz[ua] ) ),
+                                         static_cast<int>( std::floor( p[va] / sz[va] ) ) };
                     if ( m_HasLastPaint && m_LastPaintUV != uv ) // interpolate the swept line
                     {
                         const glm::ivec2 a = m_LastPaintUV, b = uv;
@@ -355,21 +350,20 @@ namespace Desert::Editor::Tools
                 m_Erasing = false;
         }
 
-        // --- Keys: E / Q (or Up / Down) raise / lower Brush Height; Ctrl+E / Ctrl+Q grow / shrink grid step. ---
-        if ( interact )
+        // --- Keys: E / Q (or Up / Down) raise / lower the brush Height (free). ---
+        if ( interact && !m_Painting )
         {
-            const bool ctrl = ::ImGui::GetIO().KeyCtrl;
-            if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_E, false ) )
-                ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
-            else if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) )
-                ms.CellSize = std::max( ms.CellSize * 0.5f, 0.01f );
-            else if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) ||
-                      ::ImGui::IsKeyPressed( ImGuiKey_UpArrow, false ) )
-                ms.Height = std::max( 1.0f, std::round( ms.Height ) + 1.0f );
+            if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) || ::ImGui::IsKeyPressed( ImGuiKey_UpArrow, false ) )
+                ms.Height = std::max( kMinDim, ms.Height * 1.25f );
             else if ( ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) ||
                       ::ImGui::IsKeyPressed( ImGuiKey_DownArrow, false ) )
-                ms.Height = std::max( 1.0f, std::round( ms.Height ) - 1.0f );
+                ms.Height = std::max( kMinDim, ms.Height * 0.8f );
         }
+
+        // Editing Width/Depth/Height rescales the whole live blockout (integer lattice × free box size), so
+        // re-bake when the size changed even without a paint edit.
+        if ( sz != m_BakedSize && !m_Cells.empty() )
+            changed = true;
 
         ms.Cubes = static_cast<int>( m_Cells.size() );
 
@@ -423,6 +417,8 @@ namespace Desert::Editor::Tools
             Cancel( scene ); // no cells left -> remove the entity
             return;
         }
+
+        m_BakedSize = m_CellSize;
 
         auto occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
 

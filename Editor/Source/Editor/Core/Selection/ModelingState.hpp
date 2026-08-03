@@ -30,11 +30,12 @@ namespace Desert::Editor::Core
         // Panel -> tool
         Tool   ActiveTool = Tool::None;
         Output OutputType = Output::DynamicMesh;
-        float  CellSize   = 1.0f;   // grid step
-        int    BrushW     = 1;      // CubeGrid paint footprint (cells) across the two in-plane axes
-        int    BrushD     = 1;
-        float  Height     = 1.0f;   // CubeGrid extrude height (WORLD units, free/continuous) — drag sets it;
-                                    // editing here / E-Q re-deforms the last box live before Accept
+        float  CellSize   = 1.0f; // legacy (unused by CubeGrid v4)
+        // CubeGrid brush box dimensions in WORLD units — FREE / continuous, NOT tied to a grid (like UE). The
+        // painted cells tile on this size, so each stamp is a Width×Height×Depth box on the target surface.
+        float  BrushW     = 1.0f;   // width  (X in-plane)
+        float  BrushD     = 1.0f;   // depth  (Z in-plane)
+        float  Height     = 1.0f;   // height / thickness (along the surface normal)
         bool   ReqAccept  = false;  // one-shot: commit the blockout, start a fresh one
         bool   ReqCancel  = false;  // one-shot: delete the in-progress blockout
         bool   ReqClear   = false;  // one-shot: clear the cells (keep editing)
