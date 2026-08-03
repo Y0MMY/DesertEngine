@@ -519,11 +519,15 @@ namespace Desert::UI
         if ( !CanvasRootRect( reg, viewportPx, canvas, canvasRect, scale ) )
             return entt::null;
 
+        const auto& cd        = reg.get<ECS::UICanvasComponent>( canvas ).Data;
+        const Rect  childRoot = InsetRect( canvasRect, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
+                                           cd.SafeArea.z * scale, cd.SafeArea.w * scale );
+
         entt::entity hit = entt::null;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) )
-                    PickRecurse( reg, c, canvasRect, scale, pointPx, hit );
+                    PickRecurse( reg, c, childRoot, scale, pointPx, hit );
         return hit;
     }
 
@@ -540,11 +544,14 @@ namespace Desert::UI
             out = canvasRect;
             return true;
         }
+        const auto& cd        = reg.get<ECS::UICanvasComponent>( canvas ).Data;
+        const Rect  childRoot = InsetRect( canvasRect, cd.SafeArea.x * scale, cd.SafeArea.y * scale,
+                                           cd.SafeArea.z * scale, cd.SafeArea.w * scale );
         bool found = false;
         if ( reg.has<ECS::RelationshipComponent>( canvas ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvas ).Children )
                 if ( reg.valid( c ) && !found )
-                    RectRecurse( reg, c, canvasRect, scale, target, out, found );
+                    RectRecurse( reg, c, childRoot, scale, target, out, found );
         return found;
     }
 

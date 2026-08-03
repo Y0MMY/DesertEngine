@@ -1210,12 +1210,16 @@ namespace Desert::UI
             scale               = fit.Scale;
         }
 
+        // Top-level content lays out inside the safe area (mobile notches); 0 insets = full canvas.
+        const Rect childRoot = InsetRect( canvasRect, canvasData.SafeArea.x * scale, canvasData.SafeArea.y * scale,
+                                          canvasData.SafeArea.z * scale, canvasData.SafeArea.w * scale );
+
         std::vector<PopupInfo>    popups;
         std::vector<entt::entity> focusables;
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked, focused, &popups, &focusables );
+                    DrawElement( reg, c, childRoot, scale, dl, input, outClicked, focused, &popups, &focusables );
 
         // Tab advances keyboard focus to the next focusable control (wraps; effective next frame).
         if ( focused && input && input->Tab && !focusables.empty() )

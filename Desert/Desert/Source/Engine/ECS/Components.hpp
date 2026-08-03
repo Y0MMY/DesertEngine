@@ -846,6 +846,11 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Visible" ), Category( "UI Canvas" ) )
         bool Visible = true;
+
+        // Safe area (Phase B): per-edge insets (L/T/R/B, design px) the top-level content stays inside — for
+        // mobile notches / rounded corners. On desktop set manually to preview a device; 0 = full canvas.
+        PROPERTY( DisplayName( "Safe Area L/T/R/B" ), Category( "UI Canvas" ) )
+        glm::vec4 SafeArea = glm::vec4( 0.0f );
     };
     struct UICanvasComponent
     {

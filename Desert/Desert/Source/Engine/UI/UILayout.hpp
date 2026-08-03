@@ -72,6 +72,14 @@ namespace Desert::UI
         return { ( viewW - w ) * 0.5f, ( viewH - h ) * 0.5f, w, h };
     }
 
+    // Shrink `r` by per-edge insets (px) — used for the Canvas safe-area (mobile notches / rounded corners):
+    // top-level content lays out inside the inset rect. Never goes negative.
+    inline Rect InsetRect( const Rect& r, float left, float top, float right, float bottom )
+    {
+        return { r.X + left, r.Y + top, std::max( 0.0f, r.W - left - right ),
+                 std::max( 0.0f, r.H - top - bottom ) };
+    }
+
     // ---------------------------------------------------------------------------------------------------
     // Auto-layout groups (VBox / HBox / Grid). A container with a layout group POSITIONS + SIZES its direct
     // children automatically, overriding their own anchors — the Unity/Godot "layout group" model. Pure math

@@ -246,6 +246,7 @@ namespace
                     .Field( FieldInfo{ .Name = "MatchWidthHeight", .Type = FieldType::Float, .Offset = offsetof( T, MatchWidthHeight ), .Size = sizeof( T::MatchWidthHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Match Width/Height", .Category = "UI Canvas", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
                     .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Background Sprite", .Category = "UI Canvas", } } )
                     .Field( FieldInfo{ .Name = "Visible", .Type = FieldType::Bool, .Offset = offsetof( T, Visible ), .Size = sizeof( T::Visible ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Visible", .Category = "UI Canvas", } } )
+                    .Field( FieldInfo{ .Name = "SafeArea", .Type = FieldType::Vec4, .Offset = offsetof( T, SafeArea ), .Size = sizeof( T::SafeArea ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Safe Area L/T/R/B", .Category = "UI Canvas", } } )
                     .WithDefault<T>()
                     .Register();
             }
