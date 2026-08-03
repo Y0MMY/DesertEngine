@@ -12,6 +12,7 @@
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/Font/FontService.hpp>
 #include <Engine/Graphic/Shader.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -662,40 +663,31 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
               if ( ImGui::InputTextMultiline( "Text", buf, sizeof( buf ), ImVec2( 0, 60 ) ) )
                   tc.Text = buf;
 
-              // Font: a dropdown of the .ttf files discovered under Resources/Fonts (scanned once) plus a
-              // drop target for dragging a .ttf from the Content Browser. FontPath stays a plain string —
-              // it just gets CHOSEN from real files instead of typed by hand.
-              static std::vector<std::string> s_Fonts;
-              static bool                     s_Scanned = false;
-              if ( !s_Scanned )
-              {
-                  s_Scanned = true;
-                  // Fonts come from THIS project's Assets tree first (drop a .ttf into the project),
-                  // plus the shared engine Resources/Fonts built-ins (Roboto, Noto, ...).
-                  const std::filesystem::path roots[] = { Common::Constants::Path::ASSETS_PATH,
-                                                          Common::Constants::Path::FONTS_PATH };
-                  for ( const auto& root : roots )
-                  {
-                      std::error_code ec;
-                      for ( const auto& de : std::filesystem::recursive_directory_iterator( root, ec ) )
-                          if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".ttf" )
-                              s_Fonts.push_back( de.path().generic_string() );
-                  }
-                  std::sort( s_Fonts.begin(), s_Fonts.end() );
-                  s_Fonts.erase( std::unique( s_Fonts.begin(), s_Fonts.end() ), s_Fonts.end() );
-              }
-
+              // Font: an ASSET HANDLE (never a raw path) — pick one of the preloaded fonts from the dropdown
+              // or drag a .ttf from the Content Browser. FontService owns the handle<->path registry and the
+              // preloaded set; "Default" (null handle) falls back to the engine's built-in font.
+              auto*             fs      = ::Desert::Runtime::ResourceRegistry::GetFontService();
+              const uint64_t    curHnd  = static_cast<uint64_t>( tc.Font );
+              const std::string curPath = fs ? fs->PathForHandle( curHnd ) : "";
               const std::string preview =
-                   tc.FontPath.empty() ? "<none>" : std::filesystem::path( tc.FontPath ).stem().string();
+                   curHnd == 0
+                        ? "Default"
+                        : ( curPath.empty() ? "(missing)" : std::filesystem::path( curPath ).stem().string() );
               if ( ImGui::BeginCombo( "Font", preview.c_str() ) )
               {
-                  for ( const auto& f : s_Fonts )
+                  if ( ImGui::Selectable( "Default", curHnd == 0 ) )
+                      tc.Font = ::Desert::Assets::AssetHandle();
+                  if ( fs )
                   {
-                      const bool selected = ( f == tc.FontPath );
-                      if ( ImGui::Selectable( std::filesystem::path( f ).stem().string().c_str(), selected ) )
-                          tc.FontPath = f;
-                      if ( selected )
-                          ImGui::SetItemDefaultFocus();
+                      for ( const auto& f : fs->AvailableFonts() )
+                      {
+                          const uint64_t h   = fs->RegisterFont( f );
+                          const bool     sel = ( h == curHnd );
+                          if ( ImGui::Selectable( std::filesystem::path( f ).stem().string().c_str(), sel ) )
+                              tc.Font = ::Desert::Assets::AssetHandle( h );
+                          if ( sel )
+                              ImGui::SetItemDefaultFocus();
+                      }
                   }
                   ImGui::EndCombo();
               }
@@ -703,12 +695,16 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
               {
                   if ( const ImGuiPayload* pl =
                             ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::FontFile ) )
-                      tc.FontPath = std::string( static_cast<const char*>( pl->Data ),
-                                                 pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                  {
+                      const std::string path( static_cast<const char*>( pl->Data ),
+                                              pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                      if ( fs && !path.empty() )
+                          tc.Font = ::Desert::Assets::AssetHandle( fs->RegisterFont( path ) );
+                  }
                   ImGui::EndDragDropTarget();
               }
               if ( ImGui::IsItemHovered() )
-                  ImGui::SetTooltip( "Pick a font or drag a .ttf here from the Content Browser" );
+                  ImGui::SetTooltip( "Pick a preloaded font or drag a .ttf here from the Content Browser" );
 
               ImGui::ColorEdit4( "Color", &tc.Color.x );
               ImGui::DragFloat( "Size", &tc.Size, 0.01f, 0.01f, 100.0f, "%.2f" );

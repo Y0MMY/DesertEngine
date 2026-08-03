@@ -209,6 +209,11 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
                     return a ? a->GetMetadata().Filepath.string() : "";
                 }
+                if ( type == "FontAsset" )
+                {
+                    // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
+                    return Runtime::ResourceRegistry::GetFontService()->PathForHandle( handle );
+                }
                 // Meshes (static/skinned both resolve handle->path via the MeshAsset base).
                 auto a = mgr.FindByHandle<Assets::MeshAsset>( Common::UUID( handle ) );
                 return a ? a->GetMetadata().Filepath.string() : "";
@@ -262,6 +267,11 @@ namespace Desert::Core::Serialize
                     // Textures are registered from cooked paths by the preloader; just look up by path.
                     auto a = mgr.FindByPath<Assets::TextureAsset>( path );
                     return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+                }
+                if ( type == "FontAsset" )
+                {
+                    // Register the path with the FontService (idempotent) and return its deterministic handle.
+                    return Runtime::ResourceRegistry::GetFontService()->RegisterFont( path );
                 }
                 // Meshes: find, else cook-create as the concrete type + register + load.
                 if ( type == "StaticMeshAsset" || type == "SkinnedMeshAsset" || type == "MeshAsset" )
@@ -780,9 +790,13 @@ namespace Desert::Core::Serialize
             s.Has       = []( ECS::Entity e ) { return e.HasComponent<ECS::TextComponent>(); };
             s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
             {
-                const auto&              tc = e.GetComponent<ECS::TextComponent>();
-                Assets::TextComponentSer ser{ tc.Text, tc.FontPath,          tc.Color,
-                                              tc.Size, tc.EmissiveIntensity, tc.Billboard };
+                const auto& tc = e.GetComponent<ECS::TextComponent>();
+                // The font is an asset HANDLE in memory but persists as its stable ttf PATH — keeps scenes
+                // portable and backward-compatible with pre-handle saves (which stored the path directly).
+                const std::string fontPath = Runtime::ResourceRegistry::GetFontService()->PathForHandle(
+                     static_cast<uint64_t>( tc.Font ) );
+                Assets::TextComponentSer ser{ tc.Text,     fontPath, tc.Color, tc.Size, tc.EmissiveIntensity,
+                                              tc.Billboard };
                 return ToGeneric( ser );
             };
             s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
@@ -794,7 +808,10 @@ namespace Desert::Core::Serialize
                 auto&       tc       = e.HasComponent<ECS::TextComponent>() ? e.GetComponent<ECS::TextComponent>()
                                                                             : e.AddComponent<ECS::TextComponent>();
                 tc.Text              = d.Text;
-                tc.FontPath          = d.FontPath;
+                // Path -> stable handle (registers it so the handle resolves at render time). Empty stays null,
+                // which the render path falls back to the default font for.
+                tc.Font = Assets::AssetHandle(
+                     Runtime::ResourceRegistry::GetFontService()->RegisterFont( d.FontPath ) );
                 tc.Color             = d.Color;
                 tc.Size              = d.Size;
                 tc.EmissiveIntensity = d.EmissiveIntensity;

@@ -122,17 +122,18 @@ namespace Desert::ECS
     // shader — into the HDR composite, so EmissiveIntensity > ~1 blooms like any emissive surface.
     struct TextComponent
     {
-        std::string Text              = "Text";
-        std::string FontPath          = "Resources/Fonts/Roboto-Regular.ttf";
-        glm::vec4   Color             = glm::vec4( 1.0f );
-        float       Size              = 1.0f;  // world units per em (scales the baked metrics)
-        float       EmissiveIntensity = 1.0f;  // >1 => the text blooms
-        bool        Billboard         = false; // face the camera (added by the system per frame)
+        std::string         Text = "Text";
+        Assets::AssetHandle Font; // SDF font asset (drag a .ttf or pick a preloaded one);
+                                  // unset = the engine's built-in default (Roboto).
+        glm::vec4 Color             = glm::vec4( 1.0f );
+        float     Size              = 1.0f;  // world units per em (scales the baked metrics)
+        float     EmissiveIntensity = 1.0f;  // >1 => the text blooms
+        bool      Billboard         = false; // face the camera (added by the system per frame)
 
         // Transient: the laid-out glyph-quad mesh, rebuilt only when the text/font/size changes.
         std::shared_ptr<DynamicMesh> RuntimeMesh;
         std::string                  BuiltText;
-        std::string                  BuiltFont;
+        std::string                  BuiltFont; // resolved ttf path used for the current mesh (font-change guard)
         float                        BuiltSize = 0.0f;
     };
 
@@ -925,6 +926,10 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Font Size" ), Category( "UI Text" ), Range( 6.0f, 200.0f ) )
         float FontSize = 22.0f;
+
+        PROPERTY( DisplayName( "Font" ), Category( "UI Text" ), Asset<FontAsset> )
+        Assets::AssetHandle Font; // SDF font asset — drag a .ttf from the Content Browser or pick a preloaded
+                                  // one. Unset = the engine's built-in default (Roboto).
 
         PROPERTY( DisplayName( "Color" ), Category( "UI Text" ), Color )
         glm::vec3 Color = glm::vec3( 1.0f, 1.0f, 1.0f );

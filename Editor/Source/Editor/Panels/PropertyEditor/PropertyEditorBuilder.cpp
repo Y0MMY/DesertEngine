@@ -6,6 +6,7 @@
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Runtime/Services/Font/FontService.hpp>
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Graphic/Image.hpp>
 
@@ -248,6 +249,63 @@ namespace Desert::Editor
             }
             case FieldType::AssetHandle:
             {
+                // Font slot: a font is referenced by asset handle (never a raw path). The user picks one of the
+                // preloaded fonts from the dropdown or drags a .ttf from the Content Browser. FontService owns
+                // the handle<->path registry; "Default" (handle 0) falls back to the engine's built-in font.
+                if ( field.Meta.AssetType == "FontAsset" )
+                {
+                    uint64_t* handle = static_cast<uint64_t*>( p );
+                    auto*     fs     = Runtime::ResourceRegistry::GetFontService();
+
+                    const std::string curPath = fs ? fs->PathForHandle( *handle ) : "";
+                    const std::string preview =
+                         *handle == 0 ? "Default"
+                                      : ( curPath.empty() ? "(missing)"
+                                                          : std::filesystem::path( curPath ).stem().string() );
+                    if ( ImGui::BeginCombo( "##font", preview.c_str() ) )
+                    {
+                        if ( ImGui::Selectable( "Default", *handle == 0 ) )
+                        {
+                            *handle = 0;
+                            changed = true;
+                        }
+                        if ( fs )
+                        {
+                            for ( const auto& f : fs->AvailableFonts() )
+                            {
+                                const uint64_t h   = fs->RegisterFont( f );
+                                const bool     sel = ( h == *handle );
+                                if ( ImGui::Selectable( std::filesystem::path( f ).stem().string().c_str(), sel ) )
+                                {
+                                    *handle = h;
+                                    changed = true;
+                                }
+                                if ( sel )
+                                    ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    if ( ImGui::BeginDragDropTarget() )
+                    {
+                        if ( const ImGuiPayload* pl =
+                                  ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::FontFile ) )
+                        {
+                            const std::string path( static_cast<const char*>( pl->Data ),
+                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                            if ( fs && !path.empty() )
+                            {
+                                *handle = fs->RegisterFont( path );
+                                changed = true;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Pick a preloaded font or drag a .ttf here from the Content Browser" );
+                    break;
+                }
+
                 // Texture slot: shows the bound asset name, accepts a drag-dropped TEXTURE_ASSET (asset
                 // path payload, emitted by the FileExplorer) and has a Clear button. Thumbnails are a
                 // later visual pass (resolving handle -> Image2D needs runtime verification).

@@ -122,7 +122,10 @@ namespace Desert::UI
             auto* fontService = Runtime::ResourceRegistry::GetFontService();
             if ( !fontService )
                 return;
-            Runtime::Font* font = fontService->Get( "Resources/Fonts/Roboto-Regular.ttf", 48.0f );
+            // Font is an asset handle on the element (drag-drop / preloaded); unset falls back to the default.
+            const uint64_t fontHandle = static_cast<uint64_t>( t.Font ) != 0 ? static_cast<uint64_t>( t.Font )
+                                                                             : fontService->DefaultFontHandle();
+            Runtime::Font* font       = fontService->Get( fontHandle, 48.0f );
             if ( !font || !font->Atlas || !font->Baked.Valid() )
                 return;
 
@@ -194,7 +197,7 @@ namespace Desert::UI
             auto* fs = Runtime::ResourceRegistry::GetFontService();
             if ( !fs )
                 return 0.0f;
-            Runtime::Font* font = fs->Get( "Resources/Fonts/Roboto-Regular.ttf", 48.0f );
+            Runtime::Font* font = fs->Get( fs->DefaultFontHandle(), 48.0f );
             if ( !font || !font->Baked.Valid() )
                 return 0.0f;
             const Text::BakedFont& bf = font->Baked;

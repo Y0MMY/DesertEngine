@@ -4,6 +4,7 @@
 #include <Common/Core/Logger.hpp>
 #include <Common/Utilities/FileSystem.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -138,5 +139,77 @@ namespace Desert::Runtime
     void FontService::Clear()
     {
         m_Fonts.clear();
+        m_HandleToPath.clear();
+        m_Available.clear();
+        m_Scanned = false;
+    }
+
+    uint64_t FontService::RegisterFont( const std::string& ttfPath )
+    {
+        if ( ttfPath.empty() )
+            return 0;
+        const uint64_t handle = static_cast<uint64_t>( Common::AssetHandle::FromKey( ttfPath ) );
+        if ( m_HandleToPath.emplace( handle, ttfPath ).second )
+            m_Available.push_back( ttfPath ); // first time we've seen this path -> offer it in the picker
+        return handle;
+    }
+
+    std::string FontService::PathForHandle( uint64_t handle )
+    {
+        if ( handle == 0 )
+            return "";
+        if ( const auto it = m_HandleToPath.find( handle ); it != m_HandleToPath.end() )
+            return it->second;
+        // A saved scene may reference a font we haven't scanned yet (project asset). Fill the registry from
+        // the font roots, then retry — the deterministic handle will match if the .ttf is discoverable.
+        EnsurePreloaded();
+        const auto it = m_HandleToPath.find( handle );
+        return it == m_HandleToPath.end() ? "" : it->second;
+    }
+
+    Font* FontService::Get( uint64_t handle, float pixelHeight )
+    {
+        const std::string path = PathForHandle( handle );
+        if ( path.empty() )
+            return nullptr;
+        return Get( path, pixelHeight );
+    }
+
+    uint64_t FontService::DefaultFontHandle()
+    {
+        // Roboto-Regular ships under the engine's (non-relocatable) FONTS_PATH, so this literal matches the
+        // form the scan produces and both map to the same handle.
+        static const std::string kDefault =
+             ( Common::Constants::Path::FONTS_PATH / "Roboto-Regular.ttf" ).generic_string();
+        return RegisterFont( kDefault );
+    }
+
+    const std::vector<std::string>& FontService::AvailableFonts()
+    {
+        EnsurePreloaded();
+        return m_Available;
+    }
+
+    void FontService::EnsurePreloaded()
+    {
+        if ( m_Scanned )
+            return;
+        m_Scanned = true;
+
+        DefaultFontHandle(); // guarantee the built-in font is always offered, even if a root is missing
+
+        // Fonts come from THIS project's Assets tree (drop a .ttf into the project) plus the shared engine
+        // Resources/Fonts built-ins (Roboto, Noto, ...). Mirrors the editor's old font-combo scan.
+        const std::filesystem::path roots[] = { Common::Constants::Path::ASSETS_PATH,
+                                                Common::Constants::Path::FONTS_PATH };
+        for ( const auto& root : roots )
+        {
+            std::error_code ec;
+            for ( const auto& de : std::filesystem::recursive_directory_iterator( root, ec ) )
+                if ( !ec && de.is_regular_file( ec ) && de.path().extension() == ".ttf" )
+                    RegisterFont( de.path().generic_string() );
+        }
+        std::sort( m_Available.begin(), m_Available.end() );
+        m_Available.erase( std::unique( m_Available.begin(), m_Available.end() ), m_Available.end() );
     }
 } // namespace Desert::Runtime

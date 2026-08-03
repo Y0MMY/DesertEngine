@@ -41,17 +41,23 @@ namespace Desert::ECS
                      if ( text.Text.empty() )
                          return;
 
-                     auto* font = Runtime::ResourceRegistry::GetFontService()->Get( text.FontPath );
+                     // Resolve the font asset handle -> baked atlas (unset falls back to the built-in default).
+                     auto*          fontSvc    = Runtime::ResourceRegistry::GetFontService();
+                     const uint64_t fontHandle = static_cast<uint64_t>( text.Font ) != 0
+                                                      ? static_cast<uint64_t>( text.Font )
+                                                      : fontSvc->DefaultFontHandle();
+                     auto*          font       = fontSvc->Get( fontHandle );
                      if ( !font )
                          return;
+                     const std::string fontPath = fontSvc->PathForHandle( fontHandle );
 
                      // Rebuild the glyph mesh only when the laid-out result would differ.
-                     if ( !text.RuntimeMesh || text.BuiltText != text.Text ||
-                          text.BuiltFont != text.FontPath || text.BuiltSize != text.Size )
+                     if ( !text.RuntimeMesh || text.BuiltText != text.Text || text.BuiltFont != fontPath ||
+                          text.BuiltSize != text.Size )
                      {
                          text.RuntimeMesh = BuildTextMesh( text, font->Baked );
                          text.BuiltText   = text.Text;
-                         text.BuiltFont   = text.FontPath;
+                         text.BuiltFont   = fontPath;
                          text.BuiltSize   = text.Size;
                      }
                      if ( !text.RuntimeMesh )
