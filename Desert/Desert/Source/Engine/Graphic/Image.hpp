@@ -54,6 +54,15 @@ namespace Desert::Graphic
         // failure / unsupported format. Used for offscreen thumbnail capture (render -> readback -> PNG).
         virtual std::vector<uint8_t> ReadPixelsRGBA8() { return {}; }
 
+        // Re-uploads tightly-packed pixel data into the EXISTING GPU image without recreating it — the
+        // image (and any descriptor sets bound to its pointer) stays valid, so this is the safe, churn-free
+        // way to stream changing content (video frames) every frame. `data` must match the image's format
+        // and dimensions. Default: unsupported.
+        virtual Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& data )
+        {
+            return Common::MakeError<bool>( "Image2D::SetData not supported by this backend" );
+        }
+
         static std::shared_ptr<Image2D> Create( const Core::Formats::Image2DSpecification& spec,
                                                 const std::unique_ptr<MipMap2DGenerator>&  mipGenerator );
     };

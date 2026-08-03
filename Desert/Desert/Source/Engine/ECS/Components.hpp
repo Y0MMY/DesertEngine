@@ -906,6 +906,10 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Panel" ) )
         glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
 
+        PROPERTY( DisplayName( "Video Path (.mpg)" ), Category( "UI Panel" ) )
+        std::string VideoPath; // MPEG1 .mpg/.mpeg streamed into this panel (loops, tinted by Color*Opacity).
+                               // Overrides the sprite/gradient fill while set. Empty = no video.
+
         // Effects (Phase 4). All in design px; scaled by the canvas scale at draw time.
         PROPERTY( DisplayName( "Use Gradient" ), Category( "Effects" ) )
         bool UseGradient = false; // vertical Color (top) -> Gradient Color (bottom); ignored when a sprite is set

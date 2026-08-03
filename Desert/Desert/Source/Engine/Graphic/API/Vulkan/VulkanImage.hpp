@@ -67,10 +67,11 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] Core::Formats::Image2DSpecification& GetImageSpecification() override { return m_Specification; }
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
         std::vector<uint8_t> ReadPixelsRGBA8() override;
-        
+
         void Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
+        Common::BoolResultStr SetData( const Core::Formats::ImagePixelData& data ) override;
 
         // --- IVulkanImage Interface ---
         [[nodiscard]] const VulkanImageResource& GetResource() const override { return m_Resource; }

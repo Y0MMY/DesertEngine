@@ -50,4 +50,10 @@ namespace Desert::Runtime
         return &animatedImageService;
     }
 
+    VideoService* ResourceRegistry::GetVideoService()
+    {
+        static VideoService videoService;
+        return &videoService;
+    }
+
 } // namespace Desert::Runtime

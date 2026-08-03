@@ -119,6 +119,54 @@ namespace Desert::Graphic::API::Vulkan
         return BOOLSUCCESS;
     }
 
+    Common::BoolResultStr VulkanImage2D::SetData( const Core::Formats::ImagePixelData& data )
+    {
+        // Stream new pixels into the already-allocated image (single-mip, sampled). Same staging-upload +
+        // synchronous flush as CreateResource, but the VkImage / view / sampler / descriptor stay put — so
+        // callers holding the Image2D* (e.g. Render2D's per-texture executor, video playback) keep working.
+        if ( !m_IsLoaded || m_Resource.Image == VK_NULL_HANDLE )
+            return Common::MakeError<bool>( "Image2D::SetData on an uninitialised image" );
+        if ( !Core::Formats::HasData( data ) )
+            return Common::MakeError<bool>( "Image2D::SetData with empty pixel data" );
+
+        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                              ->GetVulkanAllocator()
+                              .get();
+
+        const uint32_t size =
+             Image::CalculateImageSize( m_Specification.Width, m_Specification.Height, m_Specification.Format );
+        const VkImageLayout finalLayout =
+             Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
+
+        VkBuffer           staging;
+        VmaAllocation      stagingAlloc;
+        VkBufferCreateInfo bInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                     .size  = size,
+                                     .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT };
+        stagingAlloc =
+             allocator->RT_AllocateBuffer( "SetDataStaging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging )
+                  .GetValue();
+
+        void* mapped = allocator->MapMemory( stagingAlloc );
+        memcpy( mapped, Utils::GetPixelDataPtr( data ), size );
+        allocator->UnmapMemory( stagingAlloc );
+
+        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+
+        // The tracked layout (SHADER_READ_ONLY after the first upload) is the transition source.
+        TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
+        VkBufferImageCopy copy = {
+             .imageSubresource = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .layerCount = 1 },
+             .imageExtent      = { m_Specification.Width, m_Specification.Height, 1 } };
+        vkCmdCopyBufferToImage( cmd, staging, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy );
+        TransitionLayout( cmd, finalLayout );
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+        allocator->RT_DestroyBuffer( staging, stagingAlloc );
+
+        return BOOLSUCCESS;
+    }
+
     Common::BoolResultStr VulkanImage2D::CreateResource()
     {
         auto vkDevice = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();

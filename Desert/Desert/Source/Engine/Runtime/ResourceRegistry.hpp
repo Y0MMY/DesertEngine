@@ -11,6 +11,7 @@
 #include "Services/Image/ImageService.hpp"
 #include "Services/Font/FontService.hpp"
 #include "Services/AnimatedImage/AnimatedImageService.hpp"
+#include "Services/Video/VideoService.hpp"
 
 namespace Desert::Runtime
 {
@@ -31,5 +32,6 @@ namespace Desert::Runtime
         static FontService*     GetFontService();
 
         static AnimatedImageService* GetAnimatedImageService();
+        static VideoService*         GetVideoService();
     };
 } // namespace Desert::Runtime

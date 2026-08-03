@@ -647,7 +647,16 @@ namespace Desert::UI
                                           { mx.x + p.ShadowOffset.x * scale, mx.y + p.ShadowOffset.y * scale },
                                           glm::vec4( p.ShadowColor, p.Opacity ), p.CornerRadius * scale );
 
-                    if ( p.UseGradient && !HandleSet( p.Sprite ) )
+                    // A streamed video fills the panel (its stable texture is updated outside the pass by the
+                    // VideoService); it takes precedence over the sprite/gradient fill while a path is set.
+                    Graphic::Image2D* video =
+                         p.VideoPath.empty()
+                              ? nullptr
+                              : Runtime::ResourceRegistry::GetVideoService()->Resolve( p.VideoPath );
+                    if ( video )
+                        dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f },
+                                     glm::vec4( p.Color, p.Opacity ) );
+                    else if ( p.UseGradient && !HandleSet( p.Sprite ) )
                         dl.AddRectFilledMultiColor( mn, mx, glm::vec4( p.Color, p.Opacity ),
                                                     glm::vec4( p.GradientColor, p.Opacity ) );
                     else

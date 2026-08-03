@@ -25,11 +25,13 @@ project "Desert"
         "%{wks.location}/ThirdParty/stb/stb_image.cpp",
         "%{wks.location}/ThirdParty/stb/stb_truetype.cpp",
         "%{wks.location}/ThirdParty/miniaudio/miniaudio.cpp",
+        "%{wks.location}/ThirdParty/pl_mpeg/pl_mpeg.cpp",
     }
 
     includedirs {
         "Source/",
         "%{wks.location}/Desert/Common/Source",
+        "%{wks.location}/ThirdParty/pl_mpeg/include",
     }
     
     for name, path in pairs(deps.Common.IncludeDir) do

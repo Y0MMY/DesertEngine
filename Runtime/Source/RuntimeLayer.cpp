@@ -195,6 +195,11 @@ namespace Desert::Player
         if ( auto* materialService = ::Desert::Runtime::ResourceRegistry::GetMaterialService() )
             materialService->CollectGarbage();
 
+        // Advance + upload any playing UI videos here, at a safe point between frames (SetData flushes its
+        // own transfer) — the UI walk during present then just samples the freshly-updated frame texture.
+        if ( auto* videoService = ::Desert::Runtime::ResourceRegistry::GetVideoService() )
+            videoService->UpdateAll();
+
         if ( const auto begin = m_Scene->BeginScene(); !begin )
             return Common::MakeError( begin.GetError() );
 

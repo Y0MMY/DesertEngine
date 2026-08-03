@@ -496,6 +496,12 @@ namespace Desert::Editor
         if ( auto* materialService = Runtime::ResourceRegistry::GetMaterialService() )
             materialService->CollectGarbage();
 
+        // Advance + upload any playing UI videos at this safe point (behind the device-idle wait, before
+        // command recording) so authored videos animate live in the viewport; SetData flushes its own
+        // transfer, and the UI walk later just samples the freshly-updated frame texture.
+        if ( auto* videoService = Runtime::ResourceRegistry::GetVideoService() )
+            videoService->UpdateAll();
+
         // Multi-scene editing: drive EVERY open document each frame so all viewports render live. The active
         // one is m_MainScene (rebound on viewport focus); RigBuilder / F9 below act on it only. The outline
         // aid + Begin/RegistryRender/OnUpdate/End are folded into UpdateSceneFrame (see below), applied per
