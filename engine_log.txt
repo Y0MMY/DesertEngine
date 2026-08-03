@@ -1,4 +1,0 @@
-[10:51:05][info][Desert]: [Project] Opened 'Desert Sandbox' (/Users/daniilsavcenko/Desktop/Programming/C++/DesertEngine/Editor/Desert.deproj) — assets root: /Users/daniilsavcenko/Desktop/Programming/C++/DesertEngine/Editor/Resources/Assets/
-[10:51:05][info][Desert]: The Window (macOS) was created with: Title = Desert Engine — Desert Sandbox, Width = 2056, Height = 1261
-[10:51:05][trace][Desert]: VulkanRenderingContext::CreateVKInstance()
-[10:51:05][error][Desert]: Verify failed: glfwVulkanSupported() at Desert/Desert/Source/Engine/Graphic/API/Vulkan/VulkanContext.cpp:50
