@@ -22,24 +22,9 @@ namespace Desert::Editor::Tools
 {
     namespace
     {
-        // Pack/unpack an integer grid cell into a 63-bit key (21 bits/axis, centred so negatives fit).
-        constexpr int OFF = 1 << 20;
-        uint64_t      Pack( const glm::ivec3& c )
-        {
-            const uint64_t x = static_cast<uint64_t>( c.x + OFF ) & 0x1FFFFF;
-            const uint64_t y = static_cast<uint64_t>( c.y + OFF ) & 0x1FFFFF;
-            const uint64_t z = static_cast<uint64_t>( c.z + OFF ) & 0x1FFFFF;
-            return x | ( y << 21 ) | ( z << 42 );
-        }
-        glm::ivec3 Unpack( uint64_t k )
-        {
-            return { static_cast<int>( k & 0x1FFFFF ) - OFF, static_cast<int>( ( k >> 21 ) & 0x1FFFFF ) - OFF,
-                     static_cast<int>( ( k >> 42 ) & 0x1FFFFF ) - OFF };
-        }
-
-        // The 6 faces of a unit cube (position in [-0.5,0.5], + the engine's cube normals/tangents/UVs), each
+        // The 6 faces of a unit cube (position in [-0.5,0.5] + the engine's cube normals/tangents/UVs), each
         // as 4 CCW corners — copied from PrimitiveMeshFactory::CreateCube so winding/normals are known-good.
-        // Per-face outward neighbour offset drives internal-face culling.
+        // Corners map onto an arbitrary box AABB (P+0.5 -> [0,1], * boxSize + boxMin) so a box can be any size.
         struct FaceVert
         {
             glm::vec3 P, N, T, B;
@@ -77,8 +62,8 @@ namespace Desert::Editor::Tools
                { { 0.5f, 0.5f, 0.5f }, { 1, 0, 0 }, { 0, 0, -1 }, { 0, 1, 0 }, { 0, 1 } },
                { { 0.5f, -0.5f, 0.5f }, { 1, 0, 0 }, { 0, 0, -1 }, { 0, 1, 0 }, { 0, 0 } } },
         };
-        const glm::ivec3 kNeighbor[6] = { { 0, 0, 1 },  { 0, 0, -1 }, { 0, 1, 0 },
-                                          { 0, -1, 0 }, { -1, 0, 0 }, { 1, 0, 0 } };
+
+        constexpr float kMinHeight = 0.02f; // smallest extrude (world units) — keeps a box non-degenerate
     } // namespace
 
     bool CubeGridTool::WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
@@ -97,96 +82,135 @@ namespace Desert::Editor::Tools
                                const glm::mat4& viewProj, const glm::vec2& viewportPos,
                                const glm::vec2& viewportSize, bool interactive )
     {
-        // Grid step + tool activation are owned by the docked ModelingPanel (Core::ModelingState). CubeGrid
-        // paints/keys only when it's the selected tool; the panel's "Clear" is a one-shot request.
         Core::ModelingState& ms         = Core::ModelingState::Get();
         const float          cs         = ms.CellSize;
         const bool           toolActive = ms.ActiveTool == Core::ModelingState::Tool::CubeGrid;
-        m_CellSize = cs; // keep the generated mesh's cell size in lockstep with the panel's grid step (else
-                         // the overlay uses `cs` while RegenMesh bakes a mismatched-scale mesh -> "big cube")
+        m_CellSize                      = cs;
         if ( ms.ReqClear )
         {
             ms.ReqClear = false;
-            m_Cells.clear();
-            m_Region.clear();
-            m_LastBase.clear();
-            m_LastHeight = 0;
+            m_Boxes.clear();
+            m_LastBox = -1;
             RegenMesh( scene );
         }
 
-        // --- Targeting: nearest occupied cube face, else the ground plane (y=0). ---
-        m_HasAdd = m_HasRemove = false;
-        float      bestT       = FLT_MAX;
-        glm::ivec3 hitCell{ 0 };
-        bool       hit = false;
-        for ( uint64_t key : m_Cells )
+        // World AABB of a box: normal axis spans [base, base+sign*height]; in-plane axes span the footprint.
+        auto boxMinSize = [cs]( const Box& bx, glm::vec3& mn, glm::vec3& size )
         {
-            const glm::ivec3   c = Unpack( key );
+            const int   ua = ( bx.na + 1 ) % 3;
+            const int   va = ( bx.na + 2 ) % 3;
+            const float a  = bx.base;
+            const float b  = bx.base + bx.sign * bx.height;
+            glm::vec3   lo( 0.0f ), hi( 0.0f );
+            lo[bx.na] = std::min( a, b );
+            hi[bx.na] = std::max( a, b );
+            lo[ua]    = static_cast<float>( bx.cellMin[ua] ) * cs;
+            hi[ua]    = static_cast<float>( bx.cellMin[ua] + bx.w ) * cs;
+            lo[va]    = static_cast<float>( bx.cellMin[va] ) * cs;
+            hi[va]    = static_cast<float>( bx.cellMin[va] + bx.d ) * cs;
+            mn        = lo;
+            size      = hi - lo;
+        };
+
+        // --- Targeting: nearest box face under the cursor, else the ground plane (y=0). ---
+        m_HasTarget = m_HasErase = false;
+        m_EraseBox               = -1;
+        float bestT              = FLT_MAX;
+        int   hitBox             = -1;
+        for ( int i = 0; i < static_cast<int>( m_Boxes.size() ); ++i )
+        {
+            glm::vec3 mn, size;
+            boxMinSize( m_Boxes[i], mn, size );
             Common::Math::AABB box;
-            box.Min = glm::vec3( c ) * cs;
-            box.Max = box.Min + cs;
+            box.Min = mn;
+            box.Max = mn + size;
             float t;
             if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
             {
-                bestT   = t;
-                hitCell = c;
-                hit     = true;
+                bestT  = t;
+                hitBox = i;
             }
         }
-        if ( hit )
-        {
-            const glm::vec3 p  = ray.Origin + ray.Direction * bestT;
-            const glm::vec3 d  = p - ( glm::vec3( hitCell ) + 0.5f ) * cs; // from cube centre
-            const glm::vec3 ad = glm::abs( d );
-            glm::ivec3      n{ 0 };
-            if ( ad.x >= ad.y && ad.x >= ad.z )
-                n.x = d.x > 0 ? 1 : -1;
-            else if ( ad.y >= ad.z )
-                n.y = d.y > 0 ? 1 : -1;
-            else
-                n.z = d.z > 0 ? 1 : -1;
-            m_Add       = hitCell + n;
-            m_Remove    = hitCell;
-            m_AddNormal = n;
-            m_HasAdd = m_HasRemove = true;
-        }
-        else if ( std::abs( ray.Direction.y ) > 1e-5f )
+        bool groundHit = false;
+        if ( std::abs( ray.Direction.y ) > 1e-5f )
         {
             const float t = -ray.Origin.y / ray.Direction.y;
-            if ( t > 0.0f )
+            if ( t > 0.0f && t < bestT )
             {
-                const glm::vec3 p = ray.Origin + ray.Direction * t;
-                m_Add             = { static_cast<int>( std::floor( p.x / cs ) ), 0,
-                                      static_cast<int>( std::floor( p.z / cs ) ) };
-                m_AddNormal       = { 0, 1, 0 };
-                m_HasAdd          = true;
+                bestT     = t;
+                hitBox    = -1;
+                groundHit = true;
             }
         }
 
+        if ( bestT < FLT_MAX )
+        {
+            const glm::vec3 hitP = ray.Origin + ray.Direction * bestT;
+            if ( groundHit || hitBox < 0 )
+            {
+                m_TargetNa   = 1;
+                m_TargetSign = 1;
+                m_TargetBase = 0.0f;
+                m_TargetCell = { static_cast<int>( std::floor( hitP.x / cs ) ), 0,
+                                 static_cast<int>( std::floor( hitP.z / cs ) ) };
+                m_HasTarget  = true;
+            }
+            else
+            {
+                glm::vec3 mn, size;
+                boxMinSize( m_Boxes[hitBox], mn, size );
+                const glm::vec3 mx = mn + size;
+                // Face = the axis+side whose plane the hit point lies on (nearest of the 6 box planes).
+                float best = FLT_MAX;
+                int   fa = 1, fs = 1;
+                for ( int a = 0; a < 3; ++a )
+                {
+                    if ( std::abs( hitP[a] - mn[a] ) < best )
+                    {
+                        best = std::abs( hitP[a] - mn[a] );
+                        fa   = a;
+                        fs   = -1;
+                    }
+                    if ( std::abs( hitP[a] - mx[a] ) < best )
+                    {
+                        best = std::abs( hitP[a] - mx[a] );
+                        fa   = a;
+                        fs   = 1;
+                    }
+                }
+                const int ua     = ( fa + 1 ) % 3;
+                const int va     = ( fa + 2 ) % 3;
+                m_TargetNa       = fa;
+                m_TargetSign     = fs;
+                m_TargetBase     = fs > 0 ? mx[fa] : mn[fa];
+                m_TargetCell     = { 0, 0, 0 };
+                m_TargetCell[ua] = static_cast<int>( std::floor( hitP[ua] / cs ) );
+                m_TargetCell[va] = static_cast<int>( std::floor( hitP[va] / cs ) );
+                m_HasTarget      = true;
+                m_HasErase       = true;
+                m_EraseBox       = hitBox;
+            }
+        }
+
+        // --- Overlay draw list + helpers. ---
         ImDrawList* dl = ::ImGui::GetWindowDrawList();
 
-        auto occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
-
-        // Draw a cell as SOLID shaded faces — only outward, camera-facing, non-internal faces — so the
-        // blockout reads as solid boxes in the viewport (independent of the generated mesh). `isOcc` decides
-        // which neighbours hide a face (existing cells vs. the live extrude preview); checkerboard shading
-        // makes individual cells legible.
-        auto drawCellSolid = [&]( const glm::ivec3& c, auto&& isOcc, ImU32 fillEven, ImU32 fillOdd, ImU32 outline )
+        // Draw a box as SOLID shaded faces (only camera-facing faces) so the blockout reads as solid volumes
+        // in the viewport, independent of the generated mesh.
+        auto drawBoxSolid = [&]( const glm::vec3& mn, const glm::vec3& size, ImU32 fill, ImU32 outline )
         {
-            const ImU32 fill = ( ( c.x + c.y + c.z ) & 1 ) ? fillOdd : fillEven;
+            const glm::vec3 center = mn + size * 0.5f;
             for ( int f = 0; f < 6; ++f )
             {
-                if ( isOcc( c + kNeighbor[f] ) )
-                    continue; // internal face — hidden
-                const glm::vec3 fn = glm::vec3( kNeighbor[f] );
-                const glm::vec3 fc = ( glm::vec3( c ) + 0.5f ) * cs + 0.5f * cs * fn;
+                const glm::vec3 fn = kFace[f][0].N;
+                const glm::vec3 fc = center + 0.5f * size * fn;
                 if ( glm::dot( fn, ray.Origin - fc ) <= 0.0f )
                     continue; // back face (points away from the camera)
                 glm::vec2 s[4];
                 bool      ok = true;
                 for ( int k = 0; k < 4; ++k )
-                    if ( !WorldToScreen( ( glm::vec3( c ) + kFace[f][k].P + 0.5f ) * cs, viewProj, viewportPos,
-                                         viewportSize, s[k] ) )
+                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * size, viewProj, viewportPos, viewportSize,
+                                         s[k] ) )
                     {
                         ok = false;
                         break;
@@ -204,30 +228,62 @@ namespace Desert::Editor::Tools
         const bool interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
         bool       changed    = false;
 
-        // Existing cells: grey checkerboard solid boxes.
-        if ( toolActive && m_Cells.size() < 6000 )
-            for ( uint64_t k : m_Cells )
-                drawCellSolid( Unpack( k ), occupied, IM_COL32( 150, 155, 165, 190 ),
-                               IM_COL32( 120, 125, 135, 190 ), IM_COL32( 90, 95, 105, 220 ) );
+        // Existing boxes: grey checkerboard solids (the erase target is tinted red).
+        if ( toolActive )
+            for ( int i = 0; i < static_cast<int>( m_Boxes.size() ); ++i )
+            {
+                glm::vec3 mn, size;
+                boxMinSize( m_Boxes[i], mn, size );
+                const bool  erase = removeMode && m_HasErase && m_EraseBox == i;
+                const ImU32 fill  = erase       ? IM_COL32( 200, 90, 80, 200 )
+                                    : ( i & 1 ) ? IM_COL32( 120, 125, 135, 200 )
+                                                : IM_COL32( 150, 155, 165, 200 );
+                drawBoxSolid( mn, size, fill, IM_COL32( 90, 95, 105, 230 ) );
+            }
 
-        if ( toolActive && m_HasAdd && !m_Dragging )
+        const int bw = std::max( 1, ms.BrushW );
+        const int bd = std::max( 1, ms.BrushD );
+
+        // Flat W×D footprint rectangle on the target plane (the hover cursor).
+        auto drawFootprint = [&]( ImU32 fill, ImU32 outline )
         {
-            // Visible working grid on the target plane around the cursor (UE5-style) so you see where cells go.
-            const glm::ivec3 nrm        = m_AddNormal;
-            const int        na         = nrm.x ? 0 : nrm.y ? 1 : 2;
-            const int        ua         = ( na + 1 ) % 3;
-            const int        va         = ( na + 2 ) % 3;
-            const float      planeCoord = static_cast<float>( m_Add[na] ) * cs;
-            const int        G          = 8;
-            auto             gridPt     = [&]( int iu, int iv )
+            const int na = m_TargetNa;
+            const int ua = ( na + 1 ) % 3;
+            const int va = ( na + 2 ) % 3;
+            glm::vec2 s[4];
+            const int du[4] = { 0, bw, bw, 0 };
+            const int dv[4] = { 0, 0, bd, bd };
+            for ( int k = 0; k < 4; ++k )
             {
                 glm::vec3 w( 0.0f );
-                w[na] = planeCoord;
-                w[ua] = static_cast<float>( m_Add[ua] + iu ) * cs;
-                w[va] = static_cast<float>( m_Add[va] + iv ) * cs;
+                w[na] = m_TargetBase;
+                w[ua] = static_cast<float>( m_TargetCell[ua] + du[k] ) * cs;
+                w[va] = static_cast<float>( m_TargetCell[va] + dv[k] ) * cs;
+                if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[k] ) )
+                    return;
+            }
+            dl->AddQuadFilled( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
+                               ImVec2( s[3].x, s[3].y ), fill );
+            dl->AddQuad( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
+                         ImVec2( s[3].x, s[3].y ), outline, 1.5f );
+        };
+
+        // Working grid around the cursor on the target plane (only when hovering, not dragging).
+        if ( toolActive && m_HasTarget && !m_Dragging )
+        {
+            const int   na     = m_TargetNa;
+            const int   ua     = ( na + 1 ) % 3;
+            const int   va     = ( na + 2 ) % 3;
+            const int   G      = 8;
+            const ImU32 gcol   = IM_COL32( 120, 145, 180, 90 );
+            auto        gridPt = [&]( int iu, int iv )
+            {
+                glm::vec3 w( 0.0f );
+                w[na] = m_TargetBase;
+                w[ua] = static_cast<float>( m_TargetCell[ua] + iu ) * cs;
+                w[va] = static_cast<float>( m_TargetCell[va] + iv ) * cs;
                 return w;
             };
-            const ImU32 gcol = IM_COL32( 120, 145, 180, 90 );
             for ( int iu = -G; iu <= G + 1; ++iu )
             {
                 glm::vec2 a, b;
@@ -244,200 +300,131 @@ namespace Desert::Editor::Tools
             }
         }
 
-        // In-plane axes for the current target face + the WxD brush footprint on it.
-        const int na = m_AddNormal.x ? 0 : m_AddNormal.y ? 1 : 2;
-        const int ua = ( na + 1 ) % 3;
-        const int va = ( na + 2 ) % 3;
-        const int bw = std::max( 1, ms.BrushW );
-        const int bd = std::max( 1, ms.BrushD );
-
-        // WxD footprint at an anchor cell across two in-plane axes.
-        auto footprintAt = [&]( const glm::ivec3& anchor, int axisU, int axisV, std::vector<glm::ivec3>& out )
-        {
-            out.clear();
-            for ( int i = 0; i < bw; ++i )
-                for ( int j = 0; j < bd; ++j )
-                {
-                    glm::ivec3 c = anchor;
-                    c[axisU] += i;
-                    c[axisV] += j;
-                    out.push_back( c );
-                }
-        };
-
-        // Flat cell face on the current target plane (a square) — the hover footprint reads as a GRID CELL.
-        auto drawCellFace = [&]( const glm::ivec3& c, ImU32 fill, ImU32 outline )
-        {
-            const float pcrd = static_cast<float>( m_Add[na] ) * cs;
-            glm::vec2   s[4];
-            for ( int k = 0; k < 4; ++k )
-            {
-                glm::vec3 w( 0.0f );
-                w[na] = pcrd;
-                w[ua] = static_cast<float>( c[ua] + ( ( k == 1 || k == 2 ) ? 1 : 0 ) ) * cs;
-                w[va] = static_cast<float>( c[va] + ( ( k == 2 || k == 3 ) ? 1 : 0 ) ) * cs;
-                if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[k] ) )
-                    return;
-            }
-            dl->AddQuadFilled( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
-                               ImVec2( s[3].x, s[3].y ), fill );
-            dl->AddQuad( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
-                         ImVec2( s[3].x, s[3].y ), outline, 1.5f );
-        };
-
-        // --- Interaction: click a cell, then drag along the face normal (up / down) to set the extrude
-        //     HEIGHT — a clean column of cells that NEVER overlaps. The live preview is drawn in a distinct
-        //     colour; existing cells stay grey. Shift+LMB / RMB removes the hovered cube. ---
-        // Base footprint + N-tall column of cells along a normal, as a packed set.
-        auto buildColumn = [&]( const glm::ivec3& anchor, const glm::ivec3& nrm, int axisU, int axisV, int nH,
-                                std::unordered_set<uint64_t>& out )
-        {
-            out.clear();
-            std::vector<glm::ivec3> fp;
-            footprintAt( anchor, axisU, axisV, fp );
-            for ( const auto& c : fp )
-                for ( int L = 0; L < nH; ++L )
-                    out.insert( Pack( c + nrm * L ) );
-        };
-
+        // --- Interaction: click a footprint, then drag along the face normal to STRETCH the box to a free
+        //     continuous height (a plain click makes a box of the current Height). Shift+LMB / RMB removes a
+        //     whole box. ---
         if ( m_Dragging )
         {
-            const glm::vec3 nrmW = glm::normalize( glm::vec3( m_DragNormal ) );
-            const int       dna  = m_DragNormal.x ? 0 : m_DragNormal.y ? 1 : 2;
-            const int       dua  = ( dna + 1 ) % 3;
-            const int       dva  = ( dna + 2 ) % 3;
+            const int na = m_DragBox.na;
+            const int ua = ( na + 1 ) % 3;
+            const int va = ( na + 2 ) % 3;
+            glm::vec3 nrmW( 0.0f );
+            nrmW[na] = static_cast<float>( m_DragBox.sign );
 
-            // Height is driven in SCREEN space so the preview tracks the cursor exactly (predictable, works in
-            // any view): project the footprint centre + one cell along the normal, and count how many
-            // cell-lengths the cursor has moved from the press point along that screen direction.
+            // Height is driven in SCREEN space so the preview tracks the cursor exactly and the value stays
+            // fully continuous (no cube snapping): project the footprint centre + one cell along the normal,
+            // and convert the cursor's travel from the press point into world units.
             glm::vec3 center( 0.0f );
-            center[dna] = ( static_cast<float>( m_DragAnchor[dna] ) + 0.5f ) * cs;
-            center[dua] = ( static_cast<float>( m_DragAnchor[dua] ) + bw * 0.5f ) * cs;
-            center[dva] = ( static_cast<float>( m_DragAnchor[dva] ) + bd * 0.5f ) * cs;
+            center[na] = m_DragBox.base;
+            center[ua] = ( static_cast<float>( m_DragBox.cellMin[ua] ) + m_DragBox.w * 0.5f ) * cs;
+            center[va] = ( static_cast<float>( m_DragBox.cellMin[va] ) + m_DragBox.d * 0.5f ) * cs;
             glm::vec2  s0, s1;
             const bool ok0     = WorldToScreen( center, viewProj, viewportPos, viewportSize, s0 );
             const bool ok1     = WorldToScreen( center + nrmW * cs, viewProj, viewportPos, viewportSize, s1 );
             glm::vec2  dir     = s1 - s0;
             float      perCell = glm::length( dir );
+            float      worldPerPx;
             if ( ok0 && ok1 && perCell > 6.0f )
-                dir /= perCell; // one cell up == `perCell` px along `dir`
+            {
+                dir /= perCell;
+                worldPerPx = cs / perCell;
+            }
             else
             {
-                dir     = glm::vec2( 0.0f, -1.0f ); // near-parallel to view: fall back to screen-up = taller
-                perCell = 28.0f;
+                dir        = glm::vec2( 0.0f, -1.0f ); // near-parallel to view: screen-up == taller
+                worldPerPx = cs / 28.0f;
             }
             const glm::vec2 mp = glm::vec2( ::ImGui::GetMousePos().x, ::ImGui::GetMousePos().y );
-            const int levels = static_cast<int>( std::round( glm::dot( mp - m_DragStartMouse, dir ) / perCell ) );
-            const int N      = std::clamp( m_DragBaseH + levels, 1, 512 );
-            ms.Height        = N; // live-reflect into the panel
+            const float     px = glm::dot( mp - m_DragStartMouse, dir );
+            m_DragBox.height   = std::clamp( m_DragBaseHeight + px * worldPerPx, kMinHeight, 1.0e6f );
+            ms.Height          = m_DragBox.height; // live-reflect into the panel
 
-            std::unordered_set<uint64_t> preview;
-            buildColumn( m_DragAnchor, m_DragNormal, dua, dva, N, preview );
+            glm::vec3 mn, size;
+            boxMinSize( m_DragBox, mn, size );
+            drawBoxSolid( mn, size, IM_COL32( 90, 195, 240, 210 ), IM_COL32( 220, 245, 255, 235 ) );
 
-            auto isPrev = [&]( const glm::ivec3& c ) { return preview.count( Pack( c ) ) > 0; };
-            for ( uint64_t k : preview )
-                drawCellSolid( Unpack( k ), isPrev, IM_COL32( 90, 195, 240, 200 ), IM_COL32( 60, 165, 215, 200 ),
-                               IM_COL32( 220, 245, 255, 235 ) );
-
-            char htxt[24];
-            std::snprintf( htxt, sizeof( htxt ), "H %d", N );
+            char htxt[32];
+            std::snprintf( htxt, sizeof( htxt ), "H %.2f", m_DragBox.height );
             dl->AddText( ImVec2( mp.x + 14.0f, mp.y - 4.0f ), IM_COL32( 230, 245, 255, 255 ), htxt );
 
-            if ( !::ImGui::IsMouseDown( ImGuiMouseButton_Left ) ) // release -> commit the column
+            if ( !::ImGui::IsMouseDown( ImGuiMouseButton_Left ) ) // release -> commit the box
             {
-                for ( uint64_t k : preview )
-                    m_Cells.insert( k );
-                footprintAt( m_DragAnchor, dua, dva, m_LastBase ); // remember it so Height can re-extrude live
-                m_LastNormal = m_DragNormal;
-                m_LastHeight = N;
-                m_Dragging   = false;
-                changed      = true;
+                m_Boxes.push_back( m_DragBox );
+                m_LastBox  = static_cast<int>( m_Boxes.size() ) - 1;
+                m_Dragging = false;
+                changed    = true;
             }
         }
         else if ( toolActive )
         {
             // Hover preview of the footprint (green = add, red = erase).
-            if ( removeMode && m_HasRemove )
-                drawCellFace( m_Remove, IM_COL32( 240, 80, 60, 70 ), IM_COL32( 240, 90, 70, 255 ) );
-            else if ( m_HasAdd )
-            {
-                std::vector<glm::ivec3> fp;
-                footprintAt( m_Add, ua, va, fp );
-                for ( const auto& c : fp )
-                    drawCellFace( c, IM_COL32( 70, 220, 100, 70 ), IM_COL32( 90, 240, 120, 255 ) );
-            }
+            if ( removeMode && m_HasErase )
+                drawFootprint( IM_COL32( 240, 80, 60, 60 ), IM_COL32( 240, 90, 70, 255 ) );
+            else if ( m_HasTarget )
+                drawFootprint( IM_COL32( 70, 220, 100, 60 ), IM_COL32( 90, 240, 120, 255 ) );
 
             if ( interact )
             {
                 const bool lmbClick = ::ImGui::IsMouseClicked( ImGuiMouseButton_Left );
                 const bool rmbClick = ::ImGui::IsMouseClicked( ImGuiMouseButton_Right );
-                if ( ( ( lmbClick && removeMode ) || rmbClick ) && m_HasRemove ) // erase hovered cube
+                if ( ( ( lmbClick && removeMode ) || rmbClick ) && m_HasErase ) // erase the hovered box
                 {
-                    if ( m_Cells.erase( Pack( m_Remove ) ) > 0 )
-                        changed = true;
+                    m_Boxes.erase( m_Boxes.begin() + m_EraseBox );
+                    m_LastBox = -1;
+                    changed   = true;
                 }
-                else if ( lmbClick && !removeMode && m_HasAdd ) // begin an extrude drag (a plain click without
-                {                                               // moving places a column of the current Height)
-                    m_Dragging       = true;
-                    m_DragAnchor     = m_Add;
-                    m_DragNormal     = m_AddNormal;
-                    m_DragStartMouse = glm::vec2( ::ImGui::GetMousePos().x, ::ImGui::GetMousePos().y );
-                    m_DragBaseH      = std::clamp( ms.Height, 1, 512 );
+                else if ( lmbClick && !removeMode && m_HasTarget ) // begin an extrude drag
+                {
+                    m_Dragging        = true;
+                    m_DragBox         = Box{};
+                    m_DragBox.cellMin = m_TargetCell;
+                    m_DragBox.w       = bw;
+                    m_DragBox.d       = bd;
+                    m_DragBox.na      = m_TargetNa;
+                    m_DragBox.sign    = m_TargetSign;
+                    m_DragBox.base    = m_TargetBase;
+                    m_DragBox.height  = kMinHeight;
+                    m_DragStartMouse  = glm::vec2( ::ImGui::GetMousePos().x, ::ImGui::GetMousePos().y );
+                    m_DragBaseHeight  = std::max( ms.Height, kMinHeight );
                 }
             }
         }
 
-        // --- Live height edit: changing ModelingState.Height (panel field or E/Q) re-extrudes the last
-        //     committed column, so you can tune the height after drawing it and before Accept. ---
-        if ( !m_Dragging && !m_LastBase.empty() )
+        // --- Live height edit: changing ModelingState.Height (panel field, E/Q or arrows) re-deforms the
+        //     last committed box, so you can tune the height after drawing it and before Accept. ---
+        if ( !m_Dragging && m_LastBox >= 0 && m_LastBox < static_cast<int>( m_Boxes.size() ) )
         {
-            const int newH = std::clamp( ms.Height, 1, 512 );
-            if ( newH != m_LastHeight )
+            const float newH = std::max( ms.Height, kMinHeight );
+            if ( std::abs( newH - m_Boxes[m_LastBox].height ) > 1e-5f )
             {
-                for ( const auto& base : m_LastBase )
-                    for ( int L = 0; L < m_LastHeight; ++L )
-                        m_Cells.erase( Pack( base + m_LastNormal * L ) );
-                for ( const auto& base : m_LastBase )
-                    for ( int L = 0; L < newH; ++L )
-                        m_Cells.insert( Pack( base + m_LastNormal * L ) );
-                m_LastHeight = newH;
-                ms.Height    = newH;
-                changed      = true;
+                m_Boxes[m_LastBox].height = newH;
+                ms.Height                 = newH;
+                changed                   = true;
             }
         }
 
-        // --- Keys: E / Q (or Up / Down) raise / lower the last column's Height (handled by the live-edit
-        //     block above); Ctrl+E / Ctrl+Q grow / shrink the grid step. ---
+        // --- Keys: E / Q (or Up / Down) raise / lower the last box's Height (handled by the live-edit block
+        //     above); Ctrl+E / Ctrl+Q grow / shrink the grid step. ---
         if ( interact && !m_Dragging )
         {
             const bool ctrl = ::ImGui::GetIO().KeyCtrl;
             if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_E, false ) )
-            {
                 ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
-                changed     = true;
-            }
             else if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) )
-            {
-                ms.CellSize = std::max( ms.CellSize * 0.5f, 1.0f );
-                changed     = true;
-            }
+                ms.CellSize = std::max( ms.CellSize * 0.5f, 0.01f );
             else if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) ||
                       ::ImGui::IsKeyPressed( ImGuiKey_UpArrow, false ) )
-            {
-                ms.Height = std::clamp( ms.Height + 1, 1, 512 );
-            }
+                ms.Height = std::max( kMinHeight, ms.Height + cs );
             else if ( ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) ||
                       ::ImGui::IsKeyPressed( ImGuiKey_DownArrow, false ) )
-            {
-                ms.Height = std::clamp( ms.Height - 1, 1, 512 );
-            }
+                ms.Height = std::max( kMinHeight, ms.Height - cs );
         }
 
-        ms.Cubes = static_cast<int>( m_Cells.size() );
+        ms.Cubes = static_cast<int>( m_Boxes.size() );
 
         // --- Viewport bottom bar: tool name + Accept / Cancel (UE5-style confirmation), shown while a
         //     blockout is in progress. ---
-        if ( toolActive && ( !m_Cells.empty() || m_Entity != Common::UUID::Null() ) )
+        if ( toolActive && ( !m_Boxes.empty() || m_Entity != Common::UUID::Null() ) )
         {
             ::ImGui::SetNextWindowPos(
                  ImVec2( viewportPos.x + viewportSize.x * 0.5f, viewportPos.y + viewportSize.y - 58.0f ),
@@ -456,14 +443,12 @@ namespace Desert::Editor::Tools
                 ::ImGui::SameLine( 0.0f, 16.0f );
                 ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.30f, 1.0f ) );
                 ::ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.68f, 0.38f, 1.0f ) );
-                if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) && !m_Cells.empty() )
+                if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) && !m_Boxes.empty() )
                 {
                     Core::SelectionManager::SetSelected( m_Entity );
                     m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
-                    m_Cells.clear();
-                    m_Region.clear();
-                    m_LastBase.clear();
-                    m_LastHeight = 0;
+                    m_Boxes.clear();
+                    m_LastBox = -1;
                 }
                 ::ImGui::PopStyleColor( 2 );
                 ::ImGui::SameLine();
@@ -483,28 +468,37 @@ namespace Desert::Editor::Tools
 
     void CubeGridTool::RegenMesh( ::Desert::Core::Scene& scene )
     {
-        if ( m_Cells.empty() )
+        if ( m_Boxes.empty() )
         {
-            Cancel( scene ); // no cubes left -> remove the entity
+            Cancel( scene ); // no boxes left -> remove the entity
             return;
         }
 
         std::vector<Vertex> verts;
         std::vector<Index>  inds;
         glm::vec3           mn( FLT_MAX ), mx( -FLT_MAX );
-        for ( uint64_t key : m_Cells )
+        for ( const Box& bx : m_Boxes )
         {
-            const glm::ivec3 c = Unpack( key );
+            const int   ua = ( bx.na + 1 ) % 3;
+            const int   va = ( bx.na + 2 ) % 3;
+            const float a  = bx.base;
+            const float b  = bx.base + bx.sign * bx.height;
+            glm::vec3   bmin( 0.0f ), bsize( 0.0f );
+            bmin[bx.na]  = std::min( a, b );
+            bsize[bx.na] = std::abs( b - a );
+            bmin[ua]     = static_cast<float>( bx.cellMin[ua] ) * m_CellSize;
+            bsize[ua]    = static_cast<float>( bx.w ) * m_CellSize;
+            bmin[va]     = static_cast<float>( bx.cellMin[va] ) * m_CellSize;
+            bsize[va]    = static_cast<float>( bx.d ) * m_CellSize;
+
             for ( int f = 0; f < 6; ++f )
             {
-                if ( m_Cells.count( Pack( c + kNeighbor[f] ) ) ) // neighbour occupied -> internal face, cull
-                    continue;
                 const uint32_t base = static_cast<uint32_t>( verts.size() );
                 for ( int k = 0; k < 4; ++k )
                 {
                     const FaceVert& fv = kFace[f][k];
                     Vertex          v;
-                    v.Position  = ( glm::vec3( c ) + fv.P + 0.5f ) * m_CellSize; // cell cube = [c*cs, (c+1)*cs]
+                    v.Position  = bmin + ( fv.P + 0.5f ) * bsize;
                     v.Normal    = fv.N;
                     v.Tangent   = fv.T;
                     v.Bitangent = fv.B;
@@ -548,13 +542,13 @@ namespace Desert::Editor::Tools
     void CubeGridTool::Cancel( ::Desert::Core::Scene& scene )
     {
         if ( m_Entity != Common::UUID::Null() )
+        {
             if ( auto ref = scene.FindEntityByID( m_Entity ) )
                 scene.DestroyEntity( ref->get() );
+        }
         m_Entity = Common::UUID::Null();
-        m_Cells.clear();
-        m_Region.clear();
-        m_LastBase.clear();
-        m_LastHeight = 0;
+        m_Boxes.clear();
+        m_LastBox  = -1;
         m_Dragging = false;
     }
 } // namespace Desert::Editor::Tools

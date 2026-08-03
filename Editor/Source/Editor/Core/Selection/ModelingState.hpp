@@ -33,8 +33,8 @@ namespace Desert::Editor::Core
         float  CellSize   = 1.0f;   // grid step
         int    BrushW     = 1;      // CubeGrid paint footprint (cells) across the two in-plane axes
         int    BrushD     = 1;
-        int    Height     = 1;      // CubeGrid extrude height (cells) — drag sets it; editing here / E-Q
-                                    // re-extrudes the last column live before Accept
+        float  Height     = 1.0f;   // CubeGrid extrude height (WORLD units, free/continuous) — drag sets it;
+                                    // editing here / E-Q re-deforms the last box live before Accept
         bool   ReqAccept  = false;  // one-shot: commit the blockout, start a fresh one
         bool   ReqCancel  = false;  // one-shot: delete the in-progress blockout
         bool   ReqClear   = false;  // one-shot: clear the cells (keep editing)
