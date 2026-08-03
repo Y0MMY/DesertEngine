@@ -59,11 +59,13 @@ namespace Desert::Player
         std::shared_ptr<Graphic::GraphicsPipeline>   m_BlitPipeline;
         std::unique_ptr<Graphic::MaterialExecutor>   m_BlitExecutor;
         bool                                         m_PresentReady  = false;
-        bool                                         m_PrevMouseDown = false;  // for the click (down->up) edge
-        float                                        m_ScrollAccum   = 0.0f;   // wheel delta since last present
-        std::string                                  m_TypedText;              // chars typed since last present
-        bool                                         m_Backspace = false;      // backspace pressed since present
-        entt::entity                                 m_FocusedUI = entt::null; // the focused InputField (or null)
+        bool                                         m_PrevMouseDown = false; // for the click (down->up) edge
+        float                                        m_ScrollAccum   = 0.0f;  // wheel delta since last present
+        std::string                                  m_TypedText;             // chars typed since last present
+        bool                                         m_Backspace     = false; // backspace pressed since present
+        bool                                         m_TabPressed    = false; // Tab pressed since present
+        bool                                         m_SubmitPressed = false; // Enter pressed since present
+        entt::entity                                 m_FocusedUI     = entt::null; // the focused control (or null)
         Common::BoolResultStr InitPresent( const std::shared_ptr<Graphic::Framebuffer>& swapFb );
 
         // Scene::Resize destroys GPU resources — deferred to the top of OnUpdate (same rule as the

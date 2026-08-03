@@ -26,6 +26,8 @@ namespace Desert::UI
         float       ScrollDelta   = 0.0f; // mouse-wheel notches this frame (+ = up); drives ScrollView
         std::string TypedText;            // UTF-8 chars typed this frame (drives the focused InputField)
         bool        Backspace = false;    // backspace pressed this frame
+        bool        Tab       = false;    // Tab pressed: advance keyboard focus to the next focusable
+        bool        Submit    = false;    // Enter pressed: activate the focused control (button/toggle/...)
     };
 
     // Emit the scene's visible canvas into @p dl in pixel coordinates within @p viewportPx. When the canvas is

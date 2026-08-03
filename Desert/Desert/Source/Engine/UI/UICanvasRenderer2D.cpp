@@ -47,6 +47,14 @@ namespace Desert::UI
             float        Scale; // canvas scale for its text
         };
 
+        // Keyboard-focusable controls (Tab cycles between them; Enter activates the focused one).
+        bool IsFocusable( entt::registry& reg, entt::entity e )
+        {
+            return reg.has<ECS::UIButtonComponent>( e ) || reg.has<ECS::UIInputFieldComponent>( e ) ||
+                   reg.has<ECS::UIToggleComponent>( e ) || reg.has<ECS::UISliderComponent>( e ) ||
+                   reg.has<ECS::UIDropdownComponent>( e );
+        }
+
         // Resolve a sprite AssetHandle to its runtime GPU Image2D (non-owning; the image service owns it and
         // Render2D keys its per-texture executor by the raw pointer). nullptr when unset / unresolvable.
         Graphic::Image2D* ResolveSpriteImage( const Assets::AssetHandle& handle )
@@ -245,7 +253,8 @@ namespace Desert::UI
         // group — it overrides the element's own anchors for position + size.
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
                           Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked,
-                          entt::entity* focused, std::vector<PopupInfo>* popups, const Rect* forcedRect = nullptr )
+                          entt::entity* focused, std::vector<PopupInfo>* popups,
+                          std::vector<entt::entity>* focusables, const Rect* forcedRect = nullptr )
         {
             Rect       rect      = parent;
             const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
@@ -282,7 +291,9 @@ namespace Desert::UI
                         spr = b.HoverSprite;
                     DrawBox( dl, mn, mx, glm::vec4( c, 1.0f ), spr, b.SpriteBorder, scale, 6.0f * scale );
 
-                    if ( hover && outClicked && input->MouseReleased )
+                    const bool isFocused = focused && *focused == e;
+                    if ( outClicked && input &&
+                         ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                     {
                         // Encode the structured action into the click message the runtime dispatches (same
                         // encoding as the ImGui renderer, so the host dispatcher is unchanged).
@@ -359,7 +370,8 @@ namespace Desert::UI
                         dl.AddRectFilled( { mn.x + pad, mn.y + pad }, { mx.x - pad, mx.y - pad },
                                           glm::vec4( tg.CheckColor, 1.0f ), r * 0.5f );
                     }
-                    if ( hover && input->MouseReleased )
+                    const bool isFocused = focused && *focused == e;
+                    if ( input && ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                         tg.Value = !tg.Value;
                 }
                 else if ( reg.has<ECS::UISliderComponent>( e ) )
@@ -448,7 +460,8 @@ namespace Desert::UI
 
                     const bool hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
                                        input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
-                    if ( hover && input->MouseReleased )
+                    const bool isFocused = focused && *focused == e;
+                    if ( input && ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                         d.Open = !d.Open;
                     if ( d.Open && popups )
                         popups->push_back( { e, rect, scale } ); // defer the option list to draw on top
@@ -456,6 +469,17 @@ namespace Desert::UI
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
                     DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );
+
+                // Keyboard focus: record this control for Tab-cycling, and draw a focus ring when it holds
+                // focus (InputField draws its own coloured border, so skip the generic ring there).
+                if ( IsFocusable( reg, e ) )
+                {
+                    if ( focusables )
+                        focusables->push_back( e );
+                    if ( focused && *focused == e && !reg.has<ECS::UIInputFieldComponent>( e ) )
+                        dl.AddRect( mn, mx, glm::vec4( 0.30f, 0.62f, 0.98f, 1.0f ),
+                                    std::max( 1.0f, 2.0f * scale ) );
+                }
             }
 
             if ( reg.has<ECS::RelationshipComponent>( e ) )
@@ -527,13 +551,14 @@ namespace Desert::UI
                     const auto rects = SolveLayoutGroup( childParent, params, sizes );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
                         DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, focused, popups,
-                                     &rects[i] );
+                                     focusables, &rects[i] );
                 }
                 else
                 {
                     for ( auto c : children )
                         if ( reg.valid( c ) )
-                            DrawElement( reg, c, childParent, scale, dl, input, outClicked, focused, popups );
+                            DrawElement( reg, c, childParent, scale, dl, input, outClicked, focused, popups,
+                                         focusables );
                 }
                 if ( clip )
                     dl.PopClipRect();
@@ -597,11 +622,25 @@ namespace Desert::UI
             scale               = fit.Scale;
         }
 
-        std::vector<PopupInfo> popups;
+        std::vector<PopupInfo>    popups;
+        std::vector<entt::entity> focusables;
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked, focused, &popups );
+                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked, focused, &popups, &focusables );
+
+        // Tab advances keyboard focus to the next focusable control (wraps; effective next frame).
+        if ( focused && input && input->Tab && !focusables.empty() )
+        {
+            std::size_t idx = 0; // not-found -> focus the first
+            for ( std::size_t i = 0; i < focusables.size(); ++i )
+                if ( focusables[i] == *focused )
+                {
+                    idx = i + 1;
+                    break;
+                }
+            *focused = focusables[idx % focusables.size()];
+        }
 
         // Open dropdown option lists, drawn LAST so they overlay everything.
         for ( const PopupInfo& pi : popups )

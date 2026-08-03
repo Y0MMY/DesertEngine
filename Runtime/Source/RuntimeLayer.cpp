@@ -295,10 +295,14 @@ namespace Desert::Player
                 input.ScrollDelta   = m_ScrollAccum;
                 input.TypedText     = m_TypedText;
                 input.Backspace     = m_Backspace;
+                input.Tab           = m_TabPressed;
+                input.Submit        = m_SubmitPressed;
                 m_PrevMouseDown     = down;
                 m_ScrollAccum       = 0.0f;
                 m_TypedText.clear();
-                m_Backspace = false;
+                m_Backspace     = false;
+                m_TabPressed    = false;
+                m_SubmitPressed = false;
 
                 UI::RenderCanvas2D( m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
                                     &clicked, &m_FocusedUI );
@@ -422,8 +426,20 @@ namespace Desert::Player
         mgr.Notify<Common::KeyPressedEvent>(
              [this]( Common::KeyPressedEvent& ev )
              {
-                 if ( ev.GetKeyCode() == Common::KeyCode::Backspace )
-                     m_Backspace = true;
+                 switch ( ev.GetKeyCode() )
+                 {
+                     case Common::KeyCode::Backspace:
+                         m_Backspace = true;
+                         break;
+                     case Common::KeyCode::Tab:
+                         m_TabPressed = true;
+                         break;
+                     case Common::KeyCode::Enter:
+                         m_SubmitPressed = true;
+                         break;
+                     default:
+                         break;
+                 }
                  return false;
              } );
     }
