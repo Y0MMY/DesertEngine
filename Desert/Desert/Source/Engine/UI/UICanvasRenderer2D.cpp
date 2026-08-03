@@ -18,6 +18,35 @@ namespace Desert::UI
             return static_cast<uint64_t>( h ) != 0;
         }
 
+        // Split a ';'-separated option string into its items (empty items skipped).
+        std::vector<std::string> SplitOptions( const std::string& s )
+        {
+            std::vector<std::string> out;
+            std::string              cur;
+            for ( char c : s )
+            {
+                if ( c == ';' )
+                {
+                    if ( !cur.empty() )
+                        out.push_back( cur );
+                    cur.clear();
+                }
+                else
+                    cur += c;
+            }
+            if ( !cur.empty() )
+                out.push_back( cur );
+            return out;
+        }
+
+        // An open dropdown whose option list is drawn AFTER the whole tree, so it overlays everything.
+        struct PopupInfo
+        {
+            entt::entity Entity;
+            Rect         Box;   // the dropdown's box rect (screen px)
+            float        Scale; // canvas scale for its text
+        };
+
         // Resolve a sprite AssetHandle to its runtime GPU Image2D (non-owning; the image service owns it and
         // Render2D keys its per-texture executor by the raw pointer). nullptr when unset / unresolvable.
         Graphic::Image2D* ResolveSpriteImage( const Assets::AssetHandle& handle )
@@ -216,7 +245,7 @@ namespace Desert::UI
         // group — it overrides the element's own anchors for position + size.
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
                           Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked,
-                          entt::entity* focused, const Rect* forcedRect = nullptr )
+                          entt::entity* focused, std::vector<PopupInfo>* popups, const Rect* forcedRect = nullptr )
         {
             Rect       rect      = parent;
             const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
@@ -396,6 +425,34 @@ namespace Desert::UI
                     if ( hover && input && input->MouseReleased && focused )
                         *focused = e; // click to focus
                 }
+                else if ( reg.has<ECS::UIDropdownComponent>( e ) )
+                {
+                    auto&      d       = reg.get<ECS::UIDropdownComponent>( e ).Data;
+                    const auto options = SplitOptions( d.Options );
+
+                    dl.AddRectFilled( mn, mx, glm::vec4( d.Background, 1.0f ), d.CornerRadius * scale );
+
+                    ECS::UITextData td;
+                    td.Text     = ( d.SelectedIndex >= 0 && d.SelectedIndex < (int)options.size() )
+                                       ? options[d.SelectedIndex]
+                                       : std::string();
+                    td.FontSize = d.FontSize;
+                    td.Color    = d.TextColor;
+                    td.Align    = ECS::UITextAlign::Left;
+                    DrawText2D( dl, td, rect, scale );
+
+                    // Down-arrow on the right edge.
+                    const float ax = mx.x - rect.H * 0.5f, ay = ( mn.y + mx.y ) * 0.5f, aw = rect.H * 0.16f;
+                    dl.AddTriangleFilled( { ax - aw, ay - aw * 0.7f }, { ax + aw, ay - aw * 0.7f },
+                                          { ax, ay + aw * 0.7f }, glm::vec4( d.TextColor, 1.0f ) );
+
+                    const bool hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
+                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    if ( hover && input->MouseReleased )
+                        d.Open = !d.Open;
+                    if ( d.Open && popups )
+                        popups->push_back( { e, rect, scale } ); // defer the option list to draw on top
+                }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
                     DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );
@@ -469,13 +526,14 @@ namespace Desert::UI
 
                     const auto rects = SolveLayoutGroup( childParent, params, sizes );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
-                        DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, focused, &rects[i] );
+                        DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, focused, popups,
+                                     &rects[i] );
                 }
                 else
                 {
                     for ( auto c : children )
                         if ( reg.valid( c ) )
-                            DrawElement( reg, c, childParent, scale, dl, input, outClicked, focused );
+                            DrawElement( reg, c, childParent, scale, dl, input, outClicked, focused, popups );
                 }
                 if ( clip )
                     dl.PopClipRect();
@@ -539,10 +597,58 @@ namespace Desert::UI
             scale               = fit.Scale;
         }
 
+        std::vector<PopupInfo> popups;
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked, focused );
+                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked, focused, &popups );
+
+        // Open dropdown option lists, drawn LAST so they overlay everything.
+        for ( const PopupInfo& pi : popups )
+        {
+            if ( !reg.valid( pi.Entity ) || !reg.has<ECS::UIDropdownComponent>( pi.Entity ) )
+                continue;
+            auto&       d       = reg.get<ECS::UIDropdownComponent>( pi.Entity ).Data;
+            const auto  options = SplitOptions( d.Options );
+            const float rowH    = pi.Box.H;
+            const Rect  popup{ pi.Box.X, pi.Box.Y + pi.Box.H, pi.Box.W,
+                              rowH * static_cast<float>( options.size() ) };
+            dl.AddRectFilled( { popup.X, popup.Y }, { popup.X + popup.W, popup.Y + popup.H },
+                              glm::vec4( d.Background, 1.0f ), d.CornerRadius * pi.Scale );
+
+            bool clickedOption = false;
+            for ( std::size_t i = 0; i < options.size(); ++i )
+            {
+                const Rect row{ popup.X, popup.Y + static_cast<float>( i ) * rowH, popup.W, rowH };
+                const bool hover = input && input->MousePx.x >= row.X && input->MousePx.x <= row.X + row.W &&
+                                   input->MousePx.y >= row.Y && input->MousePx.y <= row.Y + row.H;
+                if ( hover )
+                    dl.AddRectFilled( { row.X, row.Y }, { row.X + row.W, row.Y + row.H },
+                                      glm::vec4( d.Highlight, 1.0f ) );
+                ECS::UITextData td;
+                td.Text     = options[i];
+                td.FontSize = d.FontSize;
+                td.Color    = d.TextColor;
+                td.Align    = ECS::UITextAlign::Left;
+                DrawText2D( dl, td, row, pi.Scale );
+                if ( hover && input->MouseReleased )
+                {
+                    d.SelectedIndex = static_cast<int>( i );
+                    d.Open          = false;
+                    clickedOption   = true;
+                }
+            }
+            // A click outside both the popup and the box closes it (the box click is toggled in the walk).
+            if ( input && input->MouseReleased && !clickedOption )
+            {
+                const bool inPopup = input->MousePx.x >= popup.X && input->MousePx.x <= popup.X + popup.W &&
+                                     input->MousePx.y >= popup.Y && input->MousePx.y <= popup.Y + popup.H;
+                const bool inBox = input->MousePx.x >= pi.Box.X && input->MousePx.x <= pi.Box.X + pi.Box.W &&
+                                   input->MousePx.y >= pi.Box.Y && input->MousePx.y <= pi.Box.Y + pi.Box.H;
+                if ( !inPopup && !inBox )
+                    d.Open = false;
+            }
+        }
 
         return true;
     }

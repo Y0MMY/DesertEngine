@@ -232,6 +232,16 @@ TEST( DrawList2D, ZeroRoundingStaysSharpQuad )
     EXPECT_EQ( dl.GetIndices().size(), 6u );
 }
 
+TEST( DrawList2D, TriangleEmitsOneTri )
+{
+    DrawList2D dl;
+    dl.AddTriangleFilled( { 0, 0 }, { 10, 0 }, { 5, 10 }, { 1, 1, 1, 1 } );
+    EXPECT_EQ( dl.GetVertices().size(), 3u );
+    EXPECT_EQ( dl.GetIndices().size(), 3u );
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_EQ( dl.GetCommands()[0].Texture, nullptr );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

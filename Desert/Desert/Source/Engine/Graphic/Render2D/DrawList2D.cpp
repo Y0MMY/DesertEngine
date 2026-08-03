@@ -159,4 +159,18 @@ namespace Desert::Graphic::Render2D
     {
         AddQuad( atlas, min, max, uv0, uv1, color, true );
     }
+
+    void DrawList2D::AddTriangleFilled( const glm::vec2& p0, const glm::vec2& p1, const glm::vec2& p2,
+                                        const glm::vec4& color )
+    {
+        DrawCommand&   cmd  = CurrentCommand( nullptr, false );
+        const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
+        m_Vertices.push_back( { p0, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { p1, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { p2, { 0.5f, 0.5f }, color } );
+        m_Indices.push_back( base + 0 );
+        m_Indices.push_back( base + 1 );
+        m_Indices.push_back( base + 2 );
+        cmd.IndexCount += 3;
+    }
 } // namespace Desert::Graphic::Render2D

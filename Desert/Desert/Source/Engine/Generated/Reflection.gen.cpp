@@ -222,6 +222,20 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UIDropdownData;
+                TypeBuilder( "UIDropdownData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Options", .Type = FieldType::String, .Offset = offsetof( T, Options ), .Size = sizeof( T::Options ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Options (';'-separated)", .Category = "UI Dropdown", } } )
+                    .Field( FieldInfo{ .Name = "SelectedIndex", .Type = FieldType::Int, .Offset = offsetof( T, SelectedIndex ), .Size = sizeof( T::SelectedIndex ), .TypeName = "int", .Meta = PropertyMetadata{ .DisplayName = "Selected Index", .Category = "UI Dropdown", } } )
+                    .Field( FieldInfo{ .Name = "Open", .Type = FieldType::Bool, .Offset = offsetof( T, Open ), .Size = sizeof( T::Open ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Open", .Category = "UI Dropdown", } } )
+                    .Field( FieldInfo{ .Name = "FontSize", .Type = FieldType::Float, .Offset = offsetof( T, FontSize ), .Size = sizeof( T::FontSize ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Font Size", .Category = "UI Dropdown", .HasRange = true, .RangeMin = 6.0f, .RangeMax = 96.0f, } } )
+                    .Field( FieldInfo{ .Name = "Background", .Type = FieldType::Vec3, .Offset = offsetof( T, Background ), .Size = sizeof( T::Background ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Background", .Category = "UI Dropdown", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "TextColor", .Type = FieldType::Vec3, .Offset = offsetof( T, TextColor ), .Size = sizeof( T::TextColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Text Color", .Category = "UI Dropdown", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "Highlight", .Type = FieldType::Vec3, .Offset = offsetof( T, Highlight ), .Size = sizeof( T::Highlight ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Highlight", .Category = "UI Dropdown", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "CornerRadius", .Type = FieldType::Float, .Offset = offsetof( T, CornerRadius ), .Size = sizeof( T::CornerRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Corner Radius", .Category = "UI Dropdown", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 32.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UICanvasData;
                 TypeBuilder( "UICanvasData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "ScaleMode", .Type = FieldType::Enum, .Offset = offsetof( T, ScaleMode ), .Size = sizeof( T::ScaleMode ), .TypeName = "UICanvasScaleMode", .Meta = PropertyMetadata{ .DisplayName = "Scale Mode", .Category = "UI Canvas", }, .EnumValues = { EnumValue{ "Stretch", 0 }, EnumValue{ "ScaleWithScreen", 1 }, EnumValue{ "Letterbox", 2 }, } } )

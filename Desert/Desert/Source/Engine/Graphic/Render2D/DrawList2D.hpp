@@ -48,6 +48,10 @@ namespace Desert::Graphic::Render2D
         // Rectangle outline of the given pixel `thickness`, drawn as four filled bars (sharp corners).
         void AddRect( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color, float thickness );
 
+        // Filled triangle (e.g. a dropdown arrow). Solid batch (white texture).
+        void AddTriangleFilled( const glm::vec2& p0, const glm::vec2& p1, const glm::vec2& p2,
+                                const glm::vec4& color );
+
         // Clip subsequently-added primitives to `min`..`max` (px), intersected with the current clip (so
         // nested masks compose). Pair with PopClipRect. The backend applies it as a scissor per batch.
         void PushClipRect( const glm::vec2& min, const glm::vec2& max );

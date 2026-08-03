@@ -96,6 +96,9 @@ namespace Desert::Editor
         if ( ImGui::Button( ICON_MDI_FORM_TEXTBOX " + Input" ) )
             AddUIChild<ECS::UIInputFieldComponent>( *m_Scene, canvasEntity, "UI Input Field" );
         ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_MENU_DOWN " + Dropdown" ) )
+            AddUIChild<ECS::UIDropdownComponent>( *m_Scene, canvasEntity, "UI Dropdown" );
+        ImGui::SameLine();
         ImGui::TextDisabled( "add UI elements, then edit anchors/colour in Details" );
         ImGui::Separator();
 

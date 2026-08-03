@@ -890,6 +890,8 @@ namespace Desert::Core::Serialize
              "UIScrollView", "UIScrollViewData", &ECS::UIScrollViewComponent::Data ) );
         Register( MakeReflected<ECS::UIInputFieldComponent, ECS::UIInputFieldData>(
              "UIInputField", "UIInputFieldData", &ECS::UIInputFieldComponent::Data ) );
+        Register( MakeReflected<ECS::UIDropdownComponent, ECS::UIDropdownData>(
+             "UIDropdown", "UIDropdownData", &ECS::UIDropdownComponent::Data ) );
 
         // ---- Marker components (presence is the state) ----
         Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );

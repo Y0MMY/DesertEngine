@@ -764,6 +764,41 @@ namespace Desert::ECS
         UIInputFieldData Data;
     };
 
+    // A dropdown / combo box. Shows the selected option; a click opens a list of Options (';'-separated) below
+    // it, drawn on top of everything. Picking an option sets SelectedIndex and closes.
+    struct UIDropdownData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Options (';'-separated)" ), Category( "UI Dropdown" ) )
+        std::string Options = "Option A;Option B;Option C";
+
+        PROPERTY( DisplayName( "Selected Index" ), Category( "UI Dropdown" ) )
+        int SelectedIndex = 0;
+
+        PROPERTY( DisplayName( "Open" ), Category( "UI Dropdown" ) )
+        bool Open = false;
+
+        PROPERTY( DisplayName( "Font Size" ), Category( "UI Dropdown" ), Range( 6.0f, 96.0f ) )
+        float FontSize = 20.0f;
+
+        PROPERTY( DisplayName( "Background" ), Category( "UI Dropdown" ), Color )
+        glm::vec3 Background = glm::vec3( 0.16f, 0.17f, 0.21f );
+
+        PROPERTY( DisplayName( "Text Color" ), Category( "UI Dropdown" ), Color )
+        glm::vec3 TextColor = glm::vec3( 0.92f, 0.94f, 0.98f );
+
+        PROPERTY( DisplayName( "Highlight" ), Category( "UI Dropdown" ), Color )
+        glm::vec3 Highlight = glm::vec3( 0.26f, 0.40f, 0.62f );
+
+        PROPERTY( DisplayName( "Corner Radius" ), Category( "UI Dropdown" ), Range( 0.0f, 32.0f ) )
+        float CornerRadius = 4.0f;
+    };
+    struct UIDropdownComponent
+    {
+        UIDropdownData Data;
+    };
+
     // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas. Add UI
     // elements as CHILDREN of the canvas entity (the viewport "UI" menu / UI Editor do this for you).
     struct UICanvasData
