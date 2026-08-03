@@ -8,8 +8,10 @@
 #include <Engine/Text/FontBaker.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 #include <vector>
 
 namespace Desert::UI
@@ -19,6 +21,28 @@ namespace Desert::UI
         bool HandleSet( const Assets::AssetHandle& h )
         {
             return static_cast<uint64_t>( h ) != 0;
+        }
+
+        // Seconds since the first UI frame — a shared wall clock so every time-driven effect (pulse, marquee,
+        // hover eases) animates without any per-frame dt being plumbed through the stateless walk.
+        float NowSeconds()
+        {
+            static const auto epoch = std::chrono::steady_clock::now();
+            return std::chrono::duration<float>( std::chrono::steady_clock::now() - epoch ).count();
+        }
+
+        // Per-button hover interpolation (0=rest, 1=hovered), eased each frame toward the target so hover
+        // colours cross-fade instead of snapping. Keyed by entity (transient, non-serialized). s_FrameDt is
+        // the wall-clock delta of the current frame, refreshed once at the top of RenderCanvas2D.
+        std::unordered_map<entt::entity, float> s_HoverT;
+        float                                   s_FrameDt = 0.0f;
+
+        float HoverEase( entt::entity e, bool hovered )
+        {
+            float&      t = s_HoverT[e];
+            const float k = std::clamp( s_FrameDt * 12.0f, 0.0f, 1.0f ); // exponential approach
+            t += ( ( hovered ? 1.0f : 0.0f ) - t ) * k;
+            return t;
         }
 
         // Split a ';'-separated option string into its items (empty items skipped).
@@ -336,6 +360,43 @@ namespace Desert::UI
             const std::vector<StyledChar> chars =
                  BuildStyledChars( t.Text, glm::vec4( t.Color, 1.0f ), t.RichText );
 
+            // Marquee: a single clipped line scrolling leftward, repeated seamlessly across the width. A news
+            // ticker / running banner. Pure function of the shared clock, so it needs no per-frame state.
+            if ( t.Marquee )
+            {
+                const float sM       = ( t.FontSize * scale ) / bf.PixelHeight;
+                float       contentW = 0.0f;
+                for ( const StyledChar& sc : chars )
+                    contentW += advEm( sc.ch ) * sM;
+                const float gap    = std::max( 40.0f * scale, rect.W * 0.35f );
+                const float period = std::max( 1.0f, contentW + gap );
+                const float off    = std::fmod( NowSeconds() * t.MarqueeSpeed * scale, period );
+                const float blockH = ( bf.Ascent - bf.Descent ) * sM;
+                const float baseY  = rect.Y + ( rect.H - blockH ) * 0.5f + bf.Ascent * sM;
+
+                dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
+                for ( float startX = rect.X - off; startX < rect.X + rect.W; startX += period )
+                {
+                    float penX = startX;
+                    for ( const StyledChar& sc : chars )
+                    {
+                        const Text::Glyph* g = glyph( sc.ch );
+                        if ( !g )
+                            continue;
+                        if ( g->Width > 0.0f && g->Height > 0.0f )
+                        {
+                            const float x0 = penX + g->OffsetX * sM;
+                            const float y0 = baseY + g->OffsetY * sM;
+                            dl.AddText( atlas, { x0, y0 }, { x0 + g->Width * sM, y0 + g->Height * sM },
+                                        { g->U0, g->V0 }, { g->U1, g->V1 }, sc.color );
+                        }
+                        penX += g->Advance * sM;
+                    }
+                }
+                dl.PopClipRect();
+                return;
+            }
+
             const float pad    = 6.0f;
             const float availW = std::max( 1.0f, rect.W - 2.0f * pad );
             const float availH = std::max( 1.0f, rect.H - 2.0f * pad );
@@ -592,10 +653,13 @@ namespace Desert::UI
                                        input->MousePx.x <= mx.x && input->MousePx.y >= mn.y &&
                                        input->MousePx.y <= mx.y;
                     const bool down  = hover && input->MouseDown;
-                    // Resting colour is Selected (persistent highlight) or Normal; hover/press override it.
+                    // Resting colour is Selected (persistent highlight) or Normal; hover cross-fades toward
+                    // HoverColor (eased), press snaps to PressedColor, Disabled overrides everything.
                     const glm::vec3 rest = b.Selected ? b.SelectedColor : b.NormalColor;
-                    const glm::vec3 c = b.Disabled ? b.DisabledColor
-                                                   : ( down ? b.PressedColor : ( hover ? b.HoverColor : rest ) );
+                    const float     ht   = HoverEase( e, hover && !down );
+                    const glm::vec3 c    = b.Disabled ? b.DisabledColor
+                                           : down     ? b.PressedColor
+                                                      : glm::mix( rest, b.HoverColor, ht );
 
                     // Image can change with state (hover / press), falling back to the normal Sprite.
                     Assets::AssetHandle spr = b.Sprite;
@@ -645,6 +709,13 @@ namespace Desert::UI
                 {
                     const auto& p = reg.get<ECS::UIPanelComponent>( e ).Data;
 
+                    // Pulse breathes the whole panel's opacity between PulseMin and full (live dot / CTA glow).
+                    const float op =
+                         p.Pulse ? p.Opacity * ( p.PulseMin +
+                                                 ( 1.0f - p.PulseMin ) *
+                                                      ( 0.5f + 0.5f * std::sin( NowSeconds() * p.PulseSpeed ) ) )
+                                 : p.Opacity;
+
                     if ( p.Glow && p.GlowSize > 0.0f )
                     {
                         const int   layers = 6;
@@ -653,14 +724,14 @@ namespace Desert::UI
                         {
                             const float ex = gs * ( 1.0f - static_cast<float>( i ) / layers );
                             dl.AddRectFilled( { mn.x - ex, mn.y - ex }, { mx.x + ex, mx.y + ex },
-                                              glm::vec4( p.GlowColor, 0.10f * p.Opacity ), p.CornerRadius + ex );
+                                              glm::vec4( p.GlowColor, 0.10f * op ), p.CornerRadius + ex );
                         }
                     }
 
                     if ( p.Shadow )
                         dl.AddRectFilled( { mn.x + p.ShadowOffset.x * scale, mn.y + p.ShadowOffset.y * scale },
                                           { mx.x + p.ShadowOffset.x * scale, mx.y + p.ShadowOffset.y * scale },
-                                          glm::vec4( p.ShadowColor, p.Opacity ), p.CornerRadius * scale );
+                                          glm::vec4( p.ShadowColor, op ), p.CornerRadius * scale );
 
                     // Circle forces full rounding (radius = half the shorter side) for avatars / badges / dots.
                     const float rounding = p.Circle ? std::min( rect.W, rect.H ) * 0.5f : p.CornerRadius * scale;
@@ -672,14 +743,12 @@ namespace Desert::UI
                               ? nullptr
                               : Runtime::ResourceRegistry::GetVideoService()->Resolve( p.VideoPath );
                     if ( video )
-                        dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f },
-                                     glm::vec4( p.Color, p.Opacity ) );
+                        dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f }, glm::vec4( p.Color, op ) );
                     else if ( p.UseGradient && !HandleSet( p.Sprite ) )
-                        dl.AddRectFilledMultiColor( mn, mx, glm::vec4( p.Color, p.Opacity ),
-                                                    glm::vec4( p.GradientColor, p.Opacity ) );
+                        dl.AddRectFilledMultiColor( mn, mx, glm::vec4( p.Color, op ),
+                                                    glm::vec4( p.GradientColor, op ) );
                     else
-                        DrawBox( dl, mn, mx, glm::vec4( p.Color, p.Opacity ), p.Sprite, p.SpriteBorder, scale,
-                                 rounding );
+                        DrawBox( dl, mn, mx, glm::vec4( p.Color, op ), p.Sprite, p.SpriteBorder, scale, rounding );
 
                     // Gradient ring hugging the edge (avatar / status / progress ring).
                     if ( p.RingWidth > 0.0f )
@@ -933,6 +1002,15 @@ namespace Desert::UI
                          const glm::mat4* worldViewProj, const UIInput* input, std::string* outClicked,
                          entt::entity* focused )
     {
+        // Refresh the shared frame delta once per canvas draw (drives hover eases). Clamped so a long stall /
+        // first frame doesn't snap animations.
+        {
+            static float lastT = NowSeconds();
+            const float  now   = NowSeconds();
+            s_FrameDt          = std::clamp( now - lastT, 0.0f, 0.1f );
+            lastT              = now;
+        }
+
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
             return false;

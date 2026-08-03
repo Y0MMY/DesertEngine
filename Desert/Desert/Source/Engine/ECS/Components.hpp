@@ -922,6 +922,14 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Ring Color B" ), Category( "Ring" ), Color )
         glm::vec3 RingColorB = glm::vec3( 0.18f, 0.89f, 1.0f ); // sweeps A -> B -> A around the ring
 
+        // --- Animation (Phase F) --------------------------------------------------------------------------
+        PROPERTY( DisplayName( "Pulse" ), Category( "Animation" ) )
+        bool Pulse = false; // breathe the opacity between Pulse Min and full — a live "online" dot / CTA glow
+        PROPERTY( DisplayName( "Pulse Speed" ), Category( "Animation" ), Range( 0.1f, 10.0f ) )
+        float PulseSpeed = 2.5f; // radians/sec of the sine
+        PROPERTY( DisplayName( "Pulse Min" ), Category( "Animation" ), Range( 0.0f, 1.0f ) )
+        float PulseMin = 0.35f; // opacity floor of the breathe
+
         // Effects (Phase 4). All in design px; scaled by the canvas scale at draw time.
         PROPERTY( DisplayName( "Use Gradient" ), Category( "Effects" ) )
         bool UseGradient = false; // vertical Color (top) -> Gradient Color (bottom); ignored when a sprite is set
@@ -991,6 +999,12 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Rich Text" ), Category( "Layout" ) )
         bool RichText = false; // parse BBCode tags: [color=#rrggbb]..[/color], [b]..[/b]
+
+        // --- Animation (Phase F) --------------------------------------------------------------------------
+        PROPERTY( DisplayName( "Marquee" ), Category( "Animation" ) )
+        bool Marquee = false; // horizontally scroll the text (single line, clipped) — a news/ticker banner
+        PROPERTY( DisplayName( "Marquee Speed" ), Category( "Animation" ), Range( 5.0f, 400.0f ) )
+        float MarqueeSpeed = 60.0f; // design px/sec
 
         // Effects (Phase 4).
         PROPERTY( DisplayName( "Shadow" ), Category( "Effects" ) )
