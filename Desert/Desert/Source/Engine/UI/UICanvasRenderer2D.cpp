@@ -989,6 +989,13 @@ namespace Desert::UI
                               std::max( 1.0f, ic.Thickness * scale ), ic.Scale );
                 }
 
+                if ( reg.has<ECS::UIImageComponent>( e ) )
+                {
+                    // A sprite block — reuses DrawBox so it gets GIF playback, 9-slice and the static path.
+                    const auto& im = reg.get<ECS::UIImageComponent>( e ).Data;
+                    DrawBox( dl, mn, mx, glm::vec4( im.Tint, im.Opacity ), im.Sprite, im.SpriteBorder, scale, 0.0f );
+                }
+
                 // Keyboard focus: record this control for Tab-cycling, and draw a focus ring when it holds
                 // focus (InputField draws its own coloured border, so skip the generic ring there).
                 if ( IsFocusable( reg, e ) )

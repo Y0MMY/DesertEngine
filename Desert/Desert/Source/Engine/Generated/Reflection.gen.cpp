@@ -302,6 +302,16 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UIImageData;
+                TypeBuilder( "UIImageData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Sprite", .Category = "UI Image", .IsAsset = true, .AssetType = "TextureAsset", } } )
+                    .Field( FieldInfo{ .Name = "Tint", .Type = FieldType::Vec3, .Offset = offsetof( T, Tint ), .Size = sizeof( T::Tint ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Tint", .Category = "UI Image", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "Opacity", .Type = FieldType::Float, .Offset = offsetof( T, Opacity ), .Size = sizeof( T::Opacity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Opacity", .Category = "UI Image", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .Field( FieldInfo{ .Name = "SpriteBorder", .Type = FieldType::Vec4, .Offset = offsetof( T, SpriteBorder ), .Size = sizeof( T::SpriteBorder ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Sprite Border L/T/R/B", .Category = "UI Image", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UITextData;
                 TypeBuilder( "UITextData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "Text", .Type = FieldType::String, .Offset = offsetof( T, Text ), .Size = sizeof( T::Text ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Text", .Category = "UI Text", } } )

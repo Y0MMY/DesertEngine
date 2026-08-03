@@ -420,8 +420,8 @@ namespace Desert::Editor
                         select( AddUIChild<ECS::UITextComponent2D>( *m_Scene, parent, "UI Text" ) );
                     if ( ImGui::MenuItem( ICON_MDI_BUTTON_POINTER "  Button" ) )
                         select( AddUIChild<ECS::UIButtonComponent>( *m_Scene, parent, "UI Button" ) );
-                    if ( ImGui::MenuItem( ICON_MDI_STAR "  Icon" ) )
-                        select( AddUIChild<ECS::UIIconComponent>( *m_Scene, parent, "UI Icon" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_IMAGE "  Image" ) )
+                        select( AddUIChild<ECS::UIImageComponent>( *m_Scene, parent, "UI Image" ) );
                     if ( ImGui::MenuItem( ICON_MDI_VIEW_GRID "  Layout Group" ) )
                         select( AddUIChild<ECS::UILayoutGroupComponent>( *m_Scene, parent, "UI Layout Group" ) );
                     if ( ImGui::MenuItem( ICON_MDI_PROGRESS_HELPER "  Progress Bar" ) )

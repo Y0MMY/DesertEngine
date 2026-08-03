@@ -997,6 +997,30 @@ namespace Desert::ECS
         UIIconData Data;
     };
 
+    // A plain image block: draws a sprite (any PNG/JPG/TGA — or an animated GIF) filling the element rect,
+    // tinted by Tint*Opacity. The composable "block + sprite" alternative to the built-in vector UIIcon —
+    // drag any texture onto Sprite and position it freely with the element's anchors. 9-slice supported.
+    struct UIImageData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Sprite" ), Category( "UI Image" ), Asset<TextureAsset> )
+        Assets::AssetHandle Sprite; // drag a texture (PNG/JPG/TGA/GIF) from the Content Browser
+
+        PROPERTY( DisplayName( "Tint" ), Category( "UI Image" ), Color )
+        glm::vec3 Tint = glm::vec3( 1.0f );
+
+        PROPERTY( DisplayName( "Opacity" ), Category( "UI Image" ), Range( 0.0f, 1.0f ) )
+        float Opacity = 1.0f;
+
+        PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Image" ) )
+        glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
+    };
+    struct UIImageComponent
+    {
+        UIImageData Data;
+    };
+
     // Screen-space text label (distinct from the 3D world-space TextComponent).
     struct UITextData
     {
