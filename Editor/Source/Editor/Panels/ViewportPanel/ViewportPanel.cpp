@@ -1471,10 +1471,35 @@ namespace Desert::Editor
             // skips the 3D raycast (unless a 3D gizmo handle is being grabbed). Edit anchors/colour in Details.
             if ( !m_Gizmo.IsHovered() )
             {
-                auto&              reg   = m_Scene->GetRegistry();
-                const entt::entity uiHit = ::Desert::UI::PickElement(
+                auto&        reg   = m_Scene->GetRegistry();
+                entt::entity uiHit = ::Desert::UI::PickElement(
                      reg, glm::vec2( mp.x, mp.y ),
                      ::Desert::UI::Rect{ vp.ViewportPos.x, vp.ViewportPos.y, vp.Size.x, vp.Size.y } );
+
+                // Clicking a control's content (e.g. a button's label / icon) selects the CONTROL, not the
+                // child — promote the hit to its nearest interactable ancestor. Alt-click drills down to the
+                // exact element under the cursor instead.
+                if ( uiHit != entt::null && !::ImGui::GetIO().KeyAlt )
+                {
+                    auto isInteractable = [&]( entt::entity x )
+                    {
+                        return reg.has<ECS::UIButtonComponent>( x ) || reg.has<ECS::UIToggleComponent>( x ) ||
+                               reg.has<ECS::UISliderComponent>( x ) || reg.has<ECS::UIDropdownComponent>( x ) ||
+                               reg.has<ECS::UIInputFieldComponent>( x );
+                    };
+                    for ( entt::entity cur = uiHit; cur != entt::null; )
+                    {
+                        if ( isInteractable( cur ) )
+                        {
+                            uiHit = cur;
+                            break;
+                        }
+                        cur = reg.has<ECS::RelationshipComponent>( cur )
+                                   ? reg.get<ECS::RelationshipComponent>( cur ).Parent
+                                   : entt::null;
+                    }
+                }
+
                 if ( uiHit != entt::null && reg.has<ECS::UUIDComponent>( uiHit ) )
                 {
                     const auto uuid = reg.get<ECS::UUIDComponent>( uiHit ).UUID;
