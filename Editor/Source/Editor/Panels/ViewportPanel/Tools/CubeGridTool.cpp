@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <climits>
 #include <cmath>
 
 namespace Desert::Editor::Tools
@@ -113,6 +114,8 @@ namespace Desert::Editor::Tools
             ms.ReqClear = false;
             m_Cells.clear();
             m_HasLastPaint = false;
+            m_Origin       = glm::vec3( 0.0f );
+            m_BakedSize    = glm::vec3( -1.0f );
             RegenMesh( scene );
         }
 
@@ -127,7 +130,7 @@ namespace Desert::Editor::Tools
         {
             const glm::ivec3   c = Unpack( key );
             Common::Math::AABB box;
-            box.Min = glm::vec3( c ) * sz;
+            box.Min = m_Origin + glm::vec3( c ) * sz;
             box.Max = box.Min + sz;
             float t;
             if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
@@ -140,7 +143,8 @@ namespace Desert::Editor::Tools
         if ( hit )
         {
             const glm::vec3 p  = ray.Origin + ray.Direction * bestT;
-            const glm::vec3 d  = ( p - ( glm::vec3( hitCell ) + 0.5f ) * sz ) / ( sz * 0.5f ); // face-normalised
+            const glm::vec3 d =
+                 ( p - ( m_Origin + ( glm::vec3( hitCell ) + 0.5f ) * sz ) ) / ( sz * 0.5f ); // face-normalised
             const glm::vec3 ad = glm::abs( d );
             glm::ivec3      n{ 0 };
             if ( ad.x >= ad.y && ad.x >= ad.z )
@@ -160,8 +164,9 @@ namespace Desert::Editor::Tools
             if ( t > 0.0f )
             {
                 const glm::vec3 p = ray.Origin + ray.Direction * t;
-                m_TargetCell      = { static_cast<int>( std::floor( p.x / sz.x ) ), 0,
-                                      static_cast<int>( std::floor( p.z / sz.z ) ) };
+                m_TargetCell      = { static_cast<int>( std::floor( ( p.x - m_Origin.x ) / sz.x ) ),
+                                      static_cast<int>( std::lround( -m_Origin.y / sz.y ) ),
+                                      static_cast<int>( std::floor( ( p.z - m_Origin.z ) / sz.z ) ) };
                 m_TargetNormal    = { 0, 1, 0 };
                 m_HasTarget       = true;
             }
@@ -172,7 +177,7 @@ namespace Desert::Editor::Tools
         // Draw a cell as SOLID shaded faces (only outward, camera-facing, non-internal faces).
         auto drawCellSolid = [&]( const glm::ivec3& c, ImU32 fill, ImU32 outline )
         {
-            const glm::vec3 mn = glm::vec3( c ) * sz;
+            const glm::vec3 mn = m_Origin + glm::vec3( c ) * sz;
             for ( int f = 0; f < 6; ++f )
             {
                 if ( occupied( c + kNeighbor[f] ) )
@@ -211,8 +216,8 @@ namespace Desert::Editor::Tools
             {
                 glm::vec3 w( 0.0f );
                 w[na] = planeW;
-                w[ua] = static_cast<float>( uc + du[k] ) * sz[ua];
-                w[va] = static_cast<float>( vc + dv[k] ) * sz[va];
+                w[ua] = m_Origin[ua] + static_cast<float>( uc + du[k] ) * sz[ua];
+                w[va] = m_Origin[va] + static_cast<float>( vc + dv[k] ) * sz[va];
                 if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[k] ) )
                     return;
             }
@@ -240,7 +245,10 @@ namespace Desert::Editor::Tools
 
         // World coord of the plane that fills `cell` along axis `na` with outward normal sign `sgn`.
         auto planeWorld = [&]( const glm::ivec3& cell, int na, int sgn )
-        { return ( sgn > 0 ? static_cast<float>( cell[na] ) : static_cast<float>( cell[na] + 1 ) ) * sz[na]; };
+        {
+            return m_Origin[na] +
+                   ( sgn > 0 ? static_cast<float>( cell[na] ) : static_cast<float>( cell[na] + 1 ) ) * sz[na];
+        };
 
         // Hover footprint on the target surface (green = add, red = erase).
         if ( toolActive && !m_Painting && !m_Erasing && m_HasTarget )
@@ -311,8 +319,8 @@ namespace Desert::Editor::Tools
                     const int        ua = ( m_StrokeNa + 1 ) % 3;
                     const int        va = ( m_StrokeNa + 2 ) % 3;
                     const glm::vec3  p  = ray.Origin + ray.Direction * t;
-                    const glm::ivec2 uv{ static_cast<int>( std::floor( p[ua] / sz[ua] ) ),
-                                         static_cast<int>( std::floor( p[va] / sz[va] ) ) };
+                    const glm::ivec2 uv{ static_cast<int>( std::floor( ( p[ua] - m_Origin[ua] ) / sz[ua] ) ),
+                                         static_cast<int>( std::floor( ( p[va] - m_Origin[va] ) / sz[va] ) ) };
                     if ( m_HasLastPaint && m_LastPaintUV != uv ) // interpolate the swept line
                     {
                         const glm::ivec2 a = m_LastPaintUV, b = uv;
@@ -360,10 +368,20 @@ namespace Desert::Editor::Tools
                 ms.Height = std::max( kMinDim, ms.Height * 0.8f );
         }
 
-        // Editing Width/Depth/Height rescales the whole live blockout (integer lattice × free box size), so
-        // re-bake when the size changed even without a paint edit.
+        // Editing Width/Depth/Height rescales the live blockout. Anchor the resize to the structure's min
+        // corner (keep its world position fixed) so it grows/shrinks IN PLACE instead of sliding away from the
+        // world origin. Re-bake even without a paint edit.
         if ( sz != m_BakedSize && !m_Cells.empty() )
+        {
+            if ( m_BakedSize.x > 0.0f ) // valid previous size -> shift origin to pin the min corner
+            {
+                glm::ivec3 minCell{ INT_MAX };
+                for ( uint64_t k : m_Cells )
+                    minCell = glm::min( minCell, Unpack( k ) );
+                m_Origin += glm::vec3( minCell ) * ( m_BakedSize - sz );
+            }
             changed = true;
+        }
 
         ms.Cubes = static_cast<int>( m_Cells.size() );
 
@@ -393,6 +411,8 @@ namespace Desert::Editor::Tools
                     m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
                     m_Cells.clear();
                     m_HasLastPaint = false;
+                    m_Origin       = glm::vec3( 0.0f );
+                    m_BakedSize    = glm::vec3( -1.0f );
                 }
                 ::ImGui::PopStyleColor( 2 );
                 ::ImGui::SameLine();
@@ -437,7 +457,7 @@ namespace Desert::Editor::Tools
                 {
                     const FaceVert& fv = kFace[f][k];
                     Vertex          v;
-                    v.Position  = ( glm::vec3( c ) + fv.P + 0.5f ) * m_CellSize;
+                    v.Position  = m_Origin + ( glm::vec3( c ) + fv.P + 0.5f ) * m_CellSize;
                     v.Normal    = fv.N;
                     v.Tangent   = fv.T;
                     v.Bitangent = fv.B;
@@ -488,5 +508,7 @@ namespace Desert::Editor::Tools
         m_HasLastPaint = false;
         m_Painting     = false;
         m_Erasing      = false;
+        m_Origin       = glm::vec3( 0.0f );
+        m_BakedSize    = glm::vec3( -1.0f );
     }
 } // namespace Desert::Editor::Tools

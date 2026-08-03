@@ -37,6 +37,8 @@ namespace Desert::Editor::Tools
         std::unordered_set<uint64_t> m_Cells;                         // occupied lattice cells (packed ivec3)
         glm::vec3                    m_CellSize{ 1.0f };              // per-axis box size W×H×D (mirrors state)
         glm::vec3                    m_BakedSize{ -1.0f };            // box size the live mesh was last baked at
+        glm::vec3                    m_Origin{ 0.0f };                // world pos of cell (0,0,0)'s min corner;
+                                                                      // shifted on resize -> grow in place
         Common::UUID                 m_Entity = Common::UUID::Null(); // live blockout entity
 
         // Frame targeting: the surface under the cursor — the empty cell an ADD would fill (+ its face normal),
