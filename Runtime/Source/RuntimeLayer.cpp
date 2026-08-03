@@ -41,6 +41,9 @@
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
 #include <Engine/Core/Input.hpp>
 
+#include <Common/Core/Events/Event.hpp>
+#include <Common/Core/Events/MouseEvents.hpp>
+
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -287,7 +290,9 @@ namespace Desert::Player
                 input.MousePx       = { mx, my };
                 input.MouseDown     = down;
                 input.MouseReleased = m_PrevMouseDown && !down;
+                input.ScrollDelta   = m_ScrollAccum;
                 m_PrevMouseDown     = down;
+                m_ScrollAccum       = 0.0f;
 
                 UI::RenderCanvas2D( m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
                                     &clicked );
@@ -367,7 +372,14 @@ namespace Desert::Player
         return BOOLSUCCESS;
     }
 
-    void RuntimeLayer::OnEvent( Common::Event& )
+    void RuntimeLayer::OnEvent( Common::Event& e )
     {
+        // Accumulate mouse-wheel delta for the UI (ScrollView); consumed + reset in the present.
+        Common::EventManager( e ).Notify<Common::MouseScrolledEvent>(
+             [this]( Common::MouseScrolledEvent& ev )
+             {
+                 m_ScrollAccum += ev.GetYOffset();
+                 return false;
+             } );
     }
 } // namespace Desert::Player

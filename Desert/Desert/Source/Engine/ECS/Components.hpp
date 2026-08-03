@@ -702,6 +702,33 @@ namespace Desert::ECS
         UISliderData Data;
     };
 
+    // A vertical scroll view: clips its children to its rect and scrolls them by the mouse wheel. Children are
+    // positioned relative to the content top (offset up by ScrollY). ContentHeight is the total scrollable
+    // height in design px (author-set); scrolling clamps to [0, ContentHeight - viewport height].
+    struct UIScrollViewData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Scroll Y" ), Category( "UI Scroll View" ) )
+        float ScrollY = 0.0f;
+
+        PROPERTY( DisplayName( "Content Height" ), Category( "UI Scroll View" ) )
+        float ContentHeight = 600.0f;
+
+        PROPERTY( DisplayName( "Background" ), Category( "UI Scroll View" ), Color )
+        glm::vec3 Background = glm::vec3( 0.10f, 0.11f, 0.14f );
+
+        PROPERTY( DisplayName( "Show Scrollbar" ), Category( "UI Scroll View" ) )
+        bool ShowScrollbar = true;
+
+        PROPERTY( DisplayName( "Scrollbar Color" ), Category( "UI Scroll View" ), Color )
+        glm::vec3 ScrollbarColor = glm::vec3( 0.35f, 0.37f, 0.44f );
+    };
+    struct UIScrollViewComponent
+    {
+        UIScrollViewData Data;
+    };
+
     // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas. Add UI
     // elements as CHILDREN of the canvas entity (the viewport "UI" menu / UI Editor do this for you).
     struct UICanvasData

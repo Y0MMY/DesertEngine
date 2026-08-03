@@ -886,6 +886,8 @@ namespace Desert::Core::Serialize
                                                                             &ECS::UIToggleComponent::Data ) );
         Register( MakeReflected<ECS::UISliderComponent, ECS::UISliderData>( "UISlider", "UISliderData",
                                                                             &ECS::UISliderComponent::Data ) );
+        Register( MakeReflected<ECS::UIScrollViewComponent, ECS::UIScrollViewData>(
+             "UIScrollView", "UIScrollViewData", &ECS::UIScrollViewComponent::Data ) );
 
         // ---- Marker components (presence is the state) ----
         Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );

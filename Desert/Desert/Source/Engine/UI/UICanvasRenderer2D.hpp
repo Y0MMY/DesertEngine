@@ -23,6 +23,7 @@ namespace Desert::UI
         glm::vec2 MousePx       = { 0.0f, 0.0f };
         bool      MouseDown     = false;
         bool      MouseReleased = false;
+        float     ScrollDelta   = 0.0f; // mouse-wheel notches this frame (+ = up); drives ScrollView
     };
 
     // Emit the scene's visible canvas into @p dl in pixel coordinates within @p viewportPx. When the canvas is

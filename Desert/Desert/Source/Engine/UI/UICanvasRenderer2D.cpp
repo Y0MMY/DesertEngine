@@ -333,10 +333,32 @@ namespace Desert::UI
 
             if ( reg.has<ECS::RelationshipComponent>( e ) )
             {
-                // Clip Contents (opt-in per element, like Unity's RectMask2D): children are scissored to this
-                // element's rect. Intersects the current clip so nested masks compose.
-                const bool clip = reg.has<ECS::UILayoutComponent>( e ) &&
-                                  reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents;
+                Rect childParent = rect;
+                // Clip Contents (RectMask2D) OR a scroll view both scissor children to this element's rect.
+                bool clip = reg.has<ECS::UILayoutComponent>( e ) &&
+                            reg.get<ECS::UILayoutComponent>( e ).Data.ClipContents;
+
+                float scrollMaxPx = 0.0f; // >0 (scroll view overflowing) => draw a scrollbar afterward
+                if ( reg.has<ECS::UIScrollViewComponent>( e ) )
+                {
+                    auto& sv = reg.get<ECS::UIScrollViewComponent>( e ).Data;
+                    dl.AddRectFilled( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H },
+                                      glm::vec4( sv.Background, 1.0f ) );
+
+                    const float contentPx = sv.ContentHeight * scale;
+                    scrollMaxPx           = std::max( 0.0f, contentPx - rect.H );
+                    const bool hover = input && input->MousePx.x >= rect.X &&
+                                       input->MousePx.x <= rect.X + rect.W && input->MousePx.y >= rect.Y &&
+                                       input->MousePx.y <= rect.Y + rect.H;
+                    if ( hover && input->ScrollDelta != 0.0f )
+                        sv.ScrollY -= input->ScrollDelta * 30.0f; // 30 design px per wheel notch
+                    const float maxScrollDesign = scale > 0.0f ? scrollMaxPx / scale : 0.0f;
+                    sv.ScrollY                  = std::clamp( sv.ScrollY, 0.0f, maxScrollDesign );
+
+                    clip = true;
+                    childParent.Y -= sv.ScrollY * scale; // shift children up by the scroll offset
+                }
+
                 if ( clip )
                     dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
 
@@ -375,18 +397,35 @@ namespace Desert::UI
                     params.CellSize     = g.CellSize * scale;
                     params.Columns      = g.Columns;
 
-                    const auto rects = SolveLayoutGroup( rect, params, sizes );
+                    const auto rects = SolveLayoutGroup( childParent, params, sizes );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
-                        DrawElement( reg, kids[i], rect, scale, dl, input, outClicked, &rects[i] );
+                        DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, &rects[i] );
                 }
                 else
                 {
                     for ( auto c : children )
                         if ( reg.valid( c ) )
-                            DrawElement( reg, c, rect, scale, dl, input, outClicked );
+                            DrawElement( reg, c, childParent, scale, dl, input, outClicked );
                 }
                 if ( clip )
                     dl.PopClipRect();
+
+                // Scroll thumb on the right edge (outside the clip), shown only when the content overflows.
+                if ( reg.has<ECS::UIScrollViewComponent>( e ) )
+                {
+                    const auto& sv = reg.get<ECS::UIScrollViewComponent>( e ).Data;
+                    if ( sv.ShowScrollbar && scrollMaxPx > 0.0f )
+                    {
+                        const float barW      = 6.0f * scale;
+                        const float trackX    = rect.X + rect.W - barW;
+                        const float contentPx = sv.ContentHeight * scale;
+                        const float thumbH    = std::max( barW * 2.0f, rect.H * ( rect.H / contentPx ) );
+                        const float t         = ( sv.ScrollY * scale ) / scrollMaxPx;
+                        const float thumbY    = rect.Y + t * ( rect.H - thumbH );
+                        dl.AddRectFilled( { trackX, thumbY }, { rect.X + rect.W, thumbY + thumbH },
+                                          glm::vec4( sv.ScrollbarColor, 1.0f ), barW * 0.5f );
+                    }
+                }
             }
         }
     } // namespace

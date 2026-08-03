@@ -197,6 +197,17 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UIScrollViewData;
+                TypeBuilder( "UIScrollViewData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "ScrollY", .Type = FieldType::Float, .Offset = offsetof( T, ScrollY ), .Size = sizeof( T::ScrollY ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Scroll Y", .Category = "UI Scroll View", } } )
+                    .Field( FieldInfo{ .Name = "ContentHeight", .Type = FieldType::Float, .Offset = offsetof( T, ContentHeight ), .Size = sizeof( T::ContentHeight ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Content Height", .Category = "UI Scroll View", } } )
+                    .Field( FieldInfo{ .Name = "Background", .Type = FieldType::Vec3, .Offset = offsetof( T, Background ), .Size = sizeof( T::Background ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Background", .Category = "UI Scroll View", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "ShowScrollbar", .Type = FieldType::Bool, .Offset = offsetof( T, ShowScrollbar ), .Size = sizeof( T::ShowScrollbar ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Show Scrollbar", .Category = "UI Scroll View", } } )
+                    .Field( FieldInfo{ .Name = "ScrollbarColor", .Type = FieldType::Vec3, .Offset = offsetof( T, ScrollbarColor ), .Size = sizeof( T::ScrollbarColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Scrollbar Color", .Category = "UI Scroll View", .IsColor = true, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UICanvasData;
                 TypeBuilder( "UICanvasData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "ScaleMode", .Type = FieldType::Enum, .Offset = offsetof( T, ScaleMode ), .Size = sizeof( T::ScaleMode ), .TypeName = "UICanvasScaleMode", .Meta = PropertyMetadata{ .DisplayName = "Scale Mode", .Category = "UI Canvas", }, .EnumValues = { EnumValue{ "Stretch", 0 }, EnumValue{ "ScaleWithScreen", 1 }, EnumValue{ "Letterbox", 2 }, } } )

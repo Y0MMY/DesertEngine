@@ -427,6 +427,8 @@ namespace Desert::Editor
                         select( AddUIChild<ECS::UIToggleComponent>( *m_Scene, parent, "UI Toggle" ) );
                     if ( ImGui::MenuItem( ICON_MDI_TUNE_VARIANT "  Slider" ) )
                         select( AddUIChild<ECS::UISliderComponent>( *m_Scene, parent, "UI Slider" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_VIEW_LIST "  Scroll View" ) )
+                        select( AddUIChild<ECS::UIScrollViewComponent>( *m_Scene, parent, "UI Scroll View" ) );
                 }
                 ImGui::EndPopup();
             }

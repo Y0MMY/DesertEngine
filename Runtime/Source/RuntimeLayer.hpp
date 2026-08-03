@@ -58,6 +58,7 @@ namespace Desert::Player
         std::unique_ptr<Graphic::MaterialExecutor>   m_BlitExecutor;
         bool                                         m_PresentReady  = false;
         bool                                         m_PrevMouseDown = false; // for the click (down->up) edge
+        float                                        m_ScrollAccum   = 0.0f;  // wheel delta since last present
         Common::BoolResultStr InitPresent( const std::shared_ptr<Graphic::Framebuffer>& swapFb );
 
         // Scene::Resize destroys GPU resources — deferred to the top of OnUpdate (same rule as the

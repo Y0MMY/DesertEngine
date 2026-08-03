@@ -90,6 +90,9 @@ namespace Desert::Editor
         if ( ImGui::Button( ICON_MDI_TUNE_VARIANT " + Slider" ) )
             AddUIChild<ECS::UISliderComponent>( *m_Scene, canvasEntity, "UI Slider" );
         ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_VIEW_LIST " + Scroll" ) )
+            AddUIChild<ECS::UIScrollViewComponent>( *m_Scene, canvasEntity, "UI Scroll View" );
+        ImGui::SameLine();
         ImGui::TextDisabled( "add UI elements, then edit anchors/colour in Details" );
         ImGui::Separator();
 
