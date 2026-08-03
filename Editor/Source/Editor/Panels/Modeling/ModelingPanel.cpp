@@ -186,9 +186,10 @@ namespace Desert::Editor
                     ms.ReqClear = true;
             }
             ImGui::Separator();
-            ImGui::TextDisabled( "LMB a cell, drag = free height (stretch)" );
-            ImGui::TextDisabled( "Shift+LMB / RMB: erase a box" );
-            ImGui::TextDisabled( "E / Q or Up / Down: last box height +/-" );
+            ImGui::TextDisabled( "LMB drag: paint the grid (build as you sweep)" );
+            ImGui::TextDisabled( "Shift+LMB / RMB: erase" );
+            ImGui::TextDisabled( "Height (above): free extrude of the whole slab" );
+            ImGui::TextDisabled( "E / Q or Up / Down: height +/-" );
             ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
             ImGui::TextDisabled( "Accept / Cancel: bottom of the viewport" );
         }

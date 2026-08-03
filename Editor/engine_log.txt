@@ -1,198 +1,198 @@
-[23:56:36][info][Desert]: [Project] Opened 'Desert Sandbox' (/Users/daniilsavcenko/Desktop/Programming/C++/DesertEngine/Editor/Desert.deproj) — assets root: /Users/daniilsavcenko/Desktop/Programming/C++/DesertEngine/Editor/Resources/Assets/
-[23:56:36][info][Desert]: The Window (macOS) was created with: Title = Desert Engine — Desert Sandbox, Width = 2056, Height = 1261
-[23:56:36][trace][Desert]: VulkanRenderingContext::CreateVKInstance()
-[23:56:36][info][Desert]: Vulkan Instance Layers:
-[23:56:36][info][Desert]:   VK_LAYER_KHRONOS_validation
-[23:56:36][info][Desert]: [Vulkan] GPU: Apple M1 Pro (integrated)
-[23:56:36][info][Desert]: [Reflection] 26 reflected type(s) registered
-[23:56:37][info][Desert]: [Renderer] BRDF LUT generated (256x256, 512 samples)
-[23:56:37][info][Desert]: [Editor] Desert Engine 0.1.411+40b14f0.dirty (dev branch)
-[23:56:37][info][Desert]: [Layer] Adding Layer 
-[23:56:39][info][Desert]: Shader 'Grass': parsed 0 param(s) + render-state from shader metadata
-[23:56:39][info][Desert]: Shader 'NewShaderGraph': parsed 1 param(s) + render-state from shader metadata
-[23:56:39][info][Desert]: Shader 'NewShaderGraph/Depth': parsed 1 param(s) + render-state from shader metadata
-[23:56:41][info][Desert]: Shader 'Terrain': parsed 5 param(s) + render-state from shader metadata
-[23:56:41][info][Desert]: Shader 'TextSDF': parsed 3 param(s) + render-state from shader metadata
-[23:56:42][info][Desert]: Shader 'StaticMeshPBR': parsed 18 param(s) + render-state from shader metadata
-[23:56:44][info][Desert]: Shader 'Unlit': parsed 2 param(s) + render-state from shader metadata
-[23:56:44][info][Desert]: Shader 'Unlit/Depth': parsed 2 param(s) + render-state from shader metadata
-[23:56:44][info][Desert]: Created Skybox VulkanPipeline
-[23:56:44][info][Desert]: Created ProceduralSky VulkanPipeline
-[23:56:44][info][Desert]: Created StaticMeshGeometry VulkanPipeline
-[23:56:44][info][Desert]: Created StaticMeshWireframe VulkanPipeline
-[23:56:44][info][Desert]: Created StaticMeshGeometryInstanced VulkanPipeline
-[23:56:44][info][Desert]: Created StaticMeshGBuffer VulkanPipeline
-[23:56:44][info][Desert]: Created StaticMeshGlass VulkanPipeline
-[23:56:44][info][Desert]: Created SkinnedMeshGeometry VulkanPipeline
-[23:56:44][info][Desert]: Created SilhouettePipeline VulkanPipeline
-[23:56:44][info][Desert]: Created SilhouetteSkinnedPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created ShadowPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created ShadowPipelineInstanced VulkanPipeline
-[23:56:44][info][Desert]: Created DebugLinePipeline VulkanPipeline
-[23:56:44][info][Desert]: Created OverdrawPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created OverdrawResolvePipeline VulkanPipeline
-[23:56:44][info][Desert]: Created TerrainPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created GrassPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created JFA_InitPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created JFA_StepPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created JFA_FinalPipeline VulkanPipeline
-[23:56:44][info][Desert]: Created SceneToneMap VulkanPipeline
-[23:56:44][info][Desert]: Created SSAO VulkanPipeline
-[23:56:44][info][Desert]: Created Copy VulkanPipeline
-[23:56:44][info][Desert]: Created ParticleAdd VulkanPipeline
-[23:56:44][info][Desert]: Created ParticleAlpha VulkanPipeline
-[23:56:44][info][Desert]: Created DeferredLighting VulkanPipeline
-[23:56:44][info][Desert]: Created SceneFXAA VulkanPipeline
-[23:56:44][info][Desert]: Created SMAAEdges VulkanPipeline
-[23:56:44][info][Desert]: Created SMAAWeights VulkanPipeline
-[23:56:44][info][Desert]: Created SMAABlend VulkanPipeline
-[23:56:44][debug][Desert]: Render graph builder cleared
-[23:56:44][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:44][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:44][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:44][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:44][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:44][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:44][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:44][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:44][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:44][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:44][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: Created EditorGridPipeline VulkanPipeline
-[23:56:45][debug][Desert]: Render graph builder cleared
-[23:56:45][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: Created EditorColliderPipeline VulkanPipeline
-[23:56:45][debug][Desert]: Render graph builder cleared
-[23:56:45][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: Created UI2DPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created UITextPipeline VulkanPipeline
-[23:56:45][debug][Desert]: Render graph builder cleared
-[23:56:45][debug][Desert]: Added pass 'EditorUI2D' to phase 'UI' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: [Import] 3 source file(s) checked/cooked in 2 ms (9 workers)
-[23:56:45][info][Desert]: Loading scene: Desert Sandbox
-[23:56:45][info][Desert]: Created Skybox VulkanPipeline
-[23:56:45][info][Desert]: Created ProceduralSky VulkanPipeline
-[23:56:45][info][Desert]: Created StaticMeshGeometry VulkanPipeline
-[23:56:45][info][Desert]: Created StaticMeshWireframe VulkanPipeline
-[23:56:45][info][Desert]: Created StaticMeshGeometryInstanced VulkanPipeline
-[23:56:45][info][Desert]: Created StaticMeshGBuffer VulkanPipeline
-[23:56:45][info][Desert]: Created StaticMeshGlass VulkanPipeline
-[23:56:45][info][Desert]: Created SkinnedMeshGeometry VulkanPipeline
-[23:56:45][info][Desert]: Created SilhouettePipeline VulkanPipeline
-[23:56:45][info][Desert]: Created SilhouetteSkinnedPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created ShadowPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created ShadowPipelineInstanced VulkanPipeline
-[23:56:45][info][Desert]: Created DebugLinePipeline VulkanPipeline
-[23:56:45][info][Desert]: Created OverdrawPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created OverdrawResolvePipeline VulkanPipeline
-[23:56:45][info][Desert]: Created TerrainPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created GrassPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created JFA_InitPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created JFA_StepPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created JFA_FinalPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created SceneToneMap VulkanPipeline
-[23:56:45][info][Desert]: Created SSAO VulkanPipeline
-[23:56:45][info][Desert]: Created Copy VulkanPipeline
-[23:56:45][info][Desert]: Created ParticleAdd VulkanPipeline
-[23:56:45][info][Desert]: Created ParticleAlpha VulkanPipeline
-[23:56:45][info][Desert]: Created DeferredLighting VulkanPipeline
-[23:56:45][info][Desert]: Created SceneFXAA VulkanPipeline
-[23:56:45][info][Desert]: Created SMAAEdges VulkanPipeline
-[23:56:45][info][Desert]: Created SMAAWeights VulkanPipeline
-[23:56:45][info][Desert]: Created SMAABlend VulkanPipeline
-[23:56:45][debug][Desert]: Render graph builder cleared
-[23:56:45][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: Created EditorGridPipeline VulkanPipeline
-[23:56:45][debug][Desert]: Render graph builder cleared
-[23:56:45][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: Created EditorColliderPipeline VulkanPipeline
-[23:56:45][debug][Desert]: Render graph builder cleared
-[23:56:45][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: Created UI2DPipeline VulkanPipeline
-[23:56:45][info][Desert]: Created UITextPipeline VulkanPipeline
-[23:56:45][debug][Desert]: Render graph builder cleared
-[23:56:45][debug][Desert]: Added pass 'EditorUI2D' to phase 'UI' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
-[23:56:45][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
-[23:56:45][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
-[23:56:45][info][Desert]: [FontService] Loaded cached 'Resources/Fonts/Roboto-Regular.ttf' @ 48px -> 512x304 atlas
-[23:56:47][info][Desert]: Created GenericMesh_TextSDF VulkanPipeline
+[00:31:42][info][Desert]: [Project] Opened 'Desert Sandbox' (/Users/daniilsavcenko/Desktop/Programming/C++/DesertEngine/Editor/Desert.deproj) — assets root: /Users/daniilsavcenko/Desktop/Programming/C++/DesertEngine/Editor/Resources/Assets/
+[00:31:42][info][Desert]: The Window (macOS) was created with: Title = Desert Engine — Desert Sandbox, Width = 2056, Height = 1261
+[00:31:42][trace][Desert]: VulkanRenderingContext::CreateVKInstance()
+[00:31:42][info][Desert]: Vulkan Instance Layers:
+[00:31:42][info][Desert]:   VK_LAYER_KHRONOS_validation
+[00:31:42][info][Desert]: [Vulkan] GPU: Apple M1 Pro (integrated)
+[00:31:42][info][Desert]: [Reflection] 26 reflected type(s) registered
+[00:31:42][info][Desert]: [Renderer] BRDF LUT generated (256x256, 512 samples)
+[00:31:42][info][Desert]: [Editor] Desert Engine 0.1.411+40b14f0.dirty (dev branch)
+[00:31:42][info][Desert]: [Layer] Adding Layer 
+[00:31:45][info][Desert]: Shader 'Grass': parsed 0 param(s) + render-state from shader metadata
+[00:31:45][info][Desert]: Shader 'NewShaderGraph': parsed 1 param(s) + render-state from shader metadata
+[00:31:45][info][Desert]: Shader 'NewShaderGraph/Depth': parsed 1 param(s) + render-state from shader metadata
+[00:31:47][info][Desert]: Shader 'Terrain': parsed 5 param(s) + render-state from shader metadata
+[00:31:47][info][Desert]: Shader 'TextSDF': parsed 3 param(s) + render-state from shader metadata
+[00:31:49][info][Desert]: Shader 'StaticMeshPBR': parsed 18 param(s) + render-state from shader metadata
+[00:31:50][info][Desert]: Shader 'Unlit': parsed 2 param(s) + render-state from shader metadata
+[00:31:50][info][Desert]: Shader 'Unlit/Depth': parsed 2 param(s) + render-state from shader metadata
+[00:31:51][info][Desert]: Created Skybox VulkanPipeline
+[00:31:51][info][Desert]: Created ProceduralSky VulkanPipeline
+[00:31:51][info][Desert]: Created StaticMeshGeometry VulkanPipeline
+[00:31:51][info][Desert]: Created StaticMeshWireframe VulkanPipeline
+[00:31:51][info][Desert]: Created StaticMeshGeometryInstanced VulkanPipeline
+[00:31:51][info][Desert]: Created StaticMeshGBuffer VulkanPipeline
+[00:31:51][info][Desert]: Created StaticMeshGlass VulkanPipeline
+[00:31:51][info][Desert]: Created SkinnedMeshGeometry VulkanPipeline
+[00:31:51][info][Desert]: Created SilhouettePipeline VulkanPipeline
+[00:31:51][info][Desert]: Created SilhouetteSkinnedPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created ShadowPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created ShadowPipelineInstanced VulkanPipeline
+[00:31:51][info][Desert]: Created DebugLinePipeline VulkanPipeline
+[00:31:51][info][Desert]: Created OverdrawPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created OverdrawResolvePipeline VulkanPipeline
+[00:31:51][info][Desert]: Created TerrainPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created GrassPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created JFA_InitPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created JFA_StepPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created JFA_FinalPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created SceneToneMap VulkanPipeline
+[00:31:51][info][Desert]: Created SSAO VulkanPipeline
+[00:31:51][info][Desert]: Created Copy VulkanPipeline
+[00:31:51][info][Desert]: Created ParticleAdd VulkanPipeline
+[00:31:51][info][Desert]: Created ParticleAlpha VulkanPipeline
+[00:31:51][info][Desert]: Created DeferredLighting VulkanPipeline
+[00:31:51][info][Desert]: Created SceneFXAA VulkanPipeline
+[00:31:51][info][Desert]: Created SMAAEdges VulkanPipeline
+[00:31:51][info][Desert]: Created SMAAWeights VulkanPipeline
+[00:31:51][info][Desert]: Created SMAABlend VulkanPipeline
+[00:31:51][debug][Desert]: Render graph builder cleared
+[00:31:51][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:51][info][Desert]: Created EditorGridPipeline VulkanPipeline
+[00:31:51][debug][Desert]: Render graph builder cleared
+[00:31:51][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:51][info][Desert]: Created EditorColliderPipeline VulkanPipeline
+[00:31:51][debug][Desert]: Render graph builder cleared
+[00:31:51][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:51][info][Desert]: Created UI2DPipeline VulkanPipeline
+[00:31:51][info][Desert]: Created UITextPipeline VulkanPipeline
+[00:31:51][debug][Desert]: Render graph builder cleared
+[00:31:51][debug][Desert]: Added pass 'EditorUI2D' to phase 'UI' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:51][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:51][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:51][info][Desert]: [Import] 3 source file(s) checked/cooked in 0 ms (9 workers)
+[00:31:52][info][Desert]: Loading scene: Desert Sandbox
+[00:31:52][info][Desert]: Created Skybox VulkanPipeline
+[00:31:52][info][Desert]: Created ProceduralSky VulkanPipeline
+[00:31:52][info][Desert]: Created StaticMeshGeometry VulkanPipeline
+[00:31:52][info][Desert]: Created StaticMeshWireframe VulkanPipeline
+[00:31:52][info][Desert]: Created StaticMeshGeometryInstanced VulkanPipeline
+[00:31:52][info][Desert]: Created StaticMeshGBuffer VulkanPipeline
+[00:31:52][info][Desert]: Created StaticMeshGlass VulkanPipeline
+[00:31:52][info][Desert]: Created SkinnedMeshGeometry VulkanPipeline
+[00:31:52][info][Desert]: Created SilhouettePipeline VulkanPipeline
+[00:31:52][info][Desert]: Created SilhouetteSkinnedPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created ShadowPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created ShadowPipelineInstanced VulkanPipeline
+[00:31:52][info][Desert]: Created DebugLinePipeline VulkanPipeline
+[00:31:52][info][Desert]: Created OverdrawPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created OverdrawResolvePipeline VulkanPipeline
+[00:31:52][info][Desert]: Created TerrainPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created GrassPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created JFA_InitPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created JFA_StepPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created JFA_FinalPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created SceneToneMap VulkanPipeline
+[00:31:52][info][Desert]: Created SSAO VulkanPipeline
+[00:31:52][info][Desert]: Created Copy VulkanPipeline
+[00:31:52][info][Desert]: Created ParticleAdd VulkanPipeline
+[00:31:52][info][Desert]: Created ParticleAlpha VulkanPipeline
+[00:31:52][info][Desert]: Created DeferredLighting VulkanPipeline
+[00:31:52][info][Desert]: Created SceneFXAA VulkanPipeline
+[00:31:52][info][Desert]: Created SMAAEdges VulkanPipeline
+[00:31:52][info][Desert]: Created SMAAWeights VulkanPipeline
+[00:31:52][info][Desert]: Created SMAABlend VulkanPipeline
+[00:31:52][debug][Desert]: Render graph builder cleared
+[00:31:52][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:52][info][Desert]: Created EditorGridPipeline VulkanPipeline
+[00:31:52][debug][Desert]: Render graph builder cleared
+[00:31:52][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:52][info][Desert]: Created EditorColliderPipeline VulkanPipeline
+[00:31:52][debug][Desert]: Render graph builder cleared
+[00:31:52][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:52][info][Desert]: Created UI2DPipeline VulkanPipeline
+[00:31:52][info][Desert]: Created UITextPipeline VulkanPipeline
+[00:31:52][debug][Desert]: Render graph builder cleared
+[00:31:52][debug][Desert]: Added pass 'EditorUI2D' to phase 'UI' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'EditorColliders' to phase 'Debug' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'EditorGrid' to phase 'Transparency' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'ParticlePass' to phase 'Transparency' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'TerrainPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'GrassPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshGeometryPass' to phase 'Geometry' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshSilhouettePass' to phase 'Outline' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade0' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade1' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade2' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'MeshShadowCascade3' to phase 'DepthPrePass' with 0 dependencies
+[00:31:52][debug][Desert]: Added pass 'DebugLinesPass' to phase 'Debug' with 1 dependencies
+[00:31:52][debug][Desert]: Added pass 'SkyboxPass' to phase 'Sky' with 0 dependencies
+[00:31:52][info][Desert]: [FontService] Loaded cached 'Resources/Fonts/Roboto-Regular.ttf' @ 48px -> 512x304 atlas
+[00:31:54][info][Desert]: Created GenericMesh_TextSDF VulkanPipeline
