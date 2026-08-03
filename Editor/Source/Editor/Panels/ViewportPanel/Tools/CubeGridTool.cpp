@@ -109,6 +109,8 @@ namespace Desert::Editor::Tools
             ms.ReqClear = false;
             m_Cells.clear();
             m_Region.clear();
+            m_LastBase.clear();
+            m_LastHeight = 0;
             RegenMesh( scene );
         }
 
@@ -286,32 +288,51 @@ namespace Desert::Editor::Tools
         // --- Interaction: click a cell, then drag along the face normal (up / down) to set the extrude
         //     HEIGHT — a clean column of cells that NEVER overlaps. The live preview is drawn in a distinct
         //     colour; existing cells stay grey. Shift+LMB / RMB removes the hovered cube. ---
+        // Base footprint + N-tall column of cells along a normal, as a packed set.
+        auto buildColumn = [&]( const glm::ivec3& anchor, const glm::ivec3& nrm, int axisU, int axisV, int nH,
+                                std::unordered_set<uint64_t>& out )
+        {
+            out.clear();
+            std::vector<glm::ivec3> fp;
+            footprintAt( anchor, axisU, axisV, fp );
+            for ( const auto& c : fp )
+                for ( int L = 0; L < nH; ++L )
+                    out.insert( Pack( c + nrm * L ) );
+        };
+
         if ( m_Dragging )
         {
-            // Height from the cursor's position along the drag normal (closest point of the cursor ray to the
-            // extrude line through the anchor footprint's centre).
             const glm::vec3 nrmW = glm::normalize( glm::vec3( m_DragNormal ) );
             const int       dna  = m_DragNormal.x ? 0 : m_DragNormal.y ? 1 : 2;
             const int       dua  = ( dna + 1 ) % 3;
             const int       dva  = ( dna + 2 ) % 3;
-            glm::vec3       baseW( 0.0f );
-            baseW[dna] = ( static_cast<float>( m_DragAnchor[dna] ) + 0.5f ) * cs;
-            baseW[dua] = ( static_cast<float>( m_DragAnchor[dua] ) + bw * 0.5f ) * cs;
-            baseW[dva] = ( static_cast<float>( m_DragAnchor[dva] ) + bd * 0.5f ) * cs;
 
-            const glm::vec3 O = ray.Origin, D = ray.Direction, w0 = O - baseW;
-            const float     a = glm::dot( D, D ), b = glm::dot( D, nrmW );
-            const float     dd = glm::dot( D, w0 ), e = glm::dot( nrmW, w0 );
-            const float     denom = a - b * b;
-            const float     tc    = std::abs( denom ) > 1e-6f ? ( a * e - b * dd ) / denom : 0.0f;
-            const int       N     = std::clamp( static_cast<int>( std::floor( tc / cs + 0.5f ) ) + 1, 1, 512 );
+            // Height is driven in SCREEN space so the preview tracks the cursor exactly (predictable, works in
+            // any view): project the footprint centre + one cell along the normal, and count how many
+            // cell-lengths the cursor has moved from the press point along that screen direction.
+            glm::vec3 center( 0.0f );
+            center[dna] = ( static_cast<float>( m_DragAnchor[dna] ) + 0.5f ) * cs;
+            center[dua] = ( static_cast<float>( m_DragAnchor[dua] ) + bw * 0.5f ) * cs;
+            center[dva] = ( static_cast<float>( m_DragAnchor[dva] ) + bd * 0.5f ) * cs;
+            glm::vec2  s0, s1;
+            const bool ok0     = WorldToScreen( center, viewProj, viewportPos, viewportSize, s0 );
+            const bool ok1     = WorldToScreen( center + nrmW * cs, viewProj, viewportPos, viewportSize, s1 );
+            glm::vec2  dir     = s1 - s0;
+            float      perCell = glm::length( dir );
+            if ( ok0 && ok1 && perCell > 6.0f )
+                dir /= perCell; // one cell up == `perCell` px along `dir`
+            else
+            {
+                dir     = glm::vec2( 0.0f, -1.0f ); // near-parallel to view: fall back to screen-up = taller
+                perCell = 28.0f;
+            }
+            const glm::vec2 mp = glm::vec2( ::ImGui::GetMousePos().x, ::ImGui::GetMousePos().y );
+            const int levels = static_cast<int>( std::round( glm::dot( mp - m_DragStartMouse, dir ) / perCell ) );
+            const int N      = std::clamp( m_DragBaseH + levels, 1, 512 );
+            ms.Height        = N; // live-reflect into the panel
 
-            std::vector<glm::ivec3> fp;
-            footprintAt( m_DragAnchor, dua, dva, fp );
             std::unordered_set<uint64_t> preview;
-            for ( const auto& c : fp )
-                for ( int L = 0; L < N; ++L )
-                    preview.insert( Pack( c + m_DragNormal * L ) );
+            buildColumn( m_DragAnchor, m_DragNormal, dua, dva, N, preview );
 
             auto isPrev = [&]( const glm::ivec3& c ) { return preview.count( Pack( c ) ) > 0; };
             for ( uint64_t k : preview )
@@ -320,18 +341,17 @@ namespace Desert::Editor::Tools
 
             char htxt[24];
             std::snprintf( htxt, sizeof( htxt ), "H %d", N );
-            const ImVec2 mp = ::ImGui::GetMousePos();
             dl->AddText( ImVec2( mp.x + 14.0f, mp.y - 4.0f ), IM_COL32( 230, 245, 255, 255 ), htxt );
 
             if ( !::ImGui::IsMouseDown( ImGuiMouseButton_Left ) ) // release -> commit the column
             {
-                m_Region.clear();
-                m_RegionNormal = m_DragNormal;
                 for ( uint64_t k : preview )
-                    if ( m_Cells.insert( k ).second )
-                        m_Region.push_back( Unpack( k ) );
-                m_Dragging = false;
-                changed    = true;
+                    m_Cells.insert( k );
+                footprintAt( m_DragAnchor, dua, dva, m_LastBase ); // remember it so Height can re-extrude live
+                m_LastNormal = m_DragNormal;
+                m_LastHeight = N;
+                m_Dragging   = false;
+                changed      = true;
             }
         }
         else if ( toolActive )
@@ -356,17 +376,39 @@ namespace Desert::Editor::Tools
                     if ( m_Cells.erase( Pack( m_Remove ) ) > 0 )
                         changed = true;
                 }
-                else if ( lmbClick && !removeMode && m_HasAdd ) // begin an extrude drag
-                {
-                    m_Dragging   = true;
-                    m_DragAnchor = m_Add;
-                    m_DragNormal = m_AddNormal;
+                else if ( lmbClick && !removeMode && m_HasAdd ) // begin an extrude drag (a plain click without
+                {                                               // moving places a column of the current Height)
+                    m_Dragging       = true;
+                    m_DragAnchor     = m_Add;
+                    m_DragNormal     = m_AddNormal;
+                    m_DragStartMouse = glm::vec2( ::ImGui::GetMousePos().x, ::ImGui::GetMousePos().y );
+                    m_DragBaseH      = std::clamp( ms.Height, 1, 512 );
                 }
             }
         }
 
-        // --- Keys: E/Q extrude the last region out/in; Ctrl+E/Q grow/shrink the grid step. ---
-        if ( interact )
+        // --- Live height edit: changing ModelingState.Height (panel field or E/Q) re-extrudes the last
+        //     committed column, so you can tune the height after drawing it and before Accept. ---
+        if ( !m_Dragging && !m_LastBase.empty() )
+        {
+            const int newH = std::clamp( ms.Height, 1, 512 );
+            if ( newH != m_LastHeight )
+            {
+                for ( const auto& base : m_LastBase )
+                    for ( int L = 0; L < m_LastHeight; ++L )
+                        m_Cells.erase( Pack( base + m_LastNormal * L ) );
+                for ( const auto& base : m_LastBase )
+                    for ( int L = 0; L < newH; ++L )
+                        m_Cells.insert( Pack( base + m_LastNormal * L ) );
+                m_LastHeight = newH;
+                ms.Height    = newH;
+                changed      = true;
+            }
+        }
+
+        // --- Keys: E / Q (or Up / Down) raise / lower the last column's Height (handled by the live-edit
+        //     block above); Ctrl+E / Ctrl+Q grow / shrink the grid step. ---
+        if ( interact && !m_Dragging )
         {
             const bool ctrl = ::ImGui::GetIO().KeyCtrl;
             if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_E, false ) )
@@ -379,27 +421,15 @@ namespace Desert::Editor::Tools
                 ms.CellSize = std::max( ms.CellSize * 0.5f, 1.0f );
                 changed     = true;
             }
-            else if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) && !m_Region.empty() ) // extrude out
+            else if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) ||
+                      ::ImGui::IsKeyPressed( ImGuiKey_UpArrow, false ) )
             {
-                std::vector<glm::ivec3> next;
-                for ( const auto& c : m_Region )
-                {
-                    const glm::ivec3 nc = c + m_RegionNormal;
-                    m_Cells.insert( Pack( nc ) );
-                    next.push_back( nc );
-                }
-                m_Region = next;
-                changed  = true;
+                ms.Height = std::clamp( ms.Height + 1, 1, 512 );
             }
-            else if ( ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) && !m_Region.empty() ) // extrude in (carve)
+            else if ( ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) ||
+                      ::ImGui::IsKeyPressed( ImGuiKey_DownArrow, false ) )
             {
-                for ( const auto& c : m_Region )
-                    m_Cells.erase( Pack( c ) );
-                std::vector<glm::ivec3> prev;
-                for ( const auto& c : m_Region )
-                    prev.push_back( c - m_RegionNormal );
-                m_Region = prev;
-                changed  = true;
+                ms.Height = std::clamp( ms.Height - 1, 1, 512 );
             }
         }
 
@@ -432,6 +462,8 @@ namespace Desert::Editor::Tools
                     m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
                     m_Cells.clear();
                     m_Region.clear();
+                    m_LastBase.clear();
+                    m_LastHeight = 0;
                 }
                 ::ImGui::PopStyleColor( 2 );
                 ::ImGui::SameLine();
@@ -521,6 +553,8 @@ namespace Desert::Editor::Tools
         m_Entity = Common::UUID::Null();
         m_Cells.clear();
         m_Region.clear();
+        m_LastBase.clear();
+        m_LastHeight = 0;
         m_Dragging = false;
     }
 } // namespace Desert::Editor::Tools

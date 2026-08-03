@@ -174,6 +174,18 @@ namespace Desert::Editor
                 ImGui::SliderInt( "Brush W", &ms.BrushW, 1, 8 );
                 ImGui::SetNextItemWidth( 90.0f );
                 ImGui::SliderInt( "Brush D", &ms.BrushD, 1, 8 );
+
+                // Height: drag sets it live; editing it here re-extrudes the last column before Accept.
+                ImGui::SetNextItemWidth( 90.0f );
+                if ( ImGui::DragInt( "Height", &ms.Height, 0.1f, 1, 512 ) )
+                    ms.Height = std::clamp( ms.Height, 1, 512 );
+                ImGui::SameLine();
+                if ( ImGui::SmallButton( "-##h" ) )
+                    ms.Height = std::max( 1, ms.Height - 1 );
+                ImGui::SameLine();
+                if ( ImGui::SmallButton( "+##h" ) )
+                    ms.Height = std::min( 512, ms.Height + 1 );
+
                 ImGui::Text( "Cubes: %d", ms.Cubes );
                 if ( ImGui::Button( "Clear" ) )
                     ms.ReqClear = true;
@@ -181,7 +193,7 @@ namespace Desert::Editor
             ImGui::Separator();
             ImGui::TextDisabled( "LMB click a cell, drag up/down = height" );
             ImGui::TextDisabled( "Shift+LMB / RMB: erase a cube" );
-            ImGui::TextDisabled( "E / Q: extrude last column out / in" );
+            ImGui::TextDisabled( "E / Q or Up / Down: last column height +/-" );
             ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
             ImGui::TextDisabled( "Accept / Cancel: bottom of the viewport" );
         }

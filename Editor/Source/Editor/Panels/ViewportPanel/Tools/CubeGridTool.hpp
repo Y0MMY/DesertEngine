@@ -47,13 +47,21 @@ namespace Desert::Editor::Tools
         glm::ivec3 m_Remove{ 0 };          // cell a click would REMOVE
         glm::ivec3 m_AddNormal{ 0, 1, 0 }; // outward face normal of the add cell (extrude / drag-plane axis)
 
-        // Extrude drag (LMB press on a cell, drag along the face normal to set the column HEIGHT, release to
-        // commit) — clean columns that never overlap existing cells.
+        // Extrude drag (LMB press on a cell, drag along the face normal to set the column HEIGHT in SCREEN
+        // space, release to commit) — clean columns that never overlap existing cells.
         bool       m_Dragging = false;
         glm::ivec3 m_DragAnchor{ 0 };       // footprint anchor cell captured at press
         glm::ivec3 m_DragNormal{ 0, 1, 0 }; // extrude axis (the pressed face's outward normal)
+        glm::vec2  m_DragStartMouse{ 0 };   // cursor position at press (screen-space height reference)
+        int        m_DragBaseH = 1;         // column height at press (= ModelingState.Height), drag adds to it
 
-        // Last placed region + its normal — E/Q extrude it out / in along the normal (repeat to raise walls).
+        // Last committed column — its base footprint + normal + height. Editing ModelingState.Height (panel
+        // field or E/Q) RE-EXTRUDES this column live, before Accept.
+        std::vector<glm::ivec3> m_LastBase;
+        glm::ivec3              m_LastNormal{ 0, 1, 0 };
+        int                     m_LastHeight = 0;
+
+        // Last placed region + its normal (legacy; kept for the free-form cell set).
         std::vector<glm::ivec3> m_Region;
         glm::ivec3              m_RegionNormal{ 0, 1, 0 };
     };
