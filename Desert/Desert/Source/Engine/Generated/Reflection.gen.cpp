@@ -262,6 +262,8 @@ namespace
                     .Field( FieldInfo{ .Name = "AspectRatio", .Type = FieldType::Float, .Offset = offsetof( T, AspectRatio ), .Size = sizeof( T::AspectRatio ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Aspect Ratio (W/H)", .Category = "Fitter", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 8.0f, } } )
                     .Field( FieldInfo{ .Name = "AspectMode", .Type = FieldType::Enum, .Offset = offsetof( T, AspectMode ), .Size = sizeof( T::AspectMode ), .TypeName = "UIAspectMode", .Meta = PropertyMetadata{ .DisplayName = "Aspect Mode", .Category = "Fitter", }, .EnumValues = { EnumValue{ "Off", 0 }, EnumValue{ "HeightControlsWidth", 1 }, EnumValue{ "WidthControlsHeight", 2 }, } } )
                     .Field( FieldInfo{ .Name = "FlexGrow", .Type = FieldType::Float, .Offset = offsetof( T, FlexGrow ), .Size = sizeof( T::FlexGrow ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Flex Grow", .Category = "Fitter", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 8.0f, } } )
+                    .Field( FieldInfo{ .Name = "FitWidth", .Type = FieldType::Bool, .Offset = offsetof( T, FitWidth ), .Size = sizeof( T::FitWidth ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Fit Width To Content", .Category = "Fitter", } } )
+                    .Field( FieldInfo{ .Name = "FitHeight", .Type = FieldType::Bool, .Offset = offsetof( T, FitHeight ), .Size = sizeof( T::FitHeight ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Fit Height To Content", .Category = "Fitter", } } )
                     .WithDefault<T>()
                     .Register();
             }

@@ -899,6 +899,13 @@ namespace Desert::ECS
         // space by weight — >0 stretches this child to fill (or acts as a spacer). 0 = fixed preferred size.
         PROPERTY( DisplayName( "Flex Grow" ), Category( "Fitter" ), Range( 0.0f, 8.0f ) )
         float FlexGrow = 0.0f;
+
+        // Content Size Fitter (Phase B): a layout-group container sizes itself to its children (hug content),
+        // per axis. Keeps the anchored top-left. No effect on non-group elements.
+        PROPERTY( DisplayName( "Fit Width To Content" ), Category( "Fitter" ) )
+        bool FitWidth = false;
+        PROPERTY( DisplayName( "Fit Height To Content" ), Category( "Fitter" ) )
+        bool FitHeight = false;
     };
     struct UILayoutComponent
     {

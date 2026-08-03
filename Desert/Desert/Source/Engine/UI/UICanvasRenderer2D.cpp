@@ -716,6 +716,39 @@ namespace Desert::UI
             }
         }
 
+        // Content size (px) a layout-group container needs to hug its children — for the Content Size Fitter.
+        glm::vec2 GroupContentPx( entt::registry& reg, entt::entity e, float scale )
+        {
+            if ( !reg.has<ECS::UILayoutGroupComponent>( e ) || !reg.has<ECS::RelationshipComponent>( e ) )
+                return { 0.0f, 0.0f };
+            const auto&            g = reg.get<ECS::UILayoutGroupComponent>( e ).Data;
+            std::vector<glm::vec2> sizes;
+            for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
+            {
+                if ( !reg.valid( c ) )
+                    continue;
+                glm::vec2 pref( 0.0f );
+                if ( reg.has<ECS::UILayoutComponent>( c ) )
+                {
+                    const auto& L = reg.get<ECS::UILayoutComponent>( c ).Data;
+                    pref          = glm::max( L.CustomMinimumSize, L.OffsetMax - L.OffsetMin );
+                }
+                sizes.push_back( pref * scale );
+            }
+            LayoutGroupParams params;
+            params.Type     = g.Type == ECS::UILayoutType::Horizontal ? LayoutGroupType::Horizontal
+                              : g.Type == ECS::UILayoutType::Grid     ? LayoutGroupType::Grid
+                                                                      : LayoutGroupType::Vertical;
+            params.PaddingL = g.Padding.x * scale;
+            params.PaddingT = g.Padding.y * scale;
+            params.PaddingR = g.Padding.z * scale;
+            params.PaddingB = g.Padding.w * scale;
+            params.Spacing  = g.Spacing * scale;
+            params.CellSize = g.CellSize * scale;
+            params.Columns  = g.Columns;
+            return MeasureLayoutGroup( params, sizes );
+        }
+
         // Recursively draw one element. `forcedRect` (non-null) is the rect assigned by a parent auto-layout
         // group — it overrides the element's own anchors for position + size.
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
@@ -733,10 +766,18 @@ namespace Desert::UI
                 rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
                                              L.CustomMinimumSize * scale, parent );
             }
-            if ( hasLayout ) // Aspect Ratio Fitter reshapes the resolved rect (also inside a layout group)
+            if ( hasLayout ) // fitters reshape the resolved rect (also applied inside a layout group)
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
                 rect          = ApplyAspectFit( rect, L.AspectRatio, static_cast<int>( L.AspectMode ) );
+                if ( ( L.FitWidth || L.FitHeight ) && reg.has<ECS::UILayoutGroupComponent>( e ) )
+                {
+                    const glm::vec2 content = GroupContentPx( reg, e, scale );
+                    if ( L.FitWidth )
+                        rect.W = content.x;
+                    if ( L.FitHeight )
+                        rect.H = content.y;
+                }
             }
 
             if ( forcedRect || hasLayout )

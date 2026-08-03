@@ -96,6 +96,35 @@ namespace Desert::UI
         int       Columns       = 0;                  // Grid: fixed column count, 0 = auto-fit by width
     };
 
+    // Total content size (px) a layout group needs for `childSizes` — main axis = sum + spacing, cross axis =
+    // max child — plus padding. Used by the Content Size Fitter to size a container to its children.
+    inline glm::vec2 MeasureLayoutGroup( const LayoutGroupParams& p, const std::vector<glm::vec2>& childSizes )
+    {
+        const int   n       = static_cast<int>( childSizes.size() );
+        const float spacing = n > 1 ? p.Spacing * ( n - 1 ) : 0.0f;
+        if ( p.Type == LayoutGroupType::Horizontal || p.Type == LayoutGroupType::Vertical )
+        {
+            const bool horiz    = p.Type == LayoutGroupType::Horizontal;
+            float      mainSum  = 0.0f;
+            float      crossMax = 0.0f;
+            for ( const glm::vec2& s : childSizes )
+            {
+                mainSum += horiz ? s.x : s.y;
+                crossMax = std::max( crossMax, horiz ? s.y : s.x );
+            }
+            const float mainTotal =
+                 mainSum + spacing + ( horiz ? p.PaddingL + p.PaddingR : p.PaddingT + p.PaddingB );
+            const float crossTotal = crossMax + ( horiz ? p.PaddingT + p.PaddingB : p.PaddingL + p.PaddingR );
+            return horiz ? glm::vec2( mainTotal, crossTotal ) : glm::vec2( crossTotal, mainTotal );
+        }
+        const float cw   = std::max( 1.0f, p.CellSize.x );
+        const float ch   = std::max( 1.0f, p.CellSize.y );
+        const int   cols = p.Columns > 0 ? p.Columns : std::max( 1, n );
+        const int   rows = n > 0 ? ( n + cols - 1 ) / cols : 0;
+        return { cols * cw + std::max( 0, cols - 1 ) * p.Spacing + p.PaddingL + p.PaddingR,
+                 rows * ch + std::max( 0, rows - 1 ) * p.Spacing + p.PaddingT + p.PaddingB };
+    }
+
     // Lay `childSizes` (each child's preferred px size) out inside `container`, returning one rect per child.
     // `childFlex` (Layout Element grow weights; empty = all 0) share the leftover MAIN-axis space among the
     // flexible children proportionally, so a child can stretch to fill or act as a spacer.

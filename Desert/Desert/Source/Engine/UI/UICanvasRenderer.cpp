@@ -287,6 +287,40 @@ namespace Desert::UI
             return true;
         }
 
+        // Content size (px) a layout-group container needs to hug its children — mirrors the renderer's
+        // GroupContentPx so the Content Size Fitter picks with the same rect it draws.
+        glm::vec2 GroupContentPx( entt::registry& reg, entt::entity e, float scale )
+        {
+            if ( !reg.has<ECS::UILayoutGroupComponent>( e ) || !reg.has<ECS::RelationshipComponent>( e ) )
+                return { 0.0f, 0.0f };
+            const auto&            g = reg.get<ECS::UILayoutGroupComponent>( e ).Data;
+            std::vector<glm::vec2> sizes;
+            for ( auto c : reg.get<ECS::RelationshipComponent>( e ).Children )
+            {
+                if ( !reg.valid( c ) )
+                    continue;
+                glm::vec2 pref( 0.0f );
+                if ( reg.has<ECS::UILayoutComponent>( c ) )
+                {
+                    const auto& L = reg.get<ECS::UILayoutComponent>( c ).Data;
+                    pref          = glm::max( L.CustomMinimumSize, L.OffsetMax - L.OffsetMin );
+                }
+                sizes.push_back( pref * scale );
+            }
+            LayoutGroupParams params;
+            params.Type     = g.Type == ECS::UILayoutType::Horizontal ? LayoutGroupType::Horizontal
+                              : g.Type == ECS::UILayoutType::Grid     ? LayoutGroupType::Grid
+                                                                      : LayoutGroupType::Vertical;
+            params.PaddingL = g.Padding.x * scale;
+            params.PaddingT = g.Padding.y * scale;
+            params.PaddingR = g.Padding.z * scale;
+            params.PaddingB = g.Padding.w * scale;
+            params.Spacing  = g.Spacing * scale;
+            params.CellSize = g.CellSize * scale;
+            params.Columns  = g.Columns;
+            return MeasureLayoutGroup( params, sizes );
+        }
+
         // If `e` is an auto-layout container, solve its children's rects exactly like the renderer's
         // DrawElement does — so hit-testing / handles match the drawn positions (children of a VBox/HBox/Grid
         // are placed by the group, NOT their own anchors). Fills kids + one rect each; empty when not a group.
@@ -342,10 +376,18 @@ namespace Desert::UI
                 rect          = ResolveRect( L.AnchorMin, L.AnchorMax, L.OffsetMin * scale, L.OffsetMax * scale,
                                              L.CustomMinimumSize * scale, parent );
             }
-            if ( hasLayout ) // match the renderer's Aspect Ratio Fitter so hit-testing lines up
+            if ( hasLayout ) // match the renderer's fitters so hit-testing lines up
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
                 rect          = ApplyAspectFit( rect, L.AspectRatio, static_cast<int>( L.AspectMode ) );
+                if ( ( L.FitWidth || L.FitHeight ) && reg.has<ECS::UILayoutGroupComponent>( e ) )
+                {
+                    const glm::vec2 content = GroupContentPx( reg, e, scale );
+                    if ( L.FitWidth )
+                        rect.W = content.x;
+                    if ( L.FitHeight )
+                        rect.H = content.y;
+                }
             }
             // Any element with a rect is selectable; later/deeper hits overwrite (matches draw order), so a
             // small button on top of a full-screen panel wins the pick instead of the panel behind it.
@@ -384,6 +426,14 @@ namespace Desert::UI
             {
                 const auto& L = reg.get<ECS::UILayoutComponent>( e ).Data;
                 rect          = ApplyAspectFit( rect, L.AspectRatio, static_cast<int>( L.AspectMode ) );
+                if ( ( L.FitWidth || L.FitHeight ) && reg.has<ECS::UILayoutGroupComponent>( e ) )
+                {
+                    const glm::vec2 content = GroupContentPx( reg, e, scale );
+                    if ( L.FitWidth )
+                        rect.W = content.x;
+                    if ( L.FitHeight )
+                        rect.H = content.y;
+                }
             }
             if ( e == target )
             {
