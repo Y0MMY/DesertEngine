@@ -128,8 +128,9 @@ namespace Desert::Editor::Tools
                 n.y = d.y > 0 ? 1 : -1;
             else
                 n.z = d.z > 0 ? 1 : -1;
-            m_Add    = hitCell + n;
-            m_Remove = hitCell;
+            m_Add       = hitCell + n;
+            m_Remove    = hitCell;
+            m_AddNormal = n;
             m_HasAdd = m_HasRemove = true;
         }
         else if ( std::abs( ray.Direction.y ) > 1e-5f )
@@ -140,21 +141,22 @@ namespace Desert::Editor::Tools
                 const glm::vec3 p = ray.Origin + ray.Direction * t;
                 m_Add             = { static_cast<int>( std::floor( p.x / cs ) ), 0,
                                       static_cast<int>( std::floor( p.z / cs ) ) };
+                m_AddNormal       = { 0, 1, 0 };
                 m_HasAdd          = true;
             }
         }
 
-        // --- Overlay: highlight the target cell (green add / red remove) as a wire box. ---
-        ImDrawList* dl       = ::ImGui::GetWindowDrawList();
-        auto        drawCell = [&]( const glm::ivec3& c, ImU32 col )
+        // --- Overlay: wire box spanning inclusive cell range [cmin, cmax]. ---
+        ImDrawList* dl      = ::ImGui::GetWindowDrawList();
+        auto        drawBox = [&]( const glm::ivec3& cmin, const glm::ivec3& cmax, ImU32 col )
         {
-            const glm::vec3 mn = glm::vec3( c ) * cs;
+            const glm::vec3 mn = glm::vec3( cmin ) * cs;
+            const glm::vec3 mx = ( glm::vec3( cmax ) + 1.0f ) * cs;
             glm::vec2       s[8];
             bool            ok = true;
             for ( int i = 0; i < 8; ++i )
             {
-                const glm::vec3 w( mn.x + ( ( i & 1 ) ? cs : 0.0f ), mn.y + ( ( i & 2 ) ? cs : 0.0f ),
-                                   mn.z + ( ( i & 4 ) ? cs : 0.0f ) );
+                const glm::vec3 w( ( i & 1 ) ? mx.x : mn.x, ( i & 2 ) ? mx.y : mn.y, ( i & 4 ) ? mx.z : mn.z );
                 if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[i] ) )
                     ok = false;
             }
@@ -166,36 +168,81 @@ namespace Desert::Editor::Tools
                 dl->AddLine( ImVec2( s[e[0]].x, s[e[0]].y ), ImVec2( s[e[1]].x, s[e[1]].y ), col, 2.0f );
         };
         const bool removeMode = ::ImGui::GetIO().KeyShift;
-        if ( removeMode && m_HasRemove )
-            drawCell( m_Remove, IM_COL32( 240, 80, 60, 255 ) );
-        else if ( m_HasAdd )
-            drawCell( m_Add, IM_COL32( 90, 220, 120, 255 ) );
+        const bool interact   = interactive && !::ImGui::IsAnyItemActive();
+        bool       changed    = false;
 
-        // --- Input ---
-        bool changed = false;
-        if ( interactive && !::ImGui::IsAnyItemActive() )
+        // Highlight the cell under the cursor (green = paint, red = erase).
+        if ( removeMode && m_HasRemove )
+            drawBox( m_Remove, m_Remove, IM_COL32( 240, 80, 60, 255 ) );
+        else if ( m_HasAdd )
+            drawBox( m_Add, m_Add, IM_COL32( 90, 220, 120, 255 ) );
+
+        // --- Continuous cell painting: hold LMB and move to add every cell the cursor passes over (a paint
+        //     stroke); Shift+LMB or RMB erases. Each stroke's painted cells become the region for E/Q. ---
+        if ( interact )
         {
-            if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+            const bool lmb   = ::ImGui::IsMouseDown( ImGuiMouseButton_Left );
+            const bool rmb   = ::ImGui::IsMouseDown( ImGuiMouseButton_Right );
+            const bool erase = ( lmb && removeMode ) || rmb;
+
+            if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && !removeMode ) // begin an ADD stroke
             {
-                if ( removeMode && m_HasRemove )
-                    changed = m_Cells.erase( Pack( m_Remove ) ) > 0;
-                else if ( !removeMode && m_HasAdd )
-                    changed = m_Cells.insert( Pack( m_Add ) ).second;
+                m_Dragging = true;
+                m_Region.clear();
+                m_RegionNormal = m_AddNormal;
             }
-            else if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Right ) && m_HasRemove )
+            if ( erase )
             {
-                changed = m_Cells.erase( Pack( m_Remove ) ) > 0;
+                if ( m_HasRemove && m_Cells.erase( Pack( m_Remove ) ) > 0 )
+                    changed = true;
             }
+            else if ( m_Dragging && lmb && m_HasAdd )
+            {
+                if ( m_Cells.insert( Pack( m_Add ) ).second ) // paint this cell (skip if already filled)
+                {
+                    m_Region.push_back( m_Add );
+                    changed = true;
+                }
+            }
+            if ( !lmb )
+                m_Dragging = false;
+        }
+
+        // --- Keys: E/Q extrude the last region out/in; Ctrl+E/Q grow/shrink the grid step. ---
+        if ( interact )
+        {
             const bool ctrl = ::ImGui::GetIO().KeyCtrl;
             if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_E, false ) )
             {
                 m_CellSize = std::min( m_CellSize * 2.0f, 100000.0f );
                 changed    = true;
             }
-            if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) )
+            else if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) )
             {
                 m_CellSize = std::max( m_CellSize * 0.5f, 1.0f );
                 changed    = true;
+            }
+            else if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) && !m_Region.empty() ) // extrude out
+            {
+                std::vector<glm::ivec3> next;
+                for ( const auto& c : m_Region )
+                {
+                    const glm::ivec3 nc = c + m_RegionNormal;
+                    m_Cells.insert( Pack( nc ) );
+                    next.push_back( nc );
+                }
+                m_Region = next;
+                changed  = true;
+            }
+            else if ( ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) && !m_Region.empty() ) // extrude in (carve)
+            {
+                for ( const auto& c : m_Region )
+                    m_Cells.erase( Pack( c ) );
+                std::vector<glm::ivec3> prev;
+                for ( const auto& c : m_Region )
+                    prev.push_back( c - m_RegionNormal );
+                m_Region = prev;
+                changed  = true;
             }
         }
 
@@ -229,6 +276,7 @@ namespace Desert::Editor::Tools
                 Core::SelectionManager::SetSelected( m_Entity );
                 m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
                 m_Cells.clear();
+                m_Region.clear();
             }
             ::ImGui::SameLine();
             if ( ::ImGui::Button( "Cancel" ) )
@@ -237,11 +285,13 @@ namespace Desert::Editor::Tools
             if ( ::ImGui::Button( "Clear" ) )
             {
                 m_Cells.clear();
+                m_Region.clear();
                 changed = true;
             }
             ::ImGui::Separator();
-            ::ImGui::TextDisabled( "LMB add  -  Shift/RMB remove" );
-            ::ImGui::TextDisabled( "Ctrl+E / Ctrl+Q  grid step" );
+            ::ImGui::TextDisabled( "LMB drag: paint cells  -  Shift/RMB: erase" );
+            ::ImGui::TextDisabled( "E / Q: extrude stroke out / in" );
+            ::ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
         }
         ::ImGui::End();
 
@@ -320,5 +370,7 @@ namespace Desert::Editor::Tools
                 scene.DestroyEntity( ref->get() );
         m_Entity = Common::UUID::Null();
         m_Cells.clear();
+        m_Region.clear();
+        m_Dragging = false;
     }
 } // namespace Desert::Editor::Tools

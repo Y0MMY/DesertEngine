@@ -40,9 +40,21 @@ namespace Desert::Editor::Tools
         float                        m_CellSize = 100.0f;               // grid step (Ctrl+E/Q => x2 / /2)
         Common::UUID                 m_Entity   = Common::UUID::Null(); // live blockout entity
 
+        // Frame targeting (nearest cube face / ground).
         bool       m_HasAdd    = false;
         bool       m_HasRemove = false;
-        glm::ivec3 m_Add{ 0 };    // cell a click would ADD
-        glm::ivec3 m_Remove{ 0 }; // cell a click would REMOVE
+        glm::ivec3 m_Add{ 0 };             // cell a click would ADD
+        glm::ivec3 m_Remove{ 0 };          // cell a click would REMOVE
+        glm::ivec3 m_AddNormal{ 0, 1, 0 }; // outward face normal of the add cell (extrude / drag-plane axis)
+
+        // Rectangle drag-fill (LMB press-drag-release across a plane) — builds floors/walls in one stroke.
+        bool       m_Dragging = false;
+        glm::ivec3 m_DragAnchor{ 0 }; // first cell of the drag
+        glm::ivec3 m_DragNormal{ 0, 1, 0 };
+        glm::ivec3 m_DragFar{ 0 }; // current far corner cell (updated while dragging)
+
+        // Last placed region + its normal — E/Q extrude it out / in along the normal (repeat to raise walls).
+        std::vector<glm::ivec3> m_Region;
+        glm::ivec3              m_RegionNormal{ 0, 1, 0 };
     };
 } // namespace Desert::Editor::Tools
