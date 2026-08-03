@@ -1040,6 +1040,20 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Button" ) )
         glm::vec4 SpriteBorder = glm::vec4( 0.0f ); // 9-slice: source-px borders kept unstretched (0 = stretch)
+
+        // --- States (Phase D) -----------------------------------------------------------------------------
+        PROPERTY( DisplayName( "Selected" ), Category( "State" ) )
+        bool Selected = false; // persistent highlight (active menu item / current tab): rests on SelectedColor
+                               // and draws an accent bar, until hover/press temporarily override it
+        PROPERTY( DisplayName( "Selected Color" ), Category( "State" ), Color )
+        glm::vec3 SelectedColor = glm::vec3( 0.85f, 0.42f, 0.18f );
+        PROPERTY( DisplayName( "Selected Accent" ), Category( "State" ), Color )
+        glm::vec3 SelectedAccent = glm::vec3( 1.0f, 0.55f, 0.2f ); // the left accent bar / ring colour
+
+        PROPERTY( DisplayName( "Disabled" ), Category( "State" ) )
+        bool Disabled = false; // greyed + non-interactive (ignores hover/press/click)
+        PROPERTY( DisplayName( "Disabled Color" ), Category( "State" ), Color )
+        glm::vec3 DisabledColor = glm::vec3( 0.22f, 0.24f, 0.28f );
     };
     struct UIButtonComponent
     {

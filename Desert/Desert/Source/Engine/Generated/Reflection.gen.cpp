@@ -319,6 +319,11 @@ namespace
                     .Field( FieldInfo{ .Name = "HoverSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, HoverSprite ), .Size = sizeof( T::HoverSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Hover Sprite", .Category = "UI Button", } } )
                     .Field( FieldInfo{ .Name = "PressedSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, PressedSprite ), .Size = sizeof( T::PressedSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Pressed Sprite", .Category = "UI Button", } } )
                     .Field( FieldInfo{ .Name = "SpriteBorder", .Type = FieldType::Vec4, .Offset = offsetof( T, SpriteBorder ), .Size = sizeof( T::SpriteBorder ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "Sprite Border L/T/R/B", .Category = "UI Button", } } )
+                    .Field( FieldInfo{ .Name = "Selected", .Type = FieldType::Bool, .Offset = offsetof( T, Selected ), .Size = sizeof( T::Selected ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Selected", .Category = "State", } } )
+                    .Field( FieldInfo{ .Name = "SelectedColor", .Type = FieldType::Vec3, .Offset = offsetof( T, SelectedColor ), .Size = sizeof( T::SelectedColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Selected Color", .Category = "State", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "SelectedAccent", .Type = FieldType::Vec3, .Offset = offsetof( T, SelectedAccent ), .Size = sizeof( T::SelectedAccent ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Selected Accent", .Category = "State", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "Disabled", .Type = FieldType::Bool, .Offset = offsetof( T, Disabled ), .Size = sizeof( T::Disabled ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Disabled", .Category = "State", } } )
+                    .Field( FieldInfo{ .Name = "DisabledColor", .Type = FieldType::Vec3, .Offset = offsetof( T, DisabledColor ), .Size = sizeof( T::DisabledColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Disabled Color", .Category = "State", .IsColor = true, } } )
                     .WithDefault<T>()
                     .Register();
             }

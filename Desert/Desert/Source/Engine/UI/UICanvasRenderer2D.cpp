@@ -587,10 +587,15 @@ namespace Desert::UI
                 if ( reg.has<ECS::UIButtonComponent>( e ) )
                 {
                     const auto& b     = reg.get<ECS::UIButtonComponent>( e ).Data;
-                    const bool  hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
-                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
-                    const bool      down = hover && input->MouseDown;
-                    const glm::vec3 c    = down ? b.PressedColor : ( hover ? b.HoverColor : b.NormalColor );
+                    // Disabled swallows all pointer/keyboard interaction and rests on the dim colour.
+                    const bool hover = !b.Disabled && input && input->MousePx.x >= mn.x &&
+                                       input->MousePx.x <= mx.x && input->MousePx.y >= mn.y &&
+                                       input->MousePx.y <= mx.y;
+                    const bool down  = hover && input->MouseDown;
+                    // Resting colour is Selected (persistent highlight) or Normal; hover/press override it.
+                    const glm::vec3 rest = b.Selected ? b.SelectedColor : b.NormalColor;
+                    const glm::vec3 c = b.Disabled ? b.DisabledColor
+                                                   : ( down ? b.PressedColor : ( hover ? b.HoverColor : rest ) );
 
                     // Image can change with state (hover / press), falling back to the normal Sprite.
                     Assets::AssetHandle spr = b.Sprite;
@@ -598,10 +603,20 @@ namespace Desert::UI
                         spr = b.PressedSprite;
                     else if ( hover && HandleSet( b.HoverSprite ) )
                         spr = b.HoverSprite;
-                    DrawBox( dl, mn, mx, glm::vec4( c, 1.0f ), spr, b.SpriteBorder, scale, 6.0f * scale );
+                    DrawBox( dl, mn, mx, glm::vec4( c, b.Disabled ? 0.6f : 1.0f ), spr, b.SpriteBorder, scale,
+                             6.0f * scale );
+
+                    // Selected accent: a rounded bar hugging the left edge (the "you are here" marker).
+                    if ( b.Selected && !b.Disabled )
+                    {
+                        const float barW  = std::max( 2.0f, 3.0f * scale );
+                        const float inset = 4.0f * scale;
+                        dl.AddRectFilled( { mn.x, mn.y + inset }, { mn.x + barW, mx.y - inset },
+                                          glm::vec4( b.SelectedAccent, 1.0f ), barW * 0.5f );
+                    }
 
                     const bool isFocused = focused && *focused == e;
-                    if ( outClicked && input &&
+                    if ( outClicked && input && !b.Disabled &&
                          ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                     {
                         // Encode the structured action into the click message the runtime dispatches (same
