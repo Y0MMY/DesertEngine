@@ -165,6 +165,38 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UIProgressBarData;
+                TypeBuilder( "UIProgressBarData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Value", .Type = FieldType::Float, .Offset = offsetof( T, Value ), .Size = sizeof( T::Value ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Value", .Category = "UI Progress Bar", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .Field( FieldInfo{ .Name = "Background", .Type = FieldType::Vec3, .Offset = offsetof( T, Background ), .Size = sizeof( T::Background ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Background", .Category = "UI Progress Bar", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "Fill", .Type = FieldType::Vec3, .Offset = offsetof( T, Fill ), .Size = sizeof( T::Fill ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Fill", .Category = "UI Progress Bar", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "CornerRadius", .Type = FieldType::Float, .Offset = offsetof( T, CornerRadius ), .Size = sizeof( T::CornerRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Corner Radius", .Category = "UI Progress Bar", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 32.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UIToggleData;
+                TypeBuilder( "UIToggleData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Value", .Type = FieldType::Bool, .Offset = offsetof( T, Value ), .Size = sizeof( T::Value ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Value (on)", .Category = "UI Toggle", } } )
+                    .Field( FieldInfo{ .Name = "BoxColor", .Type = FieldType::Vec3, .Offset = offsetof( T, BoxColor ), .Size = sizeof( T::BoxColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Box Color", .Category = "UI Toggle", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "CheckColor", .Type = FieldType::Vec3, .Offset = offsetof( T, CheckColor ), .Size = sizeof( T::CheckColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Check Color", .Category = "UI Toggle", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "CornerRadius", .Type = FieldType::Float, .Offset = offsetof( T, CornerRadius ), .Size = sizeof( T::CornerRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Corner Radius", .Category = "UI Toggle", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 32.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UISliderData;
+                TypeBuilder( "UISliderData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Value", .Type = FieldType::Float, .Offset = offsetof( T, Value ), .Size = sizeof( T::Value ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Value", .Category = "UI Slider", } } )
+                    .Field( FieldInfo{ .Name = "MinValue", .Type = FieldType::Float, .Offset = offsetof( T, MinValue ), .Size = sizeof( T::MinValue ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Min", .Category = "UI Slider", } } )
+                    .Field( FieldInfo{ .Name = "MaxValue", .Type = FieldType::Float, .Offset = offsetof( T, MaxValue ), .Size = sizeof( T::MaxValue ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Max", .Category = "UI Slider", } } )
+                    .Field( FieldInfo{ .Name = "TrackColor", .Type = FieldType::Vec3, .Offset = offsetof( T, TrackColor ), .Size = sizeof( T::TrackColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Track Color", .Category = "UI Slider", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "FillColor", .Type = FieldType::Vec3, .Offset = offsetof( T, FillColor ), .Size = sizeof( T::FillColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Fill Color", .Category = "UI Slider", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "HandleColor", .Type = FieldType::Vec3, .Offset = offsetof( T, HandleColor ), .Size = sizeof( T::HandleColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Handle Color", .Category = "UI Slider", .IsColor = true, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UICanvasData;
                 TypeBuilder( "UICanvasData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "ScaleMode", .Type = FieldType::Enum, .Offset = offsetof( T, ScaleMode ), .Size = sizeof( T::ScaleMode ), .TypeName = "UICanvasScaleMode", .Meta = PropertyMetadata{ .DisplayName = "Scale Mode", .Category = "UI Canvas", }, .EnumValues = { EnumValue{ "Stretch", 0 }, EnumValue{ "ScaleWithScreen", 1 }, EnumValue{ "Letterbox", 2 }, } } )

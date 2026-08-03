@@ -277,6 +277,55 @@ namespace Desert::UI
                     if ( p.BorderWidth > 0.0f )
                         dl.AddRect( mn, mx, glm::vec4( p.BorderColor, 1.0f ), p.BorderWidth * scale );
                 }
+                else if ( reg.has<ECS::UIProgressBarComponent>( e ) )
+                {
+                    const auto& pb = reg.get<ECS::UIProgressBarComponent>( e ).Data;
+                    const float r  = pb.CornerRadius * scale;
+                    dl.AddRectFilled( mn, mx, glm::vec4( pb.Background, 1.0f ), r );
+                    const float t = std::clamp( pb.Value, 0.0f, 1.0f );
+                    if ( t > 0.0f )
+                        dl.AddRectFilled( mn, { mn.x + rect.W * t, mx.y }, glm::vec4( pb.Fill, 1.0f ), r );
+                }
+                else if ( reg.has<ECS::UIToggleComponent>( e ) )
+                {
+                    auto&      tg    = reg.get<ECS::UIToggleComponent>( e ).Data;
+                    const bool hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
+                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    const float r = tg.CornerRadius * scale;
+                    dl.AddRectFilled( mn, mx, glm::vec4( tg.BoxColor, 1.0f ), r );
+                    if ( tg.Value )
+                    {
+                        const float pad = std::min( rect.W, rect.H ) * 0.22f; // inset "check" fill
+                        dl.AddRectFilled( { mn.x + pad, mn.y + pad }, { mx.x - pad, mx.y - pad },
+                                          glm::vec4( tg.CheckColor, 1.0f ), r * 0.5f );
+                    }
+                    if ( hover && input->MouseReleased )
+                        tg.Value = !tg.Value;
+                }
+                else if ( reg.has<ECS::UISliderComponent>( e ) )
+                {
+                    auto&       sl    = reg.get<ECS::UISliderComponent>( e ).Data;
+                    const float range = std::max( 0.0001f, sl.MaxValue - sl.MinValue );
+                    const float t     = std::clamp( ( sl.Value - sl.MinValue ) / range, 0.0f, 1.0f );
+                    const float pill  = rect.H * 0.5f; // fully-rounded track ends
+                    const float fillX = mn.x + rect.W * t;
+                    const float cy    = ( mn.y + mx.y ) * 0.5f;
+                    const float hs    = rect.H * 0.6f; // handle half-size (circle via rounding)
+                    dl.AddRectFilled( mn, mx, glm::vec4( sl.TrackColor, 1.0f ), pill );
+                    if ( t > 0.0f )
+                        dl.AddRectFilled( mn, { fillX, mx.y }, glm::vec4( sl.FillColor, 1.0f ), pill );
+                    dl.AddRectFilled( { fillX - hs, cy - hs }, { fillX + hs, cy + hs },
+                                      glm::vec4( sl.HandleColor, 1.0f ), hs );
+
+                    const bool hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
+                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    if ( hover && input->MouseDown )
+                    {
+                        const float nt =
+                             std::clamp( ( input->MousePx.x - mn.x ) / std::max( 1.0f, rect.W ), 0.0f, 1.0f );
+                        sl.Value = sl.MinValue + nt * range;
+                    }
+                }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
                     DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );

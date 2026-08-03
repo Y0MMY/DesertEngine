@@ -81,6 +81,15 @@ namespace Desert::Editor
         if ( ImGui::Button( ICON_MDI_VIEW_GRID " + Layout Group" ) )
             AddUIChild<ECS::UILayoutGroupComponent>( *m_Scene, canvasEntity, "UI Layout Group" );
         ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_PROGRESS_HELPER " + Progress" ) )
+            AddUIChild<ECS::UIProgressBarComponent>( *m_Scene, canvasEntity, "UI Progress Bar" );
+        ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_CHECKBOX_MARKED_OUTLINE " + Toggle" ) )
+            AddUIChild<ECS::UIToggleComponent>( *m_Scene, canvasEntity, "UI Toggle" );
+        ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_TUNE_VARIANT " + Slider" ) )
+            AddUIChild<ECS::UISliderComponent>( *m_Scene, canvasEntity, "UI Slider" );
+        ImGui::SameLine();
         ImGui::TextDisabled( "add UI elements, then edit anchors/colour in Details" );
         ImGui::Separator();
 

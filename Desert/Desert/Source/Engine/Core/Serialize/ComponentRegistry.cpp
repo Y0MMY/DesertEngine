@@ -880,6 +880,12 @@ namespace Desert::Core::Serialize
                                                                             &ECS::UIButtonComponent::Data ) );
         Register( MakeReflected<ECS::UILayoutGroupComponent, ECS::UILayoutGroupData>(
              "UILayoutGroup", "UILayoutGroupData", &ECS::UILayoutGroupComponent::Data ) );
+        Register( MakeReflected<ECS::UIProgressBarComponent, ECS::UIProgressBarData>(
+             "UIProgressBar", "UIProgressBarData", &ECS::UIProgressBarComponent::Data ) );
+        Register( MakeReflected<ECS::UIToggleComponent, ECS::UIToggleData>( "UIToggle", "UIToggleData",
+                                                                            &ECS::UIToggleComponent::Data ) );
+        Register( MakeReflected<ECS::UISliderComponent, ECS::UISliderData>( "UISlider", "UISliderData",
+                                                                            &ECS::UISliderComponent::Data ) );
 
         // ---- Marker components (presence is the state) ----
         Register( MakeMarker<ECS::FolderComponent>( "Folder" ) );

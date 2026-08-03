@@ -421,6 +421,12 @@ namespace Desert::Editor
                         select( AddUIChild<ECS::UIButtonComponent>( *m_Scene, parent, "UI Button" ) );
                     if ( ImGui::MenuItem( ICON_MDI_VIEW_GRID "  Layout Group" ) )
                         select( AddUIChild<ECS::UILayoutGroupComponent>( *m_Scene, parent, "UI Layout Group" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_PROGRESS_HELPER "  Progress Bar" ) )
+                        select( AddUIChild<ECS::UIProgressBarComponent>( *m_Scene, parent, "UI Progress Bar" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_CHECKBOX_MARKED_OUTLINE "  Toggle" ) )
+                        select( AddUIChild<ECS::UIToggleComponent>( *m_Scene, parent, "UI Toggle" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_TUNE_VARIANT "  Slider" ) )
+                        select( AddUIChild<ECS::UISliderComponent>( *m_Scene, parent, "UI Slider" ) );
                 }
                 ImGui::EndPopup();
             }

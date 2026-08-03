@@ -628,6 +628,80 @@ namespace Desert::ECS
         UILayoutGroupData Data;
     };
 
+    // A horizontal progress/health bar: a background track with a fill spanning Value (0..1) of the width.
+    // Display-only (no interaction).
+    struct UIProgressBarData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Value" ), Category( "UI Progress Bar" ), Range( 0.0f, 1.0f ) )
+        float Value = 0.5f;
+
+        PROPERTY( DisplayName( "Background" ), Category( "UI Progress Bar" ), Color )
+        glm::vec3 Background = glm::vec3( 0.12f, 0.13f, 0.16f );
+
+        PROPERTY( DisplayName( "Fill" ), Category( "UI Progress Bar" ), Color )
+        glm::vec3 Fill = glm::vec3( 0.30f, 0.65f, 0.35f );
+
+        PROPERTY( DisplayName( "Corner Radius" ), Category( "UI Progress Bar" ), Range( 0.0f, 32.0f ) )
+        float CornerRadius = 4.0f;
+    };
+    struct UIProgressBarComponent
+    {
+        UIProgressBarData Data;
+    };
+
+    // A checkbox: a box that fills with the check colour when on. A click (runtime) flips Value.
+    struct UIToggleData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Value (on)" ), Category( "UI Toggle" ) )
+        bool Value = false;
+
+        PROPERTY( DisplayName( "Box Color" ), Category( "UI Toggle" ), Color )
+        glm::vec3 BoxColor = glm::vec3( 0.18f, 0.19f, 0.24f );
+
+        PROPERTY( DisplayName( "Check Color" ), Category( "UI Toggle" ), Color )
+        glm::vec3 CheckColor = glm::vec3( 0.30f, 0.60f, 0.90f );
+
+        PROPERTY( DisplayName( "Corner Radius" ), Category( "UI Toggle" ), Range( 0.0f, 32.0f ) )
+        float CornerRadius = 4.0f;
+    };
+    struct UIToggleComponent
+    {
+        UIToggleData Data;
+    };
+
+    // A horizontal slider: a track + a fill up to the handle + a draggable handle. Dragging (runtime) sets
+    // Value in [MinValue, MaxValue].
+    struct UISliderData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Value" ), Category( "UI Slider" ) )
+        float Value = 0.5f;
+
+        PROPERTY( DisplayName( "Min" ), Category( "UI Slider" ) )
+        float MinValue = 0.0f;
+
+        PROPERTY( DisplayName( "Max" ), Category( "UI Slider" ) )
+        float MaxValue = 1.0f;
+
+        PROPERTY( DisplayName( "Track Color" ), Category( "UI Slider" ), Color )
+        glm::vec3 TrackColor = glm::vec3( 0.12f, 0.13f, 0.16f );
+
+        PROPERTY( DisplayName( "Fill Color" ), Category( "UI Slider" ), Color )
+        glm::vec3 FillColor = glm::vec3( 0.30f, 0.52f, 0.82f );
+
+        PROPERTY( DisplayName( "Handle Color" ), Category( "UI Slider" ), Color )
+        glm::vec3 HandleColor = glm::vec3( 0.90f, 0.92f, 0.96f );
+    };
+    struct UISliderComponent
+    {
+        UISliderData Data;
+    };
+
     // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas. Add UI
     // elements as CHILDREN of the canvas entity (the viewport "UI" menu / UI Editor do this for you).
     struct UICanvasData
