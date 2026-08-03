@@ -1,0 +1,1894 @@
+{
+ "SceneName": "MainMenu",
+ "Entities": [
+  {
+   "id": 1001,
+   "Tag": "UI Canvas",
+   "UICanvas": {
+    "ScaleMode": 1,
+    "ReferenceWidth": 1920.0,
+    "ReferenceHeight": 1080.0,
+    "MatchWidthHeight": 0.5,
+    "Visible": true
+   }
+  },
+  {
+   "id": 1002,
+   "Tag": "BG",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Color": [
+     1,
+     1,
+     1
+    ],
+    "Opacity": 1.0,
+    "CornerRadius": 0.0
+   }
+  },
+  {
+   "id": 1003,
+   "Tag": "Scrim",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Color": [
+     0.02,
+     0.027,
+     0.05
+    ],
+    "Opacity": 0.35,
+    "CornerRadius": 0.0
+   }
+  },
+  {
+   "id": 1004,
+   "Tag": "TopBar",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     80
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   }
+  },
+  {
+   "id": 1005,
+   "Tag": "Logo",
+   "parent": 1004,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     40,
+     0
+    ],
+    "OffsetMax": [
+     400,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "DESERT[color=#FF7A33]RP[/color]",
+    "RichText": true,
+    "FontSize": 34.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.93,
+     0.95,
+     0.98
+    ]
+   }
+  },
+  {
+   "id": 1006,
+   "Tag": "StatusDot",
+   "parent": 1004,
+   "UILayout": {
+    "AnchorMin": [
+     1,
+     0.5
+    ],
+    "AnchorMax": [
+     1,
+     0.5
+    ],
+    "OffsetMin": [
+     -360,
+     -8
+    ],
+    "OffsetMax": [
+     -344,
+     8
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Circle": true,
+    "Color": [
+     0.24,
+     0.88,
+     0.5
+    ],
+    "Opacity": 1.0,
+    "Pulse": true,
+    "PulseSpeed": 2.5,
+    "PulseMin": 0.3
+   }
+  },
+  {
+   "id": 1007,
+   "Tag": "StatusText",
+   "parent": 1004,
+   "UILayout": {
+    "AnchorMin": [
+     1,
+     0.5
+    ],
+    "AnchorMax": [
+     1,
+     0.5
+    ],
+    "OffsetMin": [
+     -330,
+     -16
+    ],
+    "OffsetMax": [
+     -40,
+     16
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "ONLINE   -   Friends 12",
+    "FontSize": 16.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.62,
+     0.69,
+     0.78
+    ]
+   }
+  },
+  {
+   "id": 1008,
+   "Tag": "Nav",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     48,
+     150
+    ],
+    "OffsetMax": [
+     368,
+     720
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UILayoutGroup": {
+    "Type": 0,
+    "Spacing": 8.0,
+    "StretchCross": true,
+    "Padding": [
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "id": 1009,
+   "Tag": "Btn_PLAY",
+   "parent": 1008,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     60
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "HoverColor": [
+     0.16,
+     0.22,
+     0.3
+    ],
+    "PressedColor": [
+     0.08,
+     0.1,
+     0.14
+    ],
+    "Action": 1,
+    "Selected": true,
+    "SelectedColor": [
+     0.85,
+     0.42,
+     0.18
+    ],
+    "SelectedAccent": [
+     1.0,
+     0.55,
+     0.2
+    ]
+   }
+  },
+  {
+   "id": 1010,
+   "Tag": "Ico_PLAY",
+   "parent": 1009,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     18,
+     14
+    ],
+    "OffsetMax": [
+     58,
+     -14
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIIcon": {
+    "Icon": 0,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ],
+    "Thickness": 3.0,
+    "Scale": 0.8
+   }
+  },
+  {
+   "id": 1011,
+   "Tag": "Lbl_PLAY",
+   "parent": 1009,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     68,
+     0
+    ],
+    "OffsetMax": [
+     -12,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "PLAY",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ]
+   }
+  },
+  {
+   "id": 1012,
+   "Tag": "Btn_CHARACTERS",
+   "parent": 1008,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     60
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "HoverColor": [
+     0.16,
+     0.22,
+     0.3
+    ],
+    "PressedColor": [
+     0.08,
+     0.1,
+     0.14
+    ],
+    "Action": 1
+   }
+  },
+  {
+   "id": 1013,
+   "Tag": "Ico_CHARACTERS",
+   "parent": 1012,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     18,
+     14
+    ],
+    "OffsetMax": [
+     58,
+     -14
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIIcon": {
+    "Icon": 1,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ],
+    "Thickness": 3.0,
+    "Scale": 0.8
+   }
+  },
+  {
+   "id": 1014,
+   "Tag": "Lbl_CHARACTERS",
+   "parent": 1012,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     68,
+     0
+    ],
+    "OffsetMax": [
+     -12,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "CHARACTERS",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ]
+   }
+  },
+  {
+   "id": 1015,
+   "Tag": "Btn_SERVERS",
+   "parent": 1008,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     60
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "HoverColor": [
+     0.16,
+     0.22,
+     0.3
+    ],
+    "PressedColor": [
+     0.08,
+     0.1,
+     0.14
+    ],
+    "Action": 1
+   }
+  },
+  {
+   "id": 1016,
+   "Tag": "Ico_SERVERS",
+   "parent": 1015,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     18,
+     14
+    ],
+    "OffsetMax": [
+     58,
+     -14
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIIcon": {
+    "Icon": 2,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ],
+    "Thickness": 3.0,
+    "Scale": 0.8
+   }
+  },
+  {
+   "id": 1017,
+   "Tag": "Lbl_SERVERS",
+   "parent": 1015,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     68,
+     0
+    ],
+    "OffsetMax": [
+     -12,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "SERVERS",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ]
+   }
+  },
+  {
+   "id": 1018,
+   "Tag": "Btn_STORE",
+   "parent": 1008,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     60
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "HoverColor": [
+     0.16,
+     0.22,
+     0.3
+    ],
+    "PressedColor": [
+     0.08,
+     0.1,
+     0.14
+    ],
+    "Action": 1
+   }
+  },
+  {
+   "id": 1019,
+   "Tag": "Ico_STORE",
+   "parent": 1018,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     18,
+     14
+    ],
+    "OffsetMax": [
+     58,
+     -14
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIIcon": {
+    "Icon": 3,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ],
+    "Thickness": 3.0,
+    "Scale": 0.8
+   }
+  },
+  {
+   "id": 1020,
+   "Tag": "Lbl_STORE",
+   "parent": 1018,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     68,
+     0
+    ],
+    "OffsetMax": [
+     -12,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "STORE",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ]
+   }
+  },
+  {
+   "id": 1021,
+   "Tag": "Btn_SETTINGS",
+   "parent": 1008,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     60
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "HoverColor": [
+     0.16,
+     0.22,
+     0.3
+    ],
+    "PressedColor": [
+     0.08,
+     0.1,
+     0.14
+    ],
+    "Action": 1
+   }
+  },
+  {
+   "id": 1022,
+   "Tag": "Ico_SETTINGS",
+   "parent": 1021,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     18,
+     14
+    ],
+    "OffsetMax": [
+     58,
+     -14
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIIcon": {
+    "Icon": 4,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ],
+    "Thickness": 3.0,
+    "Scale": 0.8
+   }
+  },
+  {
+   "id": 1023,
+   "Tag": "Lbl_SETTINGS",
+   "parent": 1021,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     68,
+     0
+    ],
+    "OffsetMax": [
+     -12,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "SETTINGS",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ]
+   }
+  },
+  {
+   "id": 1024,
+   "Tag": "Btn_QUIT",
+   "parent": 1008,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     60
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "HoverColor": [
+     0.16,
+     0.22,
+     0.3
+    ],
+    "PressedColor": [
+     0.08,
+     0.1,
+     0.14
+    ],
+    "Action": 3
+   }
+  },
+  {
+   "id": 1025,
+   "Tag": "Ico_QUIT",
+   "parent": 1024,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     18,
+     14
+    ],
+    "OffsetMax": [
+     58,
+     -14
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIIcon": {
+    "Icon": 5,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ],
+    "Thickness": 3.0,
+    "Scale": 0.8
+   }
+  },
+  {
+   "id": 1026,
+   "Tag": "Lbl_QUIT",
+   "parent": 1024,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     68,
+     0
+    ],
+    "OffsetMax": [
+     -12,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "QUIT",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.9,
+     0.93,
+     0.98
+    ]
+   }
+  },
+  {
+   "id": 1027,
+   "Tag": "Side",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     1,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     -508,
+     120
+    ],
+    "OffsetMax": [
+     -48,
+     900
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UILayoutGroup": {
+    "Type": 0,
+    "Spacing": 16.0,
+    "StretchCross": true,
+    "Padding": [
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "id": 1028,
+   "Tag": "Card_Profile",
+   "parent": 1027,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     150
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Color": [
+     0.055,
+     0.075,
+     0.11
+    ],
+    "Opacity": 0.55,
+    "CornerRadius": 20.0,
+    "Shadow": true,
+    "ShadowColor": [
+     0,
+     0,
+     0
+    ],
+    "ShadowOffset": [
+     0,
+     6
+    ]
+   }
+  },
+  {
+   "id": 1029,
+   "Tag": "Avatar",
+   "parent": 1028,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     20
+    ],
+    "OffsetMax": [
+     110,
+     110
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Circle": true,
+    "Color": [
+     0.16,
+     0.2,
+     0.28
+    ],
+    "Opacity": 1.0,
+    "CornerRadius": 0.0,
+    "RingWidth": 4.0,
+    "RingColorA": [
+     1.0,
+     0.48,
+     0.15
+    ],
+    "RingColorB": [
+     0.18,
+     0.89,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": 1030,
+   "Tag": "AvatarIcon",
+   "parent": 1029,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     18,
+     18
+    ],
+    "OffsetMax": [
+     -18,
+     -18
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIIcon": {
+    "Icon": 1,
+    "Color": [
+     0.8,
+     0.86,
+     0.95
+    ],
+    "Thickness": 3.0,
+    "Scale": 0.9
+   }
+  },
+  {
+   "id": 1031,
+   "Tag": "Name",
+   "parent": 1028,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     128,
+     26
+    ],
+    "OffsetMax": [
+     -16,
+     58
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Nico_Bellic",
+    "FontSize": 24.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.93,
+     0.96,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": 1032,
+   "Tag": "Stats",
+   "parent": 1028,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     128,
+     64
+    ],
+    "OffsetMax": [
+     -16,
+     92
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Lv. 34    $ 1,248,500",
+    "FontSize": 15.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.62,
+     0.69,
+     0.78
+    ]
+   }
+  },
+  {
+   "id": 1033,
+   "Tag": "XP",
+   "parent": 1028,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     128,
+     104
+    ],
+    "OffsetMax": [
+     -16,
+     116
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIProgressBar": {
+    "Value": 0.68,
+    "Background": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "Fill": [
+     0.95,
+     0.55,
+     0.2
+    ],
+    "CornerRadius": 6.0
+   }
+  },
+  {
+   "id": 1034,
+   "Tag": "Card_Server",
+   "parent": 1027,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     190
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Color": [
+     0.055,
+     0.075,
+     0.11
+    ],
+    "Opacity": 0.55,
+    "CornerRadius": 20.0,
+    "Shadow": true,
+    "ShadowColor": [
+     0,
+     0,
+     0
+    ],
+    "ShadowOffset": [
+     0,
+     6
+    ]
+   }
+  },
+  {
+   "id": 1035,
+   "Tag": "SrvName",
+   "parent": 1034,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     18
+    ],
+    "OffsetMax": [
+     -20,
+     52
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Los Santos RP",
+    "FontSize": 22.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.93,
+     0.96,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": 1036,
+   "Tag": "SrvStats",
+   "parent": 1034,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     58
+    ],
+    "OffsetMax": [
+     -20,
+     84
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "847/1000    -    32 ms",
+    "FontSize": 15.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.62,
+     0.69,
+     0.78
+    ]
+   }
+  },
+  {
+   "id": 1037,
+   "Tag": "SrvBar",
+   "parent": 1034,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     96
+    ],
+    "OffsetMax": [
+     -20,
+     108
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIProgressBar": {
+    "Value": 0.85,
+    "Background": [
+     0.1,
+     0.12,
+     0.16
+    ],
+    "Fill": [
+     0.24,
+     0.88,
+     0.5
+    ],
+    "CornerRadius": 6.0
+   }
+  },
+  {
+   "id": 1038,
+   "Tag": "BtnConnect",
+   "parent": 1034,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     124
+    ],
+    "OffsetMax": [
+     -20,
+     168
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.95,
+     0.5,
+     0.2
+    ],
+    "HoverColor": [
+     1.0,
+     0.6,
+     0.28
+    ],
+    "PressedColor": [
+     0.8,
+     0.42,
+     0.16
+    ],
+    "Action": 2,
+    "OnClickMessage": ""
+   }
+  },
+  {
+   "id": 1039,
+   "Tag": "ConnectLbl",
+   "parent": 1038,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "CONNECT",
+    "FontSize": 18.0,
+    "Align": 1,
+    "VerticalAlign": 1,
+    "Color": [
+     0.1,
+     0.06,
+     0.03
+    ]
+   }
+  },
+  {
+   "id": 1040,
+   "Tag": "Card_News",
+   "parent": 1027,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     0
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     150
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Color": [
+     0.055,
+     0.075,
+     0.11
+    ],
+    "Opacity": 0.55,
+    "CornerRadius": 20.0,
+    "Shadow": true,
+    "ShadowColor": [
+     0,
+     0,
+     0
+    ],
+    "ShadowOffset": [
+     0,
+     6
+    ]
+   }
+  },
+  {
+   "id": 1041,
+   "Tag": "News0",
+   "parent": 1040,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     16
+    ],
+    "OffsetMax": [
+     -20,
+     44
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "[color=#FF7A33]PATCH[/color]  0.9.1 - housing & car auction",
+    "RichText": true,
+    "FontSize": 15.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.7,
+     0.77,
+     0.86
+    ]
+   }
+  },
+  {
+   "id": 1042,
+   "Tag": "News1",
+   "parent": 1040,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     54
+    ],
+    "OffsetMax": [
+     -20,
+     82
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "[color=#2FE3FF]EVENT[/color]  Weekend races - 5,000,000$ prize",
+    "RichText": true,
+    "FontSize": 15.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.7,
+     0.77,
+     0.86
+    ]
+   }
+  },
+  {
+   "id": 1043,
+   "Tag": "News2",
+   "parent": 1040,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     20,
+     92
+    ],
+    "OffsetMax": [
+     -20,
+     120
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "[color=#2FE3FF]CLAN[/color]  Vinewood Family recruiting",
+    "RichText": true,
+    "FontSize": 15.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.7,
+     0.77,
+     0.86
+    ]
+   }
+  },
+  {
+   "id": 1044,
+   "Tag": "BottomBar",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     1
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     0,
+     -52
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Color": [
+     0.02,
+     0.027,
+     0.05
+    ],
+    "Opacity": 0.5,
+    "CornerRadius": 0.0
+   }
+  },
+  {
+   "id": 1045,
+   "Tag": "Version",
+   "parent": 1044,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     40,
+     0
+    ],
+    "OffsetMax": [
+     320,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "DesertRP - build v0.9.1",
+    "FontSize": 14.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.62,
+     0.69,
+     0.78
+    ]
+   }
+  },
+  {
+   "id": 1046,
+   "Tag": "Ticker",
+   "parent": 1044,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     340,
+     0
+    ],
+    "OffsetMax": [
+     -340,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Double XP until Monday        Season 4 starts Aug 15        Join our Discord community",
+    "Marquee": true,
+    "MarqueeSpeed": 60.0,
+    "FontSize": 15.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.7,
+     0.77,
+     0.86
+    ]
+   }
+  },
+  {
+   "id": 1047,
+   "Tag": "Hotkeys",
+   "parent": 1044,
+   "UILayout": {
+    "AnchorMin": [
+     1,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     -320,
+     0
+    ],
+    "OffsetMax": [
+     -40,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Tab - navigate    Enter - select    Esc - back",
+    "FontSize": 13.0,
+    "Align": 2,
+    "VerticalAlign": 1,
+    "Color": [
+     0.55,
+     0.62,
+     0.73
+    ]
+   }
+  }
+ ]
+}
