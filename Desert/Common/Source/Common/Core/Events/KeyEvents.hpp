@@ -5,24 +5,63 @@
 
 namespace Common
 {
-	class KeyEvent : public Event {
-	public:
-		inline KeyCode GetKeyCode() const { return Key; }
+    class KeyEvent : public Event
+    {
+    public:
+        inline KeyCode GetKeyCode() const
+        {
+            return Key;
+        }
 
-		KeyEvent(KeyCode c)
-			: Key(c)
-		{}
-		KeyCode Key;
-	};
+        KeyEvent( KeyCode c ) : Key( c )
+        {
+        }
+        KeyCode Key;
+    };
 
-	class KeyPressedEvent : public KeyEvent {
-	public:
-		virtual const EventType GetEventType() const { return GetStaticType(); }
-		static EventType GetStaticType() { return EventType::KeyPressed; }
-		inline int GetRepeatCount() const { return RepeatCount; }
+    class KeyPressedEvent : public KeyEvent
+    {
+    public:
+        virtual const EventType GetEventType() const
+        {
+            return GetStaticType();
+        }
+        static EventType GetStaticType()
+        {
+            return EventType::KeyPressed;
+        }
+        inline int GetRepeatCount() const
+        {
+            return RepeatCount;
+        }
 
-		KeyPressedEvent(KeyCode keycode, int repeatCount)
-			: KeyEvent(keycode), RepeatCount(repeatCount) {}
-		int RepeatCount;
-	};
-}
+        KeyPressedEvent( KeyCode keycode, int repeatCount ) : KeyEvent( keycode ), RepeatCount( repeatCount )
+        {
+        }
+        int RepeatCount;
+    };
+
+    // A text-input event: the Unicode codepoint produced by a key press, already resolved for the keyboard
+    // layout / modifiers (GLFW char callback). Use this for text fields, NOT KeyPressed (which is raw keys).
+    class KeyTypedEvent : public Event
+    {
+    public:
+        virtual const EventType GetEventType() const
+        {
+            return GetStaticType();
+        }
+        static EventType GetStaticType()
+        {
+            return EventType::KeyTyped;
+        }
+        inline unsigned int GetCodepoint() const
+        {
+            return Codepoint;
+        }
+
+        explicit KeyTypedEvent( unsigned int codepoint ) : Codepoint( codepoint )
+        {
+        }
+        unsigned int Codepoint;
+    };
+} // namespace Common

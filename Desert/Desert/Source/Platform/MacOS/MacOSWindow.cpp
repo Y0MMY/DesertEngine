@@ -141,6 +141,22 @@ namespace Desert::Platform::MacOS
                                 }
                             } );
 
+        glfwSetScrollCallback( m_GLFWWindow,
+                               []( GLFWwindow* window, double xOffset, double yOffset )
+                               {
+                                   auto& data = *( (WindowData*)glfwGetWindowUserPointer( window ) );
+                                   Common::MouseScrolledEvent event( (float)xOffset, (float)yOffset );
+                                   data.EventCallback( event );
+                               } );
+
+        glfwSetCharCallback( m_GLFWWindow,
+                             []( GLFWwindow* window, unsigned int codepoint )
+                             {
+                                 auto&                 data = *( (WindowData*)glfwGetWindowUserPointer( window ) );
+                                 Common::KeyTypedEvent event( codepoint );
+                                 data.EventCallback( event );
+                             } );
+
         glfwSetDropCallback( m_GLFWWindow,
                              []( GLFWwindow* window, int count, const char** paths )
                              {

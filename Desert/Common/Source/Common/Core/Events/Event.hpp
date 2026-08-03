@@ -4,44 +4,49 @@
 
 namespace Common
 {
-	enum class EventType
-	{
-		None = 0,
-		WindowClose, WindowResize, WindowFileDrop, // Window
-		KeyPressed, // Keys
-		MouseMoved, MouseScroll, MousePressed// Mouse
-	};
+    enum class EventType
+    {
+        None = 0,
+        WindowClose,
+        WindowResize,
+        WindowFileDrop, // Window
+        KeyPressed,
+        KeyTyped, // Keys
+        MouseMoved,
+        MouseScroll,
+        MousePressed // Mouse
+    };
 
-	class Event
-	{
-	public:
-		virtual const EventType GetEventType() const = 0;
+    class Event
+    {
+    public:
+        virtual const EventType GetEventType() const = 0;
 
-		bool m_Handled = false;
-	};
+        bool m_Handled = false;
+    };
 
-	class EventManager final // NOTE: Should be static ? 
-	{
-	public:
-		template <typename T>
-		using EventFN = std::function<bool(T&)>;
+    class EventManager final // NOTE: Should be static ?
+    {
+    public:
+        template <typename T>
+        using EventFN = std::function<bool( T& )>;
 
-		explicit EventManager(Event& e)
-			: m_Event(e) {}
+        explicit EventManager( Event& e ) : m_Event( e )
+        {
+        }
 
-		template <typename T>
-		bool Notify(EventFN<T> func)
-		{
-			if (m_Event.GetEventType() == T::GetStaticType())
-			{
-				m_Event.m_Handled = func(*(T*)&m_Event); //TODO: static_cast
-				return true;
-			}
-			return false;
-		}
+        template <typename T>
+        bool Notify( EventFN<T> func )
+        {
+            if ( m_Event.GetEventType() == T::GetStaticType() )
+            {
+                m_Event.m_Handled = func( *(T*)&m_Event ); // TODO: static_cast
+                return true;
+            }
+            return false;
+        }
 
-		Event& m_Event;
+        Event& m_Event;
+    };
 
-	};
-
-}
+} // namespace Common
