@@ -1,6 +1,7 @@
 #include "CubeGridTool.hpp"
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Core/Selection/ModelingState.hpp>
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -95,7 +96,18 @@ namespace Desert::Editor::Tools
                                const glm::mat4& viewProj, const glm::vec2& viewportPos,
                                const glm::vec2& viewportSize, bool interactive )
     {
-        const float cs = m_CellSize;
+        // Grid step + tool activation are owned by the docked ModelingPanel (Core::ModelingState). CubeGrid
+        // paints/keys only when it's the selected tool; the panel's "Clear" is a one-shot request.
+        Core::ModelingState& ms         = Core::ModelingState::Get();
+        const float          cs         = ms.CellSize;
+        const bool           toolActive = ms.ActiveTool == Core::ModelingState::Tool::CubeGrid;
+        if ( ms.ReqClear )
+        {
+            ms.ReqClear = false;
+            m_Cells.clear();
+            m_Region.clear();
+            RegenMesh( scene );
+        }
 
         // --- Targeting: nearest occupied cube face, else the ground plane (y=0). ---
         m_HasAdd = m_HasRemove = false;
@@ -168,14 +180,17 @@ namespace Desert::Editor::Tools
                 dl->AddLine( ImVec2( s[e[0]].x, s[e[0]].y ), ImVec2( s[e[1]].x, s[e[1]].y ), col, 2.0f );
         };
         const bool removeMode = ::ImGui::GetIO().KeyShift;
-        const bool interact   = interactive && !::ImGui::IsAnyItemActive();
+        const bool interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
         bool       changed    = false;
 
         // Highlight the cell under the cursor (green = paint, red = erase).
-        if ( removeMode && m_HasRemove )
-            drawBox( m_Remove, m_Remove, IM_COL32( 240, 80, 60, 255 ) );
-        else if ( m_HasAdd )
-            drawBox( m_Add, m_Add, IM_COL32( 90, 220, 120, 255 ) );
+        if ( toolActive )
+        {
+            if ( removeMode && m_HasRemove )
+                drawBox( m_Remove, m_Remove, IM_COL32( 240, 80, 60, 255 ) );
+            else if ( m_HasAdd )
+                drawBox( m_Add, m_Add, IM_COL32( 90, 220, 120, 255 ) );
+        }
 
         // --- Continuous cell painting: hold LMB and move to add every cell the cursor passes over (a paint
         //     stroke); Shift+LMB or RMB erases. Each stroke's painted cells become the region for E/Q. ---
@@ -214,13 +229,13 @@ namespace Desert::Editor::Tools
             const bool ctrl = ::ImGui::GetIO().KeyCtrl;
             if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_E, false ) )
             {
-                m_CellSize = std::min( m_CellSize * 2.0f, 100000.0f );
-                changed    = true;
+                ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
+                changed     = true;
             }
             else if ( ctrl && ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) )
             {
-                m_CellSize = std::max( m_CellSize * 0.5f, 1.0f );
-                changed    = true;
+                ms.CellSize = std::max( ms.CellSize * 0.5f, 1.0f );
+                changed     = true;
             }
             else if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) && !m_Region.empty() ) // extrude out
             {
@@ -246,54 +261,37 @@ namespace Desert::Editor::Tools
             }
         }
 
-        // --- Tool panel (Accept / Cancel / Clear + stats + hints). ---
-        ::ImGui::SetNextWindowPos( ImVec2( viewportPos.x + 12.0f, viewportPos.y + 46.0f ), ImGuiCond_Always );
-        ::ImGui::SetNextWindowBgAlpha( 0.88f );
-        if ( ::ImGui::Begin( "CubeGrid##modeling", nullptr,
-                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse |
-                                  ImGuiWindowFlags_NoNav ) )
+        ms.Cubes = static_cast<int>( m_Cells.size() );
+
+        // --- Viewport bottom bar: tool name + Accept / Cancel (UE5-style confirmation), shown while a
+        //     blockout is in progress. ---
+        if ( toolActive && ( !m_Cells.empty() || m_Entity != Common::UUID::Null() ) )
         {
-            ::ImGui::TextUnformatted( "CubeGrid Blockout" );
-            ::ImGui::Separator();
-            ::ImGui::Text( "Grid step: %.0f", m_CellSize );
-            ::ImGui::SameLine();
-            if ( ::ImGui::SmallButton( "-##g" ) )
+            const float barH = 34.0f;
+            ::ImGui::SetNextWindowPos(
+                 ImVec2( viewportPos.x + viewportSize.x * 0.5f, viewportPos.y + viewportSize.y - barH - 12.0f ),
+                 ImGuiCond_Always, ImVec2( 0.5f, 0.0f ) );
+            ::ImGui::SetNextWindowBgAlpha( 0.9f );
+            if ( ::ImGui::Begin( "##cubegrid_accept", nullptr,
+                                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
+                                      ImGuiWindowFlags_NoNav ) )
             {
-                m_CellSize = std::max( m_CellSize * 0.5f, 1.0f );
-                changed    = true;
+                ::ImGui::TextUnformatted( "CubeGrid" );
+                ::ImGui::SameLine( 0.0f, 16.0f );
+                if ( ::ImGui::Button( "Accept" ) && !m_Cells.empty() )
+                {
+                    Core::SelectionManager::SetSelected( m_Entity );
+                    m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
+                    m_Cells.clear();
+                    m_Region.clear();
+                }
+                ::ImGui::SameLine();
+                if ( ::ImGui::Button( "Cancel" ) )
+                    Cancel( scene );
             }
-            ::ImGui::SameLine();
-            if ( ::ImGui::SmallButton( "+##g" ) )
-            {
-                m_CellSize = std::min( m_CellSize * 2.0f, 100000.0f );
-                changed    = true;
-            }
-            ::ImGui::Text( "Cubes: %d", static_cast<int>( m_Cells.size() ) );
-            ::ImGui::Separator();
-            if ( ::ImGui::Button( "Accept" ) && !m_Cells.empty() )
-            {
-                Core::SelectionManager::SetSelected( m_Entity );
-                m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
-                m_Cells.clear();
-                m_Region.clear();
-            }
-            ::ImGui::SameLine();
-            if ( ::ImGui::Button( "Cancel" ) )
-                Cancel( scene );
-            ::ImGui::SameLine();
-            if ( ::ImGui::Button( "Clear" ) )
-            {
-                m_Cells.clear();
-                m_Region.clear();
-                changed = true;
-            }
-            ::ImGui::Separator();
-            ::ImGui::TextDisabled( "LMB drag: paint cells  -  Shift/RMB: erase" );
-            ::ImGui::TextDisabled( "E / Q: extrude stroke out / in" );
-            ::ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
+            ::ImGui::End();
         }
-        ::ImGui::End();
 
         if ( changed )
             RegenMesh( scene );

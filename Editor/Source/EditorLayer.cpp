@@ -50,6 +50,7 @@
 #include "Editor/Panels/ViewportPanel/ViewportPanel.hpp"
 #include "Editor/Panels/MeshEditor/MeshEditorPanel.hpp"
 #include "Editor/Panels/SceneSettings/SceneSettingsPanel.hpp"
+#include "Editor/Panels/Modeling/ModelingPanel.hpp"
 #include "Editor/Panels/Logs/LogsPanel.hpp"
 #include "Editor/Panels/Collections/CollectionsPanel.hpp"
 #include "Editor/Panels/NodeGraph/NodeGraphPanel.hpp"
@@ -327,6 +328,7 @@ namespace Desert::Editor
             m_Panels.emplace_back( std::move( fileExplorer ) );
         }
         m_Panels.emplace_back( std::make_unique<Editor::MeshEditorPanel>( m_MainScene ) );
+        m_Panels.emplace_back( std::make_unique<Editor::ModelingPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
         m_Panels.emplace_back( std::make_unique<Editor::CollectionsPanel>( m_AssetManager.get() ) );

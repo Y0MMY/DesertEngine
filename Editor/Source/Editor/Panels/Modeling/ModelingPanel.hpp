@@ -1,0 +1,33 @@
+#pragma once
+
+#include "../IPanel.hpp"
+
+#include <memory>
+
+namespace Desert::Core
+{
+    class Scene;
+}
+
+namespace Desert::Editor
+{
+    // UE5-style Modeling Mode palette: a left category rail (Create / Select / XForm / …), a 2-column tool
+    // grid, and a Tool Properties section for the active tool. Currently the Create category's CubeGrid tool
+    // is functional (the rest are placeholders). Selecting CubeGrid switches the viewport into Modeling mode;
+    // the actual geometry editing happens in the viewport (CubeGridTool), driven through Core::ModelingState.
+    class ModelingPanel final : public IPanel
+    {
+    public:
+        explicit ModelingPanel( const std::shared_ptr<Desert::Core::Scene>& scene );
+
+        void OnUIRender() override;
+        void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
+        {
+            m_Scene = scene;
+        }
+
+    private:
+        std::shared_ptr<Desert::Core::Scene> m_Scene;
+        int                                  m_Category = 0; // 0 = Create (only populated one)
+    };
+} // namespace Desert::Editor
