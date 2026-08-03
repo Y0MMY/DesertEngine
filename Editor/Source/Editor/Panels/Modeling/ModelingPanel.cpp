@@ -15,6 +15,13 @@ namespace Desert::Editor
     {
     }
 
+    void ModelingPanel::OnPreUpdate()
+    {
+        // The Modeling palette only exists while the viewport is in Modeling mode (enter it via the mode
+        // dropdown), mirroring UE5 — otherwise the panel is hidden entirely.
+        GetVisibility() = Core::ViewportMode::Get() == Core::EditorMode::Modeling;
+    }
+
     void ModelingPanel::OnUIRender()
     {
         using MS  = Core::ModelingState;
@@ -35,7 +42,9 @@ namespace Desert::Editor
                              { ICON_MDI_VECTOR_SQUARE, "Model" }, { ICON_MDI_CUBE_SCAN, "Mesh" },
                              { ICON_MDI_CUBE_OUTLINE, "Voxel" },  { ICON_MDI_PALETTE, "Bake" } };
 
-        ImGui::BeginChild( "##modeling_cats", ImVec2( 66.0f, 0.0f ), true );
+        ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 6.0f, 8.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 6.0f, 8.0f ) );
+        ImGui::BeginChild( "##modeling_cats", ImVec2( 80.0f, 0.0f ), true );
         for ( int i = 0; i < static_cast<int>( IM_ARRAYSIZE( cats ) ); ++i )
         {
             const bool active = i == m_Category;
@@ -43,12 +52,13 @@ namespace Desert::Editor
                 ImGui::PushStyleColor( ImGuiCol_Button, sel );
             char label[64];
             std::snprintf( label, sizeof( label ), "%s\n%s", cats[i].Icon, cats[i].Name );
-            if ( ImGui::Button( label, ImVec2( -1.0f, 44.0f ) ) )
+            if ( ImGui::Button( label, ImVec2( -1.0f, 46.0f ) ) )
                 m_Category = i;
             if ( active )
                 ImGui::PopStyleColor();
         }
         ImGui::EndChild();
+        ImGui::PopStyleVar( 2 );
 
         ImGui::SameLine();
 
@@ -160,6 +170,10 @@ namespace Desert::Editor
                 ImGui::SameLine();
                 if ( ImGui::SmallButton( "+##gs" ) )
                     ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
+                ImGui::SetNextItemWidth( 90.0f );
+                ImGui::SliderInt( "Brush W", &ms.BrushW, 1, 8 );
+                ImGui::SetNextItemWidth( 90.0f );
+                ImGui::SliderInt( "Brush D", &ms.BrushD, 1, 8 );
                 ImGui::Text( "Cubes: %d", ms.Cubes );
                 if ( ImGui::Button( "Clear" ) )
                     ms.ReqClear = true;

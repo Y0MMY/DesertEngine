@@ -31,6 +31,8 @@ namespace Desert::Editor::Core
         Tool   ActiveTool = Tool::None;
         Output OutputType = Output::DynamicMesh;
         float  CellSize   = 100.0f; // grid step
+        int    BrushW     = 1;      // CubeGrid paint footprint (cells) across the two in-plane axes
+        int    BrushD     = 1;
         bool   ReqAccept  = false;  // one-shot: commit the blockout, start a fresh one
         bool   ReqCancel  = false;  // one-shot: delete the in-progress blockout
         bool   ReqClear   = false;  // one-shot: clear the cells (keep editing)

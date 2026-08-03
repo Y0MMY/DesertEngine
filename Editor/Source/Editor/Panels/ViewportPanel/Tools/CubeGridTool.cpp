@@ -224,17 +224,60 @@ namespace Desert::Editor::Tools
             for ( uint64_t k : m_Cells )
                 drawBox( Unpack( k ), Unpack( k ), IM_COL32( 180, 195, 215, 70 ) );
 
-        // Highlight the cell under the cursor (green = paint, red = erase).
+        // In-plane axes of the target face + its plane coordinate, and the WxD brush footprint.
+        const int   na        = m_AddNormal.x ? 0 : m_AddNormal.y ? 1 : 2;
+        const int   ua        = ( na + 1 ) % 3;
+        const int   va        = ( na + 2 ) % 3;
+        const float pcrd      = static_cast<float>( m_HasAdd ? m_Add[na] : 0 ) * cs;
+        const int   bw        = std::max( 1, ms.BrushW );
+        const int   bd        = std::max( 1, ms.BrushD );
+        auto        footprint = [&]( std::vector<glm::ivec3>& out )
+        {
+            out.clear();
+            for ( int i = 0; i < bw; ++i )
+                for ( int j = 0; j < bd; ++j )
+                {
+                    glm::ivec3 c = m_Add;
+                    c[ua] += i;
+                    c[va] += j;
+                    out.push_back( c );
+                }
+        };
+        // Flat cell face on the grid plane (a square) — reads as a GRID CELL, not a 3D cube.
+        auto drawCellFace = [&]( const glm::ivec3& c, ImU32 fill, ImU32 outline )
+        {
+            glm::vec2 s[4];
+            for ( int k = 0; k < 4; ++k )
+            {
+                glm::vec3 w( 0.0f );
+                w[na] = pcrd;
+                w[ua] = static_cast<float>( c[ua] + ( ( k == 1 || k == 2 ) ? 1 : 0 ) ) * cs;
+                w[va] = static_cast<float>( c[va] + ( ( k == 2 || k == 3 ) ? 1 : 0 ) ) * cs;
+                if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[k] ) )
+                    return;
+            }
+            dl->AddQuadFilled( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
+                               ImVec2( s[3].x, s[3].y ), fill );
+            dl->AddQuad( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
+                         ImVec2( s[3].x, s[3].y ), outline, 1.5f );
+        };
+
+        // Highlight the target as flat grid cells (green = the WxD paint footprint, red = erase).
         if ( toolActive )
         {
             if ( removeMode && m_HasRemove )
-                drawBox( m_Remove, m_Remove, IM_COL32( 240, 80, 60, 255 ) );
+                drawCellFace( m_Remove, IM_COL32( 240, 80, 60, 70 ), IM_COL32( 240, 90, 70, 255 ) );
             else if ( m_HasAdd )
-                drawBox( m_Add, m_Add, IM_COL32( 90, 220, 120, 255 ) );
+            {
+                std::vector<glm::ivec3> fp;
+                footprint( fp );
+                for ( const auto& c : fp )
+                    drawCellFace( c, IM_COL32( 70, 220, 100, 70 ), IM_COL32( 90, 240, 120, 255 ) );
+            }
         }
 
-        // --- Continuous cell painting: hold LMB and move to add every cell the cursor passes over (a paint
-        //     stroke); Shift+LMB or RMB erases. Each stroke's painted cells become the region for E/Q. ---
+        // --- Continuous painting: hold LMB and move to add the WxD footprint under the cursor; Shift/RMB
+        //     erases. Each stroke's painted cells become the region for E/Q. ---
         if ( interact )
         {
             const bool lmb   = ::ImGui::IsMouseDown( ImGuiMouseButton_Left );
@@ -254,11 +297,14 @@ namespace Desert::Editor::Tools
             }
             else if ( m_Dragging && lmb && m_HasAdd )
             {
-                if ( m_Cells.insert( Pack( m_Add ) ).second ) // paint this cell (skip if already filled)
-                {
-                    m_Region.push_back( m_Add );
-                    changed = true;
-                }
+                std::vector<glm::ivec3> fp;
+                footprint( fp );
+                for ( const auto& c : fp )
+                    if ( m_Cells.insert( Pack( c ) ).second )
+                    {
+                        m_Region.push_back( c );
+                        changed = true;
+                    }
             }
             if ( !lmb )
                 m_Dragging = false;
