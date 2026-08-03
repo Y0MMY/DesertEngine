@@ -347,7 +347,7 @@ namespace Desert::UI
 
                     const float contentPx = sv.ContentHeight * scale;
                     scrollMaxPx           = std::max( 0.0f, contentPx - rect.H );
-                    const bool hover = input && input->MousePx.x >= rect.X &&
+                    const bool hover      = input && input->MousePx.x >= rect.X &&
                                        input->MousePx.x <= rect.X + rect.W && input->MousePx.y >= rect.Y &&
                                        input->MousePx.y <= rect.Y + rect.H;
                     if ( hover && input->ScrollDelta != 0.0f )
