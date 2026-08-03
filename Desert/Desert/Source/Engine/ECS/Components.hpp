@@ -566,6 +566,23 @@ namespace Desert::ECS
         Right
     };
 
+    // Vertical placement of the (possibly multi-line) text block within the element rect.
+    enum class UITextVAlign
+    {
+        Top,
+        Middle,
+        Bottom
+    };
+
+    // What to do when the text is wider/taller than the element rect (mutually resolved in this order:
+    // AutoSize shrinks first, then Wrap breaks lines, then Ellipsis truncates the overflow).
+    enum class UITextOverflow
+    {
+        Overflow, // draw past the rect (legacy behaviour)
+        Ellipsis, // truncate the overflowing tail with "…"
+        Clip      // hard-clip to the rect (no ellipsis)
+    };
+
     // How the canvas maps to the viewport (Unity CanvasScaler-style):
     //  Stretch        - canvas == the WHOLE viewport, 1:1 pixels. Layout is driven by anchors, so a full-screen
     //                   element (anchors 0,0-1,1) fills any resolution and nothing "zooms" when the window
@@ -936,6 +953,28 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Alignment" ), Category( "UI Text" ) )
         UITextAlign Align = UITextAlign::Center;
+
+        PROPERTY( DisplayName( "Vertical Align" ), Category( "UI Text" ) )
+        UITextVAlign VerticalAlign = UITextVAlign::Middle;
+
+        // --- Layout (Phase E) ---------------------------------------------------------------------------
+        PROPERTY( DisplayName( "Word Wrap" ), Category( "Layout" ) )
+        bool Wrap = false; // break long lines at word boundaries to fit the element width
+
+        PROPERTY( DisplayName( "Line Spacing" ), Category( "Layout" ), Range( 0.5f, 3.0f ) )
+        float LineSpacing = 1.0f; // multiplier on the font's natural line height
+
+        PROPERTY( DisplayName( "Auto Size" ), Category( "Layout" ) )
+        bool AutoSize = false; // shrink the font (down to Min Font Size) until the block fits the rect
+
+        PROPERTY( DisplayName( "Min Font Size" ), Category( "Layout" ), Range( 4.0f, 200.0f ) )
+        float MinFontSize = 8.0f; // floor for Auto Size
+
+        PROPERTY( DisplayName( "Overflow" ), Category( "Layout" ) )
+        UITextOverflow Overflow = UITextOverflow::Overflow; // what to do when the text still doesn't fit
+
+        PROPERTY( DisplayName( "Rich Text" ), Category( "Layout" ) )
+        bool RichText = false; // parse BBCode tags: [color=#rrggbb]..[/color], [b]..[/b]
 
         // Effects (Phase 4).
         PROPERTY( DisplayName( "Shadow" ), Category( "Effects" ) )
