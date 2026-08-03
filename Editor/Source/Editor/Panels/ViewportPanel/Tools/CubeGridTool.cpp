@@ -2,6 +2,7 @@
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/ModelingState.hpp>
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Entity.hpp>
@@ -183,6 +184,46 @@ namespace Desert::Editor::Tools
         const bool interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
         bool       changed    = false;
 
+        if ( toolActive && m_HasAdd )
+        {
+            // Visible working grid on the target plane around the cursor (UE5-style) so you see where cells go.
+            const glm::ivec3 nrm        = m_AddNormal;
+            const int        na         = nrm.x ? 0 : nrm.y ? 1 : 2;
+            const int        ua         = ( na + 1 ) % 3;
+            const int        va         = ( na + 2 ) % 3;
+            const float      planeCoord = static_cast<float>( m_Add[na] ) * cs;
+            const int        G          = 8;
+            auto             gridPt     = [&]( int iu, int iv )
+            {
+                glm::vec3 w( 0.0f );
+                w[na] = planeCoord;
+                w[ua] = static_cast<float>( m_Add[ua] + iu ) * cs;
+                w[va] = static_cast<float>( m_Add[va] + iv ) * cs;
+                return w;
+            };
+            const ImU32 gcol = IM_COL32( 120, 145, 180, 90 );
+            for ( int iu = -G; iu <= G + 1; ++iu )
+            {
+                glm::vec2 a, b;
+                if ( WorldToScreen( gridPt( iu, -G ), viewProj, viewportPos, viewportSize, a ) &&
+                     WorldToScreen( gridPt( iu, G + 1 ), viewProj, viewportPos, viewportSize, b ) )
+                    dl->AddLine( ImVec2( a.x, a.y ), ImVec2( b.x, b.y ), gcol, 1.0f );
+            }
+            for ( int iv = -G; iv <= G + 1; ++iv )
+            {
+                glm::vec2 a, b;
+                if ( WorldToScreen( gridPt( -G, iv ), viewProj, viewportPos, viewportSize, a ) &&
+                     WorldToScreen( gridPt( G + 1, iv ), viewProj, viewportPos, viewportSize, b ) )
+                    dl->AddLine( ImVec2( a.x, a.y ), ImVec2( b.x, b.y ), gcol, 1.0f );
+            }
+        }
+
+        // Overlay every placed cell as a faint wire box — the blockout stays visible in the viewport even
+        // before/independent of the generated mesh (and confirms exactly where cubes landed).
+        if ( toolActive && m_Cells.size() < 4000 )
+            for ( uint64_t k : m_Cells )
+                drawBox( Unpack( k ), Unpack( k ), IM_COL32( 180, 195, 215, 70 ) );
+
         // Highlight the cell under the cursor (green = paint, red = erase).
         if ( toolActive )
         {
@@ -267,30 +308,40 @@ namespace Desert::Editor::Tools
         //     blockout is in progress. ---
         if ( toolActive && ( !m_Cells.empty() || m_Entity != Common::UUID::Null() ) )
         {
-            const float barH = 34.0f;
             ::ImGui::SetNextWindowPos(
-                 ImVec2( viewportPos.x + viewportSize.x * 0.5f, viewportPos.y + viewportSize.y - barH - 12.0f ),
+                 ImVec2( viewportPos.x + viewportSize.x * 0.5f, viewportPos.y + viewportSize.y - 58.0f ),
                  ImGuiCond_Always, ImVec2( 0.5f, 0.0f ) );
-            ::ImGui::SetNextWindowBgAlpha( 0.9f );
+            ::ImGui::SetNextWindowBgAlpha( 0.92f );
+            ::ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 12.0f, 8.0f ) );
+            ::ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 12.0f, 6.0f ) );
+            ::ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8.0f, 6.0f ) );
             if ( ::ImGui::Begin( "##cubegrid_accept", nullptr,
                                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
                                       ImGuiWindowFlags_NoNav ) )
             {
-                ::ImGui::TextUnformatted( "CubeGrid" );
+                ::ImGui::AlignTextToFramePadding();
+                ::ImGui::TextUnformatted( ICON_MDI_GRID "  CubeGrid" );
                 ::ImGui::SameLine( 0.0f, 16.0f );
-                if ( ::ImGui::Button( "Accept" ) && !m_Cells.empty() )
+                ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.30f, 1.0f ) );
+                ::ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.68f, 0.38f, 1.0f ) );
+                if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) && !m_Cells.empty() )
                 {
                     Core::SelectionManager::SetSelected( m_Entity );
                     m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
                     m_Cells.clear();
                     m_Region.clear();
                 }
+                ::ImGui::PopStyleColor( 2 );
                 ::ImGui::SameLine();
-                if ( ::ImGui::Button( "Cancel" ) )
+                ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.55f, 0.22f, 0.22f, 1.0f ) );
+                ::ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.70f, 0.28f, 0.28f, 1.0f ) );
+                if ( ::ImGui::Button( ICON_MDI_CLOSE "  Cancel" ) )
                     Cancel( scene );
+                ::ImGui::PopStyleColor( 2 );
             }
             ::ImGui::End();
+            ::ImGui::PopStyleVar( 3 );
         }
 
         if ( changed )

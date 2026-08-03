@@ -21,6 +21,9 @@ namespace Desert::Editor
         auto& ms  = MS::Get();
         auto  sel = ImVec4( 0.20f, 0.55f, 0.95f, 1.0f ); // active highlight (matches the viewport toolbar)
 
+        ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 6.0f, 6.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 8.0f, 6.0f ) );
+
         // --- Left category rail (icon buttons; only Create is populated) ---
         struct Cat
         {
@@ -82,6 +85,7 @@ namespace Desert::Editor
                 ImGui::TextDisabled( "Pick PolyEdit to edit a mesh's faces." );
             }
             ImGui::EndChild();
+            ImGui::PopStyleVar( 2 );
             return;
         }
 
@@ -89,6 +93,7 @@ namespace Desert::Editor
         {
             ImGui::TextDisabled( "This category is not implemented yet." );
             ImGui::EndChild();
+            ImGui::PopStyleVar( 2 );
             return;
         }
 
@@ -171,5 +176,6 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Pick a tool above (CubeGrid) to begin." );
         }
         ImGui::EndChild();
+        ImGui::PopStyleVar( 2 );
     }
 } // namespace Desert::Editor
