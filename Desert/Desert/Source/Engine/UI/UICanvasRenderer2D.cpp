@@ -84,6 +84,16 @@ namespace Desert::UI
                       const glm::vec4& color, const Assets::AssetHandle& sprite, const glm::vec4& srcBorder,
                       float scale, float rounding )
         {
+            // An animated (GIF) sprite plays its current frame (a pure function of wall-clock time), drawn
+            // stretched to the box; static sprites / 9-slice keep the path below. Non-GIF handles resolve to
+            // nullptr here, so ordinary textures are unaffected.
+            if ( auto* animService = Runtime::ResourceRegistry::GetAnimatedImageService() )
+                if ( Graphic::Image2D* frame = animService->Resolve( sprite ) )
+                {
+                    dl.AddImage( frame, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f }, color );
+                    return;
+                }
+
             Graphic::Image2D* img = ResolveSpriteImage( sprite );
             if ( !img )
             {

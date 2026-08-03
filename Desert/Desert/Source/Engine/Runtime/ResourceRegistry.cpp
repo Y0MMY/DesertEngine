@@ -44,4 +44,10 @@ namespace Desert::Runtime
         return &fontService;
     }
 
+    AnimatedImageService* ResourceRegistry::GetAnimatedImageService()
+    {
+        static AnimatedImageService animatedImageService;
+        return &animatedImageService;
+    }
+
 } // namespace Desert::Runtime

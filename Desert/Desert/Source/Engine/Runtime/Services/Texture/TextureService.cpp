@@ -34,6 +34,17 @@ namespace Desert::Runtime
         return nullptr;
     }
 
+    std::string TextureService::GetSourcePath( const Assets::AssetHandle& handle ) const
+    {
+        if ( auto it = m_TextureAssets.find( handle ); it != m_TextureAssets.end() )
+        {
+            if ( !it->second->IsReadyForUse() )
+                it->second->Load(); // reads the .tex metadata (source path), not pixels
+            return it->second->GetSourcePath();
+        }
+        return {};
+    }
+
     void TextureService::Clear()
     {
     }

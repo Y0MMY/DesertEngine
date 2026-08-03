@@ -17,6 +17,11 @@ namespace Desert::Runtime
 
         Graphic::Texture2D*
              Get( const Assets::AssetHandle& handle ) const; // builds-on-miss from a registered shell
+
+        // Original source file of a registered texture (e.g. ".../foo.gif"), empty when the handle is
+        // unknown. Loads the shell's .tex metadata on demand — used to detect animated (GIF) sources.
+        std::string GetSourcePath( const Assets::AssetHandle& handle ) const;
+
         void Clear();
 
     private:
