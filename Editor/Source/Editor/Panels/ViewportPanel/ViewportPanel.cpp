@@ -975,6 +975,8 @@ namespace Desert::Editor
                 const glm::mat4 viewProj = camera->GetProjectionMatrix() * camera->GetViewMatrix();
                 m_CubeGridTool.Update( *m_Scene, ray, viewProj, m_ViewportData.ViewportPos, m_ViewportData.Size,
                                        m_ViewportData.IsHovered );
+                m_PolyEditTool.Update( *m_Scene, ray, viewProj, m_ViewportData.ViewportPos, m_ViewportData.Size,
+                                       m_ViewportData.IsHovered );
             }
         }
 

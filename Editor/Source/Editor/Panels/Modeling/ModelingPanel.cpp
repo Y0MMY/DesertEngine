@@ -51,6 +51,40 @@ namespace Desert::Editor
 
         // --- Right content: tool grid + tool properties ---
         ImGui::BeginChild( "##modeling_content", ImVec2( 0.0f, 0.0f ), false );
+
+        // Model category (index 4): PolyEdit — face select + push/pull on the selected mesh.
+        if ( m_Category == 4 )
+        {
+            const bool active = ms.ActiveTool == MS::Tool::PolyEdit;
+            if ( active )
+                ImGui::PushStyleColor( ImGuiCol_Button, sel );
+            if ( ImGui::Button( ICON_MDI_VECTOR_SQUARE "  PolyEdit", ImVec2( -1.0f, 30.0f ) ) )
+            {
+                ms.ActiveTool = MS::Tool::PolyEdit;
+                Core::ViewportMode::Set( Core::EditorMode::Modeling );
+            }
+            if ( active )
+                ImGui::PopStyleColor();
+            ImGui::Separator();
+            if ( active )
+            {
+                ImGui::TextUnformatted( "PolyEdit" );
+                ImGui::Spacing();
+                ImGui::TextDisabled( "Select a mesh (e.g. a CubeGrid blockout)" );
+                ImGui::TextDisabled( "in Select mode first, then:" );
+                ImGui::TextDisabled( "LMB a face -> highlights green" );
+                ImGui::TextDisabled( "LMB-drag the face -> push / pull" );
+                ImGui::Spacing();
+                ImGui::TextDisabled( "Extrude / Bevel / Inset: coming next." );
+            }
+            else
+            {
+                ImGui::TextDisabled( "Pick PolyEdit to edit a mesh's faces." );
+            }
+            ImGui::EndChild();
+            return;
+        }
+
         if ( m_Category != 0 )
         {
             ImGui::TextDisabled( "This category is not implemented yet." );

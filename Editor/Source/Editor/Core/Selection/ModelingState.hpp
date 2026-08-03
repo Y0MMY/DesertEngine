@@ -12,7 +12,8 @@ namespace Desert::Editor::Core
         enum class Tool
         {
             None = 0,
-            CubeGrid
+            CubeGrid,
+            PolyEdit
         };
         enum class Output // where a committed blockout goes
         {
