@@ -175,21 +175,22 @@ namespace Desert::Editor
                 ImGui::SetNextItemWidth( 90.0f );
                 ImGui::SliderInt( "Brush D", &ms.BrushD, 1, 8 );
 
-                // Height: a FREE, continuous world-space value. Drag in the viewport sets it live; editing it
-                // here (or E/Q, arrows) re-deforms the last box before Accept.
+                // Brush Height: how many cells thick each painted stamp is, along the surface normal.
+                int h = std::max( 1, static_cast<int>( std::lround( ms.Height ) ) );
                 ImGui::SetNextItemWidth( 120.0f );
-                if ( ImGui::DragFloat( "Height", &ms.Height, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
-                    ms.Height = std::clamp( ms.Height, 0.02f, 100000.0f );
+                if ( ImGui::SliderInt( "Brush Height", &h, 1, 64 ) )
+                    ms.Height = static_cast<float>( h );
 
-                ImGui::Text( "Boxes: %d", ms.Cubes );
+                ImGui::Text( "Cells: %d", ms.Cubes );
                 if ( ImGui::Button( "Clear" ) )
                     ms.ReqClear = true;
             }
             ImGui::Separator();
-            ImGui::TextDisabled( "LMB drag: paint the grid (build as you sweep)" );
+            ImGui::TextDisabled( "LMB drag: paint on the surface you point at" );
+            ImGui::TextDisabled( "(ground, or a face of what you built)" );
             ImGui::TextDisabled( "Shift+LMB / RMB: erase" );
-            ImGui::TextDisabled( "Height (above): free extrude of the whole slab" );
-            ImGui::TextDisabled( "E / Q or Up / Down: height +/-" );
+            ImGui::TextDisabled( "E / Q or Up / Down: brush height +/-" );
+            ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
             ImGui::TextDisabled( "Ctrl+E / Ctrl+Q: grid step" );
             ImGui::TextDisabled( "Accept / Cancel: bottom of the viewport" );
         }
