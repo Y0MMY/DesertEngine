@@ -662,6 +662,9 @@ namespace Desert::UI
                                           { mx.x + p.ShadowOffset.x * scale, mx.y + p.ShadowOffset.y * scale },
                                           glm::vec4( p.ShadowColor, p.Opacity ), p.CornerRadius * scale );
 
+                    // Circle forces full rounding (radius = half the shorter side) for avatars / badges / dots.
+                    const float rounding = p.Circle ? std::min( rect.W, rect.H ) * 0.5f : p.CornerRadius * scale;
+
                     // A streamed video fills the panel (its stable texture is updated outside the pass by the
                     // VideoService); it takes precedence over the sprite/gradient fill while a path is set.
                     Graphic::Image2D* video =
@@ -676,7 +679,17 @@ namespace Desert::UI
                                                     glm::vec4( p.GradientColor, p.Opacity ) );
                     else
                         DrawBox( dl, mn, mx, glm::vec4( p.Color, p.Opacity ), p.Sprite, p.SpriteBorder, scale,
-                                 p.CornerRadius * scale );
+                                 rounding );
+
+                    // Gradient ring hugging the edge (avatar / status / progress ring).
+                    if ( p.RingWidth > 0.0f )
+                    {
+                        const glm::vec2 c      = ( mn + mx ) * 0.5f;
+                        const float     outerR = std::min( rect.W, rect.H ) * 0.5f;
+                        const float     rw     = std::max( 1.0f, p.RingWidth * scale );
+                        dl.AddRing( c, outerR, outerR - rw, glm::vec4( p.RingColorA, 1.0f ),
+                                    glm::vec4( p.RingColorB, 1.0f ) );
+                    }
 
                     if ( p.BorderWidth > 0.0f )
                         dl.AddRect( mn, mx, glm::vec4( p.BorderColor, 1.0f ), p.BorderWidth * scale );

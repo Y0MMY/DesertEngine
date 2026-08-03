@@ -910,6 +910,18 @@ namespace Desert::ECS
         std::string VideoPath; // MPEG1 .mpg/.mpeg streamed into this panel (loops, tinted by Color*Opacity).
                                // Overrides the sprite/gradient fill while set. Empty = no video.
 
+        // --- Shape (Phase C) ------------------------------------------------------------------------------
+        PROPERTY( DisplayName( "Circle" ), Category( "UI Panel" ) )
+        bool Circle = false; // force a perfect circle/ellipse (rounding = half the shorter side) at any size —
+                             // for avatars, badges, status dots. Overrides Corner Radius.
+
+        PROPERTY( DisplayName( "Ring Width" ), Category( "Ring" ), Range( 0.0f, 24.0f ) )
+        float RingWidth = 0.0f; // >0 draws a gradient ring hugging the (circular or rounded) edge
+        PROPERTY( DisplayName( "Ring Color A" ), Category( "Ring" ), Color )
+        glm::vec3 RingColorA = glm::vec3( 1.0f, 0.48f, 0.15f );
+        PROPERTY( DisplayName( "Ring Color B" ), Category( "Ring" ), Color )
+        glm::vec3 RingColorB = glm::vec3( 0.18f, 0.89f, 1.0f ); // sweeps A -> B -> A around the ring
+
         // Effects (Phase 4). All in design px; scaled by the canvas scale at draw time.
         PROPERTY( DisplayName( "Use Gradient" ), Category( "Effects" ) )
         bool UseGradient = false; // vertical Color (top) -> Gradient Color (bottom); ignored when a sprite is set

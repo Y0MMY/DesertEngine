@@ -52,6 +52,12 @@ namespace Desert::Graphic::Render2D
         void AddTriangleFilled( const glm::vec2& p0, const glm::vec2& p1, const glm::vec2& p2,
                                 const glm::vec4& color );
 
+        // Annulus (ring) centred at `center`, from `innerRadius` to `outerRadius` (px), as a triangle strip.
+        // The colour sweeps `colorA` -> `colorB` -> `colorA` around the ring (smooth, seamless), giving a
+        // conic-style gradient border for circular avatars / status rings / progress rings. Solid batch.
+        void AddRing( const glm::vec2& center, float outerRadius, float innerRadius, const glm::vec4& colorA,
+                      const glm::vec4& colorB, int segments = 48 );
+
         // Clip subsequently-added primitives to `min`..`max` (px), intersected with the current clip (so
         // nested masks compose). Pair with PopClipRect. The backend applies it as a scissor per batch.
         void PushClipRect( const glm::vec2& min, const glm::vec2& max );

@@ -173,4 +173,41 @@ namespace Desert::Graphic::Render2D
         m_Indices.push_back( base + 2 );
         cmd.IndexCount += 3;
     }
+
+    void DrawList2D::AddRing( const glm::vec2& center, float outerRadius, float innerRadius,
+                              const glm::vec4& colorA, const glm::vec4& colorB, int segments )
+    {
+        if ( outerRadius <= 0.0f || segments < 3 )
+            return;
+        innerRadius = std::clamp( innerRadius, 0.0f, outerRadius );
+
+        constexpr float TWO_PI = 6.28318530717958648f;
+        DrawCommand&    cmd    = CurrentCommand( nullptr, false );
+        const uint32_t  base   = static_cast<uint32_t>( m_Vertices.size() );
+
+        // Two rims (outer, inner) per angular step; colour lerps A->B->A so the seam at 0/2PI is invisible.
+        for ( int i = 0; i <= segments; ++i )
+        {
+            const float     f   = static_cast<float>( i ) / static_cast<float>( segments );
+            const float     a   = TWO_PI * f;
+            const float     t   = f < 0.5f ? f * 2.0f : ( 1.0f - f ) * 2.0f;
+            const glm::vec4 col = colorA * ( 1.0f - t ) + colorB * t;
+            const glm::vec2 dir( std::cos( a ), std::sin( a ) );
+            m_Vertices.push_back( { center + dir * outerRadius, { 0.5f, 0.5f }, col } );
+            m_Vertices.push_back( { center + dir * innerRadius, { 0.5f, 0.5f }, col } );
+        }
+
+        for ( int i = 0; i < segments; ++i ) // two triangles bridge rim pair i -> i+1
+        {
+            const uint32_t o0 = base + i * 2, in0 = base + i * 2 + 1;
+            const uint32_t o1 = base + ( i + 1 ) * 2, in1 = base + ( i + 1 ) * 2 + 1;
+            m_Indices.push_back( o0 );
+            m_Indices.push_back( o1 );
+            m_Indices.push_back( in1 );
+            m_Indices.push_back( o0 );
+            m_Indices.push_back( in1 );
+            m_Indices.push_back( in0 );
+            cmd.IndexCount += 6;
+        }
+    }
 } // namespace Desert::Graphic::Render2D
