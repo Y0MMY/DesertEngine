@@ -429,6 +429,8 @@ namespace Desert::Editor
                         select( AddUIChild<ECS::UISliderComponent>( *m_Scene, parent, "UI Slider" ) );
                     if ( ImGui::MenuItem( ICON_MDI_VIEW_LIST "  Scroll View" ) )
                         select( AddUIChild<ECS::UIScrollViewComponent>( *m_Scene, parent, "UI Scroll View" ) );
+                    if ( ImGui::MenuItem( ICON_MDI_FORM_TEXTBOX "  Input Field" ) )
+                        select( AddUIChild<ECS::UIInputFieldComponent>( *m_Scene, parent, "UI Input Field" ) );
                 }
                 ImGui::EndPopup();
             }

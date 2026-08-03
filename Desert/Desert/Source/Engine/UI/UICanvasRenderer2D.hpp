@@ -20,10 +20,12 @@ namespace Desert::UI
     // show their normal state) — e.g. the editor authoring view.
     struct UIInput
     {
-        glm::vec2 MousePx       = { 0.0f, 0.0f };
-        bool      MouseDown     = false;
-        bool      MouseReleased = false;
-        float     ScrollDelta   = 0.0f; // mouse-wheel notches this frame (+ = up); drives ScrollView
+        glm::vec2   MousePx       = { 0.0f, 0.0f };
+        bool        MouseDown     = false;
+        bool        MouseReleased = false;
+        float       ScrollDelta   = 0.0f; // mouse-wheel notches this frame (+ = up); drives ScrollView
+        std::string TypedText;            // UTF-8 chars typed this frame (drives the focused InputField)
+        bool        Backspace = false;    // backspace pressed this frame
     };
 
     // Emit the scene's visible canvas into @p dl in pixel coordinates within @p viewportPx. When the canvas is
@@ -33,5 +35,5 @@ namespace Desert::UI
     // no visible canvas to draw.
     bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
                          const glm::mat4* worldViewProj = nullptr, const UIInput* input = nullptr,
-                         std::string* outClicked = nullptr );
+                         std::string* outClicked = nullptr, entt::entity* focused = nullptr );
 } // namespace Desert::UI

@@ -729,6 +729,41 @@ namespace Desert::ECS
         UIScrollViewData Data;
     };
 
+    // A single-line text input. Click to focus (runtime), then typing edits Text; a caret shows at the end.
+    // Placeholder shows (dimmed) when empty + unfocused.
+    struct UIInputFieldData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Text" ), Category( "UI Input Field" ) )
+        std::string Text;
+
+        PROPERTY( DisplayName( "Placeholder" ), Category( "UI Input Field" ) )
+        std::string Placeholder = "Enter text...";
+
+        PROPERTY( DisplayName( "Font Size" ), Category( "UI Input Field" ), Range( 6.0f, 96.0f ) )
+        float FontSize = 20.0f;
+
+        PROPERTY( DisplayName( "Text Color" ), Category( "UI Input Field" ), Color )
+        glm::vec3 TextColor = glm::vec3( 0.92f, 0.94f, 0.98f );
+
+        PROPERTY( DisplayName( "Placeholder Color" ), Category( "UI Input Field" ), Color )
+        glm::vec3 PlaceholderColor = glm::vec3( 0.45f, 0.47f, 0.52f );
+
+        PROPERTY( DisplayName( "Background" ), Category( "UI Input Field" ), Color )
+        glm::vec3 Background = glm::vec3( 0.10f, 0.11f, 0.14f );
+
+        PROPERTY( DisplayName( "Focus Border" ), Category( "UI Input Field" ), Color )
+        glm::vec3 FocusColor = glm::vec3( 0.30f, 0.55f, 0.90f );
+
+        PROPERTY( DisplayName( "Corner Radius" ), Category( "UI Input Field" ), Range( 0.0f, 32.0f ) )
+        float CornerRadius = 4.0f;
+    };
+    struct UIInputFieldComponent
+    {
+        UIInputFieldData Data;
+    };
+
     // Root of a screen-space UI tree. Child entities with a UILayout are laid out against this canvas. Add UI
     // elements as CHILDREN of the canvas entity (the viewport "UI" menu / UI Editor do this for you).
     struct UICanvasData

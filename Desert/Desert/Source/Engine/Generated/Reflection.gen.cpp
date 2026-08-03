@@ -208,6 +208,20 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UIInputFieldData;
+                TypeBuilder( "UIInputFieldData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Text", .Type = FieldType::String, .Offset = offsetof( T, Text ), .Size = sizeof( T::Text ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Text", .Category = "UI Input Field", } } )
+                    .Field( FieldInfo{ .Name = "Placeholder", .Type = FieldType::String, .Offset = offsetof( T, Placeholder ), .Size = sizeof( T::Placeholder ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Placeholder", .Category = "UI Input Field", } } )
+                    .Field( FieldInfo{ .Name = "FontSize", .Type = FieldType::Float, .Offset = offsetof( T, FontSize ), .Size = sizeof( T::FontSize ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Font Size", .Category = "UI Input Field", .HasRange = true, .RangeMin = 6.0f, .RangeMax = 96.0f, } } )
+                    .Field( FieldInfo{ .Name = "TextColor", .Type = FieldType::Vec3, .Offset = offsetof( T, TextColor ), .Size = sizeof( T::TextColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Text Color", .Category = "UI Input Field", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "PlaceholderColor", .Type = FieldType::Vec3, .Offset = offsetof( T, PlaceholderColor ), .Size = sizeof( T::PlaceholderColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Placeholder Color", .Category = "UI Input Field", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "Background", .Type = FieldType::Vec3, .Offset = offsetof( T, Background ), .Size = sizeof( T::Background ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Background", .Category = "UI Input Field", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "FocusColor", .Type = FieldType::Vec3, .Offset = offsetof( T, FocusColor ), .Size = sizeof( T::FocusColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Focus Border", .Category = "UI Input Field", .IsColor = true, } } )
+                    .Field( FieldInfo{ .Name = "CornerRadius", .Type = FieldType::Float, .Offset = offsetof( T, CornerRadius ), .Size = sizeof( T::CornerRadius ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Corner Radius", .Category = "UI Input Field", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 32.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UICanvasData;
                 TypeBuilder( "UICanvasData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "ScaleMode", .Type = FieldType::Enum, .Offset = offsetof( T, ScaleMode ), .Size = sizeof( T::ScaleMode ), .TypeName = "UICanvasScaleMode", .Meta = PropertyMetadata{ .DisplayName = "Scale Mode", .Category = "UI Canvas", }, .EnumValues = { EnumValue{ "Stretch", 0 }, EnumValue{ "ScaleWithScreen", 1 }, EnumValue{ "Letterbox", 2 }, } } )

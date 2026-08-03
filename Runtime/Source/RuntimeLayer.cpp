@@ -43,6 +43,8 @@
 
 #include <Common/Core/Events/Event.hpp>
 #include <Common/Core/Events/MouseEvents.hpp>
+#include <Common/Core/Events/KeyEvents.hpp>
+#include <Common/Core/KeyCodes.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -291,11 +293,15 @@ namespace Desert::Player
                 input.MouseDown     = down;
                 input.MouseReleased = m_PrevMouseDown && !down;
                 input.ScrollDelta   = m_ScrollAccum;
+                input.TypedText     = m_TypedText;
+                input.Backspace     = m_Backspace;
                 m_PrevMouseDown     = down;
                 m_ScrollAccum       = 0.0f;
+                m_TypedText.clear();
+                m_Backspace = false;
 
                 UI::RenderCanvas2D( m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
-                                    &clicked );
+                                    &clicked, &m_FocusedUI );
 
                 if ( m_SplashTimer > 0.0f )
                 {
@@ -374,11 +380,50 @@ namespace Desert::Player
 
     void RuntimeLayer::OnEvent( Common::Event& e )
     {
-        // Accumulate mouse-wheel delta for the UI (ScrollView); consumed + reset in the present.
-        Common::EventManager( e ).Notify<Common::MouseScrolledEvent>(
+        Common::EventManager mgr( e );
+
+        // Mouse wheel -> ScrollView. Consumed + reset each present.
+        mgr.Notify<Common::MouseScrolledEvent>(
              [this]( Common::MouseScrolledEvent& ev )
              {
                  m_ScrollAccum += ev.GetYOffset();
+                 return false;
+             } );
+
+        // Text input -> the focused InputField. Encode the codepoint as UTF-8 (the default SDF atlas covers
+        // ASCII; other codepoints are stored but render as blanks until the atlas is extended).
+        mgr.Notify<Common::KeyTypedEvent>(
+             [this]( Common::KeyTypedEvent& ev )
+             {
+                 const unsigned int cp = ev.GetCodepoint();
+                 if ( cp < 0x80 )
+                     m_TypedText += static_cast<char>( cp );
+                 else if ( cp < 0x800 )
+                 {
+                     m_TypedText += static_cast<char>( 0xC0 | ( cp >> 6 ) );
+                     m_TypedText += static_cast<char>( 0x80 | ( cp & 0x3F ) );
+                 }
+                 else if ( cp < 0x10000 )
+                 {
+                     m_TypedText += static_cast<char>( 0xE0 | ( cp >> 12 ) );
+                     m_TypedText += static_cast<char>( 0x80 | ( ( cp >> 6 ) & 0x3F ) );
+                     m_TypedText += static_cast<char>( 0x80 | ( cp & 0x3F ) );
+                 }
+                 else
+                 {
+                     m_TypedText += static_cast<char>( 0xF0 | ( cp >> 18 ) );
+                     m_TypedText += static_cast<char>( 0x80 | ( ( cp >> 12 ) & 0x3F ) );
+                     m_TypedText += static_cast<char>( 0x80 | ( ( cp >> 6 ) & 0x3F ) );
+                     m_TypedText += static_cast<char>( 0x80 | ( cp & 0x3F ) );
+                 }
+                 return false;
+             } );
+
+        mgr.Notify<Common::KeyPressedEvent>(
+             [this]( Common::KeyPressedEvent& ev )
+             {
+                 if ( ev.GetKeyCode() == Common::KeyCode::Backspace )
+                     m_Backspace = true;
                  return false;
              } );
     }

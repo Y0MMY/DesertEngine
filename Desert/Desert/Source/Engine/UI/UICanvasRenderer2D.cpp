@@ -150,6 +150,37 @@ namespace Desert::UI
             }
             emit( { 0.0f, 0.0f }, glm::vec4( t.Color, 1.0f ) );
         }
+
+        // Width in px of `text` at `fontSizePx` in the default font (for the input caret). 0 if no font.
+        float MeasureTextPx( const std::string& text, float fontSizePx )
+        {
+            auto* fs = Runtime::ResourceRegistry::GetFontService();
+            if ( !fs )
+                return 0.0f;
+            Runtime::Font* font = fs->Get( "Resources/Fonts/Roboto-Regular.ttf", 48.0f );
+            if ( !font || !font->Baked.Valid() )
+                return 0.0f;
+            const Text::BakedFont& bf = font->Baked;
+            const float            s  = bf.PixelHeight > 0.0f ? fontSizePx / bf.PixelHeight : 0.0f;
+            float                  w  = 0.0f;
+            for ( char ch : text )
+            {
+                const auto it = bf.Glyphs.find( static_cast<uint32_t>( static_cast<unsigned char>( ch ) ) );
+                if ( it != bf.Glyphs.end() )
+                    w += it->second.Advance * s;
+            }
+            return w;
+        }
+
+        // Remove the last UTF-8 codepoint (trailing continuation bytes + the lead/ASCII byte).
+        void Utf8PopBack( std::string& s )
+        {
+            while ( !s.empty() && ( static_cast<unsigned char>( s.back() ) & 0xC0 ) == 0x80 )
+                s.pop_back();
+            if ( !s.empty() )
+                s.pop_back();
+        }
+
         // Maps the canvas to the viewport per its scale mode — mirrors ResolveCanvas in the ImGui renderer so
         // both paths agree on layout. Returns the canvas root rect (screen px) + the uniform scale applied to
         // every element's offsets / min-size.
@@ -185,7 +216,7 @@ namespace Desert::UI
         // group — it overrides the element's own anchors for position + size.
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
                           Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked,
-                          const Rect* forcedRect = nullptr )
+                          entt::entity* focused, const Rect* forcedRect = nullptr )
         {
             Rect       rect      = parent;
             const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
@@ -326,6 +357,45 @@ namespace Desert::UI
                         sl.Value = sl.MinValue + nt * range;
                     }
                 }
+                else if ( reg.has<ECS::UIInputFieldComponent>( e ) )
+                {
+                    auto&      f         = reg.get<ECS::UIInputFieldComponent>( e ).Data;
+                    const bool isFocused = focused && *focused == e;
+                    const bool hover     = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
+                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+
+                    dl.AddRectFilled( mn, mx, glm::vec4( f.Background, 1.0f ), f.CornerRadius * scale );
+                    if ( isFocused )
+                        dl.AddRect( mn, mx, glm::vec4( f.FocusColor, 1.0f ), std::max( 1.0f, 2.0f * scale ) );
+
+                    // Text (or dimmed placeholder), clipped to the field; caret at the end when focused.
+                    const bool      showPlaceholder = f.Text.empty() && !isFocused;
+                    ECS::UITextData td;
+                    td.Text     = showPlaceholder ? f.Placeholder : f.Text;
+                    td.FontSize = f.FontSize;
+                    td.Color    = showPlaceholder ? f.PlaceholderColor : f.TextColor;
+                    td.Align    = ECS::UITextAlign::Left;
+                    dl.PushClipRect( mn, mx );
+                    DrawText2D( dl, td, rect, scale );
+                    if ( isFocused )
+                    {
+                        const float caretX = rect.X + 6.0f + MeasureTextPx( f.Text, f.FontSize * scale );
+                        dl.AddRectFilled( { caretX, rect.Y + rect.H * 0.2f },
+                                          { caretX + std::max( 1.0f, scale ), rect.Y + rect.H * 0.8f },
+                                          glm::vec4( f.TextColor, 1.0f ) );
+                    }
+                    dl.PopClipRect();
+
+                    if ( isFocused && input )
+                    {
+                        if ( !input->TypedText.empty() )
+                            f.Text += input->TypedText;
+                        if ( input->Backspace )
+                            Utf8PopBack( f.Text );
+                    }
+                    if ( hover && input && input->MouseReleased && focused )
+                        *focused = e; // click to focus
+                }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
                     DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );
@@ -399,13 +469,13 @@ namespace Desert::UI
 
                     const auto rects = SolveLayoutGroup( childParent, params, sizes );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
-                        DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, &rects[i] );
+                        DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, focused, &rects[i] );
                 }
                 else
                 {
                     for ( auto c : children )
                         if ( reg.valid( c ) )
-                            DrawElement( reg, c, childParent, scale, dl, input, outClicked );
+                            DrawElement( reg, c, childParent, scale, dl, input, outClicked, focused );
                 }
                 if ( clip )
                     dl.PopClipRect();
@@ -431,7 +501,8 @@ namespace Desert::UI
     } // namespace
 
     bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
-                         const glm::mat4* worldViewProj, const UIInput* input, std::string* outClicked )
+                         const glm::mat4* worldViewProj, const UIInput* input, std::string* outClicked,
+                         entt::entity* focused )
     {
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
@@ -471,7 +542,7 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked );
+                    DrawElement( reg, c, canvasRect, scale, dl, input, outClicked, focused );
 
         return true;
     }
