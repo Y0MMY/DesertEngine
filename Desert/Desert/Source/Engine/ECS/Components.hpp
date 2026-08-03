@@ -957,6 +957,45 @@ namespace Desert::ECS
         UIPanelData Data;
     };
 
+    // Built-in vector icon set — drawn crisply at any size with Render2D primitives (no icon font / SVG
+    // dependency). Place as a child of a button/panel, or standalone for status glyphs.
+    enum class UIIconType
+    {
+        Play,
+        User,
+        Server,
+        Cart,
+        Gear,
+        Power,
+        Star,
+        Heart,
+        Check,
+        Close,
+        ChevronRight,
+        Bell
+    };
+
+    struct UIIconData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Icon" ), Category( "UI Icon" ) )
+        UIIconType Icon = UIIconType::Star;
+
+        PROPERTY( DisplayName( "Color" ), Category( "UI Icon" ), Color )
+        glm::vec3 Color = glm::vec3( 1.0f );
+
+        PROPERTY( DisplayName( "Thickness" ), Category( "UI Icon" ), Range( 1.0f, 12.0f ) )
+        float Thickness = 3.0f; // stroke width (design px) for outline-style icons
+
+        PROPERTY( DisplayName( "Scale" ), Category( "UI Icon" ), Range( 0.2f, 1.0f ) )
+        float Scale = 0.7f; // icon size as a fraction of the element's shorter side
+    };
+    struct UIIconComponent
+    {
+        UIIconData Data;
+    };
+
     // Screen-space text label (distinct from the 3D world-space TextComponent).
     struct UITextData
     {

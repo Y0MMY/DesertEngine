@@ -895,6 +895,8 @@ namespace Desert::Core::Serialize
                                                                           &ECS::UITextComponent2D::Data ) );
         Register( MakeReflected<ECS::UIButtonComponent, ECS::UIButtonData>( "UIButton", "UIButtonData",
                                                                             &ECS::UIButtonComponent::Data ) );
+        Register( MakeReflected<ECS::UIIconComponent, ECS::UIIconData>( "UIIcon", "UIIconData",
+                                                                        &ECS::UIIconComponent::Data ) );
         Register( MakeReflected<ECS::UILayoutGroupComponent, ECS::UILayoutGroupData>(
              "UILayoutGroup", "UILayoutGroupData", &ECS::UILayoutGroupComponent::Data ) );
         Register( MakeReflected<ECS::UIProgressBarComponent, ECS::UIProgressBarData>(

@@ -58,6 +58,7 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UICanvasComponent, Data, "UI
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIPanelComponent, Data, "UIPanelData", "UI Panel" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UITextComponent2D, Data, "UITextData", "UI Text" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIButtonComponent, Data, "UIButtonData", "UI Button" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIIconComponent, Data, "UIIconData", "UI Icon" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UILayoutGroupComponent, Data, "UILayoutGroupData",
                                      "UI Layout Group" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIProgressBarComponent, Data, "UIProgressBarData",

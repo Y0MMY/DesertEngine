@@ -52,6 +52,10 @@ namespace Desert::Graphic::Render2D
         void AddTriangleFilled( const glm::vec2& p0, const glm::vec2& p1, const glm::vec2& p2,
                                 const glm::vec4& color );
 
+        // Straight line segment of pixel `thickness`, drawn as a quad (butt caps). Solid batch. Used by the
+        // built-in vector icon set (checks, chevrons, strokes).
+        void AddLine( const glm::vec2& a, const glm::vec2& b, const glm::vec4& color, float thickness );
+
         // Annulus (ring) centred at `center`, from `innerRadius` to `outerRadius` (px), as a triangle strip.
         // The colour sweeps `colorA` -> `colorB` -> `colorA` around the ring (smooth, seamless), giving a
         // conic-style gradient border for circular avatars / status rings / progress rings. Solid batch.

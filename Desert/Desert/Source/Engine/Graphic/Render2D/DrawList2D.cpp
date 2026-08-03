@@ -174,6 +174,25 @@ namespace Desert::Graphic::Render2D
         cmd.IndexCount += 3;
     }
 
+    void DrawList2D::AddLine( const glm::vec2& a, const glm::vec2& b, const glm::vec4& color, float thickness )
+    {
+        const glm::vec2 d   = b - a;
+        const float     len = std::sqrt( d.x * d.x + d.y * d.y );
+        if ( len < 1e-4f )
+            return;
+        const glm::vec2 n = glm::vec2( -d.y, d.x ) / len * ( thickness * 0.5f ); // perpendicular half-width
+
+        DrawCommand&   cmd  = CurrentCommand( nullptr, false );
+        const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
+        m_Vertices.push_back( { a - n, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { a + n, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { b + n, { 0.5f, 0.5f }, color } );
+        m_Vertices.push_back( { b - n, { 0.5f, 0.5f }, color } );
+        const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
+        m_Indices.insert( m_Indices.end(), quad, quad + 6 );
+        cmd.IndexCount += 6;
+    }
+
     void DrawList2D::AddRing( const glm::vec2& center, float outerRadius, float innerRadius,
                               const glm::vec4& colorA, const glm::vec4& colorB, int segments )
     {
