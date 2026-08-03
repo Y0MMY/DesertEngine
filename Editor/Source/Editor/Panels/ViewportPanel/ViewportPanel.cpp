@@ -3,6 +3,7 @@
 #include <Editor/Core/EditorPreferences.hpp>
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
+#include <Editor/Core/Selection/UIPreview.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Core/Selection/ViewportMode.hpp>
@@ -507,6 +508,22 @@ namespace Desert::Editor
                 }
                 if ( ImGui::IsItemHovered() )
                     ImGui::SetTooltip( "2D UI mode: hide the grid + orientation gizmo" );
+
+                // Design <-> Preview: Preview feeds the viewport mouse/keyboard into the canvas so buttons /
+                // toggles / sliders react in the editor (like UMG preview); Design keeps drag/select/handles.
+                ImGui::SameLine();
+                const bool prevActive = m_UIPreview;
+                if ( prevActive )
+                    ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.85f, 0.45f, 0.1f, 1.0f ) );
+                if ( ImGui::Button( m_UIPreview ? ICON_MDI_PLAY "  Preview"
+                                                : ICON_MDI_CURSOR_DEFAULT_OUTLINE "  Design" ) )
+                    m_UIPreview = !m_UIPreview;
+                if ( prevActive )
+                    ImGui::PopStyleColor();
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( m_UIPreview
+                                            ? "Preview: UI is interactive (click buttons). Toggle for Design."
+                                            : "Design: drag/select UI. Toggle for interactive Preview." );
             }
         }
 
@@ -779,9 +796,35 @@ namespace Desert::Editor
         // Render scene
         m_UIHelper->Image( m_Scene->GetFinalImage(), { m_ViewportData.Size.x, m_ViewportData.Size.y } );
 
-        // In-scene UI (WYSIWYG): draw the scene's UICanvas over the viewport image (runtime draw path) plus
-        // the selection marquee + drag/resize handles, and apply mouse drag — Unity/UE-style in-scene editing.
-        DrawUIInScene();
+        // UI Preview vs Design. Preview: publish the viewport pointer/keyboard so the EditorUIPass drives the
+        // canvas with real input (buttons interactive) and SKIP the authoring overlays/handles. Design: the
+        // in-scene WYSIWYG handles (select marquee + drag/resize/anchor) as before.
+        {
+            auto& pv = ::Desert::Editor::Core::UIPreview::Get();
+            if ( m_UIPreview )
+            {
+                const bool down = m_ViewportData.IsHovered && ImGui::IsMouseDown( ImGuiMouseButton_Left );
+                pv.Enabled      = true;
+                pv.HasInput     = m_ViewportData.IsHovered;
+                pv.MousePx      = m_ViewportData.MousePosition;
+                pv.DisplaySize  = m_ViewportData.Size;
+                pv.Released     = pv.Down && !down; // down->up edge
+                pv.Down         = down;
+                pv.Scroll       = m_ViewportData.IsHovered ? ImGui::GetIO().MouseWheel : 0.0f;
+                pv.Tab          = ImGui::IsKeyPressed( ImGuiKey_Tab, false );
+                pv.Submit       = ImGui::IsKeyPressed( ImGuiKey_Enter, false );
+                pv.Backspace    = ImGui::IsKeyPressed( ImGuiKey_Backspace, false );
+                pv.TypedText.clear();
+                for ( ImWchar c : ImGui::GetIO().InputQueueCharacters )
+                    if ( c >= 32 && c < 128 ) // ASCII typed chars (matches the default font atlas)
+                        pv.TypedText.push_back( static_cast<char>( c ) );
+            }
+            else
+            {
+                pv.Enabled = false;
+                DrawUIInScene();
+            }
+        }
 
         // Drag a prefab file from the File Explorer onto the viewport to instantiate it into the scene.
         if ( ImGui::BeginDragDropTarget() )
@@ -1421,7 +1464,7 @@ namespace Desert::Editor
         const bool   overImage = mp.x >= vp.ViewportPos.x && mp.y >= vp.ViewportPos.y &&
                                  mp.x < vp.ViewportPos.x + vp.Size.x && mp.y < vp.ViewportPos.y + vp.Size.y;
 
-        if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() &&
+        if ( e.GetMouseButton() == Common::MouseButton::Left && !m_TerrainTool.BrushEnabled() && !m_UIPreview &&
              Core::ViewportMode::Get() == Core::EditorMode::Select && m_ViewportData.IsHovered && overImage )
         {
             // In-scene UI: the 2D canvas overlays the 3D scene, so a click on a UI element selects it and

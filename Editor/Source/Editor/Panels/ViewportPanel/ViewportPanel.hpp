@@ -118,6 +118,7 @@ namespace Desert::Editor
         // reads like a UI designer. m_SavedShowGrid restores the scene's grid setting when toggled off.
         bool m_UIMode        = false;
         bool m_SavedShowGrid = true;
+        bool m_UIPreview     = false; // Design (drag/select) <-> Preview (buttons interactive) toggle
 
         // In-scene UI drag/resize state. Offsets are captured at drag start so the drag is absolute (no drift).
         UIHandle  m_UIDrag = UIHandle::None;
