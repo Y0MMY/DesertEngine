@@ -167,6 +167,10 @@ namespace Desert::Editor
                 ImGui::SetNextItemWidth( 120.0f );
                 if ( ImGui::DragFloat( "Block Size", &ms.CellSize, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
                     ms.CellSize = std::max( 0.02f, ms.CellSize );
+                // Blocks Per Step: how many cells one Push/Pull moves (UE multiplier).
+                ImGui::SetNextItemWidth( 120.0f );
+                if ( ImGui::SliderInt( "Blocks / Step", &ms.BlocksPerStep, 1, 32 ) )
+                    ms.BlocksPerStep = std::max( 1, ms.BlocksPerStep );
                 ImGui::Text( "Cells: %d", ms.Cubes );
                 if ( ImGui::Button( "Clear" ) )
                     ms.ReqClear = true;

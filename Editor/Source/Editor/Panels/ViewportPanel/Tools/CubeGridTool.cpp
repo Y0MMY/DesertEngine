@@ -98,13 +98,14 @@ namespace Desert::Editor::Tools
     {
         if ( !m_HasSel )
             return;
-        auto      occ  = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
-        const int na   = m_PlaneNa;
-        const int sign = m_PlaneSign;
-        const int ua   = ( na + 1 ) % 3;
-        const int va   = ( na + 2 ) % 3;
+        auto      occ   = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
+        const int na    = m_PlaneNa;
+        const int sign  = m_PlaneSign;
+        const int ua    = ( na + 1 ) % 3;
+        const int va    = ( na + 2 ) % 3;
+        const int steps = std::max( 1, Core::ModelingState::Get().BlocksPerStep ); // Blocks Per Step
 
-        if ( dir > 0 ) // Extrude out: fill the first empty cell from the plane, per column
+        if ( dir > 0 ) // Extrude out: fill `steps` cells from the first empty cell, per column
         {
             for ( int u = m_UMin; u <= m_UMax; ++u )
                 for ( int v = m_VMin; v <= m_VMax; ++v )
@@ -115,23 +116,24 @@ namespace Desert::Editor::Tools
                     c[va] = v;
                     while ( occ( c ) )
                         c[na] += sign;
-                    m_Cells.insert( Pack( c ) );
+                    for ( int s = 0; s < steps; ++s, c[na] += sign )
+                        m_Cells.insert( Pack( c ) );
                 }
-            m_PlaneCell += sign; // plane advances so the next push builds on top
+            m_PlaneCell += sign * steps; // plane advances so the next push builds on top
         }
-        else // Push in: remove the solid cell just inside the plane, per column
+        else // Push in: remove `steps` cells just inside the plane, per column
         {
-            const int inner = m_PlaneCell - sign;
             for ( int u = m_UMin; u <= m_UMax; ++u )
                 for ( int v = m_VMin; v <= m_VMax; ++v )
                 {
                     glm::ivec3 c{ 0 };
-                    c[na] = inner;
+                    c[na] = m_PlaneCell - sign;
                     c[ua] = u;
                     c[va] = v;
-                    m_Cells.erase( Pack( c ) );
+                    for ( int s = 0; s < steps; ++s, c[na] -= sign )
+                        m_Cells.erase( Pack( c ) );
                 }
-            m_PlaneCell -= sign;
+            m_PlaneCell -= sign * steps;
         }
         RegenMesh( scene );
     }
@@ -272,6 +274,72 @@ namespace Desert::Editor::Tools
                          ImVec2( s[3].x, s[3].y ), outline, 2.0f );
         };
 
+        // A world point on plane `na` (planeW) at fractional cell (fu,fv).
+        auto planePt = [&]( float fu, float fv, int na, float planeW )
+        {
+            const int ua = ( na + 1 ) % 3;
+            const int va = ( na + 2 ) % 3;
+            glm::vec3 w( 0.0f );
+            w[na] = planeW;
+            w[ua] = m_Origin[ua] + fu * gs;
+            w[va] = m_Origin[va] + fv * gs;
+            return w;
+        };
+        // A text label with a dark pill, centred at a screen point.
+        auto drawLabel = [&]( const glm::vec2& sp, const char* txt )
+        {
+            const ImVec2 ts = ::ImGui::CalcTextSize( txt );
+            const ImVec2 a( sp.x - ts.x * 0.5f - 4.0f, sp.y - ts.y * 0.5f - 2.0f );
+            const ImVec2 b( sp.x + ts.x * 0.5f + 4.0f, sp.y + ts.y * 0.5f + 2.0f );
+            dl->AddRectFilled( a, b, IM_COL32( 20, 22, 26, 220 ), 3.0f );
+            dl->AddText( ImVec2( sp.x - ts.x * 0.5f, sp.y - ts.y * 0.5f ), IM_COL32( 255, 235, 200, 255 ), txt );
+        };
+        // Grid lines subdividing a rect on the plane + the drawn size (W × D in world units) on its edges.
+        auto drawGridAndDims = [&]( int uMin, int uMax, int vMin, int vMax, int na, float planeW, bool showDims )
+        {
+            const ImU32 gcol = IM_COL32( 255, 185, 90, 120 );
+            if ( ( uMax - uMin ) <= 256 && ( vMax - vMin ) <= 256 ) // internal cell grid (guard huge rects)
+            {
+                for ( int iu = uMin; iu <= uMax + 1; ++iu )
+                {
+                    glm::vec2 a, b;
+                    if ( WorldToScreen( planePt( iu, vMin, na, planeW ), viewProj, viewportPos, viewportSize,
+                                        a ) &&
+                         WorldToScreen( planePt( iu, vMax + 1, na, planeW ), viewProj, viewportPos, viewportSize,
+                                        b ) )
+                        dl->AddLine( ImVec2( a.x, a.y ), ImVec2( b.x, b.y ), gcol, 1.0f );
+                }
+                for ( int iv = vMin; iv <= vMax + 1; ++iv )
+                {
+                    glm::vec2 a, b;
+                    if ( WorldToScreen( planePt( uMin, iv, na, planeW ), viewProj, viewportPos, viewportSize,
+                                        a ) &&
+                         WorldToScreen( planePt( uMax + 1, iv, na, planeW ), viewProj, viewportPos, viewportSize,
+                                        b ) )
+                        dl->AddLine( ImVec2( a.x, a.y ), ImVec2( b.x, b.y ), gcol, 1.0f );
+                }
+            }
+            if ( !showDims )
+                return;
+            // Dimensions (like UE: e.g. "450 × 200").
+            const float wWorld = static_cast<float>( uMax - uMin + 1 ) * gs;
+            const float dWorld = static_cast<float>( vMax - vMin + 1 ) * gs;
+            char        buf[32];
+            glm::vec2   sp;
+            if ( WorldToScreen( planePt( ( uMin + uMax + 1 ) * 0.5f, static_cast<float>( vMin ), na, planeW ),
+                                viewProj, viewportPos, viewportSize, sp ) )
+            {
+                std::snprintf( buf, sizeof( buf ), "%.0f", wWorld );
+                drawLabel( sp, buf );
+            }
+            if ( WorldToScreen( planePt( static_cast<float>( uMin ), ( vMin + vMax + 1 ) * 0.5f, na, planeW ),
+                                viewProj, viewportPos, viewportSize, sp ) )
+            {
+                std::snprintf( buf, sizeof( buf ), "%.0f", dWorld );
+                drawLabel( sp, buf );
+            }
+        };
+
         const bool interact = interactive && toolActive && !::ImGui::IsAnyItemActive();
         bool       changed  = false;
 
@@ -322,6 +390,7 @@ namespace Desert::Editor::Tools
             m_VMax = std::max( m_Anchor.y, cur.y );
             drawRect( m_UMin, m_UMax, m_VMin, m_VMax, na, planeW, IM_COL32( 250, 150, 40, 70 ),
                       IM_COL32( 255, 170, 60, 255 ) );
+            drawGridAndDims( m_UMin, m_UMax, m_VMin, m_VMax, na, planeW, true );
 
             if ( !::ImGui::IsMouseDown( ImGuiMouseButton_Left ) ) // release -> fix the selection
             {
@@ -329,16 +398,18 @@ namespace Desert::Editor::Tools
                 m_HasSel    = true;
             }
         }
-        else if ( m_HasSel ) // keep the fixed selection highlighted (orange)
+        else if ( m_HasSel ) // keep the fixed selection highlighted (orange) + grid + size
         {
-            drawRect( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa,
-                      planeWorldOf( m_PlaneNa, m_PlaneSign, m_PlaneCell ), IM_COL32( 250, 150, 40, 60 ),
+            const float planeW = planeWorldOf( m_PlaneNa, m_PlaneSign, m_PlaneCell );
+            drawRect( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, IM_COL32( 250, 150, 40, 60 ),
                       IM_COL32( 255, 170, 60, 255 ) );
+            drawGridAndDims( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, true );
         }
-        else if ( toolActive && tHas ) // hover: highlight the cell under the cursor
+        else if ( toolActive && tHas ) // hover: highlight the cell under the cursor + a helper grid
         {
-            drawRect( tU, tU, tV, tV, tNa, planeWorldOf( tNa, tSign, tPlaneCell ), IM_COL32( 70, 220, 100, 60 ),
-                      IM_COL32( 90, 240, 120, 255 ) );
+            const float planeW = planeWorldOf( tNa, tSign, tPlaneCell );
+            drawRect( tU, tU, tV, tV, tNa, planeW, IM_COL32( 70, 220, 100, 60 ), IM_COL32( 90, 240, 120, 255 ) );
+            drawGridAndDims( tU - 6, tU + 6, tV - 6, tV + 6, tNa, planeW, false ); // grid helper only
         }
 
         // Resize Grid pins the min corner in place (grow from the corner, not slide away from the origin).
