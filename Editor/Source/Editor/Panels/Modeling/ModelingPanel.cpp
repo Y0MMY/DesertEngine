@@ -154,6 +154,48 @@ namespace Desert::Editor
         {
             ImGui::TextUnformatted( "CubeGrid" );
             ImGui::Spacing();
+            // --- Asset Actions / Grid Reinitialization: the two top sections of UE's Cube Grid Tool ---
+            if ( ImGui::CollapsingHeader( "Asset Actions", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                if ( ImGui::Button( "Accept and Start New", ImVec2( -1.0f, 0.0f ) ) )
+                    ms.ReqAccept = true;
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Keep what you built as a mesh and start a fresh grid.\n"
+                                       "The grid frame and Block Size carry over." );
+            }
+            if ( ImGui::CollapsingHeader( "Grid Reinitialization", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                if ( ImGui::Button( "Reset Grid from Actor", ImVec2( -1.0f, 0.0f ) ) )
+                    ms.ReqResetFromActor = true;
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Put the grid origin on the SELECTED object's origin, so every block\n"
+                                       "size stays flush with its corners instead of tiling from (0,0,0)." );
+            }
+            if ( ImGui::CollapsingHeader( "Options", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                // Moving the frame commits the current piece (cells are lattice indices) and re-tiles from
+                // the new origin — already-built geometry keeps the frame it was made in and never moves.
+                ImGui::SetNextItemWidth( -1.0f );
+                ImGui::DragFloat3( "Grid Frame Origin", &ms.GridOrigin.x, 1.0f, 0.0f, 0.0f, "%.0f" );
+                ImGui::Checkbox( "Show Gizmo", &ms.ShowGizmo );
+
+                // Grid Power: block size = 1 m >> power (Power 2 = 25 cm), like UE's slider. Typing a free
+                // Current Block Size below still wins — the power just snaps to the nearest step.
+                int power = 0;
+                for ( float sz = MS::BaseBlockSize; power < MS::MaxGridPower && sz > ms.CellSize + 0.01f; ++power )
+                    sz *= 0.5f;
+                ImGui::SetNextItemWidth( 120.0f );
+                if ( ImGui::SliderInt( "Grid Power", &power, 0, MS::MaxGridPower ) )
+                    ms.CellSize =
+                         std::max( MS::MinCellSize, MS::BaseBlockSize / static_cast<float>( 1 << power ) );
+            }
+            if ( ImGui::CollapsingHeader( "Block Selection", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                ImGui::Checkbox( "Hit Unrelated Geometry", &ms.HitUnrelated );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Target other objects in the scene too, so you can start a grid on\n"
+                                       "top of an existing mesh (bounding-box level)." );
+            }
             if ( ImGui::CollapsingHeader( "Output Type", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
                 int               o      = static_cast<int>( ms.OutputType );
@@ -170,7 +212,8 @@ namespace Desert::Editor
                 // base subdivides the base. The value snaps to a base multiple after editing (the tool shows
                 // the effective size).
                 ImGui::SetNextItemWidth( 96.0f );
-                if ( ImGui::DragFloat( "Block Size", &ms.CellSize, 1.0f, kMinBlock, 100000.0f, "%.0f cm" ) )
+                if ( ImGui::DragFloat( "Current Block Size", &ms.CellSize, 1.0f, kMinBlock, 100000.0f,
+                                       "%.0f cm" ) )
                     ms.CellSize = std::max( kMinBlock, ms.CellSize );
                 ImGui::SameLine();
                 if ( ImGui::SmallButton( "/2##bs" ) )

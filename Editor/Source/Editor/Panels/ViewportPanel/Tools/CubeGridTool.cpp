@@ -147,32 +147,35 @@ namespace Desert::Editor::Tools
         if ( m_Cells.empty() )
             return;
         Layer l;
-        l.Cells = std::move( m_Cells );
-        l.Unit  = m_Unit;
+        l.Cells  = std::move( m_Cells );
+        l.Unit   = m_Unit;
+        l.Origin = m_ActiveOrigin;
         m_Frozen.push_back( std::move( l ) );
         m_Cells.clear();
         m_Unit = m_BakedUnit = -1.0f; // the next Block Size becomes the base of a brand-new volume
         m_HasSel = m_Selecting = false;
     }
 
-    bool CubeGridTool::SolidAt( const glm::ivec3& c, float unit ) const
+    bool CubeGridTool::SolidAt( const glm::ivec3& c, float unit, const glm::vec3& origin ) const
     {
         // Is the cell (index `c`, edge `unit`) inside solid geometry of ANY layer? Layer units are always
         // commensurate in practice (the base only ever halves), so a coarser layer maps with one FloorDiv.
-        // A layer FINER than `unit` is skipped — conservative: it can only leave a hidden interior face.
-        auto inLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu )
+        // A layer FINER than `unit`, or one built in a DIFFERENT grid frame (its lattice doesn't line up
+        // at all), is skipped — conservative: it can only ever leave a hidden interior face.
+        auto inLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu, const glm::vec3& lo )
         {
-            if ( cells.empty() || lu <= 0.0f )
+            if ( cells.empty() || lu <= 0.0f ||
+                 glm::any( glm::greaterThan( glm::abs( lo - origin ), glm::vec3( 1e-3f ) ) ) )
                 return false;
             const int R = static_cast<int>( std::lround( lu / unit ) );
             if ( R < 1 || std::abs( lu - static_cast<float>( R ) * unit ) > 0.001f * unit )
                 return false;
             return cells.count( Pack( { FloorDiv( c.x, R ), FloorDiv( c.y, R ), FloorDiv( c.z, R ) } ) ) > 0;
         };
-        if ( inLayer( m_Cells, m_Unit ) )
+        if ( inLayer( m_Cells, m_Unit, m_ActiveOrigin ) )
             return true;
         for ( const Layer& l : m_Frozen )
-            if ( inLayer( l.Cells, l.Unit ) )
+            if ( inLayer( l.Cells, l.Unit, l.Origin ) )
                 return true;
         return false;
     }
@@ -181,7 +184,7 @@ namespace Desert::Editor::Tools
     {
         if ( !m_HasSel )
             return;
-        auto      occ    = [&]( const glm::ivec3& c ) { return SolidAt( c, m_Unit ); };
+        auto      occ    = [&]( const glm::ivec3& c ) { return SolidAt( c, m_Unit, m_ActiveOrigin ); };
         const int na     = m_PlaneNa;
         const int sign   = m_PlaneSign;
         const int ua     = ( na + 1 ) % 3;
@@ -231,8 +234,23 @@ namespace Desert::Editor::Tools
         const bool           interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
 
         bool        changed = false;
-        // Requested Block Size in world units (metres). The UI edits it in centimetres — see Common::Units.
+        // Requested Block Size in world units (= centimetres, see Common::Units).
         const float gs = std::max( ms.CellSize, Core::ModelingState::MinCellSize );
+
+        // The whole tool works in GRID space: cell (0,0,0) sits at the origin of the grid frame, which the
+        // panel can move (Grid Frame Origin / Reset Grid from Actor) so the lattice lines up with an
+        // object's corner instead of tiling from the world origin. Only drawing and meshing add it back.
+        const glm::vec3         gridOrigin = ms.GridOrigin;
+        const Common::Math::Ray gray( ray.Origin - gridOrigin, ray.Direction );
+
+        // "Reset Grid from Actor": drop the grid frame onto the selected entity's own origin.
+        if ( ms.ReqResetFromActor )
+        {
+            ms.ReqResetFromActor = false;
+            if ( const auto& sel = Core::SelectionManager::GetSelected(); sel.has_value() )
+                if ( auto ref = scene.FindEntityByID( *sel ) )
+                    ms.GridOrigin = glm::vec3( ref->get().GetWorldTransform()[3] );
+        }
 
         // Starting a fresh marquee starts a NEW piece: commit whatever is already pushed out into a frozen
         // layer first (it keeps its own Block Size forever). Resizing the grid afterwards then only ever
@@ -240,6 +258,17 @@ namespace Desert::Editor::Tools
         // (m_HoverValid = last frame's targeting, so a click on empty sky doesn't commit anything.)
         if ( interact && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && m_HoverValid && !m_Cells.empty() )
             FreezeActive();
+
+        // Re-initialising the grid frame commits the current piece too: cells are indices into a lattice,
+        // so keeping them across a frame change would teleport built geometry. Frozen layers remember the
+        // frame they were built in and stay exactly where they are.
+        if ( glm::any( glm::greaterThan( glm::abs( ms.GridOrigin - m_ActiveOrigin ), glm::vec3( 1e-4f ) ) ) )
+        {
+            const glm::vec3 prevOrigin = m_ActiveOrigin;
+            FreezeActive();
+            m_ActiveOrigin = ms.GridOrigin;
+            m_GroundY += prevOrigin.y - m_ActiveOrigin.y; // keep the work-plane at the same world height
+        }
 
         // Base unit: the finest cell ever used. A Block Size finer than the base subdivides the base
         // losslessly (existing solids split into F³, world-identical); a coarser Block Size never remaps —
@@ -292,34 +321,66 @@ namespace Desert::Editor::Tools
         float bestT = FLT_MAX;
         {
             glm::ivec3 hitCell{ 0 };
-            float      hitUnit   = u;
+            float      hitUnit = u;
+            glm::vec3  hitOff( 0.0f ); // frozen layer's frame, expressed in the ACTIVE grid space
             bool       hit       = false;
-            auto       testLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu )
+            auto       testLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu, const glm::vec3& off )
             {
                 for ( uint64_t key : cells )
                 {
                     const glm::ivec3   c = Unpack( key );
                     Common::Math::AABB box;
-                    box.Min = glm::vec3( c ) * lu;
+                    box.Min = glm::vec3( c ) * lu + off;
                     box.Max = box.Min + lu;
                     float t;
-                    if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
+                    if ( gray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
                     {
                         bestT   = t;
                         hitCell = c;
                         hitUnit = lu;
+                        hitOff  = off;
                         hit     = true;
                     }
                 }
             };
-            testLayer( m_Cells, u );
+            testLayer( m_Cells, u, glm::vec3( 0.0f ) );
             for ( const Layer& l : m_Frozen ) // you can keep building on a committed piece
-                testLayer( l.Cells, l.Unit );
+                testLayer( l.Cells, l.Unit, l.Origin - gridOrigin );
 
-            if ( hit )
+            // "Hit Unrelated Geometry": the rest of the scene is targetable too, so you can start a grid
+            // on top of an imported prop. Bounding-box level (Scene::Raycast), which is all a work-plane
+            // needs; it never wins over a nearer blockout face.
+            const float cellT    = bestT; // nearest blockout face (FLT_MAX when the cursor missed them all)
+            bool        sceneHit = false;
+            float       sceneT   = FLT_MAX;
+            if ( ms.HitUnrelated )
             {
-                const glm::vec3 p  = ray.Origin + ray.Direction * bestT;
-                const glm::vec3 d  = p - ( glm::vec3( hitCell ) + 0.5f ) * hitUnit;
+                ::Desert::Core::RaycastHit rh;
+                if ( scene.Raycast( ray, rh ) && rh.Distance > 0.0f && rh.Distance < cellT )
+                    if ( rh.Entity != m_Entity ) // never target the live blockout's own mesh
+                    {
+                        sceneHit = true;
+                        sceneT   = rh.Distance;
+
+                        const glm::vec3 n = rh.Normal;
+                        const glm::vec3 a = glm::abs( n );
+                        tNa               = ( a.x >= a.y && a.x >= a.z ) ? 0 : ( a.y >= a.z ) ? 1 : 2;
+                        tSign             = n[tNa] >= 0.0f ? 1 : -1;
+
+                        const glm::vec3 p = rh.Point - gridOrigin; // into grid space
+                        tPlaneCell        = static_cast<int>( std::lround( p[tNa] / u ) ) -
+                                            ( tSign > 0 ? 0 : 1 ); // snap the surface to the lattice
+                        tU                = static_cast<int>( std::floor( p[( tNa + 1 ) % 3] / u ) );
+                        tV                = static_cast<int>( std::floor( p[( tNa + 2 ) % 3] / u ) );
+                        tHas              = true;
+                    }
+            }
+
+            if ( hit && cellT <= sceneT )
+            {
+                bestT              = cellT;
+                const glm::vec3 p  = gray.Origin + gray.Direction * bestT;
+                const glm::vec3 d  = p - ( ( glm::vec3( hitCell ) + 0.5f ) * hitUnit + hitOff );
                 const glm::vec3 ad = glm::abs( d );
                 glm::ivec3      n{ 0 };
                 if ( ad.x >= ad.y && ad.x >= ad.z )
@@ -330,19 +391,24 @@ namespace Desert::Editor::Tools
                     n.z = d.z > 0 ? 1 : -1;
                 tNa   = n.x ? 0 : n.y ? 1 : 2;
                 tSign = n[tNa];
-                // The hit face in WORLD units -> the active base grid (a frozen layer may use another unit).
-                const float faceW = static_cast<float>( hitCell[tNa] + ( tSign > 0 ? 1 : 0 ) ) * hitUnit;
-                tPlaneCell        = static_cast<int>( std::lround( faceW / u ) ) - ( tSign > 0 ? 0 : 1 );
-                tU                = static_cast<int>( std::floor( p[( tNa + 1 ) % 3] / u ) );
-                tV                = static_cast<int>( std::floor( p[( tNa + 2 ) % 3] / u ) );
-                tHas              = true;
+                // The hit face in ACTIVE grid units (a frozen layer may use another unit and frame).
+                const float faceW =
+                     static_cast<float>( hitCell[tNa] + ( tSign > 0 ? 1 : 0 ) ) * hitUnit + hitOff[tNa];
+                tPlaneCell = static_cast<int>( std::lround( faceW / u ) ) - ( tSign > 0 ? 0 : 1 );
+                tU         = static_cast<int>( std::floor( p[( tNa + 1 ) % 3] / u ) );
+                tV         = static_cast<int>( std::floor( p[( tNa + 2 ) % 3] / u ) );
+                tHas       = true;
             }
-            else if ( std::abs( ray.Direction.y ) > 1e-5f )
+            else if ( sceneHit )
             {
-                const float t = ( m_GroundY - ray.Origin.y ) / ray.Direction.y;
+                bestT = sceneT; // work-plane already derived from the scene hit above
+            }
+            else if ( std::abs( gray.Direction.y ) > 1e-5f )
+            {
+                const float t = ( m_GroundY - gray.Origin.y ) / gray.Direction.y;
                 if ( t > 0.0f )
                 {
-                    const glm::vec3 p = ray.Origin + ray.Direction * t;
+                    const glm::vec3 p = gray.Origin + gray.Direction * t;
                     tNa               = 1;
                     tSign             = 1;
                     tPlaneCell        = static_cast<int>( std::lround( m_GroundY / u ) );
@@ -356,16 +422,16 @@ namespace Desert::Editor::Tools
 
         ImDrawList* dl = ::ImGui::GetWindowDrawList();
 
-        auto drawCellSolid = [&]( const glm::ivec3& c, float cu, ImU32 fill, ImU32 outline )
+        auto drawCellSolid = [&]( const glm::ivec3& c, float cu, const glm::vec3& co, ImU32 fill, ImU32 outline )
         {
-            const glm::vec3 mn = glm::vec3( c ) * cu;
+            const glm::vec3 mn = glm::vec3( c ) * cu + co;
             for ( int f = 0; f < 6; ++f )
             {
-                if ( SolidAt( c + kNeighbor[f], cu ) )
+                if ( SolidAt( c + kNeighbor[f], cu, co ) )
                     continue;
                 const glm::vec3 fn = kFace[f][0].N;
                 const glm::vec3 fc = mn + 0.5f * cu + 0.5f * cu * fn;
-                if ( glm::dot( fn, ray.Origin - fc ) <= 0.0f )
+                if ( glm::dot( fn, ray.Origin - fc ) <= 0.0f ) // fc is world space here
                     continue;
                 glm::vec2 s[4];
                 bool      ok = true;
@@ -394,7 +460,7 @@ namespace Desert::Editor::Tools
             w[na] = planeW;
             w[ua] = fu * u;
             w[va] = fv * u;
-            return w;
+            return w + gridOrigin;
         };
         auto drawRect =
              [&]( int uMin, int uMax, int vMin, int vMax, int na, float planeW, ImU32 fill, ImU32 outline )
@@ -465,7 +531,63 @@ namespace Desert::Editor::Tools
                 Common::Units::FormatLength( buf, sizeof( buf ), dWorld );
                 drawLabel( sp, buf );
             }
+
+            // HEIGHT: how deep the solid goes straight down from the work-plane, i.e. how tall the thing
+            // you just pushed out is. Drawn as a vertical dimension line at the near corner, so a wall
+            // reads its height the same way the footprint reads its width and depth.
+            int depth = 0;
+            {
+                const int  corU[4] = { uMin, uMax, uMin, uMax };
+                const int  corV[4] = { vMin, vMin, vMax, vMax };
+                const int  sign    = ( na == m_PlaneNa ) ? m_PlaneSign : 1;
+                glm::ivec3 c{ 0 };
+                for ( int k = 0; k < 4; ++k )
+                {
+                    int       d       = 0;
+                    const int cell    = static_cast<int>( std::lround( planeW / u ) ) - ( sign > 0 ? 0 : 1 );
+                    c[na]             = cell - sign;
+                    c[( na + 1 ) % 3] = corU[k];
+                    c[( na + 2 ) % 3] = corV[k];
+                    while ( d < 4096 && SolidAt( c, u, gridOrigin ) )
+                    {
+                        ++d;
+                        c[na] -= sign;
+                    }
+                    depth = std::max( depth, d );
+                }
+                if ( depth > 0 )
+                {
+                    const float botW = planeW - static_cast<float>( sign * depth ) * u;
+                    glm::vec2   a, b;
+                    if ( WorldToScreen( worldPt( (float)uMin, (float)vMin, na, planeW ), viewProj, viewportPos,
+                                        viewportSize, a ) &&
+                         WorldToScreen( worldPt( (float)uMin, (float)vMin, na, botW ), viewProj, viewportPos,
+                                        viewportSize, b ) )
+                    {
+                        dl->AddLine( ImVec2( a.x, a.y ), ImVec2( b.x, b.y ), IM_COL32( 255, 185, 90, 220 ), 2.0f );
+                        Common::Units::FormatLength( buf, sizeof( buf ), static_cast<float>( depth ) * u );
+                        drawLabel( glm::vec2( ( a.x + b.x ) * 0.5f, ( a.y + b.y ) * 0.5f ), buf );
+                    }
+                }
+            }
         };
+
+        // Grid frame gizmo: the origin the lattice tiles from (Reset Grid from Actor moves it here).
+        if ( toolActive && ms.ShowGizmo )
+        {
+            const float     len     = static_cast<float>( K ) * u * 2.0f;
+            const glm::vec3 axes[3] = { { len, 0, 0 }, { 0, len, 0 }, { 0, 0, len } };
+            const ImU32     cols[3] = { IM_COL32( 235, 80, 80, 255 ), IM_COL32( 90, 225, 90, 255 ),
+                                        IM_COL32( 90, 140, 250, 255 ) };
+            glm::vec2       o;
+            if ( WorldToScreen( gridOrigin, viewProj, viewportPos, viewportSize, o ) )
+                for ( int a = 0; a < 3; ++a )
+                {
+                    glm::vec2 e;
+                    if ( WorldToScreen( gridOrigin + axes[a], viewProj, viewportPos, viewportSize, e ) )
+                        dl->AddLine( ImVec2( o.x, o.y ), ImVec2( e.x, e.y ), cols[a], 2.0f );
+                }
+        }
 
         // Committed pieces: flat dim grey (they never re-subdivide, so the Block Size can no longer touch
         // them). The volume being worked on: brighter grey checkerboard at the live base resolution.
@@ -473,12 +595,12 @@ namespace Desert::Editor::Tools
         {
             for ( const Layer& l : m_Frozen )
                 for ( uint64_t k : l.Cells )
-                    drawCellSolid( Unpack( k ), l.Unit, IM_COL32( 108, 112, 122, 200 ),
+                    drawCellSolid( Unpack( k ), l.Unit, l.Origin, IM_COL32( 108, 112, 122, 200 ),
                                    IM_COL32( 78, 82, 92, 225 ) );
             for ( uint64_t k : m_Cells )
             {
                 const glm::ivec3 c = Unpack( k );
-                drawCellSolid( c, u,
+                drawCellSolid( c, u, gridOrigin,
                                ( ( c.x + c.y + c.z ) & 1 ) ? IM_COL32( 120, 125, 135, 205 )
                                                            : IM_COL32( 150, 155, 165, 205 ),
                                IM_COL32( 90, 95, 105, 230 ) );
@@ -524,7 +646,7 @@ namespace Desert::Editor::Tools
             {
                 m_GroundY = planeWorldOf( tNa, tSign, tPlaneCell );
                 if ( tNa != 1 ) // clicked a vertical face: keep the ground plane, just move it to that height
-                    m_GroundY = ray.Origin.y + ray.Direction.y * bestT;
+                    m_GroundY = gray.Origin.y + gray.Direction.y * bestT;
                 m_GroundY = std::round( m_GroundY / u ) * u;
             }
         }
@@ -548,12 +670,12 @@ namespace Desert::Editor::Tools
             const int   va     = ( na + 2 ) % 3;
             const float planeW = planeWorldOf( na, m_PlaneSign, m_PlaneCell );
             glm::ivec2  cur    = m_Anchor;
-            if ( std::abs( ray.Direction[na] ) > 1e-6f )
+            if ( std::abs( gray.Direction[na] ) > 1e-6f )
             {
-                const float t = ( planeW - ray.Origin[na] ) / ray.Direction[na];
+                const float t = ( planeW - gray.Origin[na] ) / gray.Direction[na];
                 if ( t > 0.0f )
                 {
-                    const glm::vec3 p = ray.Origin + ray.Direction * t;
+                    const glm::vec3 p = gray.Origin + gray.Direction * t;
                     cur               = { static_cast<int>( std::floor( p[ua] / u ) ),
                                           static_cast<int>( std::floor( p[va] / u ) ) };
                 }
@@ -668,22 +790,14 @@ namespace Desert::Editor::Tools
                 ::ImGui::SameLine( 0.0f, 16.0f );
                 ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.30f, 1.0f ) );
                 ::ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.68f, 0.38f, 1.0f ) );
-                if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) && !( m_Cells.empty() && m_Frozen.empty() ) )
-                {
-                    Core::SelectionManager::SetSelected( m_Entity );
-                    m_Entity = Common::UUID::Null();
-                    m_Cells.clear();
-                    m_Frozen.clear();
-                    m_HasSel = m_Selecting = false;
-                    m_Unit = m_BakedUnit = -1.0f;
-                    m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
-                }
+                if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) )
+                    ms.ReqAccept = true;
                 ::ImGui::PopStyleColor( 2 );
                 ::ImGui::SameLine();
                 ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.55f, 0.22f, 0.22f, 1.0f ) );
                 ::ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.70f, 0.28f, 0.28f, 1.0f ) );
                 if ( ::ImGui::Button( ICON_MDI_CLOSE "  Cancel" ) )
-                    Cancel( scene );
+                    ms.ReqCancel = true;
                 ::ImGui::PopStyleColor( 2 );
             }
             ::ImGui::End();
@@ -692,6 +806,28 @@ namespace Desert::Editor::Tools
 
         if ( changed )
             RegenMesh( scene );
+
+        // Accept ("Accept and Start New" in UE's panel): keep the built mesh, select it, and hand the tool
+        // a clean slate — the grid frame and Block Size stay so you carry straight on with the next piece.
+        if ( ms.ReqAccept )
+        {
+            ms.ReqAccept = false;
+            if ( !( m_Cells.empty() && m_Frozen.empty() ) )
+            {
+                Core::SelectionManager::SetSelected( m_Entity );
+                m_Entity = Common::UUID::Null();
+                m_Cells.clear();
+                m_Frozen.clear();
+                m_HasSel = m_Selecting = false;
+                m_Unit = m_BakedUnit = -1.0f;
+                m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
+            }
+        }
+        if ( ms.ReqCancel )
+        {
+            ms.ReqCancel = false;
+            Cancel( scene );
+        }
     }
 
     void CubeGridTool::RegenMesh( ::Desert::Core::Scene& scene )
@@ -707,21 +843,21 @@ namespace Desert::Editor::Tools
         std::vector<Index>  inds;
         glm::vec3           mn( FLT_MAX ), mx( -FLT_MAX );
         // One mesh out of every layer — each meshed at its OWN cell size, face-culled against all layers.
-        auto emitLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu )
+        auto emitLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu, const glm::vec3& lo )
         {
             for ( uint64_t key : cells )
             {
                 const glm::ivec3 c = Unpack( key );
                 for ( int f = 0; f < 6; ++f )
                 {
-                    if ( SolidAt( c + kNeighbor[f], lu ) ) // Face Culling: only Solid/Empty borders
+                    if ( SolidAt( c + kNeighbor[f], lu, lo ) ) // Face Culling: only Solid/Empty borders
                         continue;
                     const uint32_t base = static_cast<uint32_t>( verts.size() );
                     for ( int k = 0; k < 4; ++k )
                     {
                         const FaceVert& fv = kFace[f][k];
                         Vertex          v;
-                        v.Position  = ( glm::vec3( c ) + fv.P + 0.5f ) * lu;
+                        v.Position  = ( glm::vec3( c ) + fv.P + 0.5f ) * lu + lo;
                         v.Normal    = fv.N;
                         v.Tangent   = fv.T;
                         v.Bitangent = fv.B;
@@ -735,9 +871,9 @@ namespace Desert::Editor::Tools
                 }
             }
         };
-        emitLayer( m_Cells, m_Unit );
+        emitLayer( m_Cells, m_Unit, m_ActiveOrigin );
         for ( const Layer& l : m_Frozen )
-            emitLayer( l.Cells, l.Unit );
+            emitLayer( l.Cells, l.Unit, l.Origin );
 
         if ( m_Entity == Common::UUID::Null() )
         {

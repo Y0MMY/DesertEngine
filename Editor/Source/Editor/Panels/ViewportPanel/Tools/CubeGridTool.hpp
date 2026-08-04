@@ -37,7 +37,8 @@ namespace Desert::Editor::Tools
         void        RefineBy( int F ); // subdivide the base grid by F (split every cell + the selection ×F)
         void        FreezeActive();    // commit the volume being worked on into an immutable layer
         void        RescaleSelection( float oldUnit, float newUnit, int K ); // keep the marquee in place
-        bool        SolidAt( const glm::ivec3& cell, float unit ) const; // occupancy across every layer
+        // Occupancy across every layer, for a query cell of edge `unit` in the frame `origin`.
+        bool        SolidAt( const glm::ivec3& cell, float unit, const glm::vec3& origin ) const;
         static bool WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
                                    const glm::vec2& size, glm::vec2& out );
 
@@ -48,6 +49,7 @@ namespace Desert::Editor::Tools
         {
             std::unordered_set<uint64_t> Cells;
             float                        Unit = 1.0f;
+            glm::vec3                    Origin{ 0.0f }; // grid frame this piece was built in
         };
         std::vector<Layer> m_Frozen;
 
@@ -56,7 +58,8 @@ namespace Desert::Editor::Tools
         float                        m_BakedUnit = -1.0f; // base size the live mesh was last baked at
         Common::UUID                 m_Entity    = Common::UUID::Null(); // live blockout entity
 
-        float m_GroundY    = 0.0f;  // ground work-plane height in WORLD units (Level up/down)
+        glm::vec3 m_ActiveOrigin{ 0.0f }; // grid frame the active volume is being built in
+        float     m_GroundY    = 0.0f;    // ground work-plane height in the active grid frame (Level up/down)
         bool  m_HoverValid = false; // last frame's cursor targeting hit something
 
         // Work-plane (in BASE cells): locked while selecting and kept for the active selection.

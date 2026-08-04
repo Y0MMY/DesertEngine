@@ -1,5 +1,7 @@
 #pragma once
 
+#include <glm/glm.hpp>
+
 namespace Desert::Editor::Core
 {
     // Shared state between the docked ModelingPanel (the UE5-style tool palette + properties) and the
@@ -29,6 +31,9 @@ namespace Desert::Editor::Core
 
         // Smallest CubeGrid block, in world units (= 1 cm). Both the panel and the tool clamp to it.
         static constexpr float MinCellSize = 1.0f;
+        // Grid Power 0 is a one-metre block; each step halves it (Power 2 = 25 cm), like UE's Grid Power.
+        static constexpr float BaseBlockSize = 100.0f;
+        static constexpr int   MaxGridPower  = 6;
 
         // Panel -> tool
         Tool   ActiveTool = Tool::None;
@@ -41,9 +46,20 @@ namespace Desert::Editor::Core
         float  BrushD        = 1.0f;
         float  Height        = 1.0f;
         int    BlocksPerStep = 1;      // cells extruded/removed per Push/Pull (UE "Blocks Per Step")
-        bool   ReqAccept  = false;  // one-shot: commit the blockout, start a fresh one
-        bool   ReqCancel  = false;  // one-shot: delete the in-progress blockout
-        bool   ReqClear   = false;  // one-shot: clear the cells (keep editing)
+
+        // --- Grid frame (UE "Grid Reinitialization" / "Options") ---
+        // World position of grid cell (0,0,0). Moving it re-aligns the lattice to an object's corner so
+        // any block size stays flush with it, instead of tiling from the world origin.
+        glm::vec3 GridOrigin = glm::vec3( 0.0f );
+        // Targeting also considers OTHER scene meshes (build on top of an imported prop, snap the plane
+        // onto it), not just the blockout being edited. UE calls this "Hit Unrelated Geometry".
+        bool HitUnrelated = true;
+        bool ShowGizmo    = false; // draw the grid frame axes at the origin
+
+        bool ReqAccept         = false; // one-shot: commit the blockout, start a fresh one
+        bool ReqCancel         = false; // one-shot: delete the in-progress blockout
+        bool ReqClear          = false; // one-shot: clear the cells (keep editing)
+        bool ReqResetFromActor = false; // one-shot: put the grid origin on the selected entity
 
         // Tool -> panel (read-only stats for the properties panel)
         int Cubes = 0;
