@@ -514,24 +514,25 @@ namespace Desert::Editor::Tools
             if ( ms.HitUnrelated )
             {
                 ::Desert::Core::RaycastHit rh;
-                if ( scene.Raycast( ray, rh ) && rh.Distance > 0.0f && rh.Distance < cellT )
-                    if ( rh.Entity != m_Entity ) // never target the live blockout's own mesh
-                    {
-                        sceneHit = true;
-                        sceneT   = rh.Distance;
+                const bool got = scene.Raycast( ray, rh ) && rh.Distance > 0.0f && rh.Distance < cellT &&
+                                 rh.Entity != m_Entity; // never target the live blockout's own mesh
+                if ( got )
+                {
+                    sceneHit = true;
+                    sceneT   = rh.Distance;
 
-                        const glm::vec3 n = rh.Normal;
-                        const glm::vec3 a = glm::abs( n );
-                        tNa               = ( a.x >= a.y && a.x >= a.z ) ? 0 : ( a.y >= a.z ) ? 1 : 2;
-                        tSign             = n[tNa] >= 0.0f ? 1 : -1;
+                    const glm::vec3 a = glm::abs( rh.Normal );
+                    tNa               = ( a.x >= a.y && a.x >= a.z ) ? 0 : ( a.y >= a.z ) ? 1 : 2;
+                    tSign             = rh.Normal[tNa] >= 0.0f ? 1 : -1;
 
-                        const glm::vec3 p = rh.Point - gridOrigin; // into grid space
-                        tPlaneCell        = static_cast<int>( std::lround( p[tNa] / u ) ) -
-                                            ( tSign > 0 ? 0 : 1 ); // snap the surface to the lattice
-                        tU                = static_cast<int>( std::floor( p[( tNa + 1 ) % 3] / u ) );
-                        tV                = static_cast<int>( std::floor( p[( tNa + 2 ) % 3] / u ) );
-                        tHas              = true;
-                    }
+                    // Snap the hit surface onto the lattice, then work from there.
+                    const glm::vec3 p = rh.Point - gridOrigin;
+
+                    tPlaneCell = static_cast<int>( std::lround( p[tNa] / u ) ) - ( tSign > 0 ? 0 : 1 );
+                    tU         = static_cast<int>( std::floor( p[( tNa + 1 ) % 3] / u ) );
+                    tV         = static_cast<int>( std::floor( p[( tNa + 2 ) % 3] / u ) );
+                    tHas       = true;
+                }
             }
 
             if ( hit && cellT <= sceneT )

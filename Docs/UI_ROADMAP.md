@@ -3,12 +3,19 @@
 Goal: a complete, production-grade in-engine UI toolkit — authored WYSIWYG in the 3D
 viewport, rendered identically at runtime, on par with Unity UGUI/UI Toolkit and UE UMG.
 
-Rendering baseline today (2026-08-03): UI is drawn by the engine's own **`Render2D`** batcher
+Rendering baseline today (2026-08-04): UI is drawn by the engine's own **`Render2D`** batcher
 (`Engine/Graphic/Render2D/` — `DrawList2D` CPU geometry + GPU batcher, custom `UI2D`/`UIText`
 SDF shaders), NOT ImGui. The scene walker is `Engine/UI/UICanvasRenderer2D`. The **runtime is
 fully ImGui-free** (own swapchain present + Render2D UI/splash); the editor still uses ImGui only
 for authoring chrome. Runtime dispatches `UIButton` actions. Assets are cooked; `TextureAsset`
 exists; there is a Sequencer panel; Lua scripting exists.
+
+Since the 2026-08-03 sync we also shipped: **media** (animated GIF + MPEG1 video, video as an
+`AssetHandle` w/ drag-drop), **icons** (`UIIcon` vector set + `UIImage` sprite blocks), **shapes**
+(rounded corners, circle/ring), **Phase B fitters** (Content Size / Aspect Ratio / Layout Element,
+Canvas safe-area), **Phase D** disabled/selected states, **Phase F** first tweens (pulse / ticker /
+eased hover), and editor authoring — **Design↔Preview** play-in-editor, click-selects-control +
+Alt-drill, reveal-in-Outliner, picking inside auto-layout groups — plus a **MainMenu** example scene.
 
 Legend: [x] done · [~] partial · [ ] todo · (dep) needs a third-party dependency (must be
 approved per the engine's "no magic dependencies" rule).
@@ -17,10 +24,11 @@ approved per the engine's "no magic dependencies" rule).
 
 ## A. Content types (what can live in a UI element)
 - [x] Text (custom font asset, word-wrap, rich text — see E)
-- [~] Image / Sprite (PNG/JPG/TGA), **9-slice**, tint — done on Panel/Button/Canvas via `AssetHandle`; atlas/tiling/flip todo
-- [ ] Icon fonts / vector icons
-- [ ] **GIF** (animated image, per-frame) — stb_image can decode GIF frames (likely no dep)
-- [ ] **Video** — mp4/H.264 (dep: ffmpeg/libav, heavy) OR MPEG1/webm (dep: pl_mpeg/libvpx, light) + audio sync
+- [~] Image / Sprite (PNG/JPG/TGA), **9-slice**, tint — done on Panel/Button/Canvas via `AssetHandle`; empty Image draws nothing; atlas/tiling/flip todo
+- [x] **Icons** — built-in vector icon set (`UIIcon`, drawn with `AddLine`) + `UIImage` sprite icon blocks (used by the MainMenu). *(icon-font glyph atlas still todo)*
+- [x] **Shapes** — rounded-rect corner radius (`AddRectFilled`), **circular panels + gradient ring** (avatars / status rings)
+- [x] **GIF** (animated image, per-frame) — decoded frames driven on the atlas (no new dep)
+- [~] **Video** — **MPEG1 as UI content** + **video as an `AssetHandle` (drag-drop)** done; H.264/webm + audio sync todo
 - [ ] **SVG** (vector) — (dep: nanosvg, tiny) rasterized to texture on import
 - [ ] **Lottie** (After-Effects JSON vector animation) — (dep: rlottie) — modern motion UI
 - [ ] **3D model / render-texture** — render a model or a whole scene into a UI element
@@ -35,8 +43,8 @@ approved per the engine's "no magic dependencies" rule).
 - [x] Anchor presets (Unity 4x4) + Fill
 - [x] Canvas Scale Mode (Stretch / ScaleWithScreen / Letterbox)
 - [~] Auto-layout containers — **VBox / HBox / Grid** done (`UILayoutGroup`, padding/spacing, unit-tested); Flex / Wrap todo
-- [ ] Content Size Fitter, Aspect Ratio Fitter, Layout Element (min/preferred/flex)
-- [ ] Constraints (pin/relative), safe-area (mobile notches), responsive breakpoints
+- [x] **Content Size Fitter** (hug children), **Aspect Ratio Fitter**, **Layout Element** flexible grow (in VBox/HBox)
+- [~] **Canvas safe-area insets** done; constraints (pin/relative), responsive breakpoints todo
 - [ ] Pixel-perfect mode
 
 ## C. Controls / widgets
@@ -50,7 +58,7 @@ approved per the engine's "no magic dependencies" rule).
 
 ## D. Interaction & input
 - [x] Mouse click-select (editor), button hover/press (runtime)
-- [~] State set: normal / hover / pressed / focused done; disabled / selected todo
+- [x] State set: normal / hover / pressed / focused / **disabled / selected** (per-state button sprites + tints)
 - [~] **Focus + navigation** — keyboard Tab-order + Enter-activate done; gamepad D-pad, back button todo
 - [ ] **Touch + gestures** (tap/long-press/swipe/drag/pinch), multi-touch
 - [ ] **Drag & drop** between UI elements (inventory), drop targets
@@ -65,7 +73,7 @@ approved per the engine's "no magic dependencies" rule).
 - [x] Text effects: outline, shadow, gradient, glow
 
 ## F. Animation
-- [ ] Tween/easing (from->to, curves), triggers (on-show/hover/click)
+- [~] Tween/easing + triggers — **pulse, marquee ticker, eased hover transitions** done; generic from→to curve tracks todo
 - [ ] Transitions between screens/states, UI **state machine**
 - [ ] **UI Sequencer** (reuse engine Sequencer): tracks on position/color/opacity/scale
 - [ ] Spring/physics motion; Lottie playback (dep)
@@ -75,6 +83,7 @@ approved per the engine's "no magic dependencies" rule).
 - [ ] Sorting: z-order, sorting layers, multiple canvases (overlay / world-space / camera-space)
 - [~] **World-space canvas** (billboarded UI at a 3D pos) done; UI on an arbitrary 3D surface + camera-space todo
 - [~] Effects: drop shadow, outline, gradient, glow done; **backdrop blur / glass**, blend modes todo
+- [x] Primitives: **rounded-rect corner radius**, circle/ring, `AddLine` (used by icons/shapes)
 - [ ] Custom UI shaders/materials; post-processing scoped to UI
 - [x] Batching to a real UI mesh — `Render2D` merges same-state quads into batched draw calls
 - [ ] Offscreen culling, element pooling for lists
@@ -85,7 +94,10 @@ approved per the engine's "no magic dependencies" rule).
 - [ ] Data-driven lists (bind a collection -> virtualized list)
 
 ## I. Editor authoring (WYSIWYG, prod UX)
-- [x] In-scene render + create menu + click-select + anchor presets + 2D mode
+- [x] In-scene render + create menu + anchor presets + 2D mode
+- [x] **Click selects the control** (not the Scrim), **Alt-click drills into children**; pick/handles work **inside auto-layout groups**
+- [x] **Design ↔ Preview toggle** — play-in-editor for UI (buttons interactive, authoring overlays hidden), like UE
+- [x] **Reveal selection in the Outliner** — expand ancestors + scroll into view (works for hidden/nested UI)
 - [x] **Drag-move + resize handles + anchor handles** (mouse) + snapping to parent edges/centre
 - [ ] Multi-select, copy/paste/duplicate, align/space tools, rulers/guides, alignment guides + distribute
 - [ ] **UI Prefabs** (reusable widgets) + nested prefabs + variants
@@ -95,6 +107,7 @@ approved per the engine's "no magic dependencies" rule).
 
 ## J. App/runtime level
 - [x] **Splash screen** (image, duration, fade) in `SceneSettings`, shown on scene load
+- [x] **Example: MainMenu** authored as a loadable `.desce` (sprite icon blocks, buttons, layout) — reference scene
 - [ ] **Screen/navigation stack** (pages, push/pop, back), scene transitions (fade/slide)
 - [x] Button actions: SendMessage / LoadScene / Quit / OpenURL (Custom-Lua todo)
 - [ ] Audio feedback (click/hover sounds), haptics (mobile)
@@ -119,19 +132,21 @@ approved per the engine's "no magic dependencies" rule).
 3. ✅ **Button actions + scene switch + splash screen**. (J) *(audio feedback todo)*
 4. ✅ **Masking/clipping + effects** (shadow/outline/gradient/glow) + world-space canvas. (G)
 5. ✅ **Fonts & rich text** — custom TTF asset, wrap/multi-line/auto-size/overflow, BBCode. (E) *(RTL/CJK/emoji deferred — HarfBuzz)*
-6. 🔶 **Auto-layout containers** — VBox/HBox/Grid done; **fitters + safe-area next**. (B)
-7. 🔶 **Controls + input** — Toggle/Slider/ProgressBar/InputField/ScrollView/Dropdown + Tab-focus done; disabled/selected states, drag&drop, gamepad nav todo. (C/D)
+6. ✅ **Auto-layout + fitters** — VBox/HBox/Grid + Content Size / Aspect Ratio / Layout Element + Canvas safe-area. (B) *(Flex/Wrap todo)*
+7. 🔶 **Controls + input** — Toggle/Slider/ProgressBar/InputField/ScrollView/Dropdown + Tab-focus + disabled/selected states done; drag&drop, gamepad nav todo. (C/D)
    — Also landed early, out of order: ✅ custom `Render2D` GPU backend (UI no longer ImGui) + ImGui-free runtime + batching (G/L partial).
-8. **3D model / render-texture element** + particles-in-UI. (A)
-9. **GIF** *(likely no dep)* → then **SVG** (nanosvg) → **Video** (pl_mpeg light, or ffmpeg) — dep sign-off. (A)
-10. **UI animation / Sequencer** (tweens, state machine, transitions, Lottie). (F)
-11. **Data binding + Lua** hooks; data-driven virtualized lists. (H)
-12. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
-13. **Localization + accessibility**. (K)
-14. **Perf pass**: batch to UI mesh, culling, pooling, atlases. (G/L)
+8. ✅ **Media** — animated GIF + MPEG1 video, video as an `AssetHandle` (drag-drop). (A) *(H.264/webm + audio sync todo)*
+9. ✅ **Icons + shapes** — `UIIcon` vector set + sprite icon blocks; rounded corners, circle/ring. (A/G)
+10. ✅ **Editor authoring polish** — Design↔Preview play-in-editor, click-selects-control + Alt-drill, reveal-in-Outliner, pick inside layout groups; **MainMenu** example scene. (I/J)
+11. 🔶 **UI animation / Sequencer** — first tweens (pulse/ticker/eased hover) done; generic curve tracks, state machine, transitions, Lottie todo. (F)
+12. **3D model / render-texture element** + particles-in-UI; **SVG** (nanosvg) → richer **Video** (H.264/audio). (A)
+13. **Data binding + Lua** hooks; data-driven virtualized lists. (H)
+14. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
+15. **Localization + accessibility** (K); **Perf pass** — culling, pooling, atlases (G/L).
 
-**Next up (dependency-free):** B fitters (Content Size Fitter / Aspect Ratio Fitter) + safe-area,
-then finish C/D (disabled/selected states, drag & drop between elements, pointer enter/exit events).
+**Next up (dependency-free):** finish C/D (drag & drop between elements, pointer enter/exit events,
+gamepad/D-pad nav), then F generic tween tracks + screen-transition state machine; A render-texture
+element (reuse per-instance SceneRenderer → offscreen target).
 
 Dependencies to approve when reached: nanosvg (SVG), pl_mpeg/libvpx or ffmpeg (video),
 rlottie (Lottie), HarfBuzz (complex text). Each: justify size/license/compile-time first.

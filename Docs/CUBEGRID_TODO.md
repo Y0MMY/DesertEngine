@@ -17,55 +17,71 @@ Reference screenshots: `docs/ModelingImages/`.
 - Marquee rectangle **selection** (block-aligned, latched drag, plane locked at press).
 - **Push / Pull** (Extrude / carve) along the plane normal; build on the ground or any face.
 - **Blocks Per Step** multiplier; **Resize Grid** (free Block Size input, snaps to a base multiple, `/2 ×2`).
-- On-plane grid lines (per block) + drawn-size labels (W×D world units); green preview tracks the cursor.
+- On-plane grid lines (per block) + dimension labels: **width × depth** on the edges and a vertical
+  **height** line at the near corner (how deep the solid runs under the work-plane). Green preview tracks
+  the cursor.
+- **Grid frame**: `Grid Frame Origin` + **Reset Grid from Actor** put the lattice on an object's origin so
+  any block size stays flush with its corners; `Show Gizmo` draws the frame axes. Changing the frame
+  commits the current piece (cells are lattice indices) — frozen layers remember the frame they were built
+  in, so nothing already built ever moves.
+- **Grid Power** slider (1 m ≫ power) driving the free `Current Block Size` field.
+- **Hit Unrelated Geometry**: targeting also considers other scene meshes (`Scene::Raycast`, box level), so
+  a grid can start on top of an imported prop. **Accept and Start New** in the panel.
 - Face-culled meshing → live `DynamicMesh` "Blockout" entity; **Accept** (keep) / **Cancel** (delete).
-- All controls are on-screen buttons — no keyboard clash with the Q/E/arrow camera flight.
+- UE shortcuts: **E / Q** = Push / Pull, **Ctrl+E / Ctrl+Q** = Resize Grid, **Ctrl + Wheel** = shift the
+  work-plane, **Ctrl + MMB** = snap the work-plane onto the clicked surface, **Esc** = clear the selection.
+  While a modeling tool is active the fly-camera only takes the keyboard during an RMB look
+  (`EditorCamera::SetKeyboardRequiresLook`), so the bare keys belong to the tool — as in UE. Every action
+  also has an on-screen button, and the panel lists the bindings under "Shortcut Info".
 
 ## Remaining
 
-### 1. Corner Mode (`K`) — ramps / slopes / roofs / arches  ← biggest
-- Per-cell **8-vertex offsets** (`int8 vertexOffsets[8]`) instead of a plain solid flag.
-- Vertex-based raycast: highlight nearest **corner / edge (2 verts) / face (4 verts)**; Shift = multi-select.
-- Extrude/Push moves the selected vertices by a step → wedge/prism/ramp.
-- Mesher must triangulate **deformed cubes** (not just axis-aligned boxes).
-- **Slope subdivision / Snap Size** param (¹⁄₂, ¹⁄₄, ¹⁄₁₀ of the block height).
+### 1. Corner Mode — remaining bits
+Done: cells store 8 vertical corner offsets (`Cell::V`, 1/60 of a base cell) instead of a solid flag, the
+mesher triangulates the deformed box with per-quad normals, face culling compares the four shared corners
+(so a ramp's slanted face survives while the flat faces under it stay culled), **Z** toggles the mode, the
+selection's four posts are click-picked (Shift adds) and **E / Q** move them by the **Snap Size** step
+(½ / ¼ / ¹⁄₁₀ block); the cells under the rectangle take the bilinear blend, so two posts up = a ramp,
+one post up = a hip. A finer Block Size commits a deformed piece instead of splitting it.
+Remaining:
+- Corners only move along the grid's **up axis** — a selection on a vertical face can't be sloped yet.
+- Pick **individual cell corners / edges** (today it is the rectangle's four posts, which is what gives
+  clean ramps but can't dent a single cell).
+- **Crosswise Diagonal** (which way a deformed quad is split) + arches from sub-block corner steps.
 
-### 2. Grid realignment & snapping
-- **Ctrl+MMB** — snap the work-plane onto any clicked surface/face height.
-- **Reset Grid / "Reset Grid from Actor"** — set the grid origin to the object's local (0,0,0) so any grid
-  size stays aligned to its corners (fixes the misaligned-domain Scenario 4 / stray Push).
-- **Grid Frame Origin / Orientation** panel fields; **Local Grid** (World vs Actor) so the grid follows a
-  rotated object; explicit **leading-axis switch (X/Y/Z)** for sideways/vertical grids.
+### 2. Rotated / local grids
+- **Grid Frame Orientation** + **Local Grid** (World vs Actor) so the lattice follows a rotated object —
+  every ray/cell conversion is axis-aligned today, so this needs a frame rotation throughout.
+- Explicit **leading-axis switch (X/Y/Z)** for sideways/vertical grids.
 
-### 3. Plane shift via **Ctrl + Mouse Wheel** (today only the on-screen Level buttons).
-
-### 4. Re-edit baked meshes
+### 3. Re-edit baked meshes
 - Re-activating CubeGrid on an existing Static Mesh **recognises its voxel structure** and re-shows the
   orange grid to keep building/carving. Needs the voxel volume persisted with the asset (or reconstructed
   from an axis-aligned box mesh).
 
-### 5. Selection ergonomics
+### 4. Selection ergonomics
 - **Shift+LMB drag = deselect** (subtract); **Ctrl+Shift+LMB** additive one-click box marquee.
-- **Z** = clear all selection. **Space** = rotate the selection / slope direction 90°.
+  Needs the free-form buffer below — the selection is a single rectangle today.
+- **Space** = rotate the selection / slope direction 90°.
 - Free (non-rectangular) multi-cell selection buffer in addition to the rectangle.
 
-### 6. Quick Materials
+### 5. Quick Materials
 - **Active Material** slot; Extrude assigns that material ID to the new faces.
 - **Shift+B** applies the active material to the selected faces without changing geometry.
 - Bake splits into **sub-meshes per material ID**.
 
-### 7. Bake quality (Accept)
+### 6. Bake quality (Accept)
 - **Triplanar / world-aligned UVs** (no stretching on resized blocks).
 - **Hard-edge normals + tangents** at block seams.
 - **Collision** generation (BVH triangle mesh, or merged box colliders for Jolt).
 - **Output Type = Static Mesh**: bake to an optimised StaticMesh asset (the combo exists; only the live
   DynamicMesh path is wired today).
 
-### 8. Greedy meshing (face merging)
+### 7. Greedy meshing (face merging)
 - Merge coplanar adjacent faces into larger quads — cleaner topology / fewer tris (today: per-cell face
   culling only).
 
-### 9. Create-category primitives
+### 8. Create-category primitives
 - Box / Sphere / Cylinder / Cone / Stairs presets in the palette are placeholders — not implemented.
 
 ---
