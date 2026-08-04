@@ -25,11 +25,16 @@ approved per the engine's "no magic dependencies" rule).
 ## A. Content types (what can live in a UI element)
 - [x] Text (custom font asset, word-wrap, rich text — see E)
 - [~] Image / Sprite (PNG/JPG/TGA), **9-slice**, tint — done on Panel/Button/Canvas via `AssetHandle`; empty Image draws nothing; atlas/tiling/flip todo
-- [x] **Icons** — built-in vector icon set (`UIIcon`, drawn with `AddLine`) + `UIImage` sprite icon blocks (used by the MainMenu). *(icon-font glyph atlas still todo)*
+- [x] **Icons** — built-in vector icon set (`UIIcon`, drawn with Render2D primitives) + `UIImage` sprite icon blocks (used by the MainMenu). *(SDF icon atlas — the replacement for SVG — still todo)*
 - [x] **Shapes** — rounded-rect corner radius (`AddRectFilled`), **circular panels + gradient ring** (avatars / status rings)
 - [x] **GIF** (animated image, per-frame) — decoded frames driven on the atlas (no new dep)
 - [~] **Video** — **MPEG1 as UI content** + **video as an `AssetHandle` (drag-drop)** done; H.264/webm + audio sync todo
-- [ ] **SVG** (vector) — (dep: nanosvg, tiny) rasterized to texture on import
+- ~~SVG~~ — **dropped 2026-08-04.** Rasterising an SVG on import just produces the PNG you could have
+      exported from the design tool, and nanosvg only parses a subset (no CSS/filters/text), so real
+      files break. Where resolution independence actually matters, use `UIIcon` (vector primitives) or
+      the planned **SDF icon atlas**, which reuses the existing font SDF pipeline and gets tint /
+      outline / glow for free. If designers ever hand over SVGs, convert them offline in the asset
+      pipeline — the engine stays PNG/SDF only.
 - [ ] **Lottie** (After-Effects JSON vector animation) — (dep: rlottie) — modern motion UI
 - [ ] **3D model / render-texture** — render a model or a whole scene into a UI element
       (inventory/char-select/turntable). Reuse the per-instance SceneRenderer -> offscreen
@@ -139,7 +144,7 @@ approved per the engine's "no magic dependencies" rule).
 9. ✅ **Icons + shapes** — `UIIcon` vector set + sprite icon blocks; rounded corners, circle/ring. (A/G)
 10. ✅ **Editor authoring polish** — Design↔Preview play-in-editor, click-selects-control + Alt-drill, reveal-in-Outliner, pick inside layout groups; **MainMenu** example scene. (I/J)
 11. 🔶 **UI animation / Sequencer** — first tweens (pulse/ticker/eased hover) done; generic curve tracks, state machine, transitions, Lottie todo. (F)
-12. **3D model / render-texture element** + particles-in-UI; **SVG** (nanosvg) → richer **Video** (H.264/audio). (A)
+12. **3D model / render-texture element** + particles-in-UI; richer **Video** (H.264/audio). (A)
 13. **Data binding + Lua** hooks; data-driven virtualized lists. (H)
 14. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
 15. **Localization + accessibility** (K); **Perf pass** — culling, pooling, atlases (G/L).
@@ -148,5 +153,6 @@ approved per the engine's "no magic dependencies" rule).
 gamepad/D-pad nav), then F generic tween tracks + screen-transition state machine; A render-texture
 element (reuse per-instance SceneRenderer → offscreen target).
 
-Dependencies to approve when reached: nanosvg (SVG), pl_mpeg/libvpx or ffmpeg (video),
-rlottie (Lottie), HarfBuzz (complex text). Each: justify size/license/compile-time first.
+Dependencies to approve when reached: pl_mpeg/libvpx or ffmpeg (video), rlottie (Lottie),
+HarfBuzz (complex text). Each: justify size/license/compile-time first. (nanosvg was considered for
+SVG and rejected — see A.)
