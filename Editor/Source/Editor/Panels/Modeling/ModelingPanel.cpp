@@ -187,11 +187,33 @@ namespace Desert::Editor
                     ms.ReqClear = true;
             }
             ImGui::Separator();
-            ImGui::TextDisabled( "LMB drag: select a rectangle on the surface" );
-            ImGui::TextDisabled( "(ground, or a face of what you built)" );
-            ImGui::TextDisabled( "Push / Pull: extrude the selection up / down" );
-            ImGui::TextDisabled( "Level up/down: move the ground work-plane" );
-            ImGui::TextDisabled( "Resize Grid / Push / Pull: bottom-bar buttons" );
+            // Shortcut Info — same block UE shows at the bottom of the Cube Grid Tool panel.
+            if ( ImGui::CollapsingHeader( "Shortcut Info", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                const struct
+                {
+                    const char* Action;
+                    const char* Keys;
+                } shortcuts[] = {
+                     { "Select blocks", "LMB drag on the surface" },
+                     { "Push / Pull", "E / Q" },
+                     { "Resize Grid", "Ctrl + E / Q" },
+                     { "Shift work-plane", "Ctrl + Mouse Wheel" },
+                     { "Snap grid to surface", "Ctrl + MMB" },
+                     { "Clear selection", "Esc" },
+                     { "Fly the camera", "RMB + WASD / Q / E" },
+                };
+                ImGui::Columns( 2, "##cg_keys", false );
+                ImGui::SetColumnWidth( 0, 130.0f );
+                for ( const auto& s : shortcuts )
+                {
+                    ImGui::TextDisabled( "%s", s.Action );
+                    ImGui::NextColumn();
+                    ImGui::TextUnformatted( s.Keys );
+                    ImGui::NextColumn();
+                }
+                ImGui::Columns( 1 );
+            }
             ImGui::TextDisabled( "Accept / Cancel: bottom of the viewport" );
         }
         else

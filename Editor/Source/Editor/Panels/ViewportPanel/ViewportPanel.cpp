@@ -7,6 +7,7 @@
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Core/Selection/ViewportMode.hpp>
+#include <Editor/Core/Selection/ModelingState.hpp>
 #include <Editor/Core/Selection/FoliagePaint.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ThemeManager.hpp>
@@ -792,6 +793,11 @@ namespace Desert::Editor
         if ( auto* editorCam = dynamic_cast<::Desert::Core::EditorCamera*>( mainCamera.get() ) )
         {
             editorCam->SetInputEnabled( m_ViewportData.IsHovered && !ImGui::GetIO().WantTextInput );
+            // A modeling tool binds the bare Q/E (Push/Pull) and WASD, so hand it the keyboard: the camera
+            // only flies while RMB is held, as in UE's Modeling Mode.
+            editorCam->SetKeyboardRequiresLook( Core::ViewportMode::Get() == Core::EditorMode::Modeling &&
+                                                Core::ModelingState::Get().ActiveTool !=
+                                                     Core::ModelingState::Tool::None );
         }
 
         // Render scene

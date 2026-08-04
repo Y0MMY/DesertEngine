@@ -106,6 +106,13 @@ namespace Desert::Core
         // inside the viewport stays active until the button is released even if the cursor leaves.
         void SetInputEnabled( bool enabled ) { m_InputEnabled = enabled; }
 
+        // A modeling tool owns the bare WASD/Q/E keys (Q/E = Push/Pull there), so while one is active the
+        // fly-camera only listens to the keyboard during an RMB look — exactly like UE's Modeling Mode.
+        void SetKeyboardRequiresLook( bool requiresLook )
+        {
+            m_KeyboardRequiresLook = requiresLook;
+        }
+
         // Orbit the camera so it looks ALONG `forward` (a world-space direction) at the current focal point,
         // preserving the current framing distance. Drives the clickable view-axis gizmo (snap to Front/Top/
         // Right/... ortho-ish views). Derives yaw/pitch from the target forward under this camera's model.
@@ -143,6 +150,7 @@ namespace Desert::Core
 
         bool m_InputEnabled = true;  // viewport hovered + no text input capture (see SetInputEnabled)
         bool m_Flying       = false; // RMB-look session in progress (started inside the viewport)
+        bool m_KeyboardRequiresLook = false; // a modeling tool owns the keys unless RMB is held
     };
 
     // Camera driven by a scene entity (CameraComponent): view from the entity transform, projection from

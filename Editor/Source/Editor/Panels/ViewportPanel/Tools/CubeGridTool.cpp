@@ -485,6 +485,50 @@ namespace Desert::Editor::Tools
             }
         }
 
+        // --- Keyboard / mouse shortcuts (UE's "Shortcut Info" block). The camera hands over the bare keys
+        //     while a modeling tool is active (EditorCamera::SetKeyboardRequiresLook), so it only flies
+        //     during an RMB look — holding RMB therefore means "I'm driving the camera", not editing. ---
+        if ( interact && !::ImGui::IsMouseDown( ImGuiMouseButton_Right ) )
+        {
+            const bool ctrl = ::ImGui::GetIO().KeyCtrl;
+
+            if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) )
+            {
+                if ( ctrl ) // Ctrl+E — coarser grid
+                    ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
+                else
+                    PushPull( scene, +1, K );
+            }
+            if ( ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) )
+            {
+                if ( ctrl ) // Ctrl+Q — finer grid
+                    ms.CellSize = std::max( ms.CellSize * 0.5f, Core::ModelingState::MinCellSize );
+                else
+                    PushPull( scene, -1, K );
+            }
+            // Esc clears the selection (Z stays free for Corner Mode, which is what UE binds it to).
+            if ( ::ImGui::IsKeyPressed( ImGuiKey_Escape, false ) )
+                m_HasSel = m_Selecting = false;
+
+            // Ctrl + wheel shifts the ground work-plane one block up/down, carrying a selection on it.
+            const float wheel = ::ImGui::GetIO().MouseWheel;
+            if ( ctrl && wheel != 0.0f )
+            {
+                const int steps = wheel > 0.0f ? 1 : -1;
+                m_GroundY += static_cast<float>( steps * K ) * u;
+                if ( m_HasSel && m_PlaneNa == 1 && m_PlaneSign > 0 )
+                    m_PlaneCell += steps * K;
+            }
+            // Ctrl + MMB drops the work-plane onto whatever surface was clicked (UE's grid realignment).
+            if ( ctrl && ::ImGui::IsMouseClicked( ImGuiMouseButton_Middle ) && tHas )
+            {
+                m_GroundY = planeWorldOf( tNa, tSign, tPlaneCell );
+                if ( tNa != 1 ) // clicked a vertical face: keep the ground plane, just move it to that height
+                    m_GroundY = ray.Origin.y + ray.Direction.y * bestT;
+                m_GroundY = std::round( m_GroundY / u ) * u;
+            }
+        }
+
         // --- Marquee selection (Block-aligned): LMB drag a rectangle; start requires hover, the drag is
         //     latched to the physical button and locked to the plane picked at the press. ---
         if ( interact && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && tHas )

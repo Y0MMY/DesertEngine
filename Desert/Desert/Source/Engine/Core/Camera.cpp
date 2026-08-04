@@ -171,7 +171,7 @@ namespace Desert::Core
         if ( !mousePressed )
             m_Flying = false;
 
-        const bool allowKeyboard = m_InputEnabled || m_Flying;
+        const bool allowKeyboard = ( m_InputEnabled && !m_KeyboardRequiresLook ) || m_Flying;
 
         if ( allowKeyboard )
         {
