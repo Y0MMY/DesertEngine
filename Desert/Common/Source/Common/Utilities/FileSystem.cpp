@@ -5,6 +5,7 @@
 #include <Common/Platform/Windows/WindowsFileSystem.hpp>
 #elif defined( DESERT_PLATFORM_MACOS )
 #include <Common/Platform/MacOS/MacOSFileSystem.hpp>
+#include <mach-o/dyld.h>
 #endif
 
 #include <Common/Core/Core.hpp>
@@ -111,6 +112,29 @@ namespace Common::Utils
     std::filesystem::path FileSystem::GetFileDirectory( const std::filesystem::path& filepath )
     {
         return filepath.parent_path();
+    }
+
+    std::filesystem::path FileSystem::ExecutablePath()
+    {
+#if defined( DESERT_PLATFORM_WINDOWS )
+        wchar_t     buf[MAX_PATH];
+        const DWORD n = ::GetModuleFileNameW( nullptr, buf, MAX_PATH );
+        return fs::path( std::wstring( buf, n ) );
+#elif defined( DESERT_PLATFORM_MACOS )
+        uint32_t size = 0;
+        _NSGetExecutablePath( nullptr, &size ); // first call: query required buffer size
+        std::string buf( size, '\0' );
+        if ( _NSGetExecutablePath( buf.data(), &size ) != 0 )
+            return {};
+        std::error_code ec;
+        const fs::path  p     = fs::path( buf.c_str() );
+        const fs::path  canon = fs::weakly_canonical( p, ec ); // resolve symlinks / '..'
+        return ec ? p : canon;
+#else // Linux and other POSIX
+        std::error_code ec;
+        const fs::path  p = fs::read_symlink( "/proc/self/exe", ec );
+        return ec ? fs::path{} : p;
+#endif
     }
 
     std::string FileSystem::GetFileDirectoryString( const std::filesystem::path& filepath )

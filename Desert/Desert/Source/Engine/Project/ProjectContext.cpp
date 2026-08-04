@@ -45,11 +45,13 @@ namespace Desert::Project
 
     bool ProjectContext::Open( const std::string& deprojPath )
     {
-        if ( !std::filesystem::exists( deprojPath ) )
+        // Disk first (dev, loose .deproj), else a packaged game serves the descriptor from a mounted .dpak.
+        if ( !Common::Utils::FileSystem::Exists( deprojPath ) )
         {
             LOG_ERROR( "[Project] File not found: {}", deprojPath );
             return false;
         }
+        const bool onDisk = std::filesystem::exists( deprojPath );
 
         const std::string raw = Common::Utils::FileSystem::ReadFileContent( deprojPath );
         if ( raw.empty() )
@@ -74,7 +76,9 @@ namespace Desert::Project
         const std::filesystem::path projectDir = std::filesystem::path( s_FilePath ).parent_path();
         Common::Constants::Path::SetProjectRoot( projectDir, s_Current->AssetsRoot );
 
-        // Make sure the standard content folders exist (a freshly created project has only a few).
+        // Make sure the standard content folders exist (a freshly created project has only a few). Skipped for
+        // a packaged game (opened from a read-only .dpak) — its content lives in the archive, not on disk.
+        if ( onDisk )
         {
             namespace P = Common::Constants::Path;
             std::error_code ec;
@@ -83,7 +87,8 @@ namespace Desert::Project
                 std::filesystem::create_directories( dir, ec );
         }
 
-        RegisterRecent( s_FilePath );
+        if ( onDisk ) // don't pollute the dev hub's recent-projects list from a packaged game
+            RegisterRecent( s_FilePath );
         LOG_INFO( "[Project] Opened '{}' ({}) — assets root: {}", s_Current->Name, s_FilePath,
                   Common::Constants::Path::ASSETS_PATH.string() );
         return true;
