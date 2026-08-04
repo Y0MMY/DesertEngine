@@ -6,6 +6,7 @@
 #include <entt/entt.hpp>
 
 #include <string>
+#include <vector>
 
 // Render2D-backed canvas renderer — the replacement for the ImGui-based RenderCanvas. Walks the scene's
 // UICanvas / UILayout tree and records geometry into a DrawList2D, which the Render2D GPU backend then
@@ -35,7 +36,11 @@ namespace Desert::UI
     // pass nullptr for screen-space-only hosts. @p input drives button hover/press; a click on release writes
     // the button's encoded action to @p outClicked (see the runtime dispatcher). Returns false when there is
     // no visible canvas to draw.
+    // @p outMessages (optional) collects EVERY message the canvas fired this frame — pointer enter/exit,
+    // press/release and drops — since more than one can happen in a single frame, unlike @p outClicked.
+    // Without it those messages fall back to @p outClicked when it is still empty.
     bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
                          const glm::mat4* worldViewProj = nullptr, const UIInput* input = nullptr,
-                         std::string* outClicked = nullptr, entt::entity* focused = nullptr );
+                         std::string* outClicked = nullptr, entt::entity* focused = nullptr,
+                         std::vector<std::string>* outMessages = nullptr );
 } // namespace Desert::UI

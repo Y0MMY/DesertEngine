@@ -260,6 +260,8 @@ namespace
                     .Field( FieldInfo{ .Name = "CustomMinimumSize", .Type = FieldType::Vec2, .Offset = offsetof( T, CustomMinimumSize ), .Size = sizeof( T::CustomMinimumSize ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Custom Minimum Size", .Category = "UI Layout", } } )
                     .Field( FieldInfo{ .Name = "Pivot", .Type = FieldType::Vec2, .Offset = offsetof( T, Pivot ), .Size = sizeof( T::Pivot ), .TypeName = "glm::vec2", .Meta = PropertyMetadata{ .DisplayName = "Pivot", .Category = "UI Layout", } } )
                     .Field( FieldInfo{ .Name = "ClipContents", .Type = FieldType::Bool, .Offset = offsetof( T, ClipContents ), .Size = sizeof( T::ClipContents ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Clip Contents", .Category = "UI Layout", } } )
+                    .Field( FieldInfo{ .Name = "Interactable", .Type = FieldType::Bool, .Offset = offsetof( T, Interactable ), .Size = sizeof( T::Interactable ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Interactable", .Category = "UI Interaction", } } )
+                    .Field( FieldInfo{ .Name = "RaycastTarget", .Type = FieldType::Bool, .Offset = offsetof( T, RaycastTarget ), .Size = sizeof( T::RaycastTarget ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Raycast Target", .Category = "UI Interaction", } } )
                     .Field( FieldInfo{ .Name = "AspectRatio", .Type = FieldType::Float, .Offset = offsetof( T, AspectRatio ), .Size = sizeof( T::AspectRatio ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Aspect Ratio (W/H)", .Category = "Fitter", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 8.0f, } } )
                     .Field( FieldInfo{ .Name = "AspectMode", .Type = FieldType::Enum, .Offset = offsetof( T, AspectMode ), .Size = sizeof( T::AspectMode ), .TypeName = "UIAspectMode", .Meta = PropertyMetadata{ .DisplayName = "Aspect Mode", .Category = "Fitter", }, .EnumValues = { EnumValue{ "Off", 0 }, EnumValue{ "HeightControlsWidth", 1 }, EnumValue{ "WidthControlsHeight", 2 }, } } )
                     .Field( FieldInfo{ .Name = "FlexGrow", .Type = FieldType::Float, .Offset = offsetof( T, FlexGrow ), .Size = sizeof( T::FlexGrow ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Flex Grow", .Category = "Fitter", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 8.0f, } } )
@@ -294,6 +296,33 @@ namespace
                     .Field( FieldInfo{ .Name = "Glow", .Type = FieldType::Bool, .Offset = offsetof( T, Glow ), .Size = sizeof( T::Glow ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Glow", .Category = "Effects", } } )
                     .Field( FieldInfo{ .Name = "GlowColor", .Type = FieldType::Vec3, .Offset = offsetof( T, GlowColor ), .Size = sizeof( T::GlowColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Glow Color", .Category = "Effects", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "GlowSize", .Type = FieldType::Float, .Offset = offsetof( T, GlowSize ), .Size = sizeof( T::GlowSize ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Glow Size", .Category = "Effects", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 48.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UIPointerEventsData;
+                TypeBuilder( "UIPointerEventsData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "OnEnterMessage", .Type = FieldType::String, .Offset = offsetof( T, OnEnterMessage ), .Size = sizeof( T::OnEnterMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Enter", .Category = "UI Pointer Events", } } )
+                    .Field( FieldInfo{ .Name = "OnExitMessage", .Type = FieldType::String, .Offset = offsetof( T, OnExitMessage ), .Size = sizeof( T::OnExitMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Exit", .Category = "UI Pointer Events", } } )
+                    .Field( FieldInfo{ .Name = "OnDownMessage", .Type = FieldType::String, .Offset = offsetof( T, OnDownMessage ), .Size = sizeof( T::OnDownMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Press", .Category = "UI Pointer Events", } } )
+                    .Field( FieldInfo{ .Name = "OnUpMessage", .Type = FieldType::String, .Offset = offsetof( T, OnUpMessage ), .Size = sizeof( T::OnUpMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Release", .Category = "UI Pointer Events", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UIDraggableData;
+                TypeBuilder( "UIDraggableData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Payload", .Type = FieldType::String, .Offset = offsetof( T, Payload ), .Size = sizeof( T::Payload ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Payload", .Category = "UI Drag", } } )
+                    .Field( FieldInfo{ .Name = "GhostOpacity", .Type = FieldType::Float, .Offset = offsetof( T, GhostOpacity ), .Size = sizeof( T::GhostOpacity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Ghost Opacity", .Category = "UI Drag", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 1.0f, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UIDropTargetData;
+                TypeBuilder( "UIDropTargetData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Accepts", .Type = FieldType::String, .Offset = offsetof( T, Accepts ), .Size = sizeof( T::Accepts ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Accepts (prefix)", .Category = "UI Drop", } } )
+                    .Field( FieldInfo{ .Name = "OnDropMessage", .Type = FieldType::String, .Offset = offsetof( T, OnDropMessage ), .Size = sizeof( T::OnDropMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Drop", .Category = "UI Drop", } } )
+                    .Field( FieldInfo{ .Name = "HighlightColor", .Type = FieldType::Vec3, .Offset = offsetof( T, HighlightColor ), .Size = sizeof( T::HighlightColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Highlight", .Category = "UI Drop", .IsColor = true, } } )
                     .WithDefault<T>()
                     .Register();
             }

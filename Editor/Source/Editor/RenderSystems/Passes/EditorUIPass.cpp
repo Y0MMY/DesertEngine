@@ -67,15 +67,18 @@ namespace Desert::Editor::Render
                 input.TypedText     = pv.TypedText;
             }
 
+            std::vector<std::string> uiMessages;
             UI::RenderCanvas2D( scene->GetRegistry(), m_Render2D.GetDrawList(), UI::Rect{ 0.0f, 0.0f, w, h },
                                 vpPtr, feed ? &input : nullptr, feed ? &clicked : nullptr,
-                                feed ? &pv.Focused : nullptr );
+                                feed ? &pv.Focused : nullptr, feed ? &uiMessages : nullptr );
             m_Render2D.Flush();
 
             // A button fired in preview: report it, but DON'T execute scene-load / quit here — that would
             // close/switch the editor. Interactive toggles/sliders/inputs already mutated in the walk.
             if ( feed && !clicked.empty() )
                 LOG_INFO( "[UI Preview] button action: {}", clicked );
+            for ( const std::string& msg : uiMessages ) // pointer enter/exit, press/release, drops
+                LOG_INFO( "[UI Preview] {}", msg );
         };
 
         scene->RegisterExternalPass( std::move( pass ) );

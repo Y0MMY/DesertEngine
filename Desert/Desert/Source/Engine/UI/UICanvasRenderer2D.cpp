@@ -45,6 +45,48 @@ namespace Desert::UI
             return t;
         }
 
+        // --- Hit testing ------------------------------------------------------------------------------
+        // Controls used to each test the cursor against their own rect, so two overlapping ones both lit
+        // up. Instead the walk elects a single HOT element: every raycast-target whose rect (and clip)
+        // contains the pointer overwrites the candidate, and since children draw after parents the last
+        // writer is the topmost. Controls compare against the PREVIOUS frame's winner — the same one-frame
+        // deferral ImGui uses, which avoids a second layout pass and is invisible in practice.
+        entt::entity s_Hot     = entt::null; // resolved last frame: what the controls react to now
+        entt::entity s_HotNext = entt::null; // being elected during this frame's walk
+        Rect         s_HotNextRect{};
+        bool         s_PrevDown = false; // for the press edge (UIInput only carries held + release)
+
+        // An in-flight drag. Lives here with the other cross-frame UI state; a drag survives until release.
+        struct DragState
+        {
+            bool         Active  = false; // past the threshold: the ghost is up and a drop can land
+            bool         Pending = false; // pressed on a draggable, still deciding drag vs click
+            entt::entity Source  = entt::null;
+            std::string  Payload;
+            glm::vec2    Size{ 0.0f };
+            glm::vec2    PressPos{ 0.0f };
+            float        Ghost = 0.55f;
+        };
+        DragState s_Drag;
+
+        Rect IntersectRect( const Rect& a, const Rect& b )
+        {
+            const float x0 = std::max( a.X, b.X ), y0 = std::max( a.Y, b.Y );
+            const float x1 = std::min( a.X + a.W, b.X + b.W ), y1 = std::min( a.Y + a.H, b.Y + b.H );
+            return Rect{ x0, y0, std::max( 0.0f, x1 - x0 ), std::max( 0.0f, y1 - y0 ) };
+        }
+
+        bool PointIn( const Rect& r, const glm::vec2& p )
+        {
+            return p.x >= r.X && p.x <= r.X + r.W && p.y >= r.Y && p.y <= r.Y + r.H;
+        }
+
+        // Does this target accept the payload in flight? An empty filter takes anything.
+        bool Accepts( const ECS::UIDropTargetData& t, const std::string& payload )
+        {
+            return t.Accepts.empty() || payload.rfind( t.Accepts, 0 ) == 0;
+        }
+
         // Split a ';'-separated option string into its items (empty items skipped).
         std::vector<std::string> SplitOptions( const std::string& s )
         {
@@ -693,7 +735,8 @@ namespace Desert::UI
         void DrawElement( entt::registry& reg, entt::entity e, const Rect& parent, float scale,
                           Graphic::Render2D::DrawList2D& dl, const UIInput* input, std::string* outClicked,
                           entt::entity* focused, std::vector<PopupInfo>* popups,
-                          std::vector<entt::entity>* focusables, const Rect* forcedRect = nullptr )
+                          std::vector<entt::entity>* focusables, const Rect& clipRect,
+                          const Rect* forcedRect = nullptr )
         {
             Rect       rect      = parent;
             const bool hasLayout = reg.has<ECS::UILayoutComponent>( e );
@@ -719,10 +762,34 @@ namespace Desert::UI
                 }
             }
 
+            // Interaction flags live on the layout (every UI element has one); a rect handed down by a
+            // layout group inherits the same defaults.
+            const bool interactable  = !hasLayout || reg.get<ECS::UILayoutComponent>( e ).Data.Interactable;
+            const bool raycastTarget = !hasLayout || reg.get<ECS::UILayoutComponent>( e ).Data.RaycastTarget;
+
             if ( forcedRect || hasLayout )
             {
                 const glm::vec2 mn( rect.X, rect.Y );
                 const glm::vec2 mx( rect.X + rect.W, rect.Y + rect.H );
+
+                // Elect the hot element: last writer in draw order = topmost. Clipped-away pixels don't
+                // count, so a scrolled-out row can't be clicked through its viewport.
+                if ( input && raycastTarget && PointIn( rect, input->MousePx ) &&
+                     PointIn( clipRect, input->MousePx ) )
+                {
+                    s_HotNext     = e;
+                    s_HotNextRect = rect;
+                }
+                // This element is what the pointer is over (resolved last frame) AND it responds.
+                const bool hot = interactable && e == s_Hot;
+
+                // A drop target outlines itself while a drag it would accept is in flight.
+                if ( s_Drag.Active && reg.has<ECS::UIDropTargetComponent>( e ) )
+                {
+                    const auto& dt = reg.get<ECS::UIDropTargetComponent>( e ).Data;
+                    if ( Accepts( dt, s_Drag.Payload ) )
+                        dl.AddRect( mn, mx, glm::vec4( dt.HighlightColor, hot ? 1.0f : 0.6f ), hot ? 3.0f : 2.0f );
+                }
 
                 // Panels and buttons render their sprite (single or 9-slice) tinted by the colour, or a flat
                 // box when no sprite is bound. Button hover/press state needs input plumbing (a later slice),
@@ -731,9 +798,7 @@ namespace Desert::UI
                 {
                     const auto& b     = reg.get<ECS::UIButtonComponent>( e ).Data;
                     // Disabled swallows all pointer/keyboard interaction and rests on the dim colour.
-                    const bool hover = !b.Disabled && input && input->MousePx.x >= mn.x &&
-                                       input->MousePx.x <= mx.x && input->MousePx.y >= mn.y &&
-                                       input->MousePx.y <= mx.y;
+                    const bool hover = !b.Disabled && input && hot;
                     const bool down  = hover && input->MouseDown;
                     // Resting colour is Selected (persistent highlight) or Normal; hover cross-fades toward
                     // HoverColor (eased), press snaps to PressedColor, Disabled overrides everything.
@@ -763,7 +828,8 @@ namespace Desert::UI
 
                     const bool isFocused = focused && *focused == e;
                     if ( outClicked && input && !b.Disabled &&
-                         ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
+                         ( ( hover && input->MouseReleased && !s_Drag.Active ) ||
+                           ( isFocused && input->Submit ) ) )
                     {
                         // Encode the structured action into the click message the runtime dispatches (same
                         // encoding as the ImGui renderer, so the host dispatcher is unchanged).
@@ -857,8 +923,7 @@ namespace Desert::UI
                 else if ( reg.has<ECS::UIToggleComponent>( e ) )
                 {
                     auto&      tg    = reg.get<ECS::UIToggleComponent>( e ).Data;
-                    const bool hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
-                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    const bool  hover = input && hot;
                     const float r = tg.CornerRadius * scale;
                     dl.AddRectFilled( mn, mx, glm::vec4( tg.BoxColor, 1.0f ), r );
                     if ( tg.Value )
@@ -886,8 +951,7 @@ namespace Desert::UI
                     dl.AddRectFilled( { fillX - hs, cy - hs }, { fillX + hs, cy + hs },
                                       glm::vec4( sl.HandleColor, 1.0f ), hs );
 
-                    const bool hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
-                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    const bool hover = input && hot;
                     if ( hover && input->MouseDown )
                     {
                         const float nt =
@@ -899,8 +963,7 @@ namespace Desert::UI
                 {
                     auto&      f         = reg.get<ECS::UIInputFieldComponent>( e ).Data;
                     const bool isFocused = focused && *focused == e;
-                    const bool hover     = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
-                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    const bool hover     = input && hot;
 
                     dl.AddRectFilled( mn, mx, glm::vec4( f.Background, 1.0f ), f.CornerRadius * scale );
                     if ( isFocused )
@@ -955,8 +1018,7 @@ namespace Desert::UI
                     dl.AddTriangleFilled( { ax - aw, ay - aw * 0.7f }, { ax + aw, ay - aw * 0.7f },
                                           { ax, ay + aw * 0.7f }, glm::vec4( d.TextColor, 1.0f ) );
 
-                    const bool hover = input && input->MousePx.x >= mn.x && input->MousePx.x <= mx.x &&
-                                       input->MousePx.y >= mn.y && input->MousePx.y <= mx.y;
+                    const bool hover     = input && hot;
                     const bool isFocused = focused && *focused == e;
                     if ( input && ( ( hover && input->MouseReleased ) || ( isFocused && input->Submit ) ) )
                         d.Open = !d.Open;
@@ -1010,9 +1072,7 @@ namespace Desert::UI
 
                     const float contentPx = sv.ContentHeight * scale;
                     scrollMaxPx           = std::max( 0.0f, contentPx - rect.H );
-                    const bool hover      = input && input->MousePx.x >= rect.X &&
-                                       input->MousePx.x <= rect.X + rect.W && input->MousePx.y >= rect.Y &&
-                                       input->MousePx.y <= rect.Y + rect.H;
+                    const bool hover      = input && interactable && e == s_Hot;
                     if ( hover && input->ScrollDelta != 0.0f )
                         sv.ScrollY -= input->ScrollDelta * 30.0f; // 30 design px per wheel notch
                     const float maxScrollDesign = scale > 0.0f ? scrollMaxPx / scale : 0.0f;
@@ -1024,6 +1084,10 @@ namespace Desert::UI
 
                 if ( clip )
                     dl.PushClipRect( { rect.X, rect.Y }, { rect.X + rect.W, rect.Y + rect.H } );
+
+                // Children inherit the scissor for hit testing too, so what is scrolled out of view can't
+                // be clicked through its viewport.
+                const Rect childClip = clip ? IntersectRect( clipRect, rect ) : clipRect;
 
                 const auto& children = reg.get<ECS::RelationshipComponent>( e ).Children;
                 if ( reg.has<ECS::UILayoutGroupComponent>( e ) )
@@ -1067,14 +1131,14 @@ namespace Desert::UI
                     const auto rects = SolveLayoutGroup( childParent, params, sizes, flex );
                     for ( std::size_t i = 0; i < kids.size(); ++i )
                         DrawElement( reg, kids[i], childParent, scale, dl, input, outClicked, focused, popups,
-                                     focusables, &rects[i] );
+                                     focusables, childClip, &rects[i] );
                 }
                 else
                 {
                     for ( auto c : children )
                         if ( reg.valid( c ) )
                             DrawElement( reg, c, childParent, scale, dl, input, outClicked, focused, popups,
-                                         focusables );
+                                         focusables, childClip );
                 }
                 if ( clip )
                     dl.PopClipRect();
@@ -1101,7 +1165,7 @@ namespace Desert::UI
 
     bool RenderCanvas2D( entt::registry& reg, Graphic::Render2D::DrawList2D& dl, const Rect& viewportPx,
                          const glm::mat4* worldViewProj, const UIInput* input, std::string* outClicked,
-                         entt::entity* focused )
+                         entt::entity* focused, std::vector<std::string>* outMessages )
     {
         // Refresh the shared frame delta once per canvas draw (drives hover eases). Clamped so a long stall /
         // first frame doesn't snap animations.
@@ -1111,6 +1175,10 @@ namespace Desert::UI
             s_FrameDt          = std::clamp( now - lastT, 0.0f, 0.1f );
             lastT              = now;
         }
+
+        // A scene swap leaves the elected entity dangling — drop it rather than matching a recycled id.
+        if ( s_Hot != entt::null && !reg.valid( s_Hot ) )
+            s_Hot = entt::null;
 
         auto canvasView = reg.view<ECS::UICanvasComponent>();
         if ( canvasView.begin() == canvasView.end() )
@@ -1156,7 +1224,110 @@ namespace Desert::UI
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
             for ( auto c : reg.get<ECS::RelationshipComponent>( canvasEntity ).Children )
                 if ( reg.valid( c ) )
-                    DrawElement( reg, c, childRoot, scale, dl, input, outClicked, focused, &popups, &focusables );
+                    DrawElement( reg, c, childRoot, scale, dl, input, outClicked, focused, &popups, &focusables,
+                                 viewportPx );
+
+        // --- Pointer events, drag & drop -------------------------------------------------------------
+        // Everything here runs on the freshly elected hot element, AFTER the tree is laid out: enter/exit
+        // edges, press/release callbacks, and the drag lifecycle. Messages go out through the same channel
+        // as button actions, so a host that dispatches those handles these for free.
+        if ( input )
+        {
+            auto emit = [&]( const std::string& msg )
+            {
+                if ( msg.empty() )
+                    return;
+                if ( outMessages )
+                    outMessages->push_back( msg );
+                else if ( outClicked && outClicked->empty() )
+                    *outClicked = msg;
+            };
+            auto events = [&]( entt::entity e ) -> const ECS::UIPointerEventsData*
+            {
+                return ( e != entt::null && reg.valid( e ) && reg.has<ECS::UIPointerEventsComponent>( e ) )
+                            ? &reg.get<ECS::UIPointerEventsComponent>( e ).Data
+                            : nullptr;
+            };
+
+            if ( s_HotNext != s_Hot ) // the pointer crossed a boundary this frame
+            {
+                if ( const auto* ev = events( s_Hot ) )
+                    emit( ev->OnExitMessage );
+                if ( const auto* ev = events( s_HotNext ) )
+                    emit( ev->OnEnterMessage );
+            }
+
+            const bool pressed = input->MouseDown && !s_PrevDown; // UIInput carries held + release only
+            if ( pressed )
+            {
+                if ( const auto* ev = events( s_HotNext ) )
+                    emit( ev->OnDownMessage );
+
+                // Start a drag from a draggable element. The ghost is the source's own footprint, so the
+                // cursor carries something the size of what it picked up.
+                if ( s_HotNext != entt::null && reg.valid( s_HotNext ) &&
+                     reg.has<ECS::UIDraggableComponent>( s_HotNext ) )
+                {
+                    // Only PENDING for now — a press that never moves is a click, not a drag.
+                    const auto& d   = reg.get<ECS::UIDraggableComponent>( s_HotNext ).Data;
+                    s_Drag.Pending  = true;
+                    s_Drag.Source   = s_HotNext;
+                    s_Drag.Payload  = d.Payload;
+                    s_Drag.Ghost    = d.GhostOpacity;
+                    s_Drag.Size     = { s_HotNextRect.W, s_HotNextRect.H };
+                    s_Drag.PressPos = input->MousePx;
+                }
+            }
+            // Promote the pending press to a real drag once the pointer travels far enough.
+            if ( s_Drag.Pending && !s_Drag.Active && input->MouseDown )
+            {
+                constexpr float kDragStartPx = 4.0f;
+                if ( glm::length( input->MousePx - s_Drag.PressPos ) > kDragStartPx )
+                    s_Drag.Active = true;
+            }
+
+            if ( input->MouseReleased )
+            {
+                if ( const auto* ev = events( s_HotNext ) )
+                    emit( ev->OnUpMessage );
+
+                if ( s_Drag.Active )
+                {
+                    // Drop on the element under the cursor, or on the nearest ancestor that accepts — a
+                    // target is usually a panel whose children are what you actually point at.
+                    for ( entt::entity t = s_HotNext; t != entt::null && reg.valid( t ); )
+                    {
+                        if ( reg.has<ECS::UIDropTargetComponent>( t ) )
+                        {
+                            const auto& dt = reg.get<ECS::UIDropTargetComponent>( t ).Data;
+                            if ( Accepts( dt, s_Drag.Payload ) && t != s_Drag.Source )
+                            {
+                                emit( dt.OnDropMessage.empty() ? s_Drag.Payload
+                                                               : dt.OnDropMessage + "|" + s_Drag.Payload );
+                                break;
+                            }
+                        }
+                        t = reg.has<ECS::RelationshipComponent>( t )
+                                 ? reg.get<ECS::RelationshipComponent>( t ).Parent
+                                 : entt::null;
+                    }
+                }
+                s_Drag = DragState{}; // a plain click on a draggable ends here too
+            }
+            s_PrevDown = input->MouseDown;
+
+            // The ghost rides on top of everything, drawn after the tree so nothing overlaps it.
+            if ( s_Drag.Active )
+            {
+                const glm::vec2 half = s_Drag.Size * 0.5f;
+                const glm::vec2 mn   = input->MousePx - half;
+                const glm::vec2 mx   = input->MousePx + half;
+                dl.AddRectFilled( mn, mx, glm::vec4( 0.35f, 0.55f, 0.85f, s_Drag.Ghost * 0.6f ), 6.0f );
+                dl.AddRect( mn, mx, glm::vec4( 0.75f, 0.87f, 1.0f, s_Drag.Ghost ), 2.0f );
+            }
+        }
+        s_Hot     = s_HotNext; // hand this frame's election to the next one
+        s_HotNext = entt::null;
 
         // Tab advances keyboard focus to the next focusable control (wraps; effective next frame).
         if ( focused && input && input->Tab && !focusables.empty() )

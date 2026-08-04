@@ -917,6 +917,13 @@ namespace Desert::Core::Serialize
                                                                             &ECS::UIButtonComponent::Data ) );
         Register( MakeReflected<ECS::UIIconComponent, ECS::UIIconData>( "UIIcon", "UIIconData",
                                                                         &ECS::UIIconComponent::Data ) );
+
+        Register( MakeReflected<ECS::UIPointerEventsComponent, ECS::UIPointerEventsData>(
+             "UIPointerEvents", "UIPointerEventsData", &ECS::UIPointerEventsComponent::Data ) );
+        Register( MakeReflected<ECS::UIDraggableComponent, ECS::UIDraggableData>(
+             "UIDraggable", "UIDraggableData", &ECS::UIDraggableComponent::Data ) );
+        Register( MakeReflected<ECS::UIDropTargetComponent, ECS::UIDropTargetData>(
+             "UIDropTarget", "UIDropTargetData", &ECS::UIDropTargetComponent::Data ) );
         Register( MakeReflected<ECS::UIImageComponent, ECS::UIImageData>( "UIImage", "UIImageData",
                                                                           &ECS::UIImageComponent::Data ) );
         Register( MakeReflected<ECS::UILayoutGroupComponent, ECS::UILayoutGroupData>(

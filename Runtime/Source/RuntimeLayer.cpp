@@ -309,8 +309,13 @@ namespace Desert::Player
                 m_TabPressed    = false;
                 m_SubmitPressed = false;
 
+                // Pointer events / drops can fire several times in one frame, so they come back in their
+                // own list; a button action still arrives through `clicked`.
+                std::vector<std::string> uiMessages;
                 UI::RenderCanvas2D( m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
-                                    &clicked, &m_FocusedUI );
+                                    &clicked, &m_FocusedUI, &uiMessages );
+                for ( const std::string& msg : uiMessages )
+                    LOG_INFO( "[UI] {}", msg );
 
                 if ( m_SplashTimer > 0.0f )
                 {

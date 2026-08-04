@@ -66,9 +66,12 @@ approved per the engine's "no magic dependencies" rule).
 - [x] State set: normal / hover / pressed / focused / **disabled / selected** (per-state button sprites + tints)
 - [~] **Focus + navigation** — keyboard Tab-order + Enter-activate done; gamepad D-pad, back button todo
 - [ ] **Touch + gestures** (tap/long-press/swipe/drag/pinch), multi-touch
-- [ ] **Drag & drop** between UI elements (inventory), drop targets
-- [~] Event system: click + scroll + text-typed wired; per-element callbacks, bubbling/capture, enter/exit todo
-- [ ] Raycast/hit blocking, interactable/raycast-target flags
+- [x] **Drag & drop** between UI elements — `UIDraggable` (payload + ghost) / `UIDropTarget` (prefix filter,
+      drop message, live highlight of every target that accepts); press-and-move threshold so a click stays a click
+- [~] Event system: click + scroll + text-typed + **pointer enter/exit/press/release** (`UIPointerEvents`,
+      dispatched through the same channel as button actions); bubbling/capture still todo
+- [x] Raycast/hit blocking — one HOT element elected per frame in draw order (topmost wins, clipped-away
+      pixels excluded), with **Interactable** / **Raycast Target** flags on every UILayout
 
 ## E. Text & fonts (production)
 - [~] Custom fonts — TTF asset via `AssetHandle` (preloaded dropdown + `.ttf` drag-drop), on 3D Text + UIText; font fallback chain / emoji todo
@@ -138,7 +141,7 @@ approved per the engine's "no magic dependencies" rule).
 4. ✅ **Masking/clipping + effects** (shadow/outline/gradient/glow) + world-space canvas. (G)
 5. ✅ **Fonts & rich text** — custom TTF asset, wrap/multi-line/auto-size/overflow, BBCode. (E) *(RTL/CJK/emoji deferred — HarfBuzz)*
 6. ✅ **Auto-layout + fitters** — VBox/HBox/Grid + Content Size / Aspect Ratio / Layout Element + Canvas safe-area. (B) *(Flex/Wrap todo)*
-7. 🔶 **Controls + input** — Toggle/Slider/ProgressBar/InputField/ScrollView/Dropdown + Tab-focus + disabled/selected states done; drag&drop, gamepad nav todo. (C/D)
+7. 🔶 **Controls + input** — Toggle/Slider/ProgressBar/InputField/ScrollView/Dropdown + Tab-focus + disabled/selected states + **z-ordered hit testing, pointer events, drag & drop** done; gamepad nav + bubbling todo. (C/D)
    — Also landed early, out of order: ✅ custom `Render2D` GPU backend (UI no longer ImGui) + ImGui-free runtime + batching (G/L partial).
 8. ✅ **Media** — animated GIF + MPEG1 video, video as an `AssetHandle` (drag-drop). (A) *(H.264/webm + audio sync todo)*
 9. ✅ **Icons + shapes** — `UIIcon` vector set + sprite icon blocks; rounded corners, circle/ring. (A/G)
@@ -149,9 +152,9 @@ approved per the engine's "no magic dependencies" rule).
 14. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
 15. **Localization + accessibility** (K); **Perf pass** — culling, pooling, atlases (G/L).
 
-**Next up (dependency-free):** finish C/D (drag & drop between elements, pointer enter/exit events,
-gamepad/D-pad nav), then F generic tween tracks + screen-transition state machine; A render-texture
-element (reuse per-instance SceneRenderer → offscreen target).
+**Next up (dependency-free):** gamepad/D-pad navigation + event bubbling to finish D; then F generic
+tween tracks + screen-transition state machine; A render-texture element (reuse per-instance
+SceneRenderer → offscreen target).
 
 Dependencies to approve when reached: pl_mpeg/libvpx or ffmpeg (video), rlottie (Lottie),
 HarfBuzz (complex text). Each: justify size/license/compile-time first. (nanosvg was considered for

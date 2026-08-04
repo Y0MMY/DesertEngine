@@ -894,6 +894,15 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Clip Contents" ), Category( "UI Layout" ) )
         bool ClipContents = false;
 
+        // Hit testing. RaycastTarget = does the pointer see this element at all (off = clicks fall through
+        // to whatever is behind, for decorative overlays); Interactable = does it RESPOND (off = it still
+        // blocks what is under it, but hover/press/drag do nothing). Unity draws the same distinction.
+        PROPERTY( DisplayName( "Interactable" ), Category( "UI Interaction" ) )
+        bool Interactable = true;
+
+        PROPERTY( DisplayName( "Raycast Target" ), Category( "UI Interaction" ) )
+        bool RaycastTarget = true;
+
         // Aspect Ratio Fitter (Phase B): keep this width/height ratio, deriving the free axis about the centre.
         PROPERTY( DisplayName( "Aspect Ratio (W/H)" ), Category( "Fitter" ), Range( 0.0f, 8.0f ) )
         float AspectRatio = 0.0f; // 0 = off
@@ -987,6 +996,66 @@ namespace Desert::ECS
     struct UIPanelComponent
     {
         UIPanelData Data;
+    };
+
+    // Pointer callbacks on any UI element. Each message is dispatched exactly like a button's action, so a
+    // host that already handles UIButton actions handles these for free. Empty = that edge fires nothing.
+    struct UIPointerEventsData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "On Enter" ), Category( "UI Pointer Events" ) )
+        std::string OnEnterMessage;
+
+        PROPERTY( DisplayName( "On Exit" ), Category( "UI Pointer Events" ) )
+        std::string OnExitMessage;
+
+        PROPERTY( DisplayName( "On Press" ), Category( "UI Pointer Events" ) )
+        std::string OnDownMessage;
+
+        PROPERTY( DisplayName( "On Release" ), Category( "UI Pointer Events" ) )
+        std::string OnUpMessage;
+    };
+    struct UIPointerEventsComponent
+    {
+        UIPointerEventsData Data;
+    };
+
+    // Makes an element draggable. Pressing and moving past a small threshold starts a drag carrying
+    // `Payload`; a ghost of the element follows the cursor until release (see UIDropTargetData).
+    struct UIDraggableData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Payload" ), Category( "UI Drag" ) )
+        std::string Payload; // e.g. "item:sword" — a drop target filters on its prefix
+
+        PROPERTY( DisplayName( "Ghost Opacity" ), Category( "UI Drag" ), Range( 0.0f, 1.0f ) )
+        float GhostOpacity = 0.55f;
+    };
+    struct UIDraggableComponent
+    {
+        UIDraggableData Data;
+    };
+
+    // Receives a dropped payload. While a drag is in flight every target that ACCEPTS it outlines itself,
+    // so the valid destinations are obvious; releasing over one dispatches "OnDropMessage|payload".
+    struct UIDropTargetData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Accepts (prefix)" ), Category( "UI Drop" ) )
+        std::string Accepts; // "" = anything; "item:" = only payloads starting with it
+
+        PROPERTY( DisplayName( "On Drop" ), Category( "UI Drop" ) )
+        std::string OnDropMessage;
+
+        PROPERTY( DisplayName( "Highlight" ), Category( "UI Drop" ), Color )
+        glm::vec3 HighlightColor = glm::vec3( 0.35f, 0.75f, 1.0f );
+    };
+    struct UIDropTargetComponent
+    {
+        UIDropTargetData Data;
     };
 
     // A vector icon. The artwork is an ASSET — an .svg imported once into a signed distance field
