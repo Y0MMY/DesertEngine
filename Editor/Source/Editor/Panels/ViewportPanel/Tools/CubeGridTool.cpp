@@ -37,6 +37,11 @@ namespace Desert::Editor::Tools
             return { static_cast<int>( k & 0x1FFFFF ) - OFF, static_cast<int>( ( k >> 21 ) & 0x1FFFFF ) - OFF,
                      static_cast<int>( ( k >> 42 ) & 0x1FFFFF ) - OFF };
         }
+        // Floor division rounding toward -infinity (so coarsening negative coords merges correctly).
+        int FloorDiv( int a, int b )
+        {
+            return a >= 0 ? a / b : -( ( -a + b - 1 ) / b );
+        }
 
         // The 6 faces of a unit cube (position in [-0.5,0.5] + the engine's cube normals/tangents/UVs), each as
         // 4 CCW corners — copied from PrimitiveMeshFactory::CreateCube so winding/normals are known-good.
@@ -412,17 +417,52 @@ namespace Desert::Editor::Tools
             drawGridAndDims( tU - 6, tU + 6, tV - 6, tV + 6, tNa, planeW, false ); // grid helper only
         }
 
-        // Resize Grid pins the min corner in place (grow from the corner, not slide away from the origin).
-        if ( gs != m_BakedGrid && !m_Cells.empty() )
+        // Resize Grid: already-drawn blocks stay FIXED in world (UE behaviour). We REMAP the voxel
+        // coordinates onto the new grid instead of rescaling geometry — refine (finer step) subdivides each
+        // cell into F³, coarsen merges F³→1. World position/size of existing solids is unchanged; only the
+        // grid resolution + the active selection change. Grid steps are powers of two so F is exact.
+        if ( m_BakedGrid < 0.0f )
         {
-            if ( m_BakedGrid > 0.0f )
+            m_BakedGrid = gs; // first adoption — nothing to remap
+        }
+        else if ( gs != m_BakedGrid )
+        {
+            const bool refine = gs < m_BakedGrid;
+            const int  F =
+                 std::max( 2, static_cast<int>( std::lround( refine ? m_BakedGrid / gs : gs / m_BakedGrid ) ) );
+            if ( !m_Cells.empty() )
             {
-                glm::ivec3 minCell{ INT_MAX };
+                std::unordered_set<uint64_t> out;
                 for ( uint64_t k : m_Cells )
-                    minCell = glm::min( minCell, Unpack( k ) );
-                m_Origin += glm::vec3( minCell ) * ( m_BakedGrid - gs );
+                {
+                    const glm::ivec3 c = Unpack( k );
+                    if ( refine )
+                        for ( int dx = 0; dx < F; ++dx )
+                            for ( int dy = 0; dy < F; ++dy )
+                                for ( int dz = 0; dz < F; ++dz )
+                                    out.insert( Pack( { c.x * F + dx, c.y * F + dy, c.z * F + dz } ) );
+                    else
+                        out.insert( Pack( { FloorDiv( c.x, F ), FloorDiv( c.y, F ), FloorDiv( c.z, F ) } ) );
+                }
+                m_Cells = std::move( out );
             }
-            changed = true;
+            if ( m_HasSel || m_Selecting ) // remap the marquee so it rescales to the new step
+            {
+                if ( refine )
+                {
+                    m_UMin *= F, m_VMin *= F, m_PlaneCell *= F;
+                    m_UMax = m_UMax * F + F - 1, m_VMax = m_VMax * F + F - 1;
+                }
+                else
+                {
+                    m_UMin = FloorDiv( m_UMin, F ), m_UMax = FloorDiv( m_UMax, F );
+                    m_VMin = FloorDiv( m_VMin, F ), m_VMax = FloorDiv( m_VMax, F );
+                    m_PlaneCell = FloorDiv( m_PlaneCell, F );
+                }
+            }
+            if ( !m_Cells.empty() )
+                changed = true;
+            m_BakedGrid = gs;
         }
 
         ms.Cubes = static_cast<int>( m_Cells.size() );
