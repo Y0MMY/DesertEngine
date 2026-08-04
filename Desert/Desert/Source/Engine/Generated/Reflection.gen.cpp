@@ -300,9 +300,8 @@ namespace
             {
                 using T = ::Desert::ECS::UIIconData;
                 TypeBuilder( "UIIconData", sizeof( T ) )
-                    .Field( FieldInfo{ .Name = "Icon", .Type = FieldType::Enum, .Offset = offsetof( T, Icon ), .Size = sizeof( T::Icon ), .TypeName = "UIIconType", .Meta = PropertyMetadata{ .DisplayName = "Icon", .Category = "UI Icon", }, .EnumValues = { EnumValue{ "Play", 0 }, EnumValue{ "User", 1 }, EnumValue{ "Server", 2 }, EnumValue{ "Cart", 3 }, EnumValue{ "Gear", 4 }, EnumValue{ "Power", 5 }, EnumValue{ "Star", 6 }, EnumValue{ "Heart", 7 }, EnumValue{ "Check", 8 }, EnumValue{ "Close", 9 }, EnumValue{ "ChevronRight", 10 }, EnumValue{ "Bell", 11 }, } } )
+                    .Field( FieldInfo{ .Name = "Icon", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Icon ), .Size = sizeof( T::Icon ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Icon", .Category = "UI Icon", .IsAsset = true, .AssetType = "IconAsset", } } )
                     .Field( FieldInfo{ .Name = "Color", .Type = FieldType::Vec3, .Offset = offsetof( T, Color ), .Size = sizeof( T::Color ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Color", .Category = "UI Icon", .IsColor = true, } } )
-                    .Field( FieldInfo{ .Name = "Thickness", .Type = FieldType::Float, .Offset = offsetof( T, Thickness ), .Size = sizeof( T::Thickness ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Thickness", .Category = "UI Icon", .HasRange = true, .RangeMin = 1.0f, .RangeMax = 12.0f, } } )
                     .Field( FieldInfo{ .Name = "Scale", .Type = FieldType::Float, .Offset = offsetof( T, Scale ), .Size = sizeof( T::Scale ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Scale", .Category = "UI Icon", .HasRange = true, .RangeMin = 0.2f, .RangeMax = 1.0f, } } )
                     .WithDefault<T>()
                     .Register();

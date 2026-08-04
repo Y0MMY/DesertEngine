@@ -18,6 +18,8 @@ namespace Common::Constants
         inline const std::filesystem::path SHADERDIR_PATH        = "Resources/Shaders/";
         inline const std::filesystem::path RESOURCE_SPIRV_BINARY = "Resources/Shaders/SPIRV/Bin/";
         inline const std::filesystem::path FONTS_PATH            = "Resources/Fonts/";
+        // Built-in vector icons (.svg, imported into SDF at first use — see Runtime::IconService).
+        inline const std::filesystem::path ICONS_PATH = "Resources/Icons/";
 
         // --- User content (PROJECT-owned; defaults = built-in sandbox) ---
         inline std::filesystem::path ASSETS_PATH        = "Resources/Assets/";

@@ -1,5 +1,6 @@
 {
  "SceneName": "MainMenu",
+ "UnitVersion": 1,
  "Entities": [
   {
    "id": 1001,
@@ -356,13 +357,14 @@
     ],
     "ClipContents": false
    },
-   "UIImage": {
-    "Tint": [
+   "UIIcon": {
+    "Icon": "Resources/Icons/play.svg",
+    "Color": [
      1.0,
      1.0,
      1.0
     ],
-    "Opacity": 1.0
+    "Scale": 0.62
    }
   },
   {
@@ -477,13 +479,14 @@
     ],
     "ClipContents": false
    },
-   "UIImage": {
-    "Tint": [
+   "UIIcon": {
+    "Icon": "Resources/Icons/user.svg",
+    "Color": [
      1.0,
      1.0,
      1.0
     ],
-    "Opacity": 1.0
+    "Scale": 0.62
    }
   },
   {
@@ -598,13 +601,14 @@
     ],
     "ClipContents": false
    },
-   "UIImage": {
-    "Tint": [
+   "UIIcon": {
+    "Icon": "Resources/Icons/server.svg",
+    "Color": [
      1.0,
      1.0,
      1.0
     ],
-    "Opacity": 1.0
+    "Scale": 0.62
    }
   },
   {
@@ -719,13 +723,14 @@
     ],
     "ClipContents": false
    },
-   "UIImage": {
-    "Tint": [
+   "UIIcon": {
+    "Icon": "Resources/Icons/cart.svg",
+    "Color": [
      1.0,
      1.0,
      1.0
     ],
-    "Opacity": 1.0
+    "Scale": 0.62
    }
   },
   {
@@ -840,13 +845,14 @@
     ],
     "ClipContents": false
    },
-   "UIImage": {
-    "Tint": [
+   "UIIcon": {
+    "Icon": "Resources/Icons/gear.svg",
+    "Color": [
      1.0,
      1.0,
      1.0
     ],
-    "Opacity": 1.0
+    "Scale": 0.62
    }
   },
   {
@@ -961,13 +967,14 @@
     ],
     "ClipContents": false
    },
-   "UIImage": {
-    "Tint": [
+   "UIIcon": {
+    "Icon": "Resources/Icons/power.svg",
+    "Color": [
      1.0,
      1.0,
      1.0
     ],
-    "Opacity": 1.0
+    "Scale": 0.62
    }
   },
   {
@@ -1171,13 +1178,14 @@
     ],
     "ClipContents": false
    },
-   "UIImage": {
-    "Tint": [
+   "UIIcon": {
+    "Icon": "Resources/Icons/user.svg",
+    "Color": [
      1.0,
      1.0,
      1.0
     ],
-    "Opacity": 1.0
+    "Scale": 0.8
    }
   },
   {

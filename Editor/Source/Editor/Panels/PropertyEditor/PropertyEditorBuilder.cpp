@@ -326,6 +326,62 @@ namespace Desert::Editor
                     break;
                 }
 
+                // Icon slot: a vector icon is an .svg imported into an SDF (IconService owns the
+                // handle<->path registry). Pick a discovered icon or drag an .svg from the Content Browser —
+                // adding icons never touches C++.
+                if ( field.Meta.AssetType == "IconAsset" )
+                {
+                    uint64_t* handle = static_cast<uint64_t*>( p );
+                    auto*     is     = Runtime::ResourceRegistry::GetIconService();
+
+                    const std::string curPath = is ? is->PathForHandle( *handle ) : "";
+                    const std::string preview =
+                         *handle == 0 ? "None"
+                                      : ( curPath.empty() ? "(missing)"
+                                                          : std::filesystem::path( curPath ).stem().string() );
+                    if ( ImGui::BeginCombo( "##icon", preview.c_str() ) )
+                    {
+                        if ( ImGui::Selectable( "None", *handle == 0 ) )
+                        {
+                            *handle = 0;
+                            changed = true;
+                        }
+                        if ( is )
+                        {
+                            for ( const auto& f : is->AvailableIcons() )
+                            {
+                                const uint64_t h   = is->RegisterIcon( f );
+                                const bool     sel = ( h == *handle );
+                                if ( ImGui::Selectable( std::filesystem::path( f ).stem().string().c_str(), sel ) )
+                                {
+                                    *handle = h;
+                                    changed = true;
+                                }
+                                if ( sel )
+                                    ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    if ( ImGui::BeginDragDropTarget() )
+                    {
+                        if ( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload( "AssetFile" ) )
+                        {
+                            const std::string path( static_cast<const char*>( pl->Data ),
+                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                            if ( is && !path.empty() )
+                            {
+                                *handle = is->RegisterIcon( path );
+                                changed = true;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Pick a vector icon or drag an .svg here from the Content Browser" );
+                    break;
+                }
+
                 // Video slot: a video is referenced by asset handle (never a raw path). Drag a .mpg from the
                 // Content Browser (a generic AssetFile payload). VideoService owns the handle<->path registry.
                 if ( field.Meta.AssetType == "VideoAsset" )

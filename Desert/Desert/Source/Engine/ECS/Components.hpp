@@ -989,36 +989,19 @@ namespace Desert::ECS
         UIPanelData Data;
     };
 
-    // Built-in vector icon set — drawn crisply at any size with Render2D primitives (no icon font / SVG
-    // dependency). Place as a child of a button/panel, or standalone for status glyphs.
-    enum class UIIconType
-    {
-        Play,
-        User,
-        Server,
-        Cart,
-        Gear,
-        Power,
-        Star,
-        Heart,
-        Check,
-        Close,
-        ChevronRight,
-        Bell
-    };
-
+    // A vector icon. The artwork is an ASSET — an .svg imported once into a signed distance field
+    // (Runtime::IconService) — so icons are added by dropping a file in, never by touching C++, and they
+    // stay crisp at any size because the same SDF shader that draws text reconstructs the edge.
+    // Place as a child of a button/panel, or standalone for status glyphs.
     struct UIIconData
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Icon" ), Category( "UI Icon" ) )
-        UIIconType Icon = UIIconType::Star;
+        PROPERTY( DisplayName( "Icon" ), Category( "UI Icon" ), Asset<IconAsset> )
+        Assets::AssetHandle Icon; // .svg vector icon — drag one from the Content Browser or pick a built-in
 
         PROPERTY( DisplayName( "Color" ), Category( "UI Icon" ), Color )
         glm::vec3 Color = glm::vec3( 1.0f );
-
-        PROPERTY( DisplayName( "Thickness" ), Category( "UI Icon" ), Range( 1.0f, 12.0f ) )
-        float Thickness = 3.0f; // stroke width (design px) for outline-style icons
 
         PROPERTY( DisplayName( "Scale" ), Category( "UI Icon" ), Range( 0.2f, 1.0f ) )
         float Scale = 0.7f; // icon size as a fraction of the element's shorter side
@@ -1029,7 +1012,7 @@ namespace Desert::ECS
     };
 
     // A plain image block: draws a sprite (any PNG/JPG/TGA — or an animated GIF) filling the element rect,
-    // tinted by Tint*Opacity. The composable "block + sprite" alternative to the built-in vector UIIcon —
+    // tinted by Tint*Opacity. The full-colour, raster alternative to the monochrome vector UIIcon —
     // drag any texture onto Sprite and position it freely with the element's anchors. 9-slice supported.
     struct UIImageData
     {

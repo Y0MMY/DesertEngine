@@ -619,101 +619,28 @@ namespace Desert::UI
             }
         }
 
-        // Draw a built-in vector icon centred in `rect`, sized to `sizeFrac` of the shorter side. Composed
-        // from Render2D primitives (lines / triangles / filled circles / rings) so it stays crisp at any
-        // scale with no icon-font or SVG dependency. `th` is the stroke width in px (already scaled).
-        void DrawIcon( Graphic::Render2D::DrawList2D& dl, ECS::UIIconType type, const Rect& rect,
-                       const glm::vec4& col, float th, float sizeFrac )
+        // Draw an icon ASSET centred in `rect`, sized to `sizeFrac` of the shorter side. The .svg was
+        // imported into an SDF once (Runtime::IconService), so this is a single quad through the very same
+        // shader as text — crisp at any size, and outline/glow/shadow come along for free.
+        void DrawIcon( Graphic::Render2D::DrawList2D& dl, const ECS::UIIconData& ic, const Rect& rect )
         {
-            const glm::vec2 c( rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f );
-            const float     R = std::min( rect.W, rect.H ) * 0.5f * std::clamp( sizeFrac, 0.1f, 1.0f );
-            if ( R <= 0.0f )
+            auto* icons = Runtime::ResourceRegistry::GetIconService();
+            if ( !icons )
+                return;
+            Runtime::Icon* icon = icons->Get( static_cast<uint64_t>( ic.Icon ) );
+            if ( !icon || !icon->Atlas ) // unset or unreadable: draw nothing rather than a placeholder box
                 return;
 
-            auto            line = [&]( glm::vec2 a, glm::vec2 b ) { dl.AddLine( a, b, col, th ); };
-            auto            dot  = [&]( glm::vec2 p, float r ) { dl.AddRectFilled( p - r, p + r, col, r ); };
-            auto            ring = [&]( float outerR ) { dl.AddRing( c, outerR, outerR - th, col, col ); };
-            auto            rectOutline = [&]( glm::vec2 mn, glm::vec2 mx ) { dl.AddRect( mn, mx, col, th ); };
-            constexpr float PI          = 3.14159265358979f;
+            const float box = std::min( rect.W, rect.H ) * std::clamp( ic.Scale, 0.1f, 1.0f );
+            if ( box <= 0.0f )
+                return;
+            // Fit the source aspect inside that box so a wide icon isn't stretched.
+            const float     w = icon->Aspect >= 1.0f ? box : box * icon->Aspect;
+            const float     h = icon->Aspect >= 1.0f ? box / icon->Aspect : box;
+            const glm::vec2 c( rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f );
 
-            switch ( type )
-            {
-                case ECS::UIIconType::Play:
-                    dl.AddTriangleFilled( { c.x - R * 0.5f, c.y - R * 0.75f }, { c.x - R * 0.5f, c.y + R * 0.75f },
-                                          { c.x + R * 0.8f, c.y }, col );
-                    break;
-                case ECS::UIIconType::User:
-                    dot( { c.x, c.y - R * 0.38f }, R * 0.34f ); // head
-                    dl.AddRectFilled( { c.x - R * 0.6f, c.y + R * 0.12f }, { c.x + R * 0.6f, c.y + R * 0.95f },
-                                      col, R * 0.45f ); // shoulders
-                    break;
-                case ECS::UIIconType::Server:
-                    rectOutline( { c.x - R * 0.85f, c.y - R * 0.6f }, { c.x + R * 0.85f, c.y - R * 0.05f } );
-                    rectOutline( { c.x - R * 0.85f, c.y + R * 0.05f }, { c.x + R * 0.85f, c.y + R * 0.6f } );
-                    dot( { c.x - R * 0.55f, c.y - R * 0.32f }, th * 0.7f );
-                    dot( { c.x - R * 0.55f, c.y + R * 0.32f }, th * 0.7f );
-                    break;
-                case ECS::UIIconType::Cart:
-                    line( { c.x - R * 0.85f, c.y - R * 0.6f }, { c.x - R * 0.5f, c.y - R * 0.35f } );  // handle
-                    line( { c.x - R * 0.5f, c.y - R * 0.35f }, { c.x + R * 0.7f, c.y - R * 0.35f } );  // top
-                    line( { c.x + R * 0.7f, c.y - R * 0.35f }, { c.x + R * 0.4f, c.y + R * 0.35f } );  // right
-                    line( { c.x - R * 0.5f, c.y - R * 0.35f }, { c.x - R * 0.25f, c.y + R * 0.35f } ); // left
-                    line( { c.x - R * 0.25f, c.y + R * 0.35f }, { c.x + R * 0.4f, c.y + R * 0.35f } ); // bottom
-                    dot( { c.x - R * 0.15f, c.y + R * 0.65f }, th * 0.9f );
-                    dot( { c.x + R * 0.35f, c.y + R * 0.65f }, th * 0.9f );
-                    break;
-                case ECS::UIIconType::Gear:
-                    ring( R * 0.55f );
-                    dot( c, R * 0.18f );
-                    for ( int k = 0; k < 8; ++k )
-                    {
-                        const float     a = k * PI / 4.0f;
-                        const glm::vec2 d( std::cos( a ), std::sin( a ) );
-                        line( c + d * ( R * 0.5f ), c + d * ( R * 0.88f ) );
-                    }
-                    break;
-                case ECS::UIIconType::Power:
-                    ring( R * 0.6f );
-                    line( { c.x, c.y - R * 0.9f }, { c.x, c.y + R * 0.05f } ); // top stroke through the ring
-                    break;
-                case ECS::UIIconType::Star:
-                {
-                    glm::vec2 pts[10];
-                    for ( int i = 0; i < 10; ++i )
-                    {
-                        const float a  = -PI * 0.5f + i * PI / 5.0f;
-                        const float rr = ( i % 2 == 0 ) ? R : R * 0.42f;
-                        pts[i]         = c + glm::vec2( std::cos( a ), std::sin( a ) ) * rr;
-                    }
-                    for ( int i = 0; i < 10; ++i )
-                        dl.AddTriangleFilled( c, pts[i], pts[( i + 1 ) % 10], col );
-                    break;
-                }
-                case ECS::UIIconType::Heart:
-                    dot( { c.x - R * 0.35f, c.y - R * 0.18f }, R * 0.4f );
-                    dot( { c.x + R * 0.35f, c.y - R * 0.18f }, R * 0.4f );
-                    dl.AddTriangleFilled( { c.x - R * 0.72f, c.y - R * 0.05f },
-                                          { c.x + R * 0.72f, c.y - R * 0.05f }, { c.x, c.y + R * 0.85f }, col );
-                    break;
-                case ECS::UIIconType::Check:
-                    line( { c.x - R * 0.6f, c.y + R * 0.05f }, { c.x - R * 0.12f, c.y + R * 0.5f } );
-                    line( { c.x - R * 0.12f, c.y + R * 0.5f }, { c.x + R * 0.62f, c.y - R * 0.45f } );
-                    break;
-                case ECS::UIIconType::Close:
-                    line( { c.x - R * 0.55f, c.y - R * 0.55f }, { c.x + R * 0.55f, c.y + R * 0.55f } );
-                    line( { c.x - R * 0.55f, c.y + R * 0.55f }, { c.x + R * 0.55f, c.y - R * 0.55f } );
-                    break;
-                case ECS::UIIconType::ChevronRight:
-                    line( { c.x - R * 0.25f, c.y - R * 0.55f }, { c.x + R * 0.35f, c.y } );
-                    line( { c.x + R * 0.35f, c.y }, { c.x - R * 0.25f, c.y + R * 0.55f } );
-                    break;
-                case ECS::UIIconType::Bell:
-                    dl.AddRectFilled( { c.x - R * 0.42f, c.y - R * 0.55f }, { c.x + R * 0.42f, c.y + R * 0.28f },
-                                      col, R * 0.4f );                                                  // body
-                    line( { c.x - R * 0.62f, c.y + R * 0.32f }, { c.x + R * 0.62f, c.y + R * 0.32f } ); // rim
-                    dot( { c.x, c.y + R * 0.58f }, th * 0.85f );                                        // clapper
-                    break;
-            }
+            dl.AddText( icon->Atlas.get(), { c.x - w * 0.5f, c.y - h * 0.5f }, { c.x + w * 0.5f, c.y + h * 0.5f },
+                        { icon->U0, icon->V0 }, { icon->U1, icon->V1 }, glm::vec4( ic.Color, 1.0f ) );
         }
 
         // Content size (px) a layout-group container needs to hug its children — for the Content Size Fitter.
@@ -1030,9 +957,7 @@ namespace Desert::UI
 
                 if ( reg.has<ECS::UIIconComponent>( e ) )
                 {
-                    const auto& ic = reg.get<ECS::UIIconComponent>( e ).Data;
-                    DrawIcon( dl, ic.Icon, rect, glm::vec4( ic.Color, 1.0f ),
-                              std::max( 1.0f, ic.Thickness * scale ), ic.Scale );
+                    DrawIcon( dl, reg.get<ECS::UIIconComponent>( e ).Data, rect );
                 }
 
                 if ( reg.has<ECS::UIImageComponent>( e ) )

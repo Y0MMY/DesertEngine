@@ -10,6 +10,7 @@
 #include "Services/Shader/ShaderService.hpp"
 #include "Services/Image/ImageService.hpp"
 #include "Services/Font/FontService.hpp"
+#include "Services/Icon/IconService.hpp"
 #include "Services/AnimatedImage/AnimatedImageService.hpp"
 #include "Services/Video/VideoService.hpp"
 
@@ -30,6 +31,7 @@ namespace Desert::Runtime
         static ShaderService*   GetShaderService();
         static ImageService*    GetImageService();
         static FontService*     GetFontService();
+        static IconService*     GetIconService();
 
         static AnimatedImageService* GetAnimatedImageService();
         static VideoService*         GetVideoService();
