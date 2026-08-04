@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <unordered_set>
+#include <vector>
 
 namespace Desert::Core
 {
@@ -34,13 +35,28 @@ namespace Desert::Editor::Tools
         void        Cancel( ::Desert::Core::Scene& scene );                   // delete the in-progress blockout
         void        PushPull( ::Desert::Core::Scene& scene, int dir, int K ); // extrude the selection out/in
         void        RefineBy( int F ); // subdivide the base grid by F (split every cell + the selection ×F)
+        void        FreezeActive();    // commit the volume being worked on into an immutable layer
+        bool        SolidAt( const glm::ivec3& cell, float unit ) const; // occupancy across every layer
         static bool WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
                                    const glm::vec2& size, glm::vec2& out );
+
+        // A committed piece. Its cells and its Block Size are frozen for good: starting a new marquee
+        // commits what you already pushed out, so any later Resize Grid only ever re-scales the volume you
+        // are working on NOW — never the geometry already built (UE: each Push produces finished blocks).
+        struct Layer
+        {
+            std::unordered_set<uint64_t> Cells;
+            float                        Unit = 1.0f;
+        };
+        std::vector<Layer> m_Frozen;
 
         std::unordered_set<uint64_t> m_Cells;             // BASE-resolution voxels (world = index*Unit)
         float                        m_Unit      = -1.0f; // base cell size; Block Size = K * m_Unit
         float                        m_BakedUnit = -1.0f; // base size the live mesh was last baked at
         Common::UUID                 m_Entity    = Common::UUID::Null(); // live blockout entity
+
+        float m_GroundY    = 0.0f;  // ground work-plane height in WORLD units (Level up/down)
+        bool  m_HoverValid = false; // last frame's cursor targeting hit something
 
         // Work-plane (in BASE cells): locked while selecting and kept for the active selection.
         int m_PlaneNa   = 1;

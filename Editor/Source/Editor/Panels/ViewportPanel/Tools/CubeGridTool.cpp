@@ -118,11 +118,46 @@ namespace Desert::Editor::Tools
         m_Unit /= static_cast<float>( F );
     }
 
+    void CubeGridTool::FreezeActive()
+    {
+        if ( m_Cells.empty() )
+            return;
+        Layer l;
+        l.Cells = std::move( m_Cells );
+        l.Unit  = m_Unit;
+        m_Frozen.push_back( std::move( l ) );
+        m_Cells.clear();
+        m_Unit = m_BakedUnit = -1.0f; // the next Block Size becomes the base of a brand-new volume
+        m_HasSel = m_Selecting = false;
+    }
+
+    bool CubeGridTool::SolidAt( const glm::ivec3& c, float unit ) const
+    {
+        // Is the cell (index `c`, edge `unit`) inside solid geometry of ANY layer? Layer units are always
+        // commensurate in practice (the base only ever halves), so a coarser layer maps with one FloorDiv.
+        // A layer FINER than `unit` is skipped — conservative: it can only leave a hidden interior face.
+        auto inLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu )
+        {
+            if ( cells.empty() || lu <= 0.0f )
+                return false;
+            const int R = static_cast<int>( std::lround( lu / unit ) );
+            if ( R < 1 || std::abs( lu - static_cast<float>( R ) * unit ) > 0.001f * unit )
+                return false;
+            return cells.count( Pack( { FloorDiv( c.x, R ), FloorDiv( c.y, R ), FloorDiv( c.z, R ) } ) ) > 0;
+        };
+        if ( inLayer( m_Cells, m_Unit ) )
+            return true;
+        for ( const Layer& l : m_Frozen )
+            if ( inLayer( l.Cells, l.Unit ) )
+                return true;
+        return false;
+    }
+
     void CubeGridTool::PushPull( ::Desert::Core::Scene& scene, int dir, int K )
     {
         if ( !m_HasSel )
             return;
-        auto      occ    = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
+        auto      occ    = [&]( const glm::ivec3& c ) { return SolidAt( c, m_Unit ); };
         const int na     = m_PlaneNa;
         const int sign   = m_PlaneSign;
         const int ua     = ( na + 1 ) % 3;
@@ -169,9 +204,17 @@ namespace Desert::Editor::Tools
     {
         Core::ModelingState& ms         = Core::ModelingState::Get();
         const bool           toolActive = ms.ActiveTool == Core::ModelingState::Tool::CubeGrid;
+        const bool           interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
 
         bool        changed = false;
         const float gs      = std::max( ms.CellSize, 0.02f ); // requested Block Size (world units)
+
+        // Starting a fresh marquee starts a NEW piece: commit whatever is already pushed out into a frozen
+        // layer first (it keeps its own Block Size forever). Resizing the grid afterwards then only ever
+        // re-scales the new volume — the geometry built before never moves or re-subdivides again.
+        // (m_HoverValid = last frame's targeting, so a click on empty sky doesn't commit anything.)
+        if ( interact && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && m_HoverValid && !m_Cells.empty() )
+            FreezeActive();
 
         // Base unit: the finest cell ever used. A Block Size finer than the base subdivides the base
         // losslessly (existing solids split into F³, world-identical); a coarser Block Size never remaps —
@@ -192,42 +235,54 @@ namespace Desert::Editor::Tools
         {
             ms.ReqClear = false;
             m_Cells.clear();
+            m_Frozen.clear();
             m_HasSel = m_Selecting = false;
-            m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
+            m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
             RegenMesh( scene );
         }
 
-        auto occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
         // World coord of a plane (na, planeCell, sign) — the surface a Push extrudes from.
         auto planeWorldOf = [&]( int na, int sign, int cell )
         { return static_cast<float>( cell + ( sign > 0 ? 0 : 1 ) ) * u; };
 
-        // --- Targeting: nearest filled cell's face under the cursor, else the ground plane (y=0). Yields a
-        //     BASE cell (tU,tV) + a work-plane (na, sign, planeCell). ---
+        // --- Targeting: nearest filled cell's face under the cursor, else the ground work-plane. Yields a
+        //     BASE cell (tU,tV) + a work-plane (na, sign, planeCell).
+        //     (tU,tV) are ALWAYS the axes ua=(na+1)%3 / va=(na+2)%3 — the same pair worldPt() and PushPull()
+        //     use. For the ground plane (na=1) that is u=Z, v=X: feeding it (x,z) mirrors the preview across
+        //     the diagonal, so the green block runs away from the cursor. ---
         bool  tHas = false;
         int   tNa = 1, tSign = 1, tPlaneCell = 0, tU = 0, tV = 0;
         float bestT = FLT_MAX;
         {
             glm::ivec3 hitCell{ 0 };
-            bool       hit = false;
-            for ( uint64_t key : m_Cells )
+            float      hitUnit   = u;
+            bool       hit       = false;
+            auto       testLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu )
             {
-                const glm::ivec3   c = Unpack( key );
-                Common::Math::AABB box;
-                box.Min = glm::vec3( c ) * u;
-                box.Max = box.Min + u;
-                float t;
-                if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
+                for ( uint64_t key : cells )
                 {
-                    bestT   = t;
-                    hitCell = c;
-                    hit     = true;
+                    const glm::ivec3   c = Unpack( key );
+                    Common::Math::AABB box;
+                    box.Min = glm::vec3( c ) * lu;
+                    box.Max = box.Min + lu;
+                    float t;
+                    if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
+                    {
+                        bestT   = t;
+                        hitCell = c;
+                        hitUnit = lu;
+                        hit     = true;
+                    }
                 }
-            }
+            };
+            testLayer( m_Cells, u );
+            for ( const Layer& l : m_Frozen ) // you can keep building on a committed piece
+                testLayer( l.Cells, l.Unit );
+
             if ( hit )
             {
                 const glm::vec3 p  = ray.Origin + ray.Direction * bestT;
-                const glm::vec3 d  = p - ( glm::vec3( hitCell ) + 0.5f ) * u;
+                const glm::vec3 d  = p - ( glm::vec3( hitCell ) + 0.5f ) * hitUnit;
                 const glm::vec3 ad = glm::abs( d );
                 glm::ivec3      n{ 0 };
                 if ( ad.x >= ad.y && ad.x >= ad.z )
@@ -236,46 +291,49 @@ namespace Desert::Editor::Tools
                     n.y = d.y > 0 ? 1 : -1;
                 else
                     n.z = d.z > 0 ? 1 : -1;
-                tNa        = n.x ? 0 : n.y ? 1 : 2;
-                tSign      = n[tNa];
-                tPlaneCell = hitCell[tNa] + tSign;
-                tU         = hitCell[( tNa + 1 ) % 3];
-                tV         = hitCell[( tNa + 2 ) % 3];
-                tHas       = true;
+                tNa   = n.x ? 0 : n.y ? 1 : 2;
+                tSign = n[tNa];
+                // The hit face in WORLD units -> the active base grid (a frozen layer may use another unit).
+                const float faceW = static_cast<float>( hitCell[tNa] + ( tSign > 0 ? 1 : 0 ) ) * hitUnit;
+                tPlaneCell        = static_cast<int>( std::lround( faceW / u ) ) - ( tSign > 0 ? 0 : 1 );
+                tU                = static_cast<int>( std::floor( p[( tNa + 1 ) % 3] / u ) );
+                tV                = static_cast<int>( std::floor( p[( tNa + 2 ) % 3] / u ) );
+                tHas              = true;
             }
             else if ( std::abs( ray.Direction.y ) > 1e-5f )
             {
-                const float t = -ray.Origin.y / ray.Direction.y;
-                if ( t > 0.0f && t < bestT )
+                const float t = ( m_GroundY - ray.Origin.y ) / ray.Direction.y;
+                if ( t > 0.0f )
                 {
                     const glm::vec3 p = ray.Origin + ray.Direction * t;
                     tNa               = 1;
                     tSign             = 1;
-                    tPlaneCell        = 0;
-                    tU                = static_cast<int>( std::floor( p.x / u ) );
-                    tV                = static_cast<int>( std::floor( p.z / u ) );
+                    tPlaneCell        = static_cast<int>( std::lround( m_GroundY / u ) );
+                    tU                = static_cast<int>( std::floor( p.z / u ) ); // ua = (1+1)%3 = Z
+                    tV                = static_cast<int>( std::floor( p.x / u ) ); // va = (1+2)%3 = X
                     tHas              = true;
                 }
             }
         }
+        m_HoverValid = tHas;
 
         ImDrawList* dl = ::ImGui::GetWindowDrawList();
 
-        auto drawCellSolid = [&]( const glm::ivec3& c, ImU32 fill, ImU32 outline )
+        auto drawCellSolid = [&]( const glm::ivec3& c, float cu, ImU32 fill, ImU32 outline )
         {
-            const glm::vec3 mn = glm::vec3( c ) * u;
+            const glm::vec3 mn = glm::vec3( c ) * cu;
             for ( int f = 0; f < 6; ++f )
             {
-                if ( occupied( c + kNeighbor[f] ) )
+                if ( SolidAt( c + kNeighbor[f], cu ) )
                     continue;
                 const glm::vec3 fn = kFace[f][0].N;
-                const glm::vec3 fc = mn + 0.5f * u + 0.5f * u * fn;
+                const glm::vec3 fc = mn + 0.5f * cu + 0.5f * cu * fn;
                 if ( glm::dot( fn, ray.Origin - fc ) <= 0.0f )
                     continue;
                 glm::vec2 s[4];
                 bool      ok = true;
                 for ( int k = 0; k < 4; ++k )
-                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * u, viewProj, viewportPos, viewportSize,
+                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * cu, viewProj, viewportPos, viewportSize,
                                          s[k] ) )
                     {
                         ok = false;
@@ -372,18 +430,23 @@ namespace Desert::Editor::Tools
             }
         };
 
-        const bool interact = interactive && toolActive && !::ImGui::IsAnyItemActive();
-
-        // Existing cells: grey checkerboard solids.
+        // Committed pieces: flat dim grey (they never re-subdivide, so the Block Size can no longer touch
+        // them). The volume being worked on: brighter grey checkerboard at the live base resolution.
         if ( toolActive )
+        {
+            for ( const Layer& l : m_Frozen )
+                for ( uint64_t k : l.Cells )
+                    drawCellSolid( Unpack( k ), l.Unit, IM_COL32( 108, 112, 122, 200 ),
+                                   IM_COL32( 78, 82, 92, 225 ) );
             for ( uint64_t k : m_Cells )
             {
                 const glm::ivec3 c = Unpack( k );
-                drawCellSolid( c,
+                drawCellSolid( c, u,
                                ( ( c.x + c.y + c.z ) & 1 ) ? IM_COL32( 120, 125, 135, 205 )
                                                            : IM_COL32( 150, 155, 165, 205 ),
                                IM_COL32( 90, 95, 105, 230 ) );
             }
+        }
 
         // --- Marquee selection (Block-aligned): LMB drag a rectangle; start requires hover, the drag is
         //     latched to the physical button and locked to the plane picked at the press. ---
@@ -459,6 +522,8 @@ namespace Desert::Editor::Tools
             changed = true;
 
         ms.Cubes = static_cast<int>( m_Cells.size() );
+        for ( const Layer& l : m_Frozen )
+            ms.Cubes += static_cast<int>( l.Cells.size() );
 
         // --- Viewport bottom bar: tool + Level shift + Push/Pull + Resize Grid + Accept/Cancel. ---
         if ( toolActive )
@@ -478,17 +543,23 @@ namespace Desert::Editor::Tools
                 ::ImGui::AlignTextToFramePadding();
                 ::ImGui::TextUnformatted( ICON_MDI_GRID "  CubeGrid" );
 
+                // Level: shift the ground work-plane one block up/down (the hover preview follows it), and
+                // carry a selection that sits on that plane along with it.
                 ::ImGui::SameLine( 0.0f, 14.0f );
-                const bool ground = m_PlaneNa == 1;
-                if ( !ground )
-                    ::ImGui::BeginDisabled();
+                const bool onGround = m_HasSel && m_PlaneNa == 1 && m_PlaneSign > 0;
                 if ( ::ImGui::Button( ICON_MDI_ARROW_UP "##lvlup" ) )
-                    m_PlaneCell += K;
+                {
+                    m_GroundY += static_cast<float>( K ) * u;
+                    if ( onGround )
+                        m_PlaneCell += K;
+                }
                 ::ImGui::SameLine();
                 if ( ::ImGui::Button( ICON_MDI_ARROW_DOWN "##lvldn" ) )
-                    m_PlaneCell -= K;
-                if ( !ground )
-                    ::ImGui::EndDisabled();
+                {
+                    m_GroundY -= static_cast<float>( K ) * u;
+                    if ( onGround )
+                        m_PlaneCell -= K;
+                }
 
                 ::ImGui::SameLine( 0.0f, 14.0f );
                 if ( !m_HasSel )
@@ -515,14 +586,15 @@ namespace Desert::Editor::Tools
                 ::ImGui::SameLine( 0.0f, 16.0f );
                 ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.30f, 1.0f ) );
                 ::ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.68f, 0.38f, 1.0f ) );
-                if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) && !m_Cells.empty() )
+                if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) && !( m_Cells.empty() && m_Frozen.empty() ) )
                 {
                     Core::SelectionManager::SetSelected( m_Entity );
                     m_Entity = Common::UUID::Null();
                     m_Cells.clear();
+                    m_Frozen.clear();
                     m_HasSel = m_Selecting = false;
                     m_Unit = m_BakedUnit = -1.0f;
-                    m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
+                    m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
                 }
                 ::ImGui::PopStyleColor( 2 );
                 ::ImGui::SameLine();
@@ -543,43 +615,47 @@ namespace Desert::Editor::Tools
     void CubeGridTool::RegenMesh( ::Desert::Core::Scene& scene )
     {
         m_BakedUnit = m_Unit;
-        if ( m_Cells.empty() )
+        if ( m_Cells.empty() && m_Frozen.empty() )
         {
             Cancel( scene );
             return;
         }
 
-        const float u        = m_Unit;
-        auto        occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
-
         std::vector<Vertex> verts;
         std::vector<Index>  inds;
         glm::vec3           mn( FLT_MAX ), mx( -FLT_MAX );
-        for ( uint64_t key : m_Cells )
+        // One mesh out of every layer — each meshed at its OWN cell size, face-culled against all layers.
+        auto emitLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu )
         {
-            const glm::ivec3 c = Unpack( key );
-            for ( int f = 0; f < 6; ++f )
+            for ( uint64_t key : cells )
             {
-                if ( occupied( c + kNeighbor[f] ) ) // Face Culling: only Solid/Empty borders
-                    continue;
-                const uint32_t base = static_cast<uint32_t>( verts.size() );
-                for ( int k = 0; k < 4; ++k )
+                const glm::ivec3 c = Unpack( key );
+                for ( int f = 0; f < 6; ++f )
                 {
-                    const FaceVert& fv = kFace[f][k];
-                    Vertex          v;
-                    v.Position  = ( glm::vec3( c ) + fv.P + 0.5f ) * u;
-                    v.Normal    = fv.N;
-                    v.Tangent   = fv.T;
-                    v.Bitangent = fv.B;
-                    v.TexCoord  = fv.UV;
-                    verts.push_back( v );
-                    mn = glm::min( mn, v.Position );
-                    mx = glm::max( mx, v.Position );
+                    if ( SolidAt( c + kNeighbor[f], lu ) ) // Face Culling: only Solid/Empty borders
+                        continue;
+                    const uint32_t base = static_cast<uint32_t>( verts.size() );
+                    for ( int k = 0; k < 4; ++k )
+                    {
+                        const FaceVert& fv = kFace[f][k];
+                        Vertex          v;
+                        v.Position  = ( glm::vec3( c ) + fv.P + 0.5f ) * lu;
+                        v.Normal    = fv.N;
+                        v.Tangent   = fv.T;
+                        v.Bitangent = fv.B;
+                        v.TexCoord  = fv.UV;
+                        verts.push_back( v );
+                        mn = glm::min( mn, v.Position );
+                        mx = glm::max( mx, v.Position );
+                    }
+                    inds.push_back( { base + 0, base + 1, base + 2 } );
+                    inds.push_back( { base + 2, base + 3, base + 0 } );
                 }
-                inds.push_back( { base + 0, base + 1, base + 2 } );
-                inds.push_back( { base + 2, base + 3, base + 0 } );
             }
-        }
+        };
+        emitLayer( m_Cells, m_Unit );
+        for ( const Layer& l : m_Frozen )
+            emitLayer( l.Cells, l.Unit );
 
         if ( m_Entity == Common::UUID::Null() )
         {
@@ -614,8 +690,9 @@ namespace Desert::Editor::Tools
                 scene.DestroyEntity( ref->get() );
         m_Entity = Common::UUID::Null();
         m_Cells.clear();
+        m_Frozen.clear();
         m_HasSel = m_Selecting = false;
         m_Unit = m_BakedUnit = -1.0f;
-        m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
+        m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
     }
 } // namespace Desert::Editor::Tools

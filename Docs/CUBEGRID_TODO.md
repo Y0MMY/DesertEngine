@@ -8,11 +8,15 @@ Reference screenshots: `docs/ModelingImages/`.
 ## Done (Grid Mode)
 - Sparse voxel volume (hash set of packed `ivec3`) at a **fixed base resolution** — drawn blocks never move
   when the grid step changes (finer → lossless subdivide `RefineBy`; coarser → bigger `K`-block stamp).
+- **Committed layers**: starting a new marquee freezes the volume you just pushed out (`Layer{cells, unit}`).
+  A frozen layer keeps its own Block Size forever, so a later Resize Grid only ever re-scales the piece you
+  are working on now. Frozen layers are still raycast (build on them) and meshed (face-culled across layers),
+  but Pull/carve and the grid resize can no longer touch them.
+- **Level up/down** moves the ground work-plane in world units (`m_GroundY`), so the hover preview follows it.
 - Raycast targeting: ground plane + nearest cube-face pick → work-plane.
 - Marquee rectangle **selection** (block-aligned, latched drag, plane locked at press).
 - **Push / Pull** (Extrude / carve) along the plane normal; build on the ground or any face.
 - **Blocks Per Step** multiplier; **Resize Grid** (free Block Size input, snaps to a base multiple, `/2 ×2`).
-- **Level up/down** (ground work-plane shift).
 - On-plane grid lines (per block) + drawn-size labels (W×D world units); green preview tracks the cursor.
 - Face-culled meshing → live `DynamicMesh` "Blockout" entity; **Accept** (keep) / **Cancel** (delete).
 - All controls are on-screen buttons — no keyboard clash with the Q/E/arrow camera flight.
