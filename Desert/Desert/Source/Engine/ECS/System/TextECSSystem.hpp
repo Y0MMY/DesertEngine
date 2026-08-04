@@ -6,6 +6,7 @@
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Font/FontService.hpp>
+#include <Engine/Text/Utf8.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Graphic/Render/Commands/DrawGenericMeshCommand.hpp>
 
@@ -46,7 +47,11 @@ namespace Desert::ECS
                      const uint64_t fontHandle = static_cast<uint64_t>( text.Font ) != 0
                                                       ? static_cast<uint64_t>( text.Font )
                                                       : fontSvc->DefaultFontHandle();
-                     auto*          font       = fontSvc->Get( fontHandle );
+                     // Anything beyond ASCII has to be requested before the atlas is resolved (see
+                     // FontService::RequestGlyphs) — otherwise Cyrillic/CJK text bakes to nothing.
+                     fontSvc->RequestGlyphs( fontHandle, Text::Utf8Decode( text.Text ) );
+
+                     auto* font = fontSvc->Get( fontHandle );
                      if ( !font )
                          return;
                      const std::string fontPath = fontSvc->PathForHandle( fontHandle );
@@ -129,15 +134,16 @@ namespace Desert::ECS
             float penX = 0.0f, penY = 0.0f; // pixels; baseline at penY, +X right, lines step -Y
             const float lineStep = font.LineHeight();
 
-            for ( char ch : text.Text )
+            for ( size_t ci = 0; ci < text.Text.size(); )
             {
+                const uint32_t ch = Text::Utf8Next( text.Text, ci ); // codepoints, not bytes
                 if ( ch == '\n' )
                 {
                     penX = 0.0f;
                     penY -= lineStep;
                     continue;
                 }
-                const auto it = font.Glyphs.find( static_cast<uint32_t>( static_cast<unsigned char>( ch ) ) );
+                const auto it = font.Glyphs.find( ch );
                 if ( it == font.Glyphs.end() )
                     continue;
                 const Text::Glyph& g = it->second;

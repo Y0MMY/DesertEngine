@@ -17,7 +17,8 @@ namespace Desert::Runtime
         // size change produces a fresh key, so the on-disk cache never goes stale (FNV-1a, same scheme as the
         // SPIR-V shader cache). The baker's other params (padding/atlasWidth) are compile-time constants folded
         // into kBakedFontCacheVersion, so bumping that version alone invalidates every cached atlas.
-        uint64_t FontCacheKey( const std::vector<uint8_t>& ttf, float pixelHeight )
+        uint64_t FontCacheKey( const std::vector<uint8_t>& ttf, float pixelHeight,
+                               const std::vector<uint32_t>& extraCodepoints )
         {
             constexpr uint64_t kFnvOffset = 1469598103934665603ull;
             constexpr uint64_t kFnvPrime  = 1099511628211ull;
@@ -30,6 +31,11 @@ namespace Desert::Runtime
             for ( uint8_t b : ttf )
             {
                 h ^= b;
+                h *= kFnvPrime;
+            }
+            for ( uint32_t cp : extraCodepoints ) // a different glyph set is a different atlas
+            {
+                h ^= cp;
                 h *= kFnvPrime;
             }
             return h;
@@ -83,12 +89,18 @@ namespace Desert::Runtime
         }
 
         // Disk cache: skip the (CPU-bound) SDF bake if a matching atlas was cooked on a previous run.
-        const std::filesystem::path cachePath = FontCachePath( FontCacheKey( ttf, pixelHeight ) );
+        // Glyphs beyond ASCII this font was asked for. Sorted+unique, so the same set always yields the
+        // same cache key regardless of the order the strings requested them in.
+        std::vector<uint32_t> extra;
+        if ( const auto it = m_ExtraGlyphs.find( ttfPath ); it != m_ExtraGlyphs.end() )
+            extra = it->second;
+
+        const std::filesystem::path cachePath = FontCachePath( FontCacheKey( ttf, pixelHeight, extra ) );
         Text::BakedFont             baked;
         const bool                  fromCache = TryLoadBakedFont( cachePath, baked );
         if ( !fromCache )
         {
-            baked = Text::BakeFontSDF( ttf.data(), ttf.size(), pixelHeight );
+            baked = Text::BakeFontSDF( ttf.data(), ttf.size(), pixelHeight, 5, 512, extra );
             if ( !baked.Valid() )
             {
                 LOG_ERROR( "[FontService] Failed to bake SDF atlas for '{}'", ttfPath );
@@ -140,6 +152,8 @@ namespace Desert::Runtime
     {
         m_Fonts.clear();
         m_HandleToPath.clear();
+        m_ExtraGlyphs.clear();
+        m_Retired.clear();
         m_Available.clear();
         m_Scanned = false;
     }
@@ -182,6 +196,45 @@ namespace Desert::Runtime
         static const std::string kDefault =
              ( Common::Constants::Path::FONTS_PATH / "Roboto-Regular.ttf" ).generic_string();
         return RegisterFont( kDefault );
+    }
+
+    bool FontService::RequestGlyphs( uint64_t handle, const std::vector<uint32_t>& codepoints )
+    {
+        const std::string path = PathForHandle( handle );
+        if ( path.empty() )
+            return false;
+
+        auto& have  = m_ExtraGlyphs[path];
+        bool  added = false;
+        for ( uint32_t cp : codepoints )
+        {
+            if ( cp <= 126 ) // printable ASCII is always baked; control chars have no glyph
+                continue;
+            if ( std::find( have.begin(), have.end(), cp ) != have.end() )
+                continue;
+            have.push_back( cp );
+            added = true;
+        }
+        if ( !added )
+            return false;
+        std::sort( have.begin(), have.end() ); // order-independent cache key
+
+        // Drop every baked size of this font so the next Get() re-bakes with the new glyphs. The atlas it
+        // replaces may still be in flight, so it is retired rather than destroyed.
+        for ( auto it = m_Fonts.begin(); it != m_Fonts.end(); )
+        {
+            if ( it->first.rfind( path + '|', 0 ) == 0 )
+            {
+                if ( it->second && it->second->Atlas )
+                    m_Retired.push_back( it->second->Atlas );
+                it = m_Fonts.erase( it );
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        return true;
     }
 
     const std::vector<std::string>& FontService::AvailableFonts()

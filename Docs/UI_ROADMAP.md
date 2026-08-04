@@ -74,7 +74,9 @@ approved per the engine's "no magic dependencies" rule).
       pixels excluded), with **Interactable** / **Raycast Target** flags on every UILayout
 
 ## E. Text & fonts (production)
-- [~] Custom fonts — TTF asset via `AssetHandle` (preloaded dropdown + `.ttf` drag-drop), on 3D Text + UIText; font fallback chain / emoji todo
+- [~] Custom fonts — TTF asset via `AssetHandle` (preloaded dropdown + `.ttf` drag-drop), on 3D Text + UIText;
+      **UTF-8 throughout** (Cyrillic/CJK/emoji render if the font carries them — glyphs are baked on demand);
+      font fallback chain todo
 - [~] DPI/scale sizing, word-wrap, ellipsis, auto-size, line spacing, vertical align done; full justification todo
 - [~] **Rich text** (BBCode) — `[color=#rrggbb]`, `[b]` faux-bold done; italic / links / inline sprites todo
 - [ ] Complex scripts: RTL/bidi, CJK, shaping (dep: HarfBuzz) — later

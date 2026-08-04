@@ -49,6 +49,12 @@ namespace Desert::Runtime
         // The built-in Roboto-Regular, registered on demand — the fallback when a component has no font set.
         uint64_t DefaultFontHandle();
 
+        // Ask for codepoints OUTSIDE printable ASCII (Cyrillic, CJK, …). The atlas only carries ASCII plus
+        // what was requested, because a font has thousands of glyphs and baking them all would blow it up.
+        // Anything new drops the baked font so the next Get() re-bakes with it included — call this BEFORE
+        // Get() when laying out a string and it is ready the same frame. Returns true if a re-bake is due.
+        bool RequestGlyphs( uint64_t handle, const std::vector<uint32_t>& codepoints );
+
         // Every registered .ttf path (scans the project + engine font roots once). Drives the picker dropdown.
         const std::vector<std::string>& AvailableFonts();
 
@@ -57,6 +63,11 @@ namespace Desert::Runtime
         void EnsurePreloaded();
 
         std::unordered_map<std::string, std::unique_ptr<Font>> m_Fonts;        // key = path + '|' + size
+        std::unordered_map<std::string, std::vector<uint32_t>> m_ExtraGlyphs;  // ttf path -> extra codepoints
+        // A re-bake replaces the atlas while the frame that asked for it may already have recorded draws
+        // against the old one (and ImGui caches descriptors by image view). Retired atlases are therefore
+        // held until Clear(), never freed mid-frame — the set settles after the first frames of a scene.
+        std::vector<std::shared_ptr<Graphic::Image2D>>         m_Retired;
         std::unordered_map<uint64_t, std::string>              m_HandleToPath; // font asset handle -> ttf path
         std::vector<std::string>                               m_Available;    // registered paths (for the picker)
         bool                                                   m_Scanned = false;

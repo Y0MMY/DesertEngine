@@ -6,6 +6,7 @@
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Text/FontBaker.hpp>
+#include <Engine/Text/Utf8.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -201,7 +202,7 @@ namespace Desert::UI
         // second time nudged in X, since the atlas has a single weight).
         struct StyledChar
         {
-            char      ch    = 0;
+            uint32_t  ch    = 0; // Unicode codepoint (NOT a byte — see Engine/Text/Utf8)
             glm::vec4 color = glm::vec4( 1.0f );
             bool      bold  = false;
         };
@@ -258,8 +259,8 @@ namespace Desert::UI
             out.reserve( text.size() );
             if ( !rich )
             {
-                for ( char ch : text )
-                    out.push_back( { ch, baseColor, false } );
+                for ( size_t i = 0; i < text.size(); )
+                    out.push_back( { Text::Utf8Next( text, i ), baseColor, false } );
                 return out;
             }
 
@@ -299,8 +300,7 @@ namespace Desert::UI
                         }
                     }
                 }
-                out.push_back( { text[i], colorStack.back(), boldDepth > 0 } );
-                ++i;
+                out.push_back( { Text::Utf8Next( text, i ), colorStack.back(), boldDepth > 0 } );
             }
             return out;
         }
@@ -381,19 +381,24 @@ namespace Desert::UI
             // Font is an asset handle on the element (drag-drop / preloaded); unset falls back to the default.
             const uint64_t fontHandle = static_cast<uint64_t>( t.Font ) != 0 ? static_cast<uint64_t>( t.Font )
                                                                              : fontService->DefaultFontHandle();
-            Runtime::Font* font       = fontService->Get( fontHandle, 48.0f );
+            // Non-ASCII (Cyrillic, CJK, …) is only in the atlas if it was asked for: request this string's
+            // codepoints first, so a re-bake — if any — happens before the font is resolved and the text
+            // draws correctly on its very first frame instead of a frame late.
+            fontService->RequestGlyphs( fontHandle, Text::Utf8Decode( t.Text ) );
+
+            Runtime::Font* font = fontService->Get( fontHandle, 48.0f );
             if ( !font || !font->Atlas || !font->Baked.Valid() || font->Baked.PixelHeight <= 0.0f )
                 return;
 
             const Text::BakedFont& bf    = font->Baked;
             const void*            atlas = font->Atlas.get();
 
-            auto glyph = [&]( char ch ) -> const Text::Glyph*
+            auto glyph = [&]( uint32_t ch ) -> const Text::Glyph*
             {
-                const auto it = bf.Glyphs.find( static_cast<uint32_t>( static_cast<unsigned char>( ch ) ) );
+                const auto it = bf.Glyphs.find( ch );
                 return it == bf.Glyphs.end() ? nullptr : &it->second;
             };
-            auto advEm = [&]( char ch ) -> float
+            auto advEm = [&]( uint32_t ch ) -> float
             {
                 const Text::Glyph* g = glyph( ch );
                 return g ? g->Advance : 0.0f;
@@ -612,9 +617,9 @@ namespace Desert::UI
             const Text::BakedFont& bf = font->Baked;
             const float            s  = bf.PixelHeight > 0.0f ? fontSizePx / bf.PixelHeight : 0.0f;
             float                  w  = 0.0f;
-            for ( char ch : text )
+            for ( size_t i = 0; i < text.size(); )
             {
-                const auto it = bf.Glyphs.find( static_cast<uint32_t>( static_cast<unsigned char>( ch ) ) );
+                const auto it = bf.Glyphs.find( Text::Utf8Next( text, i ) );
                 if ( it != bf.Glyphs.end() )
                     w += it->second.Advance * s;
             }

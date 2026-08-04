@@ -21,8 +21,8 @@ namespace Desert::Text
         };
     } // namespace
 
-    BakedFont BakeFontSDF( const uint8_t* ttf, size_t ttfSize, float pixelHeight, int padding,
-                           uint32_t atlasWidth )
+    BakedFont BakeFontSDF( const uint8_t* ttf, size_t ttfSize, float pixelHeight, int padding, uint32_t atlasWidth,
+                           const std::vector<uint32_t>& extraCodepoints )
     {
         BakedFont out;
         if ( !ttf || ttfSize == 0 || pixelHeight <= 0.0f || atlasWidth < 32 )
@@ -49,9 +49,25 @@ namespace Desert::Text
         // distance across the full byte range — enough gradient for smooth AA + a bit of outline room.
         const float pixelDistScale = static_cast<float>( kSdfOnEdgeValue ) / static_cast<float>( padding );
 
-        std::vector<RawGlyph> raws;
-        raws.reserve( 95 );
+        // Printable ASCII, then whatever else was asked for. Duplicates and codepoints this font has no
+        // glyph for are dropped, so a caller can request optimistically.
+        std::vector<uint32_t> codepoints;
+        codepoints.reserve( 95 + extraCodepoints.size() );
         for ( uint32_t cp = 32; cp <= 126; ++cp )
+            codepoints.push_back( cp );
+        for ( uint32_t cp : extraCodepoints )
+        {
+            if ( cp >= 32 && cp <= 126 )
+                continue;
+            if ( stbtt_FindGlyphIndex( &font, static_cast<int>( cp ) ) == 0 )
+                continue;
+            if ( std::find( codepoints.begin(), codepoints.end(), cp ) == codepoints.end() )
+                codepoints.push_back( cp );
+        }
+
+        std::vector<RawGlyph> raws;
+        raws.reserve( codepoints.size() );
+        for ( uint32_t cp : codepoints )
         {
             int advance = 0, lsb = 0;
             stbtt_GetCodepointHMetrics( &font, static_cast<int>( cp ), &advance, &lsb );

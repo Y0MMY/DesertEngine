@@ -114,6 +114,39 @@ TEST( FontBaker, DeserializeRejectsCorruptBlob )
     EXPECT_FALSE( Desert::Text::DeserializeBakedFont( blob.data(), blob.size() / 2, out ) );
 }
 
+TEST( FontBaker, BakesRequestedNonAsciiCodepoints )
+{
+    // Cyrillic (and anything else outside ASCII) only reaches the atlas when it is asked for — this is
+    // what makes "Привет" render instead of a row of blanks.
+    const auto ttf = LoadRoboto();
+    ASSERT_FALSE( ttf.empty() );
+
+    const std::vector<uint32_t> cyrillic = { 0x041F, 0x0440, 0x0438, 0x0432, 0x0435, 0x0442 }; // Привет
+
+    const Desert::Text::BakedFont ascii = Desert::Text::BakeFontSDF( ttf.data(), ttf.size() );
+    ASSERT_TRUE( ascii.Valid() );
+    for ( uint32_t cp : cyrillic )
+        EXPECT_EQ( ascii.Glyphs.count( cp ), 0u ) << "unrequested glyph baked";
+
+    const Desert::Text::BakedFont full =
+         Desert::Text::BakeFontSDF( ttf.data(), ttf.size(), 48.0f, 5, 512, cyrillic );
+    ASSERT_TRUE( full.Valid() );
+    for ( uint32_t cp : cyrillic )
+    {
+        ASSERT_EQ( full.Glyphs.count( cp ), 1u ) << "missing U+" << std::hex << cp;
+        const auto& g = full.Glyphs.at( cp );
+        EXPECT_GT( g.Width, 0.0f );
+        EXPECT_GT( g.Advance, 0.0f );
+    }
+    EXPECT_EQ( full.Glyphs.size(), ascii.Glyphs.size() + cyrillic.size() );
+
+    // A codepoint the font has no glyph for is skipped, not an error.
+    const Desert::Text::BakedFont missing =
+         Desert::Text::BakeFontSDF( ttf.data(), ttf.size(), 48.0f, 5, 512, { 0x1F600 } ); // emoji
+    ASSERT_TRUE( missing.Valid() );
+    EXPECT_EQ( missing.Glyphs.size(), ascii.Glyphs.size() );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
