@@ -4,6 +4,7 @@
 #include <Editor/Core/Selection/ViewportMode.hpp>
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Common/Core/Units.hpp>
 #include <ImGui/imgui.h>
 
 #include <algorithm>
@@ -163,16 +164,17 @@ namespace Desert::Editor
             }
             if ( ImGui::CollapsingHeader( "Grid", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
-                // Block size (Resize Grid) — free world-space value; the voxel grid tiles on it.
-                // Block Size (grid step) in world units — type any value. Already-drawn blocks never change;
-                // a coarser step just stamps bigger, a step finer than the base subdivides the base. The value
-                // snaps to a base multiple after editing (the tool shows the effective size).
+                const float kMinBlock = MS::MinCellSize;
+                // Block Size (grid step) in world units = CENTIMETRES, like UE: 100 is a one-metre block.
+                // Already-drawn blocks never change; a coarser step just stamps bigger, a step finer than the
+                // base subdivides the base. The value snaps to a base multiple after editing (the tool shows
+                // the effective size).
                 ImGui::SetNextItemWidth( 96.0f );
-                if ( ImGui::DragFloat( "Block Size", &ms.CellSize, 0.5f, 0.02f, 100000.0f, "%.3f" ) )
-                    ms.CellSize = std::max( 0.02f, ms.CellSize );
+                if ( ImGui::DragFloat( "Block Size", &ms.CellSize, 1.0f, kMinBlock, 100000.0f, "%.0f cm" ) )
+                    ms.CellSize = std::max( kMinBlock, ms.CellSize );
                 ImGui::SameLine();
                 if ( ImGui::SmallButton( "/2##bs" ) )
-                    ms.CellSize = std::max( ms.CellSize * 0.5f, 0.02f );
+                    ms.CellSize = std::max( ms.CellSize * 0.5f, kMinBlock );
                 ImGui::SameLine();
                 if ( ImGui::SmallButton( "x2##bs" ) )
                     ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );

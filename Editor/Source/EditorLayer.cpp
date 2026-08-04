@@ -10,6 +10,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Geometry/PrimitiveType.hpp>
+#include <Common/Core/Units.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/ProceduralCharacterFactory.hpp>
 #include <Engine/Animation/ProceduralCharacterAnimations.hpp>
@@ -1693,7 +1694,9 @@ namespace Desert::Editor
             if ( material )
                 smc.MaterialSlots.push_back( material );
             auto& tf       = e.GetComponent<ECS::TransformComponent>();
-            tf.Translation = pos;
+            // Demo scenes are authored in METRES for readability; a world unit is a centimetre, so every
+            // position scales up. Scale does NOT: the primitive meshes themselves are one metre now.
+            tf.Translation = pos * Common::Units::UnitsPerMetre;
             tf.Scale       = scale;
         };
         auto mat = [&]( const std::string& name, std::initializer_list<std::pair<const char*, glm::vec4>> params )
@@ -1756,8 +1759,8 @@ namespace Desert::Editor
             auto& d     = e.AddComponent<ECS::PointLightComponent>().Data;
             d.Color     = color;
             d.Intensity = intensity;
-            d.Radius    = 12.0f;
-            e.GetComponent<ECS::TransformComponent>().Translation = pos;
+            d.Radius                                              = Common::Units::Metres( 12.0f );
+            e.GetComponent<ECS::TransformComponent>().Translation = pos * Common::Units::UnitsPerMetre;
         };
         pointLight( "FillWarm", { 4.0f, 3.0f, 3.0f }, { 1.0f, 0.85f, 0.6f }, 5.0f );
         pointLight( "FillCool", { -4.0f, 2.5f, -1.0f }, { 0.4f, 0.6f, 1.0f }, 4.0f );
@@ -1768,15 +1771,16 @@ namespace Desert::Editor
             auto& tc             = label.AddComponent<ECS::TextComponent>();
             tc.Text              = "Desert Engine";
             tc.Color             = { 0.55f, 0.85f, 1.0f, 1.0f };
-            tc.Size              = 0.8f;
+            tc.Size              = Common::Units::Metres( 0.8f );
             tc.EmissiveIntensity = 2.5f; // past the bloom threshold -> the title glows
             auto& ttf            = label.GetComponent<ECS::TransformComponent>();
-            ttf.Translation      = { -2.2f, 3.4f, -3.0f }; // floating title behind the calibration rows
+            ttf.Translation      = Common::Units::Metres( 1.0f ) * glm::vec3( -2.2f, 3.4f, -3.0f );
         }
 
         auto& camera = m_MainScene->CreateNewEntity( "Camera" );
         camera.AddComponent<ECS::CameraComponent>();
-        camera.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.5f, 7.0f };
+        camera.GetComponent<ECS::TransformComponent>().Translation =
+             Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, 2.5f, 7.0f );
     }
 
     void EditorLayer::BuildCornellShowcase()
@@ -1793,7 +1797,7 @@ namespace Desert::Editor
             smc.MaterialSlots.push_back( Editor::MaterialAssetUtils::CreatePBRMaterialAsset(
                  m_AssetManager.get(), matName, albedo, 0.9f ) );
             auto& tf       = e.GetComponent<ECS::TransformComponent>();
-            tf.Translation = pos;
+            tf.Translation = pos * Common::Units::UnitsPerMetre; // authored in metres (see BuildStarterScene)
             tf.Scale       = scale;
         };
         const glm::vec4 white( 0.82f, 0.82f, 0.80f, 1 ), red( 0.85f, 0.10f, 0.10f, 1 ),
@@ -1816,7 +1820,7 @@ namespace Desert::Editor
                { "IOR", glm::vec4( 1.5f, 0.0f, 0.0f, 0.0f ) },
                { "GlassTint", glm::vec4( 0.75f, 0.9f, 1.0f, 1 ) } } ) );
         auto& gtf       = glass.GetComponent<ECS::TransformComponent>();
-        gtf.Translation = { 0.0f, 1.5f, 0.7f };
+        gtf.Translation = Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, 1.5f, 0.7f );
         gtf.Scale       = glm::vec3( 1.6f );
 
         // Point light BEHIND the objects (backlight / rim).
@@ -1824,8 +1828,9 @@ namespace Desert::Editor
         auto& pld     = pl.AddComponent<ECS::PointLightComponent>().Data;
         pld.Color     = glm::vec3( 1.0f, 0.85f, 0.6f );
         pld.Intensity = 8.0f;
-        pld.Radius    = 12.0f;
-        pl.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 2.5f, -2.5f };
+        pld.Radius    = Common::Units::Metres( 12.0f );
+        pl.GetComponent<ECS::TransformComponent>().Translation =
+             Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, 2.5f, -2.5f );
 
         // The baked scene must carry its OWN sun — it no longer piggybacks on startup state.
         // (Exactly one: a second directional light would overflow the single-light UB.)
@@ -2033,11 +2038,12 @@ namespace Desert::Editor
             auto& e                                              = scene->CreateNewEntity( std::string( name ) );
             e.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
             auto& t                                              = e.GetComponent<ECS::TransformComponent>();
-            t.Translation                                        = localPos;
+            t.Translation                                        = localPos * Common::Units::UnitsPerMetre;
             t.Scale                                              = scale;
             auto& col                                            = e.AddComponent<ECS::ColliderComponent>();
             col.Data.Shape                                       = Physics::ShapeType::Box;
-            col.Data.HalfExtents                                 = scale; // 2-unit cube -> half-extents == scale
+            // The Cube primitive spans one metre, so a box of Scale s reaches 50*s units either way.
+            col.Data.HalfExtents                                 = scale * ( Common::Units::UnitsPerMetre * 0.5f );
             e.AddComponent<ECS::RigidBodyComponent>().Data.Type  = Physics::BodyType::Static;
             scene->Attach( parent, e );
         }
@@ -2087,11 +2093,12 @@ namespace Desert::Editor
             auto& ground                                              = m_MainScene->CreateNewEntity( "Ground" );
             ground.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
             auto& gt              = ground.GetComponent<ECS::TransformComponent>();
-            gt.Translation        = { 0.0f, -0.5f, 0.0f }; // top surface at y = 0
+            gt.Translation        = Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, -0.5f, 0.0f ); // top at y=0
             gt.Scale              = { 20.0f, 0.5f, 20.0f };
             auto& gcol            = ground.AddComponent<ECS::ColliderComponent>();
             gcol.Data.Shape       = Physics::ShapeType::Box;
-            gcol.Data.HalfExtents = { 20.0f, 0.5f, 20.0f }; // matches the scaled cube (world units)
+            // Half-extents of the scaled 1 m cube: 50 units per unit of Scale.
+            gcol.Data.HalfExtents = gt.Scale * ( Common::Units::UnitsPerMetre * 0.5f );
             ground.AddComponent<ECS::RigidBodyComponent>().Data.Type = Physics::BodyType::Static;
         }
 
@@ -2101,10 +2108,10 @@ namespace Desert::Editor
             auto& box = m_MainScene->CreateNewEntity( "Obstacle" + std::to_string( i ) );
             box.AddComponent<ECS::StaticMeshComponent>().Primitive = Geometry::PrimitiveType::Cube;
             auto& bt                                               = box.GetComponent<ECS::TransformComponent>();
-            bt.Translation                                         = { -4.0f + i * 4.0f, 0.5f, -5.0f };
-            auto& bcol                                             = box.AddComponent<ECS::ColliderComponent>();
-            bcol.Data.Shape                                        = Physics::ShapeType::Box;
-            bcol.Data.HalfExtents                                  = { 0.5f, 0.5f, 0.5f };
+            bt.Translation        = Common::Units::Metres( 1.0f ) * glm::vec3( -4.0f + i * 4.0f, 0.5f, -5.0f );
+            auto& bcol            = box.AddComponent<ECS::ColliderComponent>();
+            bcol.Data.Shape       = Physics::ShapeType::Box;
+            bcol.Data.HalfExtents = glm::vec3( Common::Units::Metres( 0.5f ) );
             box.AddComponent<ECS::RigidBodyComponent>().Data.Type  = Physics::BodyType::Static;
         }
 
@@ -2115,10 +2122,11 @@ namespace Desert::Editor
         ECS::Entity player = m_MainScene->CreateNewEntity( "Player" );
         {
             auto& cc       = player.AddComponent<ECS::CharacterControllerComponent>();
-            cc.Data.Radius = 0.3f;
-            cc.Data.Height = 1.8f;
+            cc.Data.Radius = Common::Units::Metres( 0.3f );
+            cc.Data.Height = Common::Units::Metres( 1.8f );
             // Move/jump/look speeds are the SCRIPT's Properties now (Details ▸ Script), not the controller.
-            player.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, 3.0f, 0.0f };
+            player.GetComponent<ECS::TransformComponent>().Translation =
+                 Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, 3.0f, 0.0f );
             // Movement + mouse-look are now a Lua SCRIPT (engine only executes the physics it asks for).
             {
                 ECS::ScriptSlot slot;
@@ -2135,7 +2143,8 @@ namespace Desert::Editor
             body.AddComponent<ECS::SkinnedMeshComponent>().MeshHandle =
                  Geometry::ProceduralCharacterFactory::GetHumanoidMesh();
             body.AddComponent<ECS::AnimationComponent>();
-            body.GetComponent<ECS::TransformComponent>().Translation = { 0.0f, -0.9f, 0.0f };
+            body.GetComponent<ECS::TransformComponent>().Translation =
+                 Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, -0.9f, 0.0f );
             m_MainScene->Attach( player, body );
         }
 
@@ -2146,12 +2155,12 @@ namespace Desert::Editor
             auto& cd             = cam.AddComponent<ECS::CameraComponent>();
             cd.Data.IsMainCamera = true;
             auto& ct             = cam.GetComponent<ECS::TransformComponent>();
-            ct.Translation       = { 0.0f, 1.5f, 7.0f };                   // behind (+Z) and above the player
+            ct.Translation       = Common::Units::Metres( 1.0f ) * glm::vec3( 0.0f, 1.5f, 7.0f ); // 3rd person
             ct.Rotation          = { glm::radians( -10.0f ), 0.0f, 0.0f }; // look slightly down at the player
             m_MainScene->Attach( player, cam );
         }
 
-        BuildHouse( { 12.0f, 0.0f, 0.0f } ); // a walkable greybox house off to the side
+        BuildHouse( Common::Units::Metres( 1.0f ) * glm::vec3( 12.0f, 0.0f, 0.0f ) ); // greybox house aside
 
         LOG_INFO( "[Demo] Character demo scene built — press Play, then WASD to move + Space to jump." );
     }

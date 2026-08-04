@@ -50,7 +50,7 @@ namespace Desert::Editor::Core
     private:
         static inline std::vector<Common::UUID>   s_Active;
         static inline std::optional<Common::UUID> s_Editing;
-        static inline float                       s_Radius       = 3.0f;
+        static inline float                       s_Radius       = 300.0f; // world units (cm) = 3 m
         static inline float                       s_PaintDensity = 1.0f;
         static inline bool                        s_Erase        = false;
     };

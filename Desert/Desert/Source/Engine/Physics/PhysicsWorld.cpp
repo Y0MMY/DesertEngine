@@ -150,7 +150,7 @@ namespace Desert::Physics
         m_Impl->System.Init( kMaxBodies, kNumBodyMutexes, kMaxBodyPairs, kMaxContactConstraints,
                              m_Impl->BroadPhaseLayerInterface, m_Impl->ObjectVsBroadPhaseFilter,
                              m_Impl->ObjectLayerPairFilter );
-        m_Impl->System.SetGravity( JPH::Vec3( 0.0f, -9.81f, 0.0f ) );
+        m_Impl->System.SetGravity( JPH::Vec3( 0.0f, -981.0f, 0.0f ) ); // cm/s^2 — 1 world unit = 1 cm
         m_Impl->Bodies = &m_Impl->System.GetBodyInterface();
         return true;
     }
@@ -200,7 +200,7 @@ namespace Desert::Physics
                 break;
             case ShapeType::Box:
             default:
-                shape = new JPH::BoxShape( ToJolt( glm::max( desc.HalfExtents, glm::vec3( 0.01f ) ) ) );
+                shape = new JPH::BoxShape( ToJolt( glm::max( desc.HalfExtents, glm::vec3( 1.0f ) ) ) );
                 break;
         }
 
@@ -274,8 +274,8 @@ namespace Desert::Physics
             return kInvalidCharacter;
 
         JPH::CharacterVirtualSettings settings;
-        settings.mShape = new JPH::CapsuleShape( glm::max( desc.HalfHeight, 0.01f ),
-                                                 glm::max( desc.Radius, 0.01f ) );
+        settings.mShape =
+             new JPH::CapsuleShape( glm::max( desc.HalfHeight, 1.0f ), glm::max( desc.Radius, 1.0f ) );
         settings.mMaxSlopeAngle = glm::radians( desc.MaxSlopeDeg );
         // Keep the contact point a little inside the capsule so the character doesn't get stuck on edges.
         settings.mSupportingVolume = JPH::Plane( JPH::Vec3::sAxisY(), -desc.Radius );

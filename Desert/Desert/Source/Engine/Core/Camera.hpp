@@ -68,10 +68,10 @@ namespace Desert::Core
         glm::vec3 m_Position         = glm::vec3( 0.0f );
 
         float          m_FOV            = 45.0f;
-        float          m_NearPlane      = 0.001f;
-        float          m_FarPlane       = 1000.0f;
+        float          m_NearPlane      = 10.0f;     // 10 cm (1 world unit = 1 cm)
+        float          m_FarPlane       = 100000.0f; // 1 km
         ProjectionType m_ProjectionType = ProjectionType::Perspective;
-        float          m_OrthoSize      = 10.0f; // world half-height for the orthographic projection
+        float          m_OrthoSize      = 1000.0f; // world half-height for the orthographic projection
 
         uint32_t m_ViewportWidth  = 0; // last viewport size (for the live setters to rebuild against)
         uint32_t m_ViewportHeight = 0;
@@ -113,7 +113,7 @@ namespace Desert::Core
 
         // Frame a world point: the focal point moves there and the camera backs off along its
         // CURRENT view direction to `distance`. Drives F-focus and hierarchy double-click.
-        void Focus( const glm::vec3& point, float distance = 5.0f );
+        void Focus( const glm::vec3& point, float distance = 500.0f );
 
     private:
         bool OnKeyPress( Common::KeyPressedEvent& e );

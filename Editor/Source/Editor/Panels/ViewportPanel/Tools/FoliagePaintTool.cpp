@@ -176,7 +176,7 @@ namespace Desert::Editor::Tools
         ImGui::Dummy( ImVec2( 0, 2 ) );
         ImGui::TextDisabled( "BRUSH" );
         ImGui::SetNextItemWidth( -1 );
-        ImGui::SliderFloat( "##BrushSize", &Core::FoliagePaint::BrushRadius(), 0.5f, 60.0f, "Size:  %.1f m" );
+        ImGui::SliderFloat( "##BrushSize", &Core::FoliagePaint::BrushRadius(), 50.0f, 6000.0f, "Size:  %.0f cm" );
         ImGui::SetNextItemWidth( -1 );
         ImGui::SliderFloat( "##PaintDensity", &Core::FoliagePaint::PaintDensity(), 0.0f, 1.0f, "Density:  %.2f" );
 

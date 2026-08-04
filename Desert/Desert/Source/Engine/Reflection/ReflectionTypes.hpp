@@ -47,6 +47,11 @@ namespace Desert::Reflection
         bool        Thumbnail = false; // PROPERTY(Thumbnail)
         bool        ReadOnly  = false; // PROPERTY(ReadOnly)
         bool        Hidden    = false; // PROPERTY(Hidden)
+
+        // PROPERTY(Length) — the field is a distance in world units, i.e. CENTIMETRES (one world unit is
+        // one centimetre everywhere; see Common/Core/Units.hpp and docs/UNITS.md). The editor labels it
+        // "cm" and drags it a centimetre at a time; Range(min,max) is in the same units.
+        bool IsLength = false;
     };
 
     struct TypeInfo; // fwd

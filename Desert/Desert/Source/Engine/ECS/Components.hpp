@@ -72,13 +72,13 @@ namespace Desert::ECS
                   Header( "Projection" ), Tooltip( "Vertical field of view, in degrees." ) )
         float FOV = 45.0f;
 
-        PROPERTY( DisplayName( "Near" ), Category( "Camera" ), Range( 0.01f, 10.0f ),
+        PROPERTY( DisplayName( "Near" ), Category( "Camera" ), Range( 1.0f, 1000.0f ), Length,
                   Tooltip( "Near clip plane distance. Anything closer is not drawn." ) )
-        float Near = 0.1f;
+        float Near = 10.0f;
 
-        PROPERTY( DisplayName( "Far" ), Category( "Camera" ), Range( 10.0f, 10000.0f ),
+        PROPERTY( DisplayName( "Far" ), Category( "Camera" ), Range( 1000.0f, 1000000.0f ), Length,
                   Tooltip( "Far clip plane distance. Anything beyond is not drawn." ) )
-        float Far = 1000.0f;
+        float Far = 100000.0f;
     };
 
     struct CameraComponent
@@ -126,7 +126,7 @@ namespace Desert::ECS
         Assets::AssetHandle Font; // SDF font asset (drag a .ttf or pick a preloaded one);
                                   // unset = the engine's built-in default (Roboto).
         glm::vec4 Color             = glm::vec4( 1.0f );
-        float     Size              = 1.0f;  // world units per em (scales the baked metrics)
+        float     Size              = 100.0f; // world units per em (scales the baked metrics)
         float     EmissiveIntensity = 1.0f;  // >1 => the text blooms
         bool      Billboard         = false; // face the camera (added by the system per frame)
 
@@ -203,14 +203,14 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Size" ), Category( "Terrain" ), Range( 1.0f, 500.0f ) )
-        float Size = 50.0f;
+        PROPERTY( DisplayName( "Size" ), Category( "Terrain" ), Range( 100.0f, 50000.0f ), Length )
+        float Size = 5000.0f;
 
         PROPERTY( DisplayName( "Resolution" ), Category( "Terrain" ), Range( 2.0f, 256.0f ) )
         int Resolution = 64;
 
-        PROPERTY( DisplayName( "Height Scale" ), Category( "Terrain" ), Range( 0.0f, 50.0f ) )
-        float HeightScale = 5.0f;
+        PROPERTY( DisplayName( "Height Scale" ), Category( "Terrain" ), Range( 0.0f, 5000.0f ), Length )
+        float HeightScale = 500.0f;
 
         PROPERTY( DisplayName( "Noise Frequency" ), Category( "Terrain" ), Range( 0.001f, 1.0f ) )
         float NoiseFrequency = 0.08f;
@@ -236,8 +236,8 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Grass Density" ), Category( "Grass" ), Range( 8.0f, 512.0f ) )
         int GrassDensity = 320;
 
-        PROPERTY( DisplayName( "Grass Height" ), Category( "Grass" ), Range( 0.05f, 5.0f ) )
-        float GrassHeight = 0.4f;
+        PROPERTY( DisplayName( "Grass Height" ), Category( "Grass" ), Range( 5.0f, 500.0f ), Length )
+        float GrassHeight = 40.0f;
 
         // Geometric blades grown per clump instance. Higher = denser tufts (fills gaps, esp. for short
         // grass) at more vertices/instance. Drives the indirect draw's vertex count (blades*24).
@@ -412,12 +412,12 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
         float Intensity = 1.0f;
 
-        PROPERTY( DisplayName( "Radius" ), Category( "Light" ), Range( 0.0f, 100.0f ) )
-        float Radius = 10.0f;
+        PROPERTY( DisplayName( "Radius" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length )
+        float Radius = 1000.0f;
 
         // Inner radius where attenuation == 1 (a small emitter "source size"); falloff runs from here to
         // Radius. 0 = point source.
-        PROPERTY( DisplayName( "Min Radius" ), Category( "Light" ), Range( 0.0f, 100.0f ) )
+        PROPERTY( DisplayName( "Min Radius" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length )
         float MinRadius = 0.0f;
 
         PROPERTY( DisplayName( "Falloff" ), Category( "Light" ) )
@@ -444,8 +444,8 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
         float Intensity = 1.0f;
 
-        PROPERTY( DisplayName( "Range" ), Category( "Light" ), Range( 0.0f, 100.0f ) )
-        float Range = 15.0f;
+        PROPERTY( DisplayName( "Range" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length )
+        float Range = 1500.0f;
 
         PROPERTY( DisplayName( "Inner Cone" ), Category( "Light" ), Range( 0.0f, 89.0f ) )
         float InnerConeAngle = 20.0f; // degrees — full intensity inside this half-angle
@@ -503,7 +503,7 @@ namespace Desert::ECS
         float LifetimeVariance = 0.2f;
 
         PROPERTY( DisplayName( "Start Speed" ), Category( "Motion" ), Range( 0.0f, 100.0f ) )
-        float StartSpeed = 2.0f;
+        float StartSpeed = 200.0f;
 
         PROPERTY( DisplayName( "Speed Variance" ), Category( "Motion" ), Range( 0.0f, 1.0f ) )
         float SpeedVariance = 0.3f;
@@ -515,10 +515,10 @@ namespace Desert::ECS
         float ConeAngle = 45.0f; // degrees of spread around Direction (wide enough to read from any angle)
 
         PROPERTY( DisplayName( "Gravity" ), Category( "Motion" ) )
-        glm::vec3 Gravity = glm::vec3( 0.0f, -2.0f, 0.0f );
+        glm::vec3 Gravity = glm::vec3( 0.0f, -200.0f, 0.0f );
 
-        PROPERTY( DisplayName( "Start Size" ), Category( "Look" ), Range( 0.0f, 10.0f ) )
-        float StartSize = 0.25f;
+        PROPERTY( DisplayName( "Start Size" ), Category( "Look" ), Range( 0.0f, 1000.0f ), Length )
+        float StartSize = 25.0f;
 
         // Size-over-life ease: the compute shader raises the normalized age t to this power before lerping
         // Start->End size. 1 = linear; <1 = fast then slow (puffs); >1 = slow then fast (shrinking sparks).
@@ -526,8 +526,8 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Size Curve Power" ), Category( "Look" ), Range( 0.1f, 8.0f ) )
         float SizeCurvePower = 1.0f;
 
-        PROPERTY( DisplayName( "End Size" ), Category( "Look" ), Range( 0.0f, 10.0f ) )
-        float EndSize = 0.06f; // keep a sliver of size so particles stay readable instead of vanishing mid-life
+        PROPERTY( DisplayName( "End Size" ), Category( "Look" ), Range( 0.0f, 1000.0f ), Length )
+        float EndSize = 6.0f; // keep a sliver of size so particles stay readable instead of vanishing mid-life
 
         PROPERTY( DisplayName( "Start Color" ), Category( "Look" ), Color )
         glm::vec3 StartColor = glm::vec3( 1.0f, 0.6f, 0.15f );
@@ -1276,14 +1276,14 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Shape" ), Category( "Collider" ) )
         Physics::ShapeType Shape = Physics::ShapeType::Box;
 
-        PROPERTY( DisplayName( "Half Extents" ), Category( "Collider" ) )
-        glm::vec3 HalfExtents = { 0.5f, 0.5f, 0.5f }; // Box
+        PROPERTY( DisplayName( "Half Extents" ), Category( "Collider" ), Length )
+        glm::vec3 HalfExtents = { 50.0f, 50.0f, 50.0f }; // Box
 
-        PROPERTY( DisplayName( "Radius" ), Category( "Collider" ), Range( 0.01f, 50.0f ) )
-        float Radius = 0.5f; // Sphere / Capsule
+        PROPERTY( DisplayName( "Radius" ), Category( "Collider" ), Range( 1.0f, 5000.0f ), Length )
+        float Radius = 50.0f; // Sphere / Capsule
 
-        PROPERTY( DisplayName( "Half Height" ), Category( "Collider" ), Range( 0.01f, 50.0f ) )
-        float HalfHeight = 0.5f; // Capsule
+        PROPERTY( DisplayName( "Half Height" ), Category( "Collider" ), Range( 1.0f, 5000.0f ), Length )
+        float HalfHeight = 50.0f; // Capsule
     };
 
     struct ColliderComponent
@@ -1355,19 +1355,19 @@ namespace Desert::ECS
 
         // PHYSICS / capsule only. The control FEEL (move/sprint/look/jump speed) lives in the controller
         // SCRIPT's Properties — not here — so there's a single source of truth for behavior. See ScriptComponent.
-        PROPERTY( DisplayName( "Radius" ), Category( "Character" ), Range( 0.05f, 5.0f ) )
-        float Radius = 0.3f;
+        PROPERTY( DisplayName( "Radius" ), Category( "Character" ), Range( 5.0f, 500.0f ), Length )
+        float Radius = 30.0f;
 
-        PROPERTY( DisplayName( "Height" ), Category( "Character" ), Range( 0.2f, 10.0f ) )
-        float Height = 1.8f; // total capsule height (HalfHeight = (Height - 2*Radius) / 2)
+        PROPERTY( DisplayName( "Height" ), Category( "Character" ), Range( 20.0f, 1000.0f ), Length )
+        float Height = 180.0f; // total capsule height (HalfHeight = (Height - 2*Radius) / 2)
 
         PROPERTY( DisplayName( "Max Slope" ), Category( "Character" ), Range( 0.0f, 89.0f ) )
         float MaxSlopeDeg = 50.0f;
 
         // Fall acceleration (m/s^2). Default ~2x real gravity so the jump arc feels SNAPPY (real 9.81 reads as
         // floaty). Authorable per-character instead of a baked engine constant — a moon level just lowers it.
-        PROPERTY( DisplayName( "Gravity" ), Category( "Character" ), Range( 0.0f, 60.0f ) )
-        float Gravity = 20.0f;
+        PROPERTY( DisplayName( "Gravity" ), Category( "Character" ), Range( 0.0f, 6000.0f ) )
+        float Gravity = 2000.0f;
     };
 
     // A WASD-driven player. The follow camera is NOT here — parent a child entity with a CameraComponent

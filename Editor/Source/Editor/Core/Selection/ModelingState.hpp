@@ -27,10 +27,15 @@ namespace Desert::Editor::Core
             return s;
         }
 
+        // Smallest CubeGrid block, in world units (= 1 cm). Both the panel and the tool clamp to it.
+        static constexpr float MinCellSize = 1.0f;
+
         // Panel -> tool
         Tool   ActiveTool = Tool::None;
         Output OutputType = Output::DynamicMesh;
-        float  CellSize   = 1.0f; // CubeGrid block size (Resize Grid) in world units
+        // CubeGrid block size (Resize Grid) in world units — one unit is one centimetre, so the default
+        // 100 is a one-metre block, the same default as UE.
+        float CellSize = 100.0f;
         // (legacy paint-brush fields, retained for compatibility; unused by the marquee CubeGrid)
         float  BrushW        = 1.0f;
         float  BrushD        = 1.0f;

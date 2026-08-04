@@ -352,7 +352,7 @@ namespace Desert::Editor
                 float r = Core::GizmoState::RotateSnapDegrees();
                 float s = Core::GizmoState::ScaleSnap();
                 ImGui::SetNextItemWidth( 130.0f );
-                if ( ImGui::DragFloat( "Move (m)", &t, 0.05f, 0.01f, 100.0f, "%.2f" ) )
+                if ( ImGui::DragFloat( "Move (cm)", &t, 1.0f, 1.0f, 10000.0f, "%.1f" ) )
                     Core::GizmoState::SetTranslateSnap( t );
                 ImGui::SetNextItemWidth( 130.0f );
                 if ( ImGui::DragFloat( "Rotate (deg)", &r, 0.5f, 0.1f, 180.0f, "%.1f" ) )
@@ -713,12 +713,12 @@ namespace Desert::Editor
 
                     float nearP = editorCam->GetNear();
                     ImGui::SetNextItemWidth( kW );
-                    if ( ImGui::SliderFloat( "Near", &nearP, 0.001f, 10.0f, "%.3f" ) )
+                    if ( ImGui::SliderFloat( "Near", &nearP, 1.0f, 1000.0f, "%.0f cm" ) )
                         editorCam->SetNear( nearP );
 
                     float farP = editorCam->GetFar();
                     ImGui::SetNextItemWidth( kW );
-                    if ( ImGui::SliderFloat( "Far", &farP, 100.0f, 5000.0f, "%.0f" ) )
+                    if ( ImGui::SliderFloat( "Far", &farP, 10000.0f, 500000.0f, "%.0f cm" ) )
                         editorCam->SetFar( farP );
 
                     float spd = editorCam->GetMovementSpeed();

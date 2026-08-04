@@ -4,6 +4,7 @@
 #include <Engine/Animation/Skeleton.hpp>
 #include <Engine/Animation/BoneInfo.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Common/Core/Units.hpp>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -118,7 +119,9 @@ namespace Desert::Geometry
 
         glm::vec3 JointPos( uint32_t joint )
         {
-            return kJoints[joint].BindWorld;
+            // The rig is authored in metres (a 1.8 m humanoid reads better as a table); one world unit is a
+            // centimetre, so every position — bind pose AND the segment radii below — scales up by 100.
+            return kJoints[joint].BindWorld * Common::Units::UnitsPerMetre;
         }
 
         // A tapered cylinder (side surface) p0(radius r0) -> p1(radius r1), rigid-skinned to `bone`. Normals
@@ -240,15 +243,17 @@ namespace Desert::Geometry
 
             std::vector<SkinnedVertex> verts;
             std::vector<Index>         indices;
+            constexpr float            M = Common::Units::UnitsPerMetre; // radii are authored in metres too
             for ( const SegmentDef& seg : kSegments )
-                AppendCylinder( verts, indices, JointPos( seg.JointA ), JointPos( seg.JointB ), seg.RadiusA,
-                                seg.RadiusB, seg.SkinBone );
+                AppendCylinder( verts, indices, JointPos( seg.JointA ), JointPos( seg.JointB ), seg.RadiusA * M,
+                                seg.RadiusB * M, seg.SkinBone );
             for ( const SphereDef& sph : kJointSpheres )
-                AppendSphere( verts, indices, JointPos( sph.Joint ), sph.Radius, sph.Joint );
+                AppendSphere( verts, indices, JointPos( sph.Joint ), sph.Radius * M, sph.Joint );
             // Feet: a short capsule from each ankle forward (+Z), skinned to the foot joint.
             for ( uint32_t foot : { static_cast<uint32_t>( FootL ), static_cast<uint32_t>( FootR ) } )
                 AppendCylinder( verts, indices, JointPos( foot ),
-                                JointPos( foot ) + glm::vec3( 0.0f, -0.02f, 0.17f ), 0.055f, 0.045f, foot );
+                                JointPos( foot ) + glm::vec3( 0.0f, -0.02f, 0.17f ) * M, 0.055f * M, 0.045f * M,
+                                foot );
 
             // Single submesh covering the whole body.
             Submesh sub{};
@@ -258,7 +263,7 @@ namespace Desert::Geometry
             sub.IndexOffset  = 0;
             sub.IndexCount   = static_cast<uint32_t>( indices.size() * 3 );
             sub.Transform    = glm::mat4( 1.0f );
-            sub.BoundingBox  = { glm::vec3( -0.30f, 0.0f, -0.20f ), glm::vec3( 0.30f, 1.90f, 0.20f ) };
+            sub.BoundingBox  = { glm::vec3( -30.0f, 0.0f, -20.0f ), glm::vec3( 30.0f, 190.0f, 20.0f ) };
 
             auto mesh = std::make_shared<SkinnedMesh>( verts, indices, std::vector<Submesh>{ sub },
                                                        s_Skeleton.get() );

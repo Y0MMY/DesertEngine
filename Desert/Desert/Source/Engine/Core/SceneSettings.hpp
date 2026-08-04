@@ -156,8 +156,8 @@ namespace Desert::Core
         bool      LightingDebug        = false; // see note above — no longer a Scene Settings property
 
         // Other scene-wide settings
-        PROPERTY( DisplayName( "Gravity" ), Category( "Physics" ), Range( 0.0f, 50.0f ) )
-        float Gravity         = 9.81f; // For physics simulation
+        PROPERTY( DisplayName( "Gravity" ), Category( "Physics" ), Range( 0.0f, 5000.0f ) )
+        float Gravity = 981.0f; // For physics simulation (cm/s^2 — 1 unit = 1 cm)
         PROPERTY( DisplayName( "Pause Simulation" ), Category( "Physics" ) )
         bool  PauseSimulation = false;
 

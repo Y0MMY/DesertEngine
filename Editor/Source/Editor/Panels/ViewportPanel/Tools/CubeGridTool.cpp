@@ -11,6 +11,7 @@
 #include <Engine/Geometry/MeshTypes.hpp>
 
 #include <Common/Core/Math/AABB.hpp>
+#include <Common/Core/Units.hpp>
 
 #include <ImGui/imgui.h>
 
@@ -230,7 +231,8 @@ namespace Desert::Editor::Tools
         const bool           interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
 
         bool        changed = false;
-        const float gs      = std::max( ms.CellSize, 0.02f ); // requested Block Size (world units)
+        // Requested Block Size in world units (metres). The UI edits it in centimetres — see Common::Units.
+        const float gs = std::max( ms.CellSize, Core::ModelingState::MinCellSize );
 
         // Starting a fresh marquee starts a NEW piece: commit whatever is already pushed out into a frozen
         // layer first (it keeps its own Block Size forever). Resizing the grid afterwards then only ever
@@ -454,13 +456,13 @@ namespace Desert::Editor::Tools
             if ( WorldToScreen( worldPt( ( uMin + uMax + 1 ) * 0.5f, (float)vMin, na, planeW ), viewProj,
                                 viewportPos, viewportSize, sp ) )
             {
-                std::snprintf( buf, sizeof( buf ), "%.0f", wWorld );
+                Common::Units::FormatLength( buf, sizeof( buf ), wWorld );
                 drawLabel( sp, buf );
             }
             if ( WorldToScreen( worldPt( (float)uMin, ( vMin + vMax + 1 ) * 0.5f, na, planeW ), viewProj,
                                 viewportPos, viewportSize, sp ) )
             {
-                std::snprintf( buf, sizeof( buf ), "%.0f", dWorld );
+                Common::Units::FormatLength( buf, sizeof( buf ), dWorld );
                 drawLabel( sp, buf );
             }
         };
@@ -609,11 +611,12 @@ namespace Desert::Editor::Tools
                 if ( !m_HasSel )
                     ::ImGui::EndDisabled();
 
+                // Block Size readout in centimetres (UE numbers: 100 cm = one metre = the default block).
                 ::ImGui::SameLine( 0.0f, 14.0f );
                 if ( ::ImGui::Button( ICON_MDI_MINUS "##grid_dn" ) )
-                    ms.CellSize = std::max( ms.CellSize * 0.5f, 0.02f );
+                    ms.CellSize = std::max( ms.CellSize * 0.5f, Core::ModelingState::MinCellSize );
                 ::ImGui::SameLine();
-                ::ImGui::Text( "Grid %.2f", static_cast<float>( K ) * u );
+                ::ImGui::Text( "Grid %.0f cm", static_cast<float>( K ) * u );
                 ::ImGui::SameLine();
                 if ( ::ImGui::Button( ICON_MDI_PLUS "##grid_up" ) )
                     ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );

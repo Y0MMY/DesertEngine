@@ -78,7 +78,7 @@ namespace Desert::Core
 
         UpdateProjectionMatrix( width, height );
 
-        constexpr glm::vec3 InitialPosition = { 5, 5, 5 };
+        constexpr glm::vec3 InitialPosition = { 500, 500, 500 };
         m_Distance                          = glm::distance( InitialPosition, m_FocalPoint );
 
         m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
@@ -98,7 +98,7 @@ namespace Desert::Core
         m_Direction        = glm::vec3( 90.0f, 0.0f, 0.0f );
         m_FocalPoint       = glm::vec3( 0.0f );
 
-        const glm::vec3 position = { -5, 5, 5 };
+        const glm::vec3 position = { -500, 500, 500 };
         m_Distance              = glm::distance( position, m_FocalPoint );
 
         m_Yaw   = 3.0f * glm::pi<float>() / 4.0f;
@@ -186,7 +186,7 @@ namespace Desert::Core
                  Input::Keyboard::IsKeyPressed( Common::KeyCode::RightControl ) )
                 speedScale *= 0.25f;
 
-            const float cameraSpeed   = 0.0002f * m_MovementSpeed * speedScale * timestep.GetMilliseconds();
+            const float cameraSpeed   = 0.02f * m_MovementSpeed * speedScale * timestep.GetMilliseconds();
             const float rotationSpeed = 0.133f * timestep.GetMilliseconds();
 
             if ( Input::Keyboard::IsKeyPressed( Common::KeyCode::S ) )
@@ -287,7 +287,7 @@ namespace Desert::Core
     {
         // Keep the current orientation — only re-center and re-frame (matches Unity/Godot 'F').
         m_FocalPoint = point;
-        m_Position   = point - GetForwardDirection() * glm::max( distance, 0.5f );
+        m_Position   = point - GetForwardDirection() * glm::max( distance, 50.0f );
         UpdateCameraView();
     }
 

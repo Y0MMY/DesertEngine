@@ -45,6 +45,7 @@ namespace
         bool        thumbnail = false;
         bool        readOnly  = false;
         bool        hidden    = false;
+        bool        isLength  = false; // PROPERTY(Length) — the field is a distance in world units (cm)
     };
 
     struct Field
@@ -454,6 +455,8 @@ namespace
             else if ( tok == "Thumbnail" ) m.thumbnail = true;
             else if ( tok == "ReadOnly" )  m.readOnly = true;
             else if ( tok == "Hidden" )    m.hidden = true;
+            else if ( tok == "Length" )
+                m.isLength = true;
         }
         return m;
     }
@@ -677,6 +680,8 @@ namespace
         if ( m.thumbnail ) o << ".Thumbnail = true, ";
         if ( m.readOnly )  o << ".ReadOnly = true, ";
         if ( m.hidden )    o << ".Hidden = true, ";
+        if ( m.isLength )
+            o << ".IsLength = true, ";
         o << "}";
     }
 

@@ -72,7 +72,7 @@ namespace Desert::Editor::Core
     private:
         inline static Operation s_Operation = Operation::None;
 
-        inline static float s_TranslateSnap  = 0.5f;  // world units
+        inline static float s_TranslateSnap  = 50.0f; // world units (cm) — half a metre
         inline static float s_RotateSnapDeg  = 15.0f; // degrees
         inline static float s_ScaleSnap      = 0.1f;
         inline static bool  s_PersistentSnap = false;

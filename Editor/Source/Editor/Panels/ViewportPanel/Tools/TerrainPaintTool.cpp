@@ -32,7 +32,7 @@ namespace Desert::Editor::Tools
         ImGui::SetNextItemWidth( 180.0f );
         ImGui::Combo( "Layer", &m_Brush.Layer, layers, 3 );
         ImGui::SetNextItemWidth( 180.0f );
-        ImGui::SliderFloat( "Radius", &m_Brush.Radius, 0.5f, comp.Data.Size, "%.1f m" );
+        ImGui::SliderFloat( "Radius", &m_Brush.Radius, 50.0f, comp.Data.Size, "%.0f cm" );
         ImGui::SetNextItemWidth( 180.0f );
         ImGui::SliderFloat( "Strength", &m_Brush.Strength, 0.0f, 1.0f );
         ImGui::Checkbox( "Erase", &m_Brush.Erase );

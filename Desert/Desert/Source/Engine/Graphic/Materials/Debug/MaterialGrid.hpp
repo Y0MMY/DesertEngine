@@ -31,7 +31,7 @@ namespace Desert::Graphic
             data.CameraPos     = glm::vec4( camera->GetPosition(), 1.0f );
             data.ThinColor     = glm::vec4( 0.40f, 0.40f, 0.46f, 0.45f );
             data.ThickColor    = glm::vec4( 0.55f, 0.55f, 0.62f, 0.75f );
-            data.Params        = glm::vec4( 1.0f, 40.0f, 400.0f, 0.0f ); // baseCell, fadeStart, fadeEnd
+            data.Params        = glm::vec4( 100.0f, 4000.0f, 40000.0f, 0.0f ); // baseCell, fadeStart, fadeEnd (cm)
 
             if ( auto* ub = Get<UniformBufferProperty>( "GridUB" ) )
                 ub->SetRawData( reinterpret_cast<const std::byte*>( &data ), sizeof( data ) );

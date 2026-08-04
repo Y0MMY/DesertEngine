@@ -38,7 +38,7 @@ namespace Desert::Editor::Tools
         {
             bool  Enabled  = false;
             int   Layer    = 0;    // 0 = grass (R), 1 = rock (G), 2 = snow (B)
-            float Radius   = 6.0f; // world meters
+            float Radius   = 600.0f; // world units (cm) = 6 m
             float Strength = 0.6f; // 0..1 per application
             bool  Erase    = false;
         };

@@ -709,7 +709,7 @@ DESERT_REGISTER_CUSTOM_COMPONENT(
                   ImGui::SetTooltip( "Pick a preloaded font or drag a .ttf here from the Content Browser" );
 
               ImGui::ColorEdit4( "Color", &tc.Color.x );
-              ImGui::DragFloat( "Size", &tc.Size, 0.01f, 0.01f, 100.0f, "%.2f" );
+              ImGui::DragFloat( "Size", &tc.Size, 1.0f, 1.0f, 10000.0f, "%.1f cm" );
               ImGui::DragFloat( "Emissive Intensity", &tc.EmissiveIntensity, 0.05f, 0.0f, 20.0f, "%.2f" );
               if ( ImGui::IsItemHovered() )
                   ImGui::SetTooltip( "> ~1 makes the text bloom (it renders into the HDR scene)" );

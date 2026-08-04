@@ -17,6 +17,8 @@
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Import/TextureDnD.hpp>
 
+#include <Common/Core/Units.hpp>
+
 #include <ImGui/imgui.h>
 
 #include <cstdint>
@@ -67,6 +69,18 @@ namespace Desert::Editor
                 case 8:  return *static_cast<const int64_t*>( p );
                 default: return *static_cast<const int32_t*>( p );
             }
+        }
+
+        // PROPERTY(Length) — the field is a distance in world units, i.e. CENTIMETRES (Common/Core/Units).
+        // No conversion happens anywhere: the widget just labels the number and drags it a centimetre at a
+        // time instead of the 0.01 step that suits unitless ratios.
+        bool DrawLength( const char* id, float* v, int n, const Reflection::PropertyMetadata& meta )
+        {
+            const float mn = meta.RangeMin;
+            const float mx = meta.RangeMax;
+            return meta.HasRange
+                        ? ImGui::SliderScalarN( id, ImGuiDataType_Float, v, n, &mn, &mx, "%.1f cm" )
+                        : ImGui::DragScalarN( id, ImGuiDataType_Float, v, n, 1.0f, nullptr, nullptr, "%.1f cm" );
         }
 
         void WriteEnum( void* p, std::size_t size, int64_t value )
@@ -209,6 +223,11 @@ namespace Desert::Editor
             case FieldType::Float:
             {
                 float* v = static_cast<float*>( p );
+                if ( field.Meta.IsLength )
+                {
+                    changed = DrawLength( "##v", v, 1, field.Meta );
+                    break;
+                }
                 changed = field.Meta.HasRange
                               ? ImGui::SliderFloat( "##v", v, field.Meta.RangeMin, field.Meta.RangeMax )
                               : ImGui::DragFloat( "##v", v, 0.01f );
@@ -220,19 +239,20 @@ namespace Desert::Editor
                 break;
             }
             case FieldType::Vec2:
-                changed = ImGui::DragFloat2( "##v", static_cast<float*>( p ), 0.01f );
+                changed = field.Meta.IsLength ? DrawLength( "##v", static_cast<float*>( p ), 2, field.Meta )
+                                              : ImGui::DragFloat2( "##v", static_cast<float*>( p ), 0.01f );
                 break;
 
             case FieldType::Vec3:
-                changed = field.Meta.IsColor
-                              ? ImGui::ColorEdit3( "##v", static_cast<float*>( p ) )
-                              : ImGui::DragFloat3( "##v", static_cast<float*>( p ), 0.01f );
+                changed = field.Meta.IsColor    ? ImGui::ColorEdit3( "##v", static_cast<float*>( p ) )
+                          : field.Meta.IsLength ? DrawLength( "##v", static_cast<float*>( p ), 3, field.Meta )
+                                                : ImGui::DragFloat3( "##v", static_cast<float*>( p ), 0.01f );
                 break;
 
             case FieldType::Vec4:
-                changed = field.Meta.IsColor
-                              ? ImGui::ColorEdit4( "##v", static_cast<float*>( p ) )
-                              : ImGui::DragFloat4( "##v", static_cast<float*>( p ), 0.01f );
+                changed = field.Meta.IsColor    ? ImGui::ColorEdit4( "##v", static_cast<float*>( p ) )
+                          : field.Meta.IsLength ? DrawLength( "##v", static_cast<float*>( p ), 4, field.Meta )
+                                                : ImGui::DragFloat4( "##v", static_cast<float*>( p ), 0.01f );
                 break;
 
             case FieldType::String:
