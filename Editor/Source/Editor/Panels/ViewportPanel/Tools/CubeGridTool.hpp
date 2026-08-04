@@ -36,6 +36,7 @@ namespace Desert::Editor::Tools
         void        PushPull( ::Desert::Core::Scene& scene, int dir, int K ); // extrude the selection out/in
         void        RefineBy( int F ); // subdivide the base grid by F (split every cell + the selection ×F)
         void        FreezeActive();    // commit the volume being worked on into an immutable layer
+        void        RescaleSelection( float oldUnit, float newUnit, int K ); // keep the marquee in place
         bool        SolidAt( const glm::ivec3& cell, float unit ) const; // occupancy across every layer
         static bool WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
                                    const glm::vec2& size, glm::vec2& out );

@@ -118,6 +118,29 @@ namespace Desert::Editor::Tools
         m_Unit /= static_cast<float>( F );
     }
 
+    void CubeGridTool::RescaleSelection( float oldUnit, float newUnit, int K )
+    {
+        // Re-express the marquee (which is stored in BASE cells) in a new base, keeping its world position,
+        // then re-snap it out to whole blocks of the new size.
+        const float s = oldUnit / newUnit;
+        auto toNewMin = [&]( int c ) { return static_cast<int>( std::floor( static_cast<float>( c ) * s ) ); };
+        auto toNewMax = [&]( int c )
+        { return static_cast<int>( std::ceil( static_cast<float>( c + 1 ) * s ) ) - 1; };
+
+        const float planeW = static_cast<float>( m_PlaneCell + ( m_PlaneSign > 0 ? 0 : 1 ) ) * oldUnit;
+        m_PlaneCell        = static_cast<int>( std::lround( planeW / newUnit ) ) - ( m_PlaneSign > 0 ? 0 : 1 );
+        m_Anchor           = { toNewMin( m_Anchor.x ), toNewMin( m_Anchor.y ) };
+
+        const int uMin = toNewMin( m_UMin );
+        const int uMax = toNewMax( m_UMax );
+        const int vMin = toNewMin( m_VMin );
+        const int vMax = toNewMax( m_VMax );
+        m_UMin         = FloorDiv( uMin, K ) * K;
+        m_UMax         = FloorDiv( uMax, K ) * K + K - 1;
+        m_VMin         = FloorDiv( vMin, K ) * K;
+        m_VMax         = FloorDiv( vMax, K ) * K + K - 1;
+    }
+
     void CubeGridTool::FreezeActive()
     {
         if ( m_Cells.empty() )
@@ -219,8 +242,13 @@ namespace Desert::Editor::Tools
         // Base unit: the finest cell ever used. A Block Size finer than the base subdivides the base
         // losslessly (existing solids split into F³, world-identical); a coarser Block Size never remaps —
         // it just stamps K base cells at once. So drawn geometry never changes when the grid step changes.
+        const float uPrev   = m_Unit;
+        bool        rebased = false;
         if ( m_Unit < 0.0f || m_Cells.empty() )
-            m_Unit = gs; // nothing drawn yet -> the requested size simply becomes the base
+        {
+            m_Unit  = gs; // nothing drawn yet -> the requested size simply becomes the base
+            rebased = true;
+        }
         else
             for ( int guard = 0; gs < m_Unit * 0.999f && guard < 24; ++guard )
             {
@@ -230,6 +258,13 @@ namespace Desert::Editor::Tools
         const int K   = std::max( 1, static_cast<int>( std::lround( gs / m_Unit ) ) );
         ms.CellSize   = static_cast<float>( K ) * m_Unit; // snap the shown Block Size to a base multiple
         const float u = m_Unit;
+
+        // Resizing the grid with a selection up but nothing pushed yet re-bases the whole volume, so the
+        // stored cell indices would silently mean a different world position — the orange rectangle jumped
+        // somewhere else. Re-express it in the new base instead: it stays where you put it and just
+        // re-snaps to the new block size (UE: the marquee grows/shrinks in place).
+        if ( rebased && uPrev > 0.0f && m_Unit != uPrev && ( m_HasSel || m_Selecting ) )
+            RescaleSelection( uPrev, m_Unit, K );
 
         if ( ms.ReqClear )
         {
