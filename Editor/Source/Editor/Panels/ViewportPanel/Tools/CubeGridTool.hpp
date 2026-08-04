@@ -15,11 +15,14 @@ namespace Desert::Core
 
 namespace Desert::Editor::Tools
 {
-    // UE5-style CubeGrid blockout tool (Modeling mode). Flow (matches UE): drag a RECTANGLE on the work
-    // surface (the ground, or a face of what you already built) to SELECT a grid region, then PUSH / PULL it
-    // to extrude that region up / down along the surface normal. Resize Grid changes the block size. You can
-    // re-select a region on any face of the object and push/pull it — all without leaving the tool. All
-    // controls are on-screen buttons (no keyboard, to avoid clashing with the Q/E/arrow camera flight).
+    // UE5-style CubeGrid blockout tool (Modeling mode). Marquee-select a rectangle on the work surface (the
+    // ground, or a face of what you built), then Push / Pull to extrude that region. Blocks Per Step multiplies
+    // the extrude height.
+    //
+    // KEY ARCHITECTURE (matches UE): solids are stored at a FIXED BASE resolution and NEVER move when the
+    // Block Size (grid step) changes — changing Block Size only re-scales the brush/grid. A coarser Block Size
+    // just stamps K×K×K base cells at once; a Block Size finer than the base subdivides the base losslessly
+    // (each cell splits into F³, geometry stays put). So a big block and small blocks coexist in one mesh.
     class CubeGridTool
     {
     public:
@@ -27,26 +30,26 @@ namespace Desert::Editor::Tools
                      const glm::vec2& viewportPos, const glm::vec2& viewportSize, bool interactive );
 
     private:
-        void        RegenMesh( ::Desert::Core::Scene& scene ); // rebuild the DynamicMesh from the cells
-        void        Cancel( ::Desert::Core::Scene& scene );    // delete the in-progress blockout entity
-        void        PushPull( ::Desert::Core::Scene& scene, int dir ); // extrude the selection out(+)/in(-)
+        void        RegenMesh( ::Desert::Core::Scene& scene );                // rebuild the DynamicMesh from cells
+        void        Cancel( ::Desert::Core::Scene& scene );                   // delete the in-progress blockout
+        void        PushPull( ::Desert::Core::Scene& scene, int dir, int K ); // extrude the selection out/in
+        void        RefineBy( int F ); // subdivide the base grid by F (split every cell + the selection ×F)
         static bool WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
                                    const glm::vec2& size, glm::vec2& out );
 
-        std::unordered_set<uint64_t> m_Cells;             // occupied grid cells (packed ivec3)
-        glm::vec3                    m_Origin{ 0.0f };    // world pos of cell (0,0,0)'s min corner (resize pin)
-        float                        m_BakedGrid = -1.0f; // grid size the live mesh was last baked at
+        std::unordered_set<uint64_t> m_Cells;             // BASE-resolution voxels (world = index*Unit)
+        float                        m_Unit      = -1.0f; // base cell size; Block Size = K * m_Unit
+        float                        m_BakedUnit = -1.0f; // base size the live mesh was last baked at
         Common::UUID                 m_Entity    = Common::UUID::Null(); // live blockout entity
 
-        // Work-plane: locked while selecting and kept for the active selection. `PlaneCell` is the cell index
-        // along `PlaneNa` that a PUSH fills; `PlaneSign` is the outward normal direction.
+        // Work-plane (in BASE cells): locked while selecting and kept for the active selection.
         int m_PlaneNa   = 1;
         int m_PlaneSign = 1;
         int m_PlaneCell = 0;
 
-        // Marquee rectangle selection (inclusive cell range on the plane's two in-plane axes).
+        // Marquee rectangle selection (inclusive BASE-cell range, always Block-aligned).
         bool       m_Selecting = false;
-        glm::ivec2 m_Anchor{ 0 }; // first cell of the drag
+        glm::ivec2 m_Anchor{ 0 }; // press cell (base)
         bool       m_HasSel = false;
         int        m_UMin = 0, m_UMax = 0, m_VMin = 0, m_VMax = 0;
     };

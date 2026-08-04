@@ -164,14 +164,15 @@ namespace Desert::Editor
             if ( ImGui::CollapsingHeader( "Grid", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
                 // Block size (Resize Grid) — free world-space value; the voxel grid tiles on it.
-                // Block size changes in powers of two (like UE Grid Power) so old geometry remaps exactly and
-                // stays put. Halving subdivides the helper grid to add finer detail over existing blocks.
-                ImGui::TextUnformatted( "Block Size" );
+                // Block Size (grid step) in world units — type any value. Already-drawn blocks never change;
+                // a coarser step just stamps bigger, a step finer than the base subdivides the base. The value
+                // snaps to a base multiple after editing (the tool shows the effective size).
+                ImGui::SetNextItemWidth( 96.0f );
+                if ( ImGui::DragFloat( "Block Size", &ms.CellSize, 0.5f, 0.02f, 100000.0f, "%.3f" ) )
+                    ms.CellSize = std::max( 0.02f, ms.CellSize );
                 ImGui::SameLine();
                 if ( ImGui::SmallButton( "/2##bs" ) )
                     ms.CellSize = std::max( ms.CellSize * 0.5f, 0.02f );
-                ImGui::SameLine();
-                ImGui::Text( "%.3f", ms.CellSize );
                 ImGui::SameLine();
                 if ( ImGui::SmallButton( "x2##bs" ) )
                     ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
