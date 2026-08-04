@@ -339,6 +339,33 @@ namespace Desert::Editor
                          *handle == 0 ? "None"
                                       : ( curPath.empty() ? "(missing)"
                                                           : std::filesystem::path( curPath ).stem().string() );
+
+                    // Swatch of the bound icon. The SDF's alpha channel holds a sharpened coverage mask
+                    // (see IconService), so a plain alpha-blended draw shows the real silhouette.
+                    const float          swatch = ImGui::GetFrameHeight();
+                    Runtime::Icon* const icon   = ( is && *handle != 0 ) ? is->Get( *handle ) : nullptr;
+                    if ( uiHelper && icon && icon->Atlas )
+                    {
+                        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+                        ImGui::GetWindowDrawList()->AddRectFilled( p0, ImVec2( p0.x + swatch, p0.y + swatch ),
+                                                                   IM_COL32( 28, 30, 36, 255 ), 3.0f );
+                        uiHelper->Image( icon->Atlas, ImVec2( swatch, swatch ), ImVec2( icon->U0, icon->V0 ),
+                                         ImVec2( icon->U1, icon->V1 ) );
+                        if ( ImGui::IsItemHovered() )
+                        {
+                            ImGui::BeginTooltip();
+                            uiHelper->Image( icon->Atlas, ImVec2( 128.0f, 128.0f ), ImVec2( icon->U0, icon->V0 ),
+                                             ImVec2( icon->U1, icon->V1 ) );
+                            ImGui::TextUnformatted( std::filesystem::path( curPath ).filename().string().c_str() );
+                            ImGui::EndTooltip();
+                        }
+                    }
+                    else
+                    {
+                        ImGui::Dummy( ImVec2( swatch, swatch ) ); // keep the combo aligned when unset
+                    }
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth( -1.0f );
                     if ( ImGui::BeginCombo( "##icon", preview.c_str() ) )
                     {
                         if ( ImGui::Selectable( "None", *handle == 0 ) )

@@ -73,15 +73,20 @@ namespace Desert::Runtime
 
         const uint32_t dim = kIconSize + 2u * static_cast<uint32_t>( kIconPadding );
 
-        // The engine's sampled formats are RGBA8 (no R8) — mirror the SDF into every channel exactly like
-        // the font atlas, so the text shader's .r read works unchanged.
+        // The engine's sampled formats are RGBA8 (no R8), so RGB carries the distance field — the UI text
+        // shader samples .r and reconstructs the edge itself. ALPHA is free (the shader never reads it), so
+        // it gets a sharpened coverage mask instead: any plain alpha-blended draw — the editor's Details
+        // preview — then shows the icon's real silhouette rather than a soft grey blob, at zero cost.
         std::vector<unsigned char> rgba( static_cast<size_t>( dim ) * dim * 4 );
+        const float                edge     = static_cast<float>( Vector::kSdfOnEdgeValue );
+        const float                perTexel = edge / static_cast<float>( kIconPadding ); // SDF units / texel
         for ( size_t i = 0; i < sdf.size(); ++i )
         {
+            const float cov = ( static_cast<float>( sdf[i] ) - edge ) * ( 255.0f / perTexel ) + 128.0f;
             rgba[i * 4 + 0] = sdf[i];
             rgba[i * 4 + 1] = sdf[i];
             rgba[i * 4 + 2] = sdf[i];
-            rgba[i * 4 + 3] = sdf[i];
+            rgba[i * 4 + 3] = static_cast<unsigned char>( std::clamp( cov, 0.0f, 255.0f ) );
         }
 
         Core::Formats::Image2DSpecification spec = { .Tag        = "IconSDF:" + path,
