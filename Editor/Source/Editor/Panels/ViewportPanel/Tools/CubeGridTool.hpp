@@ -57,7 +57,7 @@ namespace Desert::Editor::Tools
         void        FreezeActive();    // commit the volume being worked on into an immutable layer
         void        RescaleSelection( float oldUnit, float newUnit, int K ); // keep the marquee in place
         // Occupancy across every layer, for a query cell of edge `unit` in the frame `origin`.
-        bool        SolidAt( const glm::ivec3& cell, float unit, const glm::vec3& origin ) const;
+        bool SolidAt( const glm::ivec3& cell, float unit, const glm::vec3& origin ) const;
         // Is face `f` of `cell` hidden by its neighbour? A deformed cell only hides a face when the four
         // shared corners agree, otherwise the two boxes don't actually meet there.
         bool FaceHidden( const CellMap& cells, const glm::ivec3& cell, const Cell& data, int f, float unit,
