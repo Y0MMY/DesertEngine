@@ -239,9 +239,18 @@ namespace Desert::Editor
             return;
         }
         auto& entity = entOpt->get();
+
+        // A UI element gets the property timeline instead of the skeletal one — same panel, same idiom.
+        if ( entity.HasComponent<ECS::UILayoutComponent>() || entity.HasComponent<ECS::UIAnimComponent>() )
+        {
+            ECS::Entity uiEntity = entity; // Entity is a handle; the UI editor writes through it
+            DrawUITracks( uiEntity );
+            return;
+        }
+
         if ( !entity.HasComponent<ECS::AnimationComponent>() || !entity.HasComponent<ECS::SkinnedMeshComponent>() )
         {
-            ImGui::TextDisabled( "Selected entity has no Animation + Skinned Mesh component." );
+            ImGui::TextDisabled( "Select a skinned-mesh entity (Animation + Skinned Mesh) or a UI element." );
             return;
         }
 
@@ -794,6 +803,212 @@ namespace Desert::Editor
         else
         {
             ImGui::TextDisabled( "Click a keyframe to edit it. Drag keys to retime." );
+        }
+    }
+
+    // ---- UI property timeline ---------------------------------------------------------------------
+    // The skeletal editor above keys bones; this keys a UI element's Offset / Size / Opacity / Color.
+    // It edits UIAnimComponent directly: lanes with draggable key diamonds, a scrubbable ruler, and a
+    // transport. The playhead is a runtime-only field, so scrubbing never dirties the scene.
+    void SequencerPanel::DrawUITracks( ECS::Entity& entity )
+    {
+        namespace ImGui = ::ImGui;
+
+        if ( !entity.HasComponent<ECS::UIAnimComponent>() )
+        {
+            ImGui::TextDisabled( "This UI element has no animation clip yet." );
+            ImGui::Spacing();
+            if ( ImGui::Button( ICON_MDI_PLUS "  Add UI Animation" ) )
+                entity.AddComponent<ECS::UIAnimComponent>();
+            ImGui::SameLine();
+            ImGui::TextDisabled( "(a clip keys Offset / Size / Opacity / Color over time)" );
+            return;
+        }
+
+        auto& clip = entity.GetComponent<ECS::UIAnimComponent>().Data;
+
+        // --- transport -------------------------------------------------------------------------------
+        if ( ImGui::Button( clip.Playing ? ICON_MDI_PAUSE "  Pause" : ICON_MDI_PLAY "  Play" ) )
+            clip.Playing = !clip.Playing;
+        ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_STOP "  Rewind" ) )
+            clip.Time = 0.0f;
+        ImGui::SameLine();
+        ImGui::Checkbox( "Loop", &clip.Loop );
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( 110.0f );
+        ImGui::DragFloat( "Duration", &clip.Duration, 0.05f, 0.05f, 120.0f, "%.2f s" );
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( 140.0f );
+        ImGui::SliderFloat( "Time", &clip.Time, 0.0f, std::max( 0.05f, clip.Duration ), "%.2f s" );
+        if ( ImGui::IsItemActive() )
+            clip.Playing = false; // scrubbing takes over from playback, as a timeline should
+
+        // --- add a lane ------------------------------------------------------------------------------
+        const char* const propNames[] = { "Offset", "Size", "Opacity", "Color" };
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( 120.0f );
+        static int newProp = 0;
+        ImGui::Combo( "##uiprop", &newProp, propNames, 4 );
+        ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_PLUS "  Track" ) )
+        {
+            ECS::UIAnimTrack tr;
+            tr.Property = static_cast<ECS::UITweenProperty>( newProp );
+            tr.Keys.push_back( { 0.0f, glm::vec4( 0.0f ), ECS::UIEasing::CubicOut } );
+            clip.Tracks.push_back( std::move( tr ) );
+        }
+
+        if ( clip.Tracks.empty() )
+        {
+            ImGui::Separator();
+            ImGui::TextDisabled( "No tracks. Pick a property above and press + Track." );
+            return;
+        }
+
+        // --- lanes -----------------------------------------------------------------------------------
+        const float duration = std::max( 0.05f, clip.Duration );
+        const float gutter   = 120.0f;
+        const float laneH    = 22.0f;
+
+        ImGui::Separator();
+        const float contentX0 = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x;
+        const float laneW     = std::max( 120.0f, ImGui::GetContentRegionAvail().x - gutter - 12.0f );
+        const float laneX0    = contentX0 + gutter;
+        const auto  timeToX   = [&]( float t ) { return laneX0 + ( t / duration ) * laneW; };
+        const auto  xToTime   = [&]( float x )
+        { return std::clamp( ( x - laneX0 ) / laneW * duration, 0.0f, duration ); };
+
+        ImGui::BeginChild( "##uiTracks",
+                           ImVec2( gutter + laneW, std::min( 260.0f, 12.0f + clip.Tracks.size() * laneH ) ),
+                           false );
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+
+        int deleteTrack = -1;
+        for ( int ti = 0; ti < static_cast<int>( clip.Tracks.size() ); ++ti )
+        {
+            ECS::UIAnimTrack& tr    = clip.Tracks[ti];
+            const ImVec2      rp    = ImGui::GetCursorScreenPos();
+            const float       laneY = rp.y;
+            dl->AddRectFilled( ImVec2( laneX0, laneY ), ImVec2( laneX0 + laneW, laneY + laneH - 3.0f ),
+                               ( ti % 2 ) ? IM_COL32( 40, 40, 46, 255 ) : IM_COL32( 33, 33, 39, 255 ) );
+            dl->AddText( ImVec2( contentX0 + 6.0f, laneY + 3.0f ), IM_COL32( 205, 205, 215, 255 ),
+                         propNames[static_cast<int>( tr.Property )] );
+
+            // per-lane: key at the playhead, and drop the lane
+            ImGui::SetCursorScreenPos( ImVec2( contentX0 + gutter - 46.0f, laneY ) );
+            ImGui::PushID( ti * 8192 + 7 );
+            if ( ImGui::SmallButton( "+" ) )
+            {
+                tr.Keys.push_back( { clip.Time, tr.Keys.empty() ? glm::vec4( 0.0f ) : tr.Keys.back().Value,
+                                     ECS::UIEasing::CubicOut } );
+                std::sort( tr.Keys.begin(), tr.Keys.end(),
+                           []( const ECS::UIAnimKey& a, const ECS::UIAnimKey& b ) { return a.Time < b.Time; } );
+            }
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "x" ) )
+                deleteTrack = ti;
+            ImGui::PopID();
+
+            // keys as diamonds; drag horizontally to retime
+            for ( int ki = 0; ki < static_cast<int>( tr.Keys.size() ); ++ki )
+            {
+                const float  kx = timeToX( tr.Keys[ki].Time );
+                const ImVec2 c( kx, laneY + ( laneH - 3.0f ) * 0.5f );
+                const bool   sel = ( ti == m_UITrack && ki == m_UIKey );
+                dl->AddNgonFilled( c, sel ? 7.0f : 5.5f,
+                                   sel ? IM_COL32( 255, 205, 90, 255 ) : IM_COL32( 190, 200, 220, 255 ), 4 );
+
+                ImGui::SetCursorScreenPos( ImVec2( kx - 7.0f, laneY ) );
+                ImGui::PushID( ti * 8192 + ki );
+                ImGui::InvisibleButton( "##k", ImVec2( 14.0f, laneH - 3.0f ) );
+                if ( ImGui::IsItemActivated() )
+                {
+                    m_UITrack = ti;
+                    m_UIKey   = ki;
+                }
+                if ( ImGui::IsItemActive() && ImGui::IsMouseDragging( ImGuiMouseButton_Left ) )
+                {
+                    tr.Keys[ki].Time = xToTime( ImGui::GetIO().MousePos.x );
+                    clip.Playing     = false;
+                    clip.Time        = tr.Keys[ki].Time; // the pose follows the key being moved
+                }
+                if ( ImGui::IsItemDeactivated() )
+                {
+                    const float moved = tr.Keys[ki].Time;
+                    std::sort( tr.Keys.begin(), tr.Keys.end(),
+                               []( const ECS::UIAnimKey& a, const ECS::UIAnimKey& b )
+                               { return a.Time < b.Time; } );
+                    for ( int i = 0; i < static_cast<int>( tr.Keys.size() ); ++i )
+                        if ( tr.Keys[i].Time == moved )
+                        {
+                            m_UIKey = i; // keep the dragged key selected after the re-sort
+                            break;
+                        }
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::SetCursorScreenPos( ImVec2( rp.x, laneY + laneH ) );
+        }
+
+        // playhead over every lane
+        const float playX = timeToX( clip.Time );
+        dl->AddLine( ImVec2( playX, ImGui::GetWindowPos().y ),
+                     ImVec2( playX, ImGui::GetWindowPos().y + ImGui::GetWindowSize().y ),
+                     IM_COL32( 255, 120, 90, 220 ), 2.0f );
+        ImGui::EndChild();
+
+        if ( deleteTrack >= 0 )
+        {
+            clip.Tracks.erase( clip.Tracks.begin() + deleteTrack );
+            m_UITrack = m_UIKey = -1;
+        }
+
+        // --- selected key ----------------------------------------------------------------------------
+        if ( m_UITrack >= 0 && m_UITrack < static_cast<int>( clip.Tracks.size() ) )
+        {
+            ECS::UIAnimTrack& tr = clip.Tracks[m_UITrack];
+            if ( m_UIKey >= 0 && m_UIKey < static_cast<int>( tr.Keys.size() ) )
+            {
+                ECS::UIAnimKey& k = tr.Keys[m_UIKey];
+                ImGui::Separator();
+                ImGui::Text( "Key %d of %s", m_UIKey, propNames[static_cast<int>( tr.Property )] );
+                ImGui::SetNextItemWidth( 120.0f );
+                if ( ImGui::DragFloat( "Time", &k.Time, 0.01f, 0.0f, duration, "%.2f s" ) )
+                    clip.Time = k.Time;
+
+                // The value is read per property, exactly as the renderer reads it.
+                switch ( tr.Property )
+                {
+                    case ECS::UITweenProperty::Offset:
+                    case ECS::UITweenProperty::Size:
+                        ImGui::SetNextItemWidth( 200.0f );
+                        ImGui::DragFloat2( "Value (px)", &k.Value.x, 1.0f );
+                        break;
+                    case ECS::UITweenProperty::Opacity:
+                        ImGui::SetNextItemWidth( 200.0f );
+                        ImGui::SliderFloat( "Opacity", &k.Value.x, 0.0f, 1.0f );
+                        break;
+                    case ECS::UITweenProperty::Color:
+                        ImGui::SetNextItemWidth( 200.0f );
+                        ImGui::ColorEdit3( "Color", &k.Value.x );
+                        break;
+                }
+
+                const char* const easeNames[] = { "Linear",   "QuadIn",     "QuadOut", "QuadInOut",  "CubicIn",
+                                                  "CubicOut", "CubicInOut", "BackOut", "ElasticOut", "BounceOut" };
+                int               ease        = static_cast<int>( k.Easing );
+                ImGui::SetNextItemWidth( 140.0f );
+                if ( ImGui::Combo( "Ease in", &ease, easeNames, 10 ) )
+                    k.Easing = static_cast<ECS::UIEasing>( ease );
+                ImGui::SameLine();
+                if ( ImGui::SmallButton( "Delete key" ) )
+                {
+                    tr.Keys.erase( tr.Keys.begin() + m_UIKey );
+                    m_UIKey = -1;
+                }
+            }
         }
     }
 } // namespace Desert::Editor

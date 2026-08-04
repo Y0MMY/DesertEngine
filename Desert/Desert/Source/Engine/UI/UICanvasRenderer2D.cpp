@@ -197,6 +197,67 @@ namespace Desert::UI
             return out;
         }
 
+        // A keyed CLIP (UIAnim) on top of the one-shot tween: several property lanes, many keys, one
+        // playhead. Segments ease with the key they arrive at, so an author shapes each leg separately.
+        void ApplyAnimClip( entt::registry& reg, entt::entity e, TweenSample& out )
+        {
+            if ( !reg.has<ECS::UIAnimComponent>( e ) )
+                return;
+            auto& clip = reg.get<ECS::UIAnimComponent>( e ).Data;
+
+            // The playhead is a runtime field (never serialized): the canvas drives it while Playing, and
+            // the Sequencer pauses playback and writes it directly to scrub.
+            if ( clip.Playing )
+            {
+                clip.Time += s_FrameDt;
+                if ( clip.Duration > 0.0f )
+                    clip.Time =
+                         clip.Loop ? std::fmod( clip.Time, clip.Duration ) : std::min( clip.Time, clip.Duration );
+            }
+
+            for ( const ECS::UIAnimTrack& tr : clip.Tracks )
+            {
+                if ( tr.Keys.empty() )
+                    continue;
+
+                glm::vec4 v = tr.Keys.front().Value;
+                if ( clip.Time >= tr.Keys.back().Time )
+                {
+                    v = tr.Keys.back().Value;
+                }
+                else
+                {
+                    for ( size_t i = 1; i < tr.Keys.size(); ++i )
+                    {
+                        const ECS::UIAnimKey& k0 = tr.Keys[i - 1];
+                        const ECS::UIAnimKey& k1 = tr.Keys[i];
+                        if ( clip.Time < k0.Time || clip.Time > k1.Time )
+                            continue;
+                        const float span = k1.Time - k0.Time;
+                        const float u    = span > 1e-6f ? ( clip.Time - k0.Time ) / span : 1.0f;
+                        v                = glm::mix( k0.Value, k1.Value, Ease( k1.Easing, u ) );
+                        break;
+                    }
+                }
+
+                switch ( tr.Property )
+                {
+                    case ECS::UITweenProperty::Offset:
+                        out.Offset += glm::vec2( v );
+                        break;
+                    case ECS::UITweenProperty::Size:
+                        out.Size += glm::vec2( v );
+                        break;
+                    case ECS::UITweenProperty::Opacity:
+                        out.Tint.a *= v.x;
+                        break;
+                    case ECS::UITweenProperty::Color:
+                        out.Tint *= glm::vec4( glm::vec3( v ), 1.0f );
+                        break;
+                }
+            }
+        }
+
         // The tint of the element being drawn — multiplied into its colours so Opacity/Color tweens reach
         // every control without threading a parameter through each one.
         glm::vec4 s_Tint{ 1.0f };
@@ -959,7 +1020,8 @@ namespace Desert::UI
 
             // Tween: shift/resize the resolved rect and stage the colour multiplier its draws will use.
             // Applied on the way out, never written back — see SampleTween.
-            const TweenSample tween = SampleTween( reg, e );
+            TweenSample tween = SampleTween( reg, e );
+            ApplyAnimClip( reg, e, tween ); // a clip layers on top of the one-shot tween
             rect.X += ( tween.Offset.x + screenSlide.x ) * scale;
             rect.Y += ( tween.Offset.y + screenSlide.y ) * scale;
             rect.W += tween.Size.x * scale;

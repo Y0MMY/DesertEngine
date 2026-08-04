@@ -803,6 +803,61 @@ namespace Desert::Core::Serialize
             Register( std::move( s ) );
         }
 
+        // ---- UI Anim (custom: the reflected path has no vector-of-struct support; the playhead is
+        //      runtime-only and never written) ----
+        {
+            ComponentSerializer s;
+            s.Key       = "UIAnim";
+            s.Has       = []( ECS::Entity e ) { return e.HasComponent<ECS::UIAnimComponent>(); };
+            s.Serialize = []( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            {
+                const auto&                d = e.GetComponent<ECS::UIAnimComponent>().Data;
+                Assets::UIAnimComponentSer ser;
+                ser.Duration = d.Duration;
+                ser.Loop     = d.Loop;
+                ser.Playing  = d.Playing;
+                ser.Tracks.reserve( d.Tracks.size() );
+                for ( const auto& tr : d.Tracks )
+                {
+                    Assets::UIAnimTrackSer ts;
+                    ts.Property = static_cast<int>( tr.Property );
+                    ts.Keys.reserve( tr.Keys.size() );
+                    for ( const auto& k : tr.Keys )
+                        ts.Keys.push_back( { k.Time, k.Value, static_cast<int>( k.Easing ) } );
+                    ser.Tracks.push_back( std::move( ts ) );
+                }
+                return ToGeneric( ser );
+            };
+            s.Deserialize = []( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            {
+                auto parsed = FromGeneric<Assets::UIAnimComponentSer>( g );
+                if ( !parsed.has_value() )
+                    return;
+                const auto& d    = parsed.value();
+                auto&       ac   = e.HasComponent<ECS::UIAnimComponent>() ? e.GetComponent<ECS::UIAnimComponent>()
+                                                                          : e.AddComponent<ECS::UIAnimComponent>();
+                ac.Data.Duration = d.Duration;
+                ac.Data.Loop     = d.Loop;
+                ac.Data.Playing  = d.Playing;
+                ac.Data.Time     = 0.0f;
+                ac.Data.Tracks.clear();
+                ac.Data.Tracks.reserve( d.Tracks.size() );
+                for ( const auto& ts : d.Tracks )
+                {
+                    ECS::UIAnimTrack tr;
+                    tr.Property = static_cast<ECS::UITweenProperty>( ts.Property );
+                    tr.Keys.reserve( ts.Keys.size() );
+                    for ( const auto& k : ts.Keys )
+                        tr.Keys.push_back( { k.Time, k.Value, static_cast<ECS::UIEasing>( k.Easing ) } );
+                    std::sort( tr.Keys.begin(), tr.Keys.end(),
+                               []( const ECS::UIAnimKey& a, const ECS::UIAnimKey& b )
+                               { return a.Time < b.Time; } );
+                    ac.Data.Tracks.push_back( std::move( tr ) );
+                }
+            };
+            Register( std::move( s ) );
+        }
+
         // ---- Text (custom: only the authored fields; the glyph mesh is transient) ----
         {
             ComponentSerializer s;

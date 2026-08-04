@@ -91,6 +91,28 @@ namespace Desert::Assets
         std::optional<std::vector<MaterialTextureSer>> Textures;
     };
 
+    // UIAnimComponent mirror — the authored clip. The playhead is runtime-only and deliberately absent,
+    // so scrubbing in the Sequencer can never dirty a saved scene. Enums travel as ints, matching how the
+    // reflected path stores them.
+    struct UIAnimKeySer
+    {
+        float     Time   = 0.0f;
+        glm::vec4 Value  = glm::vec4( 0.0f );
+        int       Easing = 5;
+    };
+    struct UIAnimTrackSer
+    {
+        int                       Property = 0;
+        std::vector<UIAnimKeySer> Keys;
+    };
+    struct UIAnimComponentSer
+    {
+        std::vector<UIAnimTrackSer> Tracks;
+        float                       Duration = 1.0f;
+        bool                        Loop     = false;
+        bool                        Playing  = true;
+    };
+
     // TextComponent mirror — only the authored fields (the glyph mesh is transient, rebuilt at runtime).
     struct TextComponentSer
     {

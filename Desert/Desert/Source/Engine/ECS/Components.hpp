@@ -1069,6 +1069,43 @@ namespace Desert::ECS
         UITweenData Data;
     };
 
+    // One keyframe of a UI animation track. Value is read exactly like UITweenData::From/To — xy for
+    // Offset/Size, x for Opacity, rgb for Color — and Easing shapes the segment ENDING at this key.
+    struct UIAnimKey
+    {
+        float     Time   = 0.0f;
+        glm::vec4 Value  = glm::vec4( 0.0f );
+        UIEasing  Easing = UIEasing::CubicOut;
+    };
+
+    // One property's lane on the timeline. Keys are kept sorted by time; a lane with a single key just
+    // holds that value.
+    struct UIAnimTrack
+    {
+        UITweenProperty        Property = UITweenProperty::Offset;
+        std::vector<UIAnimKey> Keys;
+    };
+
+    // A multi-key UI animation, authored on the timeline (View -> Sequencer with a UI element selected).
+    // UITween is the one-shot from->to; this is the clip: several properties, many keys, one clock.
+    // Serialized by hand (ComponentRegistry) because the reflected path has no vector-of-struct support —
+    // the Sequencer is its editor, not the Details grid.
+    struct UIAnimData
+    {
+        std::vector<UIAnimTrack> Tracks;
+        float                    Duration = 1.0f;
+        bool                     Loop     = false;
+        bool                     Playing  = true;
+
+        // Playhead. RUNTIME only — never serialized, so scrubbing in the editor cannot dirty the scene.
+        // The canvas advances it while Playing; the Sequencer pauses and writes it directly to scrub.
+        float Time = 0.0f;
+    };
+    struct UIAnimComponent
+    {
+        UIAnimData Data;
+    };
+
     // A screen (page) of a canvas: everything under this element is shown only while it is the current
     // screen. Sibling screens are the states of a small machine — a button with Action = ShowScreen moves
     // between them and BackScreen returns, so a menu with pages needs no scripting.

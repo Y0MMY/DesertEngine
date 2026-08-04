@@ -2,6 +2,8 @@
 
 #include "../IPanel.hpp"
 
+#include <Engine/ECS/Entity.hpp>
+
 #include <glm/glm.hpp>
 
 #include <memory>
@@ -66,6 +68,10 @@ namespace Desert::Editor
         void KeyBonePose( Animation::AnimationClip* clip, const Animation::Animator& animator, int boneIndex,
                           float time );
 
+        // UI mode: the selected entity is a UI element rather than a skinned mesh. Draws the clip's
+        // property lanes (Offset / Size / Opacity / Color) with draggable keys and a scrubbable playhead.
+        void DrawUITracks( ECS::Entity& entity );
+
         std::shared_ptr<::Desert::Core::Scene> m_Scene;
         Animation::AnimationLibrary*           m_Library      = nullptr;
         Assets::AssetManager*                  m_AssetManager = nullptr;
@@ -83,6 +89,10 @@ namespace Desert::Editor
         int   m_SelChannel = -1;
         int   m_SelKey     = -1;
         float m_DragTime   = 0.0f; // time being written while dragging a key (for re-selection after re-sort)
+
+        // UI-clip editing state (which lane/key is selected in UI mode).
+        int m_UITrack = -1;
+        int m_UIKey   = -1;
 
         // Layer-preview authoring state (transient — previews on the live Animator).
         int   m_LayerClip         = -1;
