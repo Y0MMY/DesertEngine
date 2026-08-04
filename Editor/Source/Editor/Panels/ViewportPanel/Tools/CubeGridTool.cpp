@@ -85,6 +85,30 @@ namespace Desert::Editor::Tools
         // Outward neighbour offset per face — a face is generated only on a Solid/Empty border (Face Culling).
         const glm::ivec3 kNeighbor[6] = { { 0, 0, 1 },  { 0, 0, -1 }, { 0, 1, 0 },
                                           { 0, -1, 0 }, { -1, 0, 0 }, { 1, 0, 0 } };
+
+        // The same 6 faces expressed as CORNER indices (bits: 1=+X, 2=+Y, 4=+Z), in the identical winding
+        // as kFace, plus the corner-index bit that flips when you step to that face's neighbour. Corner Mode
+        // moves corners, so the mesher builds every quad from these instead of from a fixed box.
+        const int kFaceCorner[6][4] = {
+             { 4, 5, 7, 6 }, // Front  (+Z)
+             { 0, 2, 3, 1 }, // Back   (-Z)
+             { 2, 6, 7, 3 }, // Top    (+Y)
+             { 0, 1, 5, 4 }, // Bottom (-Y)
+             { 0, 4, 6, 2 }, // Left   (-X)
+             { 1, 3, 7, 5 }, // Right  (+X)
+        };
+        const int kFaceAxisBit[6] = { 4, 4, 2, 2, 1, 1 };
+
+        // World position of corner `i` of the cell at `c` (edge `unit`, frame `origin`), including the
+        // corner's vertical offset.
+        glm::vec3 CornerPos( const glm::ivec3& c, const CubeGridTool::Cell& cell, int i, float unit,
+                             const glm::vec3& origin )
+        {
+            glm::vec3 p( c.x + ( i & 1 ? 1 : 0 ), c.y + ( i & 2 ? 1 : 0 ), c.z + ( i & 4 ? 1 : 0 ) );
+            p *= unit;
+            p.y += static_cast<float>( cell.V[i] ) / static_cast<float>( CubeGridTool::CornerDen ) * unit;
+            return p + origin;
+        }
     } // namespace
 
     bool CubeGridTool::WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
@@ -101,15 +125,15 @@ namespace Desert::Editor::Tools
 
     void CubeGridTool::RefineBy( int F )
     {
-        std::unordered_set<uint64_t> out;
+        CellMap out;
         out.reserve( m_Cells.size() * static_cast<size_t>( F * F * F ) );
-        for ( uint64_t k : m_Cells )
+        for ( const auto& [k, cell] : m_Cells )
         {
             const glm::ivec3 c = Unpack( k );
             for ( int dx = 0; dx < F; ++dx )
                 for ( int dy = 0; dy < F; ++dy )
                     for ( int dz = 0; dz < F; ++dz )
-                        out.insert( Pack( { c.x * F + dx, c.y * F + dy, c.z * F + dz } ) );
+                        out[Pack( { c.x * F + dx, c.y * F + dy, c.z * F + dz } )] = Cell{};
         }
         m_Cells = std::move( out );
         m_Anchor *= F;
@@ -142,6 +166,86 @@ namespace Desert::Editor::Tools
         m_VMax         = FloorDiv( vMax, K ) * K + K - 1;
     }
 
+    namespace
+    {
+        // The four posts of the selection rectangle, as (cell offset in u, cell offset in v, corner index).
+        // u = the (na+1)%3 axis, v = (na+2)%3; corner bits are 1=+X, 2=+Y(top), 4=+Z, and for a ground grid
+        // (na=1) u is Z (bit 4) and v is X (bit 1).
+        struct RectPost
+        {
+            bool AtUMax, AtVMax;
+            int  Corner;
+        };
+        const RectPost kPosts[4] = {
+             { false, false, 2 }, { true, false, 2 | 4 }, { false, true, 2 | 1 }, { true, true, 2 | 1 | 4 } };
+    } // namespace
+
+    void CubeGridTool::ApplyCornerHeights( ::Desert::Core::Scene& scene )
+    {
+        // Corner Mode deforms the TOP layer of cells under the selection: every cell corner takes the
+        // bilinear blend of the four rectangle posts, so raising two of them tilts the whole region into
+        // one clean ramp (and raising one gives a hip).
+        if ( !m_HasSel || m_PlaneNa != 1 || m_PlaneSign <= 0 )
+            return;
+        const int ua      = ( m_PlaneNa + 1 ) % 3;
+        const int va      = ( m_PlaneNa + 2 ) % 3;
+        const int topCell = m_PlaneCell - 1; // the cell whose top face is the work-plane
+
+        const float spanU = static_cast<float>( m_UMax + 1 - m_UMin );
+        const float spanV = static_cast<float>( m_VMax + 1 - m_VMin );
+        if ( spanU <= 0.0f || spanV <= 0.0f )
+            return;
+
+        auto heightAt = [&]( int lu, int lv )
+        {
+            const float fu = ( static_cast<float>( lu - m_UMin ) ) / spanU;
+            const float fv = ( static_cast<float>( lv - m_VMin ) ) / spanV;
+            const float a = glm::mix( static_cast<float>( m_CornerH[0] ), static_cast<float>( m_CornerH[1] ), fu );
+            const float b = glm::mix( static_cast<float>( m_CornerH[2] ), static_cast<float>( m_CornerH[3] ), fu );
+            return static_cast<int16_t>( std::lround( glm::mix( a, b, fv ) ) );
+        };
+
+        for ( int uu = m_UMin; uu <= m_UMax; ++uu )
+            for ( int vv = m_VMin; vv <= m_VMax; ++vv )
+            {
+                glm::ivec3 c{ 0 };
+                c[m_PlaneNa] = topCell;
+                c[ua]        = uu;
+                c[va]        = vv;
+                auto it      = m_Cells.find( Pack( c ) );
+                if ( it == m_Cells.end() )
+                    continue; // nothing pushed out under this column yet
+                for ( int i = 0; i < 8; ++i )
+                {
+                    if ( !( i & 2 ) ) // bottom corners stay on the lattice so the cell below still meets it
+                        continue;
+                    it->second.V[i] = heightAt( uu + ( ( i & 4 ) ? 1 : 0 ), vv + ( ( i & 1 ) ? 1 : 0 ) );
+                }
+            }
+        RegenMesh( scene );
+    }
+
+    void CubeGridTool::SyncCornerHeights()
+    {
+        // Entering Corner Mode picks up whatever the rectangle's posts are already at, so a second pass
+        // continues from the current shape instead of snapping it flat.
+        for ( int k = 0; k < 4; ++k )
+            m_CornerH[k] = 0;
+        if ( !m_HasSel || m_PlaneNa != 1 || m_PlaneSign <= 0 )
+            return;
+        const int ua = ( m_PlaneNa + 1 ) % 3;
+        const int va = ( m_PlaneNa + 2 ) % 3;
+        for ( int k = 0; k < 4; ++k )
+        {
+            glm::ivec3 c{ 0 };
+            c[m_PlaneNa] = m_PlaneCell - 1;
+            c[ua]        = kPosts[k].AtUMax ? m_UMax : m_UMin;
+            c[va]        = kPosts[k].AtVMax ? m_VMax : m_VMin;
+            if ( auto it = m_Cells.find( Pack( c ) ); it != m_Cells.end() )
+                m_CornerH[k] = it->second.V[kPosts[k].Corner];
+        }
+    }
+
     void CubeGridTool::FreezeActive()
     {
         if ( m_Cells.empty() )
@@ -153,7 +257,7 @@ namespace Desert::Editor::Tools
         m_Frozen.push_back( std::move( l ) );
         m_Cells.clear();
         m_Unit = m_BakedUnit = -1.0f; // the next Block Size becomes the base of a brand-new volume
-        m_HasSel = m_Selecting = false;
+        m_HasSel = m_Selecting = m_CornerMode = false;
     }
 
     bool CubeGridTool::SolidAt( const glm::ivec3& c, float unit, const glm::vec3& origin ) const
@@ -162,7 +266,7 @@ namespace Desert::Editor::Tools
         // commensurate in practice (the base only ever halves), so a coarser layer maps with one FloorDiv.
         // A layer FINER than `unit`, or one built in a DIFFERENT grid frame (its lattice doesn't line up
         // at all), is skipped — conservative: it can only ever leave a hidden interior face.
-        auto inLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu, const glm::vec3& lo )
+        auto inLayer = [&]( const CellMap& cells, float lu, const glm::vec3& lo )
         {
             if ( cells.empty() || lu <= 0.0f ||
                  glm::any( glm::greaterThan( glm::abs( lo - origin ), glm::vec3( 1e-3f ) ) ) )
@@ -178,6 +282,28 @@ namespace Desert::Editor::Tools
             if ( inLayer( l.Cells, l.Unit, l.Origin ) )
                 return true;
         return false;
+    }
+
+    bool CubeGridTool::FaceHidden( const CellMap& cells, const glm::ivec3& c, const Cell& data, int f, float unit,
+                                   const glm::vec3& origin ) const
+    {
+        const glm::ivec3 n  = c + kNeighbor[f];
+        const auto       it = cells.find( Pack( n ) );
+        if ( it != cells.end() )
+        {
+            // Same layer: the shared quad only exists if all four corners line up on both boxes — that is
+            // what keeps a ramp's slanted face visible while the flat faces under it stay culled.
+            const int bit = kFaceAxisBit[f];
+            for ( int k = 0; k < 4; ++k )
+            {
+                const int i = kFaceCorner[f][k];
+                if ( data.V[i] != it->second.V[i ^ bit] )
+                    return false;
+            }
+            return true;
+        }
+        // Another layer's solid can only hide a face of an UNDEFORMED cell (we don't know its corners).
+        return data.IsFlat() && SolidAt( n, unit, origin );
     }
 
     void CubeGridTool::PushPull( ::Desert::Core::Scene& scene, int dir, int K )
@@ -204,7 +330,7 @@ namespace Desert::Editor::Tools
                     while ( occ( c ) )
                         c[na] += sign;
                     for ( int s = 0; s < height; ++s, c[na] += sign )
-                        m_Cells.insert( Pack( c ) );
+                        m_Cells[Pack( c )] = Cell{};
                 }
             m_PlaneCell += sign * height;
         }
@@ -252,11 +378,29 @@ namespace Desert::Editor::Tools
                     ms.GridOrigin = glm::vec3( ref->get().GetWorldTransform()[3] );
         }
 
+        // Corner Mode toggle (Z, or the panel button). Only meaningful with a selection on a horizontal
+        // work-plane: corners move along the grid's up axis.
+        if ( ms.ReqCornerMode )
+        {
+            ms.ReqCornerMode = false;
+            if ( m_CornerMode )
+                m_CornerMode = false;
+            else if ( m_HasSel && m_PlaneNa == 1 && m_PlaneSign > 0 )
+            {
+                m_CornerMode = true;
+                SyncCornerHeights();
+                for ( bool& sel : m_CornerSel )
+                    sel = false;
+            }
+        }
+        ms.CornerMode = m_CornerMode;
+
         // Starting a fresh marquee starts a NEW piece: commit whatever is already pushed out into a frozen
         // layer first (it keeps its own Block Size forever). Resizing the grid afterwards then only ever
         // re-scales the new volume — the geometry built before never moves or re-subdivides again.
         // (m_HoverValid = last frame's targeting, so a click on empty sky doesn't commit anything.)
-        if ( interact && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && m_HoverValid && !m_Cells.empty() )
+        if ( interact && !m_CornerMode && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && m_HoverValid &&
+             !m_Cells.empty() )
             FreezeActive();
 
         // Re-initialising the grid frame commits the current piece too: cells are indices into a lattice,
@@ -269,6 +413,18 @@ namespace Desert::Editor::Tools
             m_ActiveOrigin = ms.GridOrigin;
             m_GroundY += prevOrigin.y - m_ActiveOrigin.y; // keep the work-plane at the same world height
         }
+
+        // A finer Block Size subdivides the base — but splitting a DEFORMED cell would have to re-derive
+        // every corner offset, so a piece that already has slopes is committed instead and the finer work
+        // starts on a clean slate. (Its shape is preserved exactly; nothing is flattened.)
+        if ( !m_Cells.empty() && gs < m_Unit * 0.999f )
+            for ( const auto& [k, cell] : m_Cells )
+                if ( !cell.IsFlat() )
+                {
+                    FreezeActive();
+                    m_CornerMode = false;
+                    break;
+                }
 
         // Base unit: the finest cell ever used. A Block Size finer than the base subdivides the base
         // losslessly (existing solids split into F³, world-identical); a coarser Block Size never remaps —
@@ -302,7 +458,7 @@ namespace Desert::Editor::Tools
             ms.ReqClear = false;
             m_Cells.clear();
             m_Frozen.clear();
-            m_HasSel = m_Selecting = false;
+            m_HasSel = m_Selecting = m_CornerMode = false;
             m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
             RegenMesh( scene );
         }
@@ -324,11 +480,13 @@ namespace Desert::Editor::Tools
             float      hitUnit = u;
             glm::vec3  hitOff( 0.0f ); // frozen layer's frame, expressed in the ACTIVE grid space
             bool       hit       = false;
-            auto       testLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu, const glm::vec3& off )
+            auto       testLayer = [&]( const CellMap& cells, float lu, const glm::vec3& off )
             {
-                for ( uint64_t key : cells )
+                for ( const auto& [key, cellData] : cells )
                 {
                     const glm::ivec3   c = Unpack( key );
+                    // Targeting stays box-level even for a deformed cell: a slanted top still picks the
+                    // cell you are pointing at, and the work-plane is a lattice plane either way.
                     Common::Math::AABB box;
                     box.Min = glm::vec3( c ) * lu + off;
                     box.Max = box.Min + lu;
@@ -422,12 +580,13 @@ namespace Desert::Editor::Tools
 
         ImDrawList* dl = ::ImGui::GetWindowDrawList();
 
-        auto drawCellSolid = [&]( const glm::ivec3& c, float cu, const glm::vec3& co, ImU32 fill, ImU32 outline )
+        auto drawCellSolid = [&]( const CellMap& cells, const glm::ivec3& c, const Cell& cell, float cu,
+                                  const glm::vec3& co, ImU32 fill, ImU32 outline )
         {
             const glm::vec3 mn = glm::vec3( c ) * cu + co;
             for ( int f = 0; f < 6; ++f )
             {
-                if ( SolidAt( c + kNeighbor[f], cu, co ) )
+                if ( FaceHidden( cells, c, cell, f, cu, co ) )
                     continue;
                 const glm::vec3 fn = kFace[f][0].N;
                 const glm::vec3 fc = mn + 0.5f * cu + 0.5f * cu * fn;
@@ -436,8 +595,8 @@ namespace Desert::Editor::Tools
                 glm::vec2 s[4];
                 bool      ok = true;
                 for ( int k = 0; k < 4; ++k )
-                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * cu, viewProj, viewportPos, viewportSize,
-                                         s[k] ) )
+                    if ( !WorldToScreen( CornerPos( c, cell, kFaceCorner[f][k], cu, co ), viewProj, viewportPos,
+                                         viewportSize, s[k] ) )
                     {
                         ok = false;
                         break;
@@ -594,13 +753,13 @@ namespace Desert::Editor::Tools
         if ( toolActive )
         {
             for ( const Layer& l : m_Frozen )
-                for ( uint64_t k : l.Cells )
-                    drawCellSolid( Unpack( k ), l.Unit, l.Origin, IM_COL32( 108, 112, 122, 200 ),
+                for ( const auto& [k, cell] : l.Cells )
+                    drawCellSolid( l.Cells, Unpack( k ), cell, l.Unit, l.Origin, IM_COL32( 108, 112, 122, 200 ),
                                    IM_COL32( 78, 82, 92, 225 ) );
-            for ( uint64_t k : m_Cells )
+            for ( const auto& [k, cell] : m_Cells )
             {
                 const glm::ivec3 c = Unpack( k );
-                drawCellSolid( c, u, gridOrigin,
+                drawCellSolid( m_Cells, c, cell, u, gridOrigin,
                                ( ( c.x + c.y + c.z ) & 1 ) ? IM_COL32( 120, 125, 135, 205 )
                                                            : IM_COL32( 150, 155, 165, 205 ),
                                IM_COL32( 90, 95, 105, 230 ) );
@@ -614,10 +773,28 @@ namespace Desert::Editor::Tools
         {
             const bool ctrl = ::ImGui::GetIO().KeyCtrl;
 
+            // In Corner Mode E/Q raise / lower the SELECTED posts by one snap step instead of extruding.
+            const int snapDiv     = std::max( 2, ms.CornerSnapDiv );
+            const int cornerStep  = std::max( 1, K * CornerDen / snapDiv );
+            auto      moveCorners = [&]( int dir )
+            {
+                bool any = false;
+                for ( int k = 0; k < 4; ++k )
+                    if ( m_CornerSel[k] )
+                    {
+                        m_CornerH[k] += dir * cornerStep;
+                        any = true;
+                    }
+                if ( any )
+                    ApplyCornerHeights( scene );
+            };
+
             if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) )
             {
                 if ( ctrl ) // Ctrl+E — coarser grid
                     ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
+                else if ( m_CornerMode )
+                    moveCorners( +1 );
                 else
                     PushPull( scene, +1, K );
             }
@@ -625,12 +802,22 @@ namespace Desert::Editor::Tools
             {
                 if ( ctrl ) // Ctrl+Q — finer grid
                     ms.CellSize = std::max( ms.CellSize * 0.5f, Core::ModelingState::MinCellSize );
+                else if ( m_CornerMode )
+                    moveCorners( -1 );
                 else
                     PushPull( scene, -1, K );
             }
-            // Esc clears the selection (Z stays free for Corner Mode, which is what UE binds it to).
+            // Z starts / completes Corner Mode (UE's binding). It needs a selection on a horizontal
+            // work-plane — corners move along the grid's up axis.
+            if ( ::ImGui::IsKeyPressed( ImGuiKey_Z, false ) )
+                ms.ReqCornerMode = true;
             if ( ::ImGui::IsKeyPressed( ImGuiKey_Escape, false ) )
-                m_HasSel = m_Selecting = false;
+            {
+                if ( m_CornerMode )
+                    m_CornerMode = false;
+                else
+                    m_HasSel = m_Selecting = false;
+            }
 
             // Ctrl + wheel shifts the ground work-plane one block up/down, carrying a selection on it.
             const float wheel = ::ImGui::GetIO().MouseWheel;
@@ -653,7 +840,7 @@ namespace Desert::Editor::Tools
 
         // --- Marquee selection (Block-aligned): LMB drag a rectangle; start requires hover, the drag is
         //     latched to the physical button and locked to the plane picked at the press. ---
-        if ( interact && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && tHas )
+        if ( interact && !m_CornerMode && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && tHas )
         {
             m_Selecting = true;
             m_HasSel    = false;
@@ -720,6 +907,56 @@ namespace Desert::Editor::Tools
             }
         }
 
+        // --- Corner Mode: the selection rectangle's four posts. Click one to pick it (Shift adds), then
+        //     E / Q raise or lower every picked post by one Snap Size step; the cells under the rectangle
+        //     take the bilinear blend, so two posts up = a ramp, one post up = a hip. ---
+        if ( toolActive && m_CornerMode && m_HasSel )
+        {
+            const float  planeW = planeWorldOf( m_PlaneNa, m_PlaneSign, m_PlaneCell );
+            const ImVec2 mouse  = ::ImGui::GetMousePos();
+            glm::vec2    sp[4];
+            bool         ok[4];
+            int          hovered = -1;
+            float        bestD   = 14.0f;
+            for ( int k = 0; k < 4; ++k )
+            {
+                const float lu = static_cast<float>( kPosts[k].AtUMax ? m_UMax + 1 : m_UMin );
+                const float lv = static_cast<float>( kPosts[k].AtVMax ? m_VMax + 1 : m_VMin );
+                const float hW = planeW + static_cast<float>( m_CornerH[k] ) / CornerDen * u;
+                ok[k] =
+                     WorldToScreen( worldPt( lu, lv, m_PlaneNa, hW ), viewProj, viewportPos, viewportSize, sp[k] );
+                if ( !ok[k] )
+                    continue;
+                const float d = glm::length( sp[k] - glm::vec2( mouse.x, mouse.y ) );
+                if ( d < bestD )
+                {
+                    bestD   = d;
+                    hovered = k;
+                }
+            }
+            for ( int k = 0; k < 4; ++k )
+            {
+                if ( !ok[k] )
+                    continue;
+                const ImVec2 p( sp[k].x, sp[k].y );
+                const float  r = ( k == hovered ) ? 8.0f : 6.0f;
+                if ( m_CornerSel[k] )
+                    dl->AddCircleFilled( p, r, IM_COL32( 255, 170, 60, 235 ) );
+                else
+                    dl->AddCircleFilled( p, r, IM_COL32( 25, 27, 32, 200 ) );
+                dl->AddCircle( p, r, IM_COL32( 250, 250, 250, 235 ), 0, 2.0f );
+            }
+            if ( interact && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+            {
+                const bool shift = ::ImGui::GetIO().KeyShift;
+                if ( !shift )
+                    for ( bool& sel : m_CornerSel )
+                        sel = false;
+                if ( hovered >= 0 )
+                    m_CornerSel[hovered] = shift ? !m_CornerSel[hovered] : true;
+            }
+        }
+
         // Re-bake if the base resolution changed (a refine this frame).
         if ( m_Unit != m_BakedUnit && !m_Cells.empty() )
             changed = true;
@@ -768,13 +1005,42 @@ namespace Desert::Editor::Tools
                 if ( !m_HasSel )
                     ::ImGui::BeginDisabled();
                 ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.45f, 0.75f, 1.0f ) );
+                // In Corner Mode these move the picked posts instead of extruding the region.
+                const int snapDivBar    = std::max( 2, ms.CornerSnapDiv );
+                const int cornerStepBar = std::max( 1, K * CornerDen / snapDivBar );
+                auto      barMove       = [&]( int dir )
+                {
+                    bool any = false;
+                    for ( int k = 0; k < 4; ++k )
+                        if ( m_CornerSel[k] )
+                        {
+                            m_CornerH[k] += dir * cornerStepBar;
+                            any = true;
+                        }
+                    if ( any )
+                        ApplyCornerHeights( scene );
+                };
                 if ( ::ImGui::Button( ICON_MDI_ARROW_EXPAND_UP "  Push" ) )
-                    PushPull( scene, +1, K );
+                    m_CornerMode ? barMove( +1 ) : PushPull( scene, +1, K );
                 ::ImGui::SameLine();
                 if ( ::ImGui::Button( ICON_MDI_ARROW_COLLAPSE_DOWN "  Pull" ) )
-                    PushPull( scene, -1, K );
+                    m_CornerMode ? barMove( -1 ) : PushPull( scene, -1, K );
                 ::ImGui::PopStyleColor();
                 if ( !m_HasSel )
+                    ::ImGui::EndDisabled();
+
+                // Corner Mode toggle, right next to Push/Pull (Z does the same).
+                ::ImGui::SameLine();
+                const bool canCorner = m_HasSel && m_PlaneNa == 1 && m_PlaneSign > 0;
+                if ( !canCorner && !m_CornerMode )
+                    ::ImGui::BeginDisabled();
+                if ( m_CornerMode )
+                    ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.85f, 0.55f, 0.15f, 1.0f ) );
+                if ( ::ImGui::Button( ICON_MDI_VECTOR_POINT "  Corner" ) )
+                    ms.ReqCornerMode = true;
+                if ( m_CornerMode )
+                    ::ImGui::PopStyleColor();
+                if ( !canCorner && !m_CornerMode )
                     ::ImGui::EndDisabled();
 
                 // Block Size readout in centimetres (UE numbers: 100 cm = one metre = the default block).
@@ -818,7 +1084,7 @@ namespace Desert::Editor::Tools
                 m_Entity = Common::UUID::Null();
                 m_Cells.clear();
                 m_Frozen.clear();
-                m_HasSel = m_Selecting = false;
+                m_HasSel = m_Selecting = m_CornerMode = false;
                 m_Unit = m_BakedUnit = -1.0f;
                 m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
             }
@@ -843,25 +1109,33 @@ namespace Desert::Editor::Tools
         std::vector<Index>  inds;
         glm::vec3           mn( FLT_MAX ), mx( -FLT_MAX );
         // One mesh out of every layer — each meshed at its OWN cell size, face-culled against all layers.
-        auto emitLayer = [&]( const std::unordered_set<uint64_t>& cells, float lu, const glm::vec3& lo )
+        auto emitLayer = [&]( const CellMap& cells, float lu, const glm::vec3& lo )
         {
-            for ( uint64_t key : cells )
+            for ( const auto& [key, cell] : cells )
             {
                 const glm::ivec3 c = Unpack( key );
                 for ( int f = 0; f < 6; ++f )
                 {
-                    if ( SolidAt( c + kNeighbor[f], lu, lo ) ) // Face Culling: only Solid/Empty borders
+                    if ( FaceHidden( cells, c, cell, f, lu, lo ) ) // only Solid/Empty borders
                         continue;
+                    // Corner Mode can slant a quad, so the normal comes from the actual corners; the
+                    // tangent frame and UVs stay the box's (good enough for a blockout, and stable).
+                    glm::vec3 p[4];
+                    for ( int k = 0; k < 4; ++k )
+                        p[k] = CornerPos( c, cell, kFaceCorner[f][k], lu, lo );
+                    glm::vec3 nrm =
+                         glm::cross( p[1] - p[0], p[3] - p[0] ) + glm::cross( p[3] - p[2], p[1] - p[2] );
+                    nrm = glm::dot( nrm, nrm ) > 1e-12f ? glm::normalize( nrm ) : kFace[f][0].N;
+
                     const uint32_t base = static_cast<uint32_t>( verts.size() );
                     for ( int k = 0; k < 4; ++k )
                     {
-                        const FaceVert& fv = kFace[f][k];
-                        Vertex          v;
-                        v.Position  = ( glm::vec3( c ) + fv.P + 0.5f ) * lu + lo;
-                        v.Normal    = fv.N;
-                        v.Tangent   = fv.T;
-                        v.Bitangent = fv.B;
-                        v.TexCoord  = fv.UV;
+                        Vertex v;
+                        v.Position  = p[k];
+                        v.Normal    = nrm;
+                        v.Tangent   = kFace[f][k].T;
+                        v.Bitangent = kFace[f][k].B;
+                        v.TexCoord  = kFace[f][k].UV;
                         verts.push_back( v );
                         mn = glm::min( mn, v.Position );
                         mx = glm::max( mx, v.Position );
@@ -909,7 +1183,7 @@ namespace Desert::Editor::Tools
         m_Entity = Common::UUID::Null();
         m_Cells.clear();
         m_Frozen.clear();
-        m_HasSel = m_Selecting = false;
+        m_HasSel = m_Selecting = m_CornerMode = false;
         m_Unit = m_BakedUnit = -1.0f;
         m_GroundY = 0.0f, m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
     }

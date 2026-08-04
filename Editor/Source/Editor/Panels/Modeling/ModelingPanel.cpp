@@ -189,6 +189,31 @@ namespace Desert::Editor
                     ms.CellSize =
                          std::max( MS::MinCellSize, MS::BaseBlockSize / static_cast<float>( 1 << power ) );
             }
+            if ( ImGui::CollapsingHeader( "Corner Mode", ImGuiTreeNodeFlags_DefaultOpen ) )
+            {
+                // Ramps / roofs / wedges: pick the selection's corner posts and raise or lower them.
+                if ( ms.CornerMode )
+                    ImGui::PushStyleColor( ImGuiCol_Button, sel );
+                if ( ImGui::Button( ms.CornerMode ? "Corner Mode: ON  (Z)" : "Corner Mode: OFF  (Z)",
+                                    ImVec2( -1.0f, 0.0f ) ) )
+                    ms.ReqCornerMode = true;
+                if ( ms.CornerMode )
+                    ImGui::PopStyleColor();
+
+                // Snap Size — how far one E/Q press moves a post, as a fraction of the block height.
+                const char* const snaps[] = { "1/2 block", "1/4 block", "1/10 block" };
+                const int         divs[]  = { 2, 4, 10 };
+                int               cur     = 0;
+                for ( int i = 0; i < 3; ++i )
+                    if ( divs[i] == ms.CornerSnapDiv )
+                        cur = i;
+                ImGui::SetNextItemWidth( -1.0f );
+                if ( ImGui::Combo( "Snap Size", &cur, snaps, 3 ) )
+                    ms.CornerSnapDiv = divs[cur];
+
+                ImGui::TextDisabled( "Select a rectangle, press Z, click the" );
+                ImGui::TextDisabled( "corner posts (Shift adds), then E / Q." );
+            }
             if ( ImGui::CollapsingHeader( "Block Selection", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
                 ImGui::Checkbox( "Hit Unrelated Geometry", &ms.HitUnrelated );
@@ -240,6 +265,7 @@ namespace Desert::Editor
                 } shortcuts[] = {
                      { "Select blocks", "LMB drag on the surface" },
                      { "Push / Pull", "E / Q" },
+                     { "Corner Mode", "Z (then E / Q on posts)" },
                      { "Resize Grid", "Ctrl + E / Q" },
                      { "Shift work-plane", "Ctrl + Mouse Wheel" },
                      { "Snap grid to surface", "Ctrl + MMB" },

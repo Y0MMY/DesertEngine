@@ -56,12 +56,18 @@ namespace Desert::Editor::Core
         bool HitUnrelated = true;
         bool ShowGizmo    = false; // draw the grid frame axes at the origin
 
+        // Corner Mode (Z): moves the selection's corner posts along the grid's up axis to build ramps,
+        // roofs and wedges. Snap Size = the fraction of a block one press moves them.
+        int  CornerSnapDiv = 2;     // 2 = half a block, 4 = quarter, 10 = a tenth
+        bool ReqCornerMode = false; // one-shot: toggle Corner Mode
+
         bool ReqAccept         = false; // one-shot: commit the blockout, start a fresh one
         bool ReqCancel         = false; // one-shot: delete the in-progress blockout
         bool ReqClear          = false; // one-shot: clear the cells (keep editing)
         bool ReqResetFromActor = false; // one-shot: put the grid origin on the selected entity
 
         // Tool -> panel (read-only stats for the properties panel)
-        int Cubes = 0;
+        int  Cubes      = 0;
+        bool CornerMode = false; // the tool is currently in Corner Mode
     };
 } // namespace Desert::Editor::Core
