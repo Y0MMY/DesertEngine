@@ -161,30 +161,22 @@ namespace Desert::Editor
                 if ( ImGui::Combo( "##out", &o, outs, IM_ARRAYSIZE( outs ) ) )
                     ms.OutputType = static_cast<MS::Output>( o );
             }
-            if ( ImGui::CollapsingHeader( "Brush Size", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( ImGui::CollapsingHeader( "Grid", ImGuiTreeNodeFlags_DefaultOpen ) )
             {
-                // FREE world-space brush dimensions (not tied to any grid) — each painted stamp is a
-                // Width × Height × Depth box; the paint lattice tiles on these sizes so sweeps stay seamless.
+                // Block size (Resize Grid) — free world-space value; the voxel grid tiles on it.
                 ImGui::SetNextItemWidth( 120.0f );
-                if ( ImGui::DragFloat( "Width", &ms.BrushW, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
-                    ms.BrushW = std::max( 0.02f, ms.BrushW );
-                ImGui::SetNextItemWidth( 120.0f );
-                if ( ImGui::DragFloat( "Depth", &ms.BrushD, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
-                    ms.BrushD = std::max( 0.02f, ms.BrushD );
-                ImGui::SetNextItemWidth( 120.0f );
-                if ( ImGui::DragFloat( "Height", &ms.Height, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
-                    ms.Height = std::max( 0.02f, ms.Height );
-
+                if ( ImGui::DragFloat( "Block Size", &ms.CellSize, 0.02f, 0.02f, 100000.0f, "%.3f" ) )
+                    ms.CellSize = std::max( 0.02f, ms.CellSize );
                 ImGui::Text( "Cells: %d", ms.Cubes );
                 if ( ImGui::Button( "Clear" ) )
                     ms.ReqClear = true;
             }
             ImGui::Separator();
-            ImGui::TextDisabled( "LMB drag: paint on the surface you point at" );
+            ImGui::TextDisabled( "LMB drag: select a rectangle on the surface" );
             ImGui::TextDisabled( "(ground, or a face of what you built)" );
-            ImGui::TextDisabled( "Shift+LMB / RMB: erase" );
-            ImGui::TextDisabled( "Width / Depth / Height: free box size (world units)" );
-            ImGui::TextDisabled( "E / Q or Up / Down: height x1.25 / x0.8" );
+            ImGui::TextDisabled( "Push / Pull: extrude the selection up / down" );
+            ImGui::TextDisabled( "Level up/down: move the ground work-plane" );
+            ImGui::TextDisabled( "Resize Grid / Push / Pull: bottom-bar buttons" );
             ImGui::TextDisabled( "Accept / Cancel: bottom of the viewport" );
         }
         else

@@ -23,7 +23,7 @@ namespace Desert::Editor::Tools
 {
     namespace
     {
-        // Pack/unpack a lattice cell into a 63-bit key (21 bits/axis, centred so negatives fit).
+        // Sparse voxel volume key: pack a grid cell into a 63-bit key (21 bits/axis, centred so negatives fit).
         constexpr int OFF = 1 << 20;
         uint64_t      Pack( const glm::ivec3& c )
         {
@@ -39,8 +39,7 @@ namespace Desert::Editor::Tools
         }
 
         // The 6 faces of a unit cube (position in [-0.5,0.5] + the engine's cube normals/tangents/UVs), each as
-        // 4 CCW corners — copied from PrimitiveMeshFactory::CreateCube. Corners map onto a box of ANY per-axis
-        // size (P+0.5 -> [0,1], * boxSize + boxMin), so a cell can be Width×Height×Depth.
+        // 4 CCW corners — copied from PrimitiveMeshFactory::CreateCube so winding/normals are known-good.
         struct FaceVert
         {
             glm::vec3 P, N, T, B;
@@ -78,11 +77,9 @@ namespace Desert::Editor::Tools
                { { 0.5f, 0.5f, 0.5f }, { 1, 0, 0 }, { 0, 0, -1 }, { 0, 1, 0 }, { 0, 1 } },
                { { 0.5f, -0.5f, 0.5f }, { 1, 0, 0 }, { 0, 0, -1 }, { 0, 1, 0 }, { 0, 0 } } },
         };
-        // Outward neighbour offset per face — a face is internal (culled) when that neighbour is filled.
+        // Outward neighbour offset per face — a face is generated only on a Solid/Empty border (Face Culling).
         const glm::ivec3 kNeighbor[6] = { { 0, 0, 1 },  { 0, 0, -1 }, { 0, 1, 0 },
                                           { 0, -1, 0 }, { -1, 0, 0 }, { 1, 0, 0 } };
-
-        constexpr float kMinDim = 0.02f; // smallest brush dimension (world units)
     } // namespace
 
     bool CubeGridTool::WorldToScreen( const glm::vec3& world, const glm::mat4& vp, const glm::vec2& pos,
@@ -97,99 +94,146 @@ namespace Desert::Editor::Tools
         return true;
     }
 
+    void CubeGridTool::PushPull( ::Desert::Core::Scene& scene, int dir )
+    {
+        if ( !m_HasSel )
+            return;
+        auto      occ  = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
+        const int na   = m_PlaneNa;
+        const int sign = m_PlaneSign;
+        const int ua   = ( na + 1 ) % 3;
+        const int va   = ( na + 2 ) % 3;
+
+        if ( dir > 0 ) // Extrude out: fill the first empty cell from the plane, per column
+        {
+            for ( int u = m_UMin; u <= m_UMax; ++u )
+                for ( int v = m_VMin; v <= m_VMax; ++v )
+                {
+                    glm::ivec3 c{ 0 };
+                    c[na] = m_PlaneCell;
+                    c[ua] = u;
+                    c[va] = v;
+                    while ( occ( c ) )
+                        c[na] += sign;
+                    m_Cells.insert( Pack( c ) );
+                }
+            m_PlaneCell += sign; // plane advances so the next push builds on top
+        }
+        else // Push in: remove the solid cell just inside the plane, per column
+        {
+            const int inner = m_PlaneCell - sign;
+            for ( int u = m_UMin; u <= m_UMax; ++u )
+                for ( int v = m_VMin; v <= m_VMax; ++v )
+                {
+                    glm::ivec3 c{ 0 };
+                    c[na] = inner;
+                    c[ua] = u;
+                    c[va] = v;
+                    m_Cells.erase( Pack( c ) );
+                }
+            m_PlaneCell -= sign;
+        }
+        RegenMesh( scene );
+    }
+
     void CubeGridTool::Update( ::Desert::Core::Scene& scene, const Common::Math::Ray& ray,
                                const glm::mat4& viewProj, const glm::vec2& viewportPos,
                                const glm::vec2& viewportSize, bool interactive )
     {
         Core::ModelingState& ms         = Core::ModelingState::Get();
         const bool           toolActive = ms.ActiveTool == Core::ModelingState::Tool::CubeGrid;
-
-        // Per-axis brush box size (Width, Height, Depth) in world units — fully free, not tied to any grid.
-        const glm::vec3 sz( std::max( ms.BrushW, kMinDim ), std::max( ms.Height, kMinDim ),
-                            std::max( ms.BrushD, kMinDim ) );
-        m_CellSize = sz;
+        const float          gs         = std::max( ms.CellSize, 0.02f ); // grid / block size (Resize Grid)
 
         if ( ms.ReqClear )
         {
             ms.ReqClear = false;
             m_Cells.clear();
-            m_HasLastPaint = false;
-            m_Origin       = glm::vec3( 0.0f );
-            m_BakedSize    = glm::vec3( -1.0f );
+            m_HasSel = m_Selecting = false;
+            m_Origin               = glm::vec3( 0.0f );
+            m_BakedGrid            = -1.0f;
+            m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
             RegenMesh( scene );
         }
 
         auto occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
+        // World coord of the plane (na, planeCell, sign) — the surface a Push extrudes from.
+        auto planeWorldOf = [&]( int na, int sign, int cell )
+        { return m_Origin[na] + static_cast<float>( cell + ( sign > 0 ? 0 : 1 ) ) * gs; };
 
-        // --- Targeting: nearest filled cell's face under the cursor, else the ground plane (y=0). ---
-        m_HasTarget = m_HasErase = false;
-        float      bestT         = FLT_MAX;
-        glm::ivec3 hitCell{ 0 };
-        bool       hit = false;
-        for ( uint64_t key : m_Cells )
+        // --- Targeting: the surface under the cursor (a filled cell's face, else the ground). Produces a
+        //     candidate work-plane + the cell (u,v) the cursor is over. ---
+        bool  tHas = false;
+        int   tNa = 1, tSign = 1, tPlaneCell = 0, tU = 0, tV = 0;
+        float bestT = FLT_MAX;
         {
-            const glm::ivec3   c = Unpack( key );
-            Common::Math::AABB box;
-            box.Min = m_Origin + glm::vec3( c ) * sz;
-            box.Max = box.Min + sz;
-            float t;
-            if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
+            glm::ivec3 hitCell{ 0 };
+            bool       hit = false;
+            for ( uint64_t key : m_Cells )
             {
-                bestT   = t;
-                hitCell = c;
-                hit     = true;
+                const glm::ivec3   c = Unpack( key );
+                Common::Math::AABB box;
+                box.Min = m_Origin + glm::vec3( c ) * gs;
+                box.Max = box.Min + gs;
+                float t;
+                if ( ray.IntersectsAABB( box, t ) && t >= 0.0f && t < bestT )
+                {
+                    bestT   = t;
+                    hitCell = c;
+                    hit     = true;
+                }
             }
-        }
-        if ( hit )
-        {
-            const glm::vec3 p  = ray.Origin + ray.Direction * bestT;
-            const glm::vec3 d =
-                 ( p - ( m_Origin + ( glm::vec3( hitCell ) + 0.5f ) * sz ) ) / ( sz * 0.5f ); // face-normalised
-            const glm::vec3 ad = glm::abs( d );
-            glm::ivec3      n{ 0 };
-            if ( ad.x >= ad.y && ad.x >= ad.z )
-                n.x = d.x > 0 ? 1 : -1;
-            else if ( ad.y >= ad.z )
-                n.y = d.y > 0 ? 1 : -1;
-            else
-                n.z = d.z > 0 ? 1 : -1;
-            m_TargetCell   = hitCell + n;
-            m_TargetNormal = n;
-            m_EraseCell    = hitCell;
-            m_HasTarget = m_HasErase = true;
-        }
-        else if ( std::abs( ray.Direction.y ) > 1e-5f )
-        {
-            const float t = -ray.Origin.y / ray.Direction.y;
-            if ( t > 0.0f )
+            if ( hit )
             {
-                const glm::vec3 p = ray.Origin + ray.Direction * t;
-                m_TargetCell      = { static_cast<int>( std::floor( ( p.x - m_Origin.x ) / sz.x ) ),
-                                      static_cast<int>( std::lround( -m_Origin.y / sz.y ) ),
-                                      static_cast<int>( std::floor( ( p.z - m_Origin.z ) / sz.z ) ) };
-                m_TargetNormal    = { 0, 1, 0 };
-                m_HasTarget       = true;
+                const glm::vec3 p  = ray.Origin + ray.Direction * bestT;
+                const glm::vec3 d  = ( p - ( m_Origin + ( glm::vec3( hitCell ) + 0.5f ) * gs ) );
+                const glm::vec3 ad = glm::abs( d );
+                glm::ivec3      n{ 0 };
+                if ( ad.x >= ad.y && ad.x >= ad.z )
+                    n.x = d.x > 0 ? 1 : -1;
+                else if ( ad.y >= ad.z )
+                    n.y = d.y > 0 ? 1 : -1;
+                else
+                    n.z = d.z > 0 ? 1 : -1;
+                tNa        = n.x ? 0 : n.y ? 1 : 2;
+                tSign      = n[tNa];
+                tPlaneCell = hitCell[tNa] + tSign;
+                tU         = hitCell[( tNa + 1 ) % 3];
+                tV         = hitCell[( tNa + 2 ) % 3];
+                tHas       = true;
+            }
+            else if ( std::abs( ray.Direction.y ) > 1e-5f ) // ground plane y=0
+            {
+                const float t = -ray.Origin.y / ray.Direction.y;
+                if ( t > 0.0f && t < bestT )
+                {
+                    const glm::vec3 p = ray.Origin + ray.Direction * t;
+                    tNa               = 1;
+                    tSign             = 1;
+                    tPlaneCell        = static_cast<int>( std::lround( -m_Origin.y / gs ) );
+                    tU                = static_cast<int>( std::floor( ( p.x - m_Origin.x ) / gs ) );
+                    tV                = static_cast<int>( std::floor( ( p.z - m_Origin.z ) / gs ) );
+                    tHas              = true;
+                }
             }
         }
 
         ImDrawList* dl = ::ImGui::GetWindowDrawList();
 
-        // Draw a cell as SOLID shaded faces (only outward, camera-facing, non-internal faces).
         auto drawCellSolid = [&]( const glm::ivec3& c, ImU32 fill, ImU32 outline )
         {
-            const glm::vec3 mn = m_Origin + glm::vec3( c ) * sz;
+            const glm::vec3 mn = m_Origin + glm::vec3( c ) * gs;
             for ( int f = 0; f < 6; ++f )
             {
                 if ( occupied( c + kNeighbor[f] ) )
-                    continue; // internal face
+                    continue;
                 const glm::vec3 fn = kFace[f][0].N;
-                const glm::vec3 fc = mn + 0.5f * sz + 0.5f * sz * fn;
+                const glm::vec3 fc = mn + 0.5f * gs + 0.5f * gs * fn;
                 if ( glm::dot( fn, ray.Origin - fc ) <= 0.0f )
-                    continue; // back face
+                    continue;
                 glm::vec2 s[4];
                 bool      ok = true;
                 for ( int k = 0; k < 4; ++k )
-                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * sz, viewProj, viewportPos, viewportSize,
+                    if ( !WorldToScreen( mn + ( kFace[f][k].P + 0.5f ) * gs, viewProj, viewportPos, viewportSize,
                                          s[k] ) )
                     {
                         ok = false;
@@ -204,215 +248,182 @@ namespace Desert::Editor::Tools
             }
         };
 
-        // Flat cell face on a plane (na = normal axis, planeW = world coord) — the hover brush footprint.
-        auto drawPlaneCell = [&]( int uc, int vc, int na, float planeW, ImU32 fill, ImU32 outline )
+        // Filled rect [uMin..uMax+1] × [vMin..vMax+1] on plane (na, planeW).
+        auto drawRect =
+             [&]( int uMin, int uMax, int vMin, int vMax, int na, float planeW, ImU32 fill, ImU32 outline )
         {
             const int ua = ( na + 1 ) % 3;
             const int va = ( na + 2 ) % 3;
             glm::vec2 s[4];
-            const int du[4] = { 0, 1, 1, 0 };
-            const int dv[4] = { 0, 0, 1, 1 };
+            const int uu[4] = { uMin, uMax + 1, uMax + 1, uMin };
+            const int vv[4] = { vMin, vMin, vMax + 1, vMax + 1 };
             for ( int k = 0; k < 4; ++k )
             {
                 glm::vec3 w( 0.0f );
                 w[na] = planeW;
-                w[ua] = m_Origin[ua] + static_cast<float>( uc + du[k] ) * sz[ua];
-                w[va] = m_Origin[va] + static_cast<float>( vc + dv[k] ) * sz[va];
+                w[ua] = m_Origin[ua] + static_cast<float>( uu[k] ) * gs;
+                w[va] = m_Origin[va] + static_cast<float>( vv[k] ) * gs;
                 if ( !WorldToScreen( w, viewProj, viewportPos, viewportSize, s[k] ) )
                     return;
             }
             dl->AddQuadFilled( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
                                ImVec2( s[3].x, s[3].y ), fill );
             dl->AddQuad( ImVec2( s[0].x, s[0].y ), ImVec2( s[1].x, s[1].y ), ImVec2( s[2].x, s[2].y ),
-                         ImVec2( s[3].x, s[3].y ), outline, 1.5f );
+                         ImVec2( s[3].x, s[3].y ), outline, 2.0f );
         };
 
-        const bool removeMode = ::ImGui::GetIO().KeyShift;
-        const bool interact   = interactive && toolActive && !::ImGui::IsAnyItemActive();
-        bool       changed    = false;
+        const bool interact = interactive && toolActive && !::ImGui::IsAnyItemActive();
+        bool       changed  = false;
 
-        // Existing cells: grey checkerboard solids (the erase target is tinted red).
+        // Existing cells: grey checkerboard solids.
         if ( toolActive )
             for ( uint64_t k : m_Cells )
             {
-                const glm::ivec3 c    = Unpack( k );
-                const bool       eras = removeMode && m_HasErase && m_EraseCell == c;
-                const ImU32      fill = eras                          ? IM_COL32( 200, 90, 80, 205 )
-                                        : ( ( c.x + c.y + c.z ) & 1 ) ? IM_COL32( 120, 125, 135, 205 )
-                                                                      : IM_COL32( 150, 155, 165, 205 );
-                drawCellSolid( c, fill, IM_COL32( 90, 95, 105, 230 ) );
+                const glm::ivec3 c = Unpack( k );
+                drawCellSolid( c,
+                               ( ( c.x + c.y + c.z ) & 1 ) ? IM_COL32( 120, 125, 135, 205 )
+                                                           : IM_COL32( 150, 155, 165, 205 ),
+                               IM_COL32( 90, 95, 105, 230 ) );
             }
 
-        // World coord of the plane that fills `cell` along axis `na` with outward normal sign `sgn`.
-        auto planeWorld = [&]( const glm::ivec3& cell, int na, int sgn )
+        // --- Marquee selection: LMB drag a rectangle on the surface. Start requires hover; the drag is
+        //     latched to the physically-held button and locked to the plane picked at the press. ---
+        if ( interact && ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && tHas )
         {
-            return m_Origin[na] +
-                   ( sgn > 0 ? static_cast<float>( cell[na] ) : static_cast<float>( cell[na] + 1 ) ) * sz[na];
-        };
-
-        // Hover footprint on the target surface (green = add, red = erase).
-        if ( toolActive && !m_Painting && !m_Erasing && m_HasTarget )
-        {
-            const int   na  = m_TargetNormal.x ? 0 : m_TargetNormal.y ? 1 : 2;
-            const int   sgn = m_TargetNormal[na];
-            const int   ua  = ( na + 1 ) % 3;
-            const int   va  = ( na + 2 ) % 3;
-            const float pw  = planeWorld( m_TargetCell, na, sgn );
-            const ImU32 ff  = removeMode ? IM_COL32( 240, 80, 60, 70 ) : IM_COL32( 70, 220, 100, 70 );
-            const ImU32 fo  = removeMode ? IM_COL32( 240, 90, 70, 255 ) : IM_COL32( 90, 240, 120, 255 );
-            drawPlaneCell( m_TargetCell[ua], m_TargetCell[va], na, pw, ff, fo );
+            m_Selecting = true;
+            m_HasSel    = false;
+            m_PlaneNa   = tNa;
+            m_PlaneSign = tSign;
+            m_PlaneCell = tPlaneCell;
+            m_Anchor    = { tU, tV };
         }
 
-        // Stamp one box cell at plane (uc,vc) of the locked stroke plane.
-        auto stampUV = [&]( int uc, int vc, bool erase )
+        if ( m_Selecting )
         {
-            const int  na = m_StrokeNa;
-            const int  ua = ( na + 1 ) % 3;
-            const int  va = ( na + 2 ) % 3;
-            glm::ivec3 c{ 0 };
-            c[na]              = m_StrokePlaneCell;
-            c[ua]              = uc;
-            c[va]              = vc;
-            const uint64_t key = Pack( c );
-            if ( erase )
-                changed |= m_Cells.erase( key ) > 0;
-            else
-                changed |= m_Cells.insert( key ).second;
-        };
-
-        // --- Start a stroke only when the viewport is genuinely hovered/active. ---
-        if ( interact )
-        {
-            if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && !removeMode && m_HasTarget )
+            const int   na     = m_PlaneNa;
+            const int   ua     = ( na + 1 ) % 3;
+            const int   va     = ( na + 2 ) % 3;
+            const float planeW = planeWorldOf( na, m_PlaneSign, m_PlaneCell );
+            // Project the cursor onto the locked plane to get the current cell.
+            glm::ivec2 cur = m_Anchor;
+            if ( std::abs( ray.Direction[na] ) > 1e-6f )
             {
-                m_Painting        = true;
-                m_Erasing         = false;
-                m_StrokeNa        = m_TargetNormal.x ? 0 : m_TargetNormal.y ? 1 : 2;
-                m_StrokeSign      = m_TargetNormal[m_StrokeNa];
-                m_StrokePlaneCell = m_TargetCell[m_StrokeNa];
-                m_StrokePlaneW    = planeWorld( m_TargetCell, m_StrokeNa, m_StrokeSign );
-                m_HasLastPaint    = false;
-            }
-            else if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Left ) && removeMode )
-            {
-                m_Erasing  = true;
-                m_Painting = false;
-            }
-            else if ( ::ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
-            {
-                m_Erasing  = true;
-                m_Painting = false;
-            }
-        }
-
-        // --- Paint: keep filling while LMB is PHYSICALLY held (independent of hover flicker). The cursor is
-        //     projected onto the LOCKED work-plane, so the whole sweep paints one surface; cells between
-        //     frames are interpolated to avoid gaps. ---
-        if ( toolActive && m_Painting )
-        {
-            const bool lmb = ::ImGui::IsMouseDown( ImGuiMouseButton_Left );
-            if ( lmb && std::abs( ray.Direction[m_StrokeNa] ) > 1e-6f )
-            {
-                const float t = ( m_StrokePlaneW - ray.Origin[m_StrokeNa] ) / ray.Direction[m_StrokeNa];
+                const float t = ( planeW - ray.Origin[na] ) / ray.Direction[na];
                 if ( t > 0.0f )
                 {
-                    const int        ua = ( m_StrokeNa + 1 ) % 3;
-                    const int        va = ( m_StrokeNa + 2 ) % 3;
-                    const glm::vec3  p  = ray.Origin + ray.Direction * t;
-                    const glm::ivec2 uv{ static_cast<int>( std::floor( ( p[ua] - m_Origin[ua] ) / sz[ua] ) ),
-                                         static_cast<int>( std::floor( ( p[va] - m_Origin[va] ) / sz[va] ) ) };
-                    if ( m_HasLastPaint && m_LastPaintUV != uv ) // interpolate the swept line
-                    {
-                        const glm::ivec2 a = m_LastPaintUV, b = uv;
-                        const int        steps = std::max( std::abs( b.x - a.x ), std::abs( b.y - a.y ) );
-                        for ( int s = 1; s <= steps; ++s )
-                        {
-                            const float f = static_cast<float>( s ) / steps;
-                            stampUV( static_cast<int>( std::lround( a.x + ( b.x - a.x ) * f ) ),
-                                     static_cast<int>( std::lround( a.y + ( b.y - a.y ) * f ) ), false );
-                        }
-                    }
-                    else
-                    {
-                        stampUV( uv.x, uv.y, false );
-                    }
-                    m_LastPaintUV  = uv;
-                    m_HasLastPaint = true;
+                    const glm::vec3 p = ray.Origin + ray.Direction * t;
+                    cur               = { static_cast<int>( std::floor( ( p[ua] - m_Origin[ua] ) / gs ) ),
+                                          static_cast<int>( std::floor( ( p[va] - m_Origin[va] ) / gs ) ) };
                 }
             }
-            if ( !lmb )
+            m_UMin = std::min( m_Anchor.x, cur.x );
+            m_UMax = std::max( m_Anchor.x, cur.x );
+            m_VMin = std::min( m_Anchor.y, cur.y );
+            m_VMax = std::max( m_Anchor.y, cur.y );
+            drawRect( m_UMin, m_UMax, m_VMin, m_VMax, na, planeW, IM_COL32( 250, 150, 40, 70 ),
+                      IM_COL32( 255, 170, 60, 255 ) );
+
+            if ( !::ImGui::IsMouseDown( ImGuiMouseButton_Left ) ) // release -> fix the selection
             {
-                m_Painting     = false;
-                m_HasLastPaint = false;
+                m_Selecting = false;
+                m_HasSel    = true;
             }
         }
-
-        // --- Erase: remove whatever cell is under the cursor while a button is held (sweeps a trail). ---
-        if ( toolActive && m_Erasing )
+        else if ( m_HasSel ) // keep the fixed selection highlighted (orange)
         {
-            const bool held =
-                 ::ImGui::IsMouseDown( ImGuiMouseButton_Left ) || ::ImGui::IsMouseDown( ImGuiMouseButton_Right );
-            if ( held && m_HasErase )
-                changed |= m_Cells.erase( Pack( m_EraseCell ) ) > 0;
-            if ( !held )
-                m_Erasing = false;
+            drawRect( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa,
+                      planeWorldOf( m_PlaneNa, m_PlaneSign, m_PlaneCell ), IM_COL32( 250, 150, 40, 60 ),
+                      IM_COL32( 255, 170, 60, 255 ) );
+        }
+        else if ( toolActive && tHas ) // hover: highlight the cell under the cursor
+        {
+            drawRect( tU, tU, tV, tV, tNa, planeWorldOf( tNa, tSign, tPlaneCell ), IM_COL32( 70, 220, 100, 60 ),
+                      IM_COL32( 90, 240, 120, 255 ) );
         }
 
-        // --- Keys: E / Q (or Up / Down) raise / lower the brush Height (free). ---
-        if ( interact && !m_Painting )
+        // Resize Grid pins the min corner in place (grow from the corner, not slide away from the origin).
+        if ( gs != m_BakedGrid && !m_Cells.empty() )
         {
-            if ( ::ImGui::IsKeyPressed( ImGuiKey_E, false ) || ::ImGui::IsKeyPressed( ImGuiKey_UpArrow, false ) )
-                ms.Height = std::max( kMinDim, ms.Height * 1.25f );
-            else if ( ::ImGui::IsKeyPressed( ImGuiKey_Q, false ) ||
-                      ::ImGui::IsKeyPressed( ImGuiKey_DownArrow, false ) )
-                ms.Height = std::max( kMinDim, ms.Height * 0.8f );
-        }
-
-        // Editing Width/Depth/Height rescales the live blockout. Anchor the resize to the structure's min
-        // corner (keep its world position fixed) so it grows/shrinks IN PLACE instead of sliding away from the
-        // world origin. Re-bake even without a paint edit.
-        if ( sz != m_BakedSize && !m_Cells.empty() )
-        {
-            if ( m_BakedSize.x > 0.0f ) // valid previous size -> shift origin to pin the min corner
+            if ( m_BakedGrid > 0.0f )
             {
                 glm::ivec3 minCell{ INT_MAX };
                 for ( uint64_t k : m_Cells )
                     minCell = glm::min( minCell, Unpack( k ) );
-                m_Origin += glm::vec3( minCell ) * ( m_BakedSize - sz );
+                m_Origin += glm::vec3( minCell ) * ( m_BakedGrid - gs );
             }
             changed = true;
         }
 
         ms.Cubes = static_cast<int>( m_Cells.size() );
 
-        // --- Viewport bottom bar: tool name + Accept / Cancel (shown while a blockout is in progress). ---
-        if ( toolActive && ( !m_Cells.empty() || m_Entity != Common::UUID::Null() ) )
+        // --- Viewport bottom bar: tool + Level shift + Push/Pull + Resize Grid + Accept/Cancel. ---
+        if ( toolActive )
         {
             ::ImGui::SetNextWindowPos(
                  ImVec2( viewportPos.x + viewportSize.x * 0.5f, viewportPos.y + viewportSize.y - 58.0f ),
                  ImGuiCond_Always, ImVec2( 0.5f, 0.0f ) );
             ::ImGui::SetNextWindowBgAlpha( 0.92f );
             ::ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 12.0f, 8.0f ) );
-            ::ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 12.0f, 6.0f ) );
-            ::ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 8.0f, 6.0f ) );
-            if ( ::ImGui::Begin( "##cubegrid_accept", nullptr,
+            ::ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 10.0f, 6.0f ) );
+            ::ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 6.0f, 6.0f ) );
+            if ( ::ImGui::Begin( "##cubegrid_bar", nullptr,
                                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
                                       ImGuiWindowFlags_NoNav ) )
             {
                 ::ImGui::AlignTextToFramePadding();
                 ::ImGui::TextUnformatted( ICON_MDI_GRID "  CubeGrid" );
+
+                // Move the horizontal work-plane up / down a level (only meaningful on the ground plane).
+                ::ImGui::SameLine( 0.0f, 14.0f );
+                const bool ground = m_PlaneNa == 1;
+                if ( !ground )
+                    ::ImGui::BeginDisabled();
+                if ( ::ImGui::Button( ICON_MDI_ARROW_UP "##lvlup" ) )
+                    m_PlaneCell += 1;
+                ::ImGui::SameLine();
+                if ( ::ImGui::Button( ICON_MDI_ARROW_DOWN "##lvldn" ) )
+                    m_PlaneCell -= 1;
+                if ( !ground )
+                    ::ImGui::EndDisabled();
+
+                // Push / Pull the selected region.
+                ::ImGui::SameLine( 0.0f, 14.0f );
+                if ( !m_HasSel )
+                    ::ImGui::BeginDisabled();
+                ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.45f, 0.75f, 1.0f ) );
+                if ( ::ImGui::Button( ICON_MDI_ARROW_EXPAND_UP "  Push" ) )
+                    PushPull( scene, +1 );
+                ::ImGui::SameLine();
+                if ( ::ImGui::Button( ICON_MDI_ARROW_COLLAPSE_DOWN "  Pull" ) )
+                    PushPull( scene, -1 );
+                ::ImGui::PopStyleColor();
+                if ( !m_HasSel )
+                    ::ImGui::EndDisabled();
+
+                // Resize Grid (block size).
+                ::ImGui::SameLine( 0.0f, 14.0f );
+                if ( ::ImGui::Button( ICON_MDI_MINUS "##grid_dn" ) )
+                    ms.CellSize = std::max( ms.CellSize * 0.5f, 0.02f );
+                ::ImGui::SameLine();
+                ::ImGui::Text( "Grid %.2f", gs );
+                ::ImGui::SameLine();
+                if ( ::ImGui::Button( ICON_MDI_PLUS "##grid_up" ) )
+                    ms.CellSize = std::min( ms.CellSize * 2.0f, 100000.0f );
+
+                // Accept / Cancel.
                 ::ImGui::SameLine( 0.0f, 16.0f );
                 ::ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.55f, 0.30f, 1.0f ) );
                 ::ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.68f, 0.38f, 1.0f ) );
                 if ( ::ImGui::Button( ICON_MDI_CHECK "  Accept" ) && !m_Cells.empty() )
                 {
                     Core::SelectionManager::SetSelected( m_Entity );
-                    m_Entity = Common::UUID::Null(); // keep the mesh; next edits start a fresh blockout
+                    m_Entity = Common::UUID::Null();
                     m_Cells.clear();
-                    m_HasLastPaint = false;
-                    m_Origin       = glm::vec3( 0.0f );
-                    m_BakedSize    = glm::vec3( -1.0f );
+                    m_HasSel = m_Selecting = false;
+                    m_Origin               = glm::vec3( 0.0f );
+                    m_BakedGrid            = -1.0f;
+                    m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
                 }
                 ::ImGui::PopStyleColor( 2 );
                 ::ImGui::SameLine();
@@ -432,13 +443,15 @@ namespace Desert::Editor::Tools
 
     void CubeGridTool::RegenMesh( ::Desert::Core::Scene& scene )
     {
+        Core::ModelingState& ms = Core::ModelingState::Get();
+        const float          gs = std::max( ms.CellSize, 0.02f );
+        m_BakedGrid             = gs;
+
         if ( m_Cells.empty() )
         {
-            Cancel( scene ); // no cells left -> remove the entity
+            Cancel( scene );
             return;
         }
-
-        m_BakedSize = m_CellSize;
 
         auto occupied = [&]( const glm::ivec3& c ) { return m_Cells.count( Pack( c ) ) > 0; };
 
@@ -450,14 +463,14 @@ namespace Desert::Editor::Tools
             const glm::ivec3 c = Unpack( key );
             for ( int f = 0; f < 6; ++f )
             {
-                if ( occupied( c + kNeighbor[f] ) ) // neighbour filled -> internal face, cull
+                if ( occupied( c + kNeighbor[f] ) ) // Face Culling: only Solid/Empty borders
                     continue;
                 const uint32_t base = static_cast<uint32_t>( verts.size() );
                 for ( int k = 0; k < 4; ++k )
                 {
                     const FaceVert& fv = kFace[f][k];
                     Vertex          v;
-                    v.Position  = m_Origin + ( glm::vec3( c ) + fv.P + 0.5f ) * m_CellSize;
+                    v.Position  = m_Origin + ( glm::vec3( c ) + fv.P + 0.5f ) * gs;
                     v.Normal    = fv.N;
                     v.Tangent   = fv.T;
                     v.Bitangent = fv.B;
@@ -471,7 +484,6 @@ namespace Desert::Editor::Tools
             }
         }
 
-        // Ensure the live blockout entity exists.
         if ( m_Entity == Common::UUID::Null() )
         {
             auto& e = scene.CreateNewEntity( "Blockout" );
@@ -505,10 +517,9 @@ namespace Desert::Editor::Tools
                 scene.DestroyEntity( ref->get() );
         m_Entity = Common::UUID::Null();
         m_Cells.clear();
-        m_HasLastPaint = false;
-        m_Painting     = false;
-        m_Erasing      = false;
-        m_Origin       = glm::vec3( 0.0f );
-        m_BakedSize    = glm::vec3( -1.0f );
+        m_HasSel = m_Selecting = false;
+        m_Origin               = glm::vec3( 0.0f );
+        m_BakedGrid            = -1.0f;
+        m_PlaneNa = 1, m_PlaneSign = 1, m_PlaneCell = 0;
     }
 } // namespace Desert::Editor::Tools
