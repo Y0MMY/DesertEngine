@@ -918,6 +918,10 @@ namespace Desert::Core::Serialize
         Register( MakeReflected<ECS::UIIconComponent, ECS::UIIconData>( "UIIcon", "UIIconData",
                                                                         &ECS::UIIconComponent::Data ) );
 
+        Register( MakeReflected<ECS::UIScreenComponent, ECS::UIScreenData>( "UIScreen", "UIScreenData",
+                                                                            &ECS::UIScreenComponent::Data ) );
+        Register( MakeReflected<ECS::UIScreenStackComponent, ECS::UIScreenStackData>(
+             "UIScreenStack", "UIScreenStackData", &ECS::UIScreenStackComponent::Data ) );
         Register( MakeReflected<ECS::UITweenComponent, ECS::UITweenData>( "UITween", "UITweenData",
                                                                           &ECS::UITweenComponent::Data ) );
         Register( MakeReflected<ECS::UIPointerEventsComponent, ECS::UIPointerEventsData>(

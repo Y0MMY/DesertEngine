@@ -1069,6 +1069,44 @@ namespace Desert::ECS
         UITweenData Data;
     };
 
+    // A screen (page) of a canvas: everything under this element is shown only while it is the current
+    // screen. Sibling screens are the states of a small machine — a button with Action = ShowScreen moves
+    // between them and BackScreen returns, so a menu with pages needs no scripting.
+    struct UIScreenData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Screen Name" ), Category( "UI Screen" ) )
+        std::string Name; // referenced by a ShowScreen button; empty = never selectable
+    };
+    struct UIScreenComponent
+    {
+        UIScreenData Data;
+    };
+
+    // How screens hand over. Lives on the canvas; the current screen and the back-stack are RUNTIME state
+    // kept outside the component, so navigating in the editor never rewrites the authored scene.
+    struct UIScreenStackData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Initial Screen" ), Category( "UI Screens" ) )
+        std::string InitialScreen; // empty = the first UIScreen found
+
+        PROPERTY( DisplayName( "Transition" ), Category( "UI Screens" ), Range( 0.0f, 3.0f ) )
+        float TransitionTime = 0.25f; // 0 = cut
+
+        PROPERTY( DisplayName( "Slide (px)" ), Category( "UI Screens" ), Range( -1200.0f, 1200.0f ) )
+        float SlidePx = 60.0f; // the incoming screen slides in from this far right; out goes the other way
+
+        PROPERTY( DisplayName( "Easing" ), Category( "UI Screens" ) )
+        UIEasing Easing = UIEasing::CubicOut;
+    };
+    struct UIScreenStackComponent
+    {
+        UIScreenStackData Data;
+    };
+
     // Pointer callbacks on any UI element. Each message is dispatched exactly like a button's action, so a
     // host that already handles UIButton actions handles these for free. Empty = that edge fires nothing.
     struct UIPointerEventsData
@@ -1251,7 +1289,9 @@ namespace Desert::ECS
         SendMessage,
         LoadScene,
         QuitGame,
-        OpenURL
+        OpenURL,
+        ShowScreen, // switch the canvas to the UIScreen named in On Click Message (pushes onto the stack)
+        BackScreen  // return to the screen underneath (does nothing at the bottom of the stack)
     };
 
     struct UIButtonData

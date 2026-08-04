@@ -11,6 +11,12 @@
     "ReferenceHeight": 1080.0,
     "MatchWidthHeight": 0.5,
     "Visible": true
+   },
+   "UIScreenStack": {
+    "InitialScreen": "Main",
+    "TransitionTime": 0.28,
+    "SlidePx": 90.0,
+    "Easing": 5
    }
   },
   {
@@ -235,9 +241,40 @@
    }
   },
   {
+   "id": 1060,
+   "Tag": "Screen_Main",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIScreen": {
+    "Name": "Main"
+   }
+  },
+  {
    "id": 1008,
    "Tag": "Nav",
-   "parent": 1001,
+   "parent": 1060,
    "UILayout": {
     "AnchorMin": [
      0,
@@ -899,7 +936,8 @@
      0.1,
      0.14
     ],
-    "Action": 1
+    "Action": 5,
+    "OnClickMessage": "Settings"
    },
    "UITween": {
     "Property": 0,
@@ -1145,7 +1183,7 @@
   {
    "id": 1027,
    "Tag": "Side",
-   "parent": 1001,
+   "parent": 1060,
    "UILayout": {
     "AnchorMin": [
      1,
@@ -2107,6 +2145,348 @@
      0.55,
      0.62,
      0.73
+    ]
+   }
+  },
+  {
+   "id": 1061,
+   "Tag": "Screen_Settings",
+   "parent": 1001,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIScreen": {
+    "Name": "Settings"
+   }
+  },
+  {
+   "id": 1062,
+   "Tag": "SettingsCard",
+   "parent": 1061,
+   "UILayout": {
+    "AnchorMin": [
+     0.5,
+     0.5
+    ],
+    "AnchorMax": [
+     0.5,
+     0.5
+    ],
+    "OffsetMin": [
+     -320,
+     -200
+    ],
+    "OffsetMax": [
+     320,
+     200
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIPanel": {
+    "Color": [
+     0.055,
+     0.075,
+     0.11
+    ],
+    "Opacity": 0.92,
+    "CornerRadius": 22.0,
+    "Shadow": true,
+    "ShadowColor": [
+     0,
+     0,
+     0
+    ],
+    "ShadowOffset": [
+     0,
+     8
+    ]
+   },
+   "UITween": {
+    "Property": 1,
+    "From": [
+     0.0,
+     -24.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.35,
+    "Delay": 0.0,
+    "Easing": 7,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
+   }
+  },
+  {
+   "id": 1063,
+   "Tag": "SettingsTitle",
+   "parent": 1062,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     28,
+     24
+    ],
+    "OffsetMax": [
+     -28,
+     72
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "НАСТРОЙКИ",
+    "FontSize": 30.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.92,
+     0.95,
+     1.0
+    ]
+   }
+  },
+  {
+   "id": 1064,
+   "Tag": "SettingsRow1",
+   "parent": 1062,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     28,
+     96
+    ],
+    "OffsetMax": [
+     -28,
+     140
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Разрешение      1920 x 1080",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.75,
+     0.8,
+     0.88
+    ]
+   }
+  },
+  {
+   "id": 1065,
+   "Tag": "SettingsRow2",
+   "parent": 1062,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     28,
+     148
+    ],
+    "OffsetMax": [
+     -28,
+     192
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Громкость        80%",
+    "FontSize": 20.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.75,
+     0.8,
+     0.88
+    ]
+   }
+  },
+  {
+   "id": 1066,
+   "Tag": "SettingsHint",
+   "parent": 1062,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     0
+    ],
+    "OffsetMin": [
+     28,
+     208
+    ],
+    "OffsetMax": [
+     -28,
+     248
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "Экран-состояние: Back возвращает на Main",
+    "FontSize": 16.0,
+    "Align": 0,
+    "VerticalAlign": 1,
+    "Color": [
+     0.45,
+     0.52,
+     0.62
+    ]
+   }
+  },
+  {
+   "id": 1067,
+   "Tag": "Btn_Back",
+   "parent": 1062,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     1
+    ],
+    "AnchorMax": [
+     0,
+     1
+    ],
+    "OffsetMin": [
+     28,
+     -84
+    ],
+    "OffsetMax": [
+     208,
+     -28
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIButton": {
+    "NormalColor": [
+     0.16,
+     0.2,
+     0.28
+    ],
+    "HoverColor": [
+     0.24,
+     0.3,
+     0.4
+    ],
+    "PressedColor": [
+     0.12,
+     0.15,
+     0.2
+    ],
+    "CornerRadius": 12.0,
+    "Action": 6,
+    "OnClickMessage": ""
+   }
+  },
+  {
+   "id": 1068,
+   "Tag": "Btn_BackLbl",
+   "parent": 1067,
+   "UILayout": {
+    "AnchorMin": [
+     0,
+     0
+    ],
+    "AnchorMax": [
+     1,
+     1
+    ],
+    "OffsetMin": [
+     0,
+     0
+    ],
+    "OffsetMax": [
+     0,
+     0
+    ],
+    "CustomMinimumSize": [
+     0,
+     0
+    ],
+    "ClipContents": false
+   },
+   "UIText": {
+    "Text": "< BACK",
+    "FontSize": 20.0,
+    "Align": 1,
+    "VerticalAlign": 1,
+    "Color": [
+     0.9,
+     0.94,
+     1.0
     ]
    }
   }

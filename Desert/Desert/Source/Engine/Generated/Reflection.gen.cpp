@@ -315,6 +315,23 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UIScreenData;
+                TypeBuilder( "UIScreenData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Name", .Type = FieldType::String, .Offset = offsetof( T, Name ), .Size = sizeof( T::Name ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Screen Name", .Category = "UI Screen", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::UIScreenStackData;
+                TypeBuilder( "UIScreenStackData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "InitialScreen", .Type = FieldType::String, .Offset = offsetof( T, InitialScreen ), .Size = sizeof( T::InitialScreen ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Initial Screen", .Category = "UI Screens", } } )
+                    .Field( FieldInfo{ .Name = "TransitionTime", .Type = FieldType::Float, .Offset = offsetof( T, TransitionTime ), .Size = sizeof( T::TransitionTime ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Transition", .Category = "UI Screens", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 3.0f, } } )
+                    .Field( FieldInfo{ .Name = "SlidePx", .Type = FieldType::Float, .Offset = offsetof( T, SlidePx ), .Size = sizeof( T::SlidePx ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Slide (px)", .Category = "UI Screens", .HasRange = true, .RangeMin = -1200.0f, .RangeMax = 1200.0f, } } )
+                    .Field( FieldInfo{ .Name = "Easing", .Type = FieldType::Enum, .Offset = offsetof( T, Easing ), .Size = sizeof( T::Easing ), .TypeName = "UIEasing", .Meta = PropertyMetadata{ .DisplayName = "Easing", .Category = "UI Screens", }, .EnumValues = { EnumValue{ "Linear", 0 }, EnumValue{ "QuadIn", 1 }, EnumValue{ "QuadOut", 2 }, EnumValue{ "QuadInOut", 3 }, EnumValue{ "CubicIn", 4 }, EnumValue{ "CubicOut", 5 }, EnumValue{ "CubicInOut", 6 }, EnumValue{ "BackOut", 7 }, EnumValue{ "ElasticOut", 8 }, EnumValue{ "BounceOut", 9 }, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UIPointerEventsData;
                 TypeBuilder( "UIPointerEventsData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "OnEnterMessage", .Type = FieldType::String, .Offset = offsetof( T, OnEnterMessage ), .Size = sizeof( T::OnEnterMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Enter", .Category = "UI Pointer Events", } } )
@@ -391,7 +408,7 @@ namespace
                     .Field( FieldInfo{ .Name = "NormalColor", .Type = FieldType::Vec3, .Offset = offsetof( T, NormalColor ), .Size = sizeof( T::NormalColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Normal", .Category = "UI Button", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "HoverColor", .Type = FieldType::Vec3, .Offset = offsetof( T, HoverColor ), .Size = sizeof( T::HoverColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Hover", .Category = "UI Button", .IsColor = true, } } )
                     .Field( FieldInfo{ .Name = "PressedColor", .Type = FieldType::Vec3, .Offset = offsetof( T, PressedColor ), .Size = sizeof( T::PressedColor ), .TypeName = "glm::vec3", .Meta = PropertyMetadata{ .DisplayName = "Pressed", .Category = "UI Button", .IsColor = true, } } )
-                    .Field( FieldInfo{ .Name = "Action", .Type = FieldType::Enum, .Offset = offsetof( T, Action ), .Size = sizeof( T::Action ), .TypeName = "UIButtonAction", .Meta = PropertyMetadata{ .DisplayName = "Click Action", .Category = "UI Button", }, .EnumValues = { EnumValue{ "None", 0 }, EnumValue{ "SendMessage", 1 }, EnumValue{ "LoadScene", 2 }, EnumValue{ "QuitGame", 3 }, EnumValue{ "OpenURL", 4 }, } } )
+                    .Field( FieldInfo{ .Name = "Action", .Type = FieldType::Enum, .Offset = offsetof( T, Action ), .Size = sizeof( T::Action ), .TypeName = "UIButtonAction", .Meta = PropertyMetadata{ .DisplayName = "Click Action", .Category = "UI Button", }, .EnumValues = { EnumValue{ "None", 0 }, EnumValue{ "SendMessage", 1 }, EnumValue{ "LoadScene", 2 }, EnumValue{ "QuitGame", 3 }, EnumValue{ "OpenURL", 4 }, EnumValue{ "ShowScreen", 5 }, EnumValue{ "BackScreen", 6 }, } } )
                     .Field( FieldInfo{ .Name = "OnClickMessage", .Type = FieldType::String, .Offset = offsetof( T, OnClickMessage ), .Size = sizeof( T::OnClickMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Action Target", .Category = "UI Button", } } )
                     .Field( FieldInfo{ .Name = "Sprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Sprite ), .Size = sizeof( T::Sprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Sprite", .Category = "UI Button", } } )
                     .Field( FieldInfo{ .Name = "HoverSprite", .Type = FieldType::AssetHandle, .Offset = offsetof( T, HoverSprite ), .Size = sizeof( T::HoverSprite ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Hover Sprite", .Category = "UI Button", } } )

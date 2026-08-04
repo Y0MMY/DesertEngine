@@ -46,6 +46,27 @@ namespace Desert::UI
             return t;
         }
 
+        // --- Screens ----------------------------------------------------------------------------------
+        // A canvas can hold several UIScreen sub-trees; exactly one is current, and a ShowScreen button
+        // moves between them (BackScreen returns). Like the tweens, the live state is kept HERE and not in
+        // the component: navigating in the editor must not rewrite the authored scene.
+        std::string              s_Screen;                // current screen name
+        std::string              s_ScreenFrom;            // the one handing over, while a transition runs
+        std::vector<std::string> s_ScreenStack;           // history for BackScreen
+        float                    s_ScreenT       = 1.0f;  // 0..1 progress of the current transition (1 = idle)
+        float                    s_ScreenSlidePx = 60.0f; // mirrored from the canvas's UIScreenStack
+        float                    s_ScreenTime    = 0.25f;
+        ECS::UIEasing            s_ScreenEasing  = ECS::UIEasing::CubicOut;
+        bool                     s_ScreenBack = false; // true when the transition is a Back (slides the other way)
+        std::string              s_ScreenReq; // requested by a button this frame, applied at the walk's end
+        bool                     s_ScreenReqBack = false;
+
+        void RequestScreen( const std::string& name, bool back )
+        {
+            s_ScreenReq     = name;
+            s_ScreenReqBack = back;
+        }
+
         // --- Tweens -----------------------------------------------------------------------------------
         // A generic from->to animation, evaluated here on the way to the screen and NEVER written back
         // into the authored component — so a tween is safe to run in the editor, previews live in Design
@@ -906,17 +927,47 @@ namespace Desert::UI
                 }
             }
 
+            // Screen gating: a screen sub-tree draws only while it is current, or while it is the one
+            // handing over. During a hand-over both are on screen — the incoming sliding in and fading up,
+            // the outgoing doing the reverse — which is the whole transition.
+            float     screenFade = 1.0f;
+            glm::vec2 screenSlide( 0.0f );
+            if ( reg.has<ECS::UIScreenComponent>( e ) )
+            {
+                const std::string& name      = reg.get<ECS::UIScreenComponent>( e ).Data.Name;
+                const bool         isCurrent = ( name == s_Screen );
+                const bool         isLeaving = ( name == s_ScreenFrom && s_ScreenT < 1.0f );
+                if ( !isCurrent && !isLeaving )
+                    return; // not on screen: skip the whole sub-tree, input included
+
+                if ( s_ScreenT < 1.0f )
+                {
+                    const float k   = Ease( s_ScreenEasing, s_ScreenT );
+                    const float dir = s_ScreenBack ? -1.0f : 1.0f;
+                    if ( isCurrent )
+                    {
+                        screenFade    = k;
+                        screenSlide.x = ( 1.0f - k ) * s_ScreenSlidePx * dir;
+                    }
+                    else // leaving: pushed out the opposite way
+                    {
+                        screenFade    = 1.0f - k;
+                        screenSlide.x = -k * s_ScreenSlidePx * dir;
+                    }
+                }
+            }
+
             // Tween: shift/resize the resolved rect and stage the colour multiplier its draws will use.
             // Applied on the way out, never written back — see SampleTween.
             const TweenSample tween = SampleTween( reg, e );
-            rect.X += tween.Offset.x * scale;
-            rect.Y += tween.Offset.y * scale;
+            rect.X += ( tween.Offset.x + screenSlide.x ) * scale;
+            rect.Y += ( tween.Offset.y + screenSlide.y ) * scale;
             rect.W += tween.Size.x * scale;
             rect.H += tween.Size.y * scale;
 
             // Tints nest: a faded panel fades its children with it.
             const glm::vec4 parentTint = s_Tint;
-            s_Tint                     = parentTint * tween.Tint;
+            s_Tint                     = parentTint * tween.Tint * glm::vec4( 1.0f, 1.0f, 1.0f, screenFade );
             struct TintRestore
             {
                 glm::vec4 Prev;
@@ -1007,6 +1058,15 @@ namespace Desert::UI
                                 break;
                             case ECS::UIButtonAction::OpenURL:
                                 *outClicked = "url:" + b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::ShowScreen:
+                                // Handled inside the canvas — the host never sees a screen switch.
+                                RequestScreen( b.OnClickMessage, false );
+                                *outClicked = "screen:" + b.OnClickMessage;
+                                break;
+                            case ECS::UIButtonAction::BackScreen:
+                                RequestScreen( "", true );
+                                *outClicked = "screen:back";
                                 break;
                             case ECS::UIButtonAction::SendMessage:
                                 *outClicked = b.OnClickMessage;
@@ -1386,6 +1446,46 @@ namespace Desert::UI
         const Rect childRoot = InsetRect( canvasRect, canvasData.SafeArea.x * scale, canvasData.SafeArea.y * scale,
                                           canvasData.SafeArea.z * scale, canvasData.SafeArea.w * scale );
 
+        // --- Screen machine: seed on first use, then advance the running transition ---
+        {
+            if ( reg.has<ECS::UIScreenStackComponent>( canvasEntity ) )
+            {
+                const auto& st  = reg.get<ECS::UIScreenStackComponent>( canvasEntity ).Data;
+                s_ScreenTime    = st.TransitionTime;
+                s_ScreenSlidePx = st.SlidePx;
+                s_ScreenEasing  = st.Easing;
+                if ( s_Screen.empty() )
+                    s_Screen = st.InitialScreen;
+            }
+            // Seed, or re-seed when the current name doesn't exist here — otherwise a name left over from
+            // another scene would hide every screen in this one.
+            std::string firstScreen;
+            bool        currentExists = false;
+            for ( auto se : reg.view<ECS::UIScreenComponent>() )
+            {
+                const std::string& n = reg.get<ECS::UIScreenComponent>( se ).Data.Name;
+                if ( n.empty() )
+                    continue;
+                if ( firstScreen.empty() )
+                    firstScreen = n;
+                if ( n == s_Screen )
+                    currentExists = true;
+            }
+            if ( !firstScreen.empty() && !currentExists )
+            {
+                s_Screen = firstScreen;
+                s_ScreenFrom.clear();
+                s_ScreenStack.clear();
+                s_ScreenT = 1.0f;
+            }
+            if ( s_ScreenT < 1.0f )
+            {
+                s_ScreenT = s_ScreenTime > 0.0f ? std::min( 1.0f, s_ScreenT + s_FrameDt / s_ScreenTime ) : 1.0f;
+                if ( s_ScreenT >= 1.0f )
+                    s_ScreenFrom.clear(); // hand-over finished; the outgoing screen stops drawing
+            }
+        }
+
         std::vector<PopupInfo>    popups;
         std::vector<entt::entity> focusables;
         if ( reg.has<ECS::RelationshipComponent>( canvasEntity ) )
@@ -1493,6 +1593,33 @@ namespace Desert::UI
                 dl.AddRect( mn, mx, glm::vec4( 0.75f, 0.87f, 1.0f, s_Drag.Ghost ), 2.0f );
             }
         }
+        // A ShowScreen / BackScreen button fired during the walk: start the hand-over now, so the very
+        // next frame already draws both screens mid-transition.
+        if ( !s_ScreenReq.empty() || s_ScreenReqBack )
+        {
+            if ( s_ScreenReqBack )
+            {
+                if ( !s_ScreenStack.empty() ) // at the bottom of the stack Back is simply ignored
+                {
+                    s_ScreenFrom = s_Screen;
+                    s_Screen     = s_ScreenStack.back();
+                    s_ScreenStack.pop_back();
+                    s_ScreenT    = 0.0f;
+                    s_ScreenBack = true;
+                }
+            }
+            else if ( s_ScreenReq != s_Screen )
+            {
+                s_ScreenStack.push_back( s_Screen );
+                s_ScreenFrom = s_Screen;
+                s_Screen     = s_ScreenReq;
+                s_ScreenT    = 0.0f;
+                s_ScreenBack = false;
+            }
+            s_ScreenReq.clear();
+            s_ScreenReqBack = false;
+        }
+
         s_Hot     = s_HotNext; // hand this frame's election to the next one
         s_HotNext = entt::null;
 

@@ -87,7 +87,10 @@ approved per the engine's "no magic dependencies" rule).
       curves incl. Back/Elastic/Bounce, Once / Loop / PingPong, delay for staggering, rewind-on-hide),
       evaluated on the way to the screen so it never writes back into authored data; plus the earlier
       pulse / marquee ticker / eased hover. *(triggering a tween from an event still todo)*
-- [ ] Transitions between screens/states, UI **state machine**
+- [x] Transitions between screens/states — `UIScreen` sub-trees + `UIScreenStack` on the canvas, driven
+      by the ShowScreen / BackScreen button actions: the incoming screen slides+fades in while the
+      outgoing does the reverse, with a real back-stack. Runtime state lives outside the components, so
+      navigating in the editor never rewrites the scene
 - [ ] **UI Sequencer** (reuse engine Sequencer): tracks on position/color/opacity/scale
 - [ ] Spring/physics motion; Lottie playback (dep)
 
@@ -121,7 +124,7 @@ approved per the engine's "no magic dependencies" rule).
 ## J. App/runtime level
 - [x] **Splash screen** (image, duration, fade) in `SceneSettings`, shown on scene load
 - [x] **Example: MainMenu** authored as a loadable `.desce` (sprite icon blocks, buttons, layout) — reference scene
-- [ ] **Screen/navigation stack** (pages, push/pop, back), scene transitions (fade/slide)
+- [x] **Screen/navigation stack** (pages, push/pop, back) with fade+slide transitions — see F
 - [x] Button actions: SendMessage / LoadScene / Quit / OpenURL (Custom-Lua todo)
 - [ ] Audio feedback (click/hover sounds), haptics (mobile)
 - [ ] In-game debug/console UI, pause menu, HUD system
@@ -151,15 +154,14 @@ approved per the engine's "no magic dependencies" rule).
 8. ✅ **Media** — animated GIF + MPEG1 video, video as an `AssetHandle` (drag-drop). (A) *(H.264/webm + audio sync todo)*
 9. ✅ **Icons + shapes** — `UIIcon` vector set + sprite icon blocks; rounded corners, circle/ring. (A/G)
 10. ✅ **Editor authoring polish** — Design↔Preview play-in-editor, click-selects-control + Alt-drill, reveal-in-Outliner, pick inside layout groups; **MainMenu** example scene. (I/J)
-11. 🔶 **UI animation / Sequencer** — pulse/ticker/eased hover + **generic tween tracks** done; screen-transition state machine, Sequencer tracks, Lottie todo. (F)
+11. 🔶 **UI animation / Sequencer** — pulse/ticker/eased hover, **generic tween tracks** and the **screen-transition state machine** done; Sequencer tracks + Lottie todo. (F)
 12. **3D model / render-texture element** + particles-in-UI; richer **Video** (H.264/audio). (A)
 13. **Data binding + Lua** hooks; data-driven virtualized lists. (H)
 14. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
 15. **Localization + accessibility** (K); **Perf pass** — culling, pooling, atlases (G/L).
 
-**Next up (dependency-free):** the F screen-transition state machine (tween tracks are in); gamepad/D-pad
-navigation + event bubbling to finish D; A render-texture element (reuse per-instance SceneRenderer →
-offscreen target).
+**Next up (dependency-free):** gamepad/D-pad navigation + event bubbling to finish D; A render-texture
+element (reuse per-instance SceneRenderer → offscreen target); then F's Sequencer tracks.
 
 Dependencies to approve when reached: pl_mpeg/libvpx or ffmpeg (video), rlottie (Lottie),
 HarfBuzz (complex text). Each: justify size/license/compile-time first. (nanosvg was considered for
