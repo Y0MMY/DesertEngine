@@ -431,21 +431,27 @@ namespace Desert::Editor::Tools
                 m_HasSel    = true;
             }
         }
-        else if ( m_HasSel )
+        else
         {
-            const float planeW = planeWorldOf( m_PlaneNa, m_PlaneSign, m_PlaneCell );
-            drawRect( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, IM_COL32( 250, 150, 40, 60 ),
-                      IM_COL32( 255, 170, 60, 255 ) );
-            drawGridAndDims( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, true );
-        }
-        else if ( toolActive && tHas ) // hover: the Block under the cursor + a helper grid
-        {
-            const int   bu     = FloorDiv( tU, K ) * K;
-            const int   bv     = FloorDiv( tV, K ) * K;
-            const float planeW = planeWorldOf( tNa, tSign, tPlaneCell );
-            drawRect( bu, bu + K - 1, bv, bv + K - 1, tNa, planeW, IM_COL32( 70, 220, 100, 60 ),
-                      IM_COL32( 90, 240, 120, 255 ) );
-            drawGridAndDims( bu - 6 * K, bu + 7 * K - 1, bv - 6 * K, bv + 7 * K - 1, tNa, planeW, false );
+            // The committed selection stays highlighted (a repeat Push/Pull acts on it)...
+            if ( m_HasSel )
+            {
+                const float planeW = planeWorldOf( m_PlaneNa, m_PlaneSign, m_PlaneCell );
+                drawRect( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, IM_COL32( 250, 150, 40, 55 ),
+                          IM_COL32( 255, 170, 60, 235 ) );
+                drawGridAndDims( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, true );
+            }
+            // ...and the green Block preview ALWAYS tracks the cursor, so you always see where the next
+            // selection begins (a fresh LMB drag replaces the committed one).
+            if ( toolActive && tHas )
+            {
+                const int   bu     = FloorDiv( tU, K ) * K;
+                const int   bv     = FloorDiv( tV, K ) * K;
+                const float planeW = planeWorldOf( tNa, tSign, tPlaneCell );
+                drawGridAndDims( bu - 6 * K, bu + 7 * K - 1, bv - 6 * K, bv + 7 * K - 1, tNa, planeW, false );
+                drawRect( bu, bu + K - 1, bv, bv + K - 1, tNa, planeW, IM_COL32( 70, 220, 100, 70 ),
+                          IM_COL32( 90, 240, 120, 255 ) );
+            }
         }
 
         // Re-bake if the base resolution changed (a refine this frame).
