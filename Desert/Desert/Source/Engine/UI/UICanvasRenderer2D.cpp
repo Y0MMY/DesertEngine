@@ -46,6 +46,145 @@ namespace Desert::UI
             return t;
         }
 
+        // --- Tweens -----------------------------------------------------------------------------------
+        // A generic from->to animation, evaluated here on the way to the screen and NEVER written back
+        // into the authored component — so a tween is safe to run in the editor, previews live in Design
+        // mode, and stopping it simply restores the authored look.
+        std::unordered_map<entt::entity, float>    s_TweenT;    // per-entity clock (transient, like s_HoverT)
+        std::unordered_map<entt::entity, uint64_t> s_TweenSeen; // frame the tween was last evaluated on
+        uint64_t                                   s_FrameIndex = 0;
+
+        float Ease( ECS::UIEasing e, float t )
+        {
+            t = std::clamp( t, 0.0f, 1.0f );
+            switch ( e )
+            {
+                case ECS::UIEasing::QuadIn:
+                    return t * t;
+                case ECS::UIEasing::QuadOut:
+                    return 1.0f - ( 1.0f - t ) * ( 1.0f - t );
+                case ECS::UIEasing::QuadInOut:
+                    return t < 0.5f ? 2.0f * t * t : 1.0f - 2.0f * ( 1.0f - t ) * ( 1.0f - t );
+                case ECS::UIEasing::CubicIn:
+                    return t * t * t;
+                case ECS::UIEasing::CubicOut:
+                    return 1.0f - std::pow( 1.0f - t, 3.0f );
+                case ECS::UIEasing::CubicInOut:
+                    return t < 0.5f ? 4.0f * t * t * t : 1.0f - std::pow( -2.0f * t + 2.0f, 3.0f ) * 0.5f;
+                case ECS::UIEasing::BackOut:
+                {
+                    constexpr float c1 = 1.70158f, c3 = c1 + 1.0f;
+                    return 1.0f + c3 * std::pow( t - 1.0f, 3.0f ) + c1 * std::pow( t - 1.0f, 2.0f );
+                }
+                case ECS::UIEasing::ElasticOut:
+                {
+                    if ( t <= 0.0f || t >= 1.0f )
+                        return t;
+                    constexpr float c4 = 2.0f * 3.14159265f / 3.0f;
+                    return std::pow( 2.0f, -10.0f * t ) * std::sin( ( t * 10.0f - 0.75f ) * c4 ) + 1.0f;
+                }
+                case ECS::UIEasing::BounceOut:
+                {
+                    constexpr float n1 = 7.5625f, d1 = 2.75f;
+                    if ( t < 1.0f / d1 )
+                        return n1 * t * t;
+                    if ( t < 2.0f / d1 )
+                    {
+                        t -= 1.5f / d1;
+                        return n1 * t * t + 0.75f;
+                    }
+                    if ( t < 2.5f / d1 )
+                    {
+                        t -= 2.25f / d1;
+                        return n1 * t * t + 0.9375f;
+                    }
+                    t -= 2.625f / d1;
+                    return n1 * t * t + 0.984375f;
+                }
+                case ECS::UIEasing::Linear:
+                default:
+                    return t;
+            }
+        }
+
+        // What a tween contributes this frame. Identity when the element has none.
+        struct TweenSample
+        {
+            glm::vec2 Offset{ 0.0f }; // design px
+            glm::vec2 Size{ 0.0f };   // design px
+            glm::vec4 Tint{ 1.0f };   // multiplies colour + alpha
+        };
+
+        TweenSample SampleTween( entt::registry& reg, entt::entity e )
+        {
+            TweenSample out;
+            if ( !reg.has<ECS::UITweenComponent>( e ) )
+                return out;
+            const auto& tw = reg.get<ECS::UITweenComponent>( e ).Data;
+
+            float&    clock    = s_TweenT[e];
+            uint64_t& lastSeen = s_TweenSeen[e];
+            // Not evaluated last frame => this element was hidden (or the canvas was). Replaying from the
+            // top is what an intro tween should do when its screen comes back.
+            if ( tw.RewindOnHide && lastSeen + 1 != s_FrameIndex )
+                clock = 0.0f;
+            lastSeen = s_FrameIndex;
+
+            if ( tw.Playing )
+                clock += s_FrameDt;
+
+            const float dur = std::max( 0.001f, tw.Duration );
+            float       t   = ( clock - tw.Delay ) / dur; // <0 while delayed
+            switch ( tw.Loop )
+            {
+                case ECS::UITweenLoop::Loop:
+                    t = t > 0.0f ? std::fmod( t, 1.0f ) : 0.0f;
+                    break;
+                case ECS::UITweenLoop::PingPong:
+                {
+                    if ( t > 0.0f )
+                    {
+                        const float cycle = std::fmod( t, 2.0f );
+                        t                 = cycle <= 1.0f ? cycle : 2.0f - cycle;
+                    }
+                    else
+                        t = 0.0f;
+                    break;
+                }
+                case ECS::UITweenLoop::Once:
+                default:
+                    t = std::clamp( t, 0.0f, 1.0f );
+                    break;
+            }
+
+            const glm::vec4 v = glm::mix( tw.From, tw.To, Ease( tw.Easing, t ) );
+            switch ( tw.Property )
+            {
+                case ECS::UITweenProperty::Offset:
+                    out.Offset = glm::vec2( v );
+                    break;
+                case ECS::UITweenProperty::Size:
+                    out.Size = glm::vec2( v );
+                    break;
+                case ECS::UITweenProperty::Opacity:
+                    out.Tint.a = v.x;
+                    break;
+                case ECS::UITweenProperty::Color:
+                    out.Tint = glm::vec4( glm::vec3( v ), 1.0f );
+                    break;
+            }
+            return out;
+        }
+
+        // The tint of the element being drawn — multiplied into its colours so Opacity/Color tweens reach
+        // every control without threading a parameter through each one.
+        glm::vec4 s_Tint{ 1.0f };
+
+        glm::vec4 Tinted( const glm::vec4& c )
+        {
+            return c * s_Tint;
+        }
+
         // --- Hit testing ------------------------------------------------------------------------------
         // Controls used to each test the cursor against their own rect, so two overlapping ones both lit
         // up. Instead the walk elects a single HOT element: every raycast-target whose rect (and clip)
@@ -405,7 +544,7 @@ namespace Desert::UI
             };
 
             const std::vector<StyledChar> chars =
-                 BuildStyledChars( t.Text, glm::vec4( t.Color, 1.0f ), t.RichText );
+                 BuildStyledChars( t.Text, Tinted( glm::vec4( t.Color, 1.0f ) ), t.RichText );
 
             // Marquee: a single clipped line scrolling leftward, repeated seamlessly across the width. A news
             // ticker / running banner. Pure function of the shared clock, so it needs no per-frame state.
@@ -698,7 +837,7 @@ namespace Desert::UI
                                       static_cast<float>( layer.RGBA & 0xFF ) / 255.0f );
                 dl.AddText( atlas, { c.x - w * 0.5f, c.y - h * 0.5f }, { c.x + w * 0.5f, c.y + h * 0.5f },
                             { layer.U0, layer.V0 }, { layer.U1, layer.V1 },
-                            glm::vec4( glm::vec3( fill ) * ic.Color, fill.a ) );
+                            Tinted( glm::vec4( glm::vec3( fill ) * ic.Color, fill.a ) ) );
             }
         }
 
@@ -767,6 +906,26 @@ namespace Desert::UI
                 }
             }
 
+            // Tween: shift/resize the resolved rect and stage the colour multiplier its draws will use.
+            // Applied on the way out, never written back — see SampleTween.
+            const TweenSample tween = SampleTween( reg, e );
+            rect.X += tween.Offset.x * scale;
+            rect.Y += tween.Offset.y * scale;
+            rect.W += tween.Size.x * scale;
+            rect.H += tween.Size.y * scale;
+
+            // Tints nest: a faded panel fades its children with it.
+            const glm::vec4 parentTint = s_Tint;
+            s_Tint                     = parentTint * tween.Tint;
+            struct TintRestore
+            {
+                glm::vec4 Prev;
+                ~TintRestore()
+                {
+                    s_Tint = Prev;
+                }
+            } tintRestore{ parentTint };
+
             // Interaction flags live on the layout (every UI element has one); a rect handed down by a
             // layout group inherits the same defaults.
             const bool interactable  = !hasLayout || reg.get<ECS::UILayoutComponent>( e ).Data.Interactable;
@@ -819,8 +978,8 @@ namespace Desert::UI
                         spr = b.PressedSprite;
                     else if ( hover && HandleSet( b.HoverSprite ) )
                         spr = b.HoverSprite;
-                    DrawBox( dl, mn, mx, glm::vec4( c, b.Disabled ? 0.6f : 1.0f ), spr, b.SpriteBorder, scale,
-                             6.0f * scale );
+                    DrawBox( dl, mn, mx, Tinted( glm::vec4( c, b.Disabled ? 0.6f : 1.0f ) ), spr, b.SpriteBorder,
+                             scale, 6.0f * scale );
 
                     // Selected accent: a rounded bar hugging the left edge (the "you are here" marker).
                     if ( b.Selected && !b.Disabled )
@@ -896,12 +1055,14 @@ namespace Desert::UI
                                                           static_cast<uint64_t>( p.Video ) )
                                                    : nullptr;
                     if ( video )
-                        dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f }, glm::vec4( p.Color, op ) );
+                        dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f },
+                                     Tinted( glm::vec4( p.Color, op ) ) );
                     else if ( p.UseGradient && !HandleSet( p.Sprite ) )
-                        dl.AddRectFilledMultiColor( mn, mx, glm::vec4( p.Color, op ),
+                        dl.AddRectFilledMultiColor( mn, mx, Tinted( glm::vec4( p.Color, op ) ),
                                                     glm::vec4( p.GradientColor, op ) );
                     else
-                        DrawBox( dl, mn, mx, glm::vec4( p.Color, op ), p.Sprite, p.SpriteBorder, scale, rounding );
+                        DrawBox( dl, mn, mx, Tinted( glm::vec4( p.Color, op ) ), p.Sprite, p.SpriteBorder, scale,
+                                 rounding );
 
                     // Gradient ring hugging the edge (avatar / status / progress ring).
                     if ( p.RingWidth > 0.0f )
@@ -920,7 +1081,7 @@ namespace Desert::UI
                 {
                     const auto& pb = reg.get<ECS::UIProgressBarComponent>( e ).Data;
                     const float r  = pb.CornerRadius * scale;
-                    dl.AddRectFilled( mn, mx, glm::vec4( pb.Background, 1.0f ), r );
+                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( pb.Background, 1.0f ) ), r );
                     const float t = std::clamp( pb.Value, 0.0f, 1.0f );
                     if ( t > 0.0f )
                         dl.AddRectFilled( mn, { mn.x + rect.W * t, mx.y }, glm::vec4( pb.Fill, 1.0f ), r );
@@ -930,7 +1091,7 @@ namespace Desert::UI
                     auto&      tg    = reg.get<ECS::UIToggleComponent>( e ).Data;
                     const bool  hover = input && hot;
                     const float r = tg.CornerRadius * scale;
-                    dl.AddRectFilled( mn, mx, glm::vec4( tg.BoxColor, 1.0f ), r );
+                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( tg.BoxColor, 1.0f ) ), r );
                     if ( tg.Value )
                     {
                         const float pad = std::min( rect.W, rect.H ) * 0.22f; // inset "check" fill
@@ -950,7 +1111,7 @@ namespace Desert::UI
                     const float fillX = mn.x + rect.W * t;
                     const float cy    = ( mn.y + mx.y ) * 0.5f;
                     const float hs    = rect.H * 0.6f; // handle half-size (circle via rounding)
-                    dl.AddRectFilled( mn, mx, glm::vec4( sl.TrackColor, 1.0f ), pill );
+                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( sl.TrackColor, 1.0f ) ), pill );
                     if ( t > 0.0f )
                         dl.AddRectFilled( mn, { fillX, mx.y }, glm::vec4( sl.FillColor, 1.0f ), pill );
                     dl.AddRectFilled( { fillX - hs, cy - hs }, { fillX + hs, cy + hs },
@@ -970,7 +1131,7 @@ namespace Desert::UI
                     const bool isFocused = focused && *focused == e;
                     const bool hover     = input && hot;
 
-                    dl.AddRectFilled( mn, mx, glm::vec4( f.Background, 1.0f ), f.CornerRadius * scale );
+                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( f.Background, 1.0f ) ), f.CornerRadius * scale );
                     if ( isFocused )
                         dl.AddRect( mn, mx, glm::vec4( f.FocusColor, 1.0f ), std::max( 1.0f, 2.0f * scale ) );
 
@@ -1007,7 +1168,7 @@ namespace Desert::UI
                     auto&      d       = reg.get<ECS::UIDropdownComponent>( e ).Data;
                     const auto options = SplitOptions( d.Options );
 
-                    dl.AddRectFilled( mn, mx, glm::vec4( d.Background, 1.0f ), d.CornerRadius * scale );
+                    dl.AddRectFilled( mn, mx, Tinted( glm::vec4( d.Background, 1.0f ) ), d.CornerRadius * scale );
 
                     ECS::UITextData td;
                     td.Text     = ( d.SelectedIndex >= 0 && d.SelectedIndex < (int)options.size() )
@@ -1045,8 +1206,8 @@ namespace Desert::UI
                     // With no sprite bound it draws nothing (an empty Image is invisible, not a solid box).
                     const auto& im = reg.get<ECS::UIImageComponent>( e ).Data;
                     if ( HandleSet( im.Sprite ) )
-                        DrawBox( dl, mn, mx, glm::vec4( im.Tint, im.Opacity ), im.Sprite, im.SpriteBorder, scale,
-                                 0.0f );
+                        DrawBox( dl, mn, mx, Tinted( glm::vec4( im.Tint, im.Opacity ) ), im.Sprite,
+                                 im.SpriteBorder, scale, 0.0f );
                 }
 
                 // Keyboard focus: record this control for Tab-cycling, and draw a focus ring when it holds
@@ -1179,6 +1340,7 @@ namespace Desert::UI
             const float  now   = NowSeconds();
             s_FrameDt          = std::clamp( now - lastT, 0.0f, 0.1f );
             lastT              = now;
+            ++s_FrameIndex; // drives the tween rewind-on-hide check
         }
 
         // A scene swap leaves the elected entity dangling — drop it rather than matching a recycled id.

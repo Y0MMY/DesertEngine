@@ -300,6 +300,21 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UITweenData;
+                TypeBuilder( "UITweenData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Property", .Type = FieldType::Enum, .Offset = offsetof( T, Property ), .Size = sizeof( T::Property ), .TypeName = "UITweenProperty", .Meta = PropertyMetadata{ .DisplayName = "Property", .Category = "UI Tween", }, .EnumValues = { EnumValue{ "Offset", 0 }, EnumValue{ "Size", 1 }, EnumValue{ "Opacity", 2 }, EnumValue{ "Color", 3 }, } } )
+                    .Field( FieldInfo{ .Name = "From", .Type = FieldType::Vec4, .Offset = offsetof( T, From ), .Size = sizeof( T::From ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "From", .Category = "UI Tween", .Tooltip = "Offset/Size: xy in design px. Opacity: x. Color: rgb.", } } )
+                    .Field( FieldInfo{ .Name = "To", .Type = FieldType::Vec4, .Offset = offsetof( T, To ), .Size = sizeof( T::To ), .TypeName = "glm::vec4", .Meta = PropertyMetadata{ .DisplayName = "To", .Category = "UI Tween", } } )
+                    .Field( FieldInfo{ .Name = "Duration", .Type = FieldType::Float, .Offset = offsetof( T, Duration ), .Size = sizeof( T::Duration ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Duration", .Category = "UI Tween", .HasRange = true, .RangeMin = 0.01f, .RangeMax = 20.0f, } } )
+                    .Field( FieldInfo{ .Name = "Delay", .Type = FieldType::Float, .Offset = offsetof( T, Delay ), .Size = sizeof( T::Delay ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Delay", .Category = "UI Tween", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 20.0f, } } )
+                    .Field( FieldInfo{ .Name = "Easing", .Type = FieldType::Enum, .Offset = offsetof( T, Easing ), .Size = sizeof( T::Easing ), .TypeName = "UIEasing", .Meta = PropertyMetadata{ .DisplayName = "Easing", .Category = "UI Tween", }, .EnumValues = { EnumValue{ "Linear", 0 }, EnumValue{ "QuadIn", 1 }, EnumValue{ "QuadOut", 2 }, EnumValue{ "QuadInOut", 3 }, EnumValue{ "CubicIn", 4 }, EnumValue{ "CubicOut", 5 }, EnumValue{ "CubicInOut", 6 }, EnumValue{ "BackOut", 7 }, EnumValue{ "ElasticOut", 8 }, EnumValue{ "BounceOut", 9 }, } } )
+                    .Field( FieldInfo{ .Name = "Loop", .Type = FieldType::Enum, .Offset = offsetof( T, Loop ), .Size = sizeof( T::Loop ), .TypeName = "UITweenLoop", .Meta = PropertyMetadata{ .DisplayName = "Loop", .Category = "UI Tween", }, .EnumValues = { EnumValue{ "Once", 0 }, EnumValue{ "Loop", 1 }, EnumValue{ "PingPong", 2 }, } } )
+                    .Field( FieldInfo{ .Name = "Playing", .Type = FieldType::Bool, .Offset = offsetof( T, Playing ), .Size = sizeof( T::Playing ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Playing", .Category = "UI Tween", } } )
+                    .Field( FieldInfo{ .Name = "RewindOnHide", .Type = FieldType::Bool, .Offset = offsetof( T, RewindOnHide ), .Size = sizeof( T::RewindOnHide ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Rewind On Hide", .Category = "UI Tween", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UIPointerEventsData;
                 TypeBuilder( "UIPointerEventsData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "OnEnterMessage", .Type = FieldType::String, .Offset = offsetof( T, OnEnterMessage ), .Size = sizeof( T::OnEnterMessage ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "On Enter", .Category = "UI Pointer Events", } } )

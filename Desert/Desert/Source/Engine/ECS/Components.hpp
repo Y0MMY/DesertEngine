@@ -998,6 +998,77 @@ namespace Desert::ECS
         UIPanelData Data;
     };
 
+    // What a tween drives. From/To are read per property: Offset/Size use xy (design px), Opacity uses x,
+    // Color uses rgb — one vec4 keeps the component flat instead of four half-used fields.
+    enum class UITweenProperty
+    {
+        Offset,  // slide: shifts the resolved rect
+        Size,    // grow/shrink: adds to the rect's width/height
+        Opacity, // fade: multiplies the element's alpha
+        Color    // tint: multiplies the element's colour
+    };
+
+    enum class UIEasing
+    {
+        Linear,
+        QuadIn,
+        QuadOut,
+        QuadInOut,
+        CubicIn,
+        CubicOut,
+        CubicInOut,
+        BackOut, // overshoots then settles — the "pop" of a modal
+        ElasticOut,
+        BounceOut
+    };
+
+    enum class UITweenLoop
+    {
+        Once,
+        Loop,
+        PingPong
+    };
+
+    // A generic from->to animation on any UI element, evaluated while the canvas is drawn. It never
+    // writes back into the authored fields — the value is applied on the way to the screen — so a tween
+    // running in the editor cannot corrupt the scene, and Design mode previews it live.
+    struct UITweenData
+    {
+        REFLECT()
+
+        PROPERTY( DisplayName( "Property" ), Category( "UI Tween" ) )
+        UITweenProperty Property = UITweenProperty::Offset;
+
+        PROPERTY( DisplayName( "From" ), Category( "UI Tween" ),
+                  Tooltip( "Offset/Size: xy in design px. Opacity: x. Color: rgb." ) )
+        glm::vec4 From = glm::vec4( 0.0f );
+
+        PROPERTY( DisplayName( "To" ), Category( "UI Tween" ) )
+        glm::vec4 To = glm::vec4( 0.0f );
+
+        PROPERTY( DisplayName( "Duration" ), Category( "UI Tween" ), Range( 0.01f, 20.0f ) )
+        float Duration = 0.4f;
+
+        PROPERTY( DisplayName( "Delay" ), Category( "UI Tween" ), Range( 0.0f, 20.0f ) )
+        float Delay = 0.0f;
+
+        PROPERTY( DisplayName( "Easing" ), Category( "UI Tween" ) )
+        UIEasing Easing = UIEasing::CubicOut;
+
+        PROPERTY( DisplayName( "Loop" ), Category( "UI Tween" ) )
+        UITweenLoop Loop = UITweenLoop::Once;
+
+        PROPERTY( DisplayName( "Playing" ), Category( "UI Tween" ) )
+        bool Playing = true; // clear to freeze at the current value; set to (re)start from the delay
+
+        PROPERTY( DisplayName( "Rewind On Hide" ), Category( "UI Tween" ) )
+        bool RewindOnHide = true; // a canvas that goes invisible replays from the top when it returns
+    };
+    struct UITweenComponent
+    {
+        UITweenData Data;
+    };
+
     // Pointer callbacks on any UI element. Each message is dispatched exactly like a button's action, so a
     // host that already handles UIButton actions handles these for free. Empty = that edge fires nothing.
     struct UIPointerEventsData

@@ -83,7 +83,10 @@ approved per the engine's "no magic dependencies" rule).
 - [x] Text effects: outline, shadow, gradient, glow
 
 ## F. Animation
-- [~] Tween/easing + triggers — **pulse, marquee ticker, eased hover transitions** done; generic from→to curve tracks todo
+- [x] Tween/easing — **generic from→to tracks** (`UITween`: Offset / Size / Opacity / Color, 10 easing
+      curves incl. Back/Elastic/Bounce, Once / Loop / PingPong, delay for staggering, rewind-on-hide),
+      evaluated on the way to the screen so it never writes back into authored data; plus the earlier
+      pulse / marquee ticker / eased hover. *(triggering a tween from an event still todo)*
 - [ ] Transitions between screens/states, UI **state machine**
 - [ ] **UI Sequencer** (reuse engine Sequencer): tracks on position/color/opacity/scale
 - [ ] Spring/physics motion; Lottie playback (dep)
@@ -148,15 +151,15 @@ approved per the engine's "no magic dependencies" rule).
 8. ✅ **Media** — animated GIF + MPEG1 video, video as an `AssetHandle` (drag-drop). (A) *(H.264/webm + audio sync todo)*
 9. ✅ **Icons + shapes** — `UIIcon` vector set + sprite icon blocks; rounded corners, circle/ring. (A/G)
 10. ✅ **Editor authoring polish** — Design↔Preview play-in-editor, click-selects-control + Alt-drill, reveal-in-Outliner, pick inside layout groups; **MainMenu** example scene. (I/J)
-11. 🔶 **UI animation / Sequencer** — first tweens (pulse/ticker/eased hover) done; generic curve tracks, state machine, transitions, Lottie todo. (F)
+11. 🔶 **UI animation / Sequencer** — pulse/ticker/eased hover + **generic tween tracks** done; screen-transition state machine, Sequencer tracks, Lottie todo. (F)
 12. **3D model / render-texture element** + particles-in-UI; richer **Video** (H.264/audio). (A)
 13. **Data binding + Lua** hooks; data-driven virtualized lists. (H)
 14. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
 15. **Localization + accessibility** (K); **Perf pass** — culling, pooling, atlases (G/L).
 
-**Next up (dependency-free):** gamepad/D-pad navigation + event bubbling to finish D; then F generic
-tween tracks + screen-transition state machine; A render-texture element (reuse per-instance
-SceneRenderer → offscreen target).
+**Next up (dependency-free):** the F screen-transition state machine (tween tracks are in); gamepad/D-pad
+navigation + event bubbling to finish D; A render-texture element (reuse per-instance SceneRenderer →
+offscreen target).
 
 Dependencies to approve when reached: pl_mpeg/libvpx or ffmpeg (video), rlottie (Lottie),
 HarfBuzz (complex text). Each: justify size/license/compile-time first. (nanosvg was considered for

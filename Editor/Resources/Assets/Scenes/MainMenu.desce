@@ -328,6 +328,27 @@
      0.55,
      0.2
     ]
+   },
+   "UITween": {
+    "Property": 0,
+    "From": [
+     -40.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.45,
+    "Delay": 0.0,
+    "Easing": 5,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -450,6 +471,27 @@
      0.14
     ],
     "Action": 1
+   },
+   "UITween": {
+    "Property": 0,
+    "From": [
+     -40.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.45,
+    "Delay": 0.06,
+    "Easing": 5,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -572,6 +614,27 @@
      0.14
     ],
     "Action": 1
+   },
+   "UITween": {
+    "Property": 0,
+    "From": [
+     -40.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.45,
+    "Delay": 0.12,
+    "Easing": 5,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -694,6 +757,27 @@
      0.14
     ],
     "Action": 1
+   },
+   "UITween": {
+    "Property": 0,
+    "From": [
+     -40.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.45,
+    "Delay": 0.18,
+    "Easing": 5,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -816,6 +900,27 @@
      0.14
     ],
     "Action": 1
+   },
+   "UITween": {
+    "Property": 0,
+    "From": [
+     -40.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.45,
+    "Delay": 0.24,
+    "Easing": 5,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -938,6 +1043,27 @@
      0.14
     ],
     "Action": 3
+   },
+   "UITween": {
+    "Property": 0,
+    "From": [
+     -40.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.45,
+    "Delay": 0.3,
+    "Easing": 5,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -1100,6 +1226,27 @@
      0,
      6
     ]
+   },
+   "UITween": {
+    "Property": 2,
+    "From": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     1.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.5,
+    "Delay": 0.25,
+    "Easing": 2,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -1353,6 +1500,27 @@
      0,
      6
     ]
+   },
+   "UITween": {
+    "Property": 2,
+    "From": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     1.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.5,
+    "Delay": 0.25,
+    "Easing": 2,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {
@@ -1643,6 +1811,27 @@
      0,
      6
     ]
+   },
+   "UITween": {
+    "Property": 2,
+    "From": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "To": [
+     1.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "Duration": 0.5,
+    "Delay": 0.25,
+    "Easing": 2,
+    "Loop": 0,
+    "Playing": true,
+    "RewindOnHide": true
    }
   },
   {

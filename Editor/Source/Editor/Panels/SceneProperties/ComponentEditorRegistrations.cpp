@@ -59,6 +59,7 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIPanelComponent, Data, "UIP
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UITextComponent2D, Data, "UITextData", "UI Text" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIButtonComponent, Data, "UIButtonData", "UI Button" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIIconComponent, Data, "UIIconData", "UI Icon" )
+DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UITweenComponent, Data, "UITweenData", "UI Tween" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIPointerEventsComponent, Data, "UIPointerEventsData",
                                      "UI Pointer Events" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIDraggableComponent, Data, "UIDraggableData", "UI Draggable" )
