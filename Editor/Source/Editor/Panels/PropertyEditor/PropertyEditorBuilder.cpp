@@ -340,22 +340,36 @@ namespace Desert::Editor
                                       : ( curPath.empty() ? "(missing)"
                                                           : std::filesystem::path( curPath ).stem().string() );
 
-                    // Swatch of the bound icon. The SDF's alpha channel holds a sharpened coverage mask
-                    // (see IconService), so a plain alpha-blended draw shows the real silhouette.
+                    // Swatch of the bound icon: every colour run stacked in place, each in its own fill, so
+                    // a multi-colour icon previews the way it will actually draw. The atlas alpha channel
+                    // holds a sharpened coverage mask (see IconService), hence a crisp silhouette here.
                     const float          swatch = ImGui::GetFrameHeight();
                     Runtime::Icon* const icon   = ( is && *handle != 0 ) ? is->Get( *handle ) : nullptr;
-                    if ( uiHelper && icon && icon->Atlas )
+                    if ( uiHelper && icon && icon->Valid() && is->Atlas() )
                     {
-                        const ImVec2 p0 = ImGui::GetCursorScreenPos();
-                        ImGui::GetWindowDrawList()->AddRectFilled( p0, ImVec2( p0.x + swatch, p0.y + swatch ),
-                                                                   IM_COL32( 28, 30, 36, 255 ), 3.0f );
-                        uiHelper->Image( icon->Atlas, ImVec2( swatch, swatch ), ImVec2( icon->U0, icon->V0 ),
-                                         ImVec2( icon->U1, icon->V1 ) );
+                        const void* tex   = uiHelper->GetTextureID( is->Atlas() );
+                        auto        stack = [&]( const ImVec2& at, float side )
+                        {
+                            ImDrawList* dl = ImGui::GetWindowDrawList();
+                            dl->AddRectFilled( at, ImVec2( at.x + side, at.y + side ), IM_COL32( 28, 30, 36, 255 ),
+                                               3.0f );
+                            if ( !tex )
+                                return;
+                            for ( const Runtime::IconLayer& l : icon->Layers )
+                                dl->AddImage( reinterpret_cast<ImTextureID>( const_cast<void*>( tex ) ), at,
+                                              ImVec2( at.x + side, at.y + side ), ImVec2( l.U0, l.V0 ),
+                                              ImVec2( l.U1, l.V1 ),
+                                              IM_COL32( ( l.RGBA >> 24 ) & 0xFF, ( l.RGBA >> 16 ) & 0xFF,
+                                                        ( l.RGBA >> 8 ) & 0xFF, 255 ) );
+                        };
+
+                        stack( ImGui::GetCursorScreenPos(), swatch );
+                        ImGui::Dummy( ImVec2( swatch, swatch ) );
                         if ( ImGui::IsItemHovered() )
                         {
                             ImGui::BeginTooltip();
-                            uiHelper->Image( icon->Atlas, ImVec2( 128.0f, 128.0f ), ImVec2( icon->U0, icon->V0 ),
-                                             ImVec2( icon->U1, icon->V1 ) );
+                            stack( ImGui::GetCursorScreenPos(), 128.0f );
+                            ImGui::Dummy( ImVec2( 128.0f, 128.0f ) );
                             ImGui::TextUnformatted( std::filesystem::path( curPath ).filename().string().c_str() );
                             ImGui::EndTooltip();
                         }

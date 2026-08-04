@@ -666,10 +666,14 @@ namespace Desert::Vector
         return out;
     }
 
-    std::vector<uint8_t> RasterizeSdf( const VectorImage& image, uint32_t size, int padding )
+    std::vector<uint8_t> RasterizeSdf( const VectorImage& image, uint32_t size, int padding, size_t shapeBegin,
+                                       size_t shapeEnd )
     {
         std::vector<uint8_t> out;
         if ( !image.Valid() || size == 0 || padding < 0 )
+            return out;
+        shapeEnd = std::min( shapeEnd, image.Shapes.size() );
+        if ( shapeBegin >= shapeEnd )
             return out;
 
         // Fit the viewBox into the inner box, preserving aspect and centring the shorter axis.
@@ -683,8 +687,8 @@ namespace Desert::Vector
             float X0, Y0, X1, Y1;
         };
         std::vector<Seg> segs;
-        for ( const Shape& sh : image.Shapes )
-            for ( const auto& c : sh.Contours )
+        for ( size_t si = shapeBegin; si < shapeEnd; ++si )
+            for ( const auto& c : image.Shapes[si].Contours )
                 for ( size_t k = 0; k < c.size(); ++k )
                 {
                     const Vec2 a = c[k];

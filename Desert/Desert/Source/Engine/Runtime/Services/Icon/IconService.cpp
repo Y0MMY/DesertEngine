@@ -19,6 +19,11 @@ namespace Desert::Runtime
         // reconstructs the edge analytically, so this is about gradient quality, not pixel resolution.
         constexpr uint32_t kIconSize    = 64;
         constexpr int      kIconPadding = 6;
+        constexpr uint32_t kCellDim     = kIconSize + 2u * static_cast<uint32_t>( kIconPadding );
+
+        constexpr uint32_t kAtlasStart = 256;  // grows by doubling as icons are imported
+        constexpr uint32_t kAtlasMax   = 2048; // 16 MB RGBA8 — hundreds of icons; refuse rather than crawl
+        constexpr uint32_t kSpacing    = 1;    // gutter so bilinear sampling never pulls in a neighbour
     } // namespace
 
     uint64_t IconService::RegisterIcon( const std::string& svgPath )
@@ -52,44 +57,124 @@ namespace Desert::Runtime
         if ( const auto it = m_Icons.find( path ); it != m_Icons.end() )
             return it->second.get();
 
-        const auto svg = Common::Utils::FileSystem::ReadByteFileContent( path );
-        if ( svg.empty() )
+        auto  icon    = std::make_unique<Icon>();
+        Icon* raw     = icon.get();
+        m_Icons[path] = std::move( icon ); // insert first: a failed import negative-caches itself
+
+        const auto svgFile = Common::Utils::FileSystem::ReadByteFileContent( path );
+        if ( svgFile.empty() )
         {
             LOG_ERROR( "[IconService] Cannot read icon '{}'", path );
-            m_Icons[path] = std::make_unique<Icon>(); // negative-cache: don't retry every frame
-            return m_Icons[path].get();
+            return raw;
         }
 
         const Vector::VectorImage image =
-             Vector::ParseSvg( reinterpret_cast<const char*>( svg.data() ), svg.size() );
-        const std::vector<uint8_t> sdf  = Vector::RasterizeSdf( image, kIconSize, kIconPadding );
-        auto                       icon = std::make_unique<Icon>();
-        if ( sdf.empty() )
+             Vector::ParseSvg( reinterpret_cast<const char*>( svgFile.data() ), svgFile.size() );
+        if ( !image.Valid() )
         {
-            LOG_ERROR( "[IconService] '{}' has no filled shapes this importer understands", path );
-            m_Icons[path] = std::move( icon );
-            return m_Icons[path].get();
+            LOG_ERROR( "[IconService] '{}' has no shapes this importer understands", path );
+            return raw;
+        }
+        raw->Aspect = image.Height > 0.0f ? image.Width / image.Height : 1.0f;
+
+        // Bake one layer per COLOUR RUN. Consecutive shapes sharing a fill collapse into a single layer
+        // (fewer quads); a new colour starts a new one, and document order is preserved so overlapping
+        // paths still paint back-to-front exactly as the .svg says.
+        const size_t firstBitmap = m_Bitmaps.size();
+        size_t       runStart    = 0;
+        for ( size_t i = 1; i <= image.Shapes.size(); ++i )
+        {
+            const bool endOfRun =
+                 ( i == image.Shapes.size() ) || ( image.Shapes[i].FillRGBA != image.Shapes[runStart].FillRGBA );
+            if ( !endOfRun )
+                continue;
+
+            std::vector<uint8_t> sdf = Vector::RasterizeSdf( image, kIconSize, kIconPadding, runStart, i );
+            if ( !sdf.empty() )
+            {
+                LayerBitmap lb;
+                lb.Sdf   = std::move( sdf );
+                lb.Dim   = kCellDim;
+                lb.RGBA  = image.Shapes[runStart].FillRGBA;
+                lb.Owner = path;
+                m_Bitmaps.push_back( std::move( lb ) );
+                raw->Layers.push_back( IconLayer{ 0.0f, 0.0f, 1.0f, 1.0f, image.Shapes[runStart].FillRGBA } );
+            }
+            runStart = i;
         }
 
-        const uint32_t dim = kIconSize + 2u * static_cast<uint32_t>( kIconPadding );
+        if ( raw->Layers.empty() )
+        {
+            LOG_ERROR( "[IconService] '{}' has no filled shapes", path );
+            return raw;
+        }
+        if ( !RepackAtlas() )
+        {
+            m_Bitmaps.resize( firstBitmap ); // roll the new runs back out so the atlas stays consistent
+            raw->Layers.clear();
+            RepackAtlas();
+            return raw;
+        }
+        LOG_INFO( "[IconService] Imported '{}' ({} layer(s)) into the {}x{} icon atlas", path, raw->Layers.size(),
+                  m_AtlasSize, m_AtlasSize );
+        return raw;
+    }
 
-        // The engine's sampled formats are RGBA8 (no R8), so RGB carries the distance field — the UI text
-        // shader samples .r and reconstructs the edge itself. ALPHA is free (the shader never reads it), so
-        // it gets a sharpened coverage mask instead: any plain alpha-blended draw — the editor's Details
-        // preview — then shows the icon's real silhouette rather than a soft grey blob, at zero cost.
-        std::vector<unsigned char> rgba( static_cast<size_t>( dim ) * dim * 4 );
+    bool IconService::RepackAtlas()
+    {
+        if ( m_Bitmaps.empty() )
+        {
+            m_Atlas.reset();
+            m_AtlasSize = 0;
+            return true;
+        }
+
+        // Every cell is the same size, so the shelf packer degenerates into a grid: find the smallest
+        // power-of-two page that holds them all, growing by doubling.
+        const uint32_t stride = kCellDim + kSpacing;
+        uint32_t       dim    = std::max( kAtlasStart, m_AtlasSize );
+        uint32_t       perRow = 0;
+        while ( true )
+        {
+            perRow              = dim / stride;
+            const uint32_t rows = perRow ? ( static_cast<uint32_t>( m_Bitmaps.size() ) + perRow - 1 ) / perRow : 0;
+            if ( perRow > 0 && rows * stride <= dim )
+                break;
+            if ( dim >= kAtlasMax )
+            {
+                LOG_ERROR( "[IconService] Icon atlas is full at {}x{} ({} layers) — icon not imported", dim, dim,
+                           m_Bitmaps.size() );
+                return false;
+            }
+            dim *= 2;
+        }
+
+        // RGB carries the distance field (the UI text shader samples .r and reconstructs the edge itself).
+        // ALPHA is free, so it gets a sharpened coverage mask: any plain alpha-blended draw — the editor's
+        // Details preview — then shows the icon's real silhouette rather than a soft grey blob.
+        std::vector<unsigned char> rgba( static_cast<size_t>( dim ) * dim * 4, 0 );
         const float                edge     = static_cast<float>( Vector::kSdfOnEdgeValue );
-        const float                perTexel = edge / static_cast<float>( kIconPadding ); // SDF units / texel
-        for ( size_t i = 0; i < sdf.size(); ++i )
+        const float                perTexel = edge / static_cast<float>( kIconPadding );
+
+        for ( size_t i = 0; i < m_Bitmaps.size(); ++i )
         {
-            const float cov = ( static_cast<float>( sdf[i] ) - edge ) * ( 255.0f / perTexel ) + 128.0f;
-            rgba[i * 4 + 0] = sdf[i];
-            rgba[i * 4 + 1] = sdf[i];
-            rgba[i * 4 + 2] = sdf[i];
-            rgba[i * 4 + 3] = static_cast<unsigned char>( std::clamp( cov, 0.0f, 255.0f ) );
+            const LayerBitmap& lb = m_Bitmaps[i];
+            const uint32_t     ox = static_cast<uint32_t>( i % perRow ) * stride;
+            const uint32_t     oy = static_cast<uint32_t>( i / perRow ) * stride;
+            for ( uint32_t y = 0; y < lb.Dim; ++y )
+                for ( uint32_t x = 0; x < lb.Dim; ++x )
+                {
+                    const uint8_t v   = lb.Sdf[static_cast<size_t>( y ) * lb.Dim + x];
+                    const float   cov = ( static_cast<float>( v ) - edge ) * ( 255.0f / perTexel ) + 128.0f;
+                    const size_t  d   = ( static_cast<size_t>( oy + y ) * dim + ( ox + x ) ) * 4;
+                    rgba[d + 0]       = v;
+                    rgba[d + 1]       = v;
+                    rgba[d + 2]       = v;
+                    rgba[d + 3]       = static_cast<unsigned char>( std::clamp( cov, 0.0f, 255.0f ) );
+                }
         }
 
-        Core::Formats::Image2DSpecification spec = { .Tag        = "IconSDF:" + path,
+        Core::Formats::Image2DSpecification spec = { .Tag        = "IconAtlas",
                                                      .Width      = dim,
                                                      .Height     = dim,
                                                      .Format     = Core::Formats::ImageFormat::RGBA8F,
@@ -98,19 +183,39 @@ namespace Desert::Runtime
                                                      .Usage      = Core::Formats::Image2DUsage::Image2D,
                                                      .Properties = Core::Formats::Sample };
 
-        icon->Atlas = Graphic::Image2D::Create( spec, nullptr );
-        if ( !icon->Atlas )
+        auto atlas = Graphic::Image2D::Create( spec, nullptr );
+        if ( !atlas )
         {
-            LOG_ERROR( "[IconService] GPU upload failed for '{}'", path );
+            LOG_ERROR( "[IconService] GPU upload failed for the {}x{} icon atlas", dim, dim );
+            return false;
         }
-        else
-        {
-            LOG_INFO( "[IconService] Imported '{}' -> {}x{} SDF", path, dim, dim );
-        }
+        if ( m_Atlas )
+            m_Retired.push_back( std::move( m_Atlas ) ); // outlive any in-flight frame that still cites it
+        m_Atlas     = std::move( atlas );
+        m_AtlasSize = dim;
 
-        icon->Aspect  = image.Height > 0.0f ? image.Width / image.Height : 1.0f;
-        m_Icons[path] = std::move( icon );
-        return m_Icons[path].get();
+        // Re-address every icon's layers into the new page. An icon's colour runs were pushed
+        // consecutively, so finding its first cell is enough to walk them in order.
+        const float inv = 1.0f / static_cast<float>( dim );
+        for ( const auto& [path, icon] : m_Icons )
+        {
+            size_t cell = 0;
+            while ( cell < m_Bitmaps.size() && m_Bitmaps[cell].Owner != path )
+                ++cell;
+            for ( IconLayer& layer : icon->Layers )
+            {
+                if ( cell >= m_Bitmaps.size() )
+                    break;
+                const uint32_t ox = static_cast<uint32_t>( cell % perRow ) * stride;
+                const uint32_t oy = static_cast<uint32_t>( cell / perRow ) * stride;
+                layer.U0          = static_cast<float>( ox ) * inv;
+                layer.V0          = static_cast<float>( oy ) * inv;
+                layer.U1          = static_cast<float>( ox + kCellDim ) * inv;
+                layer.V1          = static_cast<float>( oy + kCellDim ) * inv;
+                ++cell;
+            }
+        }
+        return true;
     }
 
     const std::vector<std::string>& IconService::AvailableIcons()
@@ -123,8 +228,12 @@ namespace Desert::Runtime
     {
         m_Icons.clear();
         m_HandleToPath.clear();
+        m_Bitmaps.clear();
         m_Available.clear();
-        m_Scanned = false;
+        m_Atlas.reset();
+        m_Retired.clear();
+        m_AtlasSize = 0;
+        m_Scanned   = false;
     }
 
     void IconService::EnsurePreloaded()

@@ -54,5 +54,10 @@ namespace Desert::Vector
     // the outline, `kSdfOnEdgeValue` at the edge, rising inside. Distances are exact (per-texel nearest
     // segment) rather than a propagated transform — an icon is small and this runs at import time only.
     // Returns an empty vector if the image is invalid.
-    std::vector<uint8_t> RasterizeSdf( const VectorImage& image, uint32_t size, int padding = 6 );
+    //
+    // [shapeBegin, shapeEnd) selects a RANGE of shapes; the default takes them all. A multi-colour icon
+    // is baked one colour run at a time, and because the fit box is always derived from the WHOLE image
+    // every range lands in the same frame — so the layers stack back up perfectly.
+    std::vector<uint8_t> RasterizeSdf( const VectorImage& image, uint32_t size, int padding = 6,
+                                       size_t shapeBegin = 0, size_t shapeEnd = static_cast<size_t>( -1 ) );
 } // namespace Desert::Vector

@@ -628,7 +628,7 @@ namespace Desert::UI
             if ( !icons )
                 return;
             Runtime::Icon* icon = icons->Get( static_cast<uint64_t>( ic.Icon ) );
-            if ( !icon || !icon->Atlas ) // unset or unreadable: draw nothing rather than a placeholder box
+            if ( !icon || !icon->Valid() || !icons->Atlas() ) // unset/unreadable: draw nothing, no placeholder
                 return;
 
             const float box = std::min( rect.W, rect.H ) * std::clamp( ic.Scale, 0.1f, 1.0f );
@@ -639,8 +639,20 @@ namespace Desert::UI
             const float     h = icon->Aspect >= 1.0f ? box / icon->Aspect : box;
             const glm::vec2 c( rect.X + rect.W * 0.5f, rect.Y + rect.H * 0.5f );
 
-            dl.AddText( icon->Atlas.get(), { c.x - w * 0.5f, c.y - h * 0.5f }, { c.x + w * 0.5f, c.y + h * 0.5f },
-                        { icon->U0, icon->V0 }, { icon->U1, icon->V1 }, glm::vec4( ic.Color, 1.0f ) );
+            // One quad per colour run, painted back-to-front in document order. A monochrome icon is a
+            // single white layer, so Color tints it outright; a multi-colour one keeps the fills the .svg
+            // authored and Color multiplies them (white = exactly as drawn).
+            const void* atlas = icons->Atlas().get();
+            for ( const Runtime::IconLayer& layer : icon->Layers )
+            {
+                const glm::vec4 fill( static_cast<float>( ( layer.RGBA >> 24 ) & 0xFF ) / 255.0f,
+                                      static_cast<float>( ( layer.RGBA >> 16 ) & 0xFF ) / 255.0f,
+                                      static_cast<float>( ( layer.RGBA >> 8 ) & 0xFF ) / 255.0f,
+                                      static_cast<float>( layer.RGBA & 0xFF ) / 255.0f );
+                dl.AddText( atlas, { c.x - w * 0.5f, c.y - h * 0.5f }, { c.x + w * 0.5f, c.y + h * 0.5f },
+                            { layer.U0, layer.V0 }, { layer.U1, layer.V1 },
+                            glm::vec4( glm::vec3( fill ) * ic.Color, fill.a ) );
+            }
         }
 
         // Content size (px) a layout-group container needs to hug its children — for the Content Size Fitter.
