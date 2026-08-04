@@ -340,45 +340,49 @@ namespace Desert::Editor
                                       : ( curPath.empty() ? "(missing)"
                                                           : std::filesystem::path( curPath ).stem().string() );
 
-                    // Swatch of the bound icon: every colour run stacked in place, each in its own fill, so
-                    // a multi-colour icon previews the way it will actually draw. The atlas alpha channel
-                    // holds a sharpened coverage mask (see IconService), hence a crisp silhouette here.
-                    const float          swatch = ImGui::GetFrameHeight();
-                    Runtime::Icon* const icon   = ( is && *handle != 0 ) ? is->Get( *handle ) : nullptr;
-                    if ( uiHelper && icon && icon->Valid() && is->Atlas() )
+                    // A REAL preview, not a chip: every colour run stacked at size, each in its own fill, so
+                    // a multi-colour icon previews exactly the way it will draw. The atlas alpha channel
+                    // carries a sharpened coverage mask (see IconService), hence a crisp silhouette here.
+                    constexpr float      kPreview = 96.0f;
+                    Runtime::Icon* const icon     = ( is && *handle != 0 ) ? is->Get( *handle ) : nullptr;
+                    const bool           drawable = uiHelper && icon && icon->Valid() && is->Atlas();
                     {
-                        const void* tex   = uiHelper->GetTextureID( is->Atlas() );
-                        auto        stack = [&]( const ImVec2& at, float side )
-                        {
-                            ImDrawList* dl = ImGui::GetWindowDrawList();
-                            dl->AddRectFilled( at, ImVec2( at.x + side, at.y + side ), IM_COL32( 28, 30, 36, 255 ),
-                                               3.0f );
-                            if ( !tex )
-                                return;
-                            for ( const Runtime::IconLayer& l : icon->Layers )
-                                dl->AddImage( reinterpret_cast<ImTextureID>( const_cast<void*>( tex ) ), at,
-                                              ImVec2( at.x + side, at.y + side ), ImVec2( l.U0, l.V0 ),
-                                              ImVec2( l.U1, l.V1 ),
-                                              IM_COL32( ( l.RGBA >> 24 ) & 0xFF, ( l.RGBA >> 16 ) & 0xFF,
-                                                        ( l.RGBA >> 8 ) & 0xFF, 255 ) );
-                        };
+                        const ImVec2 at = ImGui::GetCursorScreenPos();
+                        const ImVec2 br( at.x + kPreview, at.y + kPreview );
+                        ImDrawList*  dl = ImGui::GetWindowDrawList();
 
-                        stack( ImGui::GetCursorScreenPos(), swatch );
-                        ImGui::Dummy( ImVec2( swatch, swatch ) );
-                        if ( ImGui::IsItemHovered() )
+                        // Checkerboard backdrop so a light icon reads as clearly as a dark one.
+                        dl->AddRectFilled( at, br, IM_COL32( 32, 34, 40, 255 ), 4.0f );
+                        dl->PushClipRect( at, br, true );
+                        for ( int cy = 0; cy * 12 < static_cast<int>( kPreview ); ++cy )
+                            for ( int cx = ( cy & 1 ); cx * 12 < static_cast<int>( kPreview ); cx += 2 )
+                                dl->AddRectFilled( ImVec2( at.x + cx * 12.0f, at.y + cy * 12.0f ),
+                                                   ImVec2( at.x + cx * 12.0f + 12.0f, at.y + cy * 12.0f + 12.0f ),
+                                                   IM_COL32( 44, 47, 55, 255 ) );
+                        if ( drawable )
                         {
-                            ImGui::BeginTooltip();
-                            stack( ImGui::GetCursorScreenPos(), 128.0f );
-                            ImGui::Dummy( ImVec2( 128.0f, 128.0f ) );
-                            ImGui::TextUnformatted( std::filesystem::path( curPath ).filename().string().c_str() );
-                            ImGui::EndTooltip();
+                            // Fit the source aspect into the box, exactly like the renderer does.
+                            const float  side = kPreview - 12.0f;
+                            const float  w    = icon->Aspect >= 1.0f ? side : side * icon->Aspect;
+                            const float  h    = icon->Aspect >= 1.0f ? side / icon->Aspect : side;
+                            const ImVec2 c( at.x + kPreview * 0.5f, at.y + kPreview * 0.5f );
+                            const ImVec2 p0( c.x - w * 0.5f, c.y - h * 0.5f );
+                            const ImVec2 p1( c.x + w * 0.5f, c.y + h * 0.5f );
+                            if ( const void* tex = uiHelper->GetTextureID( is->Atlas() ) )
+                                for ( const Runtime::IconLayer& l : icon->Layers )
+                                    dl->AddImage( reinterpret_cast<ImTextureID>( const_cast<void*>( tex ) ), p0,
+                                                  p1, ImVec2( l.U0, l.V0 ), ImVec2( l.U1, l.V1 ),
+                                                  IM_COL32( ( l.RGBA >> 24 ) & 0xFF, ( l.RGBA >> 16 ) & 0xFF,
+                                                            ( l.RGBA >> 8 ) & 0xFF, 255 ) );
                         }
+                        dl->PopClipRect();
+                        dl->AddRect( at, br, IM_COL32( 70, 74, 84, 255 ), 4.0f );
+                        ImGui::Dummy( ImVec2( kPreview, kPreview ) );
                     }
-                    else
-                    {
-                        ImGui::Dummy( ImVec2( swatch, swatch ) ); // keep the combo aligned when unset
-                    }
-                    ImGui::SameLine();
+                    if ( icon && icon->Valid() )
+                        ImGui::TextDisabled( "%zu layer%s", icon->Layers.size(),
+                                             icon->Layers.size() == 1 ? "" : "s" );
+
                     ImGui::SetNextItemWidth( -1.0f );
                     if ( ImGui::BeginCombo( "##icon", preview.c_str() ) )
                     {
