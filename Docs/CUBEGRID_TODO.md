@@ -34,6 +34,9 @@ Reference screenshots: `docs/ModelingImages/`.
   (`EditorCamera::SetKeyboardRequiresLook`), so the bare keys belong to the tool — as in UE. Every action
   also has an on-screen button, and the panel lists the bindings under "Shortcut Info".
 
+**Status 2026-08-04:** Grid Mode, committed layers, UE shortcuts, panel parity and Corner Mode are all in.
+What is left is bake quality, mesh optimisation and the rest of the Create palette — the list below.
+
 ## Remaining
 
 ### 1. Corner Mode — remaining bits
@@ -48,6 +51,8 @@ Remaining:
 - Pick **individual cell corners / edges** (today it is the rectangle's four posts, which is what gives
   clean ramps but can't dent a single cell).
 - **Crosswise Diagonal** (which way a deformed quad is split) + arches from sub-block corner steps.
+- **Drag the posts with the mouse** (snapped to Snap Size) instead of only stepping them with E/Q; the
+  object gizmo is suppressed in Modeling mode, so this would be the tool's own handle.
 
 ### 2. Rotated / local grids
 - **Grid Frame Orientation** + **Local Grid** (World vs Actor) so the lattice follows a rotated object —
