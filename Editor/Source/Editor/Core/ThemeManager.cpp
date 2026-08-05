@@ -22,27 +22,31 @@ namespace Desert::Editor
         ImVec4*  colors = style.Colors;
 
         // ── Palette ─────────────────────────────────────────────────────────
-        const ImVec4 Bg        = C(  28,  28,  28 ); // #1C1C1C  main window / child bg
-        const ImVec4 BgInput   = C(  56,  56,  56 ); // #383838  input / frame bg
-        const ImVec4 BgPopup   = C(  30,  30,  30 ); // #1E1E1E  popup bg
-        const ImVec4 TabActive = C(  45,  45,  45 ); // #2D2D2D  focused tab / active panel
-        const ImVec4 TabInact  = C(  20,  20,  20 ); // #141414  unfocused tab
-        const ImVec4 TitleBar  = C(  20,  20,  20 ); // #141414  title-bar / menu-bar
-        const ImVec4 Border    = C(  55,  55,  55 ); // #373737  borders / separators
-        const ImVec4 Btn       = C(  50,  50,  50 ); // #323232  button normal
-        const ImVec4 BtnHov    = C(  65,  65,  65 ); // #414141  button hovered
-        const ImVec4 BtnAct    = C(  38,  38,  38 ); // #262626  button active (pressed)
-        const ImVec4 Select    = C(  30,  92, 181 ); // #1E5CB5  selection / header selected
-        const ImVec4 SelectHov = C(  40, 105, 198 ); // #2869C6  hovered selection
-        const ImVec4 SelectAct = C(  22,  72, 148 ); // #164894  active selection
-        const ImVec4 Accent    = C(  77, 155, 230 ); // #4D9BE6  checkmark / slider / accent
+        // Sampled straight out of a UE5 screenshot (the Static Mesh Editor), not eyeballed: UE's editor
+        // chrome is a very short ramp — panel #242424, section bar #2F2F2F, every input sunk to near-black
+        // #0F0F0F, and ONE saturated blue for selection. Guessing "a bit lighter here" is exactly what made
+        // the old theme read as a different program in every panel.
+        const ImVec4 Bg        = C( 36, 36, 36 );   // #242424  main window / child / row bg
+        const ImVec4 BgInput   = C( 15, 15, 15 );   // #0F0F0F  input / frame bg (sunk, not raised)
+        const ImVec4 BgPopup   = C( 30, 30, 30 );   // #1E1E1E  popup bg
+        const ImVec4 TabActive = C( 36, 36, 36 );   // #242424  focused tab = the panel it opens
+        const ImVec4 TabInact  = C( 21, 21, 21 );   // #151515  unfocused tab
+        const ImVec4 TitleBar  = C( 21, 21, 21 );   // #151515  title-bar / menu-bar
+        const ImVec4 Border    = C( 26, 26, 26 );   // #1A1A1A  borders / row rules / separators
+        const ImVec4 Btn       = C( 51, 51, 51 );   // #333333  button normal
+        const ImVec4 BtnHov    = C( 64, 64, 64 );   // #404040  button hovered
+        const ImVec4 BtnAct    = C( 41, 41, 41 );   // #292929  button active (pressed)
+        const ImVec4 Select    = C( 0, 112, 224 );  // #0070E0  selection / header selected
+        const ImVec4 SelectHov = C( 26, 133, 240 ); // #1A85F0  hovered selection
+        const ImVec4 SelectAct = C( 0, 88, 176 );   // #0058B0  active selection
+        const ImVec4 Accent    = C( 0, 112, 224 );  // #0070E0  checkmark / slider / accent
 
         s_SelectedColor = Accent;
         s_IconColor     = C( 180, 180, 180 );
 
         // ── Text ─────────────────────────────────────────────────────────────
-        colors[ImGuiCol_Text]         = C( 212, 212, 212 ); // #D4D4D4
-        colors[ImGuiCol_TextDisabled] = C( 108, 108, 108 ); // #6C6C6C
+        colors[ImGuiCol_Text]         = C( 200, 200, 200 ); // #C8C8C8
+        colors[ImGuiCol_TextDisabled] = C( 128, 128, 128 ); // #808080
 
         // ── Windows ──────────────────────────────────────────────────────────
         colors[ImGuiCol_WindowBg]  = Bg;
@@ -55,8 +59,8 @@ namespace Desert::Editor
 
         // ── Frames (input fields, combos) ────────────────────────────────────
         colors[ImGuiCol_FrameBg]        = BgInput;
-        colors[ImGuiCol_FrameBgHovered] = C(  70,  70,  70 );
-        colors[ImGuiCol_FrameBgActive]  = C(  44,  44,  44 );
+        colors[ImGuiCol_FrameBgHovered] = C( 26, 26, 26 );
+        colors[ImGuiCol_FrameBgActive]  = C( 10, 10, 10 );
 
         // ── Title-bars ────────────────────────────────────────────────────────
         colors[ImGuiCol_TitleBg]          = TitleBar;
@@ -65,10 +69,10 @@ namespace Desert::Editor
         colors[ImGuiCol_MenuBarBg]        = TitleBar;
 
         // ── Scrollbars ────────────────────────────────────────────────────────
-        colors[ImGuiCol_ScrollbarBg]          = C( 20, 20, 20,  0 );
-        colors[ImGuiCol_ScrollbarGrab]        = C( 75, 75, 75 );
-        colors[ImGuiCol_ScrollbarGrabHovered] = C( 95, 95, 95 );
-        colors[ImGuiCol_ScrollbarGrabActive]  = C( 115, 115, 115 );
+        colors[ImGuiCol_ScrollbarBg]          = C( 21, 21, 21, 0 );
+        colors[ImGuiCol_ScrollbarGrab]        = C( 80, 80, 80 );
+        colors[ImGuiCol_ScrollbarGrabHovered] = C( 100, 100, 100 );
+        colors[ImGuiCol_ScrollbarGrabActive]  = C( 120, 120, 120 );
 
         // ── Checkmarks / sliders ─────────────────────────────────────────────
         colors[ImGuiCol_CheckMark]        = Accent;
@@ -91,9 +95,9 @@ namespace Desert::Editor
         colors[ImGuiCol_SeparatorActive]  = C( 110, 110, 110 );
 
         // ── Resize grips ──────────────────────────────────────────────────────
-        colors[ImGuiCol_ResizeGrip]        = C( 77, 155, 230,  25 );
-        colors[ImGuiCol_ResizeGripHovered] = C( 77, 155, 230, 170 );
-        colors[ImGuiCol_ResizeGripActive]  = C( 77, 155, 230, 242 );
+        colors[ImGuiCol_ResizeGrip]        = C( 0, 112, 224, 25 );
+        colors[ImGuiCol_ResizeGripHovered] = C( 0, 112, 224, 170 );
+        colors[ImGuiCol_ResizeGripActive]  = C( 0, 112, 224, 242 );
 
         // ── Tabs ──────────────────────────────────────────────────────────────
         colors[ImGuiCol_Tab]                = TabInact;
@@ -103,22 +107,22 @@ namespace Desert::Editor
         colors[ImGuiCol_TabUnfocusedActive] = C( 37, 37, 37 );
 
         // ── Docking ───────────────────────────────────────────────────────────
-        colors[ImGuiCol_DockingEmptyBg] = C( 18, 18, 18 );
-        colors[ImGuiCol_DockingPreview] = C( 30, 92, 181, 178 );
+        colors[ImGuiCol_DockingEmptyBg] = C( 21, 21, 21 );
+        colors[ImGuiCol_DockingPreview] = C( 0, 112, 224, 178 );
 
         // ── Tables ────────────────────────────────────────────────────────────
-        colors[ImGuiCol_TableHeaderBg]     = C( 35, 35, 35 );
+        colors[ImGuiCol_TableHeaderBg]     = C( 47, 47, 47 );
         colors[ImGuiCol_TableBorderStrong] = Border;
-        colors[ImGuiCol_TableBorderLight]  = C( 45, 45, 45 );
+        colors[ImGuiCol_TableBorderLight]  = C( 30, 30, 30 );
         colors[ImGuiCol_TableRowBg]        = ImVec4( 0, 0, 0, 0 );
-        colors[ImGuiCol_TableRowBgAlt]     = C( 33, 33, 33 );
+        colors[ImGuiCol_TableRowBgAlt]     = C( 42, 42, 42 );
 
         // ── Misc ──────────────────────────────────────────────────────────────
         colors[ImGuiCol_PlotLines]             = C( 156, 156, 156 );
         colors[ImGuiCol_PlotLinesHovered]      = Accent;
         colors[ImGuiCol_PlotHistogram]         = C( 230, 179,   0 );
         colors[ImGuiCol_PlotHistogramHovered]  = C( 255, 153,   0 );
-        colors[ImGuiCol_TextSelectedBg]        = C(  30,  92, 181,  89 );
+        colors[ImGuiCol_TextSelectedBg]        = C( 0, 112, 224, 89 );
         colors[ImGuiCol_DragDropTarget]        = Accent;
         colors[ImGuiCol_NavHighlight]          = Accent;
         colors[ImGuiCol_NavWindowingHighlight] = C( 255, 255, 255, 178 );
@@ -126,10 +130,13 @@ namespace Desert::Editor
         colors[ImGuiCol_ModalWindowDimBg]      = C(  20,  20,  20, 140 );
 
         // ── Style / sizes ─────────────────────────────────────────────────────
-        style.WindowPadding     = ImVec2(  8.0f,  8.0f );
-        style.FramePadding      = ImVec2(  5.0f,  3.0f );
-        style.CellPadding       = ImVec2(  4.0f,  2.0f );
-        style.ItemSpacing       = ImVec2(  8.0f,  4.0f );
+        // UE's Details panel is a stack of equal-height bands separated by a 1px rule — no gaps. Hence the
+        // tighter vertical item spacing and the roomier frame padding: the row's height comes from the
+        // control, not from the space around it.
+        style.WindowPadding     = ImVec2( 8.0f, 6.0f );
+        style.FramePadding      = ImVec2( 6.0f, 4.0f );
+        style.CellPadding       = ImVec2( 4.0f, 2.0f );
+        style.ItemSpacing       = ImVec2( 8.0f, 3.0f );
         style.ItemInnerSpacing  = ImVec2(  4.0f,  4.0f );
         style.IndentSpacing     = 18.0f;
         style.ScrollbarSize     = 10.0f;
@@ -143,11 +150,11 @@ namespace Desert::Editor
 
         style.WindowRounding    = 0.0f;
         style.ChildRounding     = 0.0f;
-        style.FrameRounding     = 3.0f;
-        style.PopupRounding     = 3.0f;
+        style.FrameRounding     = 2.0f;
+        style.PopupRounding     = 2.0f;
         style.ScrollbarRounding = 0.0f;
-        style.GrabRounding      = 3.0f;
-        style.TabRounding       = 3.0f;
+        style.GrabRounding      = 2.0f;
+        style.TabRounding       = 2.0f;
 
         style.WindowTitleAlign    = ImVec2( 0.0f, 0.5f );
         style.ColorButtonPosition = ImGuiDir_Left;
@@ -223,6 +230,11 @@ namespace Desert::Editor
     ImVec4 ThemeManager::GetIconColor()
     {
         return s_IconColor;
+    }
+
+    ImVec4 ThemeManager::GetSectionHeaderColor()
+    {
+        return C( 47, 47, 47 ); // #2F2F2F — UE's category bar, one step above the panel
     }
 
 } // namespace Desert::Editor

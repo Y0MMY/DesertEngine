@@ -1,5 +1,6 @@
 #include "ImGuiUtilities.hpp"
 
+#include <Editor/Core/ThemeManager.hpp>
 #include <ImGui/imgui.h>
 #include <ImGui/imgui_internal.h>
 #include <algorithm>
@@ -9,15 +10,18 @@ namespace Desert::Editor::Utils
 {
     static int s_UIContextID = 0;
 
-    bool ImGuiUtilities::SectionHeader( const char* label, bool defaultOpen )
+    bool ImGuiUtilities::SectionHeader( const char* label, bool defaultOpen, const char* detail )
     {
         // ONE look for every section in the editor. Modelled on UE's Details panel: a flat, full-width
         // grey bar with a disclosure triangle — not a tinted rounded pill. A section header is furniture;
         // when it is coloured and rounded it competes with the actual controls for attention, and when
         // every panel invents its own the whole editor reads as unfinished.
-        ImGui::PushStyleColor( ImGuiCol_Header, ImVec4( 0.16f, 0.17f, 0.19f, 1.00f ) );
-        ImGui::PushStyleColor( ImGuiCol_HeaderHovered, ImVec4( 0.21f, 0.22f, 0.25f, 1.00f ) );
-        ImGui::PushStyleColor( ImGuiCol_HeaderActive, ImVec4( 0.24f, 0.26f, 0.29f, 1.00f ) );
+        const ImVec4 bar = ThemeManager::GetSectionHeaderColor();
+        ImGui::PushStyleColor( ImGuiCol_Header, bar );
+        ImGui::PushStyleColor( ImGuiCol_HeaderHovered,
+                               ImVec4( bar.x + 0.05f, bar.y + 0.05f, bar.z + 0.05f, 1.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_HeaderActive,
+                               ImVec4( bar.x + 0.09f, bar.y + 0.09f, bar.z + 0.09f, 1.0f ) );
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 6.0f, 5.0f ) );
         ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 0.0f );
 
@@ -31,39 +35,87 @@ namespace Desert::Editor::Utils
 
         ImGui::PopStyleVar( 2 );
         ImGui::PopStyleColor( 3 );
+
+        if ( detail && *detail )
+        {
+            // Painted into the bar rather than submitted as an item: an item here would sit ON the header
+            // and eat the click that opens it.
+            const ImVec2 barMin = ImGui::GetItemRectMin();
+            const ImVec2 barMax = ImGui::GetItemRectMax();
+            const float  textW  = ImGui::CalcTextSize( detail ).x;
+            const float  labelW = ImGui::CalcTextSize( label ).x + ImGui::GetFontSize() * 2.0f;
+            const float  x      = barMax.x - textW - 8.0f;
+            if ( x > barMin.x + labelW )
+            {
+                const float y = barMin.y + ( barMax.y - barMin.y - ImGui::GetFontSize() ) * 0.5f;
+                ImGui::GetWindowDrawList()->AddText( ImVec2( x, y ), ImGui::GetColorU32( ImGuiCol_TextDisabled ),
+                                                     detail );
+            }
+        }
         return open;
     }
 
     namespace
     {
-        // Alternating row index, continuous down a component's rows and reset when one starts.
-        int s_PropertyRowIndex = 0;
+        // Vertical extent of the row currently being submitted, so the column rule can be drawn once the
+        // columns are open (the background is painted before them).
+        float s_RowBandTop    = 0.0f;
+        float s_RowBandBottom = 0.0f;
     } // namespace
 
     void ImGuiUtilities::ResetPropertyRows()
     {
-        s_PropertyRowIndex = 0;
+        s_RowBandTop    = 0.0f;
+        s_RowBandBottom = 0.0f;
+    }
+
+    float ImGuiUtilities::PropertyLabelWidth()
+    {
+        // The label column follows the panel instead of a fixed width: docked narrow, a fixed column eats
+        // the editor and every value box collapses; docked wide, the labels strand far from their values.
+        return std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
     }
 
     bool ImGuiUtilities::PropertyRowBackground()
     {
-        const ImVec2 rowMin = ImGui::GetCursorScreenPos();
+        const ImGuiStyle& style  = ImGui::GetStyle();
+        const ImVec2      rowMin = ImGui::GetCursorScreenPos();
         const ImVec2 rowMax( rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + ImGui::GetFrameHeight() );
-        const bool   hovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) &&
+
+        const bool hovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) &&
                              ImGui::IsMouseHoveringRect( rowMin, rowMax, /*clip*/ true );
 
-        // Edge to edge, past the window padding: a stripe that stops short of the border reads as a box
-        // instead of a row.
-        const ImVec2 bandMin( rowMin.x - ImGui::GetStyle().WindowPadding.x, rowMin.y );
-        const ImVec2 bandMax( rowMax.x + ImGui::GetStyle().WindowPadding.x, rowMax.y );
+        // Edge to edge, past the window padding: a band that stops short of the border reads as a box
+        // instead of a row. The band claims HALF the item spacing on each side, so consecutive rows tile
+        // with no gap between them — that continuous surface is what makes UE's grid read as a grid.
+        const float  half = style.ItemSpacing.y * 0.5f;
+        const ImVec2 bandMin( rowMin.x - style.WindowPadding.x, rowMin.y - half );
+        const ImVec2 bandMax( rowMax.x + style.WindowPadding.x, rowMax.y + half );
         ImDrawList*  dl = ImGui::GetWindowDrawList();
-        if ( hovered )
-            dl->AddRectFilled( bandMin, bandMax, ImGui::GetColorU32( ImGuiCol_Header, 0.30f ) );
-        else if ( ( s_PropertyRowIndex & 1 ) != 0 )
-            dl->AddRectFilled( bandMin, bandMax, IM_COL32( 255, 255, 255, 8 ) );
 
-        ++s_PropertyRowIndex;
+        // No zebra: UE separates rows with a rule, not with alternating fills (measured off the Static
+        // Mesh Editor — every row there is the same #242424). Stripes on top of a rule read as noise.
+        if ( hovered )
+            dl->AddRectFilled( bandMin, bandMax, IM_COL32( 255, 255, 255, 12 ) );
+        dl->AddLine( ImVec2( bandMin.x, bandMin.y ), ImVec2( bandMax.x, bandMin.y ),
+                     ImGui::GetColorU32( ImGuiCol_Border ) );
+
+        s_RowBandTop    = bandMin.y;
+        s_RowBandBottom = bandMax.y;
         return hovered;
+    }
+
+    void ImGuiUtilities::PropertyColumnRule()
+    {
+        if ( s_RowBandBottom <= s_RowBandTop )
+            return;
+
+        // GetColumnOffset is measured from the window's content edge, which is exactly where the label
+        // column starts — so the rule lands on the real split whatever the indent.
+        const float x = ImGui::GetWindowPos().x - ImGui::GetScrollX() + ImGui::GetColumnOffset( 1 ) -
+                        ImGui::GetStyle().ItemSpacing.x * 0.5f;
+        ImGui::GetWindowDrawList()->AddLine( ImVec2( x, s_RowBandTop ), ImVec2( x, s_RowBandBottom ),
+                                             ImGui::GetColorU32( ImGuiCol_Border ) );
     }
 
     void ImGuiUtilities::BeginPropertyRow( const char* label, const char* tooltip )
@@ -71,10 +123,7 @@ namespace Desert::Editor::Utils
         PropertyRowBackground();
 
         ImGui::Columns( 2 );
-        // The label column follows the panel instead of a fixed width: docked narrow, a fixed column eats
-        // the editor and every value box collapses; docked wide, the labels strand far from their values.
-        const float labelW = std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
-        ImGui::SetColumnWidth( 0, labelW );
+        ImGui::SetColumnWidth( 0, PropertyLabelWidth() );
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted( label );
         if ( tooltip )
@@ -88,15 +137,20 @@ namespace Desert::Editor::Utils
     {
         ImGui::PopItemWidth();
         ImGui::NextColumn();
+        PropertyColumnRule();
         ImGui::Columns( 1 );
     }
 
     bool ImGuiUtilities::AccentButton( const char* label, float height )
     {
-        ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.20f, 0.44f, 0.72f, 1.0f ) );
-        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.26f, 0.52f, 0.82f, 1.0f ) );
-        ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImVec4( 0.16f, 0.38f, 0.64f, 1.0f ) );
-        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 5.0f );
+        // The theme's accent, not a second blue of its own — the editor gets ONE primary colour.
+        const ImVec4 accent = ThemeManager::GetSelectedColor();
+        ImGui::PushStyleColor( ImGuiCol_Button, accent );
+        ImGui::PushStyleColor( ImGuiCol_ButtonHovered,
+                               ImVec4( accent.x + 0.10f, accent.y + 0.08f, accent.z + 0.06f, 1.0f ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonActive,
+                               ImVec4( accent.x * 0.8f, accent.y * 0.8f, accent.z * 0.8f, 1.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 3.0f );
         const bool clicked = ImGui::Button( label, ImVec2( ImGui::GetContentRegionAvail().x, height ) );
         ImGui::PopStyleVar();
         ImGui::PopStyleColor( 3 );

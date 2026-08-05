@@ -47,28 +47,40 @@ namespace Desert::Editor::Utils
 
         static ImRect GetItemRect();
 
-        // A polished sub-section header for the Details panel: an accent-tinted, rounded collapsing header
-        // (open by default). Pass a label optionally prefixed with an MDI icon. Returns whether it is expanded
-        // — wrap the body in `if (SectionHeader(...)) { ImGui::Indent(); ... ImGui::Unindent(); }`.
-        static bool SectionHeader( const char* label, bool defaultOpen = true );
+        // A section header for the Details panel: UE's flat grey bar with a disclosure triangle, full
+        // width, the same height as a property row. Pass a label optionally prefixed with an MDI icon.
+        // Returns whether it is expanded — wrap the body in
+        // `if (SectionHeader(...)) { ImGui::Indent(); ... ImGui::Unindent(); }`.
+        //
+        // `detail` is drawn right-aligned INSIDE the bar in the muted text colour, the way UE puts
+        // "Triangles: 1,458  Vertices: 1,186" on its LOD header — a collapsed section still states its
+        // headline fact. It is painted straight into the bar, so it adds no item and never steals the
+        // header's click; it is dropped when the panel is too narrow to hold it beside the label.
+        static bool SectionHeader( const char* label, bool defaultOpen = true, const char* detail = nullptr );
 
         // A full-width accent ("primary") button — for the one obvious action of a section (Convert, Create…).
         static bool AccentButton( const char* label, float height = 0.0f );
 
         // --- Property rows -------------------------------------------------------------------------
-        // THE row look of the editor, in one place: alternating stripe, hover band, a label column whose
-        // width follows the panel, and a value column that fills the rest. Hand-written widgets call
+        // THE row look of the editor, in one place — modelled on UE's Details grid: a uniform row
+        // background, a 1px dark rule between rows, a vertical rule splitting label from value, a hover
+        // band, and a label column whose width follows the panel. Hand-written widgets call
         // BeginPropertyRow/EndPropertyRow; the reflected grid draws its own controls but shares the
-        // background through PropertyRowBackground, so a mesh widget and an auto-built component cannot
-        // drift into looking like two different editors.
+        // furniture through PropertyRowBackground + PropertyColumnRule, so a mesh widget and an
+        // auto-built component cannot drift into looking like two different editors.
         //
-        //   ResetPropertyRows();                       // once per component, so striping starts alike
-        //   if ( BeginPropertyRow( "Mesh Type" ) ) ... // value widget goes here, already width-clamped
+        //   ResetPropertyRows();                       // once per component
+        //   BeginPropertyRow( "Mesh Type" );           // value widget goes here, already width-clamped
         //   EndPropertyRow();
         static void ResetPropertyRows();
         // Draws the background for the row that is ABOUT to be submitted and returns whether the pointer
-        // is over it (a fill drawn after the row would cover the widgets). Advances the stripe.
+        // is over it (a fill drawn after the row would cover the widgets).
         static bool PropertyRowBackground();
+        // The vertical rule between the label and value columns, for the row currently being submitted.
+        // Call it while the columns are still open, just before closing them.
+        static void PropertyColumnRule();
+        // Width of the label column — shared so every row in the panel breaks at the same x.
+        static float PropertyLabelWidth();
         // Opens a two-column row and writes the label; the caller then submits ONE value widget.
         static void BeginPropertyRow( const char* label, const char* tooltip = nullptr );
         static void EndPropertyRow();

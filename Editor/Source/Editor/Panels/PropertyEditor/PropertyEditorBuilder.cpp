@@ -420,10 +420,7 @@ namespace Desert::Editor
         const bool rowHovered = Utils::ImGuiUtilities::PropertyRowBackground();
 
         ImGui::Columns( 2 );
-        // The label column follows the panel instead of a fixed 150px: docked narrow, a fixed column eats
-        // the editor and every value box collapses; docked wide, the labels stranded far from their values.
-        const float labelW = std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
-        ImGui::SetColumnWidth( 0, labelW );
+        ImGui::SetColumnWidth( 0, Utils::ImGuiUtilities::PropertyLabelWidth() );
         ImGui::AlignTextToFramePadding();
         if ( conditionMet )
             ImGui::TextUnformatted( label.c_str() );
@@ -973,6 +970,7 @@ namespace Desert::Editor
         ImGui::PopItemWidth();
         ImGui::EndDisabled();
         ImGui::NextColumn();
+        Utils::ImGuiUtilities::PropertyColumnRule();
         ImGui::Columns( 1 );
 
         ImGui::PopID();
