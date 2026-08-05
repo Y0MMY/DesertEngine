@@ -1,4 +1,5 @@
 #include "AnimLayersPanel.hpp"
+#include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
 
@@ -124,4 +125,11 @@ namespace Desert::Editor
         }
         ImGui::EndDisabled();
     }
+
+    bool AnimLayersPanel::IsRelevant() const
+    {
+        return SelectionHas<ECS::AnimationComponent>( m_Scene ) &&
+               SelectionHas<ECS::SkinnedMeshComponent>( m_Scene );
+    }
+
 } // namespace Desert::Editor

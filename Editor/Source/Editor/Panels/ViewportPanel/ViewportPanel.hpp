@@ -49,6 +49,12 @@ namespace Desert::Editor
                        const Assets::AssetManager* assetManager = nullptr, std::string title = "Scene###scene" );
         ~ViewportPanel() override; // defined in the .cpp (unique_ptr<AsyncMeshLoader> needs the complete type)
         void OnUIRender() override;
+
+        // The scene image must reach the window edges — any padding would frame it with dead pixels.
+        ImVec2 GetWindowPadding() const override
+        {
+            return ImVec2( 0.0f, 0.0f );
+        }
         void OnPreUpdate() override;
 
         void OnEvent( Common::Event& e ) override;

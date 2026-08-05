@@ -1,4 +1,5 @@
 #include "MeshEditorPanel.hpp"
+#include <Editor/Panels/PanelContext.hpp>
 
 #include <ImGui/imgui.h>
 #include <ImGui/imgui_internal.h>
@@ -955,6 +956,11 @@ void MeshEditorPanel::ClearTarget()
     m_Mesh         = nullptr;
     m_Selection.VertexIndices.clear();
     m_SowPanel = false;
+}
+
+bool MeshEditorPanel::IsRelevant() const
+{
+    return SelectionHas<ECS::StaticMeshComponent>( m_Scene ) || SelectionHas<ECS::SkinnedMeshComponent>( m_Scene );
 }
 
 } // namespace Desert::Editor

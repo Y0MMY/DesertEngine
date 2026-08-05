@@ -48,6 +48,38 @@ namespace Desert::Editor
             return m_SowPanel;
         }
 
+        // --- Contextual panels ---------------------------------------------------------------------
+        // A tool panel is only meaningful for a particular selection or mode: the Sequencer for something
+        // animatable, the Particle Editor for an emitter, Modeling for Modeling mode. Rather than hanging
+        // around empty ("Select a ... to ..."), such a panel OPENS ITSELF when its context appears and
+        // steps aside when it goes away — the editor shows what the work needs, not everything at once.
+        //
+        // Explicit intent always wins: opening a panel by hand (View menu / command palette) PINS it, and
+        // a pinned panel is never auto-closed. Closing it by hand unpins it again.
+        virtual bool IsContextual() const
+        {
+            return false;
+        }
+
+        // Is this panel's context present right now? Only consulted when IsContextual().
+        virtual bool IsRelevant() const
+        {
+            return true;
+        }
+
+        bool& Pinned()
+        {
+            return m_Pinned;
+        }
+
+        // Window padding for this panel. One number for the whole editor keeps every panel's content
+        // breathing the same way; the viewport overrides it to zero because its image must reach the
+        // window edges. (Pushed by the panel loop around Begin/End — panels don't do it themselves.)
+        virtual ImVec2 GetWindowPadding() const
+        {
+            return ImVec2( 8.0f, 8.0f );
+        }
+
         // Preferred window size the FIRST time the panel ever opens (0,0 = let ImGui decide). Once
         // the user moves/resizes it, imgui.ini remembers their layout instead. Floating tool windows
         // (Node Graph, Sequencer, Build Settings) override this so they don't pop up as tiny
@@ -60,5 +92,6 @@ namespace Desert::Editor
     protected:
         const std::string m_PanelName;
         bool              m_SowPanel;
+        bool              m_Pinned = false; // opened by hand: never auto-closed (see IsContextual)
     };
 } // namespace Desert::Editor

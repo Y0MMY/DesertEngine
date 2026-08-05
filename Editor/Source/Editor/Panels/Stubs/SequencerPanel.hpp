@@ -42,6 +42,13 @@ namespace Desert::Editor
             return ImVec2( 980.0f, 320.0f );
         }
         void OnUIRender() override;
+
+        // Contextual: a timeline needs something animatable selected.
+        bool IsContextual() const override
+        {
+            return true;
+        }
+        bool IsRelevant() const override;
         void OnPreUpdate() override;
 
         // Cross-panel: a Details "Open in Sequencer" button asks the panel to reveal itself next frame.

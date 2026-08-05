@@ -45,6 +45,14 @@ namespace Desert::Editor
         }
 
         void OnUIRender() override;
+
+        // Contextual: a state machine belongs to an animated entity.
+        bool IsContextual() const override
+        {
+            return true;
+        }
+
+        bool IsRelevant() const override;
         void OnPreUpdate() override;
 
         // Cross-panel: a Details "Open in Anim Graph" button asks the panel to reveal itself next frame.

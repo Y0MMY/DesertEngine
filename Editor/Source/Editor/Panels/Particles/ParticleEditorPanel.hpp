@@ -26,6 +26,13 @@ namespace Desert::Editor
             return ImVec2( 460.0f, 620.0f );
         }
         void OnUIRender() override;
+
+        // Contextual: an emitter must be selected to author it.
+        bool IsContextual() const override
+        {
+            return true;
+        }
+        bool IsRelevant() const override;
         void OnPreUpdate() override;
         void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
         {

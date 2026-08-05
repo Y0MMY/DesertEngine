@@ -1,4 +1,5 @@
 #include "ParticleEditorPanel.hpp"
+#include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -282,4 +283,10 @@ namespace Desert::Editor
         const int maxAlive = std::min( d.MaxParticles, static_cast<int>( d.SpawnRate * d.Lifetime + 0.5f ) );
         ImGui::TextDisabled( "~%d particles alive (rate x lifetime, capped at Max).", std::max( 0, maxAlive ) );
     }
+
+    bool ParticleEditorPanel::IsRelevant() const
+    {
+        return SelectionHas<ECS::ParticleEmitterComponent>( m_Scene );
+    }
+
 } // namespace Desert::Editor

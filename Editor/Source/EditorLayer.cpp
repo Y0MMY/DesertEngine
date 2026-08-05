@@ -149,6 +149,43 @@ namespace Desert::Editor
     // Composes "<icon>  <label>###<stable id>". The visible part gets the icon; the trailing ###<name>
     // keeps the ImGui window ID EXACTLY panel->GetName(), so saved dock layouts and every GetName()==...
     // lookup keep working unchanged.
+    // A tool panel that only makes sense for a particular selection or mode opens itself when that
+    // context appears and steps aside when it goes away — so the tab strip carries what the current work
+    // needs instead of every panel at once. Opening one BY HAND pins it (explicit intent wins) until the
+    // user closes it again; see IPanel::IsContextual.
+    void EditorLayer::UpdateContextualPanels()
+    {
+        for ( auto& panel : m_Panels )
+        {
+            if ( !panel->IsContextual() )
+                continue;
+
+            const bool relevant = panel->IsRelevant();
+            bool&      visible  = panel->GetVisibility();
+
+            // Opened by hand while its context was absent -> the user wants it regardless.
+            if ( visible && !relevant && !m_ContextualShown.count( panel.get() ) )
+                panel->Pinned() = true;
+
+            if ( relevant && !visible && !panel->Pinned() )
+            {
+                visible = true;
+                m_ContextualShown.insert( panel.get() );
+                m_FocusPanel = panel->GetName(); // bring it forward in whatever dock it lives
+            }
+            else if ( !relevant && visible && !panel->Pinned() )
+            {
+                visible = false;
+                m_ContextualShown.erase( panel.get() );
+            }
+            else if ( !visible )
+            {
+                m_ContextualShown.erase( panel.get() );
+                panel->Pinned() = false; // closed by hand -> stop pinning it open
+            }
+        }
+    }
+
     static std::string PanelDisplayTitle( const std::string& name )
     {
         std::string label = name;
@@ -486,6 +523,8 @@ namespace Desert::Editor
         // never destroyed while their DS are bound to the recording command buffer.
         for ( auto& panel : m_Panels )
             panel->OnPreUpdate();
+
+        UpdateContextualPanels();
 
         // Asset hot-reload: pick up edited .demat/.shader files (runs BEFORE scene rendering so
         // a shader-triggered pipeline invalidation never touches an in-recording frame).
@@ -898,10 +937,8 @@ namespace Desert::Editor
             }
 
             namespace ImGui = ::ImGui;
-            if ( panel->GetName() == "Scene###scene" ) // TODO: Panel props
-            {
-                ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
-            }
+            // One padding rule for the whole editor, declared by the panel (the viewport asks for zero).
+            ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, panel->GetWindowPadding() );
 
             // First-ever open: give the panel its preferred size, centered on the main viewport —
             // floating tools no longer pop up as tiny windows in a corner. imgui.ini keeps the
@@ -915,14 +952,19 @@ namespace Desert::Editor
 
             // p_open: the title-bar X closes the panel and stays in sync with the View menu. The display
             // title carries an icon but keeps the ImGui ID == GetName() (see PanelDisplayTitle).
+            // A panel that just auto-opened is brought to the front of its dock, otherwise it would
+            // appear as a background tab nobody notices.
+            if ( !m_FocusPanel.empty() && panel->GetName() == m_FocusPanel )
+            {
+                ImGui::SetNextWindowFocus();
+                m_FocusPanel.clear();
+            }
+
             ImGui::Begin( PanelDisplayTitle( panel->GetName() ).c_str(), &panel->GetVisibility() );
+            ImGui::PopStyleVar(); // right after Begin: the window kept it, child windows must not inherit
             {
                 DESERT_PROFILE_SCOPE_DYNAMIC( panel->GetName().c_str() );
                 panel->OnUIRender();
-            }
-            if ( panel->GetName() == "Scene###scene" )
-            {
-                ImGui::PopStyleVar();
             }
             ImGui::End();
         }
@@ -961,7 +1003,11 @@ namespace Desert::Editor
             std::string name = p->GetName();
             if ( const auto hash = name.find( "##" ); hash != std::string::npos )
                 name.erase( hash ); // drop the "###id" ImGui suffix for display
-            commands.push_back( { "Panel", "Open " + name, [p] { p->GetVisibility() = true; } } );
+            commands.push_back( { "Panel", "Open " + name, [p]
+                                  {
+                                      p->GetVisibility() = true;
+                                      p->Pinned()        = true; // asked for explicitly: keep it open
+                                  } } );
         }
 
         // Entities — select any object in the open scene.
@@ -1633,11 +1679,31 @@ namespace Desert::Editor
             return;
         }
 
-        for ( auto& panel : m_Panels )
+        // Two groups: the panels that are always yours to arrange, and the tools that come and go with
+        // the selection. Without the split the menu is twenty entries with no hint that half of them
+        // manage themselves — and ticking one of those means "keep it open even when it doesn't apply".
+        auto panelItem = [&]( const std::unique_ptr<Editor::IPanel>& panel )
         {
             // Same icon + stable ID as the panel title (the ###id keeps each menu entry unique/stable).
-            ImGui::MenuItem( PanelDisplayTitle( panel->GetName() ).c_str(), "", &panel->GetVisibility(), true );
-        }
+            const bool wasVisible = panel->GetVisibility();
+            if ( ImGui::MenuItem( PanelDisplayTitle( panel->GetName() ).c_str(), "", &panel->GetVisibility(),
+                                  true ) )
+            {
+                // Ticking a contextual panel pins it open; unticking releases it back to the context.
+                if ( panel->IsContextual() )
+                    panel->Pinned() = !wasVisible;
+            }
+        };
+
+        for ( auto& panel : m_Panels )
+            if ( !panel->IsContextual() )
+                panelItem( panel );
+
+        ImGui::Separator();
+        ImGui::TextDisabled( "Tools (open with the selection)" );
+        for ( auto& panel : m_Panels )
+            if ( panel->IsContextual() )
+                panelItem( panel );
 
         ImGui::Separator();
         ImGui::MenuItem( "Profiler", "", &m_ShowProfiler, true );

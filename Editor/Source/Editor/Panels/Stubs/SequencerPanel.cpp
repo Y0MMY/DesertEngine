@@ -1,4 +1,5 @@
 #include "SequencerPanel.hpp"
+#include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
@@ -1011,4 +1012,13 @@ namespace Desert::Editor
             }
         }
     }
+
+    bool SequencerPanel::IsRelevant() const
+    {
+        // Skeletal clips OR a UI element's property timeline — both live in this panel.
+        return ( SelectionHas<ECS::AnimationComponent>( m_Scene ) &&
+                 SelectionHas<ECS::SkinnedMeshComponent>( m_Scene ) ) ||
+               SelectionHas<ECS::UILayoutComponent>( m_Scene );
+    }
+
 } // namespace Desert::Editor

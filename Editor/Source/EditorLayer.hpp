@@ -56,6 +56,8 @@ namespace Desert::Editor
 
         // Bottom status bar: scene state (Edit/Play), scene name, current selection, and FPS/frame time.
         void DrawStatusBar();
+        // Opens/closes panels whose context appeared or vanished (see IPanel::IsContextual).
+        void UpdateContextualPanels();
 
         // Ctrl+P "go to anything": builds the frame's commands (panels, entities, actions) and draws
         // the overlay. No-op unless the palette is open.
@@ -163,6 +165,11 @@ namespace Desert::Editor
 #ifdef EBABLE_IMGUI
         std::shared_ptr<ImGui::ImGuiLayer>           m_ImGuiLayer;
         std::vector<std::unique_ptr<Editor::IPanel>> m_Panels;
+
+        // Contextual panels (IPanel::IsContextual): which ones WE opened, so a panel the user opened by
+        // hand is never auto-closed, and the one to bring to the front of its dock this frame.
+        std::unordered_set<Editor::IPanel*> m_ContextualShown;
+        std::string                         m_FocusPanel;
 
         CommandPalette m_CommandPalette;
 

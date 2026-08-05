@@ -30,6 +30,13 @@ namespace Desert::Editor
         }
         void OnUIRender() override;
 
+        // Contextual: layers apply to a skinned mesh.
+        bool IsContextual() const override
+        {
+            return true;
+        }
+        bool IsRelevant() const override;
+
     private:
         std::shared_ptr<::Desert::Core::Scene> m_Scene;
         Animation::AnimationLibrary*           m_Library = nullptr;

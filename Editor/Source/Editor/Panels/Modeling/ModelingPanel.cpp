@@ -16,11 +16,12 @@ namespace Desert::Editor
     {
     }
 
-    void ModelingPanel::OnPreUpdate()
+    // The Modeling palette only exists while the viewport is in Modeling mode (enter it via the mode
+    // dropdown), mirroring UE5. Now expressed through the shared contextual contract, so it obeys the
+    // same pin rule as every other tool panel instead of forcing its own visibility every frame.
+    bool ModelingPanel::IsRelevant() const
     {
-        // The Modeling palette only exists while the viewport is in Modeling mode (enter it via the mode
-        // dropdown), mirroring UE5 — otherwise the panel is hidden entirely.
-        GetVisibility() = Core::ViewportMode::Get() == Core::EditorMode::Modeling;
+        return Core::ViewportMode::Get() == Core::EditorMode::Modeling;
     }
 
     void ModelingPanel::OnUIRender()

@@ -26,6 +26,13 @@ namespace Desert::Editor
             return ImVec2( 900.0f, 560.0f );
         }
         void OnUIRender() override;
+
+        // Contextual: it authors a UI element.
+        bool IsContextual() const override
+        {
+            return true;
+        }
+        bool IsRelevant() const override;
         void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
         {
             m_Scene = scene;

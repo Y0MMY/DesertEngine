@@ -21,7 +21,14 @@ namespace Desert::Editor
         explicit ModelingPanel( const std::shared_ptr<Desert::Core::Scene>& scene );
 
         void OnUIRender() override;
-        void OnPreUpdate() override; // auto-show only while the viewport is in Modeling mode
+
+        // Contextual: the viewport is in Modeling mode.
+        bool IsContextual() const override
+        {
+            return true;
+        }
+
+        bool IsRelevant() const override;
         void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override
         {
             m_Scene = scene;

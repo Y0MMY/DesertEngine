@@ -1,4 +1,5 @@
 #include "UIEditorPanel.hpp"
+#include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -133,4 +134,10 @@ namespace Desert::Editor
 
         ImGui::Dummy( avail );
     }
+
+    bool UIEditorPanel::IsRelevant() const
+    {
+        return SelectionHas<ECS::UILayoutComponent>( m_Scene ) || SelectionHas<ECS::UICanvasComponent>( m_Scene );
+    }
+
 } // namespace Desert::Editor

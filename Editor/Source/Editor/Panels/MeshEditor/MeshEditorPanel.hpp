@@ -40,6 +40,14 @@ namespace Desert::Editor
 
         void OnUIRender() override;
 
+        // Contextual: there must be a mesh to edit.
+        bool IsContextual() const override
+        {
+            return true;
+        }
+
+        bool IsRelevant() const override;
+
         void SetTarget( ECS::Entity entity );
         void ClearTarget();
 

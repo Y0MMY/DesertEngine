@@ -1,4 +1,5 @@
 #include "AnimGraphPanel.hpp"
+#include <Editor/Panels/PanelContext.hpp>
 
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -518,4 +519,10 @@ namespace Desert::Editor
         if ( dirty )
             anim.GraphRevision++;
     }
+
+    bool AnimGraphPanel::IsRelevant() const
+    {
+        return SelectionHas<ECS::AnimationComponent>( m_Scene );
+    }
+
 } // namespace Desert::Editor
