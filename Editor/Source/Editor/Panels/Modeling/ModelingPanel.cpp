@@ -12,7 +12,7 @@
 namespace Desert::Editor
 {
     ModelingPanel::ModelingPanel( const std::shared_ptr<Desert::Core::Scene>& scene )
-         : IPanel( "Modeling" ), m_Scene( scene )
+         : IPanel( "Modeling", /*showPanel=*/false ), m_Scene( scene ) // contextual: Modeling mode opens it
     {
     }
 

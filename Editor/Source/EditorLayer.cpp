@@ -160,10 +160,9 @@ namespace Desert::Editor
             const bool relevant = panel->IsRelevant();
             bool&      visible  = panel->GetVisibility();
 
-            // Opened by hand while its context was absent -> the user wants it regardless.
-            if ( visible && !relevant && !m_ContextualShown.count( panel.get() ) )
-                panel->Pinned() = true;
-
+            // Pinning is set ONLY where the user actually asks for the panel (View menu / command
+            // palette). Inferring it from "visible but not relevant" also fired on the very first frame
+            // for a panel that merely starts visible, pinning it open forever.
             if ( relevant && !visible && !panel->Pinned() )
             {
                 visible = true;
