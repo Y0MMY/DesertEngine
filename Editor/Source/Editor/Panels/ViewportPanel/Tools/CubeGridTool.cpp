@@ -8,6 +8,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Geometry/GreedyMesher.hpp>
 #include <Engine/Geometry/MeshTypes.hpp>
 
 #include <Common/Core/Math/AABB.hpp>
@@ -101,6 +102,26 @@ namespace Desert::Editor::Tools
 
         // World position of corner `i` of the cell at `c` (edge `unit`, frame `origin`), including the
         // corner's vertical offset.
+        // World-aligned ("triplanar-ish") UVs: one UV unit per metre of world space, so a 4x1 wall and a
+        // 1x1 block share a texel density and a MERGED quad tiles instead of stretching one 0..1 patch
+        // over it. This is what makes greedy meshing safe to turn on — per-face 0..1 UVs would smear.
+        constexpr float kUvPerUnit = 1.0f / 100.0f;
+
+        // The UV axes of a face, in world space. Vertical faces put V on world +Y (a wall's texture stays
+        // upright whichever way it faces); the two horizontal faces fall back to X/Z.
+        struct FaceUvFrame
+        {
+            glm::vec3 T, B;
+        };
+        FaceUvFrame UvFrame( int f )
+        {
+            const glm::vec3 n = kFace[f][0].N;
+            if ( std::abs( n.y ) > 0.5f )
+                return { { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
+            const glm::vec3 t = glm::cross( glm::vec3( 0.0f, 1.0f, 0.0f ), n );
+            return { glm::normalize( t ), { 0.0f, 1.0f, 0.0f } };
+        }
+
         glm::vec3 CornerPos( const glm::ivec3& c, const CubeGridTool::Cell& cell, int i, float unit,
                              const glm::vec3& origin )
         {
@@ -1081,6 +1102,49 @@ namespace Desert::Editor::Tools
             ms.ReqAccept = false;
             if ( !( m_Cells.empty() && m_Frozen.empty() ) )
             {
+                // Collision on Accept (UE's Cube Grid bakes collision with the mesh): a blockout you
+                // cannot walk into is half a blockout. This is a BOX around the piece, not a triangle
+                // mesh — the physics layer has box/sphere/capsule shapes today, so a concave blockout
+                // gets its bounding volume, and the panel says so rather than implying trimesh collision.
+                if ( ms.GenerateCollision )
+                {
+                    if ( auto ref = scene.FindEntityByID( m_Entity ) )
+                    {
+                        ECS::Entity e = ref->get();
+                        if ( e.HasComponent<ECS::StaticMeshComponent>() )
+                        {
+                            const auto& smc = e.GetComponent<ECS::StaticMeshComponent>();
+                            if ( smc.RuntimeMesh && !smc.RuntimeMesh->GetSubmeshes().empty() )
+                            {
+                                glm::vec3 bmin( FLT_MAX ), bmax( -FLT_MAX );
+                                for ( const auto& sm : smc.RuntimeMesh->GetSubmeshes() )
+                                {
+                                    bmin = glm::min( bmin, sm.BoundingBox.Min );
+                                    bmax = glm::max( bmax, sm.BoundingBox.Max );
+                                }
+                                if ( bmin.x <= bmax.x )
+                                {
+                                    auto& col            = e.HasComponent<ECS::ColliderComponent>()
+                                                                ? e.GetComponent<ECS::ColliderComponent>()
+                                                                : e.AddComponent<ECS::ColliderComponent>();
+                                    col.Data.Shape       = Physics::ShapeType::Box;
+                                    col.Data.HalfExtents = glm::max( ( bmax - bmin ) * 0.5f, glm::vec3( 1.0f ) );
+                                    col.Data.Radius =
+                                         glm::max( col.Data.HalfExtents.x,
+                                                   glm::max( col.Data.HalfExtents.y, col.Data.HalfExtents.z ) );
+
+                                    // Static body, so the collider actually participates in the sim
+                                    // (a collider alone is inert).
+                                    auto& rb     = e.HasComponent<ECS::RigidBodyComponent>()
+                                                        ? e.GetComponent<ECS::RigidBodyComponent>()
+                                                        : e.AddComponent<ECS::RigidBodyComponent>();
+                                    rb.Data.Type = Physics::BodyType::Static;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Core::SelectionManager::SetSelected( m_Entity );
                 m_Entity = Common::UUID::Null();
                 m_Cells.clear();
@@ -1109,18 +1173,79 @@ namespace Desert::Editor::Tools
         std::vector<Vertex> verts;
         std::vector<Index>  inds;
         glm::vec3           mn( FLT_MAX ), mx( -FLT_MAX );
+
+        // One quad -> 4 vertices + 2 triangles, with world-aligned UVs and a tangent frame that matches
+        // them (so a normal map on a merged quad lines up with the texture it is paired with).
+        auto emitQuad = [&]( const glm::vec3 p[4], const glm::vec3& nrm, const FaceUvFrame& uv )
+        {
+            const uint32_t base = static_cast<uint32_t>( verts.size() );
+            for ( int k = 0; k < 4; ++k )
+            {
+                Vertex v;
+                v.Position  = p[k];
+                v.Normal    = nrm;
+                v.Tangent   = uv.T;
+                v.Bitangent = uv.B;
+                v.TexCoord  = { glm::dot( p[k], uv.T ) * kUvPerUnit, glm::dot( p[k], uv.B ) * kUvPerUnit };
+                verts.push_back( v );
+                mn = glm::min( mn, v.Position );
+                mx = glm::max( mx, v.Position );
+            }
+            inds.push_back( { base + 0, base + 1, base + 2 } );
+            inds.push_back( { base + 2, base + 3, base + 0 } );
+        };
+
         // One mesh out of every layer — each meshed at its OWN cell size, face-culled against all layers.
         auto emitLayer = [&]( const CellMap& cells, float lu, const glm::vec3& lo )
         {
+            // FLAT cells go through greedy meshing: a 20x8 blockout wall becomes ONE quad instead of 160.
+            // Corner-deformed cells keep their own per-face quads — their corners are not coplanar with a
+            // neighbour's, so merging them would flatten the ramp you just built.
+            std::vector<glm::ivec3> flat;
+            flat.reserve( cells.size() );
+            for ( const auto& [key, cell] : cells )
+                if ( cell.IsFlat() )
+                    flat.push_back( Unpack( key ) );
+
+            const auto merged = Geometry::GreedyMeshFaces(
+                 flat,
+                 [&]( const glm::ivec3& c, int f )
+                 {
+                     const auto it = cells.find( Pack( c ) );
+                     return it != cells.end() && !FaceHidden( cells, c, it->second, f, lu, lo );
+                 } );
+
+            for ( const auto& q : merged )
+            {
+                const Geometry::VoxelFaceAxes ax = Geometry::FaceAxes( q.Face );
+                const FaceUvFrame             uv = UvFrame( q.Face );
+
+                // The face's unit-cube corners, stretched over the merged run: the 0/1 offset along each
+                // in-plane axis becomes 0/Size, which keeps the table's winding (and so the normal).
+                glm::vec3 p[4];
+                for ( int k = 0; k < 4; ++k )
+                {
+                    const glm::vec3 unitP = kFace[q.Face][k].P + 0.5f; // 0 or 1 per axis
+                    glm::vec3       g( q.Cell );
+                    g[ax.Normal] += unitP[ax.Normal];
+                    g[ax.U] += unitP[ax.U] * static_cast<float>( q.SizeU );
+                    g[ax.V] += unitP[ax.V] * static_cast<float>( q.SizeV );
+                    p[k] = g * lu + lo;
+                }
+                emitQuad( p, kFace[q.Face][0].N, uv );
+            }
+
             for ( const auto& [key, cell] : cells )
             {
+                if ( cell.IsFlat() )
+                    continue; // already meshed above
+
                 const glm::ivec3 c = Unpack( key );
                 for ( int f = 0; f < 6; ++f )
                 {
                     if ( FaceHidden( cells, c, cell, f, lu, lo ) ) // only Solid/Empty borders
                         continue;
-                    // Corner Mode can slant a quad, so the normal comes from the actual corners; the
-                    // tangent frame and UVs stay the box's (good enough for a blockout, and stable).
+                    // Corner Mode can slant a quad, so the normal comes from the actual corners.
                     glm::vec3 p[4];
                     for ( int k = 0; k < 4; ++k )
                         p[k] = CornerPos( c, cell, kFaceCorner[f][k], lu, lo );
@@ -1128,21 +1253,7 @@ namespace Desert::Editor::Tools
                          glm::cross( p[1] - p[0], p[3] - p[0] ) + glm::cross( p[3] - p[2], p[1] - p[2] );
                     nrm = glm::dot( nrm, nrm ) > 1e-12f ? glm::normalize( nrm ) : kFace[f][0].N;
 
-                    const uint32_t base = static_cast<uint32_t>( verts.size() );
-                    for ( int k = 0; k < 4; ++k )
-                    {
-                        Vertex v;
-                        v.Position  = p[k];
-                        v.Normal    = nrm;
-                        v.Tangent   = kFace[f][k].T;
-                        v.Bitangent = kFace[f][k].B;
-                        v.TexCoord  = kFace[f][k].UV;
-                        verts.push_back( v );
-                        mn = glm::min( mn, v.Position );
-                        mx = glm::max( mx, v.Position );
-                    }
-                    inds.push_back( { base + 0, base + 1, base + 2 } );
-                    inds.push_back( { base + 2, base + 3, base + 0 } );
+                    emitQuad( p, nrm, UvFrame( f ) );
                 }
             }
         };

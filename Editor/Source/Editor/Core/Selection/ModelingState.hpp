@@ -61,6 +61,10 @@ namespace Desert::Editor::Core
         int  CornerSnapDiv = 2;     // 2 = half a block, 4 = quarter, 10 = a tenth
         bool ReqCornerMode = false; // one-shot: toggle Corner Mode
 
+        // Accept also gives the committed piece a BOX collider + a static body, so a blockout is
+        // walkable immediately. Box, not triangle mesh: the physics layer has no trimesh shape yet.
+        bool GenerateCollision = true;
+
         bool ReqAccept         = false; // one-shot: commit the blockout, start a fresh one
         bool ReqCancel         = false; // one-shot: delete the in-progress blockout
         bool ReqClear          = false; // one-shot: clear the cells (keep editing)

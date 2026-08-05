@@ -229,6 +229,13 @@ namespace Desert::Editor
                 ImGui::SetNextItemWidth( -1.0f );
                 if ( ImGui::Combo( "##out", &o, outs, IM_ARRAYSIZE( outs ) ) )
                     ms.OutputType = static_cast<MS::Output>( o );
+
+                ImGui::Checkbox( "Generate Collision", &ms.GenerateCollision );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Accept also adds a BOX collider around the piece and a static body,\n"
+                                       "so you can walk into it right away.\n"
+                                       "It is the bounding box, not a triangle mesh: a concave blockout is\n"
+                                       "solid inside until the physics layer grows a mesh shape." );
             }
             if ( ImGui::CollapsingHeader( "Grid", ImGuiTreeNodeFlags_DefaultOpen ) )
             {

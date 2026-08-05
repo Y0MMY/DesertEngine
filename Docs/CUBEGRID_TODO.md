@@ -34,8 +34,10 @@ Reference screenshots: `docs/ModelingImages/`.
   (`EditorCamera::SetKeyboardRequiresLook`), so the bare keys belong to the tool — as in UE. Every action
   also has an on-screen button, and the panel lists the bindings under "Shortcut Info".
 
-**Status 2026-08-04:** Grid Mode, committed layers, UE shortcuts, panel parity and Corner Mode are all in.
-What is left is bake quality, mesh optimisation and the rest of the Create palette — the list below.
+**Status 2026-08-06:** Grid Mode, committed layers, UE shortcuts, panel parity and Corner Mode are all in,
+and so are greedy meshing + world-aligned UVs + box collision on Accept. What is left is the rest of the
+Create palette, Quick Materials, selection ergonomics, rotated grids, re-editing a baked mesh, and real
+(triangle-mesh) collision — the list below.
 
 ## Remaining
 
@@ -76,15 +78,26 @@ Remaining:
 - Bake splits into **sub-meshes per material ID**.
 
 ### 6. Bake quality (Accept)
-- **Triplanar / world-aligned UVs** (no stretching on resized blocks).
-- **Hard-edge normals + tangents** at block seams.
-- **Collision** generation (BVH triangle mesh, or merged box colliders for Jolt).
+- ~~**Triplanar / world-aligned UVs**~~ — DONE. One UV unit per metre of world space (`kUvPerUnit`), with
+  V on world +Y for vertical faces so a wall's texture stays upright whichever way it faces. This is what
+  makes greedy meshing safe: per-face 0..1 UVs would smear across a merged quad.
+- ~~**Hard-edge normals + tangents**~~ — DONE. Every quad already owns its 4 vertices (so seams were always
+  hard); the tangent frame now comes from the same axes as the UVs, so a normal map lines up with the
+  texture it is paired with.
+- ~~**Collision**~~ — PARTIAL. Accept adds a **box** collider around the piece plus a static body
+  (`Generate Collision`, on by default), so a blockout is walkable immediately. It is the bounding box,
+  not a triangle mesh: a concave blockout is solid inside. A real BVH/trimesh shape is an engine-side
+  physics feature (Jolt has `MeshShape`; `Physics::ShapeType` has Box/Sphere/Capsule today) — that is the
+  next step, and the panel tooltip says so rather than implying trimesh collision.
 - **Output Type = Static Mesh**: bake to an optimised StaticMesh asset (the combo exists; only the live
   DynamicMesh path is wired today).
 
 ### 7. Greedy meshing (face merging)
-- Merge coplanar adjacent faces into larger quads — cleaner topology / fewer tris (today: per-cell face
-  culling only).
+- ~~Merge coplanar adjacent faces into larger quads~~ — DONE (`Engine/Geometry/GreedyMesher.hpp`,
+  header-only + unit-tested in the MeshLOD test binary). A 20x8 blockout wall bakes as ONE quad instead of
+  160. The caller owns the rules: it passes "is this face exposed?" (which already accounts for other
+  layers) and a merge key for surfaces that must not blend (materials, later). Corner-Mode DEFORMED cells
+  are excluded and keep their per-face quads — merging them would flatten the ramp you just built.
 
 ### 8. Create-category primitives
 - Box / Sphere / Cylinder / Cone / Stairs presets in the palette are placeholders — not implemented.

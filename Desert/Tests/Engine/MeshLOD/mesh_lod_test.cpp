@@ -1,8 +1,12 @@
+#include <Engine/Geometry/GreedyMesher.hpp>
 #include <Engine/Geometry/LODSelection.hpp>
 #include <Engine/Geometry/MeshLOD.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
+
+#include <set>
+#include <tuple>
 
 using Desert::Index;
 using Desert::Submesh;
@@ -195,6 +199,146 @@ TEST( LODSelection, SizeAwareAndBiasShifts )
 TEST( LODSelection, EmptyMeshIsLODZero )
 {
     EXPECT_EQ( SelectLOD( AtOrigin(), {}, glm::vec3( 0.0f, 0.0f, 100000.0f ), -1, 0 ), 0u );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// GREEDY MESHING (Geometry::GreedyMeshFaces) — merges coplanar voxel faces into as few quads as
+// possible. The CubeGrid bake draws what this returns, so these cases pin BOTH the count and the
+// coverage: a merge that loses a cell is far worse than one that merges nothing.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    using Desert::Geometry::FaceAxes;
+    using Desert::Geometry::GreedyMeshFaces;
+    using Desert::Geometry::VoxelFaceQuad;
+
+    // A solid box of cells [0,w) x [0,h) x [0,d).
+    std::vector<glm::ivec3> SolidBox( int w, int h, int d )
+    {
+        std::vector<glm::ivec3> cells;
+        for ( int x = 0; x < w; ++x )
+            for ( int y = 0; y < h; ++y )
+                for ( int z = 0; z < d; ++z )
+                    cells.push_back( { x, y, z } );
+        return cells;
+    }
+
+    // "Exposed" = the neighbour in that direction is not part of the volume (plain face culling).
+    auto CullAgainst( const std::vector<glm::ivec3>& cells )
+    {
+        return [set = std::set<std::tuple<int, int, int>>(
+                     [&]
+                     {
+                         std::set<std::tuple<int, int, int>> s;
+                         for ( const auto& c : cells )
+                             s.insert( { c.x, c.y, c.z } );
+                         return s;
+                     }() )]( const glm::ivec3& c, int face )
+        {
+            const glm::ivec3 n = c + Desert::Geometry::kVoxelFaceNormal[face];
+            return set.find( { n.x, n.y, n.z } ) == set.end();
+        };
+    }
+
+    // Total cells covered by the quads of one face — must equal the exposed-face count.
+    int CoveredCells( const std::vector<VoxelFaceQuad>& quads, int face )
+    {
+        int total = 0;
+        for ( const auto& q : quads )
+            if ( q.Face == face )
+                total += q.SizeU * q.SizeV;
+        return total;
+    }
+} // namespace
+
+TEST( GreedyMesh, FlatSlabCollapsesToOneQuadPerFace )
+{
+    const auto cells = SolidBox( 8, 1, 5 ); // a floor slab
+    const auto quads = GreedyMeshFaces( cells, CullAgainst( cells ) );
+
+    // Six faces, each a single merged rectangle — 40 cells would otherwise be 240 quads.
+    ASSERT_EQ( quads.size(), 6u );
+    for ( int f = 0; f < 6; ++f )
+    {
+        const auto it =
+             std::find_if( quads.begin(), quads.end(), [f]( const VoxelFaceQuad& q ) { return q.Face == f; } );
+        ASSERT_NE( it, quads.end() ) << "face " << f << " missing";
+        EXPECT_EQ( it->SizeU * it->SizeV, f == 2 || f == 3 ? 8 * 5 : ( f <= 1 ? 8 * 1 : 5 * 1 ) );
+    }
+}
+
+TEST( GreedyMesh, CoversExactlyTheExposedFaces )
+{
+    const auto cells   = SolidBox( 4, 3, 2 );
+    const auto exposed = CullAgainst( cells );
+    const auto quads   = GreedyMeshFaces( cells, exposed );
+
+    for ( int f = 0; f < 6; ++f )
+    {
+        int expected = 0;
+        for ( const auto& c : cells )
+            if ( exposed( c, f ) )
+                ++expected;
+        EXPECT_EQ( CoveredCells( quads, f ), expected ) << "face " << f;
+    }
+}
+
+TEST( GreedyMesh, HoleSplitsTheRunInsteadOfSwallowingIt )
+{
+    // A 3x1x3 floor with the middle cell missing: the top face cannot be one rectangle.
+    std::vector<glm::ivec3> cells;
+    for ( int x = 0; x < 3; ++x )
+        for ( int z = 0; z < 3; ++z )
+            if ( !( x == 1 && z == 1 ) )
+                cells.push_back( { x, 0, z } );
+
+    const auto quads = GreedyMeshFaces( cells, CullAgainst( cells ) );
+
+    // Top (+Y) covers exactly the 8 remaining cells, and needs more than one quad to do it.
+    EXPECT_EQ( CoveredCells( quads, 2 ), 8 );
+    const int topQuads = static_cast<int>(
+         std::count_if( quads.begin(), quads.end(), []( const VoxelFaceQuad& q ) { return q.Face == 2; } ) );
+    EXPECT_GT( topQuads, 1 );
+}
+
+TEST( GreedyMesh, MergeKeyKeepsDifferentSurfacesApart )
+{
+    const auto cells = SolidBox( 4, 1, 1 );
+    // Two materials along the row: the top face must break where the key changes.
+    const auto quads = GreedyMeshFaces( cells, CullAgainst( cells ),
+                                        []( const glm::ivec3& c, int ) -> uint64_t { return c.x < 2 ? 1 : 2; } );
+
+    const int topQuads = static_cast<int>(
+         std::count_if( quads.begin(), quads.end(), []( const VoxelFaceQuad& q ) { return q.Face == 2; } ) );
+    EXPECT_EQ( topQuads, 2 );
+    EXPECT_EQ( CoveredCells( quads, 2 ), 4 );
+}
+
+TEST( GreedyMesh, EmptyVolumeAndFullyEnclosedCellProduceNothing )
+{
+    EXPECT_TRUE( GreedyMeshFaces( {}, []( const glm::ivec3&, int ) { return true; } ).empty() );
+
+    // A single cell surrounded on all six sides: nothing of it is visible.
+    const std::vector<glm::ivec3> one = { { 0, 0, 0 } };
+    EXPECT_TRUE( GreedyMeshFaces( one, []( const glm::ivec3&, int ) { return false; } ).empty() );
+}
+
+TEST( GreedyMesh, IsDeterministic )
+{
+    auto       cells = SolidBox( 3, 2, 3 );
+    const auto a     = GreedyMeshFaces( cells, CullAgainst( cells ) );
+    std::reverse( cells.begin(), cells.end() ); // insertion order must not matter
+    const auto b = GreedyMeshFaces( cells, CullAgainst( cells ) );
+
+    ASSERT_EQ( a.size(), b.size() );
+    for ( size_t i = 0; i < a.size(); ++i )
+    {
+        EXPECT_EQ( a[i].Face, b[i].Face );
+        EXPECT_EQ( a[i].Cell, b[i].Cell );
+        EXPECT_EQ( a[i].SizeU, b[i].SizeU );
+        EXPECT_EQ( a[i].SizeV, b[i].SizeV );
+    }
 }
 
 int main( int argc, char** argv )
