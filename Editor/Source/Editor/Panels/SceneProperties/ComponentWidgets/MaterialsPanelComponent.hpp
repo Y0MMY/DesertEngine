@@ -7,6 +7,14 @@
 #include <Common/Utilities/FileSystem.hpp>
 #include <ImGui/imgui.h>
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
+#include <Editor/Widgets/ThumbnailCache.hpp>
+
+#include <array>
+
+namespace Desert::Core
+{
+    class Scene;
+}
 
 namespace Desert::Editor
 {
@@ -15,7 +23,9 @@ namespace Desert::Editor
     public:
         MaterialComponentWidget( const Assets::AssetManager* assetManager );
 
-        void Render( ECS::Entity& entity );
+        // @p scene supplies the active camera for the "drawing LOD n" readout; without it that line is
+        // simply omitted.
+        void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr );
 
     private:
         // overriddenByShader: non-empty when the entity's Shader Override component routes the
@@ -51,9 +61,43 @@ namespace Desert::Editor
         // element row gains its own slot without changing the rendered look.
         static void MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot );
 
+        // A slot's visual identity, read from the SHADER SCHEMA rather than from hardcoded PBR names:
+        // the first Color parameter as a swatch, plus up to two of its ranged scalars as bars. For the
+        // standard shader that is albedo / metallic / roughness; a custom shader gets the same treatment
+        // from its own Properties block, for free.
+        struct SwatchStrip
+        {
+            struct Bar
+            {
+                const char* Label = nullptr; // points into the shader schema (owned by the shader service)
+                float       Value = 0.0f;    // normalised into 0..1 by the param's Range (bar fill)
+                float       Raw   = 0.0f;    // the value as authored (what the number reads)
+            };
+
+            bool               HasColor = false;
+            glm::vec4          Color    = glm::vec4( 1.0f );
+            std::array<Bar, 2> Bars;
+            uint32_t           BarCount = 0;
+        };
+
+        // parentData: material-instance mode — values fall back to the parent chain, then to the schema
+        // default, exactly like the parameter editor.
+        static SwatchStrip BuildSwatchStrip( const Assets::SurfaceMaterialAsset& asset,
+                                             const Assets::MaterialData*         parentData );
+        // Draws the strip right-aligned INTO the element header bar (pure ImDrawList — it must not
+        // become an item that steals the header's click/drop handling).
+        static void DrawSwatchStripInHeader( const SwatchStrip& strip );
+        // The identity card inside an open element: rendered thumbnail (or an albedo chip when the asset
+        // browser has not produced one yet), material name, shader, and the labelled swatch bars.
+        // parentData/parentName describe the instance's parent (both empty for a base material).
+        void DrawSlotIdentityCard( const Assets::SurfaceMaterialAsset& asset, const SwatchStrip& strip,
+                                   const Assets::MaterialData* parentData, const std::string& parentName );
+
     private:
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
         const Assets::AssetManager*           m_AssetManager;
+        // Decoded rendered-thumbnail PNGs (the shared on-disk cache the asset browser fills).
+        ThumbnailCache m_Thumbnails;
     };
 
 } // namespace Desert::Editor

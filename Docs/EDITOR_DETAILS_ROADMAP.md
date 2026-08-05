@@ -87,7 +87,7 @@ section (today a folded section just shows nothing until you expand it), and RMB
 
 ---
 
-## Phase 2 — mesh & material sections that read like UE
+## Phase 2 — mesh & material sections that read like UE — **DONE**
 
 * **Static/Skinned Mesh:** preview + the facts UE shows next to it — triangle and vertex counts, LOD
   count and the active LOD, bounds extent, UV channel count, whether a collision shape exists. All of it
@@ -99,6 +99,45 @@ section (today a folded section just shows nothing until you expand it), and RMB
   warning when it exceeds the skinning limit.
 
 **Done when:** you can pick the right material slot and spot a too-heavy mesh without leaving Details.
+
+**As shipped**
+
+*Mesh section* (`ComponentWidgets/Helper/MeshDetailsWidget.{hpp,cpp}`, rewritten) — one section shared by
+the static and skinned widgets, driven off the mesh **actually drawn** (an edited `RuntimeMesh` / in-editor
+rig wins over the asset mesh, the same precedence the material slot count uses):
+
+* triangles (from `IndexCount`, not `VertexCount/3` — the old readout undercounted every indexed mesh),
+  vertices, elements, LOD levels, bounds extent in cm, world size when the entity is scaled, UV channels,
+  and the entity's collision shape; plus a folded per-element table (name / tris / verts / LODs).
+* **Active LOD** is reported through the renderer's own policy: `MeshRenderer::ComputeLOD` moved its body
+  into `Engine/Geometry/LODSelection.hpp` (`Geometry::SelectLOD`, header-only) and now only resolves the
+  camera + the LOD toggle around it. Details calls the same function with the scene's active camera, so
+  "drawing LOD 1" cannot drift from what the viewport draws. The existing *Level of Detail* list marks the
+  same level with `(drawing)`.
+* A mesh whose GPU build hasn't run says so instead of rendering zeros.
+
+*Material slots* (`MaterialsPanelComponent`): each element header now reads
+`Element 0 — M_Rock (inherited)` and carries a right-aligned **swatch strip** — a colour chip plus up to
+two mini bars — painted straight into the header bar with `ImDrawList` so it adds no item and the row keeps
+its click and `.demat` drop behaviour. Opening a slot shows an identity card: rendered thumbnail, material
+name, shader, `Instance of:` parent, and the same swatches labelled with their values.
+
+The strip is built from the **shader schema**, never from hardcoded PBR names: the first `Color` property
+becomes the chip, the first two `Range`-bounded floats become the bars. For `StaticMeshPBR` that is exactly
+albedo / metallic / roughness; a custom DSL shader gets an equally identifiable slot for free. Values
+resolve child-override → parent chain → schema default, so an instance's chip shows what it renders.
+
+*Skinned* (`SkinnedMeshComponentWidget`): skeleton signature, per-frame pose upload (`bones × 64 B`), the
+influence cap, and the current clip (marked when an Anim Graph drives it). The planned "over the skinning
+limit" warning was **not** implementable as specified — there is no fixed bone cap: the pose lives in a
+storage buffer that grows on demand (`VulkanStorageBuffer::SetData`). Instead the section audits the vertex
+weights (cached; recomputed only when the mesh changes) and reports the real defects: vertices referencing a
+bone the skeleton lacks (wrong rig — a GPU out-of-range read), vertices with no weights at all (they stay in
+bind pose), and how many use all four influence slots (the importer dropped the rest).
+
+Still open: Details reads the **shared** rendered-thumbnail PNG cache but never fills it — a material the
+asset browser has not displayed yet falls back to its colour chip. Generating one from here means a second
+offscreen renderer in this panel, which is deliberately deferred.
 
 ---
 
@@ -172,8 +211,8 @@ consumer: `PropertyEditorBuilder`):
 
 ## Suggested order
 
-1. Phase 1 (preview widget) — unblocks everything.
-2. Phase 2 (mesh/material) — the most-used components.
+1. ~~Phase 1 (preview widget)~~ — done.
+2. ~~Phase 2 (mesh/material)~~ — done.
 3. Phase 4 row polish + search — cheap, felt everywhere.
 4. Phase 3 (lights/sky/camera) — highest "can't do this today" value.
 5. Phase 5 metadata — convert the hand-written bits back to data as they stabilise.

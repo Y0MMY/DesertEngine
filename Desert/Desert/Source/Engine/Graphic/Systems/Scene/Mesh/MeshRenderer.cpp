@@ -5,6 +5,7 @@
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialGlass.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Geometry/LODSelection.hpp>
 #include <Common/Core/Profiler.hpp>
 
 #include <variant>
@@ -184,31 +185,9 @@ namespace Desert::Graphic::System
         if ( !camera )
             return 0;
 
-        // World-space bounding radius = mesh AABB half-diagonal * the largest transform scale. Using it
-        // (instead of raw distance) makes selection SIZE-AWARE: a large object keeps full detail farther
-        // away than a small one.
-        glm::vec3 mn( 1.0e30f );
-        glm::vec3 mx( -1.0e30f );
-        for ( const auto& sm : mesh->GetSubmeshes() )
-        {
-            mn = glm::min( mn, sm.BoundingBox.Min );
-            mx = glm::max( mx, sm.BoundingBox.Max );
-        }
-        if ( mn.x > mx.x )
-            return 0; // empty mesh
-
-        const float scale  = glm::max( glm::length( glm::vec3( transform[0] ) ),
-                                       glm::max( glm::length( glm::vec3( transform[1] ) ),
-                                                 glm::length( glm::vec3( transform[2] ) ) ) );
-        const float radius = glm::length( mx - mn ) * 0.5f * scale;
-        const float dist   = glm::length( camera->GetPosition() - glm::vec3( transform[3] ) );
-
-        // Screen-coverage proxy (radius / distance): larger / closer = finer LOD.
-        const float coverage = radius / glm::max( dist, 0.001f );
-        const int   base     = coverage > 0.20f ? 0 : coverage > 0.08f ? 1 : coverage > 0.03f ? 2 : 3;
-        // Per-mesh bias shifts the auto pick (+coarser / -finer); the draw side clamps to the
-        // submesh's actual LOD count, so 3 here just means "the coarsest available".
-        return static_cast<uint32_t>( std::clamp( base + lodBias, 0, 3 ) );
+        // The policy itself lives in Geometry::SelectLOD so the editor can report the SAME level it
+        // draws with (Details "Mesh" section); this only resolves the renderer's camera + LOD toggle.
+        return Geometry::SelectLOD( transform, mesh->GetSubmeshes(), camera->GetPosition(), forcedLOD, lodBias );
     }
 
     void MeshRenderer::SubmitGenericMesh( const GenericMeshRenderData& data )

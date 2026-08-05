@@ -11,6 +11,7 @@
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
+#include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Geometry/PrimitiveMeshFactory.hpp>
 
 #include <algorithm>
@@ -123,15 +124,41 @@ namespace Desert::Editor
         ImGui::Columns( 1 );
         ImGui::Separator();
 
+        ShowMeshDetails( entity, scene, staticMesh );
+
         {
             static MaterialComponentWidget materialComponent( m_AssetManager );
-            materialComponent.Render( entity );
+            materialComponent.Render( entity, scene );
         }
 
         RenderRigging( entity, staticMesh );
 
         ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
+    }
+
+    void StaticMeshComponentWidget::ShowMeshDetails( const ECS::Entity& entity, ::Desert::Core::Scene* scene,
+                                                     const ECS::StaticMeshComponent& staticMesh ) const
+    {
+        MeshDetailsWidget::Context ctx;
+        ctx.Entity    = &entity;
+        ctx.Scene     = scene;
+        ctx.ForcedLOD = staticMesh.ForcedLOD;
+        ctx.LODBias   = staticMesh.LODBias;
+
+        // The mesh that is ACTUALLY drawn: an edited RuntimeMesh wins over the shared built asset mesh
+        // (same precedence the material slot count uses).
+        if ( staticMesh.RuntimeMesh && !staticMesh.RuntimeMesh->GetSubmeshes().empty() )
+        {
+            ctx.RuntimeMesh = staticMesh.RuntimeMesh.get();
+        }
+        else if ( staticMesh.MeshHandle )
+        {
+            ctx.RuntimeMesh = Runtime::ResourceRegistry::GetMeshService()->Get( staticMesh.MeshHandle );
+            ctx.Asset       = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
+        }
+
+        MeshDetailsWidget::Show( ctx );
     }
 
     void StaticMeshComponentWidget::RenderRigging( ECS::Entity& entity, ECS::StaticMeshComponent& staticMesh )

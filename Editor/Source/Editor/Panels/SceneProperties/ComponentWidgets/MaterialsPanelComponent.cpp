@@ -12,7 +12,9 @@
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Core/Scene.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
+#include <Engine/Geometry/LODSelection.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Graphic/Materials/MaterialFactory.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/StaticMaterialPBR.hpp>
@@ -32,6 +34,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <system_error>
 
@@ -46,7 +49,7 @@ namespace Desert::Editor
         m_UIHelper->Init();
     }
 
-    void MaterialComponentWidget::Render( ECS::Entity& entity )
+    void MaterialComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
         auto& materialComp = entity.GetComponent<ECS::StaticMeshComponent>();
 
@@ -102,6 +105,23 @@ namespace Desert::Editor
             }
             else
             {
+                // Which level the current view resolves to — the renderer's own policy, so the marker
+                // can't disagree with what is on screen.
+                size_t active     = 0;
+                bool   haveActive = false;
+                if ( scene )
+                {
+                    if ( const auto& camera = scene->GetActiveCamera() )
+                    {
+                        active =
+                             std::min<size_t>( Geometry::SelectLOD( entity.GetWorldTransform(),
+                                                                    lodMesh->GetSubmeshes(), camera->GetPosition(),
+                                                                    materialComp.ForcedLOD, materialComp.LODBias ),
+                                               levels - 1 );
+                        haveActive = true;
+                    }
+                }
+
                 const auto& subs = lodMesh->GetSubmeshes();
                 for ( size_t l = 0; l < levels; ++l )
                 {
@@ -111,7 +131,10 @@ namespace Desert::Editor
                         const size_t li = l < sm.LODs.size() ? l : sm.LODs.size() - 1;
                         tris += sm.LODs[li].IndexCount / 3;
                     }
-                    ImGui::BulletText( "LOD %zu \xE2\x80\x94 %u tris", l, tris );
+                    if ( haveActive && l == active )
+                        ImGui::BulletText( "LOD %zu \xE2\x80\x94 %u tris   (drawing)", l, tris );
+                    else
+                        ImGui::BulletText( "LOD %zu \xE2\x80\x94 %u tris", l, tris );
                 }
             }
 
@@ -493,6 +516,163 @@ namespace Desert::Editor
         return changed;
     }
 
+    MaterialComponentWidget::SwatchStrip
+    MaterialComponentWidget::BuildSwatchStrip( const Assets::SurfaceMaterialAsset& asset,
+                                               const Assets::MaterialData*         parentData )
+    {
+        SwatchStrip strip;
+
+        auto*             shaderService = Runtime::ResourceRegistry::GetShaderService();
+        const std::string shaderName =
+             parentData ? parentData->EffectiveShaderName() : asset.Data().EffectiveShaderName();
+        auto shader = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
+        if ( !shader )
+            return strip;
+
+        using W  = ::Desert::Core::Formats::ShaderParamWidget;
+        using VT = ::Desert::Core::Formats::ShaderValueType;
+
+        const auto& data = asset.Data();
+        for ( const auto& p : shader->GetProgramMeta().Params )
+        {
+            if ( p.IsTexture )
+                continue;
+
+            // Same value resolution as the parameter rows: child override -> parent's effective value
+            // (instance mode) -> schema default. A slot must never advertise a colour it doesn't render.
+            const glm::vec4 fallback = parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
+            const glm::vec4 value    = data.GetParam( p.Name, fallback );
+            const char*     label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
+
+            if ( !strip.HasColor && p.Widget == W::Color )
+            {
+                strip.HasColor = true;
+                strip.Color    = value;
+                continue;
+            }
+
+            const bool ranged = p.Type == VT::Float && p.Min.has_value() && p.Max.has_value() && *p.Max > *p.Min;
+            if ( ranged && strip.BarCount < strip.Bars.size() )
+            {
+                const float t = glm::clamp( ( value.x - *p.Min ) / ( *p.Max - *p.Min ), 0.0f, 1.0f );
+                strip.Bars[strip.BarCount++] = { label, t, value.x };
+            }
+        }
+        return strip;
+    }
+
+    void MaterialComponentWidget::DrawSwatchStripInHeader( const SwatchStrip& strip )
+    {
+        if ( !strip.HasColor && strip.BarCount == 0 )
+            return;
+
+        // Painted straight into the header bar's rect: an interactive item here would fight the tree
+        // node for the click and the material drag-drop target.
+        const ImVec2 mn   = ImGui::GetItemRectMin();
+        const ImVec2 mx   = ImGui::GetItemRectMax();
+        const float  h    = std::max( ( mx.y - mn.y ) - 8.0f, 6.0f );
+        const float  y    = mn.y + ( ( mx.y - mn.y ) - h ) * 0.5f;
+        const float  gap  = 4.0f;
+        const float  barW = h * 2.4f;
+
+        float total = strip.HasColor ? h : 0.0f;
+        for ( uint32_t i = 0; i < strip.BarCount; ++i )
+            total += barW + ( ( i > 0 || strip.HasColor ) ? gap : 0.0f );
+        if ( total <= 0.0f || ( mx.x - mn.x ) < total + 80.0f ) // no room next to the label -> skip
+            return;
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float       x  = mx.x - 6.0f - total;
+
+        if ( strip.HasColor )
+        {
+            const ImU32 col =
+                 ImGui::ColorConvertFloat4ToU32( ImVec4( strip.Color.x, strip.Color.y, strip.Color.z, 1.0f ) );
+            dl->AddRectFilled( ImVec2( x, y ), ImVec2( x + h, y + h ), col, 2.0f );
+            dl->AddRect( ImVec2( x, y ), ImVec2( x + h, y + h ), IM_COL32( 0, 0, 0, 120 ), 2.0f );
+            x += h + gap;
+        }
+
+        const ImU32 track = ImGui::GetColorU32( ImGuiCol_FrameBg );
+        const ImU32 fill  = ImGui::GetColorU32( ImGuiCol_SliderGrab );
+        for ( uint32_t i = 0; i < strip.BarCount; ++i )
+        {
+            const float top = y + h * 0.25f;
+            const float bot = y + h * 0.75f;
+            dl->AddRectFilled( ImVec2( x, top ), ImVec2( x + barW, bot ), track, 1.0f );
+            dl->AddRectFilled( ImVec2( x, top ), ImVec2( x + barW * strip.Bars[i].Value, bot ), fill, 1.0f );
+            x += barW + gap;
+        }
+    }
+
+    void MaterialComponentWidget::DrawSlotIdentityCard( const Assets::SurfaceMaterialAsset& asset,
+                                                        const SwatchStrip&                  strip,
+                                                        const Assets::MaterialData*         parentData,
+                                                        const std::string&                  parentName )
+    {
+        constexpr float   kThumb = 56.0f;
+        const std::string path   = asset.GetMetadata().Filepath.generic_string();
+        const std::string name   = std::filesystem::path( path ).stem().string();
+
+        // The rendered material preview comes from the SHARED on-disk thumbnail cache the asset browser
+        // fills; a material it has never shown simply falls back to its colour chip here (Details does no
+        // offscreen rendering of its own — that stays a single renderer per panel).
+        std::shared_ptr<Graphic::Image2D> thumb;
+        std::error_code                   ec;
+        const std::string                 png       = ThumbnailCache::DiskPath( path );
+        bool                              haveFresh = std::filesystem::exists( png, ec );
+        if ( haveFresh )
+        {
+            // Edited material -> the cached PNG (and its decoded texture) are a lie. Same 3s margin the
+            // asset browser uses: coarse filesystem timestamps otherwise report the source as newer right
+            // after the PNG was written.
+            const auto pngTime = std::filesystem::last_write_time( png, ec );
+            const auto srcTime = std::filesystem::last_write_time( path, ec );
+            if ( !ec && ( srcTime - pngTime ) > std::chrono::seconds( 3 ) )
+            {
+                haveFresh = false;
+                m_Thumbnails.Invalidate( png );
+            }
+        }
+        if ( haveFresh )
+            thumb = m_Thumbnails.Get( png );
+
+        if ( thumb && m_UIHelper )
+        {
+            m_UIHelper->Image( thumb, ImVec2( kThumb, kThumb ) );
+        }
+        else
+        {
+            const ImVec4 chip = strip.HasColor ? ImVec4( strip.Color.x, strip.Color.y, strip.Color.z, 1.0f )
+                                               : ImGui::GetStyleColorVec4( ImGuiCol_FrameBg );
+            ImGui::ColorButton( "##slot_chip", chip, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoDragDrop,
+                                ImVec2( kThumb, kThumb ) );
+        }
+
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::TextUnformatted( name.c_str() );
+        Utils::ImGuiUtilities::Tooltip( path.c_str() );
+        // An instance renders with its parent chain's shader — its own ShaderName is empty and would
+        // read as the default here.
+        ImGui::TextDisabled( "%s", parentData ? parentData->EffectiveShaderName().c_str()
+                                              : asset.Data().EffectiveShaderName().c_str() );
+        if ( !parentName.empty() )
+            ImGui::TextDisabled( "Instance of: %s", parentName.c_str() );
+
+        // Bar first, label after it: the bars stay aligned whatever the parameter names are.
+        for ( uint32_t i = 0; i < strip.BarCount; ++i )
+        {
+            char value[16];
+            std::snprintf( value, sizeof( value ), "%.2f", strip.Bars[i].Raw );
+            ImGui::ProgressBar( strip.Bars[i].Value, ImVec2( 90.0f, ImGui::GetTextLineHeight() ), value );
+            ImGui::SameLine();
+            ImGui::TextDisabled( "%s", strip.Bars[i].Label );
+        }
+        ImGui::EndGroup();
+        ImGui::Spacing();
+    }
+
     void MaterialComponentWidget::RenderMaterialProperties( ECS::Entity&              entity,
                                                             ECS::StaticMeshComponent& meshComp,
                                                             const std::string&        overriddenByShader )
@@ -578,9 +758,36 @@ namespace Desert::Editor
                                         ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( handle )
                                         : nullptr;
 
+                // Instance parent, resolved BEFORE the header is drawn: the header's swatches must show
+                // the values the slot actually renders with, which for an instance live in the parent.
+                const bool isInstanceAsset = asset && asset->Data().IsInstance();
+                std::shared_ptr<Assets::SurfaceMaterialAsset> parentAsset;
+                std::string                                   parentName;
+                if ( isInstanceAsset && m_AssetManager )
+                {
+                    const auto parentHandle =
+                         Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal(
+                              *asset->Data().ParentMaterialId );
+                    if ( !parentHandle.IsNull() )
+                        parentAsset = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( parentHandle );
+                    parentName =
+                         parentAsset ? std::filesystem::path( parentAsset->GetMetadata().Filepath ).stem().string()
+                                     : std::string( "<missing parent>" );
+                }
+
+                SwatchStrip strip;
+                if ( asset )
+                    strip = BuildSwatchStrip( *asset, parentAsset ? &parentAsset->Data() : nullptr );
+
                 std::string title = "Element " + std::to_string( i );
+                if ( asset )
+                    title += "  \xE2\x80\x94  " +
+                             std::filesystem::path( asset->GetMetadata().Filepath ).stem().string();
                 if ( !hasOwnSlot )
                     title += handle ? "  (inherited)" : "  (default)";
+                // Stable node id: the label now carries the material name, and an id that changes on
+                // assignment would reset the row's expand state every time a slot is filled.
+                title += "##element";
 
                 if ( !hasOwnSlot )
                     ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
@@ -588,6 +795,11 @@ namespace Desert::Editor
                     title.c_str(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen );
                 if ( !hasOwnSlot )
                     ImGui::PopStyleColor();
+
+                // Identify the slot without opening it: albedo chip + the shader's ranged scalars,
+                // painted into the header bar (no item, so the row keeps its click/drop behaviour).
+                if ( asset )
+                    DrawSwatchStripInHeader( strip );
 
                 // Drop an existing material asset onto this row to assign it (creates the slot if needed).
                 if ( ImGui::BeginDragDropTarget() )
@@ -645,24 +857,9 @@ namespace Desert::Editor
                     {
                         // Material INSTANCE asset (UE model): shader + non-overridden params come
                         // from the parent chain; this editor writes ONLY overrides into the child.
-                        const bool isInstanceAsset = asset->Data().IsInstance();
-
-                        std::shared_ptr<Assets::SurfaceMaterialAsset> parentAsset;
-                        if ( isInstanceAsset && m_AssetManager )
-                        {
-                            const auto parentHandle =
-                                 Runtime::ResourceRegistry::GetMaterialService()->GetAssetHandleByExternal(
-                                      *asset->Data().ParentMaterialId );
-                            if ( !parentHandle.IsNull() )
-                                parentAsset =
-                                     m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( parentHandle );
-                            const std::string parentName =
-                                 parentAsset ? std::filesystem::path( parentAsset->GetMetadata().Filepath )
-                                                    .stem()
-                                                    .string()
-                                             : std::string( "<missing parent>" );
-                            ImGui::TextDisabled( "Instance of: %s", parentName.c_str() );
-                        }
+                        // What this slot IS, before the parameter grid: preview, name, shader, swatches.
+                        DrawSlotIdentityCard( *asset, strip, parentAsset ? &parentAsset->Data() : nullptr,
+                                              parentName );
 
                         // ── Unity-style: the shader lives inside the material (base assets only —
                         // an instance always renders with its parent chain's shader) ────────────
@@ -706,9 +903,13 @@ namespace Desert::Editor
                                                                            asset->Save() );
                             // Drop ONLY this material's cached thumbnail so the asset browser re-renders it
                             // with the new look immediately (no waiting on the modtime check; others untouched).
-                            std::error_code ec;
-                            std::filesystem::remove(
-                                 ThumbnailCache::DiskPath( asset->GetMetadata().Filepath.generic_string() ), ec );
+                            std::error_code   ec;
+                            const std::string png =
+                                 ThumbnailCache::DiskPath( asset->GetMetadata().Filepath.generic_string() );
+                            std::filesystem::remove( png, ec );
+                            // ...and the copy this panel already decoded, or the slot card would keep
+                            // showing the old look after the PNG is regenerated.
+                            m_Thumbnails.Invalidate( png );
                         }
 
                         if ( isInstanceAsset )

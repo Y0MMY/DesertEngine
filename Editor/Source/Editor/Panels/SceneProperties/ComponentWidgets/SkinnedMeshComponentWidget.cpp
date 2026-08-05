@@ -10,11 +10,69 @@
 
 #include "Helper/MeshDetailsWidget.hpp"
 
+#include <Engine/Animation/Skeleton.hpp>
+#include <Engine/Geometry/SkinnedMesh.hpp>
+
 #include <functional>
 
 namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
+
+    namespace
+    {
+        // What the vertex weights say about a rig. Real, checkable problems only — the engine has no
+        // fixed bone cap to warn about (the pose lives in a storage buffer that grows on demand), but a
+        // vertex no bone moves, or one pointing past the end of the skeleton, is a genuine bug.
+        struct SkinningAudit
+        {
+            uint64_t Unweighted      = 0; // no influence at all -> the vertex stays in bind pose
+            uint64_t OutOfRange      = 0; // references a bone index the skeleton does not have
+            uint64_t FullyInfluenced = 0; // uses all 4 slots -> the importer may have dropped weights
+        };
+
+        // Scanning every vertex per UI frame would be silly, and the answer only changes when the mesh
+        // does: cache it against (mesh, vertex count, bone count). Editor UI is single-threaded.
+        const SkinningAudit& AuditSkinning( const SkinnedMesh& mesh, size_t boneCount )
+        {
+            static const void*   cachedMesh  = nullptr;
+            static size_t        cachedVerts = 0;
+            static size_t        cachedBones = 0;
+            static SkinningAudit cached;
+
+            const auto& vertices = mesh.GetVertices();
+            if ( cachedMesh == &mesh && cachedVerts == vertices.size() && cachedBones == boneCount )
+                return cached;
+
+            cached = {};
+            for ( const auto& v : vertices )
+            {
+                float  weight   = 0.0f;
+                size_t active   = 0;
+                bool   outRange = false;
+                for ( size_t i = 0; i < SkinnedVertex::MAX_BONE_INFLUENCES; ++i )
+                {
+                    if ( v.BoneWeights[i] <= 0.0f )
+                        continue;
+                    weight += v.BoneWeights[i];
+                    ++active;
+                    if ( v.BoneIDs[i] >= boneCount )
+                        outRange = true;
+                }
+                if ( weight <= 0.0f )
+                    ++cached.Unweighted;
+                if ( outRange )
+                    ++cached.OutOfRange;
+                if ( active == SkinnedVertex::MAX_BONE_INFLUENCES )
+                    ++cached.FullyInfluenced;
+            }
+
+            cachedMesh  = &mesh;
+            cachedVerts = vertices.size();
+            cachedBones = boneCount;
+            return cached;
+        }
+    } // namespace
 
     SkinnedMeshComponentWidget::SkinnedMeshComponentWidget(
          const std::weak_ptr<Assets::AssetManager>& assetManager )
@@ -90,15 +148,19 @@ namespace Desert::Editor
         ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
 
-        MeshDetailsWidget::ShowMeshInfo( asset, skinnedMesh.MeshHandle );
+        // The mesh that is ACTUALLY drawn: an in-editor rig (Convert to Skinned) overrides the asset.
+        ::Desert::Mesh* mesh = skinnedMesh.RuntimeMesh.get();
+        if ( !mesh && skinnedMesh.MeshHandle )
+            mesh = Runtime::ResourceRegistry::GetMeshService()->Get( skinnedMesh.MeshHandle );
 
-        if ( !skinnedMesh.MeshHandle )
         {
-            return;
+            MeshDetailsWidget::Context ctx;
+            ctx.Asset       = skinnedMesh.RuntimeMesh ? nullptr : asset;
+            ctx.RuntimeMesh = mesh;
+            ctx.Entity      = &entity;
+            ctx.Scene       = scene;
+            MeshDetailsWidget::Show( ctx );
         }
-
-        auto meshService = Runtime::ResourceRegistry::GetMeshService();
-        auto mesh        = meshService->Get( skinnedMesh.MeshHandle );
 
         if ( !mesh || !mesh->IsSkinned() )
         {
@@ -115,6 +177,50 @@ namespace Desert::Editor
             const auto& bones = skeleton.GetBones();
 
             ImGui::Text( "Bone Count: %zu", bones.size() );
+            // Rig identity: the signature is what links a SkinnedMeshAsset to its SkeletonAsset, so it is
+            // the thing to compare when a mesh refuses to bind to the rig you expect.
+            ImGui::TextDisabled( "Signature: %016llx",
+                                 static_cast<unsigned long long>( skeleton.GetSignature() ) );
+            Utils::ImGuiUtilities::Tooltip(
+                 "Hash of the bone hierarchy. A mesh binds to the skeleton with the same signature." );
+
+            // Cost + format limits, stated instead of implied: the pose is uploaded per frame as one
+            // mat4 per bone, and the vertex format carries at most 4 influences per vertex.
+            ImGui::TextDisabled( "Pose upload: %zu x %zu B = %.1f KB / frame", bones.size(), sizeof( glm::mat4 ),
+                                 static_cast<double>( bones.size() * sizeof( glm::mat4 ) ) / 1024.0 );
+            ImGui::TextDisabled( "Influences: up to %zu per vertex", SkinnedVertex::MAX_BONE_INFLUENCES );
+
+            if ( entity.HasComponent<ECS::AnimationComponent>() )
+            {
+                const auto& anim = entity.GetComponent<ECS::AnimationComponent>();
+                const char* clip = anim.CurrentClip.empty() ? "<none>" : anim.CurrentClip.c_str();
+                if ( anim.Graph )
+                    ImGui::TextDisabled( "Clip: %s (driven by the Anim Graph)", clip );
+                else
+                    ImGui::TextDisabled( "Clip: %s%s", clip, anim.Playing ? "" : "  (paused)" );
+            }
+
+            // Weight problems the GPU can't tell you about. Only real ones — see AuditSkinning.
+            const SkinningAudit& audit = AuditSkinning( *skinned, bones.size() );
+            if ( audit.OutOfRange > 0 )
+                ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.4f, 1.0f ),
+                                    ICON_MDI_ALERT " %llu vertices reference a bone this skeleton does not "
+                                                   "have - the mesh is bound to the wrong rig",
+                                    static_cast<unsigned long long>( audit.OutOfRange ) );
+            if ( audit.Unweighted > 0 )
+                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ),
+                                    ICON_MDI_ALERT " %llu vertices have no bone weights - they stay in bind "
+                                                   "pose while the rest animates",
+                                    static_cast<unsigned long long>( audit.Unweighted ) );
+            if ( audit.FullyInfluenced > 0 )
+            {
+                ImGui::TextDisabled( "%llu vertices use all %zu influence slots",
+                                     static_cast<unsigned long long>( audit.FullyInfluenced ),
+                                     SkinnedVertex::MAX_BONE_INFLUENCES );
+                Utils::ImGuiUtilities::Tooltip( "The import keeps the 4 heaviest influences per vertex; "
+                                                "weights beyond that were dropped." );
+            }
+
             ImGui::Separator();
 
             // Build child adjacency and collect root bones.

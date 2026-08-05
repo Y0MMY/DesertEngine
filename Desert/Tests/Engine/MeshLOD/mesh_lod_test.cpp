@@ -1,11 +1,14 @@
+#include <Engine/Geometry/LODSelection.hpp>
 #include <Engine/Geometry/MeshLOD.hpp>
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
 using Desert::Index;
 using Desert::Submesh;
 using Desert::Vertex;
 using Desert::Geometry::BuildLODIndexBuffer;
+using Desert::Geometry::SelectLOD;
 using Desert::Geometry::SimplifyLODLevels;
 
 namespace
@@ -124,6 +127,74 @@ TEST( MeshLOD, AssembleOffsetsAndReuse )
     EXPECT_EQ( subs[0].LODs[3].IndexOffset, 42u ); // empty -> reused L2
     EXPECT_EQ( subs[0].LODs[3].IndexCount, 6u );
     EXPECT_EQ( gpu.size(), 16u ); // 10 base + 4 + 2
+}
+
+// ---------------------------------------------------------------------------------------------------
+// LOD SELECTION (Geometry::SelectLOD) — the policy the renderer draws with AND the Details panel
+// reports. Both read the same function, so these cases pin what "drawing LOD n" means.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // One submesh with a symmetric AABB of the given half-size (unit-ish mesh centred on the origin).
+    std::vector<Submesh> BoundedSubmesh( float halfSize )
+    {
+        Submesh s{};
+        s.BoundingBox.Min = glm::vec3( -halfSize );
+        s.BoundingBox.Max = glm::vec3( halfSize );
+        return { s };
+    }
+
+    glm::mat4 AtOrigin( float scale = 1.0f )
+    {
+        return glm::scale( glm::mat4( 1.0f ), glm::vec3( scale ) );
+    }
+} // namespace
+
+TEST( LODSelection, ForcedLevelWinsOverEverything )
+{
+    const auto subs = BoundedSubmesh( 50.0f );
+    // Far away (would be the coarsest level) but pinned to LOD 1.
+    EXPECT_EQ( SelectLOD( AtOrigin(), subs, glm::vec3( 0.0f, 0.0f, 100000.0f ), /*forced*/ 1, /*bias*/ 0 ), 1u );
+    // The bias is ignored while a level is forced.
+    EXPECT_EQ( SelectLOD( AtOrigin(), subs, glm::vec3( 0.0f, 0.0f, 100000.0f ), /*forced*/ 0, /*bias*/ 3 ), 0u );
+}
+
+TEST( LODSelection, CoarsensWithDistance )
+{
+    const auto subs = BoundedSubmesh( 50.0f ); // radius ~86.6 cm
+
+    // (not named near/far: those are legacy macros in the Windows SDK headers)
+    const uint32_t closeUp = SelectLOD( AtOrigin(), subs, glm::vec3( 0.0f, 0.0f, 100.0f ), -1, 0 );
+    const uint32_t middle  = SelectLOD( AtOrigin(), subs, glm::vec3( 0.0f, 0.0f, 800.0f ), -1, 0 );
+    const uint32_t distant = SelectLOD( AtOrigin(), subs, glm::vec3( 0.0f, 0.0f, 100000.0f ), -1, 0 );
+
+    EXPECT_EQ( closeUp, 0u );
+    EXPECT_GT( middle, closeUp );
+    EXPECT_EQ( distant, 3u ); // clamped to the coarsest level the policy may pick
+}
+
+TEST( LODSelection, SizeAwareAndBiasShifts )
+{
+    const auto small = BoundedSubmesh( 50.0f );
+    const auto big   = BoundedSubmesh( 5000.0f );
+    const auto eye   = glm::vec3( 0.0f, 0.0f, 5000.0f );
+
+    // A bigger object keeps finer detail at the same distance...
+    EXPECT_LT( SelectLOD( AtOrigin(), big, eye, -1, 0 ), SelectLOD( AtOrigin(), small, eye, -1, 0 ) );
+    // ...and so does the same object scaled up by its transform.
+    EXPECT_LT( SelectLOD( AtOrigin( 100.0f ), small, eye, -1, 0 ), SelectLOD( AtOrigin(), small, eye, -1, 0 ) );
+
+    // The bias shifts the automatic pick and stays inside [0, kMaxAutoLOD].
+    const uint32_t base = SelectLOD( AtOrigin(), small, eye, -1, 0 );
+    EXPECT_EQ( SelectLOD( AtOrigin(), small, eye, -1, 1 ), std::min( base + 1u, 3u ) );
+    EXPECT_EQ( SelectLOD( AtOrigin(), small, eye, -1, -9 ), 0u );
+    EXPECT_EQ( SelectLOD( AtOrigin(), small, eye, -1, 9 ), 3u );
+}
+
+TEST( LODSelection, EmptyMeshIsLODZero )
+{
+    EXPECT_EQ( SelectLOD( AtOrigin(), {}, glm::vec3( 0.0f, 0.0f, 100000.0f ), -1, 0 ), 0u );
 }
 
 int main( int argc, char** argv )
