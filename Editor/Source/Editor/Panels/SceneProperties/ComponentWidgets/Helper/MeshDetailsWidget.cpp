@@ -142,11 +142,15 @@ namespace Desert::Editor
             Utils::ImGuiUtilities::Tooltip( path.c_str() );
         }
 
-        // The RUNTIME (GPU) mesh builds lazily and can be null (not built yet, or a skinned mesh whose
-        // build hasn't run). Say so rather than showing zeros that read like an empty mesh.
+        // The RUNTIME (GPU) mesh builds lazily, so it can genuinely be missing for a frame or two after a
+        // mesh is assigned. Say WHICH state this is instead of a bare ellipsis: "no mesh assigned" and
+        // "assigned, still building" are different problems and the fix differs.
         if ( !ctx.RuntimeMesh )
         {
-            ImGui::TextDisabled( "Mesh not built yet..." );
+            if ( ctx.Asset )
+                ImGui::TextDisabled( "Building the GPU mesh..." );
+            else
+                ImGui::TextDisabled( "No mesh assigned" );
             ImGui::Unindent();
             return;
         }
@@ -159,6 +163,8 @@ namespace Desert::Editor
             ImGui::TableSetupColumn( "label", ImGuiTableColumnFlags_WidthStretch, 0.38f );
             ImGui::TableSetupColumn( "value", ImGuiTableColumnFlags_WidthStretch, 0.62f );
 
+            // Wording follows UE's Static Mesh Editor stat block, so the numbers mean the same thing to
+            // anyone who has read that panel: Triangles / Vertices / UV Channels / Approx Size.
             StatRow( "Triangles", FormatCount( stats.Triangles ), "Triangle count of LOD 0 (all elements)" );
             StatRow( "Vertices", FormatCount( stats.Vertices ) );
             StatRow( "Elements", FormatCount( stats.Elements ),
@@ -195,7 +201,7 @@ namespace Desert::Editor
 
             if ( stats.HasBounds )
             {
-                StatRow( "Bounds", FormatExtent( stats.Extent ), "Local-space extent of the mesh" );
+                StatRow( "Approx Size", FormatExtent( stats.Extent ), "Local-space extent of the mesh" );
 
                 if ( ctx.Entity )
                 {
@@ -212,7 +218,7 @@ namespace Desert::Editor
                      "exposes one channel however many the source file had." );
 
             if ( ctx.Entity )
-                StatRow( "Collision", DescribeCollision( *ctx.Entity ),
+                StatRow( "Collision Primitives", DescribeCollision( *ctx.Entity ),
                          "Collider component on this entity (physics uses this shape, not the mesh)" );
 
             ImGui::EndTable();

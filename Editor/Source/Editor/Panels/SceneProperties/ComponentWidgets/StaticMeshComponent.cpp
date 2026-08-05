@@ -146,8 +146,9 @@ namespace Desert::Editor
         ctx.ForcedLOD = staticMesh.ForcedLOD;
         ctx.LODBias   = staticMesh.LODBias;
 
-        // The mesh that is ACTUALLY drawn: an edited RuntimeMesh wins over the shared built asset mesh
-        // (same precedence the material slot count uses).
+        // The mesh that is ACTUALLY drawn, in the renderer's own precedence: an edited RuntimeMesh, else
+        // the built asset mesh, else — for a PRIMITIVE — the process-wide shared mesh every cube/sphere
+        // instances from. Missing that last case is why a primitive used to report "not built yet".
         if ( staticMesh.RuntimeMesh && !staticMesh.RuntimeMesh->GetSubmeshes().empty() )
         {
             ctx.RuntimeMesh = staticMesh.RuntimeMesh.get();
@@ -156,6 +157,10 @@ namespace Desert::Editor
         {
             ctx.RuntimeMesh = Runtime::ResourceRegistry::GetMeshService()->Get( staticMesh.MeshHandle );
             ctx.Asset       = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
+        }
+        else if ( staticMesh.Primitive.has_value() )
+        {
+            ctx.RuntimeMesh = Geometry::PrimitiveMeshFactory::GetShared( *staticMesh.Primitive );
         }
 
         MeshDetailsWidget::Show( ctx );
