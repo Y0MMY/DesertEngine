@@ -166,6 +166,44 @@ if hit.hit then
 end
 ```
 
+## UI
+
+The UI/gameplay bridge. A script writes **data** and any element carrying a `UI Binding` component that
+names the same key follows it — nothing looks a widget up, so renaming or restyling one cannot break
+gameplay code. Bindings can drive text, a slider/progress value, opacity, colour and visibility.
+
+| Call | Meaning |
+| --- | --- |
+| `ui.set(key, value)` | Write a number / string / bool. |
+| `ui.set(key, r, g, b)` | Write a colour (for a `Color` binding). |
+| `ui.get(key)` | Read it back in its natural Lua type, `nil` when unset. |
+| `ui.has(key)` | Is the key set? |
+| `ui.clear([key])` | Drop one key, or the whole store. |
+| `ui.send(msg)` | Raise a UI message yourself (same channel a button uses). |
+
+In the other direction, define `OnUIMessage(msg)` and the script hears **every** message the canvas
+raised: button actions (`SendMessage`'s text, `scene:...`, `url:...`, `screen:...`), pointer
+enter/exit/press/release from a `UI Pointer Events` component, and drag-and-drop drops
+(`OnDropMessage|payload`). It is a broadcast — a button belongs to the canvas, not to a script — so each
+script decides what, if anything, it answers.
+
+```lua
+function OnStart()
+    ui.set("player.name", "Commander")   -- a UIBinding on a UIText picks this up
+end
+
+function OnUpdate(dt)
+    ui.set("server.load", 0.6 + 0.25 * math.sin(os.clock()))  -- drives a progress bar
+end
+
+function OnUIMessage(msg)
+    if msg == "screen:Settings" then ui.set("player.name", "…in settings") end
+end
+```
+
+An unset key falls back to whatever the element's author typed, so the UI still looks right in the
+editor with no scripts running. Full example: `Editor/Resources/Scripts/Examples/UIDataBridge.lua`.
+
 ## Logging
 
 `log(msg)` or leveled `Log.info(msg)` / `Log.warn(msg)` / `Log.error(msg)` — all land in the
