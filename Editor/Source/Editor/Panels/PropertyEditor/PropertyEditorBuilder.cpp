@@ -349,13 +349,6 @@ namespace Desert::Editor
         }
     } // namespace
 
-    namespace
-    {
-        // Alternating row index, continuous down a component's grid and reset when one starts. A member
-        // would mean threading state through every call for a purely visual property of the drawing pass.
-        int s_RowIndex = 0;
-    } // namespace
-
     bool PropertyEditorBuilder::DrawField( void* object, const FieldInfo& field,
                                            const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
                                            const void* defaultObject, bool mixed, const TypeInfo* ownerType )
@@ -421,25 +414,10 @@ namespace Desert::Editor
 
         ImGui::PushID( field.Name.c_str() );
 
-        // Row background. UE's Details grid alternates row fills and highlights the row under the cursor;
-        // both are what let the eye track a label across to its value in a dense panel. Painted BEFORE the
-        // row — a fill drawn afterwards would cover the widgets — and a value row's geometry is known in
-        // advance: full width, one frame tall.
-        const ImVec2 rowMin = ImGui::GetCursorScreenPos();
-        const ImVec2 rowMax( rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + ImGui::GetFrameHeight() );
-        const bool   rowHovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) &&
-                                ImGui::IsMouseHoveringRect( rowMin, rowMax, /*clip*/ true );
-
-        // The stripe runs edge to edge (past the panel's padding), like a table row — a stripe that stops
-        // short of the border reads as a box instead of a row.
-        const ImVec2 bandMin( rowMin.x - ImGui::GetStyle().WindowPadding.x, rowMin.y );
-        const ImVec2 bandMax( rowMax.x + ImGui::GetStyle().WindowPadding.x, rowMax.y );
-        ImDrawList*  bandList = ImGui::GetWindowDrawList();
-        if ( rowHovered )
-            bandList->AddRectFilled( bandMin, bandMax, ImGui::GetColorU32( ImGuiCol_Header, 0.30f ) );
-        else if ( ( s_RowIndex & 1 ) != 0 )
-            bandList->AddRectFilled( bandMin, bandMax, IM_COL32( 255, 255, 255, 8 ) );
-        ++s_RowIndex;
+        // Row background (stripe + hover) comes from the shared property-row primitive, so this grid and
+        // a hand-written widget cannot drift apart. Painted BEFORE the row: a fill drawn afterwards would
+        // cover the widgets.
+        const bool rowHovered = Utils::ImGuiUtilities::PropertyRowBackground();
 
         ImGui::Columns( 2 );
         // The label column follows the panel instead of a fixed 150px: docked narrow, a fixed column eats
@@ -1028,7 +1006,7 @@ namespace Desert::Editor
         // The type's default-constructed instance (member initializers) — powers reset-to-default.
         const void* defaultObject = type.GetDefaultInstance ? type.GetDefaultInstance() : nullptr;
 
-        s_RowIndex = 0; // every component's grid starts its striping the same way
+        Utils::ImGuiUtilities::ResetPropertyRows(); // every component starts its striping alike
 
         anyChanged = DrawCategories( GroupFields( type, filter ), filter && *filter,
                                      [&]( const FieldInfo& field )
@@ -1074,7 +1052,7 @@ namespace Desert::Editor
         if ( others.empty() )
             return Draw( primary, type, assetMgr, uiHelper, filter );
 
-        s_RowIndex = 0;
+        Utils::ImGuiUtilities::ResetPropertyRows();
 
         // Same grouping as Draw(), but each field is marked "(mixed)" when it differs across the
         // selection, and a POD edit on the primary is broadcast to every other object.

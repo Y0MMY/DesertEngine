@@ -2,6 +2,7 @@
 
 #include <ImGui/imgui.h>
 #include <ImGui/imgui_internal.h>
+#include <algorithm>
 #include <format>
 
 namespace Desert::Editor::Utils
@@ -31,6 +32,63 @@ namespace Desert::Editor::Utils
         ImGui::PopStyleVar( 2 );
         ImGui::PopStyleColor( 3 );
         return open;
+    }
+
+    namespace
+    {
+        // Alternating row index, continuous down a component's rows and reset when one starts.
+        int s_PropertyRowIndex = 0;
+    } // namespace
+
+    void ImGuiUtilities::ResetPropertyRows()
+    {
+        s_PropertyRowIndex = 0;
+    }
+
+    bool ImGuiUtilities::PropertyRowBackground()
+    {
+        const ImVec2 rowMin = ImGui::GetCursorScreenPos();
+        const ImVec2 rowMax( rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + ImGui::GetFrameHeight() );
+        const bool   hovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) &&
+                             ImGui::IsMouseHoveringRect( rowMin, rowMax, /*clip*/ true );
+
+        // Edge to edge, past the window padding: a stripe that stops short of the border reads as a box
+        // instead of a row.
+        const ImVec2 bandMin( rowMin.x - ImGui::GetStyle().WindowPadding.x, rowMin.y );
+        const ImVec2 bandMax( rowMax.x + ImGui::GetStyle().WindowPadding.x, rowMax.y );
+        ImDrawList*  dl = ImGui::GetWindowDrawList();
+        if ( hovered )
+            dl->AddRectFilled( bandMin, bandMax, ImGui::GetColorU32( ImGuiCol_Header, 0.30f ) );
+        else if ( ( s_PropertyRowIndex & 1 ) != 0 )
+            dl->AddRectFilled( bandMin, bandMax, IM_COL32( 255, 255, 255, 8 ) );
+
+        ++s_PropertyRowIndex;
+        return hovered;
+    }
+
+    void ImGuiUtilities::BeginPropertyRow( const char* label, const char* tooltip )
+    {
+        PropertyRowBackground();
+
+        ImGui::Columns( 2 );
+        // The label column follows the panel instead of a fixed width: docked narrow, a fixed column eats
+        // the editor and every value box collapses; docked wide, the labels strand far from their values.
+        const float labelW = std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
+        ImGui::SetColumnWidth( 0, labelW );
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted( label );
+        if ( tooltip )
+            Tooltip( tooltip );
+
+        ImGui::NextColumn();
+        ImGui::PushItemWidth( -1.0f );
+    }
+
+    void ImGuiUtilities::EndPropertyRow()
+    {
+        ImGui::PopItemWidth();
+        ImGui::NextColumn();
+        ImGui::Columns( 1 );
     }
 
     bool ImGuiUtilities::AccentButton( const char* label, float height )

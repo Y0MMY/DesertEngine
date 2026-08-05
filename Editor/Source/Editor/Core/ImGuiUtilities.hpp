@@ -54,5 +54,23 @@ namespace Desert::Editor::Utils
 
         // A full-width accent ("primary") button — for the one obvious action of a section (Convert, Create…).
         static bool AccentButton( const char* label, float height = 0.0f );
+
+        // --- Property rows -------------------------------------------------------------------------
+        // THE row look of the editor, in one place: alternating stripe, hover band, a label column whose
+        // width follows the panel, and a value column that fills the rest. Hand-written widgets call
+        // BeginPropertyRow/EndPropertyRow; the reflected grid draws its own controls but shares the
+        // background through PropertyRowBackground, so a mesh widget and an auto-built component cannot
+        // drift into looking like two different editors.
+        //
+        //   ResetPropertyRows();                       // once per component, so striping starts alike
+        //   if ( BeginPropertyRow( "Mesh Type" ) ) ... // value widget goes here, already width-clamped
+        //   EndPropertyRow();
+        static void ResetPropertyRows();
+        // Draws the background for the row that is ABOUT to be submitted and returns whether the pointer
+        // is over it (a fill drawn after the row would cover the widgets). Advances the stripe.
+        static bool PropertyRowBackground();
+        // Opens a two-column row and writes the label; the caller then submits ONE value widget.
+        static void BeginPropertyRow( const char* label, const char* tooltip = nullptr );
+        static void EndPropertyRow();
     };
 } // namespace Desert::Editor::Utils

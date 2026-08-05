@@ -34,12 +34,8 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::PushID();
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
-        ImGui::Columns( 2 );
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Mesh Type" );
-        ImGui::NextColumn();
-        ImGui::PushItemWidth( -1 );
+        Utils::ImGuiUtilities::ResetPropertyRows();
+        Utils::ImGuiUtilities::BeginPropertyRow( "Mesh Type" );
 
         const char* meshTypes[] = { "Asset", "Primitive" };
         int currentType = staticMesh.Primitive.has_value() ? 1 : 0;
@@ -51,14 +47,11 @@ namespace Desert::Editor
                 staticMesh.Primitive = Geometry::PrimitiveType::Cube;
         }
 
-        ImGui::PopItemWidth();
-        ImGui::NextColumn();
+        Utils::ImGuiUtilities::EndPropertyRow();
 
         if ( !staticMesh.Primitive.has_value() )
         {
-            ImGui::TextUnformatted( "Asset" );
-            ImGui::NextColumn();
-            ImGui::PushItemWidth( -1 );
+            Utils::ImGuiUtilities::BeginPropertyRow( "Asset" );
 
             std::string currentSelectionName = "Select Mesh";
             if ( staticMesh.MeshHandle )
@@ -101,14 +94,11 @@ namespace Desert::Editor
                 }
                 ImGui::EndPopup();
             }
-            ImGui::PopItemWidth();
-            ImGui::NextColumn();
+            Utils::ImGuiUtilities::EndPropertyRow();
         }
         else
         {
-            ImGui::TextUnformatted( "Shape" );
-            ImGui::NextColumn();
-            ImGui::PushItemWidth( -1 );
+            Utils::ImGuiUtilities::BeginPropertyRow( "Shape" );
 
             const char* shapes[] = { "Cube", "Sphere", "Pyramid", "Plane", "Cylinder", "Capsule" };
             int currentShape = (int)staticMesh.Primitive.value();
@@ -118,12 +108,8 @@ namespace Desert::Editor
                 // MeshECSSystem will handle the dynamic mesh generation/update
             }
 
-            ImGui::PopItemWidth();
-            ImGui::NextColumn();
+            Utils::ImGuiUtilities::EndPropertyRow();
         }
-
-        ImGui::Columns( 1 );
-        ImGui::Separator();
 
         ShowMeshDetails( entity, scene, staticMesh );
 
