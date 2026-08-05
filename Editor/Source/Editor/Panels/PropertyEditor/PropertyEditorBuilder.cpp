@@ -15,6 +15,7 @@
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Import/TextureDnD.hpp>
 
@@ -302,7 +303,9 @@ namespace Desert::Editor
                 // expand the section holding it is exactly what the search box exists to avoid.
                 if ( filtering )
                     ImGui::SetNextItemOpen( true, ImGuiCond_Always );
-                if ( !ImGui::CollapsingHeader( cat.Name.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
+                // The shared section header — a category in a reflected component must look exactly like a
+                // section in a hand-written widget, or the panel reads as two different editors.
+                if ( !Utils::ImGuiUtilities::SectionHeader( cat.Name.c_str() ) )
                     continue;
 
                 ImGui::Spacing(); // a section, not just another row

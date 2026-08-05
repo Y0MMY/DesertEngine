@@ -10,11 +10,15 @@ namespace Desert::Editor::Utils
 
     bool ImGuiUtilities::SectionHeader( const char* label, bool defaultOpen )
     {
-        ImGui::PushStyleColor( ImGuiCol_Header, ImVec4( 0.26f, 0.42f, 0.62f, 0.55f ) );
-        ImGui::PushStyleColor( ImGuiCol_HeaderHovered, ImVec4( 0.30f, 0.48f, 0.70f, 0.75f ) );
-        ImGui::PushStyleColor( ImGuiCol_HeaderActive, ImVec4( 0.32f, 0.52f, 0.78f, 0.85f ) );
-        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 8.0f, 6.0f ) );
-        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 5.0f );
+        // ONE look for every section in the editor. Modelled on UE's Details panel: a flat, full-width
+        // grey bar with a disclosure triangle — not a tinted rounded pill. A section header is furniture;
+        // when it is coloured and rounded it competes with the actual controls for attention, and when
+        // every panel invents its own the whole editor reads as unfinished.
+        ImGui::PushStyleColor( ImGuiCol_Header, ImVec4( 0.16f, 0.17f, 0.19f, 1.00f ) );
+        ImGui::PushStyleColor( ImGuiCol_HeaderHovered, ImVec4( 0.21f, 0.22f, 0.25f, 1.00f ) );
+        ImGui::PushStyleColor( ImGuiCol_HeaderActive, ImVec4( 0.24f, 0.26f, 0.29f, 1.00f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 6.0f, 5.0f ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_FrameRounding, 0.0f );
 
         const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth |
                                          ImGuiTreeNodeFlags_AllowItemOverlap |
