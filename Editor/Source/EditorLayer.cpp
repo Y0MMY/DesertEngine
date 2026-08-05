@@ -49,7 +49,6 @@
 #include "Editor/Panels/Debug/ShaderLibraryPanel.hpp"
 #include "Editor/Panels/FileExplorer/FileExplorerPanel.hpp"
 #include "Editor/Panels/ViewportPanel/ViewportPanel.hpp"
-#include "Editor/Panels/MeshEditor/MeshEditorPanel.hpp"
 #include "Editor/Panels/SceneSettings/SceneSettingsPanel.hpp"
 #include "Editor/Panels/Modeling/ModelingPanel.hpp"
 #include "Editor/Panels/Logs/LogsPanel.hpp"
@@ -137,8 +136,6 @@ namespace Desert::Editor
             return ICON_MDI_HAMMER_WRENCH;
         if ( name == "Asset References" )
             return ICON_MDI_LINK_VARIANT;
-        if ( name == "Mesh Editor" )
-            return ICON_MDI_VECTOR_TRIANGLE;
         if ( name == "Scene Validation" )
             return ICON_MDI_CLIPBOARD_CHECK_OUTLINE;
         if ( name == "Shader Library" )
@@ -365,7 +362,6 @@ namespace Desert::Editor
             m_FileExplorerPanel = fileExplorer.get();
             m_Panels.emplace_back( std::move( fileExplorer ) );
         }
-        m_Panels.emplace_back( std::make_unique<Editor::MeshEditorPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::ModelingPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::SceneSettingsPanel>( m_MainScene ) );
         m_Panels.emplace_back( std::make_unique<Editor::LogsPanel>() );
@@ -694,7 +690,7 @@ namespace Desert::Editor
 #endif
 
         // ImGuizmo is a single global per-frame state — begin it ONCE here, before any panel issues a
-        // Manipulate(). Both the viewport's object gizmo and the Mesh Editor's vertex gizmo rely on this.
+        // Manipulate(). The viewport's object gizmo relies on this.
         ImGuizmo::BeginFrame();
 
         // ---- Startup loading overlay (UI loader) ----
@@ -870,7 +866,7 @@ namespace Desert::Editor
             // One-time auto-relayout: when the default layout's window IDs change (panel-title icons add a
             // ### suffix, changing every window's ImGui ID), old imgui.ini bindings stop matching and panels
             // scatter. Bump kDockLayoutVersion to force a single clean rebuild for everyone, then persist it.
-            constexpr int kDockLayoutVersion = 1;
+            constexpr int kDockLayoutVersion = 2; // 2: Mesh Editor removed, contextual tools docked
             if ( EditorPreferences::Get().DockLayoutVersion < kDockLayoutVersion )
             {
                 m_ResetDefaultLayout                       = true;
@@ -924,6 +920,16 @@ namespace Desert::Editor
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Assets" ).c_str(), bottom );
                 ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Logs" ).c_str(), bottom );
                 ::ImGui::DockBuilderDockWindow( "Shader Code", bottom );
+
+                // Contextual tools (IPanel::IsContextual) get a home too, so the one that opens itself
+                // lands where its work belongs instead of floating over the scene: timelines along the
+                // bottom next to Assets/Logs, authoring palettes on the right beside Details.
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Sequencer" ).c_str(), bottom );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Anim Layers" ).c_str(), bottom );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Anim Graph" ).c_str(), center );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Particle Editor" ).c_str(), right );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "UI Editor" ).c_str(), right );
+                ::ImGui::DockBuilderDockWindow( PanelDisplayTitle( "Modeling" ).c_str(), left );
 
                 ::ImGui::DockBuilderFinish( dockspace_id );
             }

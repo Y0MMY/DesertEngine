@@ -8,8 +8,6 @@
 
 #include "Helper/MeshDetailsWidget.hpp"
 
-#include "../../MeshEditor/MeshEditorPanel.hpp"
-
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
@@ -119,17 +117,6 @@ namespace Desert::Editor
             }
 
             ImGui::PopItemWidth();
-            ImGui::NextColumn();
-
-            ImGui::TextUnformatted( "Geometry Editor" );
-            ImGui::NextColumn();
-            if ( ImGui::Button( "Open Mesh Editor", ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
-            {
-                if ( auto* meshEditor = MeshEditorPanel::GetInstance() )
-                {
-                    meshEditor->SetTarget( entity );
-                }
-            }
             ImGui::NextColumn();
         }
 

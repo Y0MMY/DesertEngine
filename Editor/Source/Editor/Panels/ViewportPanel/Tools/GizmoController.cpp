@@ -4,7 +4,6 @@
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Core/CommandHistory.hpp>
-#include <Editor/Panels/MeshEditor/MeshEditorPanel.hpp>
 
 #include <memory>
 
@@ -84,12 +83,6 @@ namespace Desert::Editor::Tools
             return;
 
         auto& selectedEntity = selectedEntityOpt->get();
-
-        // If the Mesh Editor is open and editing this entity, vertex editing owns the (global) ImGuizmo
-        // interaction — drawing the object gizmo here would steal the drag and move the whole object.
-        if ( auto* meshEditor = MeshEditorPanel::GetInstance();
-             meshEditor && meshEditor->IsActivelyEditing( selectedEntity ) )
-            return;
 
         auto& transformComponent = selectedEntity.GetComponent<ECS::TransformComponent>();
         auto& reg                = scene.GetRegistry();

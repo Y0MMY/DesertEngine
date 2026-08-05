@@ -21,6 +21,7 @@
 
 #include <ImGui/imgui.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -157,7 +158,10 @@ namespace Desert::Editor
         ImGui::BeginDisabled( field.Meta.ReadOnly );
 
         ImGui::Columns( 2 );
-        ImGui::SetColumnWidth( 0, 150.0f );
+        // The label column follows the panel instead of a fixed 150px: docked narrow, a fixed column eats
+        // the editor and every value box collapses; docked wide, the labels stranded far from their values.
+        const float labelW = std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
+        ImGui::SetColumnWidth( 0, labelW );
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted( label.c_str() );
         // Multi-select: this field's value differs across the selected objects until the user edits it.
@@ -652,6 +656,7 @@ namespace Desert::Editor
 
             if ( ImGui::CollapsingHeader( catName.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
             {
+                ImGui::Spacing(); // a section, not just another row
                 // The type's default-constructed instance (member initializers) — powers reset-to-default.
                 const void* defaultObject = type.GetDefaultInstance ? type.GetDefaultInstance() : nullptr;
                 for ( const auto* field : fields )
@@ -659,6 +664,7 @@ namespace Desert::Editor
                     if ( DrawField( object, *field, assetMgr, uiHelper, defaultObject ) )
                         anyChanged = true;
                 }
+                ImGui::Spacing();
             }
         }
 
