@@ -5,6 +5,7 @@
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/Input.hpp>
 #include <Engine/Scripting/ScriptEngine.hpp>
+#include <Engine/UI/UIDataStore.hpp>
 
 #include <Common/Core/KeyCodes.hpp>
 #include <Common/Core/Logger.hpp>
@@ -139,6 +140,12 @@ namespace Desert::ECS
                     }
                 }
             }
+
+            // Deliver whatever the canvas raised this frame (button actions, pointer events, drops) to
+            // every script defining OnUIMessage. Drained here rather than pushed by the UI, so the canvas
+            // stays unaware that scripting exists — and so a message queued while paused isn't lost.
+            for ( const std::string& msg : UI::UIMessageQueue::Get().Drain() )
+                m_Engine.BroadcastUIMessage( msg );
 
             // Fire due Timer.after callbacks (scheduled by OnStart/OnUpdate/earlier timers). Game
             // time only — pausing Play pauses the timers because this Update early-outs above.

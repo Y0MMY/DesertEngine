@@ -17,6 +17,14 @@
     "TransitionTime": 0.28,
     "SlidePx": 90.0,
     "Easing": 5
+   },
+   "Script": {
+    "Scripts": [
+     {
+      "Path": "Resources/Scripts/Examples/UIDataBridge.lua",
+      "Props": []
+     }
+    ]
    }
   },
   {
@@ -1410,6 +1418,11 @@
      0.96,
      1.0
     ]
+   },
+   "UIBinding": {
+    "Key": "player.name",
+    "Target": 0,
+    "Format": ""
    }
   },
   {
@@ -1637,6 +1650,11 @@
      0.69,
      0.78
     ]
+   },
+   "UIBinding": {
+    "Key": "server.caption",
+    "Target": 0,
+    "Format": ""
    }
   },
   {
@@ -1679,6 +1697,11 @@
      0.5
     ],
     "CornerRadius": 6.0
+   },
+   "UIBinding": {
+    "Key": "server.load",
+    "Target": 1,
+    "Format": ""
    }
   },
   {

@@ -509,4 +509,5 @@ namespace Desert::Scripting
     void RegisterWorldBindings( ScriptEngine::Impl& impl );     // World table (find/spawn/raycast/water)
     void RegisterReflectionBindings( ScriptEngine::Impl& impl ); // auto component access from reflection
     void RegisterAudioBindings( ScriptEngine::Impl& impl );      // Audio.play / Audio.stopAll
+    void RegisterUIBindings( ScriptEngine::Impl& impl );         // ui.set/get/send + OnUIMessage bridge
 } // namespace Desert::Scripting

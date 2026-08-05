@@ -315,6 +315,15 @@ namespace
                     .Register();
             }
             {
+                using T = ::Desert::ECS::UIBindingData;
+                TypeBuilder( "UIBindingData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Key", .Type = FieldType::String, .Offset = offsetof( T, Key ), .Size = sizeof( T::Key ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Key", .Category = "UI Binding", .Tooltip = "Data-store key, e.g. player.hp — write it from Lua with ui.set( key, value )", } } )
+                    .Field( FieldInfo{ .Name = "Target", .Type = FieldType::Enum, .Offset = offsetof( T, Target ), .Size = sizeof( T::Target ), .TypeName = "UIBindTarget", .Meta = PropertyMetadata{ .DisplayName = "Target", .Category = "UI Binding", }, .EnumValues = { EnumValue{ "Text", 0 }, EnumValue{ "Value", 1 }, EnumValue{ "Opacity", 2 }, EnumValue{ "Color", 3 }, EnumValue{ "Visible", 4 }, } } )
+                    .Field( FieldInfo{ .Name = "Format", .Type = FieldType::String, .Offset = offsetof( T, Format ), .Size = sizeof( T::Format ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Format", .Category = "UI Binding", .Tooltip = "Text target only: printf format applied to a NUMBER, e.g. HP: %.0f — empty shows the ", } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
                 using T = ::Desert::ECS::UIScreenData;
                 TypeBuilder( "UIScreenData", sizeof( T ) )
                     .Field( FieldInfo{ .Name = "Name", .Type = FieldType::String, .Offset = offsetof( T, Name ), .Size = sizeof( T::Name ), .TypeName = "std::string", .Meta = PropertyMetadata{ .DisplayName = "Screen Name", .Category = "UI Screen", } } )

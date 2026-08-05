@@ -25,6 +25,7 @@ namespace Desert::Scripting
         RegisterWorldBindings( *m_Impl );
         RegisterReflectionBindings( *m_Impl ); // after EntityCore: extends the Entity usertype
         RegisterAudioBindings( *m_Impl );
+        RegisterUIBindings( *m_Impl );
     }
 
     ScriptEngine::~ScriptEngine() = default;
@@ -184,6 +185,26 @@ namespace Desert::Scripting
         {
             sol::error err = r;
             LOG_ERROR( "[Lua] OnAnimationNotify error: {}", err.what() );
+        }
+    }
+
+    void ScriptEngine::BroadcastUIMessage( const std::string& message )
+    {
+        for ( auto& [entity, slots] : m_Impl->Envs )
+        {
+            for ( uint32_t slot = 0; slot < static_cast<uint32_t>( slots.size() ); ++slot )
+            {
+                sol::protected_function fn = slots[slot]["OnUIMessage"];
+                if ( !fn.valid() )
+                    continue;
+                m_Impl->CurrentOwner             = Impl::SlotKey( entity, slot ); // Timer.after ownership
+                sol::protected_function_result r = fn( message );
+                if ( !r.valid() )
+                {
+                    sol::error err = r;
+                    LOG_ERROR( "[Lua] OnUIMessage error: {}", err.what() );
+                }
+            }
         }
     }
 

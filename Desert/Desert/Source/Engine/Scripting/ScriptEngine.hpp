@@ -63,6 +63,11 @@ namespace Desert::Scripting
         // script reads the overridden values. Call after LoadEntityScript, before OnStart.
         void ApplyProperties( uint32_t entity, uint32_t slot, const std::vector<ScriptProperty>& props );
 
+        // Calls OnUIMessage(msg) on EVERY loaded script that defines it. A UI message has no owner — a
+        // button belongs to the canvas, not to a script — so it broadcasts, and each script decides what
+        // (if anything) it answers. Drained from UI::UIMessageQueue once per frame by ScriptSystem.
+        void BroadcastUIMessage( const std::string& message );
+
         // Drops ALL of an entity's slot environments (entity destroyed / component removed).
         void Release( uint32_t entity );
 

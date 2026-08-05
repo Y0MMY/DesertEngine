@@ -1069,6 +1069,41 @@ namespace Desert::ECS
         UITweenData Data;
     };
 
+    // What a binding drives on its element.
+    enum class UIBindTarget
+    {
+        Text,    // replaces UIText's string (Format applies)
+        Value,   // Slider / ProgressBar value
+        Opacity, // multiplies the element (and its children) down
+        Color,   // multiplies the element's colour
+        Visible  // false hides the element and everything under it
+    };
+
+    // MVVM-lite: ties this element to a key in the UI data store, which gameplay (C++ or Lua via
+    // ui.set) writes. Nothing is written back into the component — the bound value is applied on the way
+    // to the screen — so a binding can never overwrite what the author typed.
+    struct UIBindingData
+    {
+        REFLECT()
+
+        // NOTE: the header tool reads a tooltip up to the first quote, so keep literals out of them.
+        PROPERTY( DisplayName( "Key" ), Category( "UI Binding" ),
+                  Tooltip( "Data-store key, e.g. player.hp — write it from Lua with ui.set( key, value )" ) )
+        std::string Key;
+
+        PROPERTY( DisplayName( "Target" ), Category( "UI Binding" ) )
+        UIBindTarget Target = UIBindTarget::Text;
+
+        PROPERTY( DisplayName( "Format" ), Category( "UI Binding" ),
+                  Tooltip( "Text target only: printf format applied to a NUMBER, e.g. HP: %.0f — empty shows the "
+                           "value as-is" ) )
+        std::string Format;
+    };
+    struct UIBindingComponent
+    {
+        UIBindingData Data;
+    };
+
     // One keyframe of a UI animation track. Value is read exactly like UITweenData::From/To — xy for
     // Offset/Size, x for Opacity, rgb for Color — and Easing shapes the segment ENDING at this key.
     struct UIAnimKey

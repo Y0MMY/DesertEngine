@@ -108,8 +108,14 @@ approved per the engine's "no magic dependencies" rule).
 - [ ] Offscreen culling, element pooling for lists
 
 ## H. Data & scripting
-- [ ] Data binding (MVVM-lite): bind text/value/visibility/color to game data
-- [ ] **Lua hooks**: on-click -> Lua fn, `ui.find()`, set text/color, spawn lists from data
+- [x] Data binding (MVVM-lite) — `UIBinding` ties an element to a key in a global data store
+      (Text / Value / Opacity / Color / Visible). Applied on the way to the screen, so an unset key falls
+      back to the authored value and gameplay can never overwrite the scene
+- [x] **Lua hooks** — `ui.set/get/has/clear/send` writes the data store from script, and any script
+      defining `OnUIMessage(msg)` hears every button action, pointer event and drop. Scripts address DATA,
+      never widgets, so renaming or restyling an element cannot break gameplay code.
+      Example: `Resources/Scripts/Examples/UIDataBridge.lua` *(spawning lists from data needs the
+      virtualized list in C)*
 - [ ] Data-driven lists (bind a collection -> virtualized list)
 
 ## I. Editor authoring (WYSIWYG, prod UX)
@@ -159,12 +165,13 @@ approved per the engine's "no magic dependencies" rule).
 10. ✅ **Editor authoring polish** — Design↔Preview play-in-editor, click-selects-control + Alt-drill, reveal-in-Outliner, pick inside layout groups; **MainMenu** example scene. (I/J)
 11. ✅ **UI animation / Sequencer** — pulse/ticker/eased hover, **generic tween tracks**, the **screen-transition state machine** and **UI Sequencer lanes** done. *(spring/physics motion + Lottie remain, the latter needs a dep)* (F)
 12. **3D model / render-texture element** + particles-in-UI; richer **Video** (H.264/audio). (A)
-13. **Data binding + Lua** hooks; data-driven virtualized lists. (H)
+13. 🔶 **Data binding + Lua hooks** done; data-driven virtualized lists still todo (needs C's ListView). (H)
 14. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
 15. **Localization + accessibility** (K); **Perf pass** — culling, pooling, atlases (G/L).
 
 **Next up (dependency-free):** gamepad/D-pad navigation + event bubbling to finish D; A render-texture
-element (reuse per-instance SceneRenderer → offscreen target); then H data binding + Lua hooks.
+element (reuse per-instance SceneRenderer → offscreen target); then C's virtualized ListView, which
+unlocks data-driven lists in H.
 
 Dependencies to approve when reached: pl_mpeg/libvpx or ffmpeg (video), rlottie (Lottie),
 HarfBuzz (complex text). Each: justify size/license/compile-time first. (nanosvg was considered for

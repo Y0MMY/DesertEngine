@@ -7,8 +7,10 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Text/FontBaker.hpp>
 #include <Engine/Text/Utf8.hpp>
+#include <Engine/UI/UIDataStore.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -256,6 +258,67 @@ namespace Desert::UI
                         break;
                 }
             }
+        }
+
+        // --- Data binding (MVVM-lite) -----------------------------------------------------------------
+        // Ties an element to a key in the UI data store. Like the tweens, the bound value is applied on
+        // the way to the screen and never written back, so gameplay can drive a label without the scene
+        // ever being modified.
+        struct BindingSample
+        {
+            bool                       Hide = false; // Visible target said no
+            std::optional<std::string> Text;         // Text target
+            std::optional<float>       Value;        // Slider / ProgressBar target
+        };
+
+        BindingSample SampleBinding( entt::registry& reg, entt::entity e, TweenSample& tw )
+        {
+            BindingSample out;
+            if ( !reg.has<ECS::UIBindingComponent>( e ) )
+                return out;
+            const auto& b = reg.get<ECS::UIBindingComponent>( e ).Data;
+            if ( b.Key.empty() )
+                return out;
+
+            const UIDataStore& store = UIDataStore::Get();
+            switch ( b.Target )
+            {
+                case ECS::UIBindTarget::Text:
+                {
+                    if ( !b.Format.empty() )
+                    {
+                        // A format is about numbers ("HP: %.0f"); fall back to the raw text if the value
+                        // isn't numeric, so a mistyped binding still shows something sane.
+                        if ( const auto n = store.Number( b.Key ) )
+                        {
+                            char buf[256];
+                            std::snprintf( buf, sizeof( buf ), b.Format.c_str(), *n );
+                            out.Text = std::string( buf );
+                            break;
+                        }
+                    }
+                    if ( const auto t = store.Text( b.Key ) )
+                        out.Text = *t;
+                    break;
+                }
+                case ECS::UIBindTarget::Value:
+                    if ( const auto n = store.Number( b.Key ) )
+                        out.Value = static_cast<float>( *n );
+                    break;
+                case ECS::UIBindTarget::Opacity:
+                    if ( const auto n = store.Number( b.Key ) )
+                        tw.Tint.a *= std::clamp( static_cast<float>( *n ), 0.0f, 1.0f );
+                    break;
+                case ECS::UIBindTarget::Color:
+                    if ( const auto c = store.Color( b.Key ) )
+                        tw.Tint *= glm::vec4( *c, 1.0f );
+                    break;
+                case ECS::UIBindTarget::Visible:
+                    if ( const auto v = store.Bool( b.Key ) )
+                        out.Hide = !*v;
+                    break;
+            }
+            return out;
         }
 
         // The tint of the element being drawn — multiplied into its colours so Opacity/Color tweens reach
@@ -1022,6 +1085,11 @@ namespace Desert::UI
             // Applied on the way out, never written back — see SampleTween.
             TweenSample tween = SampleTween( reg, e );
             ApplyAnimClip( reg, e, tween ); // a clip layers on top of the one-shot tween
+
+            // A binding can hide the element outright — skip the sub-tree, input included.
+            const BindingSample binding = SampleBinding( reg, e, tween );
+            if ( binding.Hide )
+                return;
             rect.X += ( tween.Offset.x + screenSlide.x ) * scale;
             rect.Y += ( tween.Offset.y + screenSlide.y ) * scale;
             rect.W += tween.Size.x * scale;
@@ -1201,8 +1269,10 @@ namespace Desert::UI
                 }
                 else if ( reg.has<ECS::UIProgressBarComponent>( e ) )
                 {
-                    const auto& pb = reg.get<ECS::UIProgressBarComponent>( e ).Data;
-                    const float r  = pb.CornerRadius * scale;
+                    ECS::UIProgressBarData pb = reg.get<ECS::UIProgressBarComponent>( e ).Data;
+                    if ( binding.Value )
+                        pb.Value = *binding.Value; // bound: the store drives the fill
+                    const float r = pb.CornerRadius * scale;
                     dl.AddRectFilled( mn, mx, Tinted( glm::vec4( pb.Background, 1.0f ) ), r );
                     const float t = std::clamp( pb.Value, 0.0f, 1.0f );
                     if ( t > 0.0f )
@@ -1315,7 +1385,19 @@ namespace Desert::UI
                 }
 
                 if ( reg.has<ECS::UITextComponent2D>( e ) )
-                    DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );
+                {
+                    // A bound label draws the store's string without the component ever being touched.
+                    if ( binding.Text )
+                    {
+                        ECS::UITextData bound = reg.get<ECS::UITextComponent2D>( e ).Data;
+                        bound.Text            = *binding.Text;
+                        DrawText2D( dl, bound, rect, scale );
+                    }
+                    else
+                    {
+                        DrawText2D( dl, reg.get<ECS::UITextComponent2D>( e ).Data, rect, scale );
+                    }
+                }
 
                 if ( reg.has<ECS::UIIconComponent>( e ) )
                 {

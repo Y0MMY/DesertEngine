@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/UI/UICanvasRenderer2D.hpp>
+#include <Engine/UI/UIDataStore.hpp>
 
 #include <Editor/Core/Selection/UIPreview.hpp>
 
@@ -78,7 +79,10 @@ namespace Desert::Editor::Render
             if ( feed && !clicked.empty() )
                 LOG_INFO( "[UI Preview] button action: {}", clicked );
             for ( const std::string& msg : uiMessages ) // pointer enter/exit, press/release, drops
+            {
                 LOG_INFO( "[UI Preview] {}", msg );
+                UI::UIMessageQueue::Get().Push( msg ); // scripts hear preview messages too, if any run
+            }
         };
 
         scene->RegisterExternalPass( std::move( pass ) );

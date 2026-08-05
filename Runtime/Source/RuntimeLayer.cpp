@@ -21,6 +21,7 @@
 #include <Engine/ECS/System/AnimationECSSystem.hpp>
 #include <Engine/ECS/System/AttachmentSystem.hpp>
 #include <Engine/ECS/System/ScriptSystem.hpp>
+#include <Engine/UI/UIDataStore.hpp>
 #include <Engine/ECS/System/PhysicsECSSystem.hpp>
 #include <Engine/ECS/System/LocomotionSystem.hpp>
 #include <Engine/ECS/System/AudioECSSystem.hpp>
@@ -314,8 +315,9 @@ namespace Desert::Player
                 std::vector<std::string> uiMessages;
                 UI::RenderCanvas2D( m_Scene->GetRegistry(), dl, UI::Rect{ 0.0f, 0.0f, w, h }, vpPtr, &input,
                                     &clicked, &m_FocusedUI, &uiMessages );
+                // Queue them for gameplay: ScriptSystem drains this and calls OnUIMessage on every script.
                 for ( const std::string& msg : uiMessages )
-                    LOG_INFO( "[UI] {}", msg );
+                    UI::UIMessageQueue::Get().Push( msg );
 
                 if ( m_SplashTimer > 0.0f )
                 {
