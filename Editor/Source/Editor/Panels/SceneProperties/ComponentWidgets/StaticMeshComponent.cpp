@@ -9,6 +9,7 @@
 #include "Helper/MeshDetailsWidget.hpp"
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/MeshResolve.hpp>
 #include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
@@ -146,22 +147,11 @@ namespace Desert::Editor
         ctx.ForcedLOD = staticMesh.ForcedLOD;
         ctx.LODBias   = staticMesh.LODBias;
 
-        // The mesh that is ACTUALLY drawn, in the renderer's own precedence: an edited RuntimeMesh, else
-        // the built asset mesh, else — for a PRIMITIVE — the process-wide shared mesh every cube/sphere
-        // instances from. Missing that last case is why a primitive used to report "not built yet".
-        if ( staticMesh.RuntimeMesh && !staticMesh.RuntimeMesh->GetSubmeshes().empty() )
-        {
-            ctx.RuntimeMesh = staticMesh.RuntimeMesh.get();
-        }
-        else if ( staticMesh.MeshHandle )
-        {
-            ctx.RuntimeMesh = Runtime::ResourceRegistry::GetMeshService()->Get( staticMesh.MeshHandle );
-            ctx.Asset       = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
-        }
-        else if ( staticMesh.Primitive.has_value() )
-        {
-            ctx.RuntimeMesh = Geometry::PrimitiveMeshFactory::GetShared( *staticMesh.Primitive );
-        }
+        // The mesh that is ACTUALLY drawn — one shared resolver, so the panel, the viewport overlay and
+        // the collider fit can never disagree about which mesh an entity shows.
+        ctx.RuntimeMesh = ResolveDrawnMesh( entity );
+        if ( staticMesh.MeshHandle )
+            ctx.Asset = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
 
         MeshDetailsWidget::Show( ctx );
     }

@@ -4,6 +4,7 @@
 #include <Editor/Core/Selection/ViewportMode.hpp>
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 #include <Common/Core/Units.hpp>
 #include <ImGui/imgui.h>
 
@@ -28,7 +29,9 @@ namespace Desert::Editor
     {
         using MS  = Core::ModelingState;
         auto& ms  = MS::Get();
-        auto  sel = ImVec4( 0.20f, 0.55f, 0.95f, 1.0f ); // active highlight (matches the viewport toolbar)
+        // The editor's ONE accent colour. A panel that mixes its own blue in is how a UI ends up looking
+        // assembled from parts.
+        const ImVec4 sel = ThemeManager::GetSelectedColor();
 
         ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( 6.0f, 6.0f ) );
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 8.0f, 6.0f ) );

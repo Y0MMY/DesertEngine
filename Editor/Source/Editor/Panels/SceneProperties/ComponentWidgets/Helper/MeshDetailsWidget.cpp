@@ -8,6 +8,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/Geometry/LODSelection.hpp>
 #include <Engine/Geometry/Mesh.hpp>
+#include <Engine/Geometry/MeshStats.hpp>
 
 #include <algorithm>
 #include <string>
@@ -18,45 +19,6 @@ namespace Desert::Editor
 
     namespace
     {
-        // What the GPU mesh actually holds. Everything here is read straight off the built Submeshes —
-        // no asset-side guessing, so the numbers describe what is drawn.
-        struct MeshStats
-        {
-            uint32_t  Elements  = 0;
-            uint64_t  Vertices  = 0;
-            uint64_t  Triangles = 0; // LOD 0
-            uint32_t  LODLevels = 1;
-            glm::vec3 Extent    = glm::vec3( 0.0f );
-            bool      HasBounds = false;
-        };
-
-        MeshStats ComputeStats( const ::Desert::Mesh& mesh )
-        {
-            MeshStats stats;
-            glm::vec3 mn( 1.0e30f );
-            glm::vec3 mx( -1.0e30f );
-
-            for ( const auto& sm : mesh.GetSubmeshes() )
-            {
-                ++stats.Elements;
-                stats.Vertices += sm.VertexCount;
-                // Triangles come from the INDEX count: a vertex is shared by several triangles, so
-                // VertexCount/3 undercounts an indexed mesh badly.
-                stats.Triangles += sm.IndexCount / 3;
-                stats.LODLevels = std::max( stats.LODLevels, static_cast<uint32_t>( sm.LODs.size() ) );
-
-                mn = glm::min( mn, sm.BoundingBox.Min );
-                mx = glm::max( mx, sm.BoundingBox.Max );
-            }
-
-            if ( mn.x <= mx.x )
-            {
-                stats.Extent    = mx - mn;
-                stats.HasBounds = true;
-            }
-            return stats;
-        }
-
         // 1234567 -> "1 234 567". Big triangle counts are unreadable as a raw run of digits, and that
         // readout is the whole point of the section.
         std::string FormatCount( uint64_t value )
@@ -155,7 +117,7 @@ namespace Desert::Editor
             return;
         }
 
-        const MeshStats stats = ComputeStats( *ctx.RuntimeMesh );
+        const Geometry::MeshStats stats = Geometry::ComputeMeshStats( ctx.RuntimeMesh->GetSubmeshes() );
 
         if ( ImGui::BeginTable( "##mesh_stats", 2,
                                 ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) )

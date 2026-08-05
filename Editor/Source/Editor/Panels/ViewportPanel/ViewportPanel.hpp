@@ -147,6 +147,10 @@ namespace Desert::Editor
         std::unique_ptr<LightGizmoRenderer>   m_LightGizmoRenderer;
         PerfHudOverlay                        m_PerfHud; // View -> Perf HUD viewport overlay
         Tools::FoliagePaintTool               m_FoliageTool;  // UE5-style foliage painting (extracted)
+        // Selected object's triangle / vertex / size block in the viewport corner (UE's Static Mesh
+        // Editor overlay). Reads the SAME resolver + stats the Details panel does.
+        void DrawMeshStatsOverlay();
+
         Tools::CubeGridTool                   m_CubeGridTool; // UE5-style CubeGrid blockout (Modeling mode)
         Tools::PolyEditTool                   m_PolyEditTool; // face select + push/pull (Modeling mode)
         Tools::TerrainPaintTool               m_TerrainTool;  // terrain splat-layer painting (extracted)
