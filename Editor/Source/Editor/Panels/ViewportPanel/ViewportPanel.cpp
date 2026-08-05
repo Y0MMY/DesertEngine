@@ -1,7 +1,5 @@
 #include "ViewportPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
-#include <Editor/Core/MeshResolve.hpp>
-#include <Engine/Geometry/MeshStats.hpp>
 #include <Editor/Core/EditorPreferences.hpp>
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -987,13 +985,6 @@ namespace Desert::Editor
             }
         }
 
-        // Mesh stats for the SELECTED object, in the viewport's top-left corner — UE's Static Mesh Editor
-        // puts exactly this block there, and for the same reason: while you are looking at the model is
-        // when you want to know what it costs, without going to find a panel. Edit mode only (a running
-        // game view stays clean), and only when something with a mesh is selected.
-        if ( m_Scene->GetState() == ::Desert::Core::Scene::SceneState::Edit && !m_UIMode )
-            DrawMeshStatsOverlay();
-
         // Editor gizmos (light/camera icons + frustums) are authoring aids — hide them in Play/Paused so the
         // running game view is clean.
         if ( m_Scene->GetState() == ::Desert::Core::Scene::SceneState::Edit )
@@ -1654,78 +1645,6 @@ namespace Desert::Editor
         smc.MaterialSlots.assign( count, handle );
         smc.RuntimeMaterialInstances.clear();
         Core::SelectionManager::SetSelected( hit.Entity );
-    }
-
-    void ViewportPanel::DrawMeshStatsOverlay()
-    {
-        const auto selected = Core::SelectionManager::GetSelected();
-        if ( !selected || !m_Scene )
-            return;
-
-        const auto entityOpt = m_Scene->FindEntityByID( *selected );
-        if ( !entityOpt )
-            return;
-
-        // One shared resolver + one shared stat computation, so this can never disagree with the
-        // Details panel about the same object.
-        const ::Desert::Mesh* mesh = ResolveDrawnMesh( entityOpt->get() );
-        if ( !mesh || mesh->GetSubmeshes().empty() )
-            return;
-
-        const Geometry::MeshStats stats = Geometry::ComputeMeshStats( mesh->GetSubmeshes() );
-
-        // 1234567 -> "1 234 567": a raw run of digits is unreadable at a glance, which is the only thing
-        // this overlay is for.
-        const auto grouped = []( uint64_t value )
-        {
-            std::string  digits = std::to_string( value );
-            std::string  out;
-            const size_t lead = digits.size() % 3 == 0 ? 3 : digits.size() % 3;
-            for ( size_t i = 0; i < digits.size(); ++i )
-            {
-                if ( i > 0 && ( i - lead ) % 3 == 0 )
-                    out += ' ';
-                out += digits[i];
-            }
-            return out;
-        };
-
-        std::vector<std::string> lines;
-        lines.push_back( "Triangles:  " + grouped( stats.Triangles ) );
-        lines.push_back( "Vertices:  " + grouped( stats.Vertices ) );
-        lines.push_back( "Elements:  " + grouped( stats.Elements ) );
-        if ( stats.LODLevels > 1 )
-            lines.push_back( "LODs:  " + grouped( stats.LODLevels ) );
-        lines.push_back( "UV Channels:  1" );
-        if ( stats.HasBounds )
-        {
-            char buf[96];
-            std::snprintf( buf, sizeof( buf ), "Approx Size:  %.0f x %.0f x %.0f cm", stats.Extent.x,
-                           stats.Extent.y, stats.Extent.z );
-            lines.emplace_back( buf );
-        }
-
-        // Drawn straight into the viewport's draw list, under the toolbar row, with a dim plate behind it
-        // so light scenes stay readable.
-        constexpr float kPad  = 8.0f;
-        float           width = 0.0f;
-        for ( const std::string& l : lines )
-            width = std::max( width, ::ImGui::CalcTextSize( l.c_str() ).x );
-
-        const float  lineH = ::ImGui::GetTextLineHeightWithSpacing();
-        const ImVec2 at( m_ViewportData.ViewportPos.x + 12.0f, m_ViewportData.ViewportPos.y + 56.0f );
-        const ImVec2 br( at.x + width + kPad * 2.0f, at.y + lineH * lines.size() + kPad * 2.0f );
-
-        ImDrawList* dl = ::ImGui::GetWindowDrawList();
-        dl->AddRectFilled( at, br, IM_COL32( 12, 13, 15, 170 ), 3.0f );
-        dl->AddRect( at, br, IM_COL32( 255, 255, 255, 26 ), 3.0f );
-
-        float y = at.y + kPad;
-        for ( const std::string& l : lines )
-        {
-            dl->AddText( ImVec2( at.x + kPad, y ), IM_COL32( 225, 227, 232, 235 ), l.c_str() );
-            y += lineH;
-        }
     }
 
 } // namespace Desert::Editor

@@ -1,5 +1,6 @@
 #include "SkyboxComponent.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/ImGuiUtilities.hpp>
 
 #include <ImGui/imgui.h>
 
@@ -166,7 +167,10 @@ namespace Desert::Editor
                       }
 
                       ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x );
-                      ImGui::SliderFloat( "Intensity", &skybox.Intensity, 0.0f, 10.0f );
+                      Utils::ImGuiUtilities::ResetPropertyRows();
+                      Utils::ImGuiUtilities::BeginPropertyRow( "Intensity" );
+                      ImGui::SliderFloat( "##skyintensity", &skybox.Intensity, 0.0f, 10.0f );
+                      Utils::ImGuiUtilities::EndPropertyRow();
                   }
 
                   // --- the rest of the fields, auto-built from reflection. In HDR mode the procedural-only
