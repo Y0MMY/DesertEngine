@@ -516,107 +516,75 @@ namespace Desert::Editor
         return changed;
     }
 
-    MaterialComponentWidget::SwatchStrip
-    MaterialComponentWidget::BuildSwatchStrip( const Assets::SurfaceMaterialAsset& asset,
-                                               const Assets::MaterialData*         parentData )
+    MaterialComponentWidget::SlotSwatch
+    MaterialComponentWidget::BuildSlotSwatch( const Assets::SurfaceMaterialAsset& asset,
+                                              const Assets::MaterialData*         parentData )
     {
-        SwatchStrip strip;
+        SlotSwatch swatch;
 
         auto*             shaderService = Runtime::ResourceRegistry::GetShaderService();
         const std::string shaderName =
              parentData ? parentData->EffectiveShaderName() : asset.Data().EffectiveShaderName();
         auto shader = shaderService ? shaderService->GetByName( shaderName ) : nullptr;
         if ( !shader )
-            return strip;
+            return swatch;
 
-        using W  = ::Desert::Core::Formats::ShaderParamWidget;
-        using VT = ::Desert::Core::Formats::ShaderValueType;
+        using W = ::Desert::Core::Formats::ShaderParamWidget;
 
         const auto& data = asset.Data();
         for ( const auto& p : shader->GetProgramMeta().Params )
         {
-            if ( p.IsTexture )
+            if ( p.IsTexture || p.Widget != W::Color )
                 continue;
 
             // Same value resolution as the parameter rows: child override -> parent's effective value
             // (instance mode) -> schema default. A slot must never advertise a colour it doesn't render.
             const glm::vec4 fallback = parentData ? parentData->GetParam( p.Name, p.Default ) : p.Default;
-            const glm::vec4 value    = data.GetParam( p.Name, fallback );
-            const char*     label    = p.DisplayName.empty() ? p.Name.c_str() : p.DisplayName.c_str();
-
-            if ( !strip.HasColor && p.Widget == W::Color )
-            {
-                strip.HasColor = true;
-                strip.Color    = value;
-                continue;
-            }
-
-            const bool ranged = p.Type == VT::Float && p.Min.has_value() && p.Max.has_value() && *p.Max > *p.Min;
-            if ( ranged && strip.BarCount < strip.Bars.size() )
-            {
-                const float t = glm::clamp( ( value.x - *p.Min ) / ( *p.Max - *p.Min ), 0.0f, 1.0f );
-                strip.Bars[strip.BarCount++] = { label, t, value.x };
-            }
+            swatch.HasColor          = true;
+            swatch.Color             = data.GetParam( p.Name, fallback );
+            break; // the FIRST colour is the material's identity; later ones are accents
         }
-        return strip;
+        return swatch;
     }
 
-    void MaterialComponentWidget::DrawSwatchStripInHeader( const SwatchStrip& strip )
+    void MaterialComponentWidget::DrawSwatchInHeader( const SlotSwatch& swatch )
     {
-        if ( !strip.HasColor && strip.BarCount == 0 )
+        if ( !swatch.HasColor )
             return;
 
         // Painted straight into the header bar's rect: an interactive item here would fight the tree
-        // node for the click and the material drag-drop target.
-        const ImVec2 mn   = ImGui::GetItemRectMin();
-        const ImVec2 mx   = ImGui::GetItemRectMax();
-        const float  h    = std::max( ( mx.y - mn.y ) - 8.0f, 6.0f );
-        const float  y    = mn.y + ( ( mx.y - mn.y ) - h ) * 0.5f;
-        const float  gap  = 4.0f;
-        const float  barW = h * 2.4f;
-
-        float total = strip.HasColor ? h : 0.0f;
-        for ( uint32_t i = 0; i < strip.BarCount; ++i )
-            total += barW + ( ( i > 0 || strip.HasColor ) ? gap : 0.0f );
-        if ( total <= 0.0f || ( mx.x - mn.x ) < total + 80.0f ) // no room next to the label -> skip
+        // node for the click and the material drag-drop target. Just the colour — parameter VALUES belong
+        // in the editor below, not stamped onto a header where they cannot be changed.
+        const ImVec2 mn = ImGui::GetItemRectMin();
+        const ImVec2 mx = ImGui::GetItemRectMax();
+        const float  h  = std::max( ( mx.y - mn.y ) - 8.0f, 6.0f );
+        const float  y  = mn.y + ( ( mx.y - mn.y ) - h ) * 0.5f;
+        if ( ( mx.x - mn.x ) < h + 80.0f ) // no room next to the label -> skip
             return;
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        float       x  = mx.x - 6.0f - total;
-
-        if ( strip.HasColor )
-        {
-            const ImU32 col =
-                 ImGui::ColorConvertFloat4ToU32( ImVec4( strip.Color.x, strip.Color.y, strip.Color.z, 1.0f ) );
-            dl->AddRectFilled( ImVec2( x, y ), ImVec2( x + h, y + h ), col, 2.0f );
-            dl->AddRect( ImVec2( x, y ), ImVec2( x + h, y + h ), IM_COL32( 0, 0, 0, 120 ), 2.0f );
-            x += h + gap;
-        }
-
-        const ImU32 track = ImGui::GetColorU32( ImGuiCol_FrameBg );
-        const ImU32 fill  = ImGui::GetColorU32( ImGuiCol_SliderGrab );
-        for ( uint32_t i = 0; i < strip.BarCount; ++i )
-        {
-            const float top = y + h * 0.25f;
-            const float bot = y + h * 0.75f;
-            dl->AddRectFilled( ImVec2( x, top ), ImVec2( x + barW, bot ), track, 1.0f );
-            dl->AddRectFilled( ImVec2( x, top ), ImVec2( x + barW * strip.Bars[i].Value, bot ), fill, 1.0f );
-            x += barW + gap;
-        }
+        const float x  = mx.x - 6.0f - h;
+        const ImU32 col =
+             ImGui::ColorConvertFloat4ToU32( ImVec4( swatch.Color.x, swatch.Color.y, swatch.Color.z, 1.0f ) );
+        dl->AddRectFilled( ImVec2( x, y ), ImVec2( x + h, y + h ), col, 2.0f );
+        dl->AddRect( ImVec2( x, y ), ImVec2( x + h, y + h ), IM_COL32( 0, 0, 0, 120 ), 2.0f );
     }
 
     void MaterialComponentWidget::DrawSlotIdentityCard( const Assets::SurfaceMaterialAsset& asset,
-                                                        const SwatchStrip&                  strip,
+                                                        const SlotSwatch&                   swatch,
                                                         const Assets::MaterialData*         parentData,
                                                         const std::string&                  parentName )
     {
-        constexpr float   kThumb = 56.0f;
+        // UE's material slot: a framed thumbnail and the asset's identity beside it. Deliberately NO
+        // parameter readouts — metallic / roughness are editable fields a few rows below, and a number
+        // you cannot change is noise on a row whose whole job is to let you RECOGNISE the slot.
+        constexpr float   kThumb = 64.0f;
         const std::string path   = asset.GetMetadata().Filepath.generic_string();
         const std::string name   = std::filesystem::path( path ).stem().string();
 
-        // The rendered material preview comes from the SHARED on-disk thumbnail cache the asset browser
-        // fills; a material it has never shown simply falls back to its colour chip here (Details does no
-        // offscreen rendering of its own — that stays a single renderer per panel).
+        // The rendered preview comes from the SHARED on-disk thumbnail cache the asset browser fills; a
+        // material it has never shown falls back to the material's own colour (Details does no offscreen
+        // rendering of its own — that stays one renderer per panel).
         std::shared_ptr<Graphic::Image2D> thumb;
         std::error_code                   ec;
         const std::string                 png       = ThumbnailCache::DiskPath( path );
@@ -637,38 +605,39 @@ namespace Desert::Editor
         if ( haveFresh )
             thumb = m_Thumbnails.Get( png );
 
+        // Drawn by hand so the rendered thumbnail and the colour fallback share one frame.
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const ImVec2 br( at.x + kThumb, at.y + kThumb );
+        ImDrawList*  dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled( at, br, IM_COL32( 28, 30, 34, 255 ), 3.0f );
+
         if ( thumb && m_UIHelper )
         {
-            m_UIHelper->Image( thumb, ImVec2( kThumb, kThumb ) );
+            if ( const void* tex = m_UIHelper->GetTextureID( thumb ) )
+                dl->AddImageRounded( reinterpret_cast<ImTextureID>( const_cast<void*>( tex ) ),
+                                     ImVec2( at.x + 1.0f, at.y + 1.0f ), ImVec2( br.x - 1.0f, br.y - 1.0f ),
+                                     ImVec2( 0, 0 ), ImVec2( 1, 1 ), IM_COL32_WHITE, 3.0f );
         }
-        else
+        else if ( swatch.HasColor )
         {
-            const ImVec4 chip = strip.HasColor ? ImVec4( strip.Color.x, strip.Color.y, strip.Color.z, 1.0f )
-                                               : ImGui::GetStyleColorVec4( ImGuiCol_FrameBg );
-            ImGui::ColorButton( "##slot_chip", chip, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoDragDrop,
-                                ImVec2( kThumb, kThumb ) );
+            dl->AddRectFilled(
+                 ImVec2( at.x + 1.0f, at.y + 1.0f ), ImVec2( br.x - 1.0f, br.y - 1.0f ),
+                 ImGui::ColorConvertFloat4ToU32( ImVec4( swatch.Color.x, swatch.Color.y, swatch.Color.z, 1.0f ) ),
+                 3.0f );
         }
+        dl->AddRect( at, br, IM_COL32( 70, 74, 84, 255 ), 3.0f );
+        ImGui::Dummy( ImVec2( kThumb, kThumb ) );
+        Utils::ImGuiUtilities::Tooltip( path.c_str() );
 
         ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::TextUnformatted( name.c_str() );
-        Utils::ImGuiUtilities::Tooltip( path.c_str() );
-        // An instance renders with its parent chain's shader — its own ShaderName is empty and would
-        // read as the default here.
+        // An instance renders with its parent chain's shader — its own ShaderName is empty and would read
+        // as the default here.
         ImGui::TextDisabled( "%s", parentData ? parentData->EffectiveShaderName().c_str()
                                               : asset.Data().EffectiveShaderName().c_str() );
         if ( !parentName.empty() )
             ImGui::TextDisabled( "Instance of: %s", parentName.c_str() );
-
-        // Bar first, label after it: the bars stay aligned whatever the parameter names are.
-        for ( uint32_t i = 0; i < strip.BarCount; ++i )
-        {
-            char value[16];
-            std::snprintf( value, sizeof( value ), "%.2f", strip.Bars[i].Raw );
-            ImGui::ProgressBar( strip.Bars[i].Value, ImVec2( 90.0f, ImGui::GetTextLineHeight() ), value );
-            ImGui::SameLine();
-            ImGui::TextDisabled( "%s", strip.Bars[i].Label );
-        }
         ImGui::EndGroup();
         ImGui::Spacing();
     }
@@ -775,9 +744,9 @@ namespace Desert::Editor
                                      : std::string( "<missing parent>" );
                 }
 
-                SwatchStrip strip;
+                SlotSwatch swatch;
                 if ( asset )
-                    strip = BuildSwatchStrip( *asset, parentAsset ? &parentAsset->Data() : nullptr );
+                    swatch = BuildSlotSwatch( *asset, parentAsset ? &parentAsset->Data() : nullptr );
 
                 std::string title = "Element " + std::to_string( i );
                 if ( asset )
@@ -796,10 +765,10 @@ namespace Desert::Editor
                 if ( !hasOwnSlot )
                     ImGui::PopStyleColor();
 
-                // Identify the slot without opening it: albedo chip + the shader's ranged scalars,
-                // painted into the header bar (no item, so the row keeps its click/drop behaviour).
+                // Identify the slot without opening it: the material's own colour, painted into the header
+                // bar (no item, so the row keeps its click/drop behaviour).
                 if ( asset )
-                    DrawSwatchStripInHeader( strip );
+                    DrawSwatchInHeader( swatch );
 
                 // Drop an existing material asset onto this row to assign it (creates the slot if needed).
                 if ( ImGui::BeginDragDropTarget() )
@@ -858,7 +827,7 @@ namespace Desert::Editor
                         // Material INSTANCE asset (UE model): shader + non-overridden params come
                         // from the parent chain; this editor writes ONLY overrides into the child.
                         // What this slot IS, before the parameter grid: preview, name, shader, swatches.
-                        DrawSlotIdentityCard( *asset, strip, parentAsset ? &parentAsset->Data() : nullptr,
+                        DrawSlotIdentityCard( *asset, swatch, parentAsset ? &parentAsset->Data() : nullptr,
                                               parentName );
 
                         // ── Unity-style: the shader lives inside the material (base assets only —

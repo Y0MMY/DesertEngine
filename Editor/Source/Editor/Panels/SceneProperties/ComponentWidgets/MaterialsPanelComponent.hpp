@@ -9,8 +9,6 @@
 #include "Editor/Widgets/UIHelper/ImGuiUI.hpp"
 #include <Editor/Widgets/ThumbnailCache.hpp>
 
-#include <array>
-
 namespace Desert::Core
 {
     class Scene;
@@ -61,36 +59,29 @@ namespace Desert::Editor
         // element row gains its own slot without changing the rendered look.
         static void MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot );
 
-        // A slot's visual identity, read from the SHADER SCHEMA rather than from hardcoded PBR names:
-        // the first Color parameter as a swatch, plus up to two of its ranged scalars as bars. For the
-        // standard shader that is albedo / metallic / roughness; a custom shader gets the same treatment
-        // from its own Properties block, for free.
-        struct SwatchStrip
+        // A slot's identifying colour, read from the SHADER SCHEMA rather than from hardcoded PBR names:
+        // the first Color parameter of whatever shader the material runs. For the standard shader that is
+        // the albedo; a custom DSL shader gets the same treatment from its own Properties block, free.
+        //
+        // Deliberately JUST the colour: UE shows a material slot as a thumbnail and a name, not as a
+        // readout of its parameters — those live in the editor below, where they can be changed.
+        struct SlotSwatch
         {
-            struct Bar
-            {
-                const char* Label = nullptr; // points into the shader schema (owned by the shader service)
-                float       Value = 0.0f;    // normalised into 0..1 by the param's Range (bar fill)
-                float       Raw   = 0.0f;    // the value as authored (what the number reads)
-            };
-
-            bool               HasColor = false;
-            glm::vec4          Color    = glm::vec4( 1.0f );
-            std::array<Bar, 2> Bars;
-            uint32_t           BarCount = 0;
+            bool      HasColor = false;
+            glm::vec4 Color    = glm::vec4( 1.0f );
         };
 
-        // parentData: material-instance mode — values fall back to the parent chain, then to the schema
-        // default, exactly like the parameter editor.
-        static SwatchStrip BuildSwatchStrip( const Assets::SurfaceMaterialAsset& asset,
-                                             const Assets::MaterialData*         parentData );
-        // Draws the strip right-aligned INTO the element header bar (pure ImDrawList — it must not
+        // parentData: material-instance mode — the value falls back to the parent chain, then to the
+        // schema default, exactly like the parameter editor.
+        static SlotSwatch BuildSlotSwatch( const Assets::SurfaceMaterialAsset& asset,
+                                           const Assets::MaterialData*         parentData );
+        // Draws the colour chip right-aligned INTO the element header bar (pure ImDrawList — it must not
         // become an item that steals the header's click/drop handling).
-        static void DrawSwatchStripInHeader( const SwatchStrip& strip );
-        // The identity card inside an open element: rendered thumbnail (or an albedo chip when the asset
-        // browser has not produced one yet), material name, shader, and the labelled swatch bars.
-        // parentData/parentName describe the instance's parent (both empty for a base material).
-        void DrawSlotIdentityCard( const Assets::SurfaceMaterialAsset& asset, const SwatchStrip& strip,
+        static void DrawSwatchInHeader( const SlotSwatch& swatch );
+        // The UE-style slot row inside an open element: a framed thumbnail (or the albedo chip when the
+        // asset browser has not rendered one yet) beside the material's name, its shader and — for an
+        // instance — its parent. parentData/parentName describe that parent (empty for a base material).
+        void DrawSlotIdentityCard( const Assets::SurfaceMaterialAsset& asset, const SlotSwatch& swatch,
                                    const Assets::MaterialData* parentData, const std::string& parentName );
 
     private:

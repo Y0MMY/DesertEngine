@@ -117,15 +117,18 @@ rig wins over the asset mesh, the same precedence the material slot count uses):
 * A mesh whose GPU build hasn't run says so instead of rendering zeros.
 
 *Material slots* (`MaterialsPanelComponent`): each element header now reads
-`Element 0 — M_Rock (inherited)` and carries a right-aligned **swatch strip** — a colour chip plus up to
-two mini bars — painted straight into the header bar with `ImDrawList` so it adds no item and the row keeps
-its click and `.demat` drop behaviour. Opening a slot shows an identity card: rendered thumbnail, material
-name, shader, `Instance of:` parent, and the same swatches labelled with their values.
+`Element 0 — M_Rock (inherited)` and carries a right-aligned **colour chip**, painted straight into the
+header bar with `ImDrawList` so it adds no item and the row keeps its click and `.demat` drop behaviour.
+Opening a slot shows a UE-style row: a framed 64px thumbnail (the shared rendered-thumbnail cache, with the
+material's own colour as the fallback) beside its name, its shader and, for an instance, its parent.
 
-The strip is built from the **shader schema**, never from hardcoded PBR names: the first `Color` property
-becomes the chip, the first two `Range`-bounded floats become the bars. For `StaticMeshPBR` that is exactly
-albedo / metallic / roughness; a custom DSL shader gets an equally identifiable slot for free. Values
-resolve child-override → parent chain → schema default, so an instance's chip shows what it renders.
+The chip is read from the **shader schema**, never from hardcoded PBR names — the first `Color` property of
+whatever shader the material runs (albedo for `StaticMeshPBR`), resolved child-override → parent chain →
+schema default, so an instance's chip shows what it actually renders.
+
+The slot deliberately shows **no metallic / roughness readout**: UE identifies a slot by thumbnail and name,
+and those values are editable fields a few rows below — a number you cannot change there is noise on a row
+whose whole job is recognition. (An earlier revision drew them as mini bars; removed.)
 
 *Skinned* (`SkinnedMeshComponentWidget`): skeleton signature, per-frame pose upload (`bones × 64 B`), the
 influence cap, and the current clip (marked when an Anim Graph drives it). The planned "over the skinning
