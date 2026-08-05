@@ -3,6 +3,7 @@
 #include "UIHelper/ImGuiUI.hpp"
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/Graphic/Renderer.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -58,6 +59,19 @@ namespace Desert::Editor
             }
         }
     } // namespace
+
+    PreviewViewport::~PreviewViewport()
+    {
+        if ( !m_Inited )
+            return;
+
+        // Closing a scene view (or quitting) can destroy this while the last submitted frame is still
+        // executing against our pipelines and descriptor pools. Idle, then release the scene before the
+        // renderer that owns its passes.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+        m_Scene.reset();
+        m_Renderer.reset();
+    }
 
     void PreviewViewport::EnsureInit()
     {

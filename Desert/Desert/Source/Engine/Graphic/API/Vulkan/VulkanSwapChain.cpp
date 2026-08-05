@@ -268,7 +268,23 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( m_ColorImages.Image )
         {
-            VmaAllocator allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator()->GetVMAAllocator();
+            // Same late-teardown hazard as VulkanFramebuffer::Release: ~Application destroys the renderer
+            // context BEFORE the window (member order), so this can run with no context — and reaching
+            // through a null shared_ptr for the allocator segfaults on exit. Without it, just drop the
+            // handles; the GPU objects go with the device.
+            const auto   ctx = EngineContext::GetInstance().GetRendererContext();
+            VmaAllocator allocator =
+                 ctx ? SP_CAST( VulkanContext, ctx )->GetVulkanAllocator()->GetVMAAllocator() : nullptr;
+            if ( !allocator )
+            {
+                vkDestroyImageView( device, m_ColorImages.ImageView, nullptr );
+                vkDestroyImageView( device, m_DepthStencilImages.ImageView, nullptr );
+                m_VmaAllocation[0] = m_VmaAllocation[1] = nullptr;
+                m_ColorImages                           = {};
+                m_DepthStencilImages                    = {};
+                m_CompositeFramebuffer                  = nullptr;
+                return;
+            }
             vmaDestroyImage( allocator, m_ColorImages.Image, (VmaAllocation)m_VmaAllocation[0] );
             vkDestroyImageView( device, m_ColorImages.ImageView, nullptr );
             

@@ -177,8 +177,11 @@ namespace Desert::Editor
         m_Preview.Draw( *m_PreviewUI, ImVec2( width, height ) );
 
         // Size for the NEXT frame's offscreen render (which happens in OnPreUpdate, before this runs again).
-        m_PreviewWidth  = static_cast<uint32_t>( width );
-        m_PreviewHeight = static_cast<uint32_t>( height );
+        // Quantized: a resize idles the GPU and recreates framebuffers, so dragging the dock splitter must
+        // not do that on every pixel. The image is stretched over the remainder, which is under 16px.
+        constexpr uint32_t kSizeStep = 16;
+        m_PreviewWidth  = std::max<uint32_t>( static_cast<uint32_t>( width ) / kSizeStep, 2 ) * kSizeStep;
+        m_PreviewHeight = std::max<uint32_t>( static_cast<uint32_t>( height ) / kSizeStep, 2 ) * kSizeStep;
         m_PreviewActive = true;
 
         ImGui::Spacing();

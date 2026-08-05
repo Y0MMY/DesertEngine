@@ -35,6 +35,14 @@ namespace Desert::Editor
     class PreviewViewport
     {
     public:
+        PreviewViewport() = default;
+        // Waits for the GPU before releasing the scene: this owns pipelines, framebuffers and descriptor
+        // pools that a submitted frame may still be executing against.
+        ~PreviewViewport();
+
+        PreviewViewport( const PreviewViewport& )            = delete;
+        PreviewViewport& operator=( const PreviewViewport& ) = delete;
+
         enum class Shape
         {
             Sphere, // material preview default

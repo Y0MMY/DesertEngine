@@ -2387,6 +2387,13 @@ namespace Desert::Editor
         // Clean shutdown: drop the session lock so the next start doesn't think we crashed.
         CrashRecovery::DisarmSession();
 
+        // The app loop exits right after the last PresentFinalImage, so the GPU is still chewing on that
+        // frame's command buffer. Panels own GPU objects — offscreen SceneRenderers (Details preview, asset
+        // thumbnails, node-graph preview), framebuffers, descriptor pools — and destroying those while that
+        // buffer is in flight is what produced the "can't be called on VkPipeline/VkDescriptorPool ... that
+        // is currently in use by VkCommandBuffer" validation errors on quit. Idle first, then tear down.
+        Graphic::Renderer::GetInstance().WaitDeviceIdle();
+
 #ifdef EBABLE_IMGUI
         m_Panels.clear();
         m_ImGuiLayer->OnDetach();

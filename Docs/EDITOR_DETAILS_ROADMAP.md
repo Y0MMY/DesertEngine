@@ -36,7 +36,7 @@ Components self-register at static-init, so adding one never touches the panel.
 
 ---
 
-## Phase 1 — a reusable preview widget
+## Phase 1 — a reusable preview widget — **DONE**
 
 Everything else depends on this, so it comes first.
 
@@ -67,6 +67,23 @@ Notes that will bite otherwise:
 
 **Done when:** selecting a static mesh shows a live, orbitable preview in Details, and dragging a
 material slider updates it in place.
+
+**As shipped** (`Editor/Widgets/PreviewViewport.{hpp,cpp}`):
+* `SetMesh(handle, materialSlots)` / `SetMaterial(handle, Shape::Sphere|Cube|Plane)` / `Clear()`.
+* Unlike the thumbnail renderer it installs its **own `GameplayCamera`** via `Scene::SetActiveCamera`
+  and drives it from orbit state (`SetFromTransform`), so it frames by moving the camera instead of
+  scaling the object — LMB/RMB drag orbits, wheel zooms multiplicatively, double-click re-frames.
+* The API enforces the frame-ordering rule: **`Update(w,h)`** records the render (panel `OnPreUpdate`),
+  **`Draw(uiHelper, size)`** only blits + handles input (panel `OnUIRender`).
+* Framing retries until the `MeshService` actually has the mesh, so an asset that streams in a few
+  frames later still gets framed rather than previewed against a guessed radius.
+* Wired into `ScenePropertiesPanel` as a "Preview" section above the component list: one renderer per
+  panel, re-pointed by a content key (entity + mesh/primitive + slots), and the render is **opt-in per
+  UI frame** — the flag is consumed in `OnPreUpdate`, so a folded section, a hidden dock tab or a
+  closed panel all stop the GPU work by simply not drawing.
+
+Still open from the notes below: falling back to the cached `ThumbnailCache` PNG for a *collapsed*
+section (today a folded section just shows nothing until you expand it), and RMB panning.
 
 ---
 
