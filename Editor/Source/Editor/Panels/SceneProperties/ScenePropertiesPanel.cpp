@@ -59,6 +59,131 @@ namespace Desert::Editor
         }
     } // namespace
 
+    namespace
+    {
+        // Identity of what the preview shows: entity + mesh/primitive + material slots. A change re-points
+        // (and re-frames) the preview; editing a material's own values does NOT change the key, because the
+        // preview renders the live material instance and updates on its own.
+        uint64_t PreviewKeyOf( const ECS::Entity& entity, uint64_t entityId )
+        {
+            if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+                return 0;
+
+            const auto& smc     = entity.GetComponent<ECS::StaticMeshComponent>();
+            const bool  hasMesh = static_cast<uint64_t>( smc.MeshHandle ) != 0;
+            if ( !hasMesh && !smc.Primitive )
+                return 0;
+
+            uint64_t   key = entityId | 1ull; // never 0 (0 means "nothing to preview")
+            const auto mix = [&key]( uint64_t v )
+            {
+                key = key * 1099511628211ull ^ v; // FNV-style; only equality matters here
+            };
+            mix( static_cast<uint64_t>( smc.MeshHandle ) );
+            mix( smc.Primitive ? static_cast<uint64_t>( *smc.Primitive ) + 1 : 0 );
+            for ( const auto& slot : smc.MaterialSlots )
+                mix( static_cast<uint64_t>( slot ) );
+            return key ? key : 1ull;
+        }
+    } // namespace
+
+    void ScenePropertiesPanel::OnPreUpdate()
+    {
+        // Everything GPU-side for the preview happens HERE: recording a scene render from inside
+        // OnUIRender() destroys descriptor pools whose sets are bound to the frame's command buffer.
+        if ( !m_SowPanel || !m_Scene )
+            return;
+
+        const auto selectedOpt = Core::SelectionManager::GetSelected();
+        if ( !selectedOpt )
+        {
+            m_PreviewKey = 0;
+            m_Preview.Clear();
+            return;
+        }
+
+        const auto& entityOpt = m_Scene->FindEntityByID( *selectedOpt );
+        if ( !entityOpt )
+        {
+            m_PreviewKey = 0;
+            m_Preview.Clear();
+            return;
+        }
+
+        const auto&    entity = entityOpt->get();
+        const uint64_t key    = PreviewKeyOf( entity, static_cast<uint64_t>( *selectedOpt ) );
+        if ( key != m_PreviewKey )
+        {
+            m_PreviewKey = key;
+            if ( key == 0 )
+            {
+                m_Preview.Clear();
+            }
+            else
+            {
+                const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
+                if ( static_cast<uint64_t>( smc.MeshHandle ) != 0 )
+                {
+                    m_Preview.SetMesh( smc.MeshHandle, smc.MaterialSlots );
+                }
+                else
+                {
+                    // A primitive: preview the shape itself with its own material, not a stand-in sphere.
+                    const auto shape = *smc.Primitive == Geometry::PrimitiveType::Plane
+                                            ? PreviewViewport::Shape::Plane
+                                            : ( *smc.Primitive == Geometry::PrimitiveType::Sphere
+                                                     ? PreviewViewport::Shape::Sphere
+                                                     : PreviewViewport::Shape::Cube );
+                    m_Preview.SetMaterial( smc.MaterialSlots.empty()
+                                                ? Assets::AssetHandle( static_cast<uint64_t>( 0 ) )
+                                                : smc.MaterialSlots.front(),
+                                           shape );
+                }
+            }
+        }
+
+        // Only pay for the render while the section is actually on screen and expanded. The flag is
+        // consumed here and must be re-affirmed by every UI frame, so a collapsed window, a hidden dock tab
+        // or a folded section all stop the render by simply not drawing.
+        if ( m_PreviewActive && m_PreviewWidth > 0 && m_PreviewHeight > 0 )
+            m_Preview.Update( m_PreviewWidth, m_PreviewHeight );
+        m_PreviewActive = false;
+    }
+
+    void ScenePropertiesPanel::DrawPreviewSection()
+    {
+        if ( m_PreviewKey == 0 )
+        {
+            m_PreviewActive = false;
+            return;
+        }
+
+        ImGui::SetNextItemOpen( m_PreviewOpen, ImGuiCond_Always );
+        m_PreviewOpen = ImGui::CollapsingHeader( ICON_MDI_CUBE_SCAN " Preview" );
+        if ( !m_PreviewOpen )
+        {
+            m_PreviewActive = false;
+            return;
+        }
+
+        if ( !m_PreviewUI )
+        {
+            m_PreviewUI = std::make_unique<UI::UIHelper>();
+            m_PreviewUI->Init();
+        }
+
+        const float width  = std::max( ImGui::GetContentRegionAvail().x, 32.0f );
+        const float height = std::max( width / m_PreviewAspect, 96.0f );
+        m_Preview.Draw( *m_PreviewUI, ImVec2( width, height ) );
+
+        // Size for the NEXT frame's offscreen render (which happens in OnPreUpdate, before this runs again).
+        m_PreviewWidth  = static_cast<uint32_t>( width );
+        m_PreviewHeight = static_cast<uint32_t>( height );
+        m_PreviewActive = true;
+
+        ImGui::Spacing();
+    }
+
     void ScenePropertiesPanel::OnUIRender()
     {
         auto selectedOpt = Core::SelectionManager::GetSelected();
@@ -222,6 +347,10 @@ namespace Desert::Editor
             ImGui::Columns( 1 );
             ImGui::Separator();
         }
+
+        // Above the (scrolling) component list, so orbiting the preview never fights the list's scroll and
+        // the preview stays put while you edit fields below it.
+        DrawPreviewSection();
 
         ImGui::BeginChild( "Components", ImVec2( 0.0f, 0.0f ), false, ImGuiWindowFlags_None );
         static ComponentEditor componentEditor( m_AssetManager, m_AnimationLibrary );
