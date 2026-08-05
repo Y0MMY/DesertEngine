@@ -251,7 +251,7 @@ change to the row than the rest of this phase and is better done with the row re
 
 ---
 
-## Phase 5 — reflection metadata to make it all data-driven
+## Phase 5 — reflection metadata to make it all data-driven — **ATTRIBUTES DONE**
 
 Every visual above should come from the component declaration, not from a hand-written widget, so a new
 component gets the treatment for free. Additions to `PROPERTY(...)` (parser: `Tools/DesertHeaderTool`,
@@ -262,11 +262,23 @@ consumer: `PropertyEditorBuilder`):
 | ~~`Advanced`~~ | done in phase 4 |
 | ~~`Units("deg" / "s" / "%")`~~ | done in phase 4 |
 | ~~`Summary`~~ | done in phase 4 |
-| `Preview` | the field's asset gets an inline preview instead of a name button |
-| `EditCondition("Foo")` | grey the field out while another field is false (UE's EditCondition) |
+| ~~`Temperature`~~ | done in phase 3 (Kelvin slider on a colour) |
+| ~~`Preview`~~ | done — an asset slot draws its content inline (checkerboard box) instead of only on hover |
+| ~~`EditCondition("Foo")`~~ | done — the row greys out while the named bool of the same block is false; `"!Foo"` inverts |
 
-What remains here is converting the hand-written widgets (mesh, materials, skybox, transform) to the same
-metadata, so a new asset-bearing component gets its slot UI without a bespoke widget.
+**As shipped.** `EditCondition` leaves the field VISIBLE and merely inert (label greyed, value disabled, and
+the hover tooltip says which flag it waits for): hiding a setting only makes people wonder where it went.
+An unknown or non-bool name evaluates to *true* on purpose — a typo in an annotation must not silently
+freeze a field nobody can then explain. Both attributes apply to the fields of the block being drawn, not
+to deeper nested structs. Annotated as the first users: UI panel gradient/pulse fields, terrain grass
+density, and the UI panel Sprite slot (`Preview`).
+
+What remains is converting the hand-written widgets (mesh, materials, skybox, transform) to the same
+metadata, so a new asset-bearing component gets its slot UI without a bespoke widget. Deliberately NOT
+done yet: those widgets carry real behaviour (slot inheritance, LOD chains, rigging) that no attribute
+expresses today, so the rewrite would be a large regression risk for no user-visible gain. The right
+trigger is the next component that needs the same UI — build the attribute then, with a second use case
+to design against.
 
 ---
 

@@ -212,6 +212,29 @@ namespace Desert::Editor
             }
         }
 
+        // PROPERTY(EditCondition("Foo")) — is the gate open? Looks the named BOOL up in the same block;
+        // a leading '!' inverts. An unknown or non-bool name evaluates to TRUE on purpose: a typo in an
+        // annotation must not silently freeze a field nobody can then explain.
+        bool EditConditionMet( const void* object, const TypeInfo& type, const std::string& condition )
+        {
+            if ( condition.empty() || !object )
+                return true;
+
+            const bool             invert = condition.front() == '!';
+            const std::string_view name( condition.data() + ( invert ? 1 : 0 ),
+                                         condition.size() - ( invert ? 1 : 0 ) );
+
+            for ( const auto& f : type.Fields )
+            {
+                if ( f.Name != name || f.Type != FieldType::Bool )
+                    continue;
+                const bool value =
+                     *reinterpret_cast<const bool*>( static_cast<const std::byte*>( object ) + f.Offset );
+                return invert ? !value : value;
+            }
+            return true;
+        }
+
         // --- Details search box ------------------------------------------------------------------
         bool ContainsCI( std::string_view haystack, std::string_view needle )
         {
@@ -381,6 +404,11 @@ namespace Desert::Editor
             std::memcpy( beforeBytes.data(), p, field.Size );
         }
 
+        // A field whose EditCondition is not met stays visible but inert — the setting exists, it just has
+        // no effect in this configuration.
+        const bool conditionMet =
+             ownerType ? EditConditionMet( object, *ownerType, field.Meta.EditCondition ) : true;
+
         ImGui::PushID( field.Name.c_str() );
 
         // Hover band across the whole row, so the eye can follow a label to its value in a dense panel.
@@ -402,7 +430,10 @@ namespace Desert::Editor
         const float labelW = std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
         ImGui::SetColumnWidth( 0, labelW );
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted( label.c_str() );
+        if ( conditionMet )
+            ImGui::TextUnformatted( label.c_str() );
+        else
+            ImGui::TextDisabled( "%s", label.c_str() ); // greyed like its (disabled) value
         // Multi-select: this field's value differs across the selected objects until the user edits it.
         if ( mixed )
         {
@@ -413,7 +444,10 @@ namespace Desert::Editor
         // revealing the underlying C++ field name (useful when DisplayName is a friendlier alias).
         if ( ImGui::IsItemHovered() )
         {
-            if ( !field.Meta.Tooltip.empty() )
+            if ( !conditionMet )
+                ImGui::SetTooltip( "Requires '%s'%s", field.Meta.EditCondition.c_str(),
+                                   field.Meta.Tooltip.empty() ? "" : ( "\n" + field.Meta.Tooltip ).c_str() );
+            else if ( !field.Meta.Tooltip.empty() )
                 ImGui::SetTooltip( "%s", field.Meta.Tooltip.c_str() );
             else if ( field.Name != label )
                 ImGui::SetTooltip( "%s", field.Name.c_str() );
@@ -471,7 +505,8 @@ namespace Desert::Editor
         ImGui::NextColumn();
         // Only the VALUE is disabled on a ReadOnly field: the label stays readable and the pin stays
         // clickable (pinning changes the layout, not the value; the reset is gated on !ReadOnly above).
-        ImGui::BeginDisabled( field.Meta.ReadOnly );
+        // An unmet EditCondition disables it for the same reason — the value cannot apply yet.
+        ImGui::BeginDisabled( field.Meta.ReadOnly || !conditionMet );
         ImGui::PushItemWidth( -1 );
 
         switch ( field.Type )
@@ -764,6 +799,39 @@ namespace Desert::Editor
                             display          = std::filesystem::path( path ).filename().string();
                         }
                     }
+                }
+
+                // PROPERTY(Preview): show the texture INLINE, not just on hover — right for a slot whose
+                // content is the point (a sprite, a decal), wrong for a long list of PBR maps. An empty
+                // slot still draws its box so the row keeps its shape and reads as "droppable".
+                if ( field.Meta.Preview && uiHelper )
+                {
+                    constexpr float kBox = 72.0f;
+                    const ImVec2    at   = ImGui::GetCursorScreenPos();
+                    const ImVec2    br( at.x + kBox, at.y + kBox );
+                    ImDrawList*     dl = ImGui::GetWindowDrawList();
+
+                    // Checkerboard, so a transparent or light sprite reads as clearly as a dark one.
+                    dl->AddRectFilled( at, br, IM_COL32( 32, 34, 40, 255 ), 4.0f );
+                    dl->PushClipRect( at, br, true );
+                    for ( int cy = 0; cy * 12 < static_cast<int>( kBox ); ++cy )
+                        for ( int cx = ( cy & 1 ); cx * 12 < static_cast<int>( kBox ); cx += 2 )
+                            dl->AddRectFilled( ImVec2( at.x + cx * 12.0f, at.y + cy * 12.0f ),
+                                               ImVec2( at.x + cx * 12.0f + 12.0f, at.y + cy * 12.0f + 12.0f ),
+                                               IM_COL32( 44, 47, 55, 255 ) );
+                    if ( *handle != 0 )
+                    {
+                        if ( auto img = ResolveTextureImage( *handle ) )
+                        {
+                            if ( const void* tex = uiHelper->GetTextureID( img ) )
+                                dl->AddImage( reinterpret_cast<ImTextureID>( const_cast<void*>( tex ) ),
+                                              ImVec2( at.x + 4.0f, at.y + 4.0f ),
+                                              ImVec2( br.x - 4.0f, br.y - 4.0f ) );
+                        }
+                    }
+                    dl->PopClipRect();
+                    dl->AddRect( at, br, IM_COL32( 70, 74, 84, 255 ), 4.0f );
+                    ImGui::Dummy( ImVec2( kBox, kBox ) );
                 }
 
                 ImGui::Button( display.c_str(), ImVec2( -1.0f, 0.0f ) );

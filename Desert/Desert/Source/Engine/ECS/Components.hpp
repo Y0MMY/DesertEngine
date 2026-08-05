@@ -234,7 +234,8 @@ namespace Desert::ECS
 
         // Blades per side over the terrain -> GrassDensity^2 instances. Higher = blades closer together
         // (smaller spacing = size/GrassDensity). 512 => up to ~262k blades.
-        PROPERTY( DisplayName( "Grass Density" ), Category( "Grass" ), Range( 8.0f, 512.0f ) )
+        PROPERTY( DisplayName( "Grass Density" ), Category( "Grass" ), Range( 8.0f, 512.0f ),
+                  EditCondition( "EnableGrass" ) )
         int GrassDensity = 320;
 
         PROPERTY( DisplayName( "Grass Height" ), Category( "Grass" ), Range( 5.0f, 500.0f ), Length )
@@ -960,7 +961,7 @@ namespace Desert::ECS
                   Tooltip( "Fill with the blurred scene behind the panel (frosted glass). 0 = off." ) )
         float BackdropBlur = 0.0f;
 
-        PROPERTY( DisplayName( "Sprite" ), Category( "UI Panel" ) )
+        PROPERTY( DisplayName( "Sprite" ), Category( "UI Panel" ), Preview )
         Assets::AssetHandle Sprite; // optional background image, tinted by Color * Opacity. Unset = flat colour.
 
         PROPERTY( DisplayName( "Sprite Border L/T/R/B" ), Category( "UI Panel" ) )
@@ -986,15 +987,17 @@ namespace Desert::ECS
         // --- Animation (Phase F) --------------------------------------------------------------------------
         PROPERTY( DisplayName( "Pulse" ), Category( "Animation" ) )
         bool Pulse = false; // breathe the opacity between Pulse Min and full — a live "online" dot / CTA glow
-        PROPERTY( DisplayName( "Pulse Speed" ), Category( "Animation" ), Range( 0.1f, 10.0f ) )
+        PROPERTY( DisplayName( "Pulse Speed" ), Category( "Animation" ), Range( 0.1f, 10.0f ), Units( "rad/s" ),
+                  EditCondition( "Pulse" ) )
         float PulseSpeed = 2.5f; // radians/sec of the sine
-        PROPERTY( DisplayName( "Pulse Min" ), Category( "Animation" ), Range( 0.0f, 1.0f ) )
+        PROPERTY( DisplayName( "Pulse Min" ), Category( "Animation" ), Range( 0.0f, 1.0f ),
+                  EditCondition( "Pulse" ) )
         float PulseMin = 0.35f; // opacity floor of the breathe
 
         // Effects (Phase 4). All in design px; scaled by the canvas scale at draw time.
         PROPERTY( DisplayName( "Use Gradient" ), Category( "Effects" ) )
         bool UseGradient = false; // vertical Color (top) -> Gradient Color (bottom); ignored when a sprite is set
-        PROPERTY( DisplayName( "Gradient Color" ), Category( "Effects" ), Color )
+        PROPERTY( DisplayName( "Gradient Color" ), Category( "Effects" ), Color, EditCondition( "UseGradient" ) )
         glm::vec3 GradientColor = glm::vec3( 0.10f, 0.11f, 0.14f );
         PROPERTY( DisplayName( "Border Width" ), Category( "Effects" ), Range( 0.0f, 16.0f ) )
         float BorderWidth = 0.0f; // 0 = no border

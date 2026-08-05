@@ -50,6 +50,8 @@ namespace
         bool        advanced    = false; // PROPERTY(Advanced) — folds under "Advanced" in its category
         bool        summary     = false; // PROPERTY(Summary)  — feeds the component header's one-liner
         bool        temperature = false; // PROPERTY(Temperature) — Kelvin slider on a Color field
+        bool        preview     = false; // PROPERTY(Preview) — inline asset preview instead of a name button
+        std::string editCondition;       // PROPERTY(EditCondition("Foo")) — grey out while Foo is false
     };
 
     struct Field
@@ -467,6 +469,10 @@ namespace
                 m.summary = true;
             else if ( tok == "Temperature" )
                 m.temperature = true;
+            else if ( tok == "Preview" )
+                m.preview = true;
+            else if ( tok.rfind( "EditCondition", 0 ) == 0 )
+                m.editCondition = ExtractStringLiteral( tok );
             else if ( tok == "Length" )
                 m.isLength = true;
         }
@@ -702,6 +708,10 @@ namespace
             o << ".Summary = true, ";
         if ( m.temperature )
             o << ".Temperature = true, ";
+        if ( m.preview )
+            o << ".Preview = true, ";
+        if ( !m.editCondition.empty() )
+            o << ".EditCondition = \"" << m.editCondition << "\", ";
         o << "}";
     }
 

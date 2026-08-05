@@ -71,6 +71,16 @@ namespace Desert::Reflection
         // that writes the RGB. The component stores only the resulting colour: Kelvin is an input to it,
         // not a second source of truth.
         bool Temperature = false;
+
+        // PROPERTY(Preview) — an asset slot shows its content INLINE instead of only on hover. For slots
+        // whose content is the point (a sprite, a decal); a long list of texture maps is better left as
+        // names.
+        bool Preview = false;
+
+        // PROPERTY(EditCondition("Foo")) — the row is greyed while the bool field `Foo` of the SAME block
+        // is false ("!Foo" inverts it). Unlike Hidden the field stays VISIBLE: the setting exists, it just
+        // has no effect yet, and hiding it would only make people wonder where it went.
+        std::string EditCondition;
     };
 
     struct TypeInfo; // fwd
