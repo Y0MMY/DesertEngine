@@ -39,9 +39,9 @@ namespace Desert::Geometry
         if ( mn.x > mx.x )
             return 0; // empty mesh
 
-        const float scale  = glm::max( glm::length( glm::vec3( transform[0] ) ),
-                                       glm::max( glm::length( glm::vec3( transform[1] ) ),
-                                                 glm::length( glm::vec3( transform[2] ) ) ) );
+        const float scale = glm::max(
+             glm::length( glm::vec3( transform[0] ) ),
+             glm::max( glm::length( glm::vec3( transform[1] ) ), glm::length( glm::vec3( transform[2] ) ) ) );
         const float radius = glm::length( mx - mn ) * 0.5f * scale;
         const float dist   = glm::length( cameraPosition - glm::vec3( transform[3] ) );
 
