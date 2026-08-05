@@ -145,6 +145,23 @@ namespace Desert::Graphic::System
              [&]( entt::entity entity, ECS::ParticleEmitterComponent& emitter, ECS::TransformComponent& transform )
              {
                  const auto& d = emitter.Data;
+
+                 // One-shot Restart from the editor transport. Handled BEFORE the enabled check so a
+                 // paused emitter also comes back empty, and by ZEROING the state rather than dropping
+                 // the buffer — the GPU may still be reading it this frame.
+                 if ( emitter.RequestRestart )
+                 {
+                     emitter.RequestRestart = false;
+                     const auto it          = m_Emitters.find( static_cast<uint32_t>( entity ) );
+                     if ( it != m_Emitters.end() && it->second.Particles )
+                     {
+                         const std::vector<uint8_t> zeros(
+                              static_cast<size_t>( it->second.MaxParticles ) * kParticleStride, 0 );
+                         it->second.Particles->SetData( zeros.data(), static_cast<uint32_t>( zeros.size() ) );
+                         it->second.SpawnAccum = 0.0f;
+                     }
+                 }
+
                  if ( !d.Enabled || d.MaxParticles <= 0 )
                      return;
 

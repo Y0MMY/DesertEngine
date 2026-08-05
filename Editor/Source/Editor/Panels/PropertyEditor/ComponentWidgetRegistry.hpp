@@ -35,6 +35,9 @@ namespace Desert::Editor
         std::weak_ptr<Assets::AssetManager> AssetManager;
         const Animation::AnimationLibrary*  AnimationLibrary = nullptr;
         UI::UIHelper*                       UIHelper         = nullptr;
+        // Details search box: while non-empty, reflected components draw only the fields that match.
+        // A hand-written widget cannot filter itself — the panel decides whether to draw it at all.
+        const char* FieldFilter = nullptr;
 
         Assets::AssetManager* AssetMgr() const
         {
@@ -52,6 +55,13 @@ namespace Desert::Editor
         std::function<void( ECS::Entity& )>                                                      Add;
         std::function<void( ECS::Entity& )>                                                      Remove;
         std::function<void( ECS::Entity&, ::Desert::Core::Scene*, const ComponentEditContext& )> Draw;
+
+        // REFLECTED components only (empty/null for hand-written widgets): the reflected data block and
+        // its type name. They let the panel read the component WITHOUT drawing it — for the collapsed
+        // header summary, the search filter and pinned fields. A custom widget opts out of all three by
+        // simply not having them.
+        std::string                          ReflectedTypeName;
+        std::function<void*( ECS::Entity& )> DataPtr;
     };
 
     // Editor-side registry of component editors. Components self-register at static-init via the macros
@@ -91,12 +101,14 @@ namespace Desert::Editor
                                                       DataT ComponentT::*member, bool canRemove = true )
     {
         ComponentEditorEntry e;
-        e.Name      = std::move( name );
-        e.CanRemove = canRemove;
-        e.Has       = []( ECS::Entity& en ) { return en.HasComponent<ComponentT>(); };
-        e.Add       = []( ECS::Entity& en ) { en.AddComponent<ComponentT>(); };
-        e.Remove    = []( ECS::Entity& en ) { en.RemoveComponent<ComponentT>(); };
-        e.Draw      = [member, dataTypeName]( ECS::Entity& en, ::Desert::Core::Scene* scene,
+        e.Name              = std::move( name );
+        e.CanRemove         = canRemove;
+        e.ReflectedTypeName = dataTypeName;
+        e.Has               = []( ECS::Entity& en ) { return en.HasComponent<ComponentT>(); };
+        e.Add               = []( ECS::Entity& en ) { en.AddComponent<ComponentT>(); };
+        e.Remove            = []( ECS::Entity& en ) { en.RemoveComponent<ComponentT>(); };
+        e.DataPtr = [member]( ECS::Entity& en ) -> void* { return &( en.GetComponent<ComponentT>().*member ); };
+        e.Draw    = [member, dataTypeName]( ECS::Entity& en, ::Desert::Core::Scene* scene,
                                          const ComponentEditContext& ctx )
         {
             auto& comp = en.GetComponent<ComponentT>();
@@ -111,7 +123,7 @@ namespace Desert::Editor
                                            } );
 
             PropertyEditorBuilder::DrawMulti( &( comp.*member ), siblings, dataTypeName, ctx.AssetMgr(),
-                                              ctx.UIHelper );
+                                              ctx.UIHelper, ctx.FieldFilter );
         };
         return e;
     }

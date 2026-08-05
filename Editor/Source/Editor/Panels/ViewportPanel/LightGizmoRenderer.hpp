@@ -22,11 +22,18 @@ namespace Desert::Editor
         // last skeleton-overlay frame; -1 if none. Populated by RenderSkeleton; drives viewport bone picking.
         int PickBone( const ImVec2& absMouse, float radiusPx = 12.0f ) const;
 
-        // True while the mouse is over a light billboard this frame — icons click-select the light,
-        // so the scene ray-pick must not run over them (it would hit whatever is behind).
+        // True while the mouse is over a light billboard OR a drag handle this frame — both consume the
+        // click, so the scene ray-pick must not run under them (it would hit whatever is behind).
         bool IsLightIconHovered() const
         {
             return m_LightIconHovered;
+        }
+
+        // True while a radius / range / cone handle is being dragged. The viewport keeps its camera and
+        // gizmo off during that (a handle drag is a value edit, not a selection or a move).
+        bool IsDraggingHandle() const
+        {
+            return m_ActiveHandle != HandleKind::None;
         }
 
     private:
@@ -76,6 +83,28 @@ namespace Desert::Editor
                            const glm::vec3& dir, float outerAngleDeg, float range, float width, float height,
                            float windowX, float windowY );
 
+        // --- draggable value handles (selected light only) ------------------------------------------
+        // What a grab is currently editing. One at a time: a drag owns the mouse until it is released.
+        enum class HandleKind
+        {
+            None,
+            PointRadius,
+            SpotRange,
+            SpotOuterAngle,
+        };
+
+        // A round grab dot at @p handle. Dragging scales @p value by the RATIO of the pointer's distance
+        // from @p center to that distance when the grab started, which keeps the feel identical at any
+        // zoom or camera angle without needing a 3D ray intersection. Returns true when it wrote a value;
+        // pushes one undo entry per completed drag.
+        bool DragValueHandle( HandleKind kind, const Common::UUID& owner, const ImVec2& center,
+                              const ImVec2& handle, float& value, float minValue, float maxValue,
+                              const char* tooltip );
+
+        // Is this the entity the Details panel is showing? Handles only appear on the selected light —
+        // otherwise a scene full of lights would be a minefield of grab dots.
+        bool IsSelected( const ECS::Entity& entity ) const;
+
     private:
         std::shared_ptr<Desert::Core::Scene> m_Scene;
 
@@ -84,5 +113,13 @@ namespace Desert::Editor
         std::vector<std::pair<int, ImVec2>> m_BoneScreenPositions;
 
         bool m_LightIconHovered = false; // see IsLightIconHovered()
+
+        // Active handle drag. The start value + start pixel distance define the proportional drag; the
+        // captured bytes become one undo entry when the mouse is released.
+        HandleKind   m_ActiveHandle = HandleKind::None;
+        Common::UUID m_ActiveHandleOwner;
+        float*       m_ActiveHandleTarget = nullptr; // the float being edited (undo target)
+        float        m_DragStartValue     = 0.0f;
+        float        m_DragStartDistance  = 0.0f;
     };
 } // namespace Desert::Editor

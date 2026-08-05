@@ -16,13 +16,25 @@ namespace Desert::Editor
         ComponentEditor( const std::shared_ptr<Assets::AssetManager>& assetManager,
                          const Animation::AnimationLibrary*           animationLibrary );
 
-        void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr );
+        // @p fieldFilter is the Details search box (null/empty = show everything). Reflected components
+        // drop the fields that don't match; a hand-written widget can only be matched on its NAME, so it
+        // is either drawn whole or not at all.
+        void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr,
+                     const char* fieldFilter = nullptr );
 
     private:
         ComponentEditContext MakeContext() const;
         void                 RenderAddComponentPopup( ECS::Entity& entity );
         void RenderComponentHeader( const ComponentEditorEntry& entry, ECS::Entity& entity,
                                     ::Desert::Core::Scene* scene, const ComponentEditContext& ctx );
+
+        // The "Pinned" section above every component: fields the user starred, hoisted out of their
+        // components so the values they actually tune are always in reach. Reflected fields only.
+        void DrawPinnedFields( ECS::Entity& entity, const ComponentEditContext& ctx );
+
+        // Is this component worth showing for the current search? Matches its name, or (reflected only)
+        // any of its field labels.
+        static bool EntryMatchesFilter( const ComponentEditorEntry& entry, const char* filter );
 
     private:
         std::weak_ptr<Assets::AssetManager> m_AssetManager;

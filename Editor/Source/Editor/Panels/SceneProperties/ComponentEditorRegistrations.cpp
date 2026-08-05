@@ -6,6 +6,7 @@
 #include <Editor/Panels/UI/UIAnchorControls.hpp>
 #include <Editor/Core/DragPayloads.hpp>
 
+#include <Engine/Core/Scene.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/Geometry/Mesh.hpp>
@@ -31,15 +32,17 @@
 #include <Common/Core/Constants.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <optional>
 
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::DirectionLightComponent, Data, "DirectionalLightData",
-                                     "Directional Light" )
+// Directional light is a CUSTOM entry: the reflected fields PLUS a sun dial, because the sun's direction
+// is not a field — it hides in TransformComponent.Translation. See MakeDirectionalLightEntry.
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::PointLightComponent, Data, "PointLightData", "Point Light" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::SpotLightComponent, Data, "SpotLightData", "Spot Light" )
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CameraComponent, Data, "CameraData", "Camera" )
+// Camera is a CUSTOM entry: reflected fields + a focal-length readout and "look through". See MakeCameraEntry.
 // Terrain is a CUSTOM entry: reflected TerrainData UI + the terrain MATERIAL editor (terrain
 // has no mesh material slots, so its shader/params live on the entity's MaterialComponent —
 // edited HERE, inside the Terrain section, not as a separate confusing component).
@@ -50,8 +53,8 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::RigidBodyComponent, Data, "R
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::CharacterControllerComponent, Data, "CharacterControllerData",
                                      "Character Controller" )
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::AudioSourceComponent, Data, "AudioSourceData", "Audio Source" )
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::ParticleEmitterComponent, Data, "ParticleEmitterData",
-                                     "Particle Emitter" )
+// Particle Emitter is a CUSTOM entry: the reflected fields plus a transport (play / pause / restart),
+// because "is it emitting right now" is a state you drive, not a value you type. See MakeEmitterEntry.
 DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UICanvasComponent, Data, "UICanvasData", "UI Canvas" )
 // UI Layout is a CUSTOM entry (not the reflected one-liner) so the Details panel gets Unity-style anchor
 // presets ("Fill / Match Parent" + a 4x4 grid) above the raw anchor/offset fields. See MakeUILayoutEntry.
@@ -84,6 +87,10 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIDropdownComponent, Data, "
 
 namespace Desert::Editor
 {
+    // The engine has its own Desert::ImGui namespace, so an unqualified ImGui:: inside Desert::Editor
+    // resolves there instead of to the library. Alias it once, like every other editor TU does.
+    namespace ImGui = ::ImGui;
+
     // Terrain material editor. TERRAIN has no mesh material slots, so its shader + params are
     // authored on the entity's MaterialComponent — the ONE remaining authored use of that
     // component (mesh entities author materials in their slots; there the component is only a
@@ -295,8 +302,274 @@ namespace Desert::Editor
         col.HalfHeight = glm::max( 0.01f, half.y - col.Radius );
     }
 
+    // The world-space half-extents FitColliderToMesh would produce, or nullopt when the entity has no
+    // mesh to measure. Same rule as the fit itself, so the warning below can never disagree with the
+    // button that silences it.
+    static std::optional<glm::vec3> MeshHalfExtents( ::Desert::ECS::Entity& entity )
+    {
+        if ( !entity.HasComponent<::Desert::ECS::StaticMeshComponent>() )
+            return std::nullopt;
+
+        const auto&     smc  = entity.GetComponent<::Desert::ECS::StaticMeshComponent>();
+        ::Desert::Mesh* mesh = nullptr;
+        if ( smc.MeshHandle )
+            mesh = ::Desert::Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
+        else if ( smc.RuntimeMesh )
+            mesh = smc.RuntimeMesh.get();
+        else if ( smc.Primitive.has_value() )
+            mesh = ::Desert::Geometry::PrimitiveMeshFactory::GetShared( smc.Primitive.value() );
+        if ( !mesh )
+            return std::nullopt;
+
+        glm::vec3 mn( std::numeric_limits<float>::max() );
+        glm::vec3 mx( std::numeric_limits<float>::lowest() );
+        for ( const auto& sm : mesh->GetSubmeshes() )
+        {
+            mn = glm::min( mn, sm.BoundingBox.Min );
+            mx = glm::max( mx, sm.BoundingBox.Max );
+        }
+        if ( mn.x > mx.x )
+            return std::nullopt;
+
+        const glm::vec3 scale = entity.GetComponent<::Desert::ECS::TransformComponent>().Scale;
+        return glm::abs( ( mx - mn ) * 0.5f * scale );
+    }
+
     // Collider editor: same auto-built reflected UI as the one-liner, PLUS a one-time auto-fit on Add and
     // a manual "Fit to Mesh Bounds" button.
+    // A top-down hemisphere dial for a sun direction: the centre is straight up (elevation 90 deg), the
+    // rim is the horizon, and the angle around the circle is the compass azimuth (up = +Z, right = +X).
+    // Dragging moves the sun; the numeric sliders beside it stay the precise path (and are the only way
+    // to put the sun BELOW the horizon, which a hemisphere cannot show).
+    static bool DrawSunDial( float& azimuthDeg, float& elevationDeg, float diameter )
+    {
+        ImDrawList*  dl     = ImGui::GetWindowDrawList();
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float  r      = diameter * 0.5f;
+        const ImVec2 c( origin.x + r, origin.y + r );
+
+        ImGui::InvisibleButton( "##sundial", ImVec2( diameter, diameter ) );
+
+        bool changed = false;
+        if ( ImGui::IsItemActive() )
+        {
+            const ImVec2 m   = ImGui::GetIO().MousePos;
+            const float  dx  = m.x - c.x;
+            const float  dy  = m.y - c.y;
+            const float  len = std::sqrt( dx * dx + dy * dy );
+
+            azimuthDeg = glm::degrees( std::atan2( dx, -dy ) );
+            if ( azimuthDeg < 0.0f )
+                azimuthDeg += 360.0f;
+            elevationDeg = ( 1.0f - glm::min( 1.0f, len / r ) ) * 90.0f;
+            changed      = true;
+        }
+
+        const ImU32 ring = ImGui::GetColorU32( ImGuiCol_Border );
+        dl->AddCircleFilled( c, r, ImGui::GetColorU32( ImGuiCol_FrameBg ), 48 );
+        dl->AddCircle( c, r, ring, 48 );
+        dl->AddCircle( c, r * 0.5f, ring, 32 ); // the 45 deg elevation ring
+        dl->AddLine( ImVec2( c.x - r, c.y ), ImVec2( c.x + r, c.y ), ring );
+        dl->AddLine( ImVec2( c.x, c.y - r ), ImVec2( c.x, c.y + r ), ring );
+
+        const ImU32 label = ImGui::GetColorU32( ImGuiCol_TextDisabled );
+        dl->AddText( ImVec2( c.x - 3.0f, c.y - r - 2.0f ), label, "N" );
+        dl->AddText( ImVec2( c.x + r - 6.0f, c.y - 7.0f ), label, "E" );
+        dl->AddText( ImVec2( c.x - 3.0f, c.y + r - 14.0f ), label, "S" );
+        dl->AddText( ImVec2( c.x - r + 2.0f, c.y - 7.0f ), label, "W" );
+
+        // The sun itself. Below the horizon it is pinned to the rim and drawn hollow — the dial covers
+        // the sky, so "night" has to read as a state rather than a position.
+        const bool   belowHorizon = elevationDeg < 0.0f;
+        const float  el           = glm::clamp( elevationDeg, 0.0f, 90.0f );
+        const float  rr           = ( 1.0f - el / 90.0f ) * r;
+        const float  azr          = glm::radians( azimuthDeg );
+        const ImVec2 sun( c.x + std::sin( azr ) * rr, c.y - std::cos( azr ) * rr );
+        dl->AddLine( c, sun, ImGui::GetColorU32( ImGuiCol_TextDisabled ) );
+        if ( belowHorizon )
+            dl->AddCircle( sun, 6.0f, IM_COL32( 120, 130, 160, 255 ), 16, 2.0f );
+        else
+            dl->AddCircleFilled( sun, 6.0f, IM_COL32( 255, 210, 90, 255 ), 16 );
+
+        return changed;
+    }
+
+    // Directional light: the reflected fields, plus the thing that is NOT a field — where the sun is.
+    // The engine stores the sun as the direction light TRAVELS in TransformComponent.Translation
+    // (Scene.cpp uploads normalize(Translation); the sky negates it), which is unauthorable as three
+    // raw numbers. This edits it as azimuth/elevation.
+    static ComponentEditorEntry MakeDirectionalLightEntry()
+    {
+        using C = ::Desert::ECS::DirectionLightComponent;
+        ComponentEditorEntry e;
+        e.Name              = "Directional Light";
+        e.CanRemove         = true;
+        e.ReflectedTypeName = "DirectionalLightData";
+        e.Has               = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<C>(); };
+        e.Add               = []( ::Desert::ECS::Entity& en ) { en.AddComponent<C>(); };
+        e.Remove            = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<C>(); };
+        e.DataPtr           = []( ::Desert::ECS::Entity& en ) -> void* { return &en.GetComponent<C>().Data; };
+        e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<C>();
+            PropertyEditorBuilder::Draw( &c.Data, "DirectionalLightData", ctx.AssetMgr(), ctx.UIHelper,
+                                         ctx.FieldFilter );
+
+            if ( ctx.FieldFilter || !en.HasComponent<::Desert::ECS::TransformComponent>() )
+                return; // while searching, only the matched fields are on screen
+
+            auto& t = en.GetComponent<::Desert::ECS::TransformComponent>();
+
+            // Translation is the TRAVEL direction; the sun sits the other way.
+            glm::vec3 travel = t.Translation;
+            float     length = glm::length( travel );
+            if ( length < 1e-4f )
+            {
+                travel = glm::vec3( -0.4f, -1.0f, -0.5f );
+                length = glm::length( travel );
+            }
+            const glm::vec3 toSun = -travel / length;
+
+            float elevation = glm::degrees( std::asin( glm::clamp( toSun.y, -1.0f, 1.0f ) ) );
+            float azimuth   = glm::degrees( std::atan2( toSun.x, toSun.z ) );
+            if ( azimuth < 0.0f )
+                azimuth += 360.0f;
+
+            if ( !::Desert::Editor::Utils::ImGuiUtilities::SectionHeader( ICON_MDI_WEATHER_SUNNY
+                                                                          "  Sun Direction" ) )
+                return;
+
+            ImGui::Indent( 6.0f );
+            bool changed = DrawSunDial( azimuth, elevation, 120.0f );
+
+            ImGui::SameLine();
+            ImGui::BeginGroup();
+            ImGui::SetNextItemWidth( -1.0f );
+            changed |= ImGui::SliderFloat( "##azimuth", &azimuth, 0.0f, 360.0f, "Azimuth %.0f deg" );
+            ImGui::SetNextItemWidth( -1.0f );
+            changed |= ImGui::SliderFloat( "##elevation", &elevation, -90.0f, 90.0f, "Elevation %.0f deg" );
+            if ( elevation < 0.0f )
+                ImGui::TextColored( ImVec4( 0.6f, 0.65f, 0.8f, 1.0f ), ICON_MDI_WEATHER_NIGHT " below horizon" );
+            ImGui::EndGroup();
+
+            if ( changed )
+            {
+                const float     az = glm::radians( azimuth );
+                const float     el = glm::radians( elevation );
+                const glm::vec3 dir( std::cos( el ) * std::sin( az ), std::sin( el ),
+                                     std::cos( el ) * std::cos( az ) );
+                // Keep the vector's length: some scenes author it as a "sun position" and only the
+                // direction is read, so rewriting the magnitude would be a silent edit.
+                t.Translation = -dir * length;
+            }
+
+            ImGui::Unindent( 6.0f );
+        };
+        return e;
+    }
+
+    // Camera: the reflected fields, plus the two things a camera needs that numbers alone don't give —
+    // the lens in millimetres photographers think in, and a way to see what it sees.
+    static ComponentEditorEntry MakeCameraEntry()
+    {
+        using C = ::Desert::ECS::CameraComponent;
+        ComponentEditorEntry e;
+        e.Name              = "Camera";
+        e.CanRemove         = true;
+        e.ReflectedTypeName = "CameraData";
+        e.Has               = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<C>(); };
+        e.Add               = []( ::Desert::ECS::Entity& en ) { en.AddComponent<C>(); };
+        e.Remove            = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<C>(); };
+        e.DataPtr           = []( ::Desert::ECS::Entity& en ) -> void* { return &en.GetComponent<C>().Data; };
+        e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene* scene, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<C>();
+            PropertyEditorBuilder::Draw( &c.Data, "CameraData", ctx.AssetMgr(), ctx.UIHelper, ctx.FieldFilter );
+
+            if ( ctx.FieldFilter )
+                return;
+
+            // Focal length <-> vertical FOV on a 35mm full-frame sensor (24mm high), the lens language
+            // every reference shot is quoted in. Purely a second view of the SAME field.
+            constexpr float kSensorHalfHeightMm = 12.0f;
+            const float     fovRad              = glm::radians( glm::clamp( c.Data.FOV, 1.0f, 179.0f ) );
+            float           focalMm             = kSensorHalfHeightMm / std::tan( fovRad * 0.5f );
+
+            ImGui::Separator();
+            ImGui::SetNextItemWidth( 180.0f );
+            if ( ImGui::DragFloat( "Focal length", &focalMm, 0.5f, 4.0f, 800.0f, "%.0f mm" ) )
+            {
+                const float newFov =
+                     2.0f * glm::degrees( std::atan( kSensorHalfHeightMm / glm::max( focalMm, 1.0f ) ) );
+                c.Data.FOV = glm::clamp( newFov, 10.0f, 120.0f );
+            }
+            ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
+                 "The same setting as Field of View, in 35mm-equivalent lens terms (24mm sensor height)." );
+
+            // "Look through": the editor camera is moved to this camera's transform instead of the
+            // viewport being handed over — nothing about the scene's active camera changes, so leaving
+            // is just moving the view again.
+            if ( scene && en.HasComponent<::Desert::ECS::TransformComponent>() )
+            {
+                if ( ImGui::Button( ICON_MDI_EYE "  Look through this camera", ImVec2( -1.0f, 0.0f ) ) )
+                {
+                    if ( auto* editorCam =
+                              dynamic_cast<::Desert::Core::EditorCamera*>( scene->GetActiveCamera().get() ) )
+                    {
+                        const glm::mat4 world    = en.GetWorldTransform();
+                        const glm::vec3 position = glm::vec3( world[3] );
+                        const glm::vec3 forward  = -glm::normalize( glm::vec3( world[2] ) );
+
+                        // Focus() backs the camera off along its CURRENT direction, so aim first.
+                        editorCam->SnapToDirection( forward );
+                        editorCam->Focus( position + forward * 100.0f, 100.0f );
+                    }
+                }
+                ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
+                     "Moves the EDITOR camera to this camera's position and orientation" );
+            }
+        };
+        return e;
+    }
+
+    // Particle emitter: transport first, then the reflected parameters. Pause writes Enabled (the same
+    // field the renderer reads, so nothing new can drift out of sync) and Restart raises the component's
+    // one-shot flag that ParticleRenderer consumes next frame.
+    static ComponentEditorEntry MakeEmitterEntry()
+    {
+        using C = ::Desert::ECS::ParticleEmitterComponent;
+        ComponentEditorEntry e;
+        e.Name              = "Particle Emitter";
+        e.CanRemove         = true;
+        e.ReflectedTypeName = "ParticleEmitterData";
+        e.Has               = []( ::Desert::ECS::Entity& en ) { return en.HasComponent<C>(); };
+        e.Add               = []( ::Desert::ECS::Entity& en ) { en.AddComponent<C>(); };
+        e.Remove            = []( ::Desert::ECS::Entity& en ) { en.RemoveComponent<C>(); };
+        e.DataPtr           = []( ::Desert::ECS::Entity& en ) -> void* { return &en.GetComponent<C>().Data; };
+        e.Draw = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
+        {
+            auto& c = en.GetComponent<C>();
+
+            if ( !ctx.FieldFilter )
+            {
+                const float w = ( ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x ) * 0.5f;
+                if ( ImGui::Button( c.Data.Enabled ? ICON_MDI_PAUSE "  Pause" : ICON_MDI_PLAY "  Play",
+                                    ImVec2( w, 0.0f ) ) )
+                    c.Data.Enabled = !c.Data.Enabled;
+                ImGui::SameLine();
+                if ( ImGui::Button( ICON_MDI_RESTART "  Restart", ImVec2( -1.0f, 0.0f ) ) )
+                    c.RequestRestart = true;
+                ::Desert::Editor::Utils::ImGuiUtilities::Tooltip(
+                     "Kill every live particle and start emitting from scratch" );
+                ImGui::Spacing();
+            }
+
+            PropertyEditorBuilder::Draw( &c.Data, "ParticleEmitterData", ctx.AssetMgr(), ctx.UIHelper,
+                                         ctx.FieldFilter );
+        };
+        return e;
+    }
+
     // Terrain: reflected TerrainData UI + the terrain MATERIAL (shader + schema params) in ONE
     // section. Terrain has no mesh slots, so its material lives on a MaterialComponent that this
     // entry manages implicitly — no separate component for the user to discover or confuse.
@@ -343,7 +616,39 @@ namespace Desert::Editor
         e.Draw   = []( ::Desert::ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
         {
             auto& c = en.GetComponent<::Desert::ECS::ColliderComponent>();
-            PropertyEditorBuilder::Draw( &c.Data, "ColliderData", ctx.AssetMgr(), ctx.UIHelper );
+            PropertyEditorBuilder::Draw( &c.Data, "ColliderData", ctx.AssetMgr(), ctx.UIHelper, ctx.FieldFilter );
+
+            // A collider that disagrees with the mesh it is supposed to wrap is invisible until something
+            // walks into thin air — the greybox house shipped with double-size colliders for exactly this
+            // reason (see the world-units commit). Say it here, next to the button that fixes it.
+            if ( !ctx.FieldFilter )
+            {
+                if ( const auto meshHalf = MeshHalfExtents( en ) )
+                {
+                    const glm::vec3 colliderHalf =
+                         c.Data.Shape == ::Desert::Physics::ShapeType::Box
+                              ? c.Data.HalfExtents
+                              : glm::vec3( c.Data.Radius,
+                                           c.Data.Shape == ::Desert::Physics::ShapeType::Capsule
+                                                ? c.Data.HalfHeight + c.Data.Radius
+                                                : c.Data.Radius,
+                                           c.Data.Radius );
+
+                    // Relative on purpose: 5 cm matters on a doorknob and not on a hillside.
+                    const glm::vec3 ref   = glm::max( *meshHalf, glm::vec3( 1.0f ) );
+                    const glm::vec3 delta = glm::abs( colliderHalf - *meshHalf ) / ref;
+                    const float     worst = glm::max( delta.x, glm::max( delta.y, delta.z ) );
+                    if ( worst > 0.25f )
+                    {
+                        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ) );
+                        ImGui::TextWrapped( ICON_MDI_ALERT " Collision is %.0f%% off the mesh bounds "
+                                                           "(mesh half-extents %.0f x %.0f x %.0f cm)",
+                                            worst * 100.0f, meshHalf->x, meshHalf->y, meshHalf->z );
+                        ImGui::PopStyleColor();
+                    }
+                }
+            }
+
             if ( ::ImGui::Button( "Fit to Mesh Bounds", ImVec2( -1.0f, 0.0f ) ) )
                 FitColliderToMesh( en, c.Data );
         };
@@ -513,6 +818,14 @@ namespace Desert::Editor
 
 namespace
 {
+    const int _desert_emitter_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeEmitterEntry() );
+
+    const int _desert_dirlight_component_reg = ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
+         ::Desert::Editor::MakeDirectionalLightEntry() );
+    const int _desert_camera_component_reg =
+         ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeCameraEntry() );
+
     const int _desert_collider_component_reg =
          ::Desert::Editor::ComponentWidgetRegistry::Get().Register( ::Desert::Editor::MakeColliderEntry() );
     const int _desert_terrain_component_reg =

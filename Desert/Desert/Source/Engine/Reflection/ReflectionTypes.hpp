@@ -52,6 +52,25 @@ namespace Desert::Reflection
         // one centimetre everywhere; see Common/Core/Units.hpp and docs/UNITS.md). The editor labels it
         // "cm" and drags it a centimetre at a time; Range(min,max) is in the same units.
         bool IsLength = false;
+
+        // PROPERTY(Units("deg")) — the quantity this number is in. The editor appends the suffix and
+        // picks a drag step that suits it. Purely presentational: NO value is ever converted, the stored
+        // number (and any Range) is already in these units. Length is exactly Units("cm") for world
+        // distances, kept as its own flag because the unit is an engine-wide invariant.
+        std::string Units;
+
+        // PROPERTY(Advanced) — the field folds under an "Advanced" node at the end of its category
+        // instead of sitting in the main list. For things that exist but are rarely touched.
+        bool Advanced = false;
+
+        // PROPERTY(Summary) — the field feeds the one-line summary drawn next to the component's header,
+        // so a COLLAPSED component still says what it is ("Point · 1000 cm · warm").
+        bool Summary = false;
+
+        // PROPERTY(Color, Temperature) — the colour row also gets a colour-TEMPERATURE (Kelvin) slider
+        // that writes the RGB. The component stores only the resulting colour: Kelvin is an input to it,
+        // not a second source of truth.
+        bool Temperature = false;
     };
 
     struct TypeInfo; // fwd

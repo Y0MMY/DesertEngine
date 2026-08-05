@@ -46,6 +46,10 @@ namespace
         bool        readOnly  = false;
         bool        hidden    = false;
         bool        isLength  = false; // PROPERTY(Length) — the field is a distance in world units (cm)
+        std::string units;             // PROPERTY(Units("deg")) — display suffix + drag step
+        bool        advanced    = false; // PROPERTY(Advanced) — folds under "Advanced" in its category
+        bool        summary     = false; // PROPERTY(Summary)  — feeds the component header's one-liner
+        bool        temperature = false; // PROPERTY(Temperature) — Kelvin slider on a Color field
     };
 
     struct Field
@@ -451,10 +455,18 @@ namespace
                 if ( a != std::string::npos && b != std::string::npos && b > a )
                     m.assetType = tok.substr( a + 1, b - a - 1 );
             }
+            else if ( tok.rfind( "Units", 0 ) == 0 )
+                m.units = ExtractStringLiteral( tok );
             else if ( tok == "Color" )     m.isColor = true;
             else if ( tok == "Thumbnail" ) m.thumbnail = true;
             else if ( tok == "ReadOnly" )  m.readOnly = true;
             else if ( tok == "Hidden" )    m.hidden = true;
+            else if ( tok == "Advanced" )
+                m.advanced = true;
+            else if ( tok == "Summary" )
+                m.summary = true;
+            else if ( tok == "Temperature" )
+                m.temperature = true;
             else if ( tok == "Length" )
                 m.isLength = true;
         }
@@ -682,6 +694,14 @@ namespace
         if ( m.hidden )    o << ".Hidden = true, ";
         if ( m.isLength )
             o << ".IsLength = true, ";
+        if ( !m.units.empty() )
+            o << ".Units = \"" << m.units << "\", ";
+        if ( m.advanced )
+            o << ".Advanced = true, ";
+        if ( m.summary )
+            o << ".Summary = true, ";
+        if ( m.temperature )
+            o << ".Temperature = true, ";
         o << "}";
     }
 

@@ -339,16 +339,32 @@ namespace Desert::Editor
 
         bool interacting = false;
 
-        // LMB/RMB drag orbits (either button — a preview has nothing to pan, so both do the same thing and
-        // the user never has to remember which).
+        // LMB-drag orbits, RMB-drag pans — the same split as the main viewport, so the muscle memory
+        // carries over. Panning moves the orbit's focus in the camera's own screen plane.
         if ( active )
         {
             const ImVec2 delta = ImGui::GetIO().MouseDelta;
             if ( delta.x != 0.0f || delta.y != 0.0f )
             {
-                constexpr float kOrbitSpeed = 0.008f; // radians per pixel
-                m_Yaw -= delta.x * kOrbitSpeed;
-                m_Pitch = std::clamp( m_Pitch + delta.y * kOrbitSpeed, -kPitchLimit, kPitchLimit );
+                if ( ImGui::IsMouseDown( ImGuiMouseButton_Right ) )
+                {
+                    // Screen-proportional: one pixel moves the focus by the same fraction of the framed
+                    // object at any zoom, so panning never feels different when you are close in.
+                    const float     cp = std::cos( m_Pitch );
+                    const glm::vec3 forward{ -cp * std::sin( m_Yaw ), -std::sin( m_Pitch ),
+                                             -cp * std::cos( m_Yaw ) };
+                    const glm::vec3 right = glm::normalize( glm::cross( forward, glm::vec3( 0, 1, 0 ) ) );
+                    const glm::vec3 up    = glm::normalize( glm::cross( right, forward ) );
+
+                    const float speed = m_Distance / std::max( drawSize.y, 1.0f );
+                    m_Focus += ( -right * delta.x + up * delta.y ) * speed;
+                }
+                else
+                {
+                    constexpr float kOrbitSpeed = 0.008f; // radians per pixel
+                    m_Yaw -= delta.x * kOrbitSpeed;
+                    m_Pitch = std::clamp( m_Pitch + delta.y * kOrbitSpeed, -kPitchLimit, kPitchLimit );
+                }
             }
             interacting = true;
         }
@@ -370,7 +386,7 @@ namespace Desert::Editor
                 interacting = true;
             }
             ImGui::SetMouseCursor( ImGuiMouseCursor_Hand );
-            ImGui::SetTooltip( "Drag to orbit - wheel to zoom - double-click to reset" );
+            ImGui::SetTooltip( "Drag to orbit - right-drag to pan - wheel to zoom - double-click to reset" );
         }
 
         return interacting;

@@ -11,6 +11,7 @@
 #include <Engine/Graphic/Image.hpp>
 
 #include <Editor/Core/CommandHistory.hpp>
+#include <Editor/Core/EditorPreferences.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
@@ -22,11 +23,16 @@
 #include <ImGui/imgui.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Desert::Editor
@@ -72,16 +78,237 @@ namespace Desert::Editor
             }
         }
 
-        // PROPERTY(Length) — the field is a distance in world units, i.e. CENTIMETRES (Common/Core/Units).
-        // No conversion happens anywhere: the widget just labels the number and drags it a centimetre at a
-        // time instead of the 0.01 step that suits unitless ratios.
-        bool DrawLength( const char* id, float* v, int n, const Reflection::PropertyMetadata& meta )
+        // The unit a field is displayed in, or nullptr when it is a plain number. PROPERTY(Length) is the
+        // world-distance case (centimetres — see Common/Core/Units and docs/UNITS.md); PROPERTY(Units("..."))
+        // covers everything else. NO value is ever converted: the suffix labels the number as stored.
+        const char* UnitSuffix( const Reflection::PropertyMetadata& meta )
         {
+            if ( meta.IsLength )
+                return "cm";
+            return meta.Units.empty() ? nullptr : meta.Units.c_str();
+        }
+
+        // How much one pixel of drag should move the value. A centimetre-sized step is right for world
+        // distances and useless for a 0..1 ratio, which is the whole reason units are declared.
+        float DragSpeedFor( const Reflection::PropertyMetadata& meta )
+        {
+            const char* unit = UnitSuffix( meta );
+            if ( !unit )
+                return 0.01f;
+            const std::string u( unit );
+            if ( u == "cm" || u == "%" )
+                return 1.0f;
+            if ( u == "deg" )
+                return 0.5f;
+            if ( u == "s" || u == "ms" )
+                return 0.01f;
+            return 0.01f;
+        }
+
+        // Float widget for a field carrying a unit: same slider/drag as a plain number, with the suffix in
+        // the value text and a step that suits the quantity.
+        bool DrawUnitScalar( const char* id, float* v, int n, const Reflection::PropertyMetadata& meta )
+        {
+            char format[32];
+            std::snprintf( format, sizeof( format ), "%%.1f %s", UnitSuffix( meta ) );
+
             const float mn = meta.RangeMin;
             const float mx = meta.RangeMax;
-            return meta.HasRange
-                        ? ImGui::SliderScalarN( id, ImGuiDataType_Float, v, n, &mn, &mx, "%.1f cm" )
-                        : ImGui::DragScalarN( id, ImGuiDataType_Float, v, n, 1.0f, nullptr, nullptr, "%.1f cm" );
+            return meta.HasRange ? ImGui::SliderScalarN( id, ImGuiDataType_Float, v, n, &mn, &mx, format )
+                                 : ImGui::DragScalarN( id, ImGuiDataType_Float, v, n, DragSpeedFor( meta ),
+                                                       nullptr, nullptr, format );
+        }
+
+        // Blackbody colour for the temperature slider (Tanner Helland's approximation), normalised so the
+        // brightest channel is 1: Kelvin sets the HUE, the light's own Intensity owns brightness.
+        glm::vec3 KelvinToRGB( float kelvin )
+        {
+            const float t = std::clamp( kelvin, 1000.0f, 40000.0f ) / 100.0f;
+            float       r = 255.0f;
+            float       g = 255.0f;
+            float       b = 255.0f;
+
+            if ( t <= 66.0f )
+            {
+                g = 99.4708025861f * std::log( t ) - 161.1195681661f;
+                b = t <= 19.0f ? 0.0f : 138.5177312231f * std::log( t - 10.0f ) - 305.0447927307f;
+            }
+            else
+            {
+                r = 329.698727446f * std::pow( t - 60.0f, -0.1332047592f );
+                g = 288.1221695283f * std::pow( t - 60.0f, -0.0755148492f );
+            }
+
+            const glm::vec3 c( std::clamp( r, 0.0f, 255.0f ), std::clamp( g, 0.0f, 255.0f ),
+                               std::clamp( b, 0.0f, 255.0f ) );
+            const float     peak = glm::max( c.r, glm::max( c.g, c.b ) );
+            return peak > 0.0f ? c / peak : glm::vec3( 1.0f );
+        }
+
+        // Rough name for a colour temperature, so the number means something to someone who has never
+        // shopped for light bulbs.
+        const char* KelvinDescription( float k )
+        {
+            if ( k < 2200.0f )
+                return "candle";
+            if ( k < 3200.0f )
+                return "warm / tungsten";
+            if ( k < 4500.0f )
+                return "neutral";
+            if ( k < 5500.0f )
+                return "cool white";
+            if ( k < 7000.0f )
+                return "daylight";
+            return "overcast / shade";
+        }
+
+        // One PROPERTY(Summary) field rendered as text for the component header's one-liner. Returns an
+        // empty string for anything that doesn't read well in a single line (a false bool says nothing; a
+        // colour is not a word), so the caller can just skip it.
+        std::string FormatSummaryValue( const void* object, const FieldInfo& field )
+        {
+            const void* p    = static_cast<const std::byte*>( object ) + field.Offset;
+            const char* unit = UnitSuffix( field.Meta );
+            const char* sep  = unit ? " " : "";
+            if ( !unit )
+                unit = "";
+
+            char buf[128];
+            switch ( field.Type )
+            {
+                case FieldType::Bool:
+                    // A true flag names itself ("Cast Shadows"); a false one is not worth the space.
+                    return *static_cast<const bool*>( p ) ? field.DisplayName() : std::string();
+
+                case FieldType::Int:
+                    std::snprintf( buf, sizeof( buf ), "%d%s%s", *static_cast<const int*>( p ), sep, unit );
+                    return buf;
+
+                case FieldType::UInt:
+                    std::snprintf( buf, sizeof( buf ), "%u%s%s", *static_cast<const uint32_t*>( p ), sep, unit );
+                    return buf;
+
+                case FieldType::Float:
+                    std::snprintf( buf, sizeof( buf ), "%.4g%s%s", *static_cast<const float*>( p ), sep, unit );
+                    return buf;
+
+                case FieldType::Enum:
+                {
+                    const int64_t v = ReadEnum( p, field.Size );
+                    for ( const auto& ev : field.EnumValues )
+                        if ( ev.Value == v )
+                            return ev.Name;
+                    return {};
+                }
+
+                case FieldType::String:
+                {
+                    const auto& s = *static_cast<const std::string*>( p );
+                    return s.size() <= 24 ? s : s.substr( 0, 23 ) + "\xE2\x80\xA6"; // ellipsis
+                }
+
+                default:
+                    return {};
+            }
+        }
+
+        // --- Details search box ------------------------------------------------------------------
+        bool ContainsCI( std::string_view haystack, std::string_view needle )
+        {
+            if ( needle.empty() )
+                return true;
+            const auto it = std::search( haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                                         []( unsigned char a, unsigned char b )
+                                         { return std::tolower( a ) == std::tolower( b ); } );
+            return it != haystack.end();
+        }
+
+        // A field matches on its label, its C++ name or its category — the three things a user might
+        // remember it by.
+        bool FieldMatches( const FieldInfo& field, const char* filter )
+        {
+            if ( !filter || !*filter )
+                return true;
+            return ContainsCI( field.DisplayName(), filter ) || ContainsCI( field.Name, filter ) ||
+                   ContainsCI( field.Meta.Category, filter );
+        }
+
+        // --- Category grouping (shared by single- and multi-edit) --------------------------------
+        struct CategoryBucket
+        {
+            std::string                   Name;
+            std::vector<const FieldInfo*> Fields;   // in declaration order
+            std::vector<const FieldInfo*> Advanced; // PROPERTY(Advanced) — folded at the end
+        };
+
+        std::vector<CategoryBucket> GroupFields( const TypeInfo& type, const char* filter )
+        {
+            std::vector<CategoryBucket> categories;
+            auto                        bucket = [&]( const std::string& cat ) -> CategoryBucket&
+            {
+                for ( auto& c : categories )
+                    if ( c.Name == cat )
+                        return c;
+                categories.push_back( CategoryBucket{ cat, {}, {} } );
+                return categories.back();
+            };
+
+            for ( const auto& field : type.Fields )
+            {
+                if ( field.Meta.Hidden || !FieldMatches( field, filter ) )
+                    continue;
+                auto& c = bucket( field.Meta.Category.empty() ? "Default" : field.Meta.Category );
+                ( field.Meta.Advanced ? c.Advanced : c.Fields ).push_back( &field );
+            }
+            return categories;
+        }
+
+        // Draws the grouped categories; `drawRow` submits one field's row so single- and multi-edit keep
+        // their own before/after handling.
+        bool DrawCategories( const std::vector<CategoryBucket>& categories, bool filtering,
+                             const std::function<bool( const FieldInfo& )>& drawRow )
+        {
+            bool anyChanged = false;
+
+            for ( const auto& cat : categories )
+            {
+                if ( cat.Fields.empty() && cat.Advanced.empty() )
+                    continue;
+
+                // While searching, sections open themselves: hunting for a field and then having to
+                // expand the section holding it is exactly what the search box exists to avoid.
+                if ( filtering )
+                    ImGui::SetNextItemOpen( true, ImGuiCond_Always );
+                if ( !ImGui::CollapsingHeader( cat.Name.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
+                    continue;
+
+                ImGui::Spacing(); // a section, not just another row
+                for ( const auto* f : cat.Fields )
+                {
+                    if ( drawRow( *f ) )
+                        anyChanged = true;
+                }
+
+                // Rarely-touched fields live behind one fold instead of padding every component.
+                if ( !cat.Advanced.empty() )
+                {
+                    ImGui::PushID( cat.Name.c_str() );
+                    if ( filtering )
+                        ImGui::SetNextItemOpen( true, ImGuiCond_Always );
+                    if ( ImGui::TreeNodeEx( "Advanced", ImGuiTreeNodeFlags_SpanAvailWidth ) )
+                    {
+                        for ( const auto* f : cat.Advanced )
+                        {
+                            if ( drawRow( *f ) )
+                                anyChanged = true;
+                        }
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::Spacing();
+            }
+            return anyChanged;
         }
 
         void WriteEnum( void* p, std::size_t size, int64_t value )
@@ -98,7 +325,7 @@ namespace Desert::Editor
 
     bool PropertyEditorBuilder::DrawField( void* object, const FieldInfo& field,
                                            const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
-                                           const void* defaultObject, bool mixed )
+                                           const void* defaultObject, bool mixed, const TypeInfo* ownerType )
     {
         if ( field.Meta.Hidden )
             return false;
@@ -155,7 +382,19 @@ namespace Desert::Editor
         }
 
         ImGui::PushID( field.Name.c_str() );
-        ImGui::BeginDisabled( field.Meta.ReadOnly );
+
+        // Hover band across the whole row, so the eye can follow a label to its value in a dense panel.
+        // Painted BEFORE the row (a fill drawn afterwards would cover the widgets) — a value row's
+        // geometry is known in advance: full width, one frame tall.
+        const ImVec2 rowMin = ImGui::GetCursorScreenPos();
+        const ImVec2 rowMax( rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + ImGui::GetFrameHeight() );
+        const bool   rowHovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) &&
+                                ImGui::IsMouseHoveringRect( rowMin, rowMax, /*clip*/ true );
+        if ( rowHovered )
+        {
+            ImGui::GetWindowDrawList()->AddRectFilled( ImVec2( rowMin.x - 2.0f, rowMin.y ), rowMax,
+                                                       ImGui::GetColorU32( ImGuiCol_Header, 0.30f ), 2.0f );
+        }
 
         ImGui::Columns( 2 );
         // The label column follows the panel instead of a fixed 150px: docked narrow, a fixed column eats
@@ -180,6 +419,32 @@ namespace Desert::Editor
                 ImGui::SetTooltip( "%s", field.Name.c_str() );
         }
 
+        // Pin (favourite): a pinned field is repeated at the TOP of Details, above every component, so the
+        // two or three values you actually tune are always in reach. Shown while the row is hovered, and
+        // permanently once pinned. Needs a stable identity, so only reflected rows get it.
+        float rightEdge = ImGui::GetColumnWidth();
+        // Skip the whole thing when there is nothing to draw and nothing to look up — otherwise every
+        // row of every component would build a key string each frame just to find an empty list.
+        if ( ownerType && ( rowHovered || !EditorPreferences::Get().FavouriteFields.empty() ) )
+        {
+            const std::string key    = FieldKey( *ownerType, field );
+            const bool        pinned = EditorPreferences::IsFavouriteField( key );
+            if ( pinned || rowHovered )
+            {
+                const float bw = ImGui::GetFrameHeight();
+                rightEdge -= bw + 2.0f;
+                ImGui::SameLine( rightEdge );
+                ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+                ImGui::PushStyleColor( ImGuiCol_Text, pinned ? ThemeManager::GetSelectedColor()
+                                                             : ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+                if ( ImGui::SmallButton( pinned ? ICON_MDI_STAR : ICON_MDI_STAR_OUTLINE ) )
+                    EditorPreferences::ToggleFavouriteField( key );
+                ImGui::PopStyleColor( 2 );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( pinned ? "Unpin from the top of Details" : "Pin to the top of Details" );
+            }
+        }
+
         // Reset-to-default: for trivially-copyable value fields (not strings/structs/containers) that DIFFER
         // from their default, show a revert button right-aligned in the label column (UE-style). memcpy is
         // safe here because these field types own no heap.
@@ -189,7 +454,8 @@ namespace Desert::Editor
         if ( resettable && std::memcmp( p, defFieldPtr, field.Size ) != 0 )
         {
             const float bw = ImGui::GetFrameHeight();
-            ImGui::SameLine( ImGui::GetColumnWidth() - bw - 2.0f );
+            // Sits left of the pin when one is showing (rightEdge already stepped past it).
+            ImGui::SameLine( rightEdge - bw - 2.0f );
             ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
             ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetSelectedColor() );
             if ( ImGui::SmallButton( ICON_MDI_BACKUP_RESTORE ) )
@@ -203,6 +469,9 @@ namespace Desert::Editor
         }
 
         ImGui::NextColumn();
+        // Only the VALUE is disabled on a ReadOnly field: the label stays readable and the pin stays
+        // clickable (pinning changes the layout, not the value; the reset is gated on !ReadOnly above).
+        ImGui::BeginDisabled( field.Meta.ReadOnly );
         ImGui::PushItemWidth( -1 );
 
         switch ( field.Type )
@@ -227,9 +496,9 @@ namespace Desert::Editor
             case FieldType::Float:
             {
                 float* v = static_cast<float*>( p );
-                if ( field.Meta.IsLength )
+                if ( UnitSuffix( field.Meta ) )
                 {
-                    changed = DrawLength( "##v", v, 1, field.Meta );
+                    changed = DrawUnitScalar( "##v", v, 1, field.Meta );
                     break;
                 }
                 changed = field.Meta.HasRange
@@ -243,20 +512,23 @@ namespace Desert::Editor
                 break;
             }
             case FieldType::Vec2:
-                changed = field.Meta.IsLength ? DrawLength( "##v", static_cast<float*>( p ), 2, field.Meta )
-                                              : ImGui::DragFloat2( "##v", static_cast<float*>( p ), 0.01f );
+                changed = UnitSuffix( field.Meta )
+                               ? DrawUnitScalar( "##v", static_cast<float*>( p ), 2, field.Meta )
+                               : ImGui::DragFloat2( "##v", static_cast<float*>( p ), 0.01f );
                 break;
 
             case FieldType::Vec3:
-                changed = field.Meta.IsColor    ? ImGui::ColorEdit3( "##v", static_cast<float*>( p ) )
-                          : field.Meta.IsLength ? DrawLength( "##v", static_cast<float*>( p ), 3, field.Meta )
-                                                : ImGui::DragFloat3( "##v", static_cast<float*>( p ), 0.01f );
+                changed = field.Meta.IsColor ? ImGui::ColorEdit3( "##v", static_cast<float*>( p ) )
+                          : UnitSuffix( field.Meta )
+                               ? DrawUnitScalar( "##v", static_cast<float*>( p ), 3, field.Meta )
+                               : ImGui::DragFloat3( "##v", static_cast<float*>( p ), 0.01f );
                 break;
 
             case FieldType::Vec4:
-                changed = field.Meta.IsColor    ? ImGui::ColorEdit4( "##v", static_cast<float*>( p ) )
-                          : field.Meta.IsLength ? DrawLength( "##v", static_cast<float*>( p ), 4, field.Meta )
-                                                : ImGui::DragFloat4( "##v", static_cast<float*>( p ), 0.01f );
+                changed = field.Meta.IsColor ? ImGui::ColorEdit4( "##v", static_cast<float*>( p ) )
+                          : UnitSuffix( field.Meta )
+                               ? DrawUnitScalar( "##v", static_cast<float*>( p ), 4, field.Meta )
+                               : ImGui::DragFloat4( "##v", static_cast<float*>( p ), 0.01f );
                 break;
 
             case FieldType::String:
@@ -598,18 +870,55 @@ namespace Desert::Editor
             }
         }
 
+        // PROPERTY(Color, Temperature): a Kelvin slider under the swatch that WRITES the colour. Only the
+        // resulting RGB is stored, so the slider keeps its own position for the session (a colour cannot be
+        // turned back into one temperature — every neutral grey is 6500 K at some brightness).
+        if ( field.Meta.Temperature && field.Meta.IsColor && !field.Meta.ReadOnly &&
+             ( field.Type == FieldType::Vec3 || field.Type == FieldType::Vec4 ) )
+        {
+            static std::unordered_map<const void*, float> s_Kelvin;
+
+            float& kelvin = s_Kelvin.try_emplace( p, 6500.0f ).first->second;
+            if ( ImGui::SliderFloat( "##kelvin", &kelvin, 1500.0f, 12000.0f, "%.0f K" ) )
+            {
+                const glm::vec3 rgb = KelvinToRGB( kelvin );
+                std::memcpy( p, &rgb, sizeof( glm::vec3 ) ); // alpha (Vec4) is deliberately untouched
+                changed = true;
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Colour temperature — %s.\nWrites the colour above; brightness stays "
+                                   "with Intensity.",
+                                   KelvinDescription( kelvin ) );
+
+            // Its own undo pair: the block above tracks the colour widget, which is a different item.
+            {
+                static void*                s_KelvinTarget = nullptr;
+                static std::vector<uint8_t> s_KelvinOld;
+                if ( ImGui::IsItemActivated() )
+                {
+                    s_KelvinTarget = p;
+                    s_KelvinOld    = beforeBytes;
+                }
+                if ( ImGui::IsItemDeactivatedAfterEdit() && s_KelvinTarget == p && !s_KelvinOld.empty() )
+                {
+                    CommandHistory::Get().Push( p, s_KelvinOld.data(), p, field.Size );
+                    s_KelvinTarget = nullptr;
+                }
+            }
+        }
+
         ImGui::PopItemWidth();
+        ImGui::EndDisabled();
         ImGui::NextColumn();
         ImGui::Columns( 1 );
 
-        ImGui::EndDisabled();
         ImGui::PopID();
 
         return changed && !field.Meta.ReadOnly;
     }
 
     bool PropertyEditorBuilder::Draw( void* object, const TypeInfo& type, const Assets::AssetManager* assetMgr,
-                                      UI::UIHelper* uiHelper )
+                                      UI::UIHelper* uiHelper, const char* filter )
     {
         if ( !object )
             return false;
@@ -631,48 +940,22 @@ namespace Desert::Editor
             }
         }
 
-        // Group by category, preserving first-seen order.
-        std::vector<std::pair<std::string, std::vector<const FieldInfo*>>> categories;
-        auto bucket = [&]( const std::string& cat ) -> std::vector<const FieldInfo*>&
-        {
-            for ( auto& [name, vec] : categories )
-                if ( name == cat )
-                    return vec;
-            categories.emplace_back( cat, std::vector<const FieldInfo*>{} );
-            return categories.back().second;
-        };
+        // The type's default-constructed instance (member initializers) — powers reset-to-default.
+        const void* defaultObject = type.GetDefaultInstance ? type.GetDefaultInstance() : nullptr;
 
-        for ( const auto& field : type.Fields )
-        {
-            if ( field.Meta.Hidden )
-                continue;
-            bucket( field.Meta.Category.empty() ? "Default" : field.Meta.Category ).push_back( &field );
-        }
-
-        for ( auto& [catName, fields] : categories )
-        {
-            if ( fields.empty() )
-                continue;
-
-            if ( ImGui::CollapsingHeader( catName.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
-            {
-                ImGui::Spacing(); // a section, not just another row
-                // The type's default-constructed instance (member initializers) — powers reset-to-default.
-                const void* defaultObject = type.GetDefaultInstance ? type.GetDefaultInstance() : nullptr;
-                for ( const auto* field : fields )
-                {
-                    if ( DrawField( object, *field, assetMgr, uiHelper, defaultObject ) )
-                        anyChanged = true;
-                }
-                ImGui::Spacing();
-            }
-        }
+        anyChanged = DrawCategories( GroupFields( type, filter ), filter && *filter,
+                                     [&]( const FieldInfo& field )
+                                     {
+                                         return DrawField( object, field, assetMgr, uiHelper, defaultObject,
+                                                           /*mixed*/ false, &type );
+                                     } );
 
         return anyChanged;
     }
 
     bool PropertyEditorBuilder::Draw( void* object, const std::string& typeName,
-                                      const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper )
+                                      const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
+                                      const char* filter )
     {
         const TypeInfo* type = ReflectionRegistry::Get().Find( typeName );
         if ( !type )
@@ -680,7 +963,7 @@ namespace Desert::Editor
             ImGui::TextDisabled( "<type '%s' not reflected>", typeName.c_str() );
             return false;
         }
-        return Draw( object, *type, assetMgr, uiHelper );
+        return Draw( object, *type, assetMgr, uiHelper, filter );
     }
 
     namespace
@@ -695,64 +978,34 @@ namespace Desert::Editor
         }
     } // namespace
 
-    bool PropertyEditorBuilder::DrawMulti( void* primary, const std::vector<void*>& others,
-                                           const TypeInfo& type, const Assets::AssetManager* assetMgr,
-                                           UI::UIHelper* uiHelper )
+    bool PropertyEditorBuilder::DrawMulti( void* primary, const std::vector<void*>& others, const TypeInfo& type,
+                                           const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper,
+                                           const char* filter )
     {
         if ( !primary )
             return false;
         if ( others.empty() )
-            return Draw( primary, type, assetMgr, uiHelper );
+            return Draw( primary, type, assetMgr, uiHelper, filter );
 
-        bool anyChanged = false;
+        // Same grouping as Draw(), but each field is marked "(mixed)" when it differs across the
+        // selection, and a POD edit on the primary is broadcast to every other object.
+        return DrawCategories(
+             GroupFields( type, filter ), filter && *filter,
+             [&]( const FieldInfo& field )
+             {
+                 const bool broadcastable = IsBroadcastable( field );
+                 const bool mixed = broadcastable && AnyFieldDiffers( primary, others, field.Offset, field.Size );
 
-        // Same category grouping as Draw(), but each field is marked "(mixed)" when it differs across
-        // the selection, and a POD edit on the primary is broadcast to every other object.
-        std::vector<std::pair<std::string, std::vector<const FieldInfo*>>> categories;
-        auto bucket = [&]( const std::string& cat ) -> std::vector<const FieldInfo*>&
-        {
-            for ( auto& [name, vec] : categories )
-                if ( name == cat )
-                    return vec;
-            categories.emplace_back( cat, std::vector<const FieldInfo*>{} );
-            return categories.back().second;
-        };
-        for ( const auto& field : type.Fields )
-        {
-            if ( field.Meta.Hidden )
-                continue;
-            bucket( field.Meta.Category.empty() ? "Default" : field.Meta.Category ).push_back( &field );
-        }
-
-        for ( auto& [catName, fields] : categories )
-        {
-            if ( fields.empty() )
-                continue;
-            if ( !ImGui::CollapsingHeader( catName.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
-                continue;
-
-            for ( const auto* field : fields )
-            {
-                const bool broadcastable = IsBroadcastable( *field );
-                const bool mixed = broadcastable &&
-                                   AnyFieldDiffers( primary, others, field->Offset, field->Size );
-
-                const bool changed = DrawField( primary, *field, assetMgr, uiHelper, nullptr, mixed );
-                if ( changed )
-                {
-                    anyChanged = true;
-                    if ( broadcastable )
-                        BroadcastField( primary, others, field->Offset, field->Size );
-                }
-            }
-        }
-
-        return anyChanged;
+                 const bool changed = DrawField( primary, field, assetMgr, uiHelper, nullptr, mixed, &type );
+                 if ( changed && broadcastable )
+                     BroadcastField( primary, others, field.Offset, field.Size );
+                 return changed;
+             } );
     }
 
     bool PropertyEditorBuilder::DrawMulti( void* primary, const std::vector<void*>& others,
                                            const std::string& typeName, const Assets::AssetManager* assetMgr,
-                                           UI::UIHelper* uiHelper )
+                                           UI::UIHelper* uiHelper, const char* filter )
     {
         const TypeInfo* type = ReflectionRegistry::Get().Find( typeName );
         if ( !type )
@@ -760,6 +1013,57 @@ namespace Desert::Editor
             ImGui::TextDisabled( "<type '%s' not reflected>", typeName.c_str() );
             return false;
         }
-        return DrawMulti( primary, others, *type, assetMgr, uiHelper );
+        return DrawMulti( primary, others, *type, assetMgr, uiHelper, filter );
+    }
+
+    bool PropertyEditorBuilder::MatchesFilter( const TypeInfo& type, const char* filter )
+    {
+        if ( !filter || !*filter )
+            return true;
+        for ( const auto& field : type.Fields )
+        {
+            if ( !field.Meta.Hidden && FieldMatches( field, filter ) )
+                return true;
+        }
+        return false;
+    }
+
+    std::string PropertyEditorBuilder::FieldKey( const TypeInfo& type, const FieldInfo& field )
+    {
+        return type.Name + "." + field.Name;
+    }
+
+    std::string PropertyEditorBuilder::BuildSummary( const void* object, const TypeInfo& type )
+    {
+        if ( !object )
+            return {};
+
+        std::string out;
+        int         used = 0;
+        for ( const auto& field : type.Fields )
+        {
+            if ( !field.Meta.Summary || field.Meta.Hidden )
+                continue;
+
+            const std::string value = FormatSummaryValue( object, field );
+            if ( value.empty() )
+                continue;
+
+            if ( !out.empty() )
+                out += "  \xE2\x80\xA2  "; // bullet
+            out += value;
+
+            // Three facts is what fits beside a header before it turns into a second panel.
+            if ( ++used == 3 )
+                break;
+        }
+        return out;
+    }
+
+    bool PropertyEditorBuilder::DrawPinnedRow( void* object, const TypeInfo& type, const FieldInfo& field,
+                                               const Assets::AssetManager* assetMgr, UI::UIHelper* uiHelper )
+    {
+        const void* defaultObject = type.GetDefaultInstance ? type.GetDefaultInstance() : nullptr;
+        return DrawField( object, field, assetMgr, uiHelper, defaultObject, /*mixed*/ false, &type );
     }
 } // namespace Desert::Editor

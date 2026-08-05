@@ -2,6 +2,7 @@
 #include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Editor/Core/Selection/SelectionManager.hpp>
 #include <Editor/Core/Selection/SkeletonEditMode.hpp>
+#include <Editor/Core/CommandHistory.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -124,6 +125,29 @@ namespace Desert::Editor
             {
                 DrawLightRadiusSphere( camera, worldPos, light.Radius, width, height, windowPos.x,
                                        windowPos.y, absoluteX, absoluteY );
+            }
+
+            // Radius handle on the SELECTED light: a dot on the sphere, placed along the camera's right
+            // axis so it is always facing the viewer and never hides behind the light itself.
+            if ( IsSelected( entity ) )
+            {
+                const glm::mat4 view  = camera->GetViewMatrix();
+                const glm::vec3 right = glm::normalize( glm::vec3( view[0][0], view[1][0], view[2][0] ) );
+
+                glm::vec2 handleScreen;
+                if ( ProjectToScreen( worldPos + right * light.Radius, mvp, width, height, handleScreen ) )
+                {
+                    const ImVec2 center( absoluteX, absoluteY );
+                    const ImVec2 handle( windowPos.x + handleScreen.x, windowPos.y + handleScreen.y );
+                    if ( DragValueHandle( HandleKind::PointRadius, entity.GetComponent<ECS::UUIDComponent>().UUID,
+                                          center, handle, light.Radius, 1.0f, 100000.0f, "Radius" ) &&
+                         !light.ShowRadius )
+                    {
+                        // Dragging the radius while the sphere is hidden is editing blind — show it.
+                        DrawLightRadiusSphere( camera, worldPos, light.Radius, width, height, windowPos.x,
+                                               windowPos.y, absoluteX, absoluteY );
+                    }
+                }
             }
             ImVec2 mousePos = ImGui::GetMousePos();
             if ( mousePos.x >= absoluteX - iconSize.x * 0.5f && mousePos.x <= absoluteX + iconSize.x * 0.5f &&
@@ -270,6 +294,57 @@ namespace Desert::Editor
             if ( light.ShowCone )
                 DrawSpotCone( camera, worldPos, forward, light.OuterConeAngle, light.Range, width,
                               height, windowPos.x, windowPos.y );
+
+            // Range + cone handles on the SELECTED spot light.
+            if ( IsSelected( entity ) )
+            {
+                const Common::UUID owner = entity.GetComponent<ECS::UUIDComponent>().UUID;
+                const glm::vec3    end   = worldPos + forward * light.Range;
+
+                glm::vec2    endScreen;
+                const bool   endVisible = ProjectToScreen( end, mvp, width, height, endScreen );
+                const ImVec2 apex( absoluteX, absoluteY );
+
+                // Range: drag the dot at the cone's far end along the aim axis.
+                if ( endVisible )
+                {
+                    const ImVec2 handle( windowPos.x + endScreen.x, windowPos.y + endScreen.y );
+                    DragValueHandle( HandleKind::SpotRange, owner, apex, handle, light.Range, 1.0f, 100000.0f,
+                                     "Range" );
+                }
+
+                // Outer cone: the handle rides the cone's rim, and the drag scales tan(angle) — the rim's
+                // distance from the axis IS range*tan(angle), so a proportional pull maps to it exactly.
+                if ( endVisible )
+                {
+                    const glm::vec3 up   = std::abs( forward.y ) > 0.95f ? glm::vec3( 1.0f, 0.0f, 0.0f )
+                                                                         : glm::vec3( 0.0f, 1.0f, 0.0f );
+                    const glm::vec3 perp = glm::normalize( glm::cross( forward, up ) );
+
+                    const float outer = glm::clamp( light.OuterConeAngle, 0.5f, 89.0f );
+                    const float rim   = light.Range * std::tan( glm::radians( outer ) );
+
+                    glm::vec2 rimScreen;
+                    if ( ProjectToScreen( end + perp * rim, mvp, width, height, rimScreen ) )
+                    {
+                        const ImVec2 axisEnd( windowPos.x + endScreen.x, windowPos.y + endScreen.y );
+                        const ImVec2 handle( windowPos.x + rimScreen.x, windowPos.y + rimScreen.y );
+
+                        float tangent = std::tan( glm::radians( outer ) );
+                        if ( DragValueHandle( HandleKind::SpotOuterAngle, owner, axisEnd, handle, tangent,
+                                              std::tan( glm::radians( 0.5f ) ), std::tan( glm::radians( 89.0f ) ),
+                                              nullptr ) )
+                        {
+                            light.OuterConeAngle = glm::degrees( std::atan( tangent ) );
+                            // The inner cone can never overtake the outer one (that inverts the falloff).
+                            light.InnerConeAngle = glm::min( light.InnerConeAngle, light.OuterConeAngle );
+                        }
+                        // The handle edits tan(angle), so the readout has to be written here in degrees.
+                        if ( m_ActiveHandle == HandleKind::SpotOuterAngle && m_ActiveHandleOwner == owner )
+                            ImGui::SetTooltip( "Outer cone: %.0f deg", light.OuterConeAngle );
+                    }
+                }
+            }
 
             ImVec2 mousePos = ImGui::GetMousePos();
             if ( mousePos.x >= absoluteX - iconSize.x * 0.5f && mousePos.x <= absoluteX + iconSize.x * 0.5f &&
@@ -820,6 +895,80 @@ namespace Desert::Editor
             prev      = s;
             prevValid = ok;
         }
+    }
+
+    bool LightGizmoRenderer::IsSelected( const ECS::Entity& entity ) const
+    {
+        const auto selected = Core::SelectionManager::GetSelected();
+        return selected.has_value() && entity.HasComponent<ECS::UUIDComponent>() &&
+               entity.GetComponent<ECS::UUIDComponent>().UUID == *selected;
+    }
+
+    bool LightGizmoRenderer::DragValueHandle( HandleKind kind, const Common::UUID& owner, const ImVec2& center,
+                                              const ImVec2& handle, float& value, float minValue, float maxValue,
+                                              const char* tooltip )
+    {
+        constexpr float kHandleRadius = 5.0f;
+        constexpr float kGrabRadius   = 9.0f; // forgiving hit area; the dot itself stays small
+
+        ImDrawList*  drawList = ImGui::GetWindowDrawList();
+        const ImVec2 mouse    = ImGui::GetMousePos();
+
+        const auto distance = []( const ImVec2& a, const ImVec2& b )
+        { return std::sqrt( ( a.x - b.x ) * ( a.x - b.x ) + ( a.y - b.y ) * ( a.y - b.y ) ); };
+
+        const bool active  = m_ActiveHandle == kind && m_ActiveHandleOwner == owner;
+        const bool hovered = distance( mouse, handle ) <= kGrabRadius;
+
+        // A drag starts only on a fresh press over the dot, and only when nothing else is grabbed.
+        if ( hovered && m_ActiveHandle == HandleKind::None && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+        {
+            m_ActiveHandle       = kind;
+            m_ActiveHandleOwner  = owner;
+            m_ActiveHandleTarget = &value;
+            m_DragStartValue     = value;
+            m_DragStartDistance  = distance( center, handle );
+        }
+
+        bool changed = false;
+        if ( active )
+        {
+            if ( !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+            {
+                // One undo entry for the whole drag, not one per frame.
+                if ( m_ActiveHandleTarget && m_DragStartValue != *m_ActiveHandleTarget )
+                {
+                    const float oldValue = m_DragStartValue;
+                    CommandHistory::Get().Push( m_ActiveHandleTarget, &oldValue, m_ActiveHandleTarget,
+                                                sizeof( float ) );
+                }
+                m_ActiveHandle       = HandleKind::None;
+                m_ActiveHandleTarget = nullptr;
+            }
+            else if ( m_DragStartDistance > 2.0f )
+            {
+                const float now = distance( center, mouse );
+                value   = glm::clamp( m_DragStartValue * ( now / m_DragStartDistance ), minValue, maxValue );
+                changed = true;
+            }
+        }
+
+        const ImU32 fill = active    ? IM_COL32( 255, 190, 60, 255 )
+                           : hovered ? IM_COL32( 255, 230, 150, 255 )
+                                     : IM_COL32( 240, 240, 240, 210 );
+        drawList->AddLine( center, handle, IM_COL32( 255, 255, 255, 90 ), 1.0f );
+        drawList->AddCircleFilled( handle, kHandleRadius, fill, 16 );
+        drawList->AddCircle( handle, kHandleRadius, IM_COL32( 25, 25, 25, 220 ), 16 );
+
+        if ( hovered || active )
+        {
+            // Shares the gate that stops the scene ray-pick firing under a gizmo.
+            m_LightIconHovered = true;
+            if ( tooltip )
+                ImGui::SetTooltip( "%s: %.0f", tooltip, value );
+        }
+
+        return changed;
     }
 
     void LightGizmoRenderer::DrawLightRadiusSphere( const std::shared_ptr<Desert::Core::Camera>& camera,

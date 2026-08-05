@@ -70,8 +70,8 @@ namespace Desert::Editor
         // scrolled-away row should skip it so an inspector full of assets doesn't render them all.
         void Update( uint32_t width, uint32_t height );
 
-        // Draws the last rendered image and handles interaction: LMB-drag orbits, wheel zooms,
-        // double-click re-frames. Returns true while the user is manipulating it.
+        // Draws the last rendered image and handles interaction: LMB-drag orbits, RMB-drag pans, wheel
+        // zooms, double-click re-frames. Returns true while the user is manipulating it.
         bool Draw( UI::UIHelper& uiHelper, const ImVec2& size );
 
         // Re-frame on the current content's bounds (what double-click does).

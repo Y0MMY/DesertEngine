@@ -13,6 +13,7 @@
 // glm::vec3 <-> JSON reflector (OutlineColor). Must be visible before the rfl::json read/write below.
 #include <Common/Core/Serialization/GlmReflection.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 
@@ -68,6 +69,42 @@ namespace Desert::Editor
                 LOG_WARN( "[Prefs] editor.json is corrupt, using defaults: {}", parsed.error().what() );
         }
         ApplyToGizmoState( Get() );
+    }
+
+    bool EditorPreferences::IsFavouriteField( const std::string& key )
+    {
+        const auto& v = Get().FavouriteFields;
+        return std::find( v.begin(), v.end(), key ) != v.end();
+    }
+
+    void EditorPreferences::ToggleFavouriteField( const std::string& key )
+    {
+        auto& v  = Get().FavouriteFields;
+        auto  it = std::find( v.begin(), v.end(), key );
+        if ( it != v.end() )
+            v.erase( it );
+        else
+            v.push_back( key );
+        Save();
+    }
+
+    bool EditorPreferences::IsComponentCollapsed( const std::string& name )
+    {
+        const auto& v = Get().CollapsedComponents;
+        return std::find( v.begin(), v.end(), name ) != v.end();
+    }
+
+    void EditorPreferences::SetComponentCollapsed( const std::string& name, bool collapsed )
+    {
+        auto& v  = Get().CollapsedComponents;
+        auto  it = std::find( v.begin(), v.end(), name );
+        if ( collapsed == ( it != v.end() ) )
+            return; // already in the requested state — don't rewrite the file for nothing
+        if ( collapsed )
+            v.push_back( name );
+        else
+            v.erase( it );
+        Save();
     }
 
     void EditorPreferences::Save()

@@ -69,7 +69,8 @@ namespace Desert::ECS
         bool IsMainCamera = true;
 
         PROPERTY( DisplayName( "Field of View" ), Category( "Camera" ), Range( 10.0f, 120.0f ),
-                  Header( "Projection" ), Tooltip( "Vertical field of view, in degrees." ) )
+                  Header( "Projection" ), Units( "deg" ), Summary,
+                  Tooltip( "Vertical field of view, in degrees." ) )
         float FOV = 45.0f;
 
         PROPERTY( DisplayName( "Near" ), Category( "Camera" ), Range( 1.0f, 1000.0f ), Length,
@@ -381,10 +382,12 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color )
+        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color, Temperature )
         glm::vec3 Color = glm::vec3( 1.0f );
 
-        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
+        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ), Summary, Units( "x" ),
+                  Tooltip( "Linear multiplier on the light colour. NOT a photometric unit (lux/candela): "
+                           "the renderer multiplies radiance by this number directly." ) )
         float Intensity = 1.0f;
     };
 
@@ -406,21 +409,23 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color )
+        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color, Temperature )
         glm::vec3 Color = glm::vec3( 1.0f );
 
-        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
+        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ), Summary, Units( "x" ),
+                  Tooltip( "Linear multiplier on the light colour. NOT a photometric unit (lux/candela): "
+                           "the renderer multiplies radiance by this number directly." ) )
         float Intensity = 1.0f;
 
-        PROPERTY( DisplayName( "Radius" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length )
+        PROPERTY( DisplayName( "Radius" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length, Summary )
         float Radius = 1000.0f;
 
         // Inner radius where attenuation == 1 (a small emitter "source size"); falloff runs from here to
         // Radius. 0 = point source.
-        PROPERTY( DisplayName( "Min Radius" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length )
+        PROPERTY( DisplayName( "Min Radius" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length, Advanced )
         float MinRadius = 0.0f;
 
-        PROPERTY( DisplayName( "Falloff" ), Category( "Light" ) )
+        PROPERTY( DisplayName( "Falloff" ), Category( "Light" ), Advanced )
         LightFalloff Falloff = LightFalloff::Quadratic;
 
         PROPERTY( DisplayName( "Show Radius" ), Category( "Light" ) )
@@ -438,22 +443,24 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color )
+        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color, Temperature )
         glm::vec3 Color = glm::vec3( 1.0f );
 
-        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ) )
+        PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ), Summary, Units( "x" ),
+                  Tooltip( "Linear multiplier on the light colour. NOT a photometric unit (lux/candela): "
+                           "the renderer multiplies radiance by this number directly." ) )
         float Intensity = 1.0f;
 
-        PROPERTY( DisplayName( "Range" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length )
+        PROPERTY( DisplayName( "Range" ), Category( "Light" ), Range( 0.0f, 10000.0f ), Length, Summary )
         float Range = 1500.0f;
 
-        PROPERTY( DisplayName( "Inner Cone" ), Category( "Light" ), Range( 0.0f, 89.0f ) )
+        PROPERTY( DisplayName( "Inner Cone" ), Category( "Light" ), Range( 0.0f, 89.0f ), Units( "deg" ) )
         float InnerConeAngle = 20.0f; // degrees — full intensity inside this half-angle
 
-        PROPERTY( DisplayName( "Outer Cone" ), Category( "Light" ), Range( 0.0f, 90.0f ) )
+        PROPERTY( DisplayName( "Outer Cone" ), Category( "Light" ), Range( 0.0f, 90.0f ), Units( "deg" ), Summary )
         float OuterConeAngle = 30.0f; // degrees — zero intensity outside this half-angle
 
-        PROPERTY( DisplayName( "Falloff" ), Category( "Light" ) )
+        PROPERTY( DisplayName( "Falloff" ), Category( "Light" ), Advanced )
         LightFalloff Falloff = LightFalloff::Quadratic;
 
         PROPERTY( DisplayName( "Show Cone" ), Category( "Light" ) )
@@ -487,7 +494,8 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Max Particles" ), Category( "Emitter" ), Range( 1.0f, 100000.0f ) )
         int MaxParticles = 2000;
 
-        PROPERTY( DisplayName( "Spawn Rate" ), Category( "Emitter" ), Range( 0.0f, 10000.0f ) )
+        PROPERTY( DisplayName( "Spawn Rate" ), Category( "Emitter" ), Range( 0.0f, 10000.0f ), Units( "/s" ),
+                  Summary )
         float SpawnRate = 200.0f; // particles per second
 
         PROPERTY( DisplayName( "Looping" ), Category( "Emitter" ) )
@@ -496,7 +504,7 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Simulate In World" ), Category( "Emitter" ) )
         bool WorldSpace = true; // world = particles trail behind a moving emitter; local = ride with it
 
-        PROPERTY( DisplayName( "Lifetime" ), Category( "Particle" ), Range( 0.01f, 60.0f ) )
+        PROPERTY( DisplayName( "Lifetime" ), Category( "Particle" ), Range( 0.01f, 60.0f ), Units( "s" ), Summary )
         float Lifetime = 3.0f; // seconds
 
         PROPERTY( DisplayName( "Lifetime Variance" ), Category( "Particle" ), Range( 0.0f, 1.0f ) )
@@ -511,7 +519,7 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Emit Direction" ), Category( "Motion" ) )
         glm::vec3 Direction = glm::vec3( 0.0f, 1.0f, 0.0f ); // normalized emit axis
 
-        PROPERTY( DisplayName( "Cone Angle" ), Category( "Motion" ), Range( 0.0f, 180.0f ) )
+        PROPERTY( DisplayName( "Cone Angle" ), Category( "Motion" ), Range( 0.0f, 180.0f ), Units( "deg" ) )
         float ConeAngle = 45.0f; // degrees of spread around Direction (wide enough to read from any angle)
 
         PROPERTY( DisplayName( "Gravity" ), Category( "Motion" ) )
@@ -552,6 +560,11 @@ namespace Desert::ECS
     struct ParticleEmitterComponent
     {
         ParticleEmitterData Data;
+
+        // One-shot "restart" from the editor's transport, consumed by ParticleRenderer::PrepareFrame:
+        // it zeroes the emitter's particle state (every particle dead -> respawned from scratch) without
+        // destroying the GPU buffer. Transient — not reflected, so it never reaches a scene file.
+        bool RequestRestart = false;
     };
 
     // ============================================================
@@ -1508,7 +1521,7 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Shape" ), Category( "Collider" ) )
+        PROPERTY( DisplayName( "Shape" ), Category( "Collider" ), Summary )
         Physics::ShapeType Shape = Physics::ShapeType::Box;
 
         PROPERTY( DisplayName( "Half Extents" ), Category( "Collider" ), Length )
@@ -1534,7 +1547,7 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Clip" ), Category( "Audio" ) )
+        PROPERTY( DisplayName( "Clip" ), Category( "Audio" ), Summary )
         std::string Clip; // audio file (wav/mp3/flac), absolute or Assets-relative
 
         PROPERTY( DisplayName( "Volume" ), Category( "Audio" ), Range( 0.0f, 2.0f ) )
@@ -1546,7 +1559,7 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Auto Play" ), Category( "Audio" ) )
         bool AutoPlay = true; // start when the scene enters Play
 
-        PROPERTY( DisplayName( "3D Spatial" ), Category( "Audio" ) )
+        PROPERTY( DisplayName( "3D Spatial" ), Category( "Audio" ), Advanced )
         bool Spatial = true; // attenuate/pan from the entity position vs. the listener (camera)
     };
 
@@ -1560,16 +1573,16 @@ namespace Desert::ECS
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Type" ), Category( "Rigid Body" ) )
+        PROPERTY( DisplayName( "Type" ), Category( "Rigid Body" ), Summary )
         Physics::BodyType Type = Physics::BodyType::Dynamic;
 
-        PROPERTY( DisplayName( "Mass" ), Category( "Rigid Body" ), Range( 0.0f, 1000.0f ) )
+        PROPERTY( DisplayName( "Mass" ), Category( "Rigid Body" ), Range( 0.0f, 1000.0f ), Units( "kg" ), Summary )
         float Mass = 1.0f;
 
-        PROPERTY( DisplayName( "Friction" ), Category( "Rigid Body" ), Range( 0.0f, 2.0f ) )
+        PROPERTY( DisplayName( "Friction" ), Category( "Rigid Body" ), Range( 0.0f, 2.0f ), Advanced )
         float Friction = 0.5f;
 
-        PROPERTY( DisplayName( "Restitution" ), Category( "Rigid Body" ), Range( 0.0f, 1.0f ) )
+        PROPERTY( DisplayName( "Restitution" ), Category( "Rigid Body" ), Range( 0.0f, 1.0f ), Advanced )
         float Restitution = 0.1f;
     };
 
@@ -1596,12 +1609,13 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Height" ), Category( "Character" ), Range( 20.0f, 1000.0f ), Length )
         float Height = 180.0f; // total capsule height (HalfHeight = (Height - 2*Radius) / 2)
 
-        PROPERTY( DisplayName( "Max Slope" ), Category( "Character" ), Range( 0.0f, 89.0f ) )
+        PROPERTY( DisplayName( "Max Slope" ), Category( "Character" ), Range( 0.0f, 89.0f ), Units( "deg" ) )
         float MaxSlopeDeg = 50.0f;
 
         // Fall acceleration (m/s^2). Default ~2x real gravity so the jump arc feels SNAPPY (real 9.81 reads as
         // floaty). Authorable per-character instead of a baked engine constant — a moon level just lowers it.
-        PROPERTY( DisplayName( "Gravity" ), Category( "Character" ), Range( 0.0f, 6000.0f ) )
+        PROPERTY( DisplayName( "Gravity" ), Category( "Character" ), Range( 0.0f, 6000.0f ), Units( "cm/s2" ),
+                  Advanced )
         float Gravity = 2000.0f;
     };
 

@@ -141,7 +141,7 @@ offscreen renderer in this panel, which is deliberately deferred.
 
 ---
 
-## Phase 3 — lights, sky and other "invisible" components
+## Phase 3 — lights, sky and other "invisible" components — **MOSTLY DONE**
 
 These have no natural thumbnail; UE gives them **visual affordances** instead.
 
@@ -162,9 +162,44 @@ These have no natural thumbnail; UE gives them **visual affordances** instead.
 
 **Done when:** a light, a sky and a camera can each be set up correctly without trial-and-error in Play.
 
+**As shipped**
+
+* **Colour temperature is an attribute, not a widget**: `PROPERTY(Color, Temperature)` adds a Kelvin slider
+  under any colour swatch that WRITES the RGB (blackbody approximation, normalised so the brightest channel
+  is 1 — Kelvin sets hue, Intensity owns brightness). Only the resulting colour is stored, so the slider
+  keeps its own position for the session; a colour cannot be turned back into one temperature. It carries
+  its own undo pair, because the row's existing capture belongs to the colour widget. Applied to all three
+  light types.
+* **Intensity** now says what it is: `Units("x")` plus a tooltip stating it is a linear multiplier on the
+  light colour, *not* lux or candela — the renderer multiplies radiance by it directly.
+* **Sun dial** (Directional Light became a custom entry): a top-down hemisphere — centre is the zenith, rim
+  the horizon, angle the compass azimuth (N/E/S/W marked) — dragged directly, with azimuth/elevation
+  sliders beside it for precision and for a sun below the horizon (drawn hollow). It writes
+  `TransformComponent.Translation`, which is where the engine keeps the direction light TRAVELS, and keeps
+  the vector's length so scenes that author it as a "sun position" are not silently rewritten.
+* **Camera**: focal length in millimetres (35mm-equivalent, 24mm sensor height) as a second view of the same
+  FOV field, editable both ways; and "Look through this camera", which moves the EDITOR camera to the
+  component's transform (`SnapToDirection` + `Focus`) instead of handing the viewport over — leaving is just
+  moving the view again.
+* **Collider**: a warning when the shape disagrees with the mesh bounds by more than 25% (relative, because
+  5 cm matters on a doorknob and not on a hillside), drawn right above the "Fit to Mesh Bounds" button. The
+  check reuses the fit's own measurement, so the two can never disagree.
+* **Sky**: a colour ramp of the procedural sky's authored colours (zenith → horizon → ground) with the
+  sunset tint mixed in at low sun and the sun marked at its current elevation, taken from the scene's
+  directional light. Deliberately a legend for the fields below rather than a render of the sky shader:
+  it costs nothing and updates while you drag.
+* **Particle emitter** (custom entry): play/pause writes the same `Enabled` field the renderer reads, and
+  Restart raises a transient `RequestRestart` that `ParticleRenderer::PrepareFrame` consumes by ZEROING the
+  emitter's particle buffer — not destroying it, since the GPU may still be reading it this frame (the
+  lesson from `43d2e65`). It works while paused, so resuming starts clean.
+
+Still open in this phase: **draggable** radius / cone handles in the viewport (`LightGizmoRenderer` draws
+them read-only today) and a looping *rendered* thumbnail of the emitter, which needs the preview renderer to
+carry a live particle scene.
+
 ---
 
-## Phase 4 — the grid itself
+## Phase 4 — the grid itself — **DONE**
 
 * **Search box** filtering fields across every component (UE's Details search).
 * **Per-component header:** icon + a one-line summary of the component's state (e.g. "Point · 1000 cm ·
@@ -176,6 +211,44 @@ These have no natural thumbnail; UE gives them **visual affordances** instead.
   precedent for adding one).
 * **Favourites:** pin a field to the top of Details (UE's star), persisted in `EditorPreferences`.
 
+**As shipped**
+
+Three new `PROPERTY(...)` attributes, end to end (`Tools/DesertHeaderTool` → `PropertyMetadata` →
+`PropertyEditorBuilder`), which is phase 5's mechanism arriving early — every future component gets these
+for free by declaring them:
+
+| Attribute | Effect |
+| --- | --- |
+| `Units("deg")` | suffix in the value text + a drag step that suits the quantity. `Length` is the world-distance case (cm) and stays its own flag. Nothing is ever converted — the stored number already is in these units. |
+| `Advanced` | the field folds under an "Advanced" node at the end of its category |
+| `Summary` | the field feeds the one-line summary beside the component header |
+
+* **Search** (`ScenePropertiesPanel::DrawSearchBox` → `ComponentEditContext::FieldFilter`): matches a
+  field's label, its C++ name or its category, case-insensitively; empty categories and whole components
+  disappear, and everything auto-expands while a search is active. A **hand-written** component widget has
+  no field metadata, so it can only be matched on its NAME — it is shown whole or not at all. Reflected
+  components filter per field.
+* **Component header**: icon (a table in `ComponentEditor.cpp`; a component missing from it gets a neutral
+  glyph, so nothing has to be registered twice) + a right-aligned summary built from the type's `Summary`
+  fields, dropped when the panel is too narrow for it. Expand/collapse now **persists** across restarts in
+  `EditorPreferences::CollapsedComponents`; ImGui still owns the live state, the panel just seeds it once
+  and mirrors user toggles back (a search-forced expansion is deliberately not written back).
+* **Pinned fields** (`EditorPreferences::FavouriteFields`, keyed `TypeName.FieldName`): a star appears on a
+  row while it is hovered, and stays once pinned; pinned fields are repeated in a "Pinned (n)" section
+  above every component, editing the same memory. Reflected fields only — a custom widget has no field
+  identity to key on.
+* **Rows**: a hover band across the full row (painted before the row, since a fill drawn afterwards would
+  cover the widgets), the pin and reset affordances share the label column's right edge, and the label
+  column keeps its panel-relative width.
+
+Annotated as the first users: camera FOV (deg, summary), the three light types (intensity/radius/range
+summaries, cone angles in deg, falloff + min radius advanced), collider shape, rigid body type/mass
+(friction + restitution advanced), audio clip, character controller slope/gravity.
+
+Not done: the **drag-handle cursor on numeric labels** (dragging the label itself to change the value).
+It needs the label to become an interactive drag zone that forwards to the widget, which is a bigger
+change to the row than the rest of this phase and is better done with the row rewrite in phase 5.
+
 ---
 
 ## Phase 5 — reflection metadata to make it all data-driven
@@ -186,11 +259,14 @@ consumer: `PropertyEditorBuilder`):
 
 | Attribute | Effect |
 | --- | --- |
-| `Advanced` | field folds under "Advanced" |
-| `Units("deg" / "s" / "%")` | suffix + sensible drag speed (generalises `Length`) |
+| ~~`Advanced`~~ | done in phase 4 |
+| ~~`Units("deg" / "s" / "%")`~~ | done in phase 4 |
+| ~~`Summary`~~ | done in phase 4 |
 | `Preview` | the field's asset gets an inline preview instead of a name button |
-| `Summary` | field participates in the collapsed-header one-liner |
 | `EditCondition("Foo")` | grey the field out while another field is false (UE's EditCondition) |
+
+What remains here is converting the hand-written widgets (mesh, materials, skybox, transform) to the same
+metadata, so a new asset-bearing component gets its slot UI without a bespoke widget.
 
 ---
 
@@ -213,6 +289,6 @@ consumer: `PropertyEditorBuilder`):
 
 1. ~~Phase 1 (preview widget)~~ — done.
 2. ~~Phase 2 (mesh/material)~~ — done.
-3. Phase 4 row polish + search — cheap, felt everywhere.
-4. Phase 3 (lights/sky/camera) — highest "can't do this today" value.
+3. ~~Phase 4 row polish + search~~ — done.
+4. ~~Phase 3 (lights/sky/camera)~~ — done except the draggable viewport handles.
 5. Phase 5 metadata — convert the hand-written bits back to data as they stabilise.

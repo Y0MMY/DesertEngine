@@ -9,7 +9,13 @@
 #include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
 #include <ImGui/imgui.h>
+#include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
+#include <Engine/Assets/Mesh/MeshAsset.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+
+#include <filesystem>
+#include <system_error>
 #include <Engine/Core/Scene.hpp>
 #include <Common/Core/Constants.hpp>
 
@@ -162,7 +168,11 @@ namespace Desert::Editor
         m_PreviewOpen = ImGui::CollapsingHeader( ICON_MDI_CUBE_SCAN " Preview" );
         if ( !m_PreviewOpen )
         {
+            // Folded: no GPU work at all, but the selection should still be recognisable — fall back to
+            // the shared rendered-thumbnail PNG the asset browser writes. If it has never rendered this
+            // asset there is simply nothing to show, which is the same as before.
             m_PreviewActive = false;
+            DrawCollapsedPreviewThumbnail();
             return;
         }
 
@@ -183,6 +193,91 @@ namespace Desert::Editor
         m_PreviewWidth  = std::max<uint32_t>( static_cast<uint32_t>( width ) / kSizeStep, 2 ) * kSizeStep;
         m_PreviewHeight = std::max<uint32_t>( static_cast<uint32_t>( height ) / kSizeStep, 2 ) * kSizeStep;
         m_PreviewActive = true;
+
+        ImGui::Spacing();
+    }
+
+    void ScenePropertiesPanel::DrawCollapsedPreviewThumbnail()
+    {
+        const auto selectedOpt = Core::SelectionManager::GetSelected();
+        if ( !selectedOpt || !m_Scene || !m_AssetManager )
+            return;
+
+        const auto& entityOpt = m_Scene->FindEntityByID( *selectedOpt );
+        if ( !entityOpt )
+            return;
+        const auto& entity = entityOpt->get();
+        if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+            return;
+
+        // Prefer the material the object actually renders with (a material thumbnail says more about a
+        // cube than the cube does); fall back to the mesh asset's own thumbnail.
+        const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
+        std::string assetPath;
+        if ( !smc.MaterialSlots.empty() && smc.MaterialSlots.front() )
+        {
+            if ( auto mat =
+                      m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( smc.MaterialSlots.front() ) )
+                assetPath = mat->GetMetadata().Filepath.generic_string();
+        }
+        if ( assetPath.empty() && smc.MeshHandle )
+        {
+            if ( auto mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( smc.MeshHandle ) )
+                assetPath = mesh->GetMetadata().Filepath.generic_string();
+        }
+        if ( assetPath.empty() )
+            return;
+
+        std::error_code   ec;
+        const std::string png = ThumbnailCache::DiskPath( assetPath );
+        if ( !std::filesystem::exists( png, ec ) )
+            return;
+
+        auto image = m_PreviewThumbnails.Get( png );
+        if ( !image )
+            return;
+
+        if ( !m_PreviewUI )
+        {
+            m_PreviewUI = std::make_unique<UI::UIHelper>();
+            m_PreviewUI->Init();
+        }
+
+        constexpr float kSize = 64.0f;
+        ImGui::Indent();
+        m_PreviewUI->Image( image, ImVec2( kSize, kSize ) );
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::TextDisabled( "Cached thumbnail" );
+        ImGui::TextDisabled( "Expand for the live preview" );
+        ImGui::EndGroup();
+        ImGui::Unindent();
+        ImGui::Spacing();
+    }
+
+    void ScenePropertiesPanel::DrawSearchBox()
+    {
+        // UE's Details search: type a property name and the panel narrows to it (fields, categories and
+        // whole components). Lives ABOVE the scrolling list so it never scrolls out of reach.
+        ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetIconColor() );
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted( ICON_MDI_MAGNIFY );
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+
+        const bool hasText = !m_FieldSearch.empty();
+        ImGui::PushItemWidth( ImGui::GetContentRegionAvail().x -
+                              ( hasText ? ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x : 0.0f ) );
+        Utils::ImGuiUtilities::InputText( m_FieldSearch, "##DetailsSearch" );
+        ImGui::PopItemWidth();
+
+        if ( hasText )
+        {
+            ImGui::SameLine();
+            if ( ImGui::Button( ICON_MDI_CLOSE "##ClearDetailsSearch" ) )
+                m_FieldSearch.clear();
+            Utils::ImGuiUtilities::Tooltip( "Clear the search" );
+        }
 
         ImGui::Spacing();
     }
@@ -355,9 +450,13 @@ namespace Desert::Editor
         // the preview stays put while you edit fields below it.
         DrawPreviewSection();
 
+        DrawSearchBox();
+
         ImGui::BeginChild( "Components", ImVec2( 0.0f, 0.0f ), false, ImGuiWindowFlags_None );
-        static ComponentEditor componentEditor( m_AssetManager, m_AnimationLibrary );
-        componentEditor.Render( const_cast<ECS::Entity&>( selectedEntity ), m_Scene.get() );
+        if ( !m_ComponentEditor )
+            m_ComponentEditor = std::make_unique<ComponentEditor>( m_AssetManager, m_AnimationLibrary );
+        m_ComponentEditor->Render( const_cast<ECS::Entity&>( selectedEntity ), m_Scene.get(),
+                                   m_FieldSearch.c_str() );
         ImGui::EndChild();
     }
 

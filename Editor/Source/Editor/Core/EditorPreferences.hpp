@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -48,7 +49,24 @@ namespace Desert::Editor
         // the camera overlay. Empty / dlib-not-built => a placeholder overlay is drawn instead.
         std::string PhotogrammetryFaceModel = "";
 
+        // --- Details panel ------------------------------------------------------------------------
+        // Fields the user pinned to the top of Details, as "TypeName.FieldName" (e.g. "PointLightData.
+        // Intensity"). Only reflected fields can be pinned — a hand-written component widget has no
+        // field identity to key on.
+        std::vector<std::string> FavouriteFields;
+        // Component sections the user collapsed, by their registered name. Everything not listed is
+        // expanded, so a fresh install behaves exactly like before this was persisted.
+        std::vector<std::string> CollapsedComponents;
+
         static EditorPreferences& Get();
+
+        // Membership helpers for the two lists above. Toggling SAVES immediately: these are single
+        // clicks scattered through the panel, and losing them to a crash before the next explicit save
+        // would be worse than the write.
+        static bool IsFavouriteField( const std::string& key );
+        static void ToggleFavouriteField( const std::string& key );
+        static bool IsComponentCollapsed( const std::string& name );
+        static void SetComponentCollapsed( const std::string& name, bool collapsed );
 
         // ~/.desertengine (created on demand); shared with the Project Hub's projects.json.
         static std::string ConfigDirectory();
