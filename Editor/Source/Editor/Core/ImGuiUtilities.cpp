@@ -1,5 +1,6 @@
 #include "ImGuiUtilities.hpp"
 
+#include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/ThemeManager.hpp>
 #include <ImGui/imgui.h>
 #include <ImGui/imgui_internal.h>
@@ -154,6 +155,32 @@ namespace Desert::Editor::Utils
         const bool clicked = ImGui::Button( label, ImVec2( ImGui::GetContentRegionAvail().x, height ) );
         ImGui::PopStyleVar();
         ImGui::PopStyleColor( 3 );
+        return clicked;
+    }
+
+    bool ImGuiUtilities::AssetSlot( const char* id, const char* text, bool empty )
+    {
+        ImGui::PushStyleColor( ImGuiCol_Button, ImGui::GetStyleColorVec4( ImGuiCol_FrameBg ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4( ImGuiCol_FrameBgHovered ) );
+        ImGui::PushStyleColor( ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4( ImGuiCol_FrameBgActive ) );
+        ImGui::PushStyleColor( ImGuiCol_Text,
+                               ImGui::GetStyleColorVec4( empty ? ImGuiCol_TextDisabled : ImGuiCol_Text ) );
+        ImGui::PushStyleVar( ImGuiStyleVar_ButtonTextAlign, ImVec2( 0.0f, 0.5f ) );
+
+        // Room for the chevron, so a long asset name is clipped by the button instead of running under it.
+        const float chevron = ImGui::GetFontSize() + 6.0f;
+        ImGui::PushID( id );
+        const bool clicked = ImGui::Button( text, ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) );
+        ImGui::PopID();
+
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor( 4 );
+
+        const ImVec2 slotMin = ImGui::GetItemRectMin();
+        const ImVec2 slotMax = ImGui::GetItemRectMax();
+        const float  y       = slotMin.y + ( slotMax.y - slotMin.y - ImGui::GetFontSize() ) * 0.5f;
+        ImGui::GetWindowDrawList()->AddText( ImVec2( slotMax.x - chevron, y ),
+                                             ImGui::GetColorU32( ImGuiCol_TextDisabled ), ICON_MDI_CHEVRON_DOWN );
         return clicked;
     }
 

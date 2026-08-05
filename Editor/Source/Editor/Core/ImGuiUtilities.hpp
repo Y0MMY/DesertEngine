@@ -61,6 +61,12 @@ namespace Desert::Editor::Utils
         // A full-width accent ("primary") button — for the one obvious action of a section (Convert, Create…).
         static bool AccentButton( const char* label, float height = 0.0f );
 
+        // An asset slot drawn the way UE draws one: a SUNK, full-width field carrying the asset's name
+        // with a chevron at its right edge — not a raised push button. The distinction is the whole
+        // reason UE's Details reads as a form: a raised button says "this does something", a sunk field
+        // says "this holds a value you can change". Returns true when clicked (open the picker).
+        static bool AssetSlot( const char* id, const char* text, bool empty = false );
+
         // --- Property rows -------------------------------------------------------------------------
         // THE row look of the editor, in one place — modelled on UE's Details grid: a uniform row
         // background, a 1px dark rule between rows, a vertical rule splitting label from value, a hover

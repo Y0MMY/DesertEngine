@@ -32,8 +32,10 @@ namespace Desert::Editor
         auto& staticMesh = entity.GetComponent<ECS::StaticMeshComponent>();
 
         Utils::ImGuiUtilities::PushID();
-        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
+        // No local FramePadding override: the row height is a PANEL metric (ThemeManager), and a widget
+        // that shrinks its own controls is exactly how the Details grid ends up with rows of three
+        // different heights.
         Utils::ImGuiUtilities::ResetPropertyRows();
         Utils::ImGuiUtilities::BeginPropertyRow( "Mesh Type" );
 
@@ -54,16 +56,19 @@ namespace Desert::Editor
             Utils::ImGuiUtilities::BeginPropertyRow( "Asset" );
 
             std::string currentSelectionName = "Select Mesh";
+            bool        emptySlot            = true;
             if ( staticMesh.MeshHandle )
             {
                 auto meshAsset = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle );
                 if ( meshAsset )
                 {
                     currentSelectionName = Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
+                    emptySlot = false;
                 }
             }
 
-            if ( ImGui::Button( currentSelectionName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+            // A sunk asset slot, not a raised button: this row HOLDS a value (UE draws it the same way).
+            if ( Utils::ImGuiUtilities::AssetSlot( "MeshSlot", currentSelectionName.c_str(), emptySlot ) )
             {
                 ImGui::OpenPopup( "mesh_selector" );
             }
@@ -120,7 +125,6 @@ namespace Desert::Editor
 
         RenderRigging( entity, staticMesh );
 
-        ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
     }
 
