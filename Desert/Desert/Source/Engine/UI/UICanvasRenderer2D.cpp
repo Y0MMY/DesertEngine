@@ -1244,7 +1244,12 @@ namespace Desert::UI
                                                    ? Runtime::ResourceRegistry::GetVideoService()->Resolve(
                                                           static_cast<uint64_t>( p.Video ) )
                                                    : nullptr;
-                    if ( video )
+                    // Frosted glass: the fill IS the blurred scene behind the panel, tinted by Color/Opacity.
+                    // Checked before the sprite/video fills — a glass panel is defined by what is behind it,
+                    // so an image on top of it would be a different element (draw one as a child).
+                    if ( p.BackdropBlur > 0.0f && !video && !HandleSet( p.Sprite ) )
+                        dl.AddGlassRect( mn, mx, Tinted( glm::vec4( p.Color, op ) ), rounding, p.BackdropBlur );
+                    else if ( video )
                         dl.AddImage( video, mn, mx, { 0.0f, 0.0f }, { 1.0f, 1.0f },
                                      Tinted( glm::vec4( p.Color, op ) ) );
                     else if ( p.UseGradient && !HandleSet( p.Sprite ) )

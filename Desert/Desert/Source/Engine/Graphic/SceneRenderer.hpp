@@ -26,6 +26,7 @@
 #include "Systems/Scene/PostProcessing/JumpFloodOutlineRenderer.hpp"
 #include "Systems/Scene/PostProcessing/FXAARenderer.hpp"
 #include "Systems/Scene/PostProcessing/SMAARenderer.hpp"
+#include "Systems/Scene/PostProcessing/BackdropBlurRenderer.hpp"
 #include "Systems/Scene/PostProcessing/BloomRenderer.hpp"
 #include "Systems/Scene/PostProcessing/AutoExposureRenderer.hpp"
 #include "Systems/Scene/Deferred/DeferredLightingRenderer.hpp"
@@ -246,7 +247,24 @@ namespace Desert::Graphic
         // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
         Core::AntiAliasingMode m_AAMode       = Core::AntiAliasingMode::FXAA;
         bool                   m_BloomEnabled = false;
+        // Raised by the UI canvas when it drew glass; consumed at the top of the next frame's UI phase.
+        bool                   m_BackdropBlurNeeded = false;
         bool                   m_ScenePlaying = false; // set per frame in BeginScene (hides authoring aids)
+
+    public:
+        // --- UI glass (backdrop blur) -----------------------------------------------------------
+        // The UI canvas raises this when it recorded a glass element; the blur pyramid is then built
+        // before the NEXT frame's UI phase. Latched per frame, so a canvas that stops using glass stops
+        // paying for it.
+        void SetBackdropBlurNeeded( bool needed )
+        {
+            m_BackdropBlurNeeded = needed;
+        }
+
+        // The blur pyramid glass samples, or null when it has never been built (the UI then falls back to
+        // a flat tint). Mip 0 is a mild blur; higher LODs are blurrier — see BackdropBlurRenderer.
+        const std::shared_ptr<Image2D>& GetBackdropBlurImage() const;
+        uint32_t                        GetBackdropBlurMaxLod() const;
 
     private:
         std::shared_ptr<Framebuffer> m_TargetFramebuffer;

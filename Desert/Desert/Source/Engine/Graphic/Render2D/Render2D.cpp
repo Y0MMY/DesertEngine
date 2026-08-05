@@ -68,6 +68,24 @@ namespace Desert::Graphic::Render2D
             return Common::MakeError( "Render2D::Init: failed to create UIText pipeline" );
         m_TextPipeline->Invalidate();
 
+        // Glass pipeline: same state again, but the UIGlass shader samples the blurred scene snapshot and
+        // masks itself with a rounded-rect SDF. Optional — a project whose shaders predate it still runs,
+        // glass just falls back to a flat tinted panel.
+        m_GlassShader = shaderService->GetByName( "UIGlass" );
+        if ( m_GlassShader )
+        {
+            GraphicsPipelineSpecification glassSpec = spec;
+            glassSpec.DebugName                     = "UIGlassPipeline";
+            glassSpec.Shader                        = m_GlassShader;
+            m_GlassPipeline                         = GraphicsPipeline::Create( glassSpec );
+            if ( m_GlassPipeline )
+                m_GlassPipeline->Invalidate();
+        }
+        else
+        {
+            LOG_WARN( "Render2D: shader 'UIGlass' not found — backdrop-blur panels draw as flat tint" );
+        }
+
         // 1x1 white texture so solid shapes collapse to their vertex colour (texture * colour == colour).
         // Created once and reused; the pipeline is rebuilt every Init but the texture/buffers persist.
         if ( !m_WhiteTexture )
@@ -151,7 +169,20 @@ namespace Desert::Graphic::Render2D
         m_VertexBuffer->SetData( (void*)verts.data(), (uint32_t)( verts.size() * sizeof( Vertex2D ) ), 0 );
         m_IndexBuffer->SetData( (void*)idx.data(), (uint32_t)( idx.size() * sizeof( uint32_t ) ), 0 );
 
-        auto& renderer = Renderer::GetInstance();
+        auto& renderer     = Renderer::GetInstance();
+        bool  usedBackdrop = false;
+
+        // Clip a batch (UILayout ClipContents) via the scissor, or reset it to the full viewport.
+        const auto ApplyScissor = [&]( const DrawCommand& cmd )
+        {
+            if ( cmd.ClipRect.z > 0.0f && cmd.ClipRect.w > 0.0f )
+                renderer.SetScissor( (int32_t)cmd.ClipRect.x, (int32_t)cmd.ClipRect.y, (uint32_t)cmd.ClipRect.z,
+                                     (uint32_t)cmd.ClipRect.w );
+            else
+                renderer.SetScissor( (int32_t)m_ViewportPx.x, (int32_t)m_ViewportPx.y, (uint32_t)m_ViewportPx.z,
+                                     (uint32_t)m_ViewportPx.w );
+        };
+
         for ( const auto& cmd : m_DrawList.GetCommands() )
         {
             if ( cmd.IndexCount == 0 )
@@ -159,6 +190,33 @@ namespace Desert::Graphic::Render2D
 
             MaterialExecutor* exec;
             GraphicsPipeline* pipeline;
+            if ( cmd.Glass && m_GlassPipeline && m_Backdrop )
+            {
+                exec     = ExecutorFor( m_GlassExecutors, m_GlassShader, "u_Backdrop", m_Backdrop, m_Backdrop );
+                pipeline = m_GlassPipeline.get();
+                if ( !exec )
+                    continue;
+
+                // Per-element push block: projection, the rect in pixels, its corner radius, the blur LOD
+                // and 1/viewport (the shader maps gl_FragCoord into the snapshot with it).
+                struct GlassPush
+                {
+                    glm::mat4 Projection;
+                    glm::vec4 Rect;
+                    glm::vec4 Params;
+                } push{ m_Projection, cmd.GlassRect,
+                        glm::vec4( cmd.GlassRound, cmd.GlassLod * static_cast<float>( m_BackdropMaxLod ),
+                                   m_ViewportPx.z > 0.0f ? 1.0f / m_ViewportPx.z : 0.0f,
+                                   m_ViewportPx.w > 0.0f ? 1.0f / m_ViewportPx.w : 0.0f ) };
+
+                ApplyScissor( cmd );
+                exec->PushConstant( &push, (uint32_t)sizeof( push ) );
+                renderer.SubmitIndexed( pipeline, m_VertexBuffer.get(), m_IndexBuffer.get(), cmd.IndexCount,
+                                        cmd.IndexOffset, exec );
+                usedBackdrop = true;
+                continue;
+            }
+
             if ( cmd.Text )
             {
                 // Text always carries a valid font-atlas texture; route it to the SDF pipeline.
@@ -176,13 +234,7 @@ namespace Desert::Graphic::Render2D
             if ( !exec )
                 continue;
 
-            // Clip this batch (UILayout ClipContents) via the scissor, or reset to the full viewport.
-            if ( cmd.ClipRect.z > 0.0f && cmd.ClipRect.w > 0.0f )
-                renderer.SetScissor( (int32_t)cmd.ClipRect.x, (int32_t)cmd.ClipRect.y, (uint32_t)cmd.ClipRect.z,
-                                     (uint32_t)cmd.ClipRect.w );
-            else
-                renderer.SetScissor( (int32_t)m_ViewportPx.x, (int32_t)m_ViewportPx.y, (uint32_t)m_ViewportPx.z,
-                                     (uint32_t)m_ViewportPx.w );
+            ApplyScissor( cmd );
 
             exec->PushConstant( &m_Projection, (uint32_t)sizeof( glm::mat4 ) );
             renderer.SubmitIndexed( pipeline, m_VertexBuffer.get(), m_IndexBuffer.get(), cmd.IndexCount,
@@ -192,5 +244,7 @@ namespace Desert::Graphic::Render2D
         // Leave the scissor at the full viewport so nothing downstream inherits a UI clip.
         renderer.SetScissor( (int32_t)m_ViewportPx.x, (int32_t)m_ViewportPx.y, (uint32_t)m_ViewportPx.z,
                              (uint32_t)m_ViewportPx.w );
+
+        m_UsedBackdrop = usedBackdrop;
     }
 } // namespace Desert::Graphic::Render2D

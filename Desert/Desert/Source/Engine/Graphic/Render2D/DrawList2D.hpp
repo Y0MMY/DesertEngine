@@ -28,6 +28,14 @@ namespace Desert::Graphic::Render2D
         uint32_t    IndexOffset = 0;                          // first index into GetIndices()
         uint32_t    IndexCount  = 0;                          // number of indices in this batch
         bool        Text        = false;                      // true => SDF glyph atlas (text pipeline), else UI2D
+
+        // GLASS (backdrop blur): this batch samples the blurred scene snapshot instead of a texture, and
+        // masks itself with a rounded rectangle. Every glass rect carries its own rect/radius/blur in push
+        // constants, so glass commands are never merged with anything — one element, one draw.
+        bool      Glass      = false;
+        glm::vec4 GlassRect  = { 0.0f, 0.0f, 0.0f, 0.0f }; // min.xy, max.xy in pixels
+        float     GlassRound = 0.0f;                       // corner radius, px
+        float     GlassLod   = 0.0f;                       // blur level in the backdrop pyramid
     };
 
     class DrawList2D
@@ -40,6 +48,14 @@ namespace Desert::Graphic::Render2D
         // rounds the corners (radius px, clamped to half the shorter side) via a triangle fan.
         void AddRectFilled( const glm::vec2& min, const glm::vec2& max, const glm::vec4& color,
                             float rounding = 0.0f );
+
+        // Frosted-glass rectangle: fills with the BLURRED scene behind it, tinted by @p tint (its alpha is
+        // how much of the tint covers the blur — 0 = pure blur, 1 = flat colour). @p blur01 picks how strong
+        // the blur is (0..1, mapped to the backdrop pyramid's LODs by the backend). Rounded by @p rounding,
+        // antialiased in the shader rather than tessellated. Falls back to a plain rounded rect when the
+        // backend has no backdrop image (e.g. the very first frame).
+        void AddGlassRect( const glm::vec2& min, const glm::vec2& max, const glm::vec4& tint,
+                           float rounding = 0.0f, float blur01 = 1.0f );
 
         // Vertical two-colour gradient fill (top -> bottom). Solid batch (white texture).
         void AddRectFilledMultiColor( const glm::vec2& min, const glm::vec2& max, const glm::vec4& topColor,

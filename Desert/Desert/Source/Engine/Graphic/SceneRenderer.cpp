@@ -118,6 +118,17 @@ namespace Desert::Graphic
         if ( !tonemapSystem->Initialize() )
             DESERT_VERIFY( false );
 
+        // Backdrop blur: a blurred snapshot of the scene colour the UI canvas samples for "glass" panels.
+        // Runs before the UI phase (which writes into this same target, so it cannot sample it directly).
+        RegisterSystem<System::BackdropBlurRenderer>( "BackdropBlurSystem", this, m_TargetFramebuffer,
+                                                      m_RenderGraphBuilder );
+        if ( const auto& backdropSystem =
+                  SP_CAST( System::BackdropBlurRenderer, m_RenderSystems["BackdropBlurSystem"] );
+             !backdropSystem->Initialize() )
+        {
+            LOG_WARN( "Backdrop blur unavailable — UI glass panels will draw as flat tint" );
+        }
+
         // Bloom reads the HDR scene color and produces a compute mip-chain glow that tonemap adds in.
         RegisterSystem<System::BloomRenderer>( "BloomSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
         const auto& bloomSystem = SP_CAST( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
@@ -430,6 +441,17 @@ namespace Desert::Graphic
             ExecuteDebugOverlay();
         }
 
+        // Backdrop blur for UI glass, BEFORE the UI overlay draws into this target. Only when the canvas
+        // asked for it last frame: a full mip pyramid every frame for a UI that has no glass is waste,
+        // and the one-frame delay is invisible (the first glass frame simply blurs the previous image).
+        if ( m_BackdropBlurNeeded )
+        {
+            DESERT_PROFILE_SCOPE( "UI: BackdropBlur" );
+            if ( auto* backdrop =
+                      UNIQUE_GET_AS( System::BackdropBlurRenderer, m_RenderSystems["BackdropBlurSystem"] ) )
+                backdrop->Execute();
+        }
+
         // UI canvas (Render2D) on top of the finished scene, as a LOAD overlay — see ExecuteUI(). Kept out of
         // the main graph so its CLEAR begin can't wipe the depth the grid/overlays above load.
         {
@@ -532,6 +554,12 @@ namespace Desert::Graphic
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Resize( width, height );
         UNIQUE_GET_AS( System::FXAARenderer, m_RenderSystems["FXAASystem"] )->Resize( width, height );
         UNIQUE_GET_AS( System::SMAARenderer, m_RenderSystems["SMAASystem"] )->Resize( width, height );
+
+        // The backdrop blur pyramid is sized from the target too. Its consumer (the UI pass) reads the
+        // image through GetBackdropBlurImage() every frame, so nothing needs re-pointing here.
+        if ( auto* backdrop =
+                  UNIQUE_GET_AS( System::BackdropBlurRenderer, m_RenderSystems["BackdropBlurSystem"] ) )
+            backdrop->Resize( width, height );
 
         // Bloom recreates its (storage) mip-chain image on resize, so re-point tonemap at the new image.
         const auto& bloomSystem = UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] );
@@ -915,6 +943,21 @@ namespace Desert::Graphic
 
         if ( currentFb )
             renderer.EndRenderPass();
+    }
+
+    const std::shared_ptr<Desert::Graphic::Image2D>& SceneRenderer::GetBackdropBlurImage() const
+    {
+        static const std::shared_ptr<Image2D> kNone;
+        const auto                            it = m_RenderSystems.find( "BackdropBlurSystem" );
+        if ( it == m_RenderSystems.end() )
+            return kNone;
+        return SP_CAST( System::BackdropBlurRenderer, it->second )->GetImage();
+    }
+
+    uint32_t SceneRenderer::GetBackdropBlurMaxLod() const
+    {
+        const auto it = m_RenderSystems.find( "BackdropBlurSystem" );
+        return it == m_RenderSystems.end() ? 0u : SP_CAST( System::BackdropBlurRenderer, it->second )->GetMaxLod();
     }
 
     void SceneRenderer::ExecuteUI()

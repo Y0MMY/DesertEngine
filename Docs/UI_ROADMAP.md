@@ -40,7 +40,7 @@ approved per the engine's "no magic dependencies" rule).
       (inventory/char-select/turntable). Reuse the per-instance SceneRenderer -> offscreen
       target -> ImTextureID. Interactive (orbit) optional.
 - [ ] **Particles / VFX in UI** (screen-space emitters over/under UI)
-- [ ] **Custom shader / material on UI** (gradient, glass/backdrop blur, masked reveal, glow)
+- [~] **Custom shader / material on UI** (gradient, glow done; **glass/backdrop blur done** — see below; masked reveal todo)
 - [ ] Procedural/dynamic textures (minimap, charts/graphs, health bars as shaders)
 
 ## B. Layout
@@ -101,7 +101,7 @@ approved per the engine's "no magic dependencies" rule).
 - [~] **Masking / clipping** — rect mask (`PushClipRect` → scissor) done; alpha/sprite mask todo
 - [ ] Sorting: z-order, sorting layers, multiple canvases (overlay / world-space / camera-space)
 - [~] **World-space canvas** (billboarded UI at a 3D pos) done; UI on an arbitrary 3D surface + camera-space todo
-- [~] Effects: drop shadow, outline, gradient, glow done; **backdrop blur / glass**, blend modes todo
+- [x] Effects: drop shadow, outline, gradient, glow, **backdrop blur / glass** done; blend modes todo
 - [x] Primitives: **rounded-rect corner radius**, circle/ring, `AddLine` (used by icons/shapes)
 - [ ] Custom UI shaders/materials; post-processing scoped to UI
 - [x] Batching to a real UI mesh — `Render2D` merges same-state quads into batched draw calls
@@ -168,6 +168,22 @@ approved per the engine's "no magic dependencies" rule).
 13. 🔶 **Data binding + Lua hooks** done; data-driven virtualized lists still todo (needs C's ListView). (H)
 14. **Prefabs / themes / undo-redo / device-preview** (editor polish). (I)
 15. **Localization + accessibility** (K); **Perf pass** — culling, pooling, atlases (G/L).
+
+**Backdrop blur / glass — as shipped.** A `UIPanel` with `Backdrop Blur` > 0 fills with the BLURRED scene
+behind it (Color/Opacity become the tint over that blur; Opacity 1 is an ordinary opaque panel again).
+
+* The UI canvas draws INTO the HDR scene target as a load overlay, and a shader may not sample the
+  attachment it writes — so `BackdropBlurRenderer` snapshots the scene just before the UI phase. It reuses
+  the **bloom downsample compute with the bright-pass off**, which is exactly a blur pyramid of the whole
+  image: mip 0 is a mild blur and each further level roughly doubles it. No new blur to maintain, and an
+  element picks a LOD instead of paying for its own kernel.
+* The pyramid is only built when the canvas used glass **last** frame (`SceneRenderer::SetBackdropBlurNeeded`),
+  so a UI without glass costs nothing; the one-frame delay is invisible.
+* `DrawList2D::AddGlassRect` opens its own draw command — the rect, corner radius and blur level travel in
+  push constants, so glass is never batched with anything else. The rounded mask is an **SDF** in `UIGlass`
+  (antialiased for free) rather than tessellated corners, and the fill is written opaque inside the mask
+  because it already contains what is behind it.
+* Missing shader or a not-yet-built pyramid degrades to a flat tinted panel rather than failing.
 
 **Next up (dependency-free):** gamepad/D-pad navigation + event bubbling to finish D; A render-texture
 element (reuse per-instance SceneRenderer → offscreen target); then C's virtualized ListView, which

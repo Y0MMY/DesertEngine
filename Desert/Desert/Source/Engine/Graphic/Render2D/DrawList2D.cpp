@@ -42,8 +42,12 @@ namespace Desert::Graphic::Render2D
 
     DrawCommand& DrawList2D::CurrentCommand( const void* texture, bool text )
     {
-        if ( !m_Commands.empty() && m_Commands.back().Texture == texture && m_Commands.back().Text == text &&
-             m_Commands.back().ClipRect == m_CurrentClip )
+        // A glass command is NEVER extended: its rect / radius / blur live in push constants, so anything
+        // appended to it would be drawn by the glass pipeline with THAT rect's parameters. (Glass looks
+        // like a solid batch — texture null, not text — so without this it would silently absorb the next
+        // flat rectangle.)
+        if ( !m_Commands.empty() && !m_Commands.back().Glass && m_Commands.back().Texture == texture &&
+             m_Commands.back().Text == text && m_Commands.back().ClipRect == m_CurrentClip )
             return m_Commands.back();
 
         DrawCommand cmd;
@@ -54,6 +58,35 @@ namespace Desert::Graphic::Render2D
         cmd.IndexCount  = 0;
         m_Commands.push_back( cmd );
         return m_Commands.back();
+    }
+
+    void DrawList2D::AddGlassRect( const glm::vec2& min, const glm::vec2& max, const glm::vec4& tint,
+                                   float rounding, float blur01 )
+    {
+        if ( max.x <= min.x || max.y <= min.y )
+            return;
+
+        // Its own command, always: the rect, its radius and its blur travel in push constants, so nothing
+        // may be batched behind it. Opened by hand instead of through CurrentCommand for that reason.
+        DrawCommand cmd;
+        cmd.Texture     = nullptr;
+        cmd.ClipRect    = m_CurrentClip;
+        cmd.IndexOffset = static_cast<uint32_t>( m_Indices.size() );
+        cmd.IndexCount  = 6;
+        cmd.Glass       = true;
+        cmd.GlassRect   = { min.x, min.y, max.x, max.y };
+        cmd.GlassRound  = std::max( 0.0f, rounding );
+        cmd.GlassLod    = std::clamp( blur01, 0.0f, 1.0f );
+        m_Commands.push_back( cmd );
+
+        const uint32_t base = static_cast<uint32_t>( m_Vertices.size() );
+        m_Vertices.push_back( { { min.x, min.y }, { 0.0f, 0.0f }, tint } );
+        m_Vertices.push_back( { { max.x, min.y }, { 1.0f, 0.0f }, tint } );
+        m_Vertices.push_back( { { max.x, max.y }, { 1.0f, 1.0f }, tint } );
+        m_Vertices.push_back( { { min.x, max.y }, { 0.0f, 1.0f }, tint } );
+
+        const uint32_t quad[6] = { base + 0, base + 1, base + 2, base + 2, base + 3, base + 0 };
+        m_Indices.insert( m_Indices.end(), quad, quad + 6 );
     }
 
     void DrawList2D::AddQuad( const void* texture, const glm::vec2& min, const glm::vec2& max,

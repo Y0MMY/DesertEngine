@@ -953,6 +953,13 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Corner Radius" ), Category( "UI Panel" ), Range( 0.0f, 64.0f ) )
         float CornerRadius = 6.0f;
 
+        // Frosted glass: fill the panel with the BLURRED scene behind it instead of a flat colour, with
+        // Color/Opacity acting as the tint over that blur (Opacity 1 = an ordinary opaque panel again).
+        // 0 = off; higher = blurrier (the renderer maps it onto its backdrop blur pyramid).
+        PROPERTY( DisplayName( "Backdrop Blur" ), Category( "UI Panel" ), Range( 0.0f, 1.0f ),
+                  Tooltip( "Fill with the blurred scene behind the panel (frosted glass). 0 = off." ) )
+        float BackdropBlur = 0.0f;
+
         PROPERTY( DisplayName( "Sprite" ), Category( "UI Panel" ) )
         Assets::AssetHandle Sprite; // optional background image, tinted by Color * Opacity. Unset = flat colour.
 

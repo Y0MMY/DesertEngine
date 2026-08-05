@@ -48,6 +48,12 @@ namespace Desert::Editor::Render
 
             m_Render2D.BeginFrame( { 0.0f, 0.0f, w, h } );
 
+            // Glass panels sample the blurred scene snapshot built just before this phase. It is only
+            // built when the canvas asked for it LAST frame, so hand the flag back after flushing.
+            if ( auto* renderer = scene->GetSceneRenderer() )
+                m_Render2D.SetBackdrop( renderer->GetBackdropBlurImage().get(),
+                                        renderer->GetBackdropBlurMaxLod() );
+
             // UI Preview (Play-in-editor): feed the viewport's pointer/keyboard into the canvas so buttons /
             // toggles / sliders react in the editor. The ViewportPanel wrote this snapshot in viewport-display
             // px; scale it into the framebuffer's px space. Design mode leaves input null (normal authoring).
@@ -73,6 +79,9 @@ namespace Desert::Editor::Render
                                 vpPtr, feed ? &input : nullptr, feed ? &clicked : nullptr,
                                 feed ? &pv.Focused : nullptr, feed ? &uiMessages : nullptr );
             m_Render2D.Flush();
+
+            if ( auto* renderer = scene->GetSceneRenderer() )
+                renderer->SetBackdropBlurNeeded( m_Render2D.UsedBackdrop() );
 
             // A button fired in preview: report it, but DON'T execute scene-load / quit here — that would
             // close/switch the editor. Interactive toggles/sliders/inputs already mutated in the walk.

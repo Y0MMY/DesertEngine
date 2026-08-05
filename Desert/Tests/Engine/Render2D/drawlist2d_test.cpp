@@ -232,6 +232,72 @@ TEST( DrawList2D, ZeroRoundingStaysSharpQuad )
     EXPECT_EQ( dl.GetIndices().size(), 6u );
 }
 
+// --- Glass (backdrop blur) ------------------------------------------------------------------------
+// A glass rect carries its rect / radius / blur in push constants, so it must ALWAYS get its own draw
+// command: merging it with a neighbour would silently draw that neighbour with this rect's parameters.
+
+TEST( DrawList2D, GlassRectEmitsOwnCommandWithParams )
+{
+    DrawList2D dl;
+    dl.AddGlassRect( { 10.0f, 20.0f }, { 110.0f, 70.0f }, { 0.1f, 0.2f, 0.3f, 0.4f }, 8.0f, 0.5f );
+
+    ASSERT_EQ( dl.GetVertices().size(), 4u );
+    ASSERT_EQ( dl.GetIndices().size(), 6u );
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+
+    const auto& cmd = dl.GetCommands()[0];
+    EXPECT_TRUE( cmd.Glass );
+    EXPECT_FALSE( cmd.Text );
+    EXPECT_EQ( cmd.Texture, nullptr );
+    EXPECT_EQ( cmd.IndexOffset, 0u );
+    EXPECT_EQ( cmd.IndexCount, 6u );
+    EXPECT_NEAR( cmd.GlassRect.x, 10.0f, kEps );
+    EXPECT_NEAR( cmd.GlassRect.y, 20.0f, kEps );
+    EXPECT_NEAR( cmd.GlassRect.z, 110.0f, kEps );
+    EXPECT_NEAR( cmd.GlassRect.w, 70.0f, kEps );
+    EXPECT_NEAR( cmd.GlassRound, 8.0f, kEps );
+    EXPECT_NEAR( cmd.GlassLod, 0.5f, kEps );
+
+    // The tint reaches the shader through the vertex colour.
+    EXPECT_NEAR( dl.GetVertices()[0].Color.a, 0.4f, kEps );
+}
+
+TEST( DrawList2D, GlassNeverMergesWithNeighbours )
+{
+    DrawList2D dl;
+    dl.AddRectFilled( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddGlassRect( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 0.2f } );
+    dl.AddGlassRect( { 20.0f, 0.0f }, { 30.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 0.2f } );
+    dl.AddRectFilled( { 40.0f, 0.0f }, { 50.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+
+    // solid | glass | glass | solid — four separate commands, each anchored at its own indices.
+    ASSERT_EQ( dl.GetCommands().size(), 4u );
+    EXPECT_FALSE( dl.GetCommands()[0].Glass );
+    EXPECT_TRUE( dl.GetCommands()[1].Glass );
+    EXPECT_TRUE( dl.GetCommands()[2].Glass );
+    EXPECT_FALSE( dl.GetCommands()[3].Glass );
+    for ( uint32_t i = 0; i < 4; ++i )
+    {
+        EXPECT_EQ( dl.GetCommands()[i].IndexOffset, i * 6u );
+        EXPECT_EQ( dl.GetCommands()[i].IndexCount, 6u );
+    }
+}
+
+TEST( DrawList2D, GlassClampsBlurAndIgnoresDegenerateRects )
+{
+    DrawList2D dl;
+    dl.AddGlassRect( { 0.0f, 0.0f }, { 10.0f, 10.0f }, { 1.0f, 1.0f, 1.0f, 1.0f }, -4.0f, 3.0f );
+    ASSERT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_NEAR( dl.GetCommands()[0].GlassRound, 0.0f, kEps ); // negative radius is meaningless
+    EXPECT_NEAR( dl.GetCommands()[0].GlassLod, 1.0f, kEps );   // blur is a 0..1 dial
+
+    // An empty (or inverted) rect draws nothing at all — no stray command, no stray geometry.
+    dl.AddGlassRect( { 50.0f, 50.0f }, { 50.0f, 80.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    dl.AddGlassRect( { 90.0f, 50.0f }, { 10.0f, 80.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } );
+    EXPECT_EQ( dl.GetCommands().size(), 1u );
+    EXPECT_EQ( dl.GetVertices().size(), 4u );
+}
+
 TEST( DrawList2D, TriangleEmitsOneTri )
 {
     DrawList2D dl;
