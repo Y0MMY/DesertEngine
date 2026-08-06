@@ -538,24 +538,28 @@ namespace Desert::Editor
                 changed = ImGui::DragScalar( "##v", ImGuiDataType_Double, p, 0.01f );
                 break;
             }
+            // A vector is drawn with axis-coloured edges (X red / Y green / Z blue), the same colours the
+            // viewport gizmo uses — the plain DragFloatN gave three identical boxes you had to count.
+            // A COLOUR is not a vector in space and keeps its swatch; a field with a unit keeps the
+            // suffixed widget, which carries the unit INSIDE the value text.
             case FieldType::Vec2:
                 changed = UnitSuffix( field.Meta )
                                ? DrawUnitScalar( "##v", static_cast<float*>( p ), 2, field.Meta )
-                               : ImGui::DragFloat2( "##v", static_cast<float*>( p ), 0.01f );
+                               : Utils::ImGuiUtilities::VectorField( "v", static_cast<float*>( p ), 2, 0.01f );
                 break;
 
             case FieldType::Vec3:
                 changed = field.Meta.IsColor ? ImGui::ColorEdit3( "##v", static_cast<float*>( p ) )
                           : UnitSuffix( field.Meta )
                                ? DrawUnitScalar( "##v", static_cast<float*>( p ), 3, field.Meta )
-                               : ImGui::DragFloat3( "##v", static_cast<float*>( p ), 0.01f );
+                               : Utils::ImGuiUtilities::VectorField( "v", static_cast<float*>( p ), 3, 0.01f );
                 break;
 
             case FieldType::Vec4:
                 changed = field.Meta.IsColor ? ImGui::ColorEdit4( "##v", static_cast<float*>( p ) )
                           : UnitSuffix( field.Meta )
                                ? DrawUnitScalar( "##v", static_cast<float*>( p ), 4, field.Meta )
-                               : ImGui::DragFloat4( "##v", static_cast<float*>( p ), 0.01f );
+                               : Utils::ImGuiUtilities::VectorField( "v", static_cast<float*>( p ), 4, 0.01f );
                 break;
 
             case FieldType::String:

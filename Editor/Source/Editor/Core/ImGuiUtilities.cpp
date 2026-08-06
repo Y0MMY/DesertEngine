@@ -159,6 +159,48 @@ namespace Desert::Editor::Utils
         return clicked;
     }
 
+    bool ImGuiUtilities::VectorField( const char* id, float* values, int components, float speed,
+                                      const char* format )
+    {
+        // Gizmo axis colours, sampled from the UE reference (#CB2600 / #67A900 / #2C7EED). A fourth
+        // component (W) is deliberately neutral: it is not an axis in space.
+        static const ImU32 kAxis[4] = { IM_COL32( 203, 38, 0, 255 ), IM_COL32( 103, 169, 0, 255 ),
+                                        IM_COL32( 44, 126, 237, 255 ), IM_COL32( 150, 150, 150, 255 ) };
+
+        if ( components <= 0 )
+            return false;
+
+        constexpr float kSpacing = 4.0f;
+        constexpr float kEdge    = 3.0f;
+
+        const float total = ImGui::CalcItemWidth();
+        const float each =
+             ( total - kSpacing * static_cast<float>( components - 1 ) ) / static_cast<float>( components );
+
+        bool changed = false;
+        ImGui::PushID( id );
+        for ( int i = 0; i < components; ++i )
+        {
+            ImGui::PushID( i );
+            ImGui::SetNextItemWidth( each );
+            if ( ImGui::DragFloat( "##v", &values[i], speed, 0.0f, 0.0f, format ) )
+                changed = true;
+
+            // Painted after the field, so it sits ON the frame instead of being covered by it.
+            const ImVec2 mn = ImGui::GetItemRectMin();
+            const ImVec2 mx = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddRectFilled( mn, ImVec2( mn.x + kEdge, mx.y ), kAxis[i < 4 ? i : 3],
+                                                       ImGui::GetStyle().FrameRounding,
+                                                       ImDrawFlags_RoundCornersLeft );
+            ImGui::PopID();
+
+            if ( i + 1 < components )
+                ImGui::SameLine( 0.0f, kSpacing );
+        }
+        ImGui::PopID();
+        return changed;
+    }
+
     bool ImGuiUtilities::AssetSlot( const char* id, const char* text, bool empty )
     {
         ImGui::PushStyleColor( ImGuiCol_Button, ImGui::GetStyleColorVec4( ImGuiCol_FrameBg ) );

@@ -61,6 +61,14 @@ namespace Desert::Editor::Utils
         // A full-width accent ("primary") button — for the one obvious action of a section (Convert, Create…).
         static bool AccentButton( const char* label, float height = 0.0f );
 
+        // A vector value the way UE draws one: N drag fields side by side, each with a thin coloured left
+        // edge — X red, Y green, Z blue, the SAME colours as the viewport gizmo's axes, so the field you
+        // type into and the handle you drag in the scene are visibly the same thing. (The old control gave
+        // each axis a big coloured X/Y/Z button, which spent a third of the row on decoration.)
+        // Returns true while the value is being edited.
+        static bool VectorField( const char* id, float* values, int components, float speed = 0.1f,
+                                 const char* format = "%.3f" );
+
         // An asset slot drawn the way UE draws one: a SUNK, full-width field carrying the asset's name
         // with a chevron at its right edge — not a raised push button. The distinction is the whole
         // reason UE's Details reads as a form: a raised button says "this does something", a sunk field

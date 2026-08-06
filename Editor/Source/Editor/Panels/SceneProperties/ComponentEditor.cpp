@@ -71,6 +71,41 @@ namespace Desert::Editor
             return ICON_MDI_PUZZLE;
         }
 
+        // Where a component sits in the panel. Components self-register at static init, so without this
+        // the order is link order — it changes when a file is added and puts Transform wherever it lands.
+        // UE's Details is read top-down in a fixed order: what the object IS (transform, then the thing it
+        // renders and its materials), then how it BEHAVES (physics, audio, script). A component missing
+        // from the table keeps its registration order after the ranked ones, so a new component never has
+        // to be listed here to appear.
+        int ComponentRank( const std::string& name )
+        {
+            static const char* const kOrder[] = {
+                 "Transform",
+                 "3D Model",
+                 "Skinned Mesh",
+                 "Animation",
+                 "Particle System",
+                 "Text",
+                 "UI Layout",
+                 "Camera",
+                 "Skybox",
+                 "Terrain",
+                 "Directional Light",
+                 "Point Light",
+                 "Spot Light",
+                 "Collider",
+                 "Rigid Body",
+                 "Character Controller",
+                 "Audio Source",
+                 "Script",
+                 "Prefab",
+            };
+            for ( int i = 0; i < static_cast<int>( std::size( kOrder ) ); ++i )
+                if ( name == kOrder[i] )
+                    return i;
+            return static_cast<int>( std::size( kOrder ) );
+        }
+
         // The reflected type behind a component entry, or null for hand-written widgets.
         const Reflection::TypeInfo* ReflectedTypeOf( const ComponentEditorEntry& entry )
         {
@@ -166,17 +201,24 @@ namespace Desert::Editor
         if ( !ctx.FieldFilter )
             DrawPinnedFields( entity, ctx );
 
-        bool anyShown = false;
+        // Ranked, not registration order — see ComponentRank. stable_sort keeps the unranked ones in the
+        // order they registered, so the tail is at least deterministic per build.
+        std::vector<const ComponentEditorEntry*> shown;
         for ( const auto& entry : ComponentWidgetRegistry::Get().Entries() )
         {
             if ( !entry.Has || !entry.Has( entity ) )
                 continue;
             if ( !EntryMatchesFilter( entry, ctx.FieldFilter ) )
                 continue;
-
-            anyShown = true;
-            RenderComponentHeader( entry, entity, scene, ctx );
+            shown.push_back( &entry );
         }
+        std::stable_sort( shown.begin(), shown.end(),
+                          []( const ComponentEditorEntry* a, const ComponentEditorEntry* b )
+                          { return ComponentRank( a->Name ) < ComponentRank( b->Name ); } );
+
+        const bool anyShown = !shown.empty();
+        for ( const auto* entry : shown )
+            RenderComponentHeader( *entry, entity, scene, ctx );
 
         if ( ctx.FieldFilter && !anyShown )
             ImGui::TextDisabled( "No property matches '%s'", ctx.FieldFilter );
