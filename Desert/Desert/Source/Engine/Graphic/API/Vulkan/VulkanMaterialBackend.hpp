@@ -44,11 +44,18 @@ namespace Desert::Graphic::API::Vulkan
         std::shared_ptr<VulkanShader> m_VulkanShader; // TODO: weak ptr
         VkDescriptorPool              m_DescriptorPool = VK_NULL_HANDLE;
 
-        // [frame][set]
-        std::vector<std::vector<VkDescriptorSet>> m_DescriptorSets;
+        // [frame][renderer slot][set].
+        //
+        // The SLOT dimension is what stops two views from sharing one set: the descriptor a draw uses is
+        // looked up with the slot of the renderer that is recording (EngineContext::GetActiveRendererSlot),
+        // so a second SceneRenderer writes and binds its own copies instead of the first one's. Every read
+        // and write goes through GetDescriptorSet, which resolves the slot in one place.
+        std::vector<std::vector<std::vector<VkDescriptorSet>>> m_DescriptorSets;
 
-        // Track updates per frame: [frame][set] (Absolute frame count)
-        std::vector<std::vector<uint64_t>> m_DescriptorSetsUpdateFrame;
+        // Track updates per [frame][slot][set] (absolute frame count). Per SLOT as well, or a slot that
+        // was not active when the frame's updates ran would keep whatever its set held last — the guard
+        // would report the work as already done for a set nobody wrote.
+        std::vector<std::vector<std::vector<uint64_t>>> m_DescriptorSetsUpdateFrame;
 
         VkBuffer      m_DummyBuffer = VK_NULL_HANDLE;
         VmaAllocation m_DummyAllocation = nullptr;

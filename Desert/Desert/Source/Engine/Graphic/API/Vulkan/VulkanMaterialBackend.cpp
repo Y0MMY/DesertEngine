@@ -88,10 +88,15 @@ namespace Desert::Graphic::API::Vulkan
             storageBufferCount += (uint32_t)descriptorSet.StorageBuffers.size();
         }
 
-        uniformBufferCount *= framesInFlight;
-        combinedImageSamplerCount *= framesInFlight;
-        storageImageCount *= framesInFlight;
-        storageBufferCount *= framesInFlight;
+        // One set per (frame in flight x RENDERER SLOT): each view records with its own descriptors, so
+        // the pool has to hold that many. Slots are a small fixed number (EngineContext::kMaxRendererSlots)
+        // and a set is a handful of descriptors, so this is a few kilobytes, not a real cost.
+        const uint32_t slots = EngineContext::kMaxRendererSlots;
+
+        uniformBufferCount *= framesInFlight * slots;
+        combinedImageSamplerCount *= framesInFlight * slots;
+        storageImageCount *= framesInFlight * slots;
+        storageBufferCount *= framesInFlight * slots;
 
         std::vector<VkDescriptorPoolSize> poolSizes;
         if ( uniformBufferCount > 0 ) poolSizes.push_back( { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBufferCount } );
@@ -105,7 +110,7 @@ namespace Desert::Graphic::API::Vulkan
         poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.poolSizeCount = static_cast<uint32_t>( poolSizes.size() );
         poolInfo.pPoolSizes    = poolSizes.data();
-        poolInfo.maxSets       = framesInFlight * setCount;
+        poolInfo.maxSets       = framesInFlight * slots * setCount;
         poolInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
         VK_CHECK_RESULT( vkCreateDescriptorPool( SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
@@ -117,37 +122,47 @@ namespace Desert::Graphic::API::Vulkan
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
         const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
 
-        m_DescriptorSets.resize( framesInFlight );
-        m_DescriptorSetsUpdateFrame.resize( framesInFlight, std::vector<uint64_t>( setCount, std::numeric_limits<uint64_t>::max() ) );
+        const uint32_t slots = EngineContext::kMaxRendererSlots;
+
+        m_DescriptorSets.assign( framesInFlight, std::vector<std::vector<VkDescriptorSet>>( slots ) );
+        m_DescriptorSetsUpdateFrame.assign(
+             framesInFlight,
+             std::vector<std::vector<uint64_t>>(
+                  slots, std::vector<uint64_t>( setCount, std::numeric_limits<uint64_t>::max() ) ) );
+
+        std::vector<VkDescriptorSetLayout> layouts( setCount );
+        for ( uint32_t set = 0; set < setCount; ++set )
+            layouts[set] = m_VulkanShader->GetDescriptorSetLayout( set );
 
         for ( uint32_t frame = 0; frame < framesInFlight; ++frame )
         {
-            m_DescriptorSets[frame].resize( setCount );
-
-            std::vector<VkDescriptorSetLayout> layouts( setCount );
-            for ( uint32_t set = 0; set < setCount; ++set )
+            for ( uint32_t slot = 0; slot < slots; ++slot )
             {
-                layouts[set] = m_VulkanShader->GetDescriptorSetLayout( set );
+                m_DescriptorSets[frame][slot].resize( setCount );
+
+                VkDescriptorSetAllocateInfo allocInfo{};
+                allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                allocInfo.descriptorPool     = m_DescriptorPool;
+                allocInfo.descriptorSetCount = setCount;
+                allocInfo.pSetLayouts        = layouts.data();
+
+                VK_CHECK_RESULT( vkAllocateDescriptorSets(
+                     SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                          ->GetVulkanLogicalDevice(),
+                     &allocInfo, m_DescriptorSets[frame][slot].data() ) );
             }
-
-            VkDescriptorSetAllocateInfo allocInfo{};
-            allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocInfo.descriptorPool     = m_DescriptorPool;
-            allocInfo.descriptorSetCount = setCount;
-            allocInfo.pSetLayouts        = layouts.data();
-
-            VK_CHECK_RESULT( vkAllocateDescriptorSets(
-                 SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
-                      ->GetVulkanLogicalDevice(),
-                 &allocInfo, m_DescriptorSets[frame].data() ) );
         }
     }
 
     VkDescriptorSet VulkanMaterialBackend::GetDescriptorSet( uint32_t frameIndex, uint32_t setIndex ) const
     {
-        if ( frameIndex < m_DescriptorSets.size() && setIndex < m_DescriptorSets[frameIndex].size() )
+        // The slot of the renderer that is RECORDING resolves here and nowhere else, so a write and the
+        // bind that follows it can never land on different copies.
+        const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();
+        if ( frameIndex < m_DescriptorSets.size() && slot < m_DescriptorSets[frameIndex].size() &&
+             setIndex < m_DescriptorSets[frameIndex][slot].size() )
         {
-            return m_DescriptorSets[frameIndex][setIndex];
+            return m_DescriptorSets[frameIndex][slot][setIndex];
         }
         return VK_NULL_HANDLE;
     }
@@ -177,7 +192,8 @@ namespace Desert::Graphic::API::Vulkan
         const uint32_t setIndex = 0; // Simplified
 
         // Only update if not already updated this absolute frame
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                        [setIndex] == absoluteFrame )
             return;
 
         if ( auto bufferInfo = uniformProp->GetUniform() )
@@ -204,7 +220,8 @@ namespace Desert::Graphic::API::Vulkan
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
         const uint32_t setIndex = 0; // Simplified
 
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                        [setIndex] == absoluteFrame )
             return;
 
         if ( auto bufferInfo = storageProp->GetStorageBuffer() )
@@ -231,7 +248,8 @@ namespace Desert::Graphic::API::Vulkan
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
         const uint32_t setIndex = 0; // Simplified
 
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                        [setIndex] == absoluteFrame )
             return;
 
         if ( auto imageUniform = textureProp->GetUniform() )
@@ -258,7 +276,8 @@ namespace Desert::Graphic::API::Vulkan
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
         const uint32_t setIndex = 0; // Simplified
 
-        if ( m_DescriptorSetsUpdateFrame[frameIndex][setIndex] == absoluteFrame )
+        if ( m_DescriptorSetsUpdateFrame[frameIndex][EngineContext::GetInstance().GetActiveRendererSlot()]
+                                        [setIndex] == absoluteFrame )
             return;
 
         if ( auto imageUniform = textureProp->GetUniform() )
@@ -278,13 +297,15 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanMaterialBackend::BindDescriptorSets( VkCommandBuffer cmdBuffer, VkPipelineLayout layout,
                                                     VkPipelineBindPoint bindPoint, uint32_t frameIndex )
     {
-        if ( frameIndex >= m_DescriptorSets.size() || m_DescriptorSets[frameIndex].empty() )
+        const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();
+        if ( frameIndex >= m_DescriptorSets.size() || slot >= m_DescriptorSets[frameIndex].size() ||
+             m_DescriptorSets[frameIndex][slot].empty() )
             return;
 
         std::vector<VkDescriptorSet> setsToBind;
-        setsToBind.reserve( m_DescriptorSets[frameIndex].size() );
+        setsToBind.reserve( m_DescriptorSets[frameIndex][slot].size() );
 
-        for ( VkDescriptorSet descriptorSet : m_DescriptorSets[frameIndex] )
+        for ( VkDescriptorSet descriptorSet : m_DescriptorSets[frameIndex][slot] )
         {
             if ( descriptorSet != VK_NULL_HANDLE )
             {
@@ -309,17 +330,20 @@ namespace Desert::Graphic::API::Vulkan
 
     bool VulkanMaterialBackend::HasDescriptorSets() const
     {
-        return !m_DescriptorSets.empty() && !m_DescriptorSets[0].empty();
+        return !m_DescriptorSets.empty() && !m_DescriptorSets[0].empty() && !m_DescriptorSets[0][0].empty();
     }
 
     void VulkanMaterialBackend::FlushUpdates()
     {
         const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
         const uint64_t absoluteFrame = Engine::FrameManager::GetInstance().GetAbsoluteFrameCount();
-        
-        // Mark all sets as updated for this absolute frame
-        for ( uint32_t i = 0; i < m_DescriptorSetsUpdateFrame[frameIndex].size(); ++i )
-            m_DescriptorSetsUpdateFrame[frameIndex][i] = absoluteFrame;
+
+        // Mark this RENDERER's sets as updated for this absolute frame. Marking every slot would tell the
+        // next view its descriptors are current when nobody has written them.
+        const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();
+        if ( slot < m_DescriptorSetsUpdateFrame[frameIndex].size() )
+            for ( auto& setFrame : m_DescriptorSetsUpdateFrame[frameIndex][slot] )
+                setFrame = absoluteFrame;
     }
 
     void VulkanMaterialBackend::InitializeWithFallbacks()
@@ -327,87 +351,101 @@ namespace Desert::Graphic::API::Vulkan
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
         auto&          descriptorSets = m_VulkanShader->GetShaderDescriptorSets();
 
-        for ( uint32_t frame = 0; frame < framesInFlight; ++frame )
+        // EVERY slot gets the fallbacks, not just the active one: a set that is bound before anything
+        // wrote it reads undefined descriptors, and a view that opens later would bind exactly that. The
+        // writes address a slot through GetDescriptorSet, so the active slot is moved across them and put
+        // back — this runs once, at material creation, on the one thread that records.
+        const uint32_t restoreSlot = EngineContext::GetInstance().GetActiveRendererSlot();
+
+        for ( uint32_t slot = 0; slot < EngineContext::kMaxRendererSlots; ++slot )
         {
-            for ( const auto& [setIndex, descriptorSet] : descriptorSets )
+            EngineContext::GetInstance().SetActiveRendererSlot( slot );
+            for ( uint32_t frame = 0; frame < framesInFlight; ++frame )
             {
-                std::vector<VkWriteDescriptorSet> writes;
-                
-                // Track infos to keep them alive until vkUpdateDescriptorSets
-                std::vector<VkDescriptorImageInfo> imageInfos;
-                imageInfos.reserve( descriptorSet.Image2DSamplers.size() +
-                                    descriptorSet.ImageCubeSamplers.size() +
-                                    descriptorSet.StorageImage2DSamplers.size() );
-
-                std::vector<VkDescriptorBufferInfo> bufferInfos;
-                bufferInfos.reserve(descriptorSet.UniformBuffers.size() + descriptorSet.StorageBuffers.size());
-
-                // UNIFORM BUFFERS
-                for ( const auto& [binding, size] : descriptorSet.UniformBuffers )
+                for ( const auto& [setIndex, descriptorSet] : descriptorSets )
                 {
-                    VkDescriptorBufferInfo info = { .buffer = m_DummyBuffer, .offset = 0, .range = VK_WHOLE_SIZE };
-                    bufferInfos.push_back( info );
-                    writes.push_back( DescriptorSetBuilder::GetUniformWDS( this, frame, setIndex, binding, 1,
-                                                                           &bufferInfos.back() ) );
-                }
+                    std::vector<VkWriteDescriptorSet> writes;
 
-                // STORAGE BUFFERS
-                for ( const auto& [binding, size] : descriptorSet.StorageBuffers )
-                {
-                    VkDescriptorBufferInfo info = { .buffer = m_DummyBuffer, .offset = 0, .range = VK_WHOLE_SIZE };
-                    bufferInfos.push_back( info );
-                    writes.push_back( DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding, 1,
-                                                                           &bufferInfos.back() ) );
-                }
+                    // Track infos to keep them alive until vkUpdateDescriptorSets
+                    std::vector<VkDescriptorImageInfo> imageInfos;
+                    imageInfos.reserve( descriptorSet.Image2DSamplers.size() +
+                                        descriptorSet.ImageCubeSamplers.size() +
+                                        descriptorSet.StorageImage2DSamplers.size() );
 
-                // IMAGE 2D SAMPLERS
-                for ( const auto& [binding, imageLayout] : descriptorSet.Image2DSamplers )
-                {
-                    auto fallbackImage =
-                         FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F );
+                    std::vector<VkDescriptorBufferInfo> bufferInfos;
+                    bufferInfos.reserve( descriptorSet.UniformBuffers.size() +
+                                         descriptorSet.StorageBuffers.size() );
 
-                    if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
+                    // UNIFORM BUFFERS
+                    for ( const auto& [binding, size] : descriptorSet.UniformBuffers )
                     {
-                        imageInfos.push_back(vulkanImage->GetResource().GetDescriptorInfo());
-                        writes.push_back(DescriptorSetBuilder::GetSampler2DWDS( this, frame, setIndex, binding, 1,
-                                                                          &imageInfos.back() ));
+                        VkDescriptorBufferInfo info = {
+                             .buffer = m_DummyBuffer, .offset = 0, .range = VK_WHOLE_SIZE };
+                        bufferInfos.push_back( info );
+                        writes.push_back( DescriptorSetBuilder::GetUniformWDS( this, frame, setIndex, binding, 1,
+                                                                               &bufferInfos.back() ) );
                     }
-                }
 
-                // IMAGE CUBE SAMPLERS
-                for ( const auto& [binding, imageLayout] : descriptorSet.ImageCubeSamplers )
-                {
-                    auto fallbackCube =
-                         FallbackTextures::Get().GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F );
-
-                    if ( auto vulkanImage = sp_cast<VulkanImageCube>( fallbackCube ) )
+                    // STORAGE BUFFERS
+                    for ( const auto& [binding, size] : descriptorSet.StorageBuffers )
                     {
-                        imageInfos.push_back(vulkanImage->GetResource().GetDescriptorInfo());
-                        writes.push_back(DescriptorSetBuilder::GetSamplerCubeWDS( this, frame, setIndex, binding, 1,
-                                                                            &imageInfos.back() ));
-                    }
-                }
-
-                // STORAGE IMAGES — init with dedicated storage fallback (has VK_IMAGE_USAGE_STORAGE_BIT)
-                for ( const auto& [binding, _] : descriptorSet.StorageImage2DSamplers )
-                {
-                    auto fallbackImage =
-                         FallbackTextures::Get().GetFallbackStorageImage2D( Core::Formats::ImageFormat::RGBA32F );
-
-                    if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
-                    {
-                        VkDescriptorImageInfo storageInfo = { VK_NULL_HANDLE,
-                                                              vulkanImage->GetResource().ImageView,
-                                                              VK_IMAGE_LAYOUT_GENERAL };
-                        imageInfos.push_back( storageInfo );
+                        VkDescriptorBufferInfo info = {
+                             .buffer = m_DummyBuffer, .offset = 0, .range = VK_WHOLE_SIZE };
+                        bufferInfos.push_back( info );
                         writes.push_back( DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding, 1,
-                                                                               &imageInfos.back() ) );
+                                                                               &bufferInfos.back() ) );
                     }
-                }
 
-                UpdateDescriptorSets( writes, true );
+                    // IMAGE 2D SAMPLERS
+                    for ( const auto& [binding, imageLayout] : descriptorSet.Image2DSamplers )
+                    {
+                        auto fallbackImage =
+                             FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F );
+
+                        if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
+                        {
+                            imageInfos.push_back( vulkanImage->GetResource().GetDescriptorInfo() );
+                            writes.push_back( DescriptorSetBuilder::GetSampler2DWDS(
+                                 this, frame, setIndex, binding, 1, &imageInfos.back() ) );
+                        }
+                    }
+
+                    // IMAGE CUBE SAMPLERS
+                    for ( const auto& [binding, imageLayout] : descriptorSet.ImageCubeSamplers )
+                    {
+                        auto fallbackCube =
+                             FallbackTextures::Get().GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F );
+
+                        if ( auto vulkanImage = sp_cast<VulkanImageCube>( fallbackCube ) )
+                        {
+                            imageInfos.push_back( vulkanImage->GetResource().GetDescriptorInfo() );
+                            writes.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
+                                 this, frame, setIndex, binding, 1, &imageInfos.back() ) );
+                        }
+                    }
+
+                    // STORAGE IMAGES — init with dedicated storage fallback (has VK_IMAGE_USAGE_STORAGE_BIT)
+                    for ( const auto& [binding, _] : descriptorSet.StorageImage2DSamplers )
+                    {
+                        auto fallbackImage = FallbackTextures::Get().GetFallbackStorageImage2D(
+                             Core::Formats::ImageFormat::RGBA32F );
+
+                        if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
+                        {
+                            VkDescriptorImageInfo storageInfo = {
+                                 VK_NULL_HANDLE, vulkanImage->GetResource().ImageView, VK_IMAGE_LAYOUT_GENERAL };
+                            imageInfos.push_back( storageInfo );
+                            writes.push_back( DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding,
+                                                                                   1, &imageInfos.back() ) );
+                        }
+                    }
+
+                    UpdateDescriptorSets( writes, true );
+                }
             }
         }
+
+        EngineContext::GetInstance().SetActiveRendererSlot( restoreSlot );
     }
 
     void VulkanMaterialBackend::InitializeDefaults()
