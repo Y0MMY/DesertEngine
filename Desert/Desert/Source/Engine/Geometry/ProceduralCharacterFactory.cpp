@@ -214,12 +214,23 @@ namespace Desert::Geometry
             for ( uint32_t i = 0; i < JointCount; ++i )
             {
                 const JointDef& j = kJoints[i];
-                glm::vec3 parentWorld = ( j.Parent >= 0 ) ? kJoints[j.Parent].BindWorld : glm::vec3( 0.0f );
+
+                // THROUGH JointPos, like the mesh: the rig is authored in metres and a world unit is a
+                // centimetre, so the bind pose has to be scaled by exactly the same 100 the vertices are.
+                // It used to use the raw (metre) values, which left the skeleton 100x smaller than the mesh
+                // it skins. In BIND pose that cancels out — the render path multiplies chainGlobal by
+                // OffsetMatrix, which is its own inverse — so a standing character looked right. As soon as
+                // a CLIP played, each bone rotated about a pivot 100x closer to the origin than the vertices
+                // it moves, and the body flew apart. (The bone overlay and the bone gizmo, both drawn at
+                // chainGlobal, were mis-scaled for the same reason.)
+                const glm::vec3 world = JointPos( i );
+                const glm::vec3 parentWorld =
+                     ( j.Parent >= 0 ) ? JointPos( static_cast<uint32_t>( j.Parent ) ) : glm::vec3( 0.0f );
 
                 bones[i].BoneIndex = i;
                 bones[i].Name      = j.Name;
                 // No rotation in the bind pose, so the local transform is just the offset from the parent.
-                bones[i].LocalBindTransform = glm::translate( glm::mat4( 1.0f ), j.BindWorld - parentWorld );
+                bones[i].LocalBindTransform = glm::translate( glm::mat4( 1.0f ), world - parentWorld );
                 bones[i].OffsetMatrix       = glm::mat4( 1.0f ); // recomputed below
                 if ( j.Parent >= 0 )
                     bones[i].ParentBoneID = static_cast<uint32_t>( j.Parent );

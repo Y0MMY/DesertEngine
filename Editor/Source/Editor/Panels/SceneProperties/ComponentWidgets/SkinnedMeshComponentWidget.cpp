@@ -116,12 +116,27 @@ namespace Desert::Editor
 
         auto meshAssets = assetManager->FindAllByType<Assets::MeshAsset>();
 
-        std::string currentMeshName = "None";
-        auto        asset           = assetManager->FindByHandle<Assets::MeshAsset>( skinnedMesh.MeshHandle );
+        // The mesh that is ACTUALLY drawn: an in-editor rig (Convert to Skinned) overrides the asset.
+        ::Desert::Mesh* mesh = skinnedMesh.RuntimeMesh.get();
+        if ( !mesh && skinnedMesh.MeshHandle )
+            mesh = Runtime::ResourceRegistry::GetMeshService()->Get( skinnedMesh.MeshHandle );
+
+        // What the slot says. A PROCEDURAL mesh (the built-in humanoid, or a mesh rigged in the editor)
+        // is registered straight with the MeshService and has no MeshAsset at all, so looking it up in the
+        // AssetManager returns nothing — the row used to call that "None", which reads as an empty slot on
+        // a character that is plainly standing in the viewport. Say what it actually is instead.
+        auto        asset = assetManager->FindByHandle<Assets::MeshAsset>( skinnedMesh.MeshHandle );
+        std::string currentMeshName;
         if ( asset )
-        {
             currentMeshName = Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath );
-        }
+        else if ( skinnedMesh.RuntimeMesh )
+            currentMeshName = "Procedural (rigged in the editor)";
+        else if ( mesh )
+            currentMeshName = "Procedural (generated)";
+
+        const bool emptySlot = currentMeshName.empty();
+        if ( emptySlot )
+            currentMeshName = "None";
 
         // UE's SkeletalMeshComponent leads with exactly this row — the asset the component renders, as a
         // preview box beside a sunk slot field — before any statistic about it.
@@ -129,15 +144,16 @@ namespace Desert::Editor
         {
             Utils::ImGuiUtilities::ResetPropertyRows();
 
-            constexpr float kBox = 40.0f;
+            // Same 64px as a material slot's preview — one preview size across Details.
+            constexpr float kBox = 64.0f;
             const float     rowH = std::max( kBox, ImGui::GetFrameHeight() ) + ImGui::GetStyle().ItemSpacing.y;
 
             Utils::ImGuiUtilities::BeginPropertyRow( "Skeletal Mesh Asset",
                                                      "The skinned mesh asset this component renders", rowH );
 
-            DrawAssetBox( kBox, ICON_MDI_HUMAN, asset != nullptr, kSkeletalMeshTint );
+            DrawAssetBox( kBox, ICON_MDI_HUMAN, !emptySlot, kSkeletalMeshTint );
             ImGui::SameLine();
-            if ( Utils::ImGuiUtilities::AssetSlot( "SkinnedMeshSlot", currentMeshName.c_str(), !asset ) )
+            if ( Utils::ImGuiUtilities::AssetSlot( "SkinnedMeshSlot", currentMeshName.c_str(), emptySlot ) )
                 ImGui::OpenPopup( "skinned_mesh_selector" );
 
             if ( ImGui::BeginPopup( "skinned_mesh_selector" ) )
@@ -175,11 +191,6 @@ namespace Desert::Editor
         }
 
         Utils::ImGuiUtilities::PopID();
-
-        // The mesh that is ACTUALLY drawn: an in-editor rig (Convert to Skinned) overrides the asset.
-        ::Desert::Mesh* mesh = skinnedMesh.RuntimeMesh.get();
-        if ( !mesh && skinnedMesh.MeshHandle )
-            mesh = Runtime::ResourceRegistry::GetMeshService()->Get( skinnedMesh.MeshHandle );
 
         {
             MeshDetailsWidget::Context ctx;

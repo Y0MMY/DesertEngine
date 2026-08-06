@@ -43,10 +43,13 @@ namespace Desert::Editor
         }
         void OnUIRender() override;
 
-        // Contextual: a timeline needs something animatable selected.
+        // NOT contextual, deliberately. A timeline is a place you GO TO author a clip, not a thing that
+        // should appear because you clicked a character in the viewport: selecting an animated actor to
+        // move it would throw a full-width editor over the screen every time. It opens on request only —
+        // Details ▸ Animation ▸ "Open in Sequencer", the View menu, or the command palette.
         bool IsContextual() const override
         {
-            return true;
+            return false;
         }
         bool IsRelevant() const override;
         void OnPreUpdate() override;

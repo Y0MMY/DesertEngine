@@ -647,8 +647,10 @@ namespace Desert::Editor
     MaterialComponentWidget::SlotAction MaterialComponentWidget::DrawSlotRow( const SlotRow& row,
                                                                               std::string&   droppedPath )
     {
-        const ImGuiStyle& style      = ImGui::GetStyle();
-        constexpr float   kPreview   = 48.0f;
+        const ImGuiStyle& style = ImGui::GetStyle();
+        // 64px: big enough to recognise a material by its render, and the SAME box the skeletal-mesh slot
+        // uses — one preview size across Details.
+        constexpr float   kPreview   = 64.0f;
         const auto*       asset      = row.Asset;
         const bool        hasOwnSlot = row.HasOwnSlot;
 
