@@ -3,6 +3,7 @@
 #include <Engine/ECS/System/System.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Core/Scene.hpp>
+#include <Engine/ECS/System/SystemRules.hpp>
 
 namespace Desert::ECS
 {
@@ -57,10 +58,9 @@ namespace Desert::ECS
                 if ( anim.Graph ) // a state machine already owns clip selection
                     return;
 
-                const std::string& name = !onGround                ? loco.JumpClip
-                                          : speed < loco.WalkSpeed ? loco.IdleClip
-                                          : speed <= loco.RunSpeed ? loco.WalkClip
-                                                                   : loco.RunClip;
+                // The rule itself lives in SystemRules.hpp so it can be tested without a Scene (and so the
+                // ordering — airborne beats any ground speed — is stated in one place).
+                const std::string& name = Rules::LocomotionClipFor( loco, speed, onGround );
 
                 if ( anim.CurrentClip != name )
                 {

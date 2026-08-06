@@ -5,6 +5,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Animation/Animator.hpp>
+#include <Engine/ECS/System/SystemRules.hpp>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -49,36 +50,30 @@ namespace Desert::ECS
                 if ( !boneIdx )
                     continue;
 
-                // World socket = targetWorld * boneModel * localOffset.
-                const glm::mat4 targetWorld = target.GetWorldTransform();
-                const glm::mat4 boneModel   = anim.Animator->GetBoneModelMatrix( *boneIdx );
-                const glm::mat4 offset =
-                     glm::translate( glm::mat4( 1.0f ), socket.OffsetTranslation ) *
-                     glm::toMat4( glm::quat( socket.OffsetRotation ) ) *
-                     glm::scale( glm::mat4( 1.0f ), socket.OffsetScale );
-                glm::mat4 world = targetWorld * boneModel * offset;
-
-                // The TransformComponent stores a LOCAL transform. If this entity is parented, convert the
-                // world socket back into the parent's space; otherwise local == world.
+                // The TransformComponent stores a LOCAL transform, so a parented weapon must come back
+                // into its parent's space or it doubles the parent's motion. The composition + decompose
+                // live in SystemRules.hpp, where a test can reach them without a Scene.
+                glm::mat4 parentWorld( 1.0f );
                 if ( registry.has<RelationshipComponent>( entity ) )
                 {
                     const auto parent = registry.get<RelationshipComponent>( entity ).Parent;
                     if ( parent != entt::null )
                     {
                         ECS::Entity parentEnt{ parent, registry };
-                        world = glm::inverse( parentEnt.GetWorldTransform() ) * world;
+                        parentWorld = parentEnt.GetWorldTransform();
                     }
                 }
 
-                glm::vec3 scale, translation, skew;
-                glm::quat rotation;
-                glm::vec4 perspective;
-                glm::decompose( world, scale, rotation, translation, skew, perspective );
+                const glm::mat4 local = Rules::SocketLocalTransform(
+                     target.GetWorldTransform(), anim.Animator->GetBoneModelMatrix( *boneIdx ),
+                     socket.OffsetTranslation, socket.OffsetRotation, socket.OffsetScale, parentWorld );
+
+                const Rules::DecomposedTransform decomposed = Rules::DecomposeTransform( local );
 
                 auto& tc       = view.get<TransformComponent>( entity );
-                tc.Translation = translation;
-                tc.Rotation    = glm::eulerAngles( rotation );
-                tc.Scale       = scale;
+                tc.Translation = decomposed.Translation;
+                tc.Rotation    = decomposed.Rotation;
+                tc.Scale       = decomposed.Scale;
             }
         }
 
