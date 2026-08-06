@@ -218,12 +218,22 @@ namespace
         const char* root = std::getenv( "DESERT_ROOT" );
         if ( !root )
         {
+#ifdef _WIN32
+            error = "DESERT_ROOT is not set — start the hub via scripts\\Windows\\RunProjectHub.bat";
+#else
             error = "DESERT_ROOT is not set — start the hub via scripts/MacOS/RunProjectHub.sh";
+#endif
             return false;
         }
 #ifdef _WIN32
-        error = "Windows launch wiring is not done yet — start the Editor manually with --project";
-        return false;
+        // `start "" /D <dir> <program> <args>`: the empty first token is the window TITLE (start treats
+        // a leading quoted argument as one), /D sets the working directory, and start returns
+        // immediately — the same detach the macOS branch gets from trailing '&'.
+        std::ostringstream cmd;
+        cmd << "start \"\" /D \"" << root << "\" \"" << root << "\\scripts\\Windows\\RunEditor.bat\" "
+            << config << " --project \"" << deprojPath << "\"";
+        std::system( cmd.str().c_str() );
+        return true;
 #else
         std::ostringstream cmd;
         cmd << "cd \"" << root << "\" && ./scripts/MacOS/RunEditor.sh " << config << " --project \""
