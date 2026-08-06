@@ -28,9 +28,11 @@ namespace Desert::Editor
         void OnUIRender() override;
 
         // Contextual: an emitter must be selected to author it.
+        // NOT contextual: selecting an object is not a request to open the particle editor. It opens only when
+        // asked for — a button in Details, the View menu, or the command palette (Core::PanelRequests).
         bool IsContextual() const override
         {
-            return true;
+            return false;
         }
         bool IsRelevant() const override;
         void OnPreUpdate() override;

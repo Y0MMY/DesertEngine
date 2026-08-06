@@ -13,6 +13,7 @@
 #include <Engine/Animation/Graph/AnimGraph.hpp>
 
 #include <Editor/Panels/Animation/AnimGraphPanel.hpp>
+#include <Editor/Core/PanelRequests.hpp>
 #include <Editor/Panels/Stubs/SequencerPanel.hpp>
 
 namespace Desert::Editor
@@ -30,12 +31,10 @@ namespace Desert::Editor
         auto& animation = entity.GetComponent<ECS::AnimationComponent>();
 
         Utils::ImGuiUtilities::PushID();
-        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
         if ( !animation.Animator )
         {
             ImGui::TextDisabled( "No animator assigned" );
-            ImGui::PopStyleVar();
             Utils::ImGuiUtilities::PopID();
             return;
         }
@@ -46,16 +45,28 @@ namespace Desert::Editor
         // BASIC CONTROLS
         // ============================================================
 
-        ImGui::Columns( 2 );
-        ImGui::Separator();
+        // Playback, on the panel's shared rows.
+        Utils::ImGuiUtilities::ResetPropertyRows();
 
-        Utils::ImGuiUtilities::Property( "Playing", animation.Playing );
-        Utils::ImGuiUtilities::Property( "Loop", animation.Loop );
-        Utils::ImGuiUtilities::Property( "Speed", animation.PlaybackSpeed, 0.1f, 3.0f, 0.01f,
-                                         Utils::ImGuiUtilities::PropertyFlag::DragValue );
+        Utils::ImGuiUtilities::BeginPropertyRow( "Playing" );
+        ImGui::Checkbox( "##playing", &animation.Playing );
+        Utils::ImGuiUtilities::EndPropertyRow();
 
-        ImGui::Columns( 1 );
-        ImGui::Separator();
+        Utils::ImGuiUtilities::BeginPropertyRow( "Loop" );
+        ImGui::Checkbox( "##loop", &animation.Loop );
+        Utils::ImGuiUtilities::EndPropertyRow();
+
+        Utils::ImGuiUtilities::BeginPropertyRow( "Speed" );
+        ImGui::DragFloat( "##speed", &animation.PlaybackSpeed, 0.01f, 0.0f, 3.0f, "%.2fx" );
+        Utils::ImGuiUtilities::EndPropertyRow();
+
+        // Root motion: the clip's hips displacement drives the ENTITY instead of sliding under it. The
+        // component has carried this flag all along with nothing in the editor able to set it.
+        Utils::ImGuiUtilities::BeginPropertyRow(
+             "Root Motion", "Apply the clip's root/hips displacement to the entity's transform instead of "
+                            "animating in place" );
+        ImGui::Checkbox( "##rootmotion", &animation.EnableRootMotion );
+        Utils::ImGuiUtilities::EndPropertyRow();
 
         // ============================================================
         // CLIP SELECTION
@@ -80,6 +91,7 @@ namespace Desert::Editor
 
         const char* preview = animation.CurrentClip.empty() ? "Select Clip" : animation.CurrentClip.c_str();
 
+        Utils::ImGuiUtilities::BeginPropertyRow( "Clip" );
         if ( ImGui::BeginCombo( "##ClipSelect", preview ) )
         {
             for ( const auto& animAsset : cached )
@@ -99,6 +111,7 @@ namespace Desert::Editor
 
             ImGui::EndCombo();
         }
+        Utils::ImGuiUtilities::EndPropertyRow();
 
         // ============================================================
         // TIMELINE
@@ -109,25 +122,31 @@ namespace Desert::Editor
             float currentTime = animator->GetCurrentTime();
             float duration    = animator->GetDuration();
 
-            ImGui::TextUnformatted( "Timeline" );
-
-            if ( ImGui::SliderFloat( "##Timeline", &currentTime, 0.0f, duration, "%.3f" ) )
+            Utils::ImGuiUtilities::BeginPropertyRow( "Time" );
+            if ( ImGui::SliderFloat( "##Timeline", &currentTime, 0.0f, duration, "%.2f s" ) )
             {
                 animation.Playing = false;
                 animator->SetTime( currentTime );
             }
+            Utils::ImGuiUtilities::EndPropertyRow();
         }
 
         // Keyframe/track editing lives in the Sequencer (a proper timeline); Details stays focused on playback
         // + the AnimGraph summary.
-        ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
-        if ( ImGui::Button( ICON_MDI_CHART_TIMELINE "  Open in Sequencer",
-                            ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+        // The authoring tools, opened EXPLICITLY. None of these panels shows up on selection any more:
+        // clicking a character is not a request to author its animation.
+        ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
+        const float half = ( ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x ) * 0.5f;
+        if ( ImGui::Button( ICON_MDI_CHART_TIMELINE "  Sequencer", ImVec2( half, 0.0f ) ) )
             SequencerPanel::RequestOpen();
+        Utils::ImGuiUtilities::Tooltip( "Author clips on a timeline (keyframes per bone)" );
+        ImGui::SameLine();
+        if ( ImGui::Button( ICON_MDI_LAYERS "  Anim Layers", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+            Core::PanelRequests::Open( "Anim Layers" );
+        Utils::ImGuiUtilities::Tooltip( "Additive layers on top of the base clip" );
 
         RenderAnimGraph( animation, cached );
 
-        ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
     }
 

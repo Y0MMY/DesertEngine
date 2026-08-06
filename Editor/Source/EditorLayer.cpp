@@ -19,6 +19,7 @@
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
+#include "Editor/Core/PanelRequests.hpp"
 #include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -154,6 +155,16 @@ namespace Desert::Editor
     {
         for ( auto& panel : m_Panels )
         {
+            // An EXPLICIT request always wins and applies to every panel, contextual or not: a button in
+            // Details ("Open in Sequencer", "Anim Graph", "Particle Editor") asked for this panel by name.
+            // It pins it, exactly like ticking it in the View menu — the user asked, so nothing auto-closes it.
+            if ( Core::PanelRequests::ConsumeOpen( panel->GetName() ) )
+            {
+                panel->GetVisibility() = true;
+                panel->Pinned()        = true;
+                m_FocusPanel           = panel->GetName();
+            }
+
             if ( !panel->IsContextual() )
                 continue;
 

@@ -47,9 +47,11 @@ namespace Desert::Editor
         void OnUIRender() override;
 
         // Contextual: a state machine belongs to an animated entity.
+        // NOT contextual: selecting an object is not a request to open the Anim Graph. It opens only when
+        // asked for — a button in Details, the View menu, or the command palette (Core::PanelRequests).
         bool IsContextual() const override
         {
-            return true;
+            return false;
         }
 
         bool IsRelevant() const override;

@@ -28,9 +28,11 @@ namespace Desert::Editor
         void OnUIRender() override;
 
         // Contextual: it authors a UI element.
+        // NOT contextual: selecting an object is not a request to open the UI editor. It opens only when
+        // asked for — a button in Details, the View menu, or the command palette (Core::PanelRequests).
         bool IsContextual() const override
         {
-            return true;
+            return false;
         }
         bool IsRelevant() const override;
         void SetScene( const std::shared_ptr<Desert::Core::Scene>& scene ) override

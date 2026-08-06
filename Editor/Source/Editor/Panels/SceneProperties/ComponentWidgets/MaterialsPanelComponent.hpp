@@ -25,12 +25,35 @@ namespace Desert::Editor
         // simply omitted.
         void Render( ECS::Entity& entity, ::Desert::Core::Scene* scene = nullptr );
 
+    public:
+        // The mesh whose slots are being edited, as a VIEW rather than a component type. A skinned mesh
+        // carries the same MaterialSlots + RuntimeMaterialInstances pair as a static one and its renderer
+        // maps them identically — the slot editor was simply hard-wired to StaticMeshComponent, so skinned
+        // meshes had no material UI at all. Everything below works on this.
+        struct MaterialHost
+        {
+            std::vector<Assets::AssetHandle>*          Slots            = nullptr;
+            std::vector<Graphic::MaterialInstancePtr>* RuntimeInstances = nullptr;
+            Assets::AssetHandle                        MeshHandle;
+            ::Desert::Mesh*                            Mesh = nullptr; // the mesh actually drawn
+
+            // Drops the cached runtime instances so the renderer rebuilds them from the slots next tick.
+            void Invalidate() const
+            {
+                if ( RuntimeInstances )
+                    RuntimeInstances->clear();
+            }
+        };
+
+        // Resolves the entity's mesh component (static first, then skinned) into a host. Slots == nullptr
+        // when the entity has neither.
+        static MaterialHost HostOf( ECS::Entity& entity );
+
     private:
         // overriddenByShader: non-empty when the entity's Shader Override component routes the
         // mesh off the PBR path — the slots are shown collapsed with a notice.
-        void RenderMaterialProperties( ECS::Entity& entity, ECS::StaticMeshComponent& materialComp,
+        void RenderMaterialProperties( ECS::Entity& entity, const MaterialHost& host,
                                        const std::string& overriddenByShader );
-
 
         // Unity-style shader picker inside the material (PBR (Standard) + Surface-domain DSL shaders).
         // Returns true when the shader changed (the runtime material must be rebuilt).
@@ -48,16 +71,15 @@ namespace Desert::Editor
         Assets::AssetHandle CreateAndRegisterMaterialInstance( const Assets::SurfaceMaterialAsset& parent );
 
         // Number of material slots the mesh expects (one per submesh; 1 for primitives).
-        size_t GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const;
+        size_t GetSubmeshCount( const MaterialHost& host ) const;
         // Creates a fresh PBR material asset on disk, registers its runtime material, returns its handle.
         // baseName is sanitized into the filename ("M_<Entity>"); identity stays the in-file GUID.
         Assets::AssetHandle CreateAndRegisterMaterial( const std::string& baseName = "Material" );
         // Resolves an asset path to a material, registers it if needed, and assigns it to a slot.
-        void AssignMaterialFromPath( ECS::StaticMeshComponent& meshComp, size_t slot,
-                                     const std::string& assetPath );
+        void AssignMaterialFromPath( const MaterialHost& host, size_t slot, const std::string& assetPath );
         // Grows MaterialSlots up to `slot` by repeating the effective (last) handle so an inherited
         // element row gains its own slot without changing the rendered look.
-        static void MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot );
+        static void MakeSlotExplicit( const MaterialHost& host, size_t slot );
 
         // A slot's identifying colour, read from the SHADER SCHEMA rather than from hardcoded PBR names:
         // the first Color parameter of whatever shader the material runs. For the standard shader that is
@@ -112,7 +134,7 @@ namespace Desert::Editor
         SlotAction DrawSlotRow( const SlotRow& row, std::string& droppedPath );
 
         // The mesh's own name for element @p index ("Body", "Head"), empty when it has none.
-        std::string SlotNameOf( const ECS::StaticMeshComponent& meshComp, size_t index ) const;
+        std::string SlotNameOf( const MaterialHost& host, size_t index ) const;
 
         // The slot preview: the shared rendered-thumbnail PNG when the asset browser has produced one,
         // the material's own colour otherwise, with a colour bar under it — UE's underline that lets you

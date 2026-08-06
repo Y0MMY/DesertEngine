@@ -9,6 +9,7 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include "Helper/MeshDetailsWidget.hpp"
+#include "MaterialsPanelComponent.hpp"
 
 #include <Engine/Animation/Skeleton.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
@@ -199,6 +200,14 @@ namespace Desert::Editor
             ctx.Entity      = &entity;
             ctx.Scene       = scene;
             MeshDetailsWidget::Show( ctx );
+        }
+
+        // Material slots. A skinned mesh carries the same MaterialSlots the renderer maps per submesh, but
+        // the slot editor used to be hard-wired to StaticMeshComponent — so a character's materials could
+        // only be set by editing the scene file. Same widget, same rows, same drag-drop.
+        {
+            static MaterialComponentWidget materials( assetManager.get() );
+            materials.Render( entity, scene );
         }
 
         if ( !mesh || !mesh->IsSkinned() )

@@ -50,9 +50,35 @@ namespace Desert::Editor
         m_UIHelper->Init();
     }
 
+    MaterialComponentWidget::MaterialHost MaterialComponentWidget::HostOf( ECS::Entity& entity )
+    {
+        MaterialHost host;
+        if ( entity.HasComponent<ECS::StaticMeshComponent>() )
+        {
+            auto& c               = entity.GetComponent<ECS::StaticMeshComponent>();
+            host.Slots            = &c.MaterialSlots;
+            host.RuntimeInstances = &c.RuntimeMaterialInstances;
+            host.MeshHandle       = c.MeshHandle;
+            host.Mesh             = c.RuntimeMesh ? static_cast<::Desert::Mesh*>( c.RuntimeMesh.get() )
+                                                  : Runtime::ResourceRegistry::GetMeshService()->Get( c.MeshHandle );
+        }
+        else if ( entity.HasComponent<ECS::SkinnedMeshComponent>() )
+        {
+            auto& c               = entity.GetComponent<ECS::SkinnedMeshComponent>();
+            host.Slots            = &c.MaterialSlots;
+            host.RuntimeInstances = &c.RuntimeMaterialInstances;
+            host.MeshHandle       = c.MeshHandle;
+            host.Mesh             = c.RuntimeMesh ? static_cast<::Desert::Mesh*>( c.RuntimeMesh.get() )
+                                                  : Runtime::ResourceRegistry::GetMeshService()->Get( c.MeshHandle );
+        }
+        return host;
+    }
+
     void MaterialComponentWidget::Render( ECS::Entity& entity, ::Desert::Core::Scene* scene )
     {
-        auto& materialComp = entity.GetComponent<ECS::StaticMeshComponent>();
+        const MaterialHost host = HostOf( entity );
+        if ( !host.Slots )
+            return;
 
         // A Shader Override component with a custom (non-PBR) shader takes this mesh off the PBR
         // path entirely — surface that here so the slots below don't look mysteriously dead.
@@ -69,7 +95,7 @@ namespace Desert::Editor
         // from material-asset SLOTS now (UE-style). The MaterialComponent param channel survives purely as
         // the scripting (Lua setMaterialParam) + legacy-scene compat path; it is no longer editor-authored.
 
-        RenderMaterialProperties( entity, materialComp, overriddenBy );
+        RenderMaterialProperties( entity, host, overriddenBy );
 
         // Quick way back to the PBR path without hunting for the Shader Override section.
         if ( !overriddenBy.empty() )
@@ -83,13 +109,14 @@ namespace Desert::Editor
             }
         }
 
-        // Level of Detail: the triangle count per LOD level + a per-mesh Force LOD override (Auto picks
-        // by camera distance). Only meshes that carry a LOD chain (imported / high-poly) show levels.
-        ::Desert::Mesh* lodMesh = nullptr;
-        if ( materialComp.MeshHandle )
-            lodMesh = Runtime::ResourceRegistry::GetMeshService()->Get( materialComp.MeshHandle );
-        else if ( materialComp.RuntimeMesh )
-            lodMesh = materialComp.RuntimeMesh.get();
+        // Level of Detail + Rendering flags live on the STATIC mesh component only (a skinned mesh has no
+        // LOD chain and no per-submesh visibility mask), so a skinned entity stops here — with its material
+        // slots drawn, which is the part it was missing entirely.
+        if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+            return;
+
+        auto&           materialComp = entity.GetComponent<ECS::StaticMeshComponent>();
+        ::Desert::Mesh* lodMesh      = host.Mesh;
 
         if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_LAYERS_TRIPLE "  Level of Detail", false ) )
         {
@@ -201,21 +228,17 @@ namespace Desert::Editor
         }
     }
 
-    size_t MaterialComponentWidget::GetSubmeshCount( const ECS::StaticMeshComponent& meshComp ) const
+    size_t MaterialComponentWidget::GetSubmeshCount( const MaterialHost& host ) const
     {
         // The ACTUAL submesh count of the mesh being rendered is the truth (the renderer maps
-        // submesh i -> slot min(i, slots-1)): edited RuntimeMesh first, then the built mesh.
-        if ( meshComp.RuntimeMesh && !meshComp.RuntimeMesh->GetSubmeshes().empty() )
-            return meshComp.RuntimeMesh->GetSubmeshes().size();
+        // submesh i -> slot min(i, slots-1)).
+        if ( host.Mesh && !host.Mesh->GetSubmeshes().empty() )
+            return host.Mesh->GetSubmeshes().size();
 
-        if ( meshComp.MeshHandle )
+        // Not built yet — fall back to the asset's imported material list.
+        if ( host.MeshHandle )
         {
-            if ( auto* mesh = Runtime::ResourceRegistry::GetMeshService()->Get( meshComp.MeshHandle ) )
-                if ( !mesh->GetSubmeshes().empty() )
-                    return mesh->GetSubmeshes().size();
-
-            // Not built yet — fall back to the asset's imported material list.
-            if ( auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( meshComp.MeshHandle ) )
+            if ( auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( host.MeshHandle ) )
             {
                 const size_t count = meshAsset->GetMaterialHandles().size();
                 if ( count > 0 )
@@ -308,18 +331,17 @@ namespace Desert::Editor
         return asset->GetMetadata().Handle;
     }
 
-    void MaterialComponentWidget::MakeSlotExplicit( ECS::StaticMeshComponent& meshComp, size_t slot )
+    void MaterialComponentWidget::MakeSlotExplicit( const MaterialHost& host, size_t slot )
     {
+        auto& meshComp = *host.Slots;
         // Extend the slot array up to `slot` by repeating the last handle — exactly the renderer's
         // min(i, slots-1) mapping — so materializing a row never changes the rendered look. With no
         // slots at all the fill is Null (the engine default), same as what those rows showed before.
-        while ( meshComp.MaterialSlots.size() <= slot )
-            meshComp.MaterialSlots.push_back( meshComp.MaterialSlots.empty()
-                                                   ? Common::UUID::Null()
-                                                   : meshComp.MaterialSlots.back() );
+        while ( meshComp.size() <= slot )
+            meshComp.push_back( meshComp.empty() ? Common::UUID::Null() : meshComp.back() );
     }
 
-    void MaterialComponentWidget::AssignMaterialFromPath( ECS::StaticMeshComponent& meshComp, size_t slot,
+    void MaterialComponentWidget::AssignMaterialFromPath( const MaterialHost& host, size_t slot,
                                                           const std::string& assetPath )
     {
         if ( !m_AssetManager )
@@ -336,14 +358,14 @@ namespace Desert::Editor
         if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
             Runtime::ResourceRegistry::GetMaterialService()->Register( asset );
 
-        if ( slot < meshComp.MaterialSlots.size() )
-            meshComp.MaterialSlots[slot] = handle;
+        if ( slot < host.Slots->size() )
+            ( *host.Slots )[slot] = handle;
         else
-            meshComp.MaterialSlots.push_back( handle );
+            host.Slots->push_back( handle );
 
         // Force MeshECSSystem to rebuild the runtime instances (it only rebuilds on slot-count change,
         // so an in-place handle swap needs an explicit reset).
-        meshComp.RuntimeMaterialInstances.clear();
+        host.Invalidate();
     }
 
     bool MaterialComponentWidget::DrawShaderPicker( Assets::SurfaceMaterialAsset& asset )
@@ -629,19 +651,11 @@ namespace Desert::Editor
             Utils::ImGuiUtilities::Tooltip( path.c_str() );
     }
 
-    std::string MaterialComponentWidget::SlotNameOf( const ECS::StaticMeshComponent& meshComp, size_t index ) const
+    std::string MaterialComponentWidget::SlotNameOf( const MaterialHost& host, size_t index ) const
     {
-        // Same mesh resolution as the slot COUNT, so a name and the row it labels can't come from two
-        // different meshes.
-        const ::Desert::Mesh* mesh = nullptr;
-        if ( meshComp.RuntimeMesh && !meshComp.RuntimeMesh->GetSubmeshes().empty() )
-            mesh = meshComp.RuntimeMesh.get();
-        else if ( meshComp.MeshHandle )
-            mesh = Runtime::ResourceRegistry::GetMeshService()->Get( meshComp.MeshHandle );
-
-        if ( !mesh || index >= mesh->GetSubmeshes().size() )
+        if ( !host.Mesh || index >= host.Mesh->GetSubmeshes().size() )
             return {};
-        return mesh->GetSubmeshes()[index].Name;
+        return host.Mesh->GetSubmeshes()[index].Name;
     }
 
     MaterialComponentWidget::SlotAction MaterialComponentWidget::DrawSlotRow( const SlotRow& row,
@@ -769,9 +783,8 @@ namespace Desert::Editor
         return action;
     }
 
-    void MaterialComponentWidget::RenderMaterialProperties( ECS::Entity&              entity,
-                                                            ECS::StaticMeshComponent& meshComp,
-                                                            const std::string&        overriddenByShader )
+    void MaterialComponentWidget::RenderMaterialProperties( ECS::Entity& entity, const MaterialHost& host,
+                                                            const std::string& overriddenByShader )
     {
         Utils::ImGuiUtilities::PushID();
 
@@ -792,8 +805,8 @@ namespace Desert::Editor
 
         // One row per submesh (plus any extra explicit slot) — the count belongs on the header, UE-style,
         // so a collapsed section still says how many elements this mesh has.
-        const size_t      submeshCount = GetSubmeshCount( meshComp );
-        const size_t      rowCount     = std::max( submeshCount, meshComp.MaterialSlots.size() );
+        const size_t      submeshCount = GetSubmeshCount( host );
+        const size_t      rowCount     = std::max( submeshCount, host.Slots->size() );
         const std::string slotDetail   = std::to_string( rowCount ) + ( rowCount == 1 ? " element" : " elements" );
 
         const bool materialsOpen = Utils::ImGuiUtilities::SectionHeader(
@@ -807,11 +820,11 @@ namespace Desert::Editor
             {
                 const std::string path( static_cast<const char*>( p->Data ),
                                         p->DataSize > 0 ? p->DataSize - 1 : 0 );
-                const size_t      count = GetSubmeshCount( meshComp );
-                while ( meshComp.MaterialSlots.size() < count )
-                    meshComp.MaterialSlots.push_back( Common::UUID::Null() );
-                for ( size_t s = 0; s < meshComp.MaterialSlots.size(); ++s )
-                    AssignMaterialFromPath( meshComp, s, path );
+                const size_t      count = GetSubmeshCount( host );
+                while ( host.Slots->size() < count )
+                    host.Slots->push_back( Common::UUID::Null() );
+                for ( size_t s = 0; s < host.Slots->size(); ++s )
+                    AssignMaterialFromPath( host, s, path );
             }
             ImGui::EndDragDropTarget();
         }
@@ -837,15 +850,14 @@ namespace Desert::Editor
             {
                 ImGui::PushID( static_cast<int>( i ) );
 
-                const bool hasOwnSlot =
-                     i < meshComp.MaterialSlots.size() && meshComp.MaterialSlots[i];
+                const bool hasOwnSlot = i < host.Slots->size() && ( *host.Slots )[i];
 
                 // The handle this row EFFECTIVELY renders with (mirrors the renderer's mapping).
                 Assets::AssetHandle handle = Common::UUID::Null();
                 if ( hasOwnSlot )
-                    handle = meshComp.MaterialSlots[i];
-                else if ( !meshComp.MaterialSlots.empty() )
-                    handle = meshComp.MaterialSlots[std::min( i, meshComp.MaterialSlots.size() - 1 )];
+                    handle = ( *host.Slots )[i];
+                else if ( !host.Slots->empty() )
+                    handle = ( *host.Slots )[std::min( i, host.Slots->size() - 1 )];
 
                 const auto asset = ( m_AssetManager && handle )
                                         ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( handle )
@@ -888,7 +900,7 @@ namespace Desert::Editor
                 row.Index      = i;
                 row.Asset      = asset.get();
                 row.Swatch     = swatch;
-                row.SlotName   = SlotNameOf( meshComp, i );
+                row.SlotName   = SlotNameOf( host, i );
                 row.ShaderName = shaderName;
                 row.ParentName = parentName;
                 row.HasOwnSlot = hasOwnSlot;
@@ -901,8 +913,8 @@ namespace Desert::Editor
                 // Drop an existing material asset on the row to assign it (creates the slot if needed).
                 if ( !dropped.empty() )
                 {
-                    MakeSlotExplicit( meshComp, i );
-                    AssignMaterialFromPath( meshComp, i, dropped );
+                    MakeSlotExplicit( host, i );
+                    AssignMaterialFromPath( host, i, dropped );
                 }
 
                 switch ( action )
@@ -920,17 +932,17 @@ namespace Desert::Editor
                     }
                     case SlotAction::MakeExplicit:
                     {
-                        MakeSlotExplicit( meshComp, i );
-                        meshComp.RuntimeMaterialInstances.clear();
+                        MakeSlotExplicit( host, i );
+                        host.Invalidate();
                         break;
                     }
                     case SlotAction::CreateMaterial:
                     {
                         if ( const auto h = CreateAndRegisterMaterial( matBaseName ) )
                         {
-                            MakeSlotExplicit( meshComp, i );
-                            meshComp.MaterialSlots[i] = h;
-                            meshComp.RuntimeMaterialInstances.clear();
+                            MakeSlotExplicit( host, i );
+                            ( *host.Slots )[i] = h;
+                            host.Invalidate();
                         }
                         break;
                     }
@@ -940,8 +952,8 @@ namespace Desert::Editor
                         {
                             if ( const auto h = CreateAndRegisterMaterialInstance( *asset ) )
                             {
-                                meshComp.MaterialSlots[i] = h;
-                                meshComp.RuntimeMaterialInstances.clear();
+                                ( *host.Slots )[i] = h;
+                                host.Invalidate();
                             }
                         }
                         break;
@@ -988,8 +1000,8 @@ namespace Desert::Editor
 
                     if ( hasOwnSlot && ImGui::Selectable( "None (use the engine default)" ) )
                     {
-                        meshComp.MaterialSlots[i] = Common::UUID::Null();
-                        meshComp.RuntimeMaterialInstances.clear();
+                        ( *host.Slots )[i] = Common::UUID::Null();
+                        host.Invalidate();
                     }
 
                     if ( m_AssetManager )
@@ -1003,9 +1015,9 @@ namespace Desert::Editor
                                 continue;
                             if ( ImGui::Selectable( matName.c_str(), candidate == handle ) )
                             {
-                                MakeSlotExplicit( meshComp, i );
-                                meshComp.MaterialSlots[i] = candidate;
-                                meshComp.RuntimeMaterialInstances.clear();
+                                MakeSlotExplicit( host, i );
+                                ( *host.Slots )[i] = candidate;
+                                host.Invalidate();
                             }
                         }
                     }
@@ -1026,7 +1038,7 @@ namespace Desert::Editor
                         // A different shader means a different runtime material CLASS —
                         // rebuild it from the asset and refresh the entity's instances.
                         Runtime::ResourceRegistry::GetMaterialService()->Invalidate( handle );
-                        meshComp.RuntimeMaterialInstances.clear();
+                        host.Invalidate();
                     }
 
                     // ONE schema-driven editor for every shader — the PBR schema lives in
