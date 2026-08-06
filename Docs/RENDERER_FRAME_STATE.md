@@ -59,6 +59,29 @@ materials × renderers, and every bind site grows a slot argument.
 
 A is the right long-term shape; B is the smaller change if the only goal is correctness for 2-3 views.
 
+### B, as landed
+
+* **B1** — `EngineContext::GetActiveRendererSlot()`, claimed by each `SceneRenderer` in creation order and
+  published in `BeginScene`. Nothing read it yet.
+* **B2** — descriptor sets allocated and bound per `(frame x slot)`; the update guard and the fallback
+  initialisation carry the slot too, so no slot can bind a set nobody wrote.
+* **B3** — uniform buffers hold a copy per `(frame x slot)`; `SetData` / `MapMemory` / the descriptor info
+  all resolve the recording slot in one place (`VulkanUniformBuffer::CopyIndex`). This is where two views
+  stop overwriting each other's camera, lights, shadow cascades and IBL.
+
+**Still shared after B3, and why it matters:**
+
+* **Storage buffers** — the per-object material array and the skinned pose. They are written per material
+  group per renderer, so two views still clash there. They are NOT duplicated yet because they are the big
+  ones (bones x objects), and the persistent variant deliberately keeps a single buffer; that needs a
+  decision about memory, not just a mechanical edit. Until then a second live view can show wrong
+  per-object material indices even though its lighting is now correct.
+* **One-shot writes** — a property is cleaned at most once per frame, for whichever slot is recording, so
+  `DirtyLifetime()` now spans `frames x slots`. A view opened LONG after a value was written once still
+  misses it until something touches that property again. The real fix is per-slot dirty tracking.
+
+So the live Details preview should stay off until storage buffers are covered as well.
+
 ## The fix
 
 Move frame-scoped state out of the material and into a **per-renderer descriptor set** bound once per

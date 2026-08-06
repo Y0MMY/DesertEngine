@@ -18,6 +18,13 @@ namespace Desert::ShaderResources::API::Vulkan
         Release();
     }
 
+    uint32_t VulkanUniformBuffer::CopyIndex( uint32_t frameIndex )
+    {
+        const uint32_t slots = EngineContext::kMaxRendererSlots;
+        const uint32_t slot  = EngineContext::GetInstance().GetActiveRendererSlot();
+        return frameIndex * slots + ( slot < slots ? slot : 0 );
+    }
+
     void VulkanUniformBuffer::Release()
     {
         if ( m_Buffers.empty() )
@@ -53,17 +60,23 @@ namespace Desert::ShaderResources::API::Vulkan
     {
         Release();
 
+        // One copy per (frame in flight x renderer slot). The frame dimension keeps a buffer the GPU is
+        // still reading from being overwritten; the SLOT dimension keeps a second view from overwriting
+        // the first one's camera, lights and shadow state inside the same frame — that is the whole point
+        // of this change. A uniform block is a few hundred bytes to a few KB, so the extra copies cost
+        // kilobytes per material.
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
+        const uint32_t copies         = framesInFlight * EngineContext::kMaxRendererSlots;
 
-        m_Buffers.resize( framesInFlight, VK_NULL_HANDLE );
-        m_MemoryAllocs.resize( framesInFlight, nullptr );
-        m_DescriptorInfos.resize( framesInFlight );
-        m_MappedMemories.resize( framesInFlight, nullptr );
+        m_Buffers.resize( copies, VK_NULL_HANDLE );
+        m_MemoryAllocs.resize( copies, nullptr );
+        m_DescriptorInfos.resize( copies );
+        m_MappedMemories.resize( copies, nullptr );
 
         auto vulkanContext = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
                                       EngineContext::GetInstance().GetRendererContext() );
 
-        for ( uint32_t i = 0; i < framesInFlight; ++i )
+        for ( uint32_t i = 0; i < copies; ++i )
         {
             VkBufferCreateInfo bufferInfo = {};
             bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -71,8 +84,9 @@ namespace Desert::ShaderResources::API::Vulkan
             bufferInfo.size               = m_UniformModel.Size;
 
             const auto allocatedBuffer = vulkanContext->GetVulkanAllocator()->RT_AllocateBuffer(
-                 std::format( "{}-UniformBuffer-Frame{}", m_UniformModel.Name, i ), bufferInfo,
-                 VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffers[i] );
+                 std::format( "{}-UniformBuffer-Frame{}-Slot{}", m_UniformModel.Name,
+                              i / EngineContext::kMaxRendererSlots, i % EngineContext::kMaxRendererSlots ),
+                 bufferInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, m_Buffers[i] );
 
             if ( !allocatedBuffer.IsSuccess() )
             {
@@ -94,36 +108,36 @@ namespace Desert::ShaderResources::API::Vulkan
 
     void VulkanUniformBuffer::SetData( const void* data, uint32_t size, uint32_t offset )
     {
-        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint32_t index = CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
 
-        if ( frameIndex >= m_MappedMemories.size() || !m_MappedMemories[frameIndex] )
+        if ( index >= m_MappedMemories.size() || !m_MappedMemories[index] )
         {
             return;
         }
 
-        memcpy( m_MappedMemories[frameIndex] + offset, data, size );
+        memcpy( m_MappedMemories[index] + offset, data, size );
     }
 
     uint8_t* VulkanUniformBuffer::MapMemory()
     {
-        const uint32_t frameIndex = EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint32_t index = CopyIndex( EngineContext::GetInstance().GetCurrentFrameIndex() );
 
-        if ( frameIndex >= m_MappedMemories.size() )
+        if ( index >= m_MappedMemories.size() )
         {
             return nullptr;
         }
 
-        if ( m_MappedMemories[frameIndex] )
+        if ( m_MappedMemories[index] )
         {
-            return m_MappedMemories[frameIndex];
+            return m_MappedMemories[index];
         }
 
-        m_MappedMemories[frameIndex] = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
-                                                EngineContext::GetInstance().GetRendererContext() )
-                                            ->GetVulkanAllocator()
-                                            ->MapMemory( m_MemoryAllocs[frameIndex] );
+        m_MappedMemories[index] = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
+                                           EngineContext::GetInstance().GetRendererContext() )
+                                       ->GetVulkanAllocator()
+                                       ->MapMemory( m_MemoryAllocs[index] );
 
-        return m_MappedMemories[frameIndex];
+        return m_MappedMemories[index];
     }
 
     void VulkanUniformBuffer::UnmapMemory()

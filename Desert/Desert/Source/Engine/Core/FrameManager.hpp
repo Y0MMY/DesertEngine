@@ -5,6 +5,12 @@
 
 namespace Desert::Engine
 {
+    // How many renderers (views) can record independently. Per-frame GPU resources are stored per
+    // (frame in flight x slot), so this is the second dimension of every such array. It lives here, next
+    // to the frame count, because the two are always used together — EngineContext::kMaxRendererSlots is
+    // the same number, exposed where callers already look for the frame index.
+    inline constexpr uint32_t kMaxRendererSlots = 4;
+
     /**
      * @brief Manages frame-level synchronization and indexing.
      */

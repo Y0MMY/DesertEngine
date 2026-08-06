@@ -58,7 +58,7 @@ namespace Desert
         // Set by SceneRenderer::BeginScene and read wherever a per-frame resource is written or bound. It
         // deliberately mirrors the frame index: same lifetime, same "ambient state of the recording"
         // shape, so the two are always looked up the same way.
-        static constexpr uint32_t kMaxRendererSlots = 4;
+        static constexpr uint32_t kMaxRendererSlots = Engine::kMaxRendererSlots;
 
         [[nodiscard]] uint32_t GetActiveRendererSlot() const
         {

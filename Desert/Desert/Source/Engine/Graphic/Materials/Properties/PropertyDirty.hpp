@@ -21,10 +21,20 @@ namespace Desert::Graphic
 
         // Number of frames a property must remain dirty so every per-frame-in-flight resource is
         // updated once. Falls back to a safe value before the swap chain (and FrameManager) exist.
+        //
+        // Per-frame resources are now also per RENDERER SLOT (a second view records its own copies —
+        // Docs/RENDERER_FRAME_STATE.md), and a property is cleaned at most once per frame, for whichever
+        // slot happens to be recording. So the window has to cover frames x slots, or the second view
+        // would keep the fallback buffer for a value that was written once.
+        //
+        // Residual, deliberately stated: a view opened LONG after a one-shot write still misses it until
+        // something touches that property again. Closing that needs per-slot dirty tracking, not a longer
+        // window — see the note in Docs/RENDERER_FRAME_STATE.md.
         inline uint32_t DirtyLifetime()
         {
             const uint32_t framesInFlight = Engine::FrameManager::GetInstance().GetMaxFramesInFlight();
-            return framesInFlight > 0 ? framesInFlight : 3u;
+            const uint32_t frames         = framesInFlight > 0 ? framesInFlight : 3u;
+            return frames * Engine::kMaxRendererSlots;
         }
 
         // Returns true at most once per absolute frame for a given tracker. Updates the tracker to the
