@@ -23,6 +23,10 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
+    // The preview is a THUMBNAIL: one fixed offscreen size, big enough that the 64px box in the 3D Model
+    // row is not blurry, small enough that it costs nothing.
+    static constexpr uint32_t kPreviewRenderSize = 256;
+
     namespace
     {
         const char* GetPrimaryComponentName( const ECS::Entity& entity )
@@ -65,13 +69,95 @@ namespace Desert::Editor
         }
     } // namespace
 
+    namespace
+    {
+        // Identity of what the preview shows: entity + mesh/primitive + material slots. A change re-points
+        // (and re-frames) the preview; editing a material's own values does NOT change the key, because the
+        // preview renders the live material instance and updates on its own.
+        uint64_t PreviewKeyOf( const ECS::Entity& entity, uint64_t entityId )
+        {
+            if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
+                return 0;
+
+            const auto& smc     = entity.GetComponent<ECS::StaticMeshComponent>();
+            const bool  hasMesh = static_cast<uint64_t>( smc.MeshHandle ) != 0;
+            if ( !hasMesh && !smc.Primitive )
+                return 0;
+
+            uint64_t   key = entityId | 1ull; // never 0 (0 means "nothing to preview")
+            const auto mix = [&key]( uint64_t v )
+            {
+                key = key * 1099511628211ull ^ v; // FNV-style; only equality matters here
+            };
+            mix( static_cast<uint64_t>( smc.MeshHandle ) );
+            mix( smc.Primitive ? static_cast<uint64_t>( *smc.Primitive ) + 1 : 0 );
+            for ( const auto& slot : smc.MaterialSlots )
+                mix( static_cast<uint64_t>( slot ) );
+            return key ? key : 1ull;
+        }
+    } // namespace
+
     void ScenePropertiesPanel::OnPreUpdate()
     {
-        // Nothing GPU-side here any more. Details used to drive its own SceneRenderer for a live preview;
-        // the engine writes per-frame scene state (camera, lights, shadow cascades) into the SHARED parent
-        // material of the shader, so a second renderer stamped over what the viewport had just written and
-        // the viewport lost its shadows. The 3D Model row shows the asset browser's cached thumbnail
-        // instead — see StaticMeshComponentWidget::DrawMeshThumbnail.
+        // Everything GPU-side for the preview happens HERE: recording a scene render from inside
+        // OnUIRender() destroys descriptor pools whose sets are bound to the frame's command buffer.
+        if ( !m_SowPanel || !m_Scene )
+            return;
+
+        const auto selectedOpt = Core::SelectionManager::GetSelected();
+        if ( !selectedOpt )
+        {
+            m_PreviewKey = 0;
+            m_Preview.Clear();
+            return;
+        }
+
+        const auto& entityOpt = m_Scene->FindEntityByID( *selectedOpt );
+        if ( !entityOpt )
+        {
+            m_PreviewKey = 0;
+            m_Preview.Clear();
+            return;
+        }
+
+        const auto&    entity = entityOpt->get();
+        const uint64_t key    = PreviewKeyOf( entity, static_cast<uint64_t>( *selectedOpt ) );
+        if ( key != m_PreviewKey )
+        {
+            m_PreviewKey = key;
+            if ( key == 0 )
+            {
+                m_Preview.Clear();
+            }
+            else
+            {
+                const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
+                if ( static_cast<uint64_t>( smc.MeshHandle ) != 0 )
+                {
+                    m_Preview.SetMesh( smc.MeshHandle, smc.MaterialSlots );
+                }
+                else
+                {
+                    // A primitive: preview the shape itself with its own material, not a stand-in sphere.
+                    const auto shape = *smc.Primitive == Geometry::PrimitiveType::Plane
+                                            ? PreviewViewport::Shape::Plane
+                                            : ( *smc.Primitive == Geometry::PrimitiveType::Sphere
+                                                     ? PreviewViewport::Shape::Sphere
+                                                     : PreviewViewport::Shape::Cube );
+                    m_Preview.SetMaterial( smc.MaterialSlots.empty()
+                                                ? Assets::AssetHandle( static_cast<uint64_t>( 0 ) )
+                                                : smc.MaterialSlots.front(),
+                                           shape );
+                }
+            }
+        }
+
+        // Only pay for the render while a component actually DREW the thumbnail last UI frame. The flag is
+        // consumed here and must be re-affirmed every frame, so a collapsed component, a hidden dock tab or
+        // a closed panel all stop the GPU work by simply not drawing it.
+        if ( m_PreviewActive )
+            m_Preview.Update( kPreviewRenderSize, kPreviewRenderSize );
+        m_PreviewActive = false;
     }
 
     void ScenePropertiesPanel::DrawSearchBox()
@@ -288,7 +374,7 @@ namespace Desert::Editor
             m_ThumbnailUI = std::make_unique<UI::UIHelper>();
             m_ThumbnailUI->Init();
         }
-        m_ComponentEditor->SetThumbnailUI( m_ThumbnailUI.get() );
+        m_ComponentEditor->SetPreview( &m_Preview, m_ThumbnailUI.get(), &m_PreviewActive );
         m_ComponentEditor->Render( const_cast<ECS::Entity&>( selectedEntity ), m_Scene.get(),
                                    m_FieldSearch.c_str() );
         ImGui::EndChild();

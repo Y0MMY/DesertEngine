@@ -144,30 +144,37 @@ namespace Desert::Editor
     void StaticMeshComponentWidget::DrawMeshThumbnail( const ECS::StaticMeshComponent& staticMesh,
                                                        float                           size ) const
     {
-        // A CACHED thumbnail, never a live second render. The engine's per-frame scene state (camera,
-        // lights, shadow cascades) is written into the SHARED parent material of the shader — one object
-        // for every PBR mesh — so a second SceneRenderer running each frame overwrites what the viewport
-        // just wrote, and the viewport lost its shadows. Until that state is per-instance, Details reads
-        // the PNG the asset browser already renders and nothing else.
-        // The widget is built fresh every frame (the registration constructs it per draw), so the decoded
-        // texture cache has to outlive it or the PNG would be re-decoded and re-uploaded 60 times a second.
+        // LIVE first: the panel lends one preview renderer, and it shows what this entity actually renders
+        // — orbitable, and it follows a material edit while you drag the slider. It is safe again because
+        // per-frame GPU state is stored per (frame x renderer slot) now, so a second renderer no longer
+        // overwrites the viewport's camera, lights and shadows (Docs/RENDERER_FRAME_STATE.md).
+        if ( m_Ctx && m_Ctx->DrawPreview( ImVec2( size, size ) ) )
+        {
+            Utils::ImGuiUtilities::Tooltip( "Live preview — drag to orbit, wheel to zoom" );
+            ImGui::SameLine();
+            return;
+        }
+
+        // No renderer lent (a panel that does not own one): fall back to the PNG the asset browser already
+        // rendered. THE MESH first — this row is the mesh slot, and showing a material sphere where the
+        // model belongs answers a question nobody asked. The material is only the last resort, for an
+        // entity whose mesh has no thumbnail yet (a primitive).
         static ThumbnailCache s_Thumbnails;
 
         std::shared_ptr<Graphic::Image2D> thumb;
         if ( m_AssetManager )
         {
-            // The material says more about a cube than the cube does; fall back to the mesh asset.
             std::string path;
-            if ( !staticMesh.MaterialSlots.empty() && staticMesh.MaterialSlots.front() )
+            if ( staticMesh.MeshHandle )
+            {
+                if ( auto mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle ) )
+                    path = mesh->GetMetadata().Filepath.generic_string();
+            }
+            if ( path.empty() && !staticMesh.MaterialSlots.empty() && staticMesh.MaterialSlots.front() )
             {
                 if ( auto mat = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>(
                           staticMesh.MaterialSlots.front() ) )
                     path = mat->GetMetadata().Filepath.generic_string();
-            }
-            if ( path.empty() && staticMesh.MeshHandle )
-            {
-                if ( auto mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle ) )
-                    path = mesh->GetMetadata().Filepath.generic_string();
             }
 
             if ( !path.empty() )

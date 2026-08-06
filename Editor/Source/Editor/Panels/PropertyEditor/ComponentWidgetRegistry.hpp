@@ -30,12 +30,28 @@ namespace Desert::Editor::UI
 
 namespace Desert::Editor
 {
+    class PreviewViewport;
+
     // Runtime services handed to a component's Draw callback (built once per frame by ComponentEditor).
     struct ComponentEditContext
     {
         std::weak_ptr<Assets::AssetManager> AssetManager;
         const Animation::AnimationLibrary*  AnimationLibrary = nullptr;
         UI::UIHelper*                       UIHelper         = nullptr;
+
+        // The Details panel's live preview renderer, lent to whichever component wants a thumbnail of what
+        // the entity renders (the 3D Model row uses it). A component only DRAWS it — the panel owns it and
+        // records its offscreen render in OnPreUpdate, because rendering from inside the ImGui pass
+        // destroys descriptor pools bound to the recording command buffer. Setting PreviewUsed tells the
+        // panel to pay for next frame's render; leaving it alone stops the GPU work.
+        PreviewViewport* Preview     = nullptr;
+        UI::UIHelper*    PreviewUI   = nullptr;
+        bool*            PreviewUsed = nullptr;
+
+        // Draws the shared preview at @p size and marks it as used. Returns false when the panel did not
+        // lend one, so a component never has to know where it came from — the caller falls back to a
+        // cached thumbnail.
+        bool DrawPreview( const ImVec2& size ) const;
 
         // Details search box: while non-empty, reflected components draw only the fields that match.
         // A hand-written widget cannot filter itself — the panel decides whether to draw it at all.

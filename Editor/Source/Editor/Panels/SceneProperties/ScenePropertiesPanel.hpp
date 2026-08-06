@@ -6,6 +6,7 @@
 
 #include "ComponentEditor.hpp"
 
+#include <Editor/Widgets/PreviewViewport.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 
@@ -50,9 +51,17 @@ namespace Desert::Editor
         // (one per scene view) and they must not share one editor's state.
         std::unique_ptr<ComponentEditor> m_ComponentEditor;
 
-        // --- Thumbnails ----------------------------------------------------------------------------
-        // Only a texture-id cache: component rows show the asset browser's cached PNGs. Details owns NO
-        // renderer — see OnPreUpdate for why a second one broke the viewport's shadows.
-        std::unique_ptr<UI::UIHelper> m_ThumbnailUI;
+        // --- Asset preview -------------------------------------------------------------------------
+        // ONE renderer for the whole panel (a SceneRenderer is not cheap), lent to whichever component
+        // wants a live thumbnail of what the entity renders — today the 3D Model row. The panel keeps the
+        // frame ordering (Update in OnPreUpdate); a component only blits the last image.
+        //
+        // A second live renderer used to corrupt the viewport, because per-frame scene state lived in the
+        // shared material. It no longer does: every such resource is stored per (frame x renderer slot),
+        // and this panel's renderer holds its own slot (Docs/RENDERER_FRAME_STATE.md, shape B).
+        PreviewViewport               m_Preview;
+        std::unique_ptr<UI::UIHelper> m_ThumbnailUI;           // texture ids for the preview image + cached PNGs
+        uint64_t                      m_PreviewKey    = 0;     // what it shows; a change re-points and re-frames
+        bool                          m_PreviewActive = false; // a component drew it during the last UI frame
     };
 } // namespace Desert::Editor

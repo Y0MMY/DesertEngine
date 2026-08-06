@@ -131,6 +131,9 @@ namespace Desert::Editor
         ctx.AssetManager     = m_AssetManager;
         ctx.AnimationLibrary = m_AnimationLibrary;
         ctx.UIHelper         = m_ThumbnailUI;
+        ctx.Preview          = m_Preview;
+        ctx.PreviewUI        = m_ThumbnailUI;
+        ctx.PreviewUsed      = m_PreviewUsed;
         return ctx;
     }
 

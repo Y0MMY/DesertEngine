@@ -202,33 +202,6 @@ namespace Desert::Graphic
         // EngineContext::GetActiveRendererSlot. Set FIRST, before anything writes a per-frame resource.
         EngineContext::GetInstance().SetActiveRendererSlot( m_RendererSlot );
 
-        // Per-frame scene state — camera, lights, shadow cascades, IBL — is written into the parent
-        // Material of the SHADER (MaterialPBRBase::Update*), and that parent is ONE object shared by every
-        // mesh drawn with it. Its uniform buffers are a single mapped allocation each, written at offset 0
-        // and REFERENCED (not copied) by the descriptor sets the frame's draws use. So two renderers in one
-        // frame overwrite each other's state, possibly while the other's frame is still in flight — that is
-        // how the Details preview silently took the viewport's shadows away.
-        //
-        // Multi-scene editing runs a renderer per view and therefore lives with this today, so refusing the
-        // second one would break a working feature. Instead it is stated ONCE, loudly, and the real fix —
-        // moving frame state into a per-renderer descriptor set — is tracked in Docs/RENDERER_FRAME_STATE.md.
-        {
-            static const SceneRenderer* s_FrameOwner = nullptr;
-            static uint64_t             s_OwnedFrame = 0;
-            static bool                 s_Warned     = false;
-
-            const uint64_t frame = Renderer::GetInstance().GetCurrentFrameIndex();
-            if ( s_FrameOwner && s_FrameOwner != this && s_OwnedFrame == frame && !s_Warned )
-            {
-                s_Warned = true;
-                LOG_WARN( "[SceneRenderer] More than one renderer is drawing the same frame. Per-frame "
-                          "state (camera / lights / shadows / IBL) lives in the SHARED material, so these "
-                          "views overwrite each other. See Docs/RENDERER_FRAME_STATE.md." );
-            }
-            s_FrameOwner = this;
-            s_OwnedFrame = frame;
-        }
-
         const auto& mainCamera   = scene.GetMainCamera().lock();
         m_SceneInfo.ActiveCamera = mainCamera.get();
 
