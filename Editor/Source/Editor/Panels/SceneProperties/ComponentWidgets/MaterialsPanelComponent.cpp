@@ -6,6 +6,7 @@
 #include <Common/Utilities/FileSystem.hpp>
 #include <Common/Core/Constants.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
@@ -90,7 +91,7 @@ namespace Desert::Editor
         else if ( materialComp.RuntimeMesh )
             lodMesh = materialComp.RuntimeMesh.get();
 
-        if ( ImGui::CollapsingHeader( "Level of Detail" ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_LAYERS_TRIPLE "  Level of Detail", false ) )
         {
             size_t levels = 0;
             if ( lodMesh )
@@ -159,7 +160,7 @@ namespace Desert::Editor
         // Rendering: persistent outline + per-submesh visibility. Both write component fields the
         // renderer honours (MeshECSSystem ORs OutlineDraw into the outline flag / the HiddenSubmeshes
         // bitmask), so they take effect live — the LOD-style inline-control pattern applied to the mesh.
-        if ( ImGui::CollapsingHeader( "Rendering" ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_EYE "  Rendering", false ) )
         {
             Utils::ImGuiUtilities::ResetPropertyRows();
 
@@ -558,99 +559,212 @@ namespace Desert::Editor
         return swatch;
     }
 
-    void MaterialComponentWidget::DrawSwatchInHeader( const SlotSwatch& swatch )
+    void MaterialComponentWidget::DrawSlotPreview( const Assets::SurfaceMaterialAsset* asset,
+                                                   const SlotSwatch& swatch, float size )
     {
-        if ( !swatch.HasColor )
-            return;
-
-        // Painted straight into the header bar's rect: an interactive item here would fight the tree
-        // node for the click and the material drag-drop target. Just the colour — parameter VALUES belong
-        // in the editor below, not stamped onto a header where they cannot be changed.
-        const ImVec2 mn = ImGui::GetItemRectMin();
-        const ImVec2 mx = ImGui::GetItemRectMax();
-        const float  h  = std::max( ( mx.y - mn.y ) - 8.0f, 6.0f );
-        const float  y  = mn.y + ( ( mx.y - mn.y ) - h ) * 0.5f;
-        if ( ( mx.x - mn.x ) < h + 80.0f ) // no room next to the label -> skip
-            return;
-
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float x  = mx.x - 6.0f - h;
-        const ImU32 col =
-             ImGui::ColorConvertFloat4ToU32( ImVec4( swatch.Color.x, swatch.Color.y, swatch.Color.z, 1.0f ) );
-        dl->AddRectFilled( ImVec2( x, y ), ImVec2( x + h, y + h ), col, 2.0f );
-        dl->AddRect( ImVec2( x, y ), ImVec2( x + h, y + h ), IM_COL32( 0, 0, 0, 120 ), 2.0f );
-    }
-
-    void MaterialComponentWidget::DrawSlotIdentityCard( const Assets::SurfaceMaterialAsset& asset,
-                                                        const SlotSwatch&                   swatch,
-                                                        const Assets::MaterialData*         parentData,
-                                                        const std::string&                  parentName )
-    {
-        // UE's material slot: a framed thumbnail and the asset's identity beside it. Deliberately NO
-        // parameter readouts — metallic / roughness are editable fields a few rows below, and a number
-        // you cannot change is noise on a row whose whole job is to let you RECOGNISE the slot.
-        constexpr float   kThumb = 64.0f;
-        const std::string path   = asset.GetMetadata().Filepath.generic_string();
-        const std::string name   = std::filesystem::path( path ).stem().string();
-
         // The rendered preview comes from the SHARED on-disk thumbnail cache the asset browser fills; a
         // material it has never shown falls back to the material's own colour (Details does no offscreen
         // rendering of its own — that stays one renderer per panel).
         std::shared_ptr<Graphic::Image2D> thumb;
-        std::error_code                   ec;
-        const std::string                 png       = ThumbnailCache::DiskPath( path );
-        bool                              haveFresh = std::filesystem::exists( png, ec );
-        if ( haveFresh )
+        std::string                       path;
+        if ( asset )
         {
-            // Edited material -> the cached PNG (and its decoded texture) are a lie. Same 3s margin the
-            // asset browser uses: coarse filesystem timestamps otherwise report the source as newer right
-            // after the PNG was written.
-            const auto pngTime = std::filesystem::last_write_time( png, ec );
-            const auto srcTime = std::filesystem::last_write_time( path, ec );
-            if ( !ec && ( srcTime - pngTime ) > std::chrono::seconds( 3 ) )
-            {
-                haveFresh = false;
-                m_Thumbnails.Invalidate( png );
-            }
-        }
-        if ( haveFresh )
-            thumb = m_Thumbnails.Get( png );
+            path = asset->GetMetadata().Filepath.generic_string();
 
-        // Drawn by hand so the rendered thumbnail and the colour fallback share one frame.
+            std::error_code   ec;
+            const std::string png       = ThumbnailCache::DiskPath( path );
+            bool              haveFresh = std::filesystem::exists( png, ec );
+            if ( haveFresh )
+            {
+                // Edited material -> the cached PNG (and its decoded texture) are a lie. Same 3s margin the
+                // asset browser uses: coarse filesystem timestamps otherwise report the source as newer
+                // right after the PNG was written.
+                const auto pngTime = std::filesystem::last_write_time( png, ec );
+                const auto srcTime = std::filesystem::last_write_time( path, ec );
+                if ( !ec && ( srcTime - pngTime ) > std::chrono::seconds( 3 ) )
+                {
+                    haveFresh = false;
+                    m_Thumbnails.Invalidate( png );
+                }
+            }
+            if ( haveFresh )
+                thumb = m_Thumbnails.Get( png );
+        }
+
+        // An InvisibleButton rather than a Dummy: the preview is the row's drag-drop target, and a drop
+        // target needs a real item to hang on.
         const ImVec2 at = ImGui::GetCursorScreenPos();
-        const ImVec2 br( at.x + kThumb, at.y + kThumb );
+        ImGui::InvisibleButton( "##preview", ImVec2( size, size ) );
+
+        const ImVec2 br( at.x + size, at.y + size );
         ImDrawList*  dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled( at, br, IM_COL32( 28, 30, 34, 255 ), 3.0f );
+        dl->AddRectFilled( at, br, IM_COL32( 15, 15, 15, 255 ), 2.0f );
 
         if ( thumb && m_UIHelper )
         {
             if ( const void* tex = m_UIHelper->GetTextureID( thumb ) )
                 dl->AddImageRounded( reinterpret_cast<ImTextureID>( const_cast<void*>( tex ) ),
                                      ImVec2( at.x + 1.0f, at.y + 1.0f ), ImVec2( br.x - 1.0f, br.y - 1.0f ),
-                                     ImVec2( 0, 0 ), ImVec2( 1, 1 ), IM_COL32_WHITE, 3.0f );
+                                     ImVec2( 0, 0 ), ImVec2( 1, 1 ), IM_COL32_WHITE, 2.0f );
         }
         else if ( swatch.HasColor )
         {
             dl->AddRectFilled(
                  ImVec2( at.x + 1.0f, at.y + 1.0f ), ImVec2( br.x - 1.0f, br.y - 1.0f ),
                  ImGui::ColorConvertFloat4ToU32( ImVec4( swatch.Color.x, swatch.Color.y, swatch.Color.z, 1.0f ) ),
-                 3.0f );
+                 2.0f );
         }
-        dl->AddRect( at, br, IM_COL32( 70, 74, 84, 255 ), 3.0f );
-        ImGui::Dummy( ImVec2( kThumb, kThumb ) );
-        Utils::ImGuiUtilities::Tooltip( path.c_str() );
+        dl->AddRect( at, br, ImGui::GetColorU32( ImGuiCol_Border ), 2.0f );
+
+        // UE underlines a slot's preview with a colour bar. Ours carries the material's identity colour,
+        // so two slots with the same (or no) thumbnail are still telling apart.
+        if ( swatch.HasColor )
+        {
+            const ImU32 col =
+                 ImGui::ColorConvertFloat4ToU32( ImVec4( swatch.Color.x, swatch.Color.y, swatch.Color.z, 1.0f ) );
+            dl->AddRectFilled( ImVec2( at.x + 1.0f, br.y - 3.0f ), ImVec2( br.x - 1.0f, br.y ), col );
+        }
+
+        if ( !path.empty() )
+            Utils::ImGuiUtilities::Tooltip( path.c_str() );
+    }
+
+    std::string MaterialComponentWidget::SlotNameOf( const ECS::StaticMeshComponent& meshComp, size_t index ) const
+    {
+        // Same mesh resolution as the slot COUNT, so a name and the row it labels can't come from two
+        // different meshes.
+        const ::Desert::Mesh* mesh = nullptr;
+        if ( meshComp.RuntimeMesh && !meshComp.RuntimeMesh->GetSubmeshes().empty() )
+            mesh = meshComp.RuntimeMesh.get();
+        else if ( meshComp.MeshHandle )
+            mesh = Runtime::ResourceRegistry::GetMeshService()->Get( meshComp.MeshHandle );
+
+        if ( !mesh || index >= mesh->GetSubmeshes().size() )
+            return {};
+        return mesh->GetSubmeshes()[index].Name;
+    }
+
+    MaterialComponentWidget::SlotAction MaterialComponentWidget::DrawSlotRow( const SlotRow& row,
+                                                                              std::string&   droppedPath )
+    {
+        const ImGuiStyle& style      = ImGui::GetStyle();
+        constexpr float   kPreview   = 48.0f;
+        const auto*       asset      = row.Asset;
+        const bool        hasOwnSlot = row.HasOwnSlot;
+
+        // The row is as tall as its content — the preview beside a two-line stack (asset field + action
+        // strip) — so the grid's rules frame it instead of cutting through it.
+        const float stack = ImGui::GetFrameHeight() * 2.0f + style.ItemSpacing.y;
+        const float rowH  = std::max( kPreview, stack ) + style.ItemSpacing.y;
+
+        Utils::ImGuiUtilities::PropertyRowBackground( rowH );
+
+        ImGui::Columns( 2 );
+        ImGui::SetColumnWidth( 0, Utils::ImGuiUtilities::PropertyLabelWidth() );
+        ImGui::AlignTextToFramePadding();
+
+        const std::string label = "Element " + std::to_string( row.Index );
+        ImGui::TextUnformatted( label.c_str() );
+        // The mesh's own name for the element, beside the index — UE's "Slot" field. The INDEX is what
+        // the renderer maps materials by, so it stays the identity and the name is the hint.
+        if ( !row.SlotName.empty() )
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled( "%s", row.SlotName.c_str() );
+        }
+        // An element without its own slot still renders SOMETHING — say where that look comes from
+        // rather than leaving the row looking broken.
+        if ( !hasOwnSlot )
+            ImGui::TextDisabled( "%s", asset ? "inherited" : "default" );
+        else if ( row.IsInstance && !row.ParentName.empty() )
+            ImGui::TextDisabled( "instance of %s", row.ParentName.c_str() );
+
+        ImGui::NextColumn();
+
+        SlotAction action = SlotAction::None;
+
+        const auto acceptDrop = [&droppedPath]()
+        {
+            if ( !ImGui::BeginDragDropTarget() )
+                return;
+            if ( const ImGuiPayload* p =
+                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
+            {
+                droppedPath.assign( static_cast<const char*>( p->Data ), p->DataSize > 0 ? p->DataSize - 1 : 0 );
+            }
+            ImGui::EndDragDropTarget();
+        };
+
+        DrawSlotPreview( asset, row.Swatch, kPreview );
+        acceptDrop();
 
         ImGui::SameLine();
         ImGui::BeginGroup();
-        ImGui::TextUnformatted( name.c_str() );
-        // An instance renders with its parent chain's shader — its own ShaderName is empty and would read
-        // as the default here.
-        ImGui::TextDisabled( "%s", parentData ? parentData->EffectiveShaderName().c_str()
-                                              : asset.Data().EffectiveShaderName().c_str() );
-        if ( !parentName.empty() )
-            ImGui::TextDisabled( "Instance of: %s", parentName.c_str() );
+
+        const std::string name = asset ? std::filesystem::path( asset->GetMetadata().Filepath ).stem().string()
+                                       : std::string( "None" );
+        if ( Utils::ImGuiUtilities::AssetSlot( "slot", name.c_str(), asset == nullptr ) )
+            action = SlotAction::Pick;
+        acceptDrop();
+
+        // A strip of flat icon actions, UE's row of small buttons under the asset field. Text buttons
+        // here would each be a full-width bar and the slot list would stop reading as a list.
+        const auto iconButton = []( const char* icon, const char* tip, bool active )
+        {
+            ImGui::PushStyleColor( ImGuiCol_Button, ImVec4( 0.0f, 0.0f, 0.0f, 0.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_Text, active ? ThemeManager::GetSelectedColor()
+                                                         : ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
+            const bool clicked = ImGui::Button( icon );
+            ImGui::PopStyleColor( 2 );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%s", tip );
+            ImGui::SameLine( 0.0f, 2.0f );
+            return clicked;
+        };
+
+        if ( asset && hasOwnSlot )
+        {
+            if ( iconButton( ICON_MDI_PENCIL, "Edit this material's parameters", row.Editing ) )
+                action = SlotAction::ToggleEdit;
+        }
+        if ( !hasOwnSlot && asset )
+        {
+            if ( iconButton( ICON_MDI_LINK_VARIANT,
+                             "Give this element its own slot (same material, look unchanged)", false ) )
+                action = SlotAction::MakeExplicit;
+        }
+        if ( !asset )
+        {
+            if ( iconButton( ICON_MDI_PLUS_BOX, "Create a new material for this element", false ) )
+                action = SlotAction::CreateMaterial;
+        }
+        if ( asset && hasOwnSlot && !row.IsInstance )
+        {
+            if ( iconButton( ICON_MDI_CONTENT_DUPLICATE,
+                             "New child instance — override parameters without touching the parent", false ) )
+                action = SlotAction::CreateInstance;
+        }
+        if ( asset && hasOwnSlot && row.IsInstance )
+        {
+            if ( iconButton( ICON_MDI_BACKUP_RESTORE, "Drop every override — back to the parent's values",
+                             false ) )
+                action = SlotAction::ResetOverrides;
+        }
+        if ( asset && hasOwnSlot )
+        {
+            if ( iconButton( ICON_MDI_CONTENT_SAVE, "Save this material asset", false ) )
+                action = SlotAction::Save;
+        }
+
+        // Always submitted, so the trailing SameLine of the strip never dangles into the group's end.
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled( "%s", row.ShaderName.c_str() );
+
         ImGui::EndGroup();
-        ImGui::Spacing();
+
+        Utils::ImGuiUtilities::PropertyColumnRule();
+        ImGui::Columns( 1 );
+        return action;
     }
 
     void MaterialComponentWidget::RenderMaterialProperties( ECS::Entity&              entity,
@@ -658,7 +772,6 @@ namespace Desert::Editor
                                                             const std::string&        overriddenByShader )
     {
         Utils::ImGuiUtilities::PushID();
-        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
         // When a runtime override (script) bypasses the slots: say so loudly and
         // start the section collapsed. Slots are the only AUTHORED source of truth.
@@ -675,11 +788,14 @@ namespace Desert::Editor
         // Script writes go straight to the runtime instance; pre-build/legacy params are consumed
         // ONCE by MeshECSSystem at instance build. Slots are the single authored source of truth.
 
-        ImGuiTreeNodeFlags materialsFlags = ImGuiTreeNodeFlags_Framed;
-        if ( overriddenByShader.empty() )
-            materialsFlags |= ImGuiTreeNodeFlags_DefaultOpen;
+        // One row per submesh (plus any extra explicit slot) — the count belongs on the header, UE-style,
+        // so a collapsed section still says how many elements this mesh has.
+        const size_t      submeshCount = GetSubmeshCount( meshComp );
+        const size_t      rowCount     = std::max( submeshCount, meshComp.MaterialSlots.size() );
+        const std::string slotDetail   = std::to_string( rowCount ) + ( rowCount == 1 ? " element" : " elements" );
 
-        const bool materialsOpen = ImGui::TreeNodeEx( "Materials", materialsFlags );
+        const bool materialsOpen = Utils::ImGuiUtilities::SectionHeader(
+             ICON_MDI_PALETTE "  Material Slots", overriddenByShader.empty(), slotDetail.c_str() );
 
         // Drop a .mat onto the Materials header (works open or collapsed): create slots up to the submesh
         // count if there are none, then assign the dropped material to EVERY slot.
@@ -713,8 +829,7 @@ namespace Desert::Editor
             // (submesh i -> slot min(i, slots-1), or the engine default when there are no slots) and
             // is shown greyed with a "Make Explicit" affordance — no slots are created behind the
             // user's back, and making a row explicit never changes the rendered look.
-            const size_t submeshCount = GetSubmeshCount( meshComp );
-            const size_t rowCount     = std::max( submeshCount, meshComp.MaterialSlots.size() );
+            Utils::ImGuiUtilities::ResetPropertyRows();
 
             for ( size_t i = 0; i < rowCount; ++i )
             {
@@ -724,15 +839,11 @@ namespace Desert::Editor
                      i < meshComp.MaterialSlots.size() && meshComp.MaterialSlots[i];
 
                 // The handle this row EFFECTIVELY renders with (mirrors the renderer's mapping).
-                Assets::AssetHandle handle        = Common::UUID::Null();
-                size_t              inheritedFrom = i;
+                Assets::AssetHandle handle = Common::UUID::Null();
                 if ( hasOwnSlot )
                     handle = meshComp.MaterialSlots[i];
                 else if ( !meshComp.MaterialSlots.empty() )
-                {
-                    inheritedFrom = std::min( i, meshComp.MaterialSlots.size() - 1 );
-                    handle        = meshComp.MaterialSlots[inheritedFrom];
-                }
+                    handle = meshComp.MaterialSlots[std::min( i, meshComp.MaterialSlots.size() - 1 )];
 
                 const auto asset = ( m_AssetManager && handle )
                                         ? m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( handle )
@@ -759,125 +870,93 @@ namespace Desert::Editor
                 if ( asset )
                     swatch = BuildSlotSwatch( *asset, parentAsset ? &parentAsset->Data() : nullptr );
 
-                std::string title = "Element " + std::to_string( i );
-                if ( asset )
-                    title += "  \xE2\x80\x94  " +
-                             std::filesystem::path( asset->GetMetadata().Filepath ).stem().string();
-                if ( !hasOwnSlot )
-                    title += handle ? "  (inherited)" : "  (default)";
-                // Stable node id: the label now carries the material name, and an id that changes on
-                // assignment would reset the row's expand state every time a slot is filled.
-                title += "##element";
+                // The shader the slot RENDERS with: an instance's own ShaderName is empty and would read
+                // as the engine default here, so it comes from the parent chain.
+                const std::string shaderName = asset ? ( parentAsset ? parentAsset->Data().EffectiveShaderName()
+                                                                     : asset->Data().EffectiveShaderName() )
+                                                     : std::string( "Engine default material" );
 
-                if ( !hasOwnSlot )
-                    ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
-                const bool nodeOpen = ImGui::TreeNodeEx(
-                    title.c_str(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen );
-                if ( !hasOwnSlot )
-                    ImGui::PopStyleColor();
+                // Whether this row's parameter editor is folded open is UI state of the row — it lives in
+                // ImGui's per-window storage, not in the component, which would carry it into the scene file.
+                ImGuiStorage* storage = ImGui::GetStateStorage();
+                const ImGuiID editId  = ImGui::GetID( "##editing" );
+                bool          editing = storage->GetBool( editId, false );
 
-                // Identify the slot without opening it: the material's own colour, painted into the header
-                // bar (no item, so the row keeps its click/drop behaviour).
-                if ( asset )
-                    DrawSwatchInHeader( swatch );
+                SlotRow row;
+                row.Index      = i;
+                row.Asset      = asset.get();
+                row.Swatch     = swatch;
+                row.SlotName   = SlotNameOf( meshComp, i );
+                row.ShaderName = shaderName;
+                row.ParentName = parentName;
+                row.HasOwnSlot = hasOwnSlot;
+                row.IsInstance = isInstanceAsset;
+                row.Editing    = editing;
 
-                // Drop an existing material asset onto this row to assign it (creates the slot if needed).
-                if ( ImGui::BeginDragDropTarget() )
+                std::string      dropped;
+                const SlotAction action = DrawSlotRow( row, dropped );
+
+                // Drop an existing material asset on the row to assign it (creates the slot if needed).
+                if ( !dropped.empty() )
                 {
-                    if ( const ImGuiPayload* p = ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::MaterialAsset ) )
-                    {
-                        const std::string path( static_cast<const char*>( p->Data ),
-                                                p->DataSize > 0 ? p->DataSize - 1 : 0 );
-                        MakeSlotExplicit( meshComp, i );
-                        AssignMaterialFromPath( meshComp, i, path );
-                    }
-                    ImGui::EndDragDropTarget();
+                    MakeSlotExplicit( meshComp, i );
+                    AssignMaterialFromPath( meshComp, i, dropped );
                 }
 
-                if ( nodeOpen )
+                switch ( action )
                 {
-                    if ( !hasOwnSlot )
+                    case SlotAction::Pick:
                     {
-                        // Inherited/default row: no inline editor (the material is authored on the row it
-                        // belongs to) — say where the look comes from and offer to own it.
+                        ImGui::OpenPopup( "material_picker" );
+                        break;
+                    }
+                    case SlotAction::ToggleEdit:
+                    {
+                        editing = !editing;
+                        storage->SetBool( editId, editing );
+                        break;
+                    }
+                    case SlotAction::MakeExplicit:
+                    {
+                        MakeSlotExplicit( meshComp, i );
+                        meshComp.RuntimeMaterialInstances.clear();
+                        break;
+                    }
+                    case SlotAction::CreateMaterial:
+                    {
+                        if ( const auto h = CreateAndRegisterMaterial( matBaseName ) )
+                        {
+                            MakeSlotExplicit( meshComp, i );
+                            meshComp.MaterialSlots[i] = h;
+                            meshComp.RuntimeMaterialInstances.clear();
+                        }
+                        break;
+                    }
+                    case SlotAction::CreateInstance:
+                    {
                         if ( asset )
                         {
-                            const std::string matName =
-                                 std::filesystem::path( asset->GetMetadata().Filepath ).stem().string();
-                            ImGui::TextDisabled( "Uses Element %zu's material: %s", inheritedFrom,
-                                                 matName.c_str() );
-                        }
-                        else
-                        {
-                            ImGui::TextDisabled( "Uses the engine default material" );
-                        }
-
-                        if ( handle )
-                        {
-                            if ( ImGui::Button( "Make Explicit", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                            if ( const auto h = CreateAndRegisterMaterialInstance( *asset ) )
                             {
-                                MakeSlotExplicit( meshComp, i );
-                                meshComp.RuntimeMaterialInstances.clear();
-                            }
-                            if ( ImGui::IsItemHovered() )
-                                ImGui::SetTooltip( "Give this element its own slot (same material, look unchanged) "
-                                                   "so it can be assigned/edited independently" );
-                        }
-                        else if ( ImGui::Button( "Create Material", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
-                        {
-                            if ( const auto h = CreateAndRegisterMaterial( matBaseName ) )
-                            {
-                                MakeSlotExplicit( meshComp, i );
                                 meshComp.MaterialSlots[i] = h;
                                 meshComp.RuntimeMaterialInstances.clear();
                             }
                         }
+                        break;
                     }
-                    else if ( asset )
+                    case SlotAction::ResetOverrides:
                     {
-                        // Material INSTANCE asset (UE model): shader + non-overridden params come
-                        // from the parent chain; this editor writes ONLY overrides into the child.
-                        // What this slot IS, before the parameter grid: preview, name, shader, swatches.
-                        DrawSlotIdentityCard( *asset, swatch, parentAsset ? &parentAsset->Data() : nullptr,
-                                              parentName );
-
-                        // ── Unity-style: the shader lives inside the material (base assets only —
-                        // an instance always renders with its parent chain's shader) ────────────
-                        if ( !isInstanceAsset && DrawShaderPicker( *asset ) )
+                        if ( asset )
                         {
-                            // A different shader means a different runtime material CLASS —
-                            // rebuild it from the asset and refresh the entity's instances.
-                            Runtime::ResourceRegistry::GetMaterialService()->Invalidate( handle );
-                            meshComp.RuntimeMaterialInstances.clear();
+                            asset->Data().Params.clear();
+                            asset->Data().Textures.clear();
+                            Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
                         }
-
-                        // ONE schema-driven editor for every shader — the PBR schema lives in
-                        // StaticMeshPBR.shader like any other shader's (single material protocol).
-                        const bool changed = DrawCustomShaderMaterial(
-                             *asset, parentAsset ? &parentAsset->Data() : nullptr, isInstanceAsset );
-
-                        // Live edit -> viewport.
-                        if ( changed )
-                        {
-                            if ( isInstanceAsset )
-                            {
-                                // An instance has no runtime Material of its own — bump the stamp so
-                                // every cached instance set rebuilds with the new overrides next tick.
-                                Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
-                            }
-                            else if ( auto* runtime = Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
-                            {
-                                if ( auto* pbr = dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) )
-                                    Graphic::MaterialFactory::ApplyPBRAsset( *pbr, *asset );
-                                else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
-                                    Graphic::MaterialFactory::ApplyShaderAsset( *ddm, *asset );
-                                // Base edits must also reach entities rendering through CHILD
-                                // instances of this material (their instances cache override sets).
-                                Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
-                            }
-                        }
-
-                        if ( ImGui::Button( "Save", ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                        break;
+                    }
+                    case SlotAction::Save:
+                    {
+                        if ( asset )
                         {
                             Common::Utils::FileSystem::WriteContentToFile( asset->GetMetadata().Filepath,
                                                                            asset->Save() );
@@ -887,63 +966,108 @@ namespace Desert::Editor
                             const std::string png =
                                  ThumbnailCache::DiskPath( asset->GetMetadata().Filepath.generic_string() );
                             std::filesystem::remove( png, ec );
-                            // ...and the copy this panel already decoded, or the slot card would keep
+                            // ...and the copy this panel already decoded, or the slot preview would keep
                             // showing the old look after the PNG is regenerated.
                             m_Thumbnails.Invalidate( png );
                         }
-
-                        if ( isInstanceAsset )
-                        {
-                            if ( ImGui::Button( "Reset Overrides",
-                                                ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
-                            {
-                                asset->Data().Params.clear();
-                                asset->Data().Textures.clear();
-                                Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
-                            }
-                            if ( ImGui::IsItemHovered() )
-                                ImGui::SetTooltip( "Drop every override — back to the parent material's values" );
-                        }
-                        else
-                        {
-                            if ( ImGui::Button( "Create Material Instance",
-                                                ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
-                            {
-                                if ( const auto h = CreateAndRegisterMaterialInstance( *asset ) )
-                                {
-                                    meshComp.MaterialSlots[i] = h;
-                                    meshComp.RuntimeMaterialInstances.clear();
-                                }
-                            }
-                            if ( ImGui::IsItemHovered() )
-                                ImGui::SetTooltip( "New child asset inheriting this material — override "
-                                                   "params per-object without touching the parent" );
-                        }
+                        break;
                     }
-                    else
+                    case SlotAction::None:
+                        break;
+                }
+
+                // The picker the slot field's chevron promises. Assigning here is the same operation as a
+                // drag-drop, so it goes through the same MakeSlotExplicit + assign pair.
+                if ( ImGui::BeginPopup( "material_picker" ) )
+                {
+                    static ImGuiTextFilter materialFilter;
+                    materialFilter.Draw( "##search", 200.0f );
+                    ImGui::Separator();
+
+                    if ( hasOwnSlot && ImGui::Selectable( "None (use the engine default)" ) )
                     {
-                        // Slot exists but its asset can't be resolved (deleted/missing file).
-                        ImGui::TextDisabled( "Material asset missing" );
-                        if ( ImGui::Button( "Create Material",
-                                            ImVec2( ImGui::GetContentRegionAvail().x, 0.0f ) ) )
+                        meshComp.MaterialSlots[i] = Common::UUID::Null();
+                        meshComp.RuntimeMaterialInstances.clear();
+                    }
+
+                    if ( m_AssetManager )
+                    {
+                        for ( const auto& [candidate, matAsset] :
+                              m_AssetManager->FindAllByType<Assets::SurfaceMaterialAsset>() )
                         {
-                            if ( const auto h = CreateAndRegisterMaterial( matBaseName ) )
+                            const std::string matName =
+                                 std::filesystem::path( matAsset->GetMetadata().Filepath ).stem().string();
+                            if ( !materialFilter.PassFilter( matName.c_str() ) )
+                                continue;
+                            if ( ImGui::Selectable( matName.c_str(), candidate == handle ) )
                             {
-                                meshComp.MaterialSlots[i] = h;
+                                MakeSlotExplicit( meshComp, i );
+                                meshComp.MaterialSlots[i] = candidate;
                                 meshComp.RuntimeMaterialInstances.clear();
                             }
                         }
                     }
-                    ImGui::TreePop();
+                    ImGui::EndPopup();
+                }
+
+                // The parameter editor, folded under the row it belongs to (UE opens a separate Material
+                // Editor window; a fold keeps the slot LIST readable without one). Inherited rows have no
+                // editor on purpose — the material is authored on the row that owns it.
+                if ( editing && asset && hasOwnSlot )
+                {
+                    ImGui::Indent( 12.0f );
+
+                    // ── Unity-style: the shader lives inside the material (base assets only — an
+                    // instance always renders with its parent chain's shader) ────────────
+                    if ( !isInstanceAsset && DrawShaderPicker( *asset ) )
+                    {
+                        // A different shader means a different runtime material CLASS —
+                        // rebuild it from the asset and refresh the entity's instances.
+                        Runtime::ResourceRegistry::GetMaterialService()->Invalidate( handle );
+                        meshComp.RuntimeMaterialInstances.clear();
+                    }
+
+                    // ONE schema-driven editor for every shader — the PBR schema lives in
+                    // StaticMeshPBR.shader like any other shader's (single material protocol).
+                    const bool changed = DrawCustomShaderMaterial(
+                         *asset, parentAsset ? &parentAsset->Data() : nullptr, isInstanceAsset );
+
+                    // Live edit -> viewport.
+                    if ( changed )
+                    {
+                        if ( isInstanceAsset )
+                        {
+                            // An instance has no runtime Material of its own — bump the stamp so
+                            // every cached instance set rebuilds with the new overrides next tick.
+                            Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
+                        }
+                        else if ( auto* runtime = Runtime::ResourceRegistry::GetMaterialService()->Get( handle ) )
+                        {
+                            if ( auto* pbr = dynamic_cast<Graphic::StaticMaterialPBR*>( runtime ) )
+                                Graphic::MaterialFactory::ApplyPBRAsset( *pbr, *asset );
+                            else if ( auto* ddm = dynamic_cast<Graphic::DataDrivenMaterial*>( runtime ) )
+                                Graphic::MaterialFactory::ApplyShaderAsset( *ddm, *asset );
+                            // Base edits must also reach entities rendering through CHILD
+                            // instances of this material (their instances cache override sets).
+                            Runtime::ResourceRegistry::GetMaterialService()->BumpInvalidationVersion();
+                        }
+                    }
+
+                    ImGui::Unindent( 12.0f );
+                }
+                else if ( hasOwnSlot && !asset )
+                {
+                    // Slot exists but its asset can't be resolved (deleted/missing file). Not a styling
+                    // question: the row would otherwise look like an ordinary empty slot.
+                    ImGui::Indent( 12.0f );
+                    ImGui::TextDisabled( ICON_MDI_ALERT "  Material asset missing" );
+                    ImGui::Unindent( 12.0f );
                 }
 
                 ImGui::PopID();
             }
-
-            ImGui::TreePop();
         }
 
-        ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
     }
 

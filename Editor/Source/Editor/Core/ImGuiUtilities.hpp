@@ -80,15 +80,17 @@ namespace Desert::Editor::Utils
         //   EndPropertyRow();
         static void ResetPropertyRows();
         // Draws the background for the row that is ABOUT to be submitted and returns whether the pointer
-        // is over it (a fill drawn after the row would cover the widgets).
-        static bool PropertyRowBackground();
+        // is over it (a fill drawn after the row would cover the widgets). `height` overrides the assumed
+        // row height for rows taller than one control (a material slot with its preview) — without it the
+        // rule and the hover band would cut straight through the row's content.
+        static bool PropertyRowBackground( float height = 0.0f );
         // The vertical rule between the label and value columns, for the row currently being submitted.
         // Call it while the columns are still open, just before closing them.
         static void PropertyColumnRule();
         // Width of the label column — shared so every row in the panel breaks at the same x.
         static float PropertyLabelWidth();
         // Opens a two-column row and writes the label; the caller then submits ONE value widget.
-        static void BeginPropertyRow( const char* label, const char* tooltip = nullptr );
+        static void BeginPropertyRow( const char* label, const char* tooltip = nullptr, float height = 0.0f );
         static void EndPropertyRow();
     };
 } // namespace Desert::Editor::Utils

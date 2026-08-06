@@ -77,11 +77,12 @@ namespace Desert::Editor::Utils
         return std::clamp( ImGui::GetWindowWidth() * 0.42f, 110.0f, 230.0f );
     }
 
-    bool ImGuiUtilities::PropertyRowBackground()
+    bool ImGuiUtilities::PropertyRowBackground( float height )
     {
         const ImGuiStyle& style  = ImGui::GetStyle();
         const ImVec2      rowMin = ImGui::GetCursorScreenPos();
-        const ImVec2 rowMax( rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + ImGui::GetFrameHeight() );
+        const float       rowH   = height > 0.0f ? height : ImGui::GetFrameHeight();
+        const ImVec2      rowMax( rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + rowH );
 
         const bool hovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows ) &&
                              ImGui::IsMouseHoveringRect( rowMin, rowMax, /*clip*/ true );
@@ -119,9 +120,9 @@ namespace Desert::Editor::Utils
                                              ImGui::GetColorU32( ImGuiCol_Border ) );
     }
 
-    void ImGuiUtilities::BeginPropertyRow( const char* label, const char* tooltip )
+    void ImGuiUtilities::BeginPropertyRow( const char* label, const char* tooltip, float height )
     {
-        PropertyRowBackground();
+        PropertyRowBackground( height );
 
         ImGui::Columns( 2 );
         ImGui::SetColumnWidth( 0, PropertyLabelWidth() );

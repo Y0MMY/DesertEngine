@@ -75,14 +75,49 @@ namespace Desert::Editor
         // schema default, exactly like the parameter editor.
         static SlotSwatch BuildSlotSwatch( const Assets::SurfaceMaterialAsset& asset,
                                            const Assets::MaterialData*         parentData );
-        // Draws the colour chip right-aligned INTO the element header bar (pure ImDrawList — it must not
-        // become an item that steals the header's click/drop handling).
-        static void DrawSwatchInHeader( const SlotSwatch& swatch );
-        // The UE-style slot row inside an open element: a framed thumbnail (or the albedo chip when the
-        // asset browser has not rendered one yet) beside the material's name, its shader and — for an
-        // instance — its parent. parentData/parentName describe that parent (empty for a base material).
-        void DrawSlotIdentityCard( const Assets::SurfaceMaterialAsset& asset, const SlotSwatch& swatch,
-                                   const Assets::MaterialData* parentData, const std::string& parentName );
+
+        // What the user asked for on an element row this frame. The row only REPORTS; the caller owns
+        // the component and the asset manager and is the only place allowed to change a slot.
+        enum class SlotAction
+        {
+            None,
+            Pick,           // open the material picker
+            MakeExplicit,   // give an inherited element its own slot
+            CreateMaterial, // fresh material asset for an empty slot
+            CreateInstance, // child instance of the slot's material
+            Save,
+            ResetOverrides, // instance only: drop every override
+            ToggleEdit,     // fold the parameter editor open/closed
+        };
+
+        // Everything one element row needs to draw itself. A struct rather than nine parameters: the row
+        // is a pure view, and the list of things it shows will keep growing.
+        struct SlotRow
+        {
+            size_t                              Index = 0;
+            const Assets::SurfaceMaterialAsset* Asset = nullptr;
+            SlotSwatch                          Swatch;
+            std::string SlotName;   // the mesh's own name for this element (UE's "Slot" field)
+            std::string ShaderName; // what it RENDERS with (an instance's comes from its parent)
+            std::string ParentName; // instance parent; empty for a base material
+            bool        HasOwnSlot = false;
+            bool        IsInstance = false;
+            bool        Editing    = false; // its parameter editor is folded open
+        };
+
+        // The UE-style element row: "Element N" in the label column; in the value column a framed
+        // preview underlined with the material's identity colour, the material's name in a sunk asset
+        // field, and a strip of flat icon actions beneath it. A material dropped on the preview or the
+        // field is written to @p droppedPath for the caller to assign.
+        SlotAction DrawSlotRow( const SlotRow& row, std::string& droppedPath );
+
+        // The mesh's own name for element @p index ("Body", "Head"), empty when it has none.
+        std::string SlotNameOf( const ECS::StaticMeshComponent& meshComp, size_t index ) const;
+
+        // The slot preview: the shared rendered-thumbnail PNG when the asset browser has produced one,
+        // the material's own colour otherwise, with a colour bar under it — UE's underline that lets you
+        // tell two slots apart at a glance.
+        void DrawSlotPreview( const Assets::SurfaceMaterialAsset* asset, const SlotSwatch& swatch, float size );
 
     private:
         std::unique_ptr<Editor::UI::UIHelper> m_UIHelper;
