@@ -7,6 +7,7 @@
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Geometry/LODSelection.hpp>
 #include <Common/Core/Profiler.hpp>
+#include <Common/Core/Units.hpp>
 
 #include <variant>
 #include <chrono>
@@ -1181,7 +1182,12 @@ namespace Desert::Graphic::System
 
         // Two ranges: the CAMERA's real near/far parametrize the unprojected frustum corners (they must
         // match invVP below), while the shadow coverage is capped so far cascades stay usefully sized.
-        constexpr float kShadowMaxDistance = 150.0f;
+        //
+        // IN WORLD UNITS, and a world unit is a CENTIMETRE. This was a bare 150.0f from the metre era, so
+        // after the units switch the cascades covered 150 cm — a metre and a half in front of the camera —
+        // and everything past that was simply unshadowed. Written through Units::Metres so it cannot rot
+        // again the next time the convention moves.
+        const float     kShadowMaxDistance = Common::Units::Metres( 150.0f );
         const float     camNear   = camera->GetNear();
         const float     camFar    = camera->GetFar();
         const float     shadowFar = glm::min( camFar, kShadowMaxDistance );
@@ -1284,7 +1290,10 @@ namespace Desert::Graphic::System
 
             // Push the light eye back by 2*radius so casters between the light and the slice still cast.
             const glm::mat4 view = glm::lookAt( snappedCenter - lightDir * ( radius * 2.0f ), snappedCenter, up );
-            const glm::mat4 proj = glm::orthoRH_ZO( -radius, radius, -radius, radius, 0.1f, radius * 4.0f );
+            // Near plane in world units too (0.1f was 10 cm when a unit was a metre; as a raw number it is
+            // now a tenth of a millimetre, which throws away shadow-map depth precision).
+            const glm::mat4 proj =
+                 glm::orthoRH_ZO( -radius, radius, -radius, radius, Common::Units::Cm( 10.0f ), radius * 4.0f );
             m_CascadeVP[c] = proj * view;
 
             // World size of one texel for this cascade (drives the PBR normal-offset / bias).
