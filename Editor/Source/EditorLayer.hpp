@@ -53,9 +53,9 @@ namespace Desert::Editor
         // UE5-style toolbar strip below the menu bar: transform-gizmo mode toggles (left) + Play/Pause/Stop
         // (centre). Drawn inside the dockspace host window so it takes a fixed height above the docked panels.
         void DrawToolbar();
-        // Toolbar drop-downs: Collision acts on the SELECTION, Modes switches the viewport tool mode.
+        // Toolbar drop-down: Collision acts on the SELECTION. (Edit MODES live in the viewport's own
+        // strip, above the picture they act on — a second copy up here was just another place to look.)
         void DrawCollisionMenu();
-        void DrawModesMenu();
 
         // Bottom status bar: scene state (Edit/Play), scene name, current selection, and FPS/frame time.
         void DrawStatusBar();

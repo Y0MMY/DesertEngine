@@ -160,11 +160,24 @@ namespace Desert::Editor
             // An EXPLICIT request always wins and applies to every panel, contextual or not: a button in
             // Details ("Open in Sequencer", "Anim Graph", "Particle Editor") asked for this panel by name.
             // It pins it, exactly like ticking it in the View menu — the user asked, so nothing auto-closes it.
-            if ( Core::PanelRequests::ConsumeOpen( panel->GetName() ) )
+            switch ( Core::PanelRequests::Consume( panel->GetName() ) )
             {
-                panel->GetVisibility() = true;
-                panel->Pinned()        = true;
-                m_FocusPanel           = panel->GetName();
+                case Core::PanelRequests::Action::Open:
+                    panel->GetVisibility() = true;
+                    panel->Pinned()        = true;
+                    m_FocusPanel           = panel->GetName();
+                    break;
+
+                // A drawer button is a switch, not a summons: pressing it again puts the panel away.
+                case Core::PanelRequests::Action::Toggle:
+                    panel->GetVisibility() = !panel->GetVisibility();
+                    panel->Pinned()        = panel->GetVisibility();
+                    if ( panel->GetVisibility() )
+                        m_FocusPanel = panel->GetName();
+                    break;
+
+                case Core::PanelRequests::Action::None:
+                    break;
             }
 
             if ( !panel->IsContextual() )
@@ -1382,10 +1395,10 @@ namespace Desert::Editor
         // text — the bar is the one place in the editor that is always visible, so it is where a panel you
         // closed by accident is found again.
         if ( ImGui::SmallButton( ICON_MDI_FOLDER_MULTIPLE "  Content Drawer" ) )
-            Core::PanelRequests::Open( "Assets" );
+            Core::PanelRequests::Toggle( "Assets" );
         ImGui::SameLine( 0.0f, 6.0f );
         if ( ImGui::SmallButton( ICON_MDI_TEXT_BOX_OUTLINE "  Output Log" ) )
-            Core::PanelRequests::Open( "Logs" );
+            Core::PanelRequests::Toggle( "Logs" );
         ImGui::SameLine( 0.0f, 6.0f );
 
         // Cmd: one line of Lua against the live scene, the same engine the Lua Console runs. UE puts a
@@ -1517,9 +1530,9 @@ namespace Desert::Editor
 
             ImGui::SameLine();
             if ( ImGui::Button( ICON_MDI_FOLDER_SEARCH "  Browse", wide ) )
-                Core::PanelRequests::Open( "Assets" );
+                Core::PanelRequests::Toggle( "Assets" );
             if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Show the content browser" );
+                ImGui::SetTooltip( "Show / hide the content browser" );
 
             ImGui::SameLine();
             ImGui::TextDisabled( "|" );
@@ -1530,11 +1543,6 @@ namespace Desert::Editor
             if ( ImGui::Button( ICON_MDI_SHAPE_OUTLINE "  Collision  " ICON_MDI_CHEVRON_DOWN, wide ) )
                 ImGui::OpenPopup( "##CollisionMenu" );
             DrawCollisionMenu();
-
-            ImGui::SameLine();
-            if ( ImGui::Button( ICON_MDI_CURSOR_DEFAULT_OUTLINE "  Modes  " ICON_MDI_CHEVRON_DOWN, wide ) )
-                ImGui::OpenPopup( "##ModesMenu" );
-            DrawModesMenu();
         }
 
         // NOTE: no "UV" menu, unlike the Static Mesh Editor screenshot this strip is modelled on — the
@@ -1601,30 +1609,6 @@ namespace Desert::Editor
             entity.RemoveComponent<ECS::ColliderComponent>();
         if ( !has )
             ImGui::EndDisabled();
-
-        ImGui::EndPopup();
-    }
-
-    void EditorLayer::DrawModesMenu()
-    {
-        namespace ImGui = ::ImGui;
-        using Mode      = Core::EditorMode;
-
-        if ( !ImGui::BeginPopup( "##ModesMenu" ) )
-            return;
-
-        const Mode current = Core::ViewportMode::Get();
-        const auto item    = [current]( const char* label, Mode mode, const char* help )
-        {
-            if ( ImGui::MenuItem( label, nullptr, current == mode ) )
-                Core::ViewportMode::Set( mode );
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "%s", help );
-        };
-
-        item( ICON_MDI_CURSOR_DEFAULT_OUTLINE "  Select", Mode::Select, "Pick and transform objects" );
-        item( ICON_MDI_CUBE_OUTLINE "  Modeling", Mode::Modeling, "CubeGrid blockout tools" );
-        item( ICON_MDI_GRASS "  Foliage", Mode::Foliage, "Paint instanced foliage onto surfaces" );
 
         ImGui::EndPopup();
     }
