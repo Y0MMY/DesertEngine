@@ -72,6 +72,31 @@ namespace Desert::Editor
             cachedBones = boneCount;
             return cached;
         }
+
+        // UE's asset-type colour for a skeletal mesh, sampled off the reference: the bar under the slot's
+        // preview says WHAT KIND of asset the slot takes, before you have read a single word of the name.
+        constexpr ImU32 kSkeletalMeshTint = IM_COL32( 241, 163, 241, 255 );
+
+        // The framed preview box beside an asset slot. This panel renders nothing offscreen (one preview
+        // renderer per panel, and it belongs to the panel, not to a component row), so the box carries the
+        // asset's GLYPH rather than a fake render — and the type bar underneath when the slot is filled.
+        void DrawAssetBox( float size, const char* icon, bool filled, ImU32 tint )
+        {
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            ImGui::Dummy( ImVec2( size, size ) );
+
+            const ImVec2 br( at.x + size, at.y + size );
+            ImDrawList*  dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled( at, br, IM_COL32( 15, 15, 15, 255 ), 2.0f );
+            dl->AddRect( at, br, ImGui::GetColorU32( ImGuiCol_Border ), 2.0f );
+
+            const ImVec2 ts = ImGui::CalcTextSize( icon );
+            dl->AddText( ImVec2( at.x + ( size - ts.x ) * 0.5f, at.y + ( size - ts.y ) * 0.5f ),
+                         ImGui::GetColorU32( filled ? ImGuiCol_Text : ImGuiCol_TextDisabled ), icon );
+
+            if ( filled )
+                dl->AddRectFilled( ImVec2( at.x + 1.0f, br.y - 3.0f ), ImVec2( br.x - 1.0f, br.y ), tint );
+        }
     } // namespace
 
     SkinnedMeshComponentWidget::SkinnedMeshComponentWidget(
@@ -88,7 +113,6 @@ namespace Desert::Editor
             return;
 
         Utils::ImGuiUtilities::PushID();
-        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
 
         auto meshAssets = assetManager->FindAllByType<Assets::MeshAsset>();
 
@@ -99,53 +123,57 @@ namespace Desert::Editor
             currentMeshName = Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath );
         }
 
-        ImGui::Columns( 2 );
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Mesh" );
-        ImGui::NextColumn();
-        ImGui::PushItemWidth( -1 );
-
-        if ( ImGui::Button( currentMeshName.c_str(), ImVec2( ImGui::GetContentRegionAvail().x, 0 ) ) )
+        // UE's SkeletalMeshComponent leads with exactly this row — the asset the component renders, as a
+        // preview box beside a sunk slot field — before any statistic about it.
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_HUMAN "  Skeletal Mesh" ) )
         {
-            ImGui::OpenPopup( "skinned_mesh_selector" );
-        }
+            Utils::ImGuiUtilities::ResetPropertyRows();
 
-        if ( ImGui::BeginPopup( "skinned_mesh_selector" ) )
-        {
-            static ImGuiTextFilter filter;
-            filter.Draw( "##Search", 200 );
-            ImGui::Separator();
+            constexpr float kBox = 40.0f;
+            const float     rowH = std::max( kBox, ImGui::GetFrameHeight() ) + ImGui::GetStyle().ItemSpacing.y;
 
-            for ( const auto& [handle, asset] : meshAssets )
+            Utils::ImGuiUtilities::BeginPropertyRow( "Skeletal Mesh Asset",
+                                                     "The skinned mesh asset this component renders", rowH );
+
+            DrawAssetBox( kBox, ICON_MDI_HUMAN, asset != nullptr, kSkeletalMeshTint );
+            ImGui::SameLine();
+            if ( Utils::ImGuiUtilities::AssetSlot( "SkinnedMeshSlot", currentMeshName.c_str(), !asset ) )
+                ImGui::OpenPopup( "skinned_mesh_selector" );
+
+            if ( ImGui::BeginPopup( "skinned_mesh_selector" ) )
             {
-                auto isSkinned = Runtime::ResourceRegistry::GetMeshService()->IsSkinned( handle );
+                static ImGuiTextFilter filter;
+                filter.Draw( "##Search", 200 );
+                ImGui::Separator();
 
-                if ( !isSkinned.has_value() || !isSkinned.value() )
+                for ( const auto& [handle, meshAsset] : meshAssets )
                 {
-                    continue;
-                }
+                    auto isSkinned = Runtime::ResourceRegistry::GetMeshService()->IsSkinned( handle );
 
-                const std::string name = Common::Utils::FileSystem::GetFileName( asset->GetMetadata().Filepath );
-
-                if ( filter.PassFilter( name.c_str() ) )
-                {
-                    bool selected = skinnedMesh.MeshHandle == handle;
-                    if ( ImGui::Selectable( name.c_str(), selected ) )
+                    if ( !isSkinned.has_value() || !isSkinned.value() )
                     {
-                        skinnedMesh.MeshHandle = handle;
+                        continue;
+                    }
+
+                    const std::string name =
+                         Common::Utils::FileSystem::GetFileName( meshAsset->GetMetadata().Filepath );
+
+                    if ( filter.PassFilter( name.c_str() ) )
+                    {
+                        bool selected = skinnedMesh.MeshHandle == handle;
+                        if ( ImGui::Selectable( name.c_str(), selected ) )
+                        {
+                            skinnedMesh.MeshHandle = handle;
+                        }
                     }
                 }
+
+                ImGui::EndPopup();
             }
 
-            ImGui::EndPopup();
+            Utils::ImGuiUtilities::EndPropertyRow();
         }
 
-        ImGui::PopItemWidth();
-        ImGui::Columns( 1 );
-        ImGui::Separator();
-
-        ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
 
         // The mesh that is ACTUALLY drawn: an in-editor rig (Convert to Skinned) overrides the asset.
@@ -170,38 +198,61 @@ namespace Desert::Editor
         auto        skinned  = static_cast<SkinnedMesh*>( mesh );
         const auto& skeleton = skinned->GetSkeleton();
 
-        if ( ImGui::CollapsingHeader( "Skeleton", ImGuiTreeNodeFlags_DefaultOpen ) )
+        const auto& bones = skeleton.GetBones();
+
+        // The bone count on the bar, UE-style: a collapsed Skeleton section still says how big the rig is.
+        const std::string skeletonDetail = std::to_string( bones.size() ) + " bones";
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_BONE "  Skeleton", true, skeletonDetail.c_str() ) )
         {
-            ImGui::Indent(); // indent the sub-section content (collapsing headers don't auto-indent)
+            Utils::ImGuiUtilities::ResetPropertyRows();
 
-            const auto& bones = skeleton.GetBones();
+            // The facts as ROWS, on the panel's shared grid — the same label column as every other
+            // component, instead of a paragraph of TextDisabled lines floating under a header.
+            const auto statRow = []( const char* label, const std::string& value, const char* tooltip )
+            {
+                Utils::ImGuiUtilities::BeginPropertyRow( label, tooltip );
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted( value.c_str() );
+                Utils::ImGuiUtilities::EndPropertyRow();
+            };
 
-            ImGui::Text( "Bone Count: %zu", bones.size() );
+            char buf[128];
+
+            statRow( "Bone Count", std::to_string( bones.size() ), nullptr );
+
             // Rig identity: the signature is what links a SkinnedMeshAsset to its SkeletonAsset, so it is
             // the thing to compare when a mesh refuses to bind to the rig you expect.
-            ImGui::TextDisabled( "Signature: %016llx",
-                                 static_cast<unsigned long long>( skeleton.GetSignature() ) );
-            Utils::ImGuiUtilities::Tooltip(
-                 "Hash of the bone hierarchy. A mesh binds to the skeleton with the same signature." );
+            std::snprintf( buf, sizeof( buf ), "%016llx",
+                           static_cast<unsigned long long>( skeleton.GetSignature() ) );
+            statRow( "Signature", buf,
+                     "Hash of the bone hierarchy. A mesh binds to the skeleton with the same signature." );
 
             // Cost + format limits, stated instead of implied: the pose is uploaded per frame as one
             // mat4 per bone, and the vertex format carries at most 4 influences per vertex.
-            ImGui::TextDisabled( "Pose upload: %zu x %zu B = %.1f KB / frame", bones.size(), sizeof( glm::mat4 ),
-                                 static_cast<double>( bones.size() * sizeof( glm::mat4 ) ) / 1024.0 );
-            ImGui::TextDisabled( "Influences: up to %zu per vertex", SkinnedVertex::MAX_BONE_INFLUENCES );
+            std::snprintf( buf, sizeof( buf ), "%zu x %zu B = %.1f KB / frame", bones.size(), sizeof( glm::mat4 ),
+                           static_cast<double>( bones.size() * sizeof( glm::mat4 ) ) / 1024.0 );
+            statRow( "Pose Upload", buf, "One mat4 per bone, uploaded every frame the mesh is drawn" );
+
+            std::snprintf( buf, sizeof( buf ), "up to %zu per vertex", SkinnedVertex::MAX_BONE_INFLUENCES );
+            statRow( "Influences", buf, nullptr );
 
             if ( entity.HasComponent<ECS::AnimationComponent>() )
             {
                 const auto& anim = entity.GetComponent<ECS::AnimationComponent>();
                 const char* clip = anim.CurrentClip.empty() ? "<none>" : anim.CurrentClip.c_str();
                 if ( anim.Graph )
-                    ImGui::TextDisabled( "Clip: %s (driven by the Anim Graph)", clip );
+                    std::snprintf( buf, sizeof( buf ), "%s  (driven by the Anim Graph)", clip );
                 else
-                    ImGui::TextDisabled( "Clip: %s%s", clip, anim.Playing ? "" : "  (paused)" );
+                    std::snprintf( buf, sizeof( buf ), "%s%s", clip, anim.Playing ? "" : "  (paused)" );
+                statRow( "Clip", buf, nullptr );
             }
 
-            // Weight problems the GPU can't tell you about. Only real ones — see AuditSkinning.
+            ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
+
+            // Weight problems the GPU can't tell you about. Only real ones — see AuditSkinning. Wrapped,
+            // because a warning that runs off the edge of a docked panel is a warning nobody reads.
             const SkinningAudit& audit = AuditSkinning( *skinned, bones.size() );
+            ImGui::PushTextWrapPos( 0.0f );
             if ( audit.OutOfRange > 0 )
                 ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.4f, 1.0f ),
                                     ICON_MDI_ALERT " %llu vertices reference a bone this skeleton does not "
@@ -212,6 +263,7 @@ namespace Desert::Editor
                                     ICON_MDI_ALERT " %llu vertices have no bone weights - they stay in bind "
                                                    "pose while the rest animates",
                                     static_cast<unsigned long long>( audit.Unweighted ) );
+            ImGui::PopTextWrapPos();
             if ( audit.FullyInfluenced > 0 )
             {
                 ImGui::TextDisabled( "%llu vertices use all %zu influence slots",
@@ -275,8 +327,6 @@ namespace Desert::Editor
                     DrawBone( r );
                 ImGui::TreePop();
             }
-
-            ImGui::Unindent();
         }
     }
 
