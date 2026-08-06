@@ -25,16 +25,34 @@ namespace Desert::Editor
         constexpr float kNearPlane  = 1.0f;  // centimetres (see Common/Core/Units.hpp)
         constexpr float kFarPlane   = 100000.0f;
         constexpr float kPitchLimit = 1.45f; // just shy of straight down/up, so the orbit never gimbals
-        constexpr float kFitMargin  = 1.08f; // a little air around the framed bounds — the fit below
-                                             // is exact, so the old 1.25 now reads as a gap
+        constexpr float kFitMargin  = 1.05f; // a little air around the fitted sphere
 
         // Sun/key-light travel direction (DirectionLight stores where the light GOES, the shader lights
         // along -Direction). Same warm key as the asset thumbnails, from above and to the side.
         constexpr glm::vec3 kLightTravel{ 2.0f, -6.0f, 5.0f };
 
+        // A primitive's true half-SIZE per axis. Primitives are generated one metre = 100 units across
+        // (PrimitiveMeshFactory::kPrimitiveSize), so this is 50 on each axis a shape actually occupies.
+        glm::vec3 HalfExtentOfPrimitive( PreviewViewport::Shape shape )
+        {
+            constexpr float kHalf = 50.0f;
+            switch ( shape )
+            {
+                case PreviewViewport::Shape::Plane:
+                    return glm::vec3( kHalf, 0.5f, kHalf ); // a card: thin on Y
+                case PreviewViewport::Shape::Cube:
+                case PreviewViewport::Shape::Sphere:
+                default:
+                    return glm::vec3( kHalf );
+            }
+        }
+
+        // Its bounding-SPHERE radius: the distance from the centre to the furthest point ON THE SHAPE. A
+        // sphere's is its own radius; a box's is its half-diagonal. Kept separate from the half-extent on
+        // purpose — feeding a radius in where a per-axis half-size belongs describes a body 1.73x too big,
+        // which is exactly what put a 100-unit primitive 517 units from the camera.
         float RadiusOfPrimitive( PreviewViewport::Shape shape )
         {
-            // Primitives are generated one metre = 100 units across (PrimitiveMeshFactory::kPrimitiveSize).
             constexpr float kHalf = 50.0f;
             switch ( shape )
             {
@@ -44,8 +62,14 @@ namespace Desert::Editor
                     return kHalf * 1.415f;
                 case PreviewViewport::Shape::Sphere:
                 default:
-                    return kHalf;
+                    return kHalf; // a sphere IS its radius — its box would be 1.73x too far
             }
+        }
+
+        // For measured geometry there is no shape to know, so the bound is the box's half-diagonal.
+        float RadiusOfHalfExtent( const glm::vec3& halfExtent )
+        {
+            return glm::length( halfExtent );
         }
 
         Geometry::PrimitiveType ToPrimitive( PreviewViewport::Shape shape )
@@ -176,8 +200,8 @@ namespace Desert::Editor
         m_MeshHandle  = mesh;
         m_HasContent  = true;
         m_Focus       = glm::vec3( 0.0f );
-        m_FrameRadius     = 100.0f; // stand-in until the bounds are known (see TryFrameMesh)
-        m_FrameHalfExtent = glm::vec3( m_FrameRadius );
+        m_FrameHalfExtent = glm::vec3( 50.0f ); // stand-in until the bounds are known (see TryFrameMesh)
+        m_FrameRadius     = RadiusOfHalfExtent( m_FrameHalfExtent );
         ResetView();
         m_Framed = TryFrameMesh();
     }
@@ -263,8 +287,9 @@ namespace Desert::Editor
 
         // Half the LARGEST EXTENT, the same convention RadiusOfPrimitive uses for the material preview
         // (a 100-unit cube gives 50, not the 87 a diagonal would).
-        m_FrameRadius     = std::max( glm::max( extent.x, glm::max( extent.y, extent.z ) ) * 0.5f, 1.0f );
+        // Half-size per axis is the measurement; the radius is derived from it, never the other way round.
         m_FrameHalfExtent = glm::max( extent * 0.5f, glm::vec3( 0.01f ) );
+        m_FrameRadius     = std::max( RadiusOfHalfExtent( m_FrameHalfExtent ), 1.0f );
 
         ResetView();
         return true;
@@ -291,8 +316,8 @@ namespace Desert::Editor
         m_MeshHandle  = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
         m_Framed      = true; // a primitive's size is known up front
         m_Focus       = glm::vec3( 0.0f );
+        m_FrameHalfExtent = HalfExtentOfPrimitive( shape );
         m_FrameRadius     = RadiusOfPrimitive( shape );
-        m_FrameHalfExtent = glm::vec3( m_FrameRadius );
         m_HasContent  = true;
         ResetView();
     }
@@ -318,46 +343,25 @@ namespace Desert::Editor
         m_Yaw   = -0.6f;
         m_Pitch = 0.4f;
 
-        // EXACT fit: the distance at which the content's eight box corners all sit inside the frustum,
-        // from the angle the camera actually starts at.
+        // Distance so the content's BOUNDING SPHERE exactly touches the frustum:
         //
-        // The old sphere fit put a sphere of radius = half the largest extent in frame, which is only
-        // right for something as thick as it is tall. A wide-and-flat prop, or anything seen three-quarter
-        // on, presents a much smaller silhouette than that sphere — so the camera sat far enough back for
-        // a ball that was never there and the mesh read as tiny. Projecting the corners costs eight dot
-        // products and cannot be fooled by shape.
+        //     sin(fov/2) = R / d   ->   d = R / sin(fov/2)
+        //
+        // A sphere is the one bound that does not change with the viewing angle, so this is the closest the
+        // camera can sit and still be guaranteed to show the whole thing however it is orbited — which is
+        // the requirement. R is the true radius of the content: 50 for the sphere primitive, the box's
+        // half-diagonal for a mesh.
+        //
+        // Fitting the BOX corners instead (what this did briefly) is exact for a box and needlessly far for
+        // everything else: perspective makes the near corner project large, so the camera has to back off
+        // for a corner that most objects do not have. That is what pushed a 100-unit primitive to 517 —
+        // together with a radius that had been fed in as a per-axis half-size, describing a box 1.73x too
+        // big.
         const float halfFov = glm::radians( kFov ) * 0.5f;
-        const float tanHalf = std::tan( halfFov );
+        m_Distance          = ( m_FrameRadius / std::sin( halfFov ) ) * kFitMargin;
 
-        const float     cp = std::cos( m_Pitch );
-        const glm::vec3 dir{ cp * std::sin( m_Yaw ), std::sin( m_Pitch ), cp * std::cos( m_Yaw ) }; // eye dir
-        const glm::vec3 forward = -dir;                                                             // toward focus
-        const glm::vec3 right   = glm::normalize(
-             glm::cross( forward, std::abs( forward.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 ) ) );
-        const glm::vec3 up = glm::normalize( glm::cross( right, forward ) );
-
-        float needed = 0.0f;
-        for ( int corner = 0; corner < 8; ++corner )
-        {
-            const glm::vec3 c( ( corner & 1 ) ? m_FrameHalfExtent.x : -m_FrameHalfExtent.x,
-                               ( corner & 2 ) ? m_FrameHalfExtent.y : -m_FrameHalfExtent.y,
-                               ( corner & 4 ) ? m_FrameHalfExtent.z : -m_FrameHalfExtent.z );
-
-            // Camera-space coordinates of the corner, with the eye still at an unknown distance d along
-            // dir: depth = d + dot(c, forward), and the corner fits while |x| <= depth * tanHalf.
-            const float depthOffset = glm::dot( c, forward );
-            const float x           = std::abs( glm::dot( c, right ) );
-            const float y           = std::abs( glm::dot( c, up ) );
-
-            needed = std::max( needed, std::max( x, y ) / tanHalf - depthOffset );
-        }
-
-        // The preview is square, so one tan covers both axes. Never closer than the content's own radius,
-        // or the camera would end up inside a long thin object.
-        m_Distance = std::max( needed * kFitMargin, m_FrameRadius * 1.05f );
-
-        LOG_TRACE( "[Preview] fit: half-extent {:.1f} x {:.1f} x {:.1f} -> distance {:.1f} (radius {:.1f})",
-                   m_FrameHalfExtent.x, m_FrameHalfExtent.y, m_FrameHalfExtent.z, m_Distance, m_FrameRadius );
+        LOG_TRACE( "[Preview] fit: radius {:.1f} (half-extent {:.1f} x {:.1f} x {:.1f}) -> distance {:.1f}",
+                   m_FrameRadius, m_FrameHalfExtent.x, m_FrameHalfExtent.y, m_FrameHalfExtent.z, m_Distance );
     }
 
     void PreviewViewport::ApplyCamera( uint32_t width, uint32_t height )
