@@ -521,7 +521,8 @@ namespace Desert::Editor
 
         // ---- Additive layers (advanced, collapsed by default) ----
         ImGui::Dummy( ImVec2( 0.0f, 4.0f ) );
-        const bool layersOpen = ImGui::CollapsingHeader( ICON_MDI_LAYERS " Additive Layers  (advanced)" );
+        const bool layersOpen =
+             Utils::ImGuiUtilities::SectionHeader( ICON_MDI_LAYERS "  Additive Layers  (advanced)", false );
         ImGui::SameLine();
         HelpMarker( "Play a SECOND clip ON TOP of the current one — e.g. a wave or aim while walking.\n\n"
                     "- Weight: how strongly it blends in (0..1).\n"

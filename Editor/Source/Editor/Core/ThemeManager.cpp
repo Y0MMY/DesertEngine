@@ -36,9 +36,13 @@ namespace Desert::Editor
         const ImVec4 Btn       = C( 51, 51, 51 );   // #333333  button normal
         const ImVec4 BtnHov    = C( 64, 64, 64 );   // #404040  button hovered
         const ImVec4 BtnAct    = C( 41, 41, 41 );   // #292929  button active (pressed)
-        const ImVec4 Select    = C( 0, 112, 224 );  // #0070E0  selection / header selected
-        const ImVec4 SelectHov = C( 26, 133, 240 ); // #1A85F0  hovered selection
-        const ImVec4 SelectAct = C( 0, 88, 176 );   // #0058B0  active selection
+        // Selection is NOT the accent. UE highlights a selected row with a muted blue-grey (#40576F,
+        // sampled off a selected outliner entry) and keeps the saturated blue for controls that report a
+        // VALUE — checkmarks, slider grabs, drag-drop. A selection painted in the accent shouts over the
+        // content it is supposed to be pointing at.
+        const ImVec4 Select    = C( 64, 87, 111 );  // #40576F  selected row
+        const ImVec4 SelectHov = C( 78, 104, 132 ); // #4E6884  hovered selection
+        const ImVec4 SelectAct = C( 53, 72, 92 );   // #35485C  active selection
         const ImVec4 Accent    = C( 0, 112, 224 );  // #0070E0  checkmark / slider / accent
 
         s_SelectedColor = Accent;

@@ -1,6 +1,7 @@
 #include "SceneSettingsPanel.hpp"
 
 #include <Editor/Core/EditorPreferences.hpp>
+#include <Editor/Core/ImGuiUtilities.hpp>
 
 #include <Engine/Core/Scene.hpp>
 #include <Engine/Core/SceneSettings.hpp>
@@ -35,7 +36,7 @@ namespace Desert::Editor
 
         Core::SceneSettings& s = m_Scene->GetSettings();
 
-        if ( ImGui::CollapsingHeader( "Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Anti-Aliasing" ) )
         {
             // ONE mode selector for every AA technique. None/FXAA/SMAA are post passes on the
             // scene setting (live); MSAA is hardware multisampling — a USER pref (editor.json ->
@@ -98,7 +99,7 @@ namespace Desert::Editor
                                                           : "off" );
         }
 
-        if ( ImGui::CollapsingHeader( "Post-Processing", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Post-Processing" ) )
         {
             // Live — consumed by the tonemap pass.
             ImGui::Checkbox( "Auto Exposure (eye adaptation)", &s.AutoExposure );
@@ -123,7 +124,7 @@ namespace Desert::Editor
                 ImGui::SetTooltip( "Chromatic rainbow fringe around bright sources (glare). Needs Bloom on." );
         }
 
-        if ( ImGui::CollapsingHeader( "Textures", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Textures" ) )
         {
             // Global sampler filter — applies live (samplers are recreated when this changes).
             const char* items[]  = { "Nearest", "Bilinear", "Trilinear", "Anisotropic" };
@@ -145,7 +146,7 @@ namespace Desert::Editor
             }
         }
 
-        if ( ImGui::CollapsingHeader( "Environment" ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Environment", false ) )
         {
             // Live — cascaded directional shadow maps.
             ImGui::Checkbox( "Shadows", &s.EnableShadows );
@@ -156,7 +157,7 @@ namespace Desert::Editor
             ImGui::TextDisabled( "Procedural Sky + skybox intensity moved to the Skybox component (Details)." );
         }
 
-        if ( ImGui::CollapsingHeader( "Shadow Debug" ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Shadow Debug", false ) )
         {
             // Viewport "show flags" (Grid / Bounding Boxes / Colliders / Wireframe / Mesh LOD) moved to the
             // viewport toolbar's "Show" dropdown, next to View Mode. "Show Normals" and "Light Debug" moved
@@ -184,7 +185,7 @@ namespace Desert::Editor
             }
         }
 
-        if ( ImGui::CollapsingHeader( "Rendering", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Rendering" ) )
         {
             const char* paths[] = { "Forward", "Deferred" };
             int         cur     = static_cast<int>( s.RenderingPath );
@@ -205,7 +206,7 @@ namespace Desert::Editor
 
         // Shared wind — a scene-global environment force (not owned by the Skybox). Drives grass + cloud
         // drift now; hair/cloth later. Consumed via SceneRenderer::GetWind().
-        if ( ImGui::CollapsingHeader( "Wind", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( "Wind" ) )
         {
             ImGui::SliderFloat( "Direction (deg)", &s.WindDirection, 0.0f, 360.0f );
             ImGui::SliderFloat( "Strength", &s.WindStrength, 0.0f, 1.0f );

@@ -1,6 +1,7 @@
 #include "PhotogrammetryPanel.hpp"
 
 #include <Editor/Core/EditorPreferences.hpp>
+#include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Import/MeshDnD.hpp>
 #include <Editor/Widgets/FaceTracker.hpp>
@@ -900,7 +901,7 @@ namespace Desert::Editor
         auto& prefs = EditorPreferences::Get();
         bool  dirty = false;
 
-        if ( ImGui::CollapsingHeader( ICON_MDI_TUNE " Reconstruction settings" ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_TUNE "  Reconstruction settings", false ) )
         {
             ImGui::TextDisabled( "{input}=frames folder  {output}=mesh file  {outdir}=its folder" );
             dirty |= PresetCombo( "##recPreset", prefs.PhotogrammetryCommand );
@@ -911,7 +912,8 @@ namespace Desert::Editor
             dirty |= PathPicker( "outmesh", prefs.PhotogrammetryOutputMesh, /*folder=*/false );
         }
 
-        if ( ImGui::CollapsingHeader( ICON_MDI_FACE_RECOGNITION " Face tracking (landmarks)" ) )
+        if ( Utils::ImGuiUtilities::SectionHeader( ICON_MDI_FACE_RECOGNITION "  Face tracking (landmarks)",
+                                                   false ) )
         {
             if ( !FaceTracker::Compiled() )
             {

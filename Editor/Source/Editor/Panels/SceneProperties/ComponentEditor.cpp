@@ -9,6 +9,7 @@
 
 #include <Editor/Core/EditorPreferences.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Editor/Widgets/Controls/Controls.hpp>
@@ -143,7 +144,7 @@ namespace Desert::Editor
         // "###" keeps the id stable while the count in the label changes.
         const std::string label =
              std::string( ICON_MDI_STAR "  Pinned (" ) + std::to_string( rows.size() ) + ")###PinnedFields";
-        if ( !ImGui::CollapsingHeader( label.c_str(), ImGuiTreeNodeFlags_DefaultOpen ) )
+        if ( !Utils::ImGuiUtilities::SectionHeader( label.c_str() ) )
             return;
 
         ImGui::PushID( "pinned" );
@@ -216,7 +217,9 @@ namespace Desert::Editor
         // without resetting the section.
         const std::string label =
              std::string( ComponentIcon( entry.Name ) ) + "  " + entry.Name + "###" + entry.Name;
-        const bool open = ImGui::CollapsingHeader( label.c_str(), ImGuiTreeNodeFlags_AllowItemOverlap );
+        // The SHARED section bar (flat grey). A raw CollapsingHeader paints itself with ImGuiCol_Header,
+        // which is the SELECTION colour — every component header would read as a selected row.
+        const bool open = Utils::ImGuiUtilities::SectionHeader( label.c_str(), true );
 
         if ( !filtering && open != storedOpen )
             EditorPreferences::SetComponentCollapsed( entry.Name, !open );

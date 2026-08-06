@@ -1,5 +1,6 @@
 #include "ModelingPanel.hpp"
 
+#include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/Selection/ModelingState.hpp>
 #include <Editor/Core/Selection/ViewportMode.hpp>
 
@@ -159,7 +160,7 @@ namespace Desert::Editor
             ImGui::TextUnformatted( "CubeGrid" );
             ImGui::Spacing();
             // --- Asset Actions / Grid Reinitialization: the two top sections of UE's Cube Grid Tool ---
-            if ( ImGui::CollapsingHeader( "Asset Actions", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Asset Actions" ) )
             {
                 if ( ImGui::Button( "Accept and Start New", ImVec2( -1.0f, 0.0f ) ) )
                     ms.ReqAccept = true;
@@ -167,7 +168,7 @@ namespace Desert::Editor
                     ImGui::SetTooltip( "Keep what you built as a mesh and start a fresh grid.\n"
                                        "The grid frame and Block Size carry over." );
             }
-            if ( ImGui::CollapsingHeader( "Grid Reinitialization", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Grid Reinitialization" ) )
             {
                 if ( ImGui::Button( "Reset Grid from Actor", ImVec2( -1.0f, 0.0f ) ) )
                     ms.ReqResetFromActor = true;
@@ -175,7 +176,7 @@ namespace Desert::Editor
                     ImGui::SetTooltip( "Put the grid origin on the SELECTED object's origin, so every block\n"
                                        "size stays flush with its corners instead of tiling from (0,0,0)." );
             }
-            if ( ImGui::CollapsingHeader( "Options", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Options" ) )
             {
                 // Moving the frame commits the current piece (cells are lattice indices) and re-tiles from
                 // the new origin — already-built geometry keeps the frame it was made in and never moves.
@@ -193,7 +194,7 @@ namespace Desert::Editor
                     ms.CellSize =
                          std::max( MS::MinCellSize, MS::BaseBlockSize / static_cast<float>( 1 << power ) );
             }
-            if ( ImGui::CollapsingHeader( "Corner Mode", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Corner Mode" ) )
             {
                 // Ramps / roofs / wedges: pick the selection's corner posts and raise or lower them.
                 if ( ms.CornerMode )
@@ -218,14 +219,14 @@ namespace Desert::Editor
                 ImGui::TextDisabled( "Select a rectangle, press Z, click the" );
                 ImGui::TextDisabled( "corner posts (Shift adds), then E / Q." );
             }
-            if ( ImGui::CollapsingHeader( "Block Selection", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Block Selection" ) )
             {
                 ImGui::Checkbox( "Hit Unrelated Geometry", &ms.HitUnrelated );
                 if ( ImGui::IsItemHovered() )
                     ImGui::SetTooltip( "Target other objects in the scene too, so you can start a grid on\n"
                                        "top of an existing mesh (bounding-box level)." );
             }
-            if ( ImGui::CollapsingHeader( "Output Type", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Output Type" ) )
             {
                 int               o      = static_cast<int>( ms.OutputType );
                 const char* const outs[] = { "Static Mesh", "Dynamic Mesh" };
@@ -240,7 +241,7 @@ namespace Desert::Editor
                                        "It is the bounding box, not a triangle mesh: a concave blockout is\n"
                                        "solid inside until the physics layer grows a mesh shape." );
             }
-            if ( ImGui::CollapsingHeader( "Grid", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Grid" ) )
             {
                 const float kMinBlock = MS::MinCellSize;
                 // Block Size (grid step) in world units = CENTIMETRES, like UE: 100 is a one-metre block.
@@ -267,7 +268,7 @@ namespace Desert::Editor
             }
             ImGui::Separator();
             // Shortcut Info — same block UE shows at the bottom of the Cube Grid Tool panel.
-            if ( ImGui::CollapsingHeader( "Shortcut Info", ImGuiTreeNodeFlags_DefaultOpen ) )
+            if ( Utils::ImGuiUtilities::SectionHeader( "Shortcut Info" ) )
             {
                 const struct
                 {

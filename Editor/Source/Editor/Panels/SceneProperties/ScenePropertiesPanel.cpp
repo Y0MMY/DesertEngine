@@ -165,7 +165,7 @@ namespace Desert::Editor
         }
 
         ImGui::SetNextItemOpen( m_PreviewOpen, ImGuiCond_Always );
-        m_PreviewOpen = ImGui::CollapsingHeader( ICON_MDI_CUBE_SCAN " Preview" );
+        m_PreviewOpen = Utils::ImGuiUtilities::SectionHeader( ICON_MDI_CUBE_SCAN "  Preview", false );
         if ( !m_PreviewOpen )
         {
             // Folded: no GPU work at all, but the selection should still be recognisable — fall back to
