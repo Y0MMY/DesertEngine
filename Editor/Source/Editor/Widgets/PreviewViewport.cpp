@@ -1,5 +1,7 @@
 #include "PreviewViewport.hpp"
 
+#include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
+
 #include "UIHelper/ImGuiUI.hpp"
 
 #include <Engine/ECS/Components.hpp>
@@ -180,36 +182,60 @@ namespace Desert::Editor
 
     bool PreviewViewport::TryFrameMesh()
     {
-        auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->Get( m_MeshHandle );
-        if ( !meshAsset )
-            return false;
+        // Bounds from the ASSET'S OWN VERTICES when they are there, and only then from the submesh AABBs.
+        // A stored AABB is whatever the importer wrote: it can be stale, empty, or in raw-vertex space that
+        // does not match what is drawn (Scene.cpp works around the same thing for picking). Framing off a
+        // wrong box is exactly how a preview ends up with the camera inside the model or the model in a
+        // corner — the vertices cannot lie.
+        glm::vec3 mn( 1e9f );
+        glm::vec3 mx( -1e9f );
+        bool      haveBounds = false;
 
-        // Union the submesh AABBs in MESH space, applying each submesh transform to its 8 corners — meshes
-        // that keep their offset in a submesh transform frame wrongly otherwise (huge / off-screen).
-        glm::vec3 mn( 1e9f ), mx( -1e9f );
-        for ( const auto& sm : meshAsset->GetSubmeshes() )
+        if ( const auto* asset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( m_MeshHandle ) )
         {
-            const glm::vec3 lo = sm.BoundingBox.Min, hi = sm.BoundingBox.Max;
-            for ( int corner = 0; corner < 8; ++corner )
+            if ( const auto* staticAsset = dynamic_cast<const Assets::StaticMeshAsset*>( asset ) )
             {
-                const glm::vec3 p( ( corner & 1 ) ? hi.x : lo.x, ( corner & 2 ) ? hi.y : lo.y,
-                                   ( corner & 4 ) ? hi.z : lo.z );
-                const glm::vec3 w = glm::vec3( sm.Transform * glm::vec4( p, 1.0f ) );
-                mn                = glm::min( mn, w );
-                mx                = glm::max( mx, w );
+                for ( const auto& v : staticAsset->GetVertices() )
+                {
+                    mn         = glm::min( mn, v.Position );
+                    mx         = glm::max( mx, v.Position );
+                    haveBounds = true;
+                }
             }
         }
-        if ( mx.x < mn.x )
-            return false; // no submeshes yet
+
+        if ( !haveBounds )
+        {
+            auto* meshAsset = Runtime::ResourceRegistry::GetMeshService()->Get( m_MeshHandle );
+            if ( !meshAsset )
+                return false;
+
+            // Union the submesh AABBs in MESH space, applying each submesh transform to its 8 corners —
+            // meshes that keep their offset in a submesh transform frame wrongly otherwise.
+            for ( const auto& sm : meshAsset->GetSubmeshes() )
+            {
+                const glm::vec3 lo = sm.BoundingBox.Min, hi = sm.BoundingBox.Max;
+                for ( int corner = 0; corner < 8; ++corner )
+                {
+                    const glm::vec3 p( ( corner & 1 ) ? hi.x : lo.x, ( corner & 2 ) ? hi.y : lo.y,
+                                       ( corner & 4 ) ? hi.z : lo.z );
+                    const glm::vec3 w = glm::vec3( sm.Transform * glm::vec4( p, 1.0f ) );
+                    mn                = glm::min( mn, w );
+                    mx                = glm::max( mx, w );
+                    haveBounds        = true;
+                }
+            }
+        }
+
+        const glm::vec3 extent = mx - mn;
+        if ( !haveBounds || extent.x < 0.0f || glm::length( extent ) < 1e-4f )
+            return false; // nothing measurable yet — keep the stand-in and retry next frame
 
         m_Focus = ( mn + mx ) * 0.5f;
 
-        // Half the LARGEST EXTENT, not half the diagonal — the same convention RadiusOfPrimitive uses for
-        // the material preview (a 100-unit cube gives 50, not 87). Framing by the diagonal pushes the
-        // camera ~1.7x further back for the same object, which is why a mesh sat small and far away while
-        // a material sphere filled its box.
-        const glm::vec3 extent = mx - mn;
-        m_FrameRadius          = std::max( glm::max( extent.x, glm::max( extent.y, extent.z ) ) * 0.5f, 1.0f );
+        // Half the LARGEST EXTENT, the same convention RadiusOfPrimitive uses for the material preview
+        // (a 100-unit cube gives 50, not the 87 a diagonal would).
+        m_FrameRadius = std::max( glm::max( extent.x, glm::max( extent.y, extent.z ) ) * 0.5f, 1.0f );
 
         ResetView();
         return true;
