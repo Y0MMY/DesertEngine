@@ -104,7 +104,11 @@ namespace Desert::Editor
         float     m_Distance = 3.0f; // world units, derived from the content's bounds on ResetView
         glm::vec3 m_Focus{ 0.0f };
         float     m_FrameRadius = 1.0f;                  // bounding radius of the current content
-        glm::vec3 m_FrameHalfExtent{ 0.5f, 0.5f, 0.5f }; // half-size of its box, for the exact fit below
+        glm::vec3 m_FrameHalfExtent{ 0.5f, 0.5f, 0.5f }; // half-size of its box, for the exact fit
+        // Round content (the sphere primitive) is bounded by its own radius from every angle, so it fits
+        // tighter than its box would. Everything else — a cube, a card, a measured mesh — is fitted by the
+        // corners of that box. Using one rule for both leaves the other one small in frame.
+        bool m_FrameIsRound = false;
 
         uint32_t m_Width = 0, m_Height = 0;
     };

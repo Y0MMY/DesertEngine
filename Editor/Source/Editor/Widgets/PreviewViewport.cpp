@@ -290,6 +290,7 @@ namespace Desert::Editor
         // Half-size per axis is the measurement; the radius is derived from it, never the other way round.
         m_FrameHalfExtent = glm::max( extent * 0.5f, glm::vec3( 0.01f ) );
         m_FrameRadius     = std::max( RadiusOfHalfExtent( m_FrameHalfExtent ), 1.0f );
+        m_FrameIsRound    = false; // a measured mesh is fitted by its box, whatever it looks like
 
         ResetView();
         return true;
@@ -318,6 +319,7 @@ namespace Desert::Editor
         m_Focus       = glm::vec3( 0.0f );
         m_FrameHalfExtent = HalfExtentOfPrimitive( shape );
         m_FrameRadius     = RadiusOfPrimitive( shape );
+        m_FrameIsRound    = ( shape == Shape::Sphere );
         m_HasContent  = true;
         ResetView();
     }
@@ -343,25 +345,52 @@ namespace Desert::Editor
         m_Yaw   = -0.6f;
         m_Pitch = 0.4f;
 
-        // Distance so the content's BOUNDING SPHERE exactly touches the frustum:
-        //
-        //     sin(fov/2) = R / d   ->   d = R / sin(fov/2)
-        //
-        // A sphere is the one bound that does not change with the viewing angle, so this is the closest the
-        // camera can sit and still be guaranteed to show the whole thing however it is orbited — which is
-        // the requirement. R is the true radius of the content: 50 for the sphere primitive, the box's
-        // half-diagonal for a mesh.
-        //
-        // Fitting the BOX corners instead (what this did briefly) is exact for a box and needlessly far for
-        // everything else: perspective makes the near corner project large, so the camera has to back off
-        // for a corner that most objects do not have. That is what pushed a 100-unit primitive to 517 —
-        // together with a radius that had been fed in as a per-axis half-size, describing a box 1.73x too
-        // big.
         const float halfFov = glm::radians( kFov ) * 0.5f;
-        m_Distance          = ( m_FrameRadius / std::sin( halfFov ) ) * kFitMargin;
 
-        LOG_TRACE( "[Preview] fit: radius {:.1f} (half-extent {:.1f} x {:.1f} x {:.1f}) -> distance {:.1f}",
-                   m_FrameRadius, m_FrameHalfExtent.x, m_FrameHalfExtent.y, m_FrameHalfExtent.z, m_Distance );
+        if ( m_FrameIsRound )
+        {
+            // A ball is bounded by its own radius from every direction, so the tightest distance at which
+            // it is fully visible follows straight from the frustum: sin(fov/2) = R / d.
+            m_Distance = ( m_FrameRadius / std::sin( halfFov ) ) * kFitMargin;
+        }
+        else
+        {
+            // Everything else is fitted by the CORNERS of its box, in perspective. Fitting such a shape by
+            // its bounding sphere instead wastes the frame: a cube's sphere is 1.73x its half-size, so the
+            // camera sits ~10% further back than it needs to and the corners never reach the edges. The
+            // corner fit is exact — for the 100-unit cube it is 276 against the sphere fit's 302, and the
+            // silhouette actually touches the frame.
+            //
+            //   corner depth  = d + dot(c, forward)
+            //   inside while |dot(c, right)| <= depth * tan(fov/2)
+            //   => d >= |dot(c, right)| / tan(fov/2) - dot(c, forward)
+            const float tanHalf = std::tan( halfFov );
+
+            const float     cp = std::cos( m_Pitch );
+            const glm::vec3 eyeDir{ cp * std::sin( m_Yaw ), std::sin( m_Pitch ), cp * std::cos( m_Yaw ) };
+            const glm::vec3 forward = -eyeDir;
+            const glm::vec3 right   = glm::normalize( glm::cross(
+                 forward, std::abs( forward.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 ) ) );
+            const glm::vec3 up      = glm::normalize( glm::cross( right, forward ) );
+
+            float needed = 0.0f;
+            for ( int corner = 0; corner < 8; ++corner )
+            {
+                const glm::vec3 c( ( corner & 1 ) ? m_FrameHalfExtent.x : -m_FrameHalfExtent.x,
+                                   ( corner & 2 ) ? m_FrameHalfExtent.y : -m_FrameHalfExtent.y,
+                                   ( corner & 4 ) ? m_FrameHalfExtent.z : -m_FrameHalfExtent.z );
+
+                const float lateral = std::max( std::abs( glm::dot( c, right ) ), std::abs( glm::dot( c, up ) ) );
+                needed              = std::max( needed, lateral / tanHalf - glm::dot( c, forward ) );
+            }
+
+            // The preview is square, so one tan covers both axes. Never inside the content's own sphere.
+            m_Distance = std::max( needed * kFitMargin, m_FrameRadius );
+        }
+
+        LOG_TRACE( "[Preview] fit: {} radius {:.1f} (half-extent {:.1f} x {:.1f} x {:.1f}) -> distance {:.1f}",
+                   m_FrameIsRound ? "round," : "boxed,", m_FrameRadius, m_FrameHalfExtent.x, m_FrameHalfExtent.y,
+                   m_FrameHalfExtent.z, m_Distance );
     }
 
     void PreviewViewport::ApplyCamera( uint32_t width, uint32_t height )
