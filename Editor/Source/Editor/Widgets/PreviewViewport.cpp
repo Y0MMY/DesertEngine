@@ -25,7 +25,8 @@ namespace Desert::Editor
         constexpr float kNearPlane  = 1.0f;  // centimetres (see Common/Core/Units.hpp)
         constexpr float kFarPlane   = 100000.0f;
         constexpr float kPitchLimit = 1.45f; // just shy of straight down/up, so the orbit never gimbals
-        constexpr float kFitMargin  = 1.25f; // leave a little air around the framed bounds
+        constexpr float kFitMargin  = 1.08f; // a little air around the framed bounds — the fit below
+                                             // is exact, so the old 1.25 now reads as a gap
 
         // Sun/key-light travel direction (DirectionLight stores where the light GOES, the shader lights
         // along -Direction). Same warm key as the asset thumbnails, from above and to the side.
@@ -175,7 +176,8 @@ namespace Desert::Editor
         m_MeshHandle  = mesh;
         m_HasContent  = true;
         m_Focus       = glm::vec3( 0.0f );
-        m_FrameRadius = 100.0f; // stand-in until the bounds are known (see TryFrameMesh)
+        m_FrameRadius     = 100.0f; // stand-in until the bounds are known (see TryFrameMesh)
+        m_FrameHalfExtent = glm::vec3( m_FrameRadius );
         ResetView();
         m_Framed = TryFrameMesh();
     }
@@ -235,7 +237,8 @@ namespace Desert::Editor
 
         // Half the LARGEST EXTENT, the same convention RadiusOfPrimitive uses for the material preview
         // (a 100-unit cube gives 50, not the 87 a diagonal would).
-        m_FrameRadius = std::max( glm::max( extent.x, glm::max( extent.y, extent.z ) ) * 0.5f, 1.0f );
+        m_FrameRadius     = std::max( glm::max( extent.x, glm::max( extent.y, extent.z ) ) * 0.5f, 1.0f );
+        m_FrameHalfExtent = glm::max( extent * 0.5f, glm::vec3( 0.01f ) );
 
         ResetView();
         return true;
@@ -262,7 +265,8 @@ namespace Desert::Editor
         m_MeshHandle  = Assets::AssetHandle( static_cast<uint64_t>( 0 ) );
         m_Framed      = true; // a primitive's size is known up front
         m_Focus       = glm::vec3( 0.0f );
-        m_FrameRadius = RadiusOfPrimitive( shape );
+        m_FrameRadius     = RadiusOfPrimitive( shape );
+        m_FrameHalfExtent = glm::vec3( m_FrameRadius );
         m_HasContent  = true;
         ResetView();
     }
@@ -285,11 +289,46 @@ namespace Desert::Editor
 
     void PreviewViewport::ResetView()
     {
-        // Distance that fits the bounding sphere in the vertical FOV, with a margin.
+        m_Yaw   = -0.6f;
+        m_Pitch = 0.4f;
+
+        // EXACT fit: the distance at which the content's eight box corners all sit inside the frustum,
+        // from the angle the camera actually starts at.
+        //
+        // The old sphere fit put a sphere of radius = half the largest extent in frame, which is only
+        // right for something as thick as it is tall. A wide-and-flat prop, or anything seen three-quarter
+        // on, presents a much smaller silhouette than that sphere — so the camera sat far enough back for
+        // a ball that was never there and the mesh read as tiny. Projecting the corners costs eight dot
+        // products and cannot be fooled by shape.
         const float halfFov = glm::radians( kFov ) * 0.5f;
-        m_Distance          = m_FrameRadius / std::sin( halfFov ) * kFitMargin;
-        m_Yaw               = -0.6f;
-        m_Pitch             = 0.4f;
+        const float tanHalf = std::tan( halfFov );
+
+        const float     cp = std::cos( m_Pitch );
+        const glm::vec3 dir{ cp * std::sin( m_Yaw ), std::sin( m_Pitch ), cp * std::cos( m_Yaw ) }; // eye dir
+        const glm::vec3 forward = -dir;                                                             // toward focus
+        const glm::vec3 right   = glm::normalize(
+             glm::cross( forward, std::abs( forward.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 ) ) );
+        const glm::vec3 up = glm::normalize( glm::cross( right, forward ) );
+
+        float needed = 0.0f;
+        for ( int corner = 0; corner < 8; ++corner )
+        {
+            const glm::vec3 c( ( corner & 1 ) ? m_FrameHalfExtent.x : -m_FrameHalfExtent.x,
+                               ( corner & 2 ) ? m_FrameHalfExtent.y : -m_FrameHalfExtent.y,
+                               ( corner & 4 ) ? m_FrameHalfExtent.z : -m_FrameHalfExtent.z );
+
+            // Camera-space coordinates of the corner, with the eye still at an unknown distance d along
+            // dir: depth = d + dot(c, forward), and the corner fits while |x| <= depth * tanHalf.
+            const float depthOffset = glm::dot( c, forward );
+            const float x           = std::abs( glm::dot( c, right ) );
+            const float y           = std::abs( glm::dot( c, up ) );
+
+            needed = std::max( needed, std::max( x, y ) / tanHalf - depthOffset );
+        }
+
+        // The preview is square, so one tan covers both axes. Never closer than the content's own radius,
+        // or the camera would end up inside a long thin object.
+        m_Distance = std::max( needed * kFitMargin, m_FrameRadius * 1.05f );
     }
 
     void PreviewViewport::ApplyCamera( uint32_t width, uint32_t height )

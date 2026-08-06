@@ -103,7 +103,8 @@ namespace Desert::Editor
         float     m_Pitch    = 0.5f;
         float     m_Distance = 3.0f; // world units, derived from the content's bounds on ResetView
         glm::vec3 m_Focus{ 0.0f };
-        float     m_FrameRadius = 1.0f; // bounding radius of the current content
+        float     m_FrameRadius = 1.0f;                  // bounding radius of the current content
+        glm::vec3 m_FrameHalfExtent{ 0.5f, 0.5f, 0.5f }; // half-size of its box, for the exact fit below
 
         uint32_t m_Width = 0, m_Height = 0;
     };
