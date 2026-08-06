@@ -1,6 +1,8 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 
 #include "EditorLayer.hpp"
+
+#include <Editor/Widgets/ThumbnailService.hpp>
 #include <Common/Core/Core.hpp>
 #include <Common/Core/Profiler.hpp>
 #include <Editor/Import/MeshDnD.hpp>
@@ -542,6 +544,11 @@ namespace Desert::Editor
         // never destroyed while their DS are bound to the recording command buffer.
         for ( auto& panel : m_Panels )
             panel->OnPreUpdate();
+
+        // ONE thumbnail capture pump for the whole editor. Panels only request; whether the asset browser
+        // is open, hidden or closed no longer changes whether previews progress, and a request made by one
+        // panel is finished for all of them.
+        ThumbnailService::Get().Tick();
 
         UpdateContextualPanels();
 

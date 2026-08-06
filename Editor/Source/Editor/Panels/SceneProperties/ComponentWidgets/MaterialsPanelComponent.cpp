@@ -10,6 +10,7 @@
 
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailService.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/Mesh/MeshAsset.hpp>
@@ -584,17 +585,21 @@ namespace Desert::Editor
     void MaterialComponentWidget::DrawSlotPreview( const Assets::SurfaceMaterialAsset* asset,
                                                    const SlotSwatch& swatch, float size )
     {
-        // The rendered preview comes from the SHARED on-disk thumbnail cache the asset browser fills; a
-        // material it has never shown falls back to the material's own colour (Details does no offscreen
-        // rendering of its own — that stays one renderer per panel).
+        // The rendered preview comes from the SHARED thumbnail service. Details used to only READ the disk
+        // cache the asset browser happened to fill, so a material the browser had never shown stayed a flat
+        // colour swatch forever. It now REQUESTS the capture itself — the service owns the single renderer
+        // for the whole editor, so asking costs nothing extra and the result is shared with every panel.
         std::shared_ptr<Graphic::Image2D> thumb;
         std::string                       path;
         if ( asset )
         {
             path = asset->GetMetadata().Filepath.generic_string();
 
-            std::error_code   ec;
-            const std::string png       = ThumbnailCache::DiskPath( path );
+            std::error_code ec;
+            // Cutout/foliage materials garble on a sphere -> flat card, same rule the browser uses.
+            const bool        flat = asset->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
+            const std::string png  = ThumbnailService::Get().RequestMaterial( asset->GetMetadata().Handle,
+                                                                              path, flat );
             bool              haveFresh = std::filesystem::exists( png, ec );
             if ( haveFresh )
             {
@@ -607,6 +612,7 @@ namespace Desert::Editor
                 {
                     haveFresh = false;
                     m_Thumbnails.Invalidate( png );
+                    ThumbnailService::Get().Invalidate( path ); // let it be captured again
                 }
             }
             if ( haveFresh )

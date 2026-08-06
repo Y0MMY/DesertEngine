@@ -3,8 +3,8 @@
 #include <Editor/Panels/IPanel.hpp>
 
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
-#include <Editor/Widgets/AssetThumbnailRenderer.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Editor/Widgets/ThumbnailService.hpp>
 
 #include <memory>
 #include <string>
@@ -64,7 +64,6 @@ namespace Desert::Editor
         Assets::AssetManager*                              m_AssetManager = nullptr;
         std::unique_ptr<UI::UIHelper>                      m_UIHelper;
         std::unique_ptr<ImportManager>                     m_ImportManager; // resolves texture paths -> handles
-        std::unique_ptr<AssetThumbnailRenderer>            m_ThumbRenderer;
         std::unique_ptr<ThumbnailCache>                    m_Thumbs;
         std::unordered_map<std::string, Assets::AssetHandle> m_ResolvedMesh; // mesh source path -> handle (cached)
     };

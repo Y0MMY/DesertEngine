@@ -250,7 +250,6 @@ namespace Desert::Editor
         Assets::AssetManager*           m_AssetManager = nullptr;
         std::unique_ptr<UI::UIHelper>   m_UIHelper;
         std::unique_ptr<ThumbnailCache>          m_Thumbnails;
-        std::unique_ptr<AssetThumbnailRenderer>  m_ThumbRenderer; // lazily created (needs the device ready)
         std::weak_ptr<::Desert::Core::Scene>     m_ViewportScene; // for "Capture Thumbnail from viewport"
         std::unordered_set<std::string>          m_FailedThumbs;  // assets that failed to load -> show icon, no retry spam
 

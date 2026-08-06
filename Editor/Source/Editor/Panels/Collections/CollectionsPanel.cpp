@@ -228,8 +228,7 @@ namespace Desert::Editor
             return;
 
         // Drive any in-flight offscreen preview render (one capture at a time, over a few frames).
-        if ( m_ThumbRenderer )
-            m_ThumbRenderer->Tick();
+        // Thumbnail capture is driven editor-wide by EditorLayer via ThumbnailService.
 
         // Content renders inside the window EditorLayer's central loop already opened for this panel. A
         // self-Begin here opened a SECOND, icon-less "Collections" window (different ImGui id) once panel
@@ -401,11 +400,8 @@ namespace Desert::Editor
 
         if ( static_cast<uint64_t>( handle ) != 0 )
         {
-            if ( !m_ThumbRenderer )
-                m_ThumbRenderer = std::make_unique<AssetThumbnailRenderer>();
-            if ( !m_ThumbRenderer->HasPending() )
-                m_ThumbRenderer->RequestMesh( handle, pngPath,
-                                              MeshMaterial::ResolveSidecar( *m_AssetManager, item.MeshPath ) );
+            ThumbnailService::Get().RequestMesh(
+                 handle, item.MeshPath, MeshMaterial::ResolveSidecar( *m_AssetManager, item.MeshPath ) );
         }
 
         ImGui::Button( ICON_MDI_CUBE_OUTLINE, img );

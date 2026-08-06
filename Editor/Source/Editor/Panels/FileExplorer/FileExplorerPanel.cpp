@@ -16,7 +16,7 @@
 #include <Editor/Import/MeshMaterial.hpp>
 #include <Editor/Widgets/UIHelper/ImGuiUI.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
-#include <Editor/Widgets/AssetThumbnailRenderer.hpp>
+#include <Editor/Widgets/ThumbnailService.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/MaterialAsset.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
@@ -717,8 +717,7 @@ namespace Desert::Editor
 
         // Advance the material-thumbnail capture state machine once per frame (renders + reads back the
         // pending material; see AssetThumbnailRenderer).
-        if ( m_ThumbRenderer )
-            m_ThumbRenderer->Tick();
+        // Thumbnail capture is driven editor-wide by EditorLayer via ThumbnailService.
         {
             FileIndex              = 0;
             if ( m_Refresh )
@@ -1333,15 +1332,13 @@ namespace Desert::Editor
         if ( !Runtime::ResourceRegistry::GetMaterialService()->Get( a->GetMetadata().Handle ) )
             Runtime::ResourceRegistry::GetMaterialService()->Register( a );
 
-        // Queue the render (one capture in flight at a time; Tick() drives it over two frames).
-        if ( !m_ThumbRenderer )
-            m_ThumbRenderer = std::make_unique<AssetThumbnailRenderer>();
-        if ( !m_ThumbRenderer->HasPending() )
+        // Queue through the editor-wide service: it owns the one renderer, deduplicates against what other
+        // panels already asked for, skips anything already on disk and never retries an asset that failed.
         {
             // Cutout/foliage materials (a grass-card atlas) wrap and garble on a sphere -> preview on a flat
             // camera-facing card instead.
             const bool flat = a->Data().GetFloat( "AlphaCutoff" ) > 0.0f;
-            m_ThumbRenderer->RequestMaterial( a->GetMetadata().Handle, pngPath, flat );
+            ThumbnailService::Get().RequestMaterial( a->GetMetadata().Handle, entry->AssetPath, flat );
         }
 
         // Until the PNG exists, show the albedo colour as a placeholder swatch.
@@ -1419,13 +1416,10 @@ namespace Desert::Editor
             return false;
         }
 
-        if ( !m_ThumbRenderer )
-            m_ThumbRenderer = std::make_unique<AssetThumbnailRenderer>();
-        if ( !m_ThumbRenderer->HasPending() )
         {
             // Show the mesh with its linked (sidecar) material if it has one.
             const auto mat = MeshMaterial::ResolveSidecar( *m_AssetManager, entry->AssetPath );
-            m_ThumbRenderer->RequestMesh( a->GetMetadata().Handle, pngPath, mat );
+            ThumbnailService::Get().RequestMesh( a->GetMetadata().Handle, entry->AssetPath, mat );
         }
 
         // No swatch for meshes — fall back to the type icon until the PNG is ready.
