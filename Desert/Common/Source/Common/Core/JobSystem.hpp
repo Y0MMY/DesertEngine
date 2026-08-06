@@ -5,6 +5,7 @@
 #include <deque>
 #include <functional>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <type_traits>
@@ -77,15 +78,18 @@ namespace Common
             void ( *Destroy )( void* );
         };
 
+        // std::destroy_at rather than an explicit `->~D()`: D is a lambda closure type here, and MSVC
+        // rejects the destructor-call syntax on a template parameter naming a closure ("class has no
+        // destructor called '~D'"). destroy_at is equivalent, standard, and accepted by both compilers.
         template <typename D>
         static constexpr Ops s_InlineOps = {
             []( void* s ) { ( *static_cast<D*>( s ) )(); },
             []( void* src, void* dst )
             {
                 new ( dst ) D( std::move( *static_cast<D*>( src ) ) );
-                static_cast<D*>( src )->~D();
+                std::destroy_at( static_cast<D*>( src ) );
             },
-            []( void* s ) { static_cast<D*>( s )->~D(); } };
+            []( void* s ) { std::destroy_at( static_cast<D*>( s ) ); } };
 
         template <typename D>
         static constexpr Ops s_HeapOps = {

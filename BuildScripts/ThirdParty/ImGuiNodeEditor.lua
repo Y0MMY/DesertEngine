@@ -33,7 +33,11 @@ project "ImGuiNodeEditor"
 	filter "system:windows"
 		systemversion "latest"
 		cppdialect "C++17"
-		staticruntime "On"
+		-- MUST match the rest of the workspace (/MD). Unlike ImGui — which gets away with
+		-- staticruntime "On" because it never touches the C++ stdlib — crude_json.cpp uses
+		-- <sstream>/<locale>, so a static CRT here drags libcpmtd.lib into the Editor link and
+		-- collides with msvcprtd.lib (LNK2038 RuntimeLibrary mismatch + a wall of LNK2005).
+		staticruntime "off"
 
 	filter "system:linux"
 		pic "On"

@@ -75,6 +75,10 @@ project "Desert"
 
     filter { "system:windows" }
         defines { "DESERT_PLATFORM_WINDOWS" }
+        -- /bigobj: MSVC caps an object file at 65279 sections, and the generated reflection +
+        -- component-registry translation units (one template instantiation per reflected type) blow
+        -- past it. Clang has no such limit, which is why this only bites the Windows build.
+        buildoptions { "/bigobj" }
         files {
             "Source/Platform/Windows/**.cpp",
             "Source/Platform/Windows/**.hpp",

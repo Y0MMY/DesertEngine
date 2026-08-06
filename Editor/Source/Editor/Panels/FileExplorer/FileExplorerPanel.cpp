@@ -309,7 +309,10 @@ namespace Desert::Editor
         const std::filesystem::path base = m_BaseProjectDir->AssetPath;
         std::error_code             ec;
         const std::filesystem::path rel = std::filesystem::relative( path, base, ec );
-        if ( ec || rel.empty() || rel.native().rfind( ".." ) == 0 )
+        // "Not under the project" = the relative path starts with a ".." component. Compare path
+        // ELEMENTS rather than the native string: path::native() is std::wstring on Windows, so a
+        // narrow ".." literal does not even overload-resolve there.
+        if ( ec || rel.empty() || *rel.begin() == std::filesystem::path( ".." ) )
             return; // not under the project
 
         DirectoryInformation* cur = m_BaseProjectDir;

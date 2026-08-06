@@ -23,16 +23,18 @@ project "FbxMeshSplitter"
     filter { "system:windows", "configurations:Debug" }
         libdirs { "%{wks.location}/Editor/ThirdParty/assimp/bin/Debug" }
         links   { "assimp-vc142-mtd" }
-        -- project-relative (Tools/FbxMeshSplitter -> ../../ = workspace root); %{wks.location} misexpands here.
+        -- %{wks.location}-anchored, like the includedirs/libdirs above: the vs2022 generator emits this
+        -- project's .vcxproj at the WORKSPACE ROOT (no explicit `location`), so a "../../" relative path
+        -- resolves above the repo and the copy fails.
         postbuildcommands {
-            '{COPYFILE} "../../Editor/ThirdParty/assimp/bin/Debug/assimp-vc142-mtd.dll" "%{cfg.targetdir}/assimp-vc142-mtd.dll"'
+            '{COPYFILE} "%{wks.location}/Editor/ThirdParty/assimp/bin/Debug/assimp-vc142-mtd.dll" "%{cfg.targetdir}/assimp-vc142-mtd.dll"'
         }
 
     filter { "system:windows", "configurations:Release" }
         libdirs { "%{wks.location}/Editor/ThirdParty/assimp/bin/Release" }
         links   { "assimp-vc142-mt" }
         postbuildcommands {
-            '{COPYFILE} "../../Editor/ThirdParty/assimp/bin/Release/assimp-vc142-mt.dll" "%{cfg.targetdir}/assimp-vc142-mt.dll"'
+            '{COPYFILE} "%{wks.location}/Editor/ThirdParty/assimp/bin/Release/assimp-vc142-mt.dll" "%{cfg.targetdir}/assimp-vc142-mt.dll"'
         }
 
     filter "system:macosx"
