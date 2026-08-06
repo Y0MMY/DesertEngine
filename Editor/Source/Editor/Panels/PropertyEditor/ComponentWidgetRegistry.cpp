@@ -54,12 +54,13 @@ namespace Desert::Editor
             if ( has( "Light" ) )
                 return "Lighting";
             if ( has( "Mesh" ) || has( "Text" ) || has( "Particle" ) || has( "Skybox" ) || has( "Terrain" ) ||
-                 has( "Sprite" ) || has( "Decal" ) )
+                 has( "Sprite" ) || has( "Decal" ) || has( "Foliage" ) )
                 return "Rendering";
-            if ( has( "Collider" ) || has( "Rigid" ) || has( "Character" ) || has( "Physics" ) )
+            if ( has( "Collider" ) || has( "Rigid" ) || has( "Character" ) || has( "Physics" ) ||
+                 has( "Projectile" ) )
                 return "Physics";
-            if ( has( "Anim" ) || has( "Skeleton" ) )
-                return "Animation";
+            if ( has( "Anim" ) || has( "Skeleton" ) || has( "Socket" ) || has( "Locomotion" ) )
+                return "Animation"; // a socket follows a BONE; locomotion picks clips
             if ( has( "Audio" ) || has( "Sound" ) )
                 return "Audio";
             if ( has( "Camera" ) )

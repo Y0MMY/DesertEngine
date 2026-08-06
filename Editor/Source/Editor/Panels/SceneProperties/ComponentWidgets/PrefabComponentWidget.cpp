@@ -3,6 +3,7 @@
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -21,10 +22,7 @@ namespace Desert::Editor
         auto& prefab = entity.GetComponent<ECS::PrefabComponent>();
 
         Utils::ImGuiUtilities::PushID();
-        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
-
-        ImGui::Columns( 2 );
-        ImGui::Separator();
+        Utils::ImGuiUtilities::ResetPropertyRows();
 
         // ── Prefab name / handle ──────────────────────────────────────────
         std::shared_ptr<Assets::PrefabAsset> asset;
@@ -45,23 +43,20 @@ namespace Desert::Editor
             }
         }
 
-        Utils::ImGuiUtilities::Property( "Asset", displayName, Utils::ImGuiUtilities::PropertyFlag::ReadOnly );
-
-        // ── Status ───────────────────────────────────────────────────────
+        Utils::ImGuiUtilities::BeginPropertyRow( "Asset" );
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted( "Status" );
-        ImGui::NextColumn();
+        ImGui::TextUnformatted( displayName.c_str() );
+        Utils::ImGuiUtilities::EndPropertyRow();
 
+        Utils::ImGuiUtilities::BeginPropertyRow( "Status" );
+        ImGui::AlignTextToFramePadding();
         if ( valid )
             ImGui::TextColored( ImVec4( 0.2f, 0.9f, 0.3f, 1.f ), ICON_MDI_CHECK " Valid" );
         else if ( prefab.Prefab )
             ImGui::TextColored( ImVec4( 0.9f, 0.2f, 0.2f, 1.f ), ICON_MDI_ALERT " Missing" );
         else
             ImGui::TextColored( ImVec4( 0.6f, 0.6f, 0.6f, 1.f ), ICON_MDI_MINUS " None" );
-
-        ImGui::NextColumn();
-        ImGui::Columns( 1 );
-        ImGui::Separator();
+        Utils::ImGuiUtilities::EndPropertyRow();
 
         // ── Select prefab by path ─────────────────────────────────────────
         ImGui::TextUnformatted( "Override Path" );
@@ -100,7 +95,6 @@ namespace Desert::Editor
             {
                 // Remove PrefabComponent from root — children keep their components
                 entity.GetRegistry()->remove<ECS::PrefabComponent>( entity.GetHandle() );
-                ImGui::PopStyleVar();
                 Utils::ImGuiUtilities::PopID();
                 return; // component is gone; stop rendering this widget
             }
@@ -121,7 +115,14 @@ namespace Desert::Editor
             ImGui::TreePop();
         }
 
-        ImGui::PopStyleVar();
         Utils::ImGuiUtilities::PopID();
     }
+
+    // The widget existed since the prefab work landed but was never registered, so a prefab instance had
+    // NO Details section at all — apply/unpack/clear were unreachable and the only prefab affordance in
+    // the panel was "Revert To Prefab", buried in the header's gear popup.
+    DESERT_REGISTER_CUSTOM_COMPONENT( ECS::PrefabComponent, "Prefab", true,
+                                      ( []( ECS::Entity& e, ::Desert::Core::Scene* s,
+                                            const ComponentEditContext& ctx )
+                                        { PrefabComponentWidget( ctx.AssetMgr() ).Render( e, s ); } ) )
 } // namespace Desert::Editor

@@ -344,11 +344,22 @@ namespace Desert::Editor
 
         if ( m_DebugMode )
         {
-            ImGui::Columns( 2 );
-            Utils::ImGuiUtilities::Property( "UUID", tag, Utils::ImGuiUtilities::PropertyFlag::ReadOnly );
-
-            ImGui::Columns( 1 );
-            ImGui::Separator();
+            // The entity's real UUID — this row used to print the TAG under a "UUID" label, which is the
+            // one thing debug mode exists to show.
+            Utils::ImGuiUtilities::ResetPropertyRows();
+            Utils::ImGuiUtilities::BeginPropertyRow( "UUID", "Stable identity used by prefabs, sockets and "
+                                                             "scripts" );
+            ImGui::AlignTextToFramePadding();
+            if ( selectedEntity.HasComponent<ECS::UUIDComponent>() )
+            {
+                ImGui::Text( "%llu", static_cast<unsigned long long>(
+                                          selectedEntity.GetComponent<ECS::UUIDComponent>().UUID ) );
+            }
+            else
+            {
+                ImGui::TextDisabled( "none" );
+            }
+            Utils::ImGuiUtilities::EndPropertyRow();
         }
 
         DrawSearchBox();
