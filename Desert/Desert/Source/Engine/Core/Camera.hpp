@@ -148,7 +148,11 @@ namespace Desert::Core
         float m_Yaw = 0.0f, m_YawDelta = 0.0f;
         float m_MovementSpeed = 1.0f; // multiplies the base fly speed (user-adjustable)
 
-        bool m_InputEnabled = true;  // viewport hovered + no text input capture (see SetInputEnabled)
+        // OFF until a viewport claims this camera (ViewportPanel sets it every frame from its hover state).
+        // Defaulting to ON meant every offscreen scene's editor camera — the Details preview's, each asset
+        // thumbnail's — flew with the viewport's RMB-look, because this reads the global mouse/keyboard
+        // directly rather than through the panel that owns the view.
+        bool m_InputEnabled         = false;
         bool m_Flying       = false; // RMB-look session in progress (started inside the viewport)
         bool m_KeyboardRequiresLook = false; // a modeling tool owns the keys unless RMB is held
     };

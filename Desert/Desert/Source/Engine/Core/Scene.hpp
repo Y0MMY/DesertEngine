@@ -161,6 +161,17 @@ namespace Desert::Core
         }
         [[nodiscard]] const std::shared_ptr<Core::Camera>& GetActiveCamera() const { return m_ActiveCamera; }
 
+        // Render through THIS camera and stop choosing one per play state. For a scene whose view is driven
+        // from outside — the Details preview orbits its own GameplayCamera — a plain SetActiveCamera lasts
+        // exactly until the next OnUpdate, which puts the scene's EditorCamera back. That camera polls the
+        // global mouse/keyboard, so the preview then flew along with the real viewport. Pinning also mutes
+        // the scene's EditorCamera input, since nothing is driving it any more. Pass nullptr to unpin.
+        void               PinActiveCamera( const std::shared_ptr<Core::Camera>& camera );
+        [[nodiscard]] bool HasPinnedCamera() const
+        {
+            return m_CameraPinned;
+        }
+
         template <typename T, typename... Args>
         void AddSystem( Args&&... args )
         {
@@ -182,6 +193,10 @@ namespace Desert::Core
         void FindMainCamera();
         void OnEntityCreated_Camera();
 
+        // Picks the active camera from the play state (Edit -> EditorCamera, Play -> the main
+        // CameraComponent). Skipped entirely while a camera is pinned.
+        void UpdateActiveCameraSource();
+
         void SetupRegistryCallbacks();
 
         // Runs the ECS systems: sequential by default, but maximal runs of CanRunParallel() systems
@@ -201,6 +216,7 @@ namespace Desert::Core
         std::weak_ptr<Core::Camera>   m_MainCamera;   // non-owning view (renderer reads this)
         std::shared_ptr<Core::Camera> m_ActiveCamera; // owns the current camera (editor or gameplay)
         std::shared_ptr<Core::Camera> m_EditorCamera;   // persistent editor view (Edit mode)
+        bool                          m_CameraPinned = false; // view driven from outside (see PinActiveCamera)
         std::shared_ptr<Core::Camera> m_GameplayCamera; // persistent game view (Play mode), driven by the
                                                         // main CameraComponent
         mutable uint32_t              m_ViewportWidth  = 1280;

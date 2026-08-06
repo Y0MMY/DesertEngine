@@ -125,8 +125,13 @@ namespace Desert::Editor
         // input-driven EditorCamera (it would fight the real viewport for the mouse and ignores transforms),
         // so the thumbnail renderer has to frame by scaling the object. A GameplayCamera we drive by hand
         // from the orbit state gives real orbit + zoom and leaves the target's transform at identity.
+        //
+        // PINNED, not merely set active: Scene::OnUpdate re-picks the camera from the play state every
+        // frame, so a plain SetActiveCamera survived exactly one frame before the scene's own EditorCamera
+        // took the view back — and that camera reads the global mouse, so the preview flew along with the
+        // viewport and lost the mesh.
         m_Camera = std::make_shared<::Desert::Core::GameplayCamera>();
-        m_Scene->SetActiveCamera( m_Camera );
+        m_Scene->PinActiveCamera( m_Camera );
 
         auto  light           = m_Scene->CreateNewEntity( "PreviewLight" );
         auto& lightC          = light.AddComponent<ECS::DirectionLightComponent>();

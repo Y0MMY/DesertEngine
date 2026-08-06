@@ -219,13 +219,31 @@ namespace Desert::Core
         // CameraComponent.
         if ( !m_EditorCamera )
             m_EditorCamera = std::make_shared<EditorCamera>();
-        if ( m_State != SceneState::Play )
+        if ( m_State != SceneState::Play && !m_CameraPinned )
             SetActiveCamera( m_EditorCamera );
 
         return BOOLSUCCESS;
     }
 
-    void Scene::OnUpdate( const Common::Timestep& ts )
+    void Scene::PinActiveCamera( const std::shared_ptr<Core::Camera>& camera )
+    {
+        if ( !camera )
+        {
+            m_CameraPinned = false;
+            return;
+        }
+
+        m_CameraPinned = true;
+        SetActiveCamera( camera );
+
+        // The scene still owns an EditorCamera (Init() always makes one). It polls the global mouse and
+        // keyboard directly, so leaving it live in an offscreen scene means it flies along with the real
+        // viewport — which is what made the Details preview follow the scene camera.
+        if ( auto* editorCam = dynamic_cast<EditorCamera*>( m_EditorCamera.get() ) )
+            editorCam->SetInputEnabled( false );
+    }
+
+    void Scene::UpdateActiveCameraSource()
     {
         // Camera source follows the play state: Edit/Paused -> EditorCamera; Play -> the main
         // CameraComponent (driven into a GameplayCamera each frame so moving the camera entity moves the
@@ -283,6 +301,16 @@ namespace Desert::Core
         {
             SetActiveCamera( m_EditorCamera );
         }
+    }
+
+    void Scene::OnUpdate( const Common::Timestep& ts )
+    {
+        // A pinned camera is driven from OUTSIDE the scene (the Details preview orbits its own), so the
+        // play-state rule must not hand the view back to the EditorCamera behind its back — that is a
+        // per-frame overwrite, and it is why the preview rendered through the input-driven editor camera
+        // one frame after being told not to.
+        if ( !m_CameraPinned )
+            UpdateActiveCameraSource();
 
         Graphic::SceneRenderer::UpdateInfo sceneRendererInfo;
         sceneRendererInfo.Timestep = ts;
