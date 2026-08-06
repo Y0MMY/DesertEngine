@@ -11,6 +11,18 @@ namespace Desert::Editor::Utils
 {
     static int s_UIContextID = 0;
 
+    namespace
+    {
+        // Vertical extent of the row currently being submitted, so the column rule can be drawn once the
+        // columns are open (the background is painted before them).
+        float s_RowBandTop    = 0.0f;
+        float s_RowBandBottom = 0.0f;
+
+        // Alternating row index, restarted per section so the first row under a header is always the
+        // panel colour — as it is in UE.
+        int s_PropertyRowIndex = 0;
+    } // namespace
+
     bool ImGuiUtilities::SectionHeader( const char* label, bool defaultOpen, const char* detail )
     {
         // ONE look for every section in the editor. Modelled on UE's Details panel: a flat, full-width
@@ -37,6 +49,10 @@ namespace Desert::Editor::Utils
         ImGui::PopStyleVar( 2 );
         ImGui::PopStyleColor( 3 );
 
+        // A section restarts the striping, so the first row under ANY header is the panel colour and never
+        // fuses with the bar above it. Doing it here means no call site has to remember.
+        s_PropertyRowIndex = 0;
+
         if ( detail && *detail )
         {
             // Painted into the bar rather than submitted as an item: an item here would sit ON the header
@@ -56,18 +72,11 @@ namespace Desert::Editor::Utils
         return open;
     }
 
-    namespace
-    {
-        // Vertical extent of the row currently being submitted, so the column rule can be drawn once the
-        // columns are open (the background is painted before them).
-        float s_RowBandTop    = 0.0f;
-        float s_RowBandBottom = 0.0f;
-    } // namespace
-
     void ImGuiUtilities::ResetPropertyRows()
     {
-        s_RowBandTop    = 0.0f;
-        s_RowBandBottom = 0.0f;
+        s_RowBandTop       = 0.0f;
+        s_RowBandBottom    = 0.0f;
+        s_PropertyRowIndex = 0;
     }
 
     float ImGuiUtilities::PropertyLabelWidth()
@@ -95,12 +104,26 @@ namespace Desert::Editor::Utils
         const ImVec2 bandMax( rowMax.x + style.WindowPadding.x, rowMax.y + half );
         ImDrawList*  dl = ImGui::GetWindowDrawList();
 
-        // No zebra: UE separates rows with a rule, not with alternating fills (measured off the Static
-        // Mesh Editor — every row there is the same #242424). Stripes on top of a rule read as noise.
+        // Zebra AND a rule, both measured off the UE reference: odd rows are painted in the section-bar
+        // grey (#2F2F2F) over the panel's #242424, and every row still gets its 1px #1A1A1A rule. The
+        // Static Mesh Editor's own Details happens to show uniform rows, but the Blueprint one alternates,
+        // and the alternation is what makes a long list of slots readable — a value belongs to the band it
+        // sits in, not to the label that happens to be closest.
+        //
+        // Index 0 is deliberately UNPAINTED: a section header is that same grey, so a painted first row
+        // would fuse with the bar above it.
         if ( hovered )
+        {
             dl->AddRectFilled( bandMin, bandMax, IM_COL32( 255, 255, 255, 12 ) );
+        }
+        else if ( ( s_PropertyRowIndex & 1 ) != 0 )
+        {
+            dl->AddRectFilled( bandMin, bandMax, ImGui::GetColorU32( ThemeManager::GetSectionHeaderColor() ) );
+        }
         dl->AddLine( ImVec2( bandMin.x, bandMin.y ), ImVec2( bandMax.x, bandMin.y ),
                      ImGui::GetColorU32( ImGuiCol_Border ) );
+
+        ++s_PropertyRowIndex;
 
         s_RowBandTop    = bandMin.y;
         s_RowBandBottom = bandMax.y;
