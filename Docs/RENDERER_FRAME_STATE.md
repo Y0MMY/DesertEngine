@@ -25,6 +25,40 @@ Consequences, all observed:
 `SceneRenderer::BeginScene` logs a one-time warning when a second renderer draws the same frame. It does
 not refuse — multi-view would break — but nothing about this should be silent.
 
+## What the code actually looks like (checked, 2026-08-06)
+
+Facts that decide how the fix has to be built — all verified in the source, not assumed:
+
+* **Reflection already handles multiple sets.** `VulkanShader` reads
+  `spv::DecorationDescriptorSet` and fills `m_ReflectionData.ShaderDescriptorSets[set]`, and
+  `GetDescriptorSetLayout(set)` exists. Shaders simply declare no `set = N` today, so everything lands in
+  set 0.
+* **The MATERIAL owns every set.** `VulkanMaterialBackend::AllocateDescriptorSets()` allocates
+  `framesInFlight × setCount` sets from the material's own pool, and `BindDescriptorSets()` binds all of
+  them starting at `firstSet = 0`. Nothing else in the engine owns a descriptor set for a graphics
+  pipeline.
+* **Buffers are created from shader reflection, by shader.** `ShaderResourcesManager(debugName, shader)`
+  builds every UniformBuffer/StorageBuffer/sampler the shader declares; `UniformBuffer::Create` is private
+  to it. There is currently no way to own a shader-declared buffer *outside* a material.
+* Sets are already per-frame-in-flight, so the frame dimension exists; only the OWNER dimension is missing.
+
+So the missing concept is "a descriptor set owned by something that is not a material". That is the whole
+job — the rest (writing the payload) is already centralised in `MeshRenderer::FrameState`.
+
+Two shapes are possible, and the second is cheaper than this document originally assumed:
+
+**A. Split the sets (this document's plan).** Frame blocks move to `set = 1`; the material backend stops
+allocating/binding that set; the renderer allocates it against `VulkanShader::GetDescriptorSetLayout(1)`
+and binds with `firstSet = 1`. Clean and standard. Touches every lit shader.
+
+**B. Give the existing set an OWNER dimension.** Keep one set and the shaders exactly as they are; make
+the backend allocate `framesInFlight × renderers` sets and the frame-scoped UniformBuffers hold one buffer
+per renderer slot; the renderer passes its slot when binding. No shader edits, no layout changes — but it
+duplicates the whole material set (textures included) per renderer, so the memory cost scales with
+materials × renderers, and every bind site grows a slot argument.
+
+A is the right long-term shape; B is the smaller change if the only goal is correctness for 2-3 views.
+
 ## The fix
 
 Move frame-scoped state out of the material and into a **per-renderer descriptor set** bound once per
