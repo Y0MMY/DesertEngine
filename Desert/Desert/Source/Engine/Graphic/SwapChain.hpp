@@ -26,9 +26,23 @@ namespace Desert::Graphic
 
         virtual void Release() = 0;
 
+        // Present pacing. ON = sync to the display (no tearing, frame rate capped at the refresh rate of
+        // the monitor the window is on); OFF = present as fast as the GPU finishes, which is what an
+        // uncapped FPS reading needs. Takes effect the next time the swapchain is (re)created — callers
+        // that toggle it at runtime must trigger a recreate, which OnResize already does.
+        void SetVSync( bool enabled )
+        {
+            m_VSync = enabled;
+        }
+        bool IsVSyncEnabled() const
+        {
+            return m_VSync;
+        }
+
         static std::shared_ptr<SwapChain> Create( const GLFWwindow* window );
 
     protected:
         const GLFWwindow* m_Window;
+        bool              m_VSync = true;
     };
 } // namespace Desert::Graphic

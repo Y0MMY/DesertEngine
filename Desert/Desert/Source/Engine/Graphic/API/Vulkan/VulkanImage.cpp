@@ -230,7 +230,14 @@ namespace Desert::Graphic::API::Vulkan
         if ( !allocResult.IsSuccess() ) return Common::MakeError<bool>( allocResult.GetError() );
         m_Resource.Allocation = allocResult.GetValue();
 
-        VkImageAspectFlags aspect = Graphic::Utils::IsDepthFormat( m_Specification.Format ) ? 
+        // The Tag already named the VMA allocation, which only shows up in a VMA dump. Name the VkImage
+        // itself as well so a graphics debugger lists "GBuffer_attachment0" instead of "Image 1234" —
+        // without this, finding a specific target in a capture means guessing by size and format.
+        if ( !m_Specification.Tag.empty() )
+            VKUtils::SetDebugUtilsObjectName( vkDevice, VK_OBJECT_TYPE_IMAGE, m_Specification.Tag,
+                                              m_Resource.Image );
+
+        VkImageAspectFlags aspect = Graphic::Utils::IsDepthFormat( m_Specification.Format ) ?
             VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
         
         m_Resource.ImageView = Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, aspect, VK_IMAGE_VIEW_TYPE_2D, 1, m_Resource.MipLevels );

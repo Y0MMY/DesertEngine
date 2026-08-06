@@ -221,7 +221,10 @@ namespace Desert::Graphic::API::Vulkan
         {
             const auto format = attachment.Format;
             Core::Formats::Image2DSpecification imageSpec = {
-                 .Tag        = m_FramebufferSpecification.DebugName + "_attachment",
+                 // Index the tag: a G-buffer's four attachments otherwise all carry the same name, which
+                 // is exactly when a capture is hardest to read.
+                 .Tag = m_FramebufferSpecification.DebugName + "_attachment" +
+                        std::to_string( attachments.size() ),
                  .Width      = m_FramebufferSpecification.Width,
                  .Height     = m_FramebufferSpecification.Height,
                  .Format     = format,

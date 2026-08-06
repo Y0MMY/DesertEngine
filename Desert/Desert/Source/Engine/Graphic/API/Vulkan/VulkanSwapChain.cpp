@@ -1,4 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanSwapChain.hpp>
+
+#include <algorithm> // std::find — present-mode support probe
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanAllocator.hpp>
 #include <Engine/Graphic/API/Vulkan/CommandBufferAllocator.hpp>
@@ -67,8 +69,12 @@ namespace Desert::Graphic::API::Vulkan
              std::clamp( desiredImageCount, surfCaps.minImageCount, maxImageCount );
 
         // Pick the present mode from what the surface ACTUALLY supports (hardcoding MAILBOX tripped a
-        // validation error on MoltenVK, which offers only FIFO + IMMEDIATE). Preference: MAILBOX
-        // (low-latency triple buffering) when available, else FIFO — the only mode the spec guarantees.
+        // validation error on MoltenVK, which offers only FIFO + IMMEDIATE).
+        //  VSync ON  -> MAILBOX (low-latency triple buffering) when available, else FIFO.
+        //  VSync OFF -> IMMEDIATE, the only mode that is NOT paced by the display: both MAILBOX and FIFO
+        //               present at the monitor's refresh rate, so without this the frame rate is pinned to
+        //               the refresh of whichever monitor the window sits on regardless of the VSync flag.
+        // FIFO is the fallback everywhere — it is the only mode the spec guarantees exists.
         VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
         {
             uint32_t presentModeCount = 0;
@@ -77,13 +83,21 @@ namespace Desert::Graphic::API::Vulkan
             if ( presentModeCount > 0 )
                 vkGetPhysicalDeviceSurfacePresentModesKHR( pDevice, m_Surface, &presentModeCount,
                                                            presentModes.data() );
-            for ( const auto mode : presentModes )
-                if ( mode == VK_PRESENT_MODE_MAILBOX_KHR )
-                {
-                    swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
-                    break;
-                }
+
+            const auto supports = [&presentModes]( VkPresentModeKHR mode )
+            { return std::find( presentModes.begin(), presentModes.end(), mode ) != presentModes.end(); };
+
+            if ( !m_VSync && supports( VK_PRESENT_MODE_IMMEDIATE_KHR ) )
+                swapchainPresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            else if ( supports( VK_PRESENT_MODE_MAILBOX_KHR ) )
+                swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
         }
+
+        LOG_INFO( "[SwapChain] Present mode: {} (VSync {})",
+                  swapchainPresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE"
+                  : swapchainPresentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX"
+                                                                        : "FIFO",
+                  m_VSync ? "on" : "off" );
 
         VkSurfaceTransformFlagsKHR preTransform;
         if ( surfCaps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR )

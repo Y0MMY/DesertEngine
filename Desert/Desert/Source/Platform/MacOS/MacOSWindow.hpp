@@ -29,9 +29,17 @@ namespace Desert::Platform::MacOS
         virtual void                   SetWindowSize( uint32_t width, uint32_t height ) override;
         [[nodiscard]] virtual uint32_t GetWidth() const override;
         [[nodiscard]] virtual uint32_t GetHeight() const override;
-        virtual void                   SetVSync( bool enabled ) override
+        // Mirrors WindowsWindow: the swapchain picks its present mode at creation, so the new pacing only
+        // applies once it is rebuilt. MoltenVK exposes FIFO + IMMEDIATE, so switching VSync off works here
+        // too — storing the flag alone (which is all this used to do) left the setting inert.
+        virtual void SetVSync( bool enabled ) override
         {
             m_Data.Specification.VSync = enabled;
+            if ( m_SwapChain )
+            {
+                m_SwapChain->SetVSync( enabled );
+                m_SwapChain->OnResize( m_Data.Specification.Width, m_Data.Specification.Height );
+            }
         }
         [[nodiscard]] virtual const void* GetNativeWindow() const override;
 

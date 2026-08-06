@@ -88,6 +88,8 @@ namespace Desert::Graphic::API::Vulkan
         [[nodiscard]] const Engine::DeviceCapabilities& GetCapabilities() const override;
         virtual void                                    WaitIdle() const override;
         [[nodiscard]] virtual std::string               GetName() const override;
+        [[nodiscard]] bool IsFormatSupported( ::Desert::Core::Formats::ImageFormat format,
+                                              Engine::FormatUsage                  usage ) const override;
 
         const auto& GetPhysicalDevice() const
         {

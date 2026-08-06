@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanImage.hpp> // GetImageVulkanFormat — engine format -> VkFormat
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/RenderConfig.hpp>
 
@@ -9,6 +10,7 @@
 
 #include <Common/Core/Constants.hpp>
 
+#include <algorithm> // std::max — largest device-local heap
 #include <filesystem>
 #include <fstream>
 
@@ -83,11 +85,89 @@ namespace Desert::Graphic::API::Vulkan
             m_Capabilities.MaxAnisotropy          = deviceProperties.limits.maxSamplerAnisotropy;
             m_Capabilities.SupportsNonSolidFill   = deviceFeatures.fillModeNonSolid == VK_TRUE;
 
-            const char* typeName =
-                 deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU     ? "discrete"
-                 : deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "integrated"
-                                                                                         : "other";
-            LOG_INFO( "[Vulkan] GPU: {} ({})", deviceProperties.deviceName, typeName );
+            // --- Identity ---
+            m_Capabilities.Name = deviceProperties.deviceName;
+            switch ( deviceProperties.deviceType )
+            {
+                case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+                    m_Capabilities.Type = Engine::DeviceType::Discrete;
+                    break;
+                case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+                    m_Capabilities.Type = Engine::DeviceType::Integrated;
+                    break;
+                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+                    m_Capabilities.Type = Engine::DeviceType::Virtual;
+                    break;
+                case VK_PHYSICAL_DEVICE_TYPE_CPU:
+                    m_Capabilities.Type = Engine::DeviceType::CPU;
+                    break;
+                default:
+                    m_Capabilities.Type = Engine::DeviceType::Unknown;
+                    break;
+            }
+            // PCI-SIG vendor IDs. Apple reports its own rather than a PCI one on Apple Silicon.
+            switch ( deviceProperties.vendorID )
+            {
+                case 0x10DE: m_Capabilities.VendorName = "NVIDIA"; break;
+                case 0x1002:
+                case 0x1022: m_Capabilities.VendorName = "AMD"; break;
+                case 0x8086: m_Capabilities.VendorName = "Intel"; break;
+                case 0x106B: m_Capabilities.VendorName = "Apple"; break;
+                case 0x13B5: m_Capabilities.VendorName = "ARM"; break;
+                case 0x5143: m_Capabilities.VendorName = "Qualcomm"; break;
+                default:     m_Capabilities.VendorName = "Unknown"; break;
+            }
+
+            // --- Limits the renderer actually branches on ---
+            m_Capabilities.MaxPushConstantSize    = deviceProperties.limits.maxPushConstantsSize;
+            m_Capabilities.MaxTexture2DSize       = deviceProperties.limits.maxImageDimension2D;
+            m_Capabilities.MaxTextureArrayLayers  = deviceProperties.limits.maxImageArrayLayers;
+            m_Capabilities.MaxColorAttachments    = deviceProperties.limits.maxColorAttachments;
+            m_Capabilities.SupportsGeometryShaders   = deviceFeatures.geometryShader == VK_TRUE;
+            m_Capabilities.SupportsTessellation      = deviceFeatures.tessellationShader == VK_TRUE;
+            m_Capabilities.SupportsMultiDrawIndirect = deviceFeatures.multiDrawIndirect == VK_TRUE;
+            m_Capabilities.SupportsTimestampQueries  = deviceProperties.limits.timestampComputeAndGraphics == VK_TRUE;
+
+            // MSAA counts usable for BOTH colour and depth — a count only one of them supports is useless
+            // to a framebuffer that has each.
+            const VkSampleCountFlags sampleCounts = deviceProperties.limits.framebufferColorSampleCounts &
+                                                    deviceProperties.limits.framebufferDepthSampleCounts;
+            m_Capabilities.MSAASampleMask = static_cast<uint32_t>( sampleCounts );
+
+            // Float render targets: RGBA32F must be usable as a colour attachment AND blendable, which is
+            // what every accumulating screen-space pass (SSR trace/resolve, GI resolve, bloom) relies on.
+            {
+                VkFormatProperties fmt{};
+                vkGetPhysicalDeviceFormatProperties( selectedPhysicalDevice, VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                     &fmt );
+                constexpr VkFormatFeatureFlags kNeeded = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                                                         VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+                                                         VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+                m_Capabilities.SupportsFloatRenderTargets =
+                     ( fmt.optimalTilingFeatures & kNeeded ) == kNeeded;
+            }
+
+            // Device-local heap size — the budget the screen-space passes are weighed against.
+            {
+                VkPhysicalDeviceMemoryProperties memProps{};
+                vkGetPhysicalDeviceMemoryProperties( selectedPhysicalDevice, &memProps );
+                for ( uint32_t i = 0; i < memProps.memoryHeapCount; ++i )
+                    if ( memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT )
+                        m_Capabilities.VideoMemory =
+                             std::max<uint64_t>( m_Capabilities.VideoMemory, memProps.memoryHeaps[i].size );
+            }
+
+            const char* typeName = m_Capabilities.Type == Engine::DeviceType::Discrete     ? "discrete"
+                                   : m_Capabilities.Type == Engine::DeviceType::Integrated ? "integrated"
+                                                                                           : "other";
+            LOG_INFO( "[Vulkan] GPU: {} ({}, {}, {} MB VRAM)", m_Capabilities.Name, m_Capabilities.VendorName,
+                      typeName, m_Capabilities.VideoMemory / ( 1024ull * 1024ull ) );
+            LOG_INFO( "[Vulkan] Caps: maxMSAA {}x, maxTex2D {}, colorAttachments {}, float RTs {}, "
+                      "timestamps {}",
+                      m_Capabilities.MaxMSAASamples(), m_Capabilities.MaxTexture2DSize,
+                      m_Capabilities.MaxColorAttachments,
+                      m_Capabilities.SupportsFloatRenderTargets ? "yes" : "NO",
+                      m_Capabilities.SupportsTimestampQueries ? "yes" : "no" );
         }
 
         // Publish anisotropy support to the low-level sampler-creation path (0 = unsupported -> no aniso).
@@ -95,18 +175,10 @@ namespace Desert::Graphic::API::Vulkan
              m_Capabilities.SupportsAnisotropy ? m_Capabilities.MaxAnisotropy : 0.0f;
         Graphic::RenderConfig::WideLines = m_Capabilities.SupportsWideLines; // clamp debug-line width if false
 
-        // Publish the device's MSAA ceiling (color AND depth must support the count).
-        {
-            VkPhysicalDeviceProperties props;
-            vkGetPhysicalDeviceProperties( selectedPhysicalDevice, &props );
-            const VkSampleCountFlags counts = props.limits.framebufferColorSampleCounts &
-                                              props.limits.framebufferDepthSampleCounts;
-            const int maxMsaa = ( counts & VK_SAMPLE_COUNT_8_BIT ) ? 8
-                                : ( counts & VK_SAMPLE_COUNT_4_BIT ) ? 4
-                                : ( counts & VK_SAMPLE_COUNT_2_BIT ) ? 2
-                                                                     : 1;
-            Graphic::RenderConfig::MaxMSAASamples = maxMsaa;
-        }
+        // Publish the device's MSAA ceiling. Derived from the capability computed above rather than
+        // re-querying the driver — one source of truth, so the value the renderer clamps to and the value
+        // GetCapabilities() reports can never disagree.
+        Graphic::RenderConfig::MaxMSAASamples = static_cast<int>( m_Capabilities.MaxMSAASamples() );
 
         DESERT_VERIFY( selectedPhysicalDevice, "Could not find any physical devices!" );
 
@@ -226,6 +298,37 @@ namespace Desert::Graphic::API::Vulkan
     std::string VulkanLogicalDevice::GetName() const
     {
         return m_DeviceName;
+    }
+
+    bool VulkanLogicalDevice::IsFormatSupported( ::Desert::Core::Formats::ImageFormat format,
+                                                 Engine::FormatUsage                  usage ) const
+    {
+        const VkFormat vkFormat = GetImageVulkanFormat( format );
+        if ( vkFormat == VK_FORMAT_UNDEFINED )
+            return false;
+
+        VkFormatProperties props{};
+        vkGetPhysicalDeviceFormatProperties( m_PhysicalDevice->GetVulkanPhysicalDevice(), vkFormat, &props );
+
+        // Optimal tiling only: every image the engine creates is VK_IMAGE_TILING_OPTIMAL. Asking about
+        // linear tiling would answer a question nothing here can act on.
+        const VkFormatFeatureFlags features = props.optimalTilingFeatures;
+
+        VkFormatFeatureFlags required = 0;
+        if ( usage & Engine::FormatUsage_Sampled )
+            required |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        if ( usage & Engine::FormatUsage_ColorAttachment )
+            required |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+        if ( usage & Engine::FormatUsage_DepthAttachment )
+            required |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        if ( usage & Engine::FormatUsage_Blendable )
+            required |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
+        if ( usage & Engine::FormatUsage_Storage )
+            required |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
+        if ( usage & Engine::FormatUsage_LinearFilter )
+            required |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+
+        return ( features & required ) == required;
     }
 
     void VulkanLogicalDevice::Destroy()

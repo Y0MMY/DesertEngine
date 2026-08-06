@@ -120,6 +120,12 @@ namespace Desert::Graphic::API::Vulkan
         renderPassInfo.clearValueCount = static_cast<uint32_t>( clearValues.size() );
         renderPassInfo.pClearValues    = clearValues.data();
 
+        // Name the region so a RenderDoc/NSight capture is a readable tree ("DeferredGBufferPass",
+        // "RSMPass", "SSRTracePass"...) instead of a flat run of draws. The spec already carries the
+        // name for logging; this is the same string, handed to the debugger.
+        VKUtils::BeginDebugLabel( m_CurrentCommandBuffer,
+                                  renderPass->GetSpecification().DebugName.c_str() );
+
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE );
         SetViewportAndScissor( framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() );
 
@@ -149,6 +155,10 @@ namespace Desert::Graphic::API::Vulkan
         VkClearValue clearValue        = { .color = { { 0.1f, 0.1f, 0.1f, 1.0f } } };
         renderPassInfo.clearValueCount = 1;
         renderPassInfo.pClearValues    = &clearValue;
+
+        // Must open a region too: EndRenderPass closes one unconditionally, so skipping it here would
+        // leave the labels unbalanced.
+        VKUtils::BeginDebugLabel( m_CurrentCommandBuffer, "SwapChainPass" );
 
         vkCmdBeginRenderPass( m_CurrentCommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE );
         SetViewportAndScissor( framebuffer->GetFramebufferWidth(), framebuffer->GetFramebufferHeight() );
@@ -180,6 +190,10 @@ namespace Desert::Graphic::API::Vulkan
                                   1, &memBarrier,
                                   0, nullptr,
                                   0, nullptr );
+
+            // Closes the region opened by BeginRenderPass / BeginSwapChainRenderPass. Both open exactly
+            // one, so this stays balanced — an unmatched Begin corrupts the capture's tree.
+            VKUtils::EndDebugLabel( m_CurrentCommandBuffer );
         }
         return BOOLSUCCESS;
     }
