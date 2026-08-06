@@ -109,6 +109,44 @@ namespace Desert::Graphic::System
 
         using RenderSystem::RenderSystem;
 
+        // Everything the SCENE (not the object) contributes to a lit draw: the camera, the lights, the
+        // shadow cascades and the IBL. Gathered ONCE per frame and applied to whichever material instance
+        // is about to be bound.
+        //
+        // It is gathered in one place because it is one THING — and because it is the state that must
+        // eventually move out of the shared material and into a per-renderer descriptor set (see
+        // Docs/RENDERER_FRAME_STATE.md). Until then this is the single point every write goes through,
+        // rather than the same four calls copied at three call sites.
+        struct FrameState
+        {
+            const Core::Camera* Camera = nullptr;
+
+            const ShaderProtocols::PointLight*     PointLights     = nullptr;
+            const ShaderProtocols::SpotLight*      SpotLights      = nullptr;
+            const ShaderProtocols::DirectionLight* DirectionLights = nullptr;
+
+            const glm::mat4* CascadeViewProj = nullptr; // kNumCascades entries
+            Image2D*         CascadeMaps[4]  = {};
+            glm::vec4        CascadeTexelWorld{ 0.0f };
+            float            ShadowBias      = 0.0f;
+            bool             ShadowsEnabled  = true;
+            int              ShadowDebugMode = 0;
+            bool             ShowNormals     = false;
+            bool             LightingDebug   = false;
+
+            ImageCube* IrradianceMap  = nullptr;
+            ImageCube* PrefilteredMap = nullptr;
+            Image2D*   BrdfLut        = nullptr;
+
+            // Writes the whole snapshot onto @p instance's material. One call, so a new piece of frame
+            // state can never be applied at two of the three sites and forgotten at the third.
+            void ApplyTo( MaterialInstance* instance ) const;
+        };
+
+        // Gathers the snapshot from the scene renderer + this renderer's own cascade state. One place that
+        // knows what "per-frame scene state" IS.
+        FrameState CaptureFrameState( const Core::Camera* camera ) const;
+
         // Cascaded shadow maps: number of directional-shadow cascades (frustum splits) + per-map resolution.
         static constexpr uint32_t kNumCascades   = 4;
         static constexpr uint32_t kShadowMapSize = 2048;

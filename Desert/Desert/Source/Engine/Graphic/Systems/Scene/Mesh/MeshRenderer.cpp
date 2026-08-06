@@ -465,34 +465,10 @@ namespace Desert::Graphic::System
             sb->SetRawData( gpuMats.data(),
                             static_cast<uint32_t>( gpuMats.size() * sizeof( PBRGpuMaterial ) ) );
 
+        // The whole scene contribution in one snapshot (see MeshRenderer::FrameState) — the glass pass
+        // needs every part of it, including the env cube + BRDF bindings it epsilon-touches.
         MaterialInstance* gi = m_GlassInstance.get();
-        StaticMaterialPBR::UpdateCamera( gi, camera );
-        StaticMaterialPBR::UpdateLights( gi, m_SceneRenderer->GetPointLights(), m_SceneRenderer->GetSpotLights(),
-                                         m_SceneRenderer->GetDirectionLights() );
-        Image2D* cascadeMaps[kNumCascades];
-        for ( uint32_t c = 0; c < kNumCascades; ++c )
-            cascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
-        StaticMaterialPBR::UpdateShadow( gi, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
-                                         m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals,
-                                         m_CascadeWorldPerTexel, m_LightingDebug );
-
-        // Resolve IBL so the env cube bindings (8/9) + BRDF (10) are valid (glass epsilon-touches them).
-        ImageCube* iblIrradiance = nullptr, *iblPrefiltered = nullptr;
-        Image2D*   iblBrdfLut    = nullptr;
-        {
-            auto* imageService = Runtime::ResourceRegistry::GetImageService();
-            if ( const auto& env = m_SceneRenderer->GetEnvironment(); env.has_value() )
-            {
-                if ( env->IrradianceMap.IsValid() )
-                    iblIrradiance = static_cast<ImageCube*>( imageService->Resolve( env->IrradianceMap ) );
-                if ( env->PreFilteredMap.IsValid() )
-                    iblPrefiltered = static_cast<ImageCube*>( imageService->Resolve( env->PreFilteredMap ) );
-            }
-            if ( const auto& brdf = Renderer::GetInstance().GetBRDFTexture();
-                 brdf && brdf->GetImageHandle().IsValid() )
-                iblBrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
-        }
-        StaticMaterialPBR::UpdateEnvironment( gi, iblIrradiance, iblPrefiltered, iblBrdfLut );
+        CaptureFrameState( camera ).ApplyTo( gi );
 
         // Bind the scene snapshot the glass samples for refraction (binding 19, glass-shader-only).
         if ( sceneColor )
@@ -537,29 +513,10 @@ namespace Desert::Graphic::System
         if ( !camera )
             return;
 
-        const auto& pointLights = m_SceneRenderer->GetPointLights();
-        const auto& spotLights  = m_SceneRenderer->GetSpotLights();
-        const auto& dirLights   = m_SceneRenderer->GetDirectionLights();
-
-        // Resolve the active IBL environment cubemaps once (diffuse irradiance + prefiltered specular)
-        // so each PBR object can sample real ambient/reflections instead of the fallback dummy cube.
-        ImageCube*  iblIrradiance  = nullptr;
-        ImageCube*  iblPrefiltered = nullptr;
-        Image2D*    iblBrdfLut     = nullptr;
-        {
-            auto* imageService = Runtime::ResourceRegistry::GetImageService();
-            if ( const auto& env = m_SceneRenderer->GetEnvironment(); env.has_value() )
-            {
-                if ( env->IrradianceMap.IsValid() )
-                    iblIrradiance = static_cast<ImageCube*>( imageService->Resolve( env->IrradianceMap ) );
-                if ( env->PreFilteredMap.IsValid() )
-                    iblPrefiltered = static_cast<ImageCube*>( imageService->Resolve( env->PreFilteredMap ) );
-            }
-            // Split-sum BRDF LUT (precomputed .tga loaded by the Renderer) — needed for correct IBL specular.
-            if ( const auto& brdf = Renderer::GetInstance().GetBRDFTexture();
-                 brdf && brdf->GetImageHandle().IsValid() )
-                iblBrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
-        }
+        // The scene's whole contribution to a lit draw, gathered ONCE (camera, lights, shadow cascades and
+        // the resolved IBL cubes + BRDF LUT). Applied per material GROUP below, not per object: only the
+        // transform is per-object, and it rides a push constant.
+        const FrameState frameState = CaptureFrameState( camera );
 
         // Group draws by material so each material's per-object data fills ONE storage buffer, indexed
         // per draw (GPU-scene style). Objects of the same material that wrote a shared buffer per-draw
@@ -711,16 +668,7 @@ namespace Desert::Graphic::System
             // constant), so it stays in the draw loop below.
             {
                 DESERT_PROFILE_SCOPE( "Mesh: SharedSceneSetup (1x/group)" );
-                MaterialInstance* anyInst = singles[0].Inst;
-                StaticMaterialPBR::UpdateCamera( anyInst, camera );
-                StaticMaterialPBR::UpdateLights( anyInst, pointLights, spotLights, dirLights );
-                Image2D* cascadeMaps[kNumCascades];
-                for ( uint32_t c = 0; c < kNumCascades; ++c )
-                    cascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
-                StaticMaterialPBR::UpdateShadow( anyInst, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
-                                                 m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals,
-                                                 m_CascadeWorldPerTexel, m_LightingDebug );
-                StaticMaterialPBR::UpdateEnvironment( anyInst, iblIrradiance, iblPrefiltered, iblBrdfLut );
+                frameState.ApplyTo( singles[0].Inst );
             }
 
             for ( uint32_t i = 0; i < static_cast<uint32_t>( singles.size() ); ++i )
@@ -795,15 +743,7 @@ namespace Desert::Graphic::System
                 sb->SetRawData( instMaterials.data(),
                                 static_cast<uint32_t>( instMaterials.size() * sizeof( PBRGpuMaterial ) ) );
 
-            StaticMaterialPBR::UpdateCamera( instInst, camera );
-            StaticMaterialPBR::UpdateLights( instInst, pointLights, spotLights, dirLights );
-            Image2D* cascadeMaps[kNumCascades];
-            for ( uint32_t c = 0; c < kNumCascades; ++c )
-                cascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
-            StaticMaterialPBR::UpdateShadow( instInst, m_CascadeVP, cascadeMaps, kNumCascades, m_ShadowBias,
-                                             m_ShadowsEnabled, m_ShadowDebugMode, m_ShowNormals,
-                                             m_CascadeWorldPerTexel, m_LightingDebug );
-            StaticMaterialPBR::UpdateEnvironment( instInst, iblIrradiance, iblPrefiltered, iblBrdfLut );
+            frameState.ApplyTo( instInst );
             StaticMaterialPBR::UpdateTransform( instInst, glm::mat4( 1.0f ) ); // unused by the instanced VS
 
             for ( const auto& d : instDraws )
@@ -1165,6 +1105,60 @@ namespace Desert::Graphic::System
         }
 
         return true;
+    }
+
+    MeshRenderer::FrameState MeshRenderer::CaptureFrameState( const Core::Camera* camera ) const
+    {
+        FrameState frame;
+        frame.Camera = camera;
+
+        frame.PointLights     = &m_SceneRenderer->GetPointLights();
+        frame.SpotLights      = &m_SceneRenderer->GetSpotLights();
+        frame.DirectionLights = &m_SceneRenderer->GetDirectionLights();
+
+        frame.CascadeViewProj = m_CascadeVP;
+        for ( uint32_t c = 0; c < kNumCascades; ++c )
+            frame.CascadeMaps[c] = m_CascadeFB[c] ? m_CascadeFB[c]->GetColorAttachmentImage().get() : nullptr;
+        frame.CascadeTexelWorld = m_CascadeWorldPerTexel;
+        frame.ShadowBias        = m_ShadowBias;
+        frame.ShadowsEnabled    = m_ShadowsEnabled;
+        frame.ShadowDebugMode   = m_ShadowDebugMode;
+        frame.ShowNormals       = m_ShowNormals;
+        frame.LightingDebug     = m_LightingDebug;
+
+        // The active IBL environment (diffuse irradiance + prefiltered specular) and the split-sum BRDF
+        // LUT, resolved once so each PBR object samples real ambient/reflections instead of the dummy cube.
+        auto* imageService = Runtime::ResourceRegistry::GetImageService();
+        if ( const auto& env = m_SceneRenderer->GetEnvironment(); env.has_value() )
+        {
+            if ( env->IrradianceMap.IsValid() )
+                frame.IrradianceMap = static_cast<ImageCube*>( imageService->Resolve( env->IrradianceMap ) );
+            if ( env->PreFilteredMap.IsValid() )
+                frame.PrefilteredMap = static_cast<ImageCube*>( imageService->Resolve( env->PreFilteredMap ) );
+        }
+        if ( const auto& brdf = Renderer::GetInstance().GetBRDFTexture();
+             brdf && brdf->GetImageHandle().IsValid() )
+            frame.BrdfLut = static_cast<Image2D*>( imageService->Resolve( brdf->GetImageHandle() ) );
+
+        return frame;
+    }
+
+    void MeshRenderer::FrameState::ApplyTo( MaterialInstance* instance ) const
+    {
+        if ( !instance )
+            return;
+
+        StaticMaterialPBR::UpdateCamera( instance, Camera );
+        if ( PointLights && SpotLights && DirectionLights )
+            StaticMaterialPBR::UpdateLights( instance, *PointLights, *SpotLights, *DirectionLights );
+
+        // The const_cast is the shape of the old API (it takes a mutable pointer array); the snapshot
+        // itself is read-only, which is the point.
+        Image2D* maps[4] = { CascadeMaps[0], CascadeMaps[1], CascadeMaps[2], CascadeMaps[3] };
+        StaticMaterialPBR::UpdateShadow( instance, CascadeViewProj, maps, kNumCascades, ShadowBias, ShadowsEnabled,
+                                         ShadowDebugMode, ShowNormals, CascadeTexelWorld, LightingDebug );
+
+        StaticMaterialPBR::UpdateEnvironment( instance, IrradianceMap, PrefilteredMap, BrdfLut );
     }
 
     void MeshRenderer::UpdateCascades()
