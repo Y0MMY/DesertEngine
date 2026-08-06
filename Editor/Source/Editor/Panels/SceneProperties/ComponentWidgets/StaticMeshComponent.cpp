@@ -22,8 +22,9 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
-    StaticMeshComponentWidget::StaticMeshComponentWidget( const Assets::AssetManager* assetManager )
-         : ComponentWidget( "3D Model" ), m_AssetManager( assetManager )
+    StaticMeshComponentWidget::StaticMeshComponentWidget( const Assets::AssetManager* assetManager,
+                                                          const ComponentEditContext* ctx )
+         : ComponentWidget( "3D Model" ), m_AssetManager( assetManager ), m_Ctx( ctx )
     {
     }
 
@@ -51,9 +52,15 @@ namespace Desert::Editor
 
         Utils::ImGuiUtilities::EndPropertyRow();
 
+        // The preview is a THUMBNAIL on this row, not a section of its own: what the mesh looks like
+        // belongs beside the slot that chooses it, the way UE draws an asset row.
+        constexpr float kThumb   = 64.0f;
+        const float     assetRow = std::max( kThumb, ImGui::GetFrameHeight() ) + ImGui::GetStyle().ItemSpacing.y;
+
         if ( !staticMesh.Primitive.has_value() )
         {
-            Utils::ImGuiUtilities::BeginPropertyRow( "Asset" );
+            Utils::ImGuiUtilities::BeginPropertyRow( "Asset", nullptr, assetRow );
+            DrawMeshThumbnail( kThumb );
 
             std::string currentSelectionName = "Select Mesh";
             bool        emptySlot            = true;
@@ -103,7 +110,8 @@ namespace Desert::Editor
         }
         else
         {
-            Utils::ImGuiUtilities::BeginPropertyRow( "Shape" );
+            Utils::ImGuiUtilities::BeginPropertyRow( "Shape", nullptr, assetRow );
+            DrawMeshThumbnail( kThumb );
 
             const char* shapes[] = { "Cube", "Sphere", "Pyramid", "Plane", "Cylinder", "Capsule" };
             int currentShape = (int)staticMesh.Primitive.value();
@@ -126,6 +134,31 @@ namespace Desert::Editor
         RenderRigging( entity, staticMesh );
 
         Utils::ImGuiUtilities::PopID();
+    }
+
+    void StaticMeshComponentWidget::DrawMeshThumbnail( float size ) const
+    {
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const ImVec2 br( at.x + size, at.y + size );
+        ImDrawList*  dl = ImGui::GetWindowDrawList();
+
+        // The frame is drawn whatever happens, so an entity with no preview still reads as a row with a
+        // slot and a (blank) thumbnail rather than a ragged one.
+        dl->AddRectFilled( at, br, IM_COL32( 15, 15, 15, 255 ), 2.0f );
+
+        const bool drawn = m_Ctx && m_Ctx->DrawPreview( ImVec2( size, size ) );
+        if ( !drawn )
+        {
+            ImGui::Dummy( ImVec2( size, size ) );
+            const char*  icon = ICON_MDI_CUBE_OUTLINE;
+            const ImVec2 ts   = ImGui::CalcTextSize( icon );
+            dl->AddText( ImVec2( at.x + ( size - ts.x ) * 0.5f, at.y + ( size - ts.y ) * 0.5f ),
+                         ImGui::GetColorU32( ImGuiCol_TextDisabled ), icon );
+        }
+        dl->AddRect( at, br, ImGui::GetColorU32( ImGuiCol_Border ), 2.0f );
+        Utils::ImGuiUtilities::Tooltip( "Live preview of what this entity renders" );
+
+        ImGui::SameLine();
     }
 
     void StaticMeshComponentWidget::ShowMeshDetails( const ECS::Entity& entity, ::Desert::Core::Scene* scene,
@@ -265,9 +298,9 @@ namespace Desert::Editor
         }
     }
 
-    DESERT_REGISTER_CUSTOM_COMPONENT(
-         ECS::StaticMeshComponent, "3D Model", false,
-         ( []( ECS::Entity& e, ::Desert::Core::Scene* s, const ComponentEditContext& ctx )
-           { StaticMeshComponentWidget( ctx.AssetMgr() ).Render( e, s ); } ) )
+    DESERT_REGISTER_CUSTOM_COMPONENT( ECS::StaticMeshComponent, "3D Model", false,
+                                      ( []( ECS::Entity& e, ::Desert::Core::Scene* s,
+                                            const ComponentEditContext& ctx )
+                                        { StaticMeshComponentWidget( ctx.AssetMgr(), &ctx ).Render( e, s ); } ) )
 
 } // namespace Desert::Editor

@@ -126,7 +126,10 @@ namespace Desert::Editor
         ComponentEditContext ctx;
         ctx.AssetManager     = m_AssetManager;
         ctx.AnimationLibrary = m_AnimationLibrary;
-        ctx.UIHelper         = nullptr;
+        ctx.UIHelper         = m_PreviewUI;
+        ctx.Preview          = m_Preview;
+        ctx.PreviewUI        = m_PreviewUI;
+        ctx.PreviewUsed      = m_PreviewUsed;
         return ctx;
     }
 

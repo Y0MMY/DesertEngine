@@ -23,6 +23,10 @@ namespace Desert::Editor
 {
     namespace ImGui = ::ImGui;
 
+    // The preview is a THUMBNAIL now, not a viewport: one fixed offscreen size, big enough that the 64px
+    // box in the 3D Model row is not blurry, small enough that it costs nothing.
+    static constexpr uint32_t kPreviewRenderSize = 256;
+
     namespace
     {
         const char* GetPrimaryComponentName( const ECS::Entity& entity )
@@ -148,111 +152,12 @@ namespace Desert::Editor
             }
         }
 
-        // Only pay for the render while the section is actually on screen and expanded. The flag is
-        // consumed here and must be re-affirmed by every UI frame, so a collapsed window, a hidden dock tab
-        // or a folded section all stop the render by simply not drawing.
-        if ( m_PreviewActive && m_PreviewWidth > 0 && m_PreviewHeight > 0 )
-            m_Preview.Update( m_PreviewWidth, m_PreviewHeight );
+        // Only pay for the render while a component actually DREW the thumbnail last UI frame. The flag is
+        // consumed here and must be re-affirmed every frame, so a collapsed component, a hidden dock tab or
+        // a closed panel all stop the GPU work by simply not drawing it.
+        if ( m_PreviewActive )
+            m_Preview.Update( kPreviewRenderSize, kPreviewRenderSize );
         m_PreviewActive = false;
-    }
-
-    void ScenePropertiesPanel::DrawPreviewSection()
-    {
-        if ( m_PreviewKey == 0 )
-        {
-            m_PreviewActive = false;
-            return;
-        }
-
-        ImGui::SetNextItemOpen( m_PreviewOpen, ImGuiCond_Always );
-        m_PreviewOpen = Utils::ImGuiUtilities::SectionHeader( ICON_MDI_CUBE_SCAN "  Preview", false );
-        if ( !m_PreviewOpen )
-        {
-            // Folded: no GPU work at all, but the selection should still be recognisable — fall back to
-            // the shared rendered-thumbnail PNG the asset browser writes. If it has never rendered this
-            // asset there is simply nothing to show, which is the same as before.
-            m_PreviewActive = false;
-            DrawCollapsedPreviewThumbnail();
-            return;
-        }
-
-        if ( !m_PreviewUI )
-        {
-            m_PreviewUI = std::make_unique<UI::UIHelper>();
-            m_PreviewUI->Init();
-        }
-
-        const float width  = std::max( ImGui::GetContentRegionAvail().x, 32.0f );
-        const float height = std::max( width / m_PreviewAspect, 96.0f );
-        m_Preview.Draw( *m_PreviewUI, ImVec2( width, height ) );
-
-        // Size for the NEXT frame's offscreen render (which happens in OnPreUpdate, before this runs again).
-        // Quantized: a resize idles the GPU and recreates framebuffers, so dragging the dock splitter must
-        // not do that on every pixel. The image is stretched over the remainder, which is under 16px.
-        constexpr uint32_t kSizeStep = 16;
-        m_PreviewWidth  = std::max<uint32_t>( static_cast<uint32_t>( width ) / kSizeStep, 2 ) * kSizeStep;
-        m_PreviewHeight = std::max<uint32_t>( static_cast<uint32_t>( height ) / kSizeStep, 2 ) * kSizeStep;
-        m_PreviewActive = true;
-
-        ImGui::Spacing();
-    }
-
-    void ScenePropertiesPanel::DrawCollapsedPreviewThumbnail()
-    {
-        const auto selectedOpt = Core::SelectionManager::GetSelected();
-        if ( !selectedOpt || !m_Scene || !m_AssetManager )
-            return;
-
-        const auto& entityOpt = m_Scene->FindEntityByID( *selectedOpt );
-        if ( !entityOpt )
-            return;
-        const auto& entity = entityOpt->get();
-        if ( !entity.HasComponent<ECS::StaticMeshComponent>() )
-            return;
-
-        // Prefer the material the object actually renders with (a material thumbnail says more about a
-        // cube than the cube does); fall back to the mesh asset's own thumbnail.
-        const auto& smc = entity.GetComponent<ECS::StaticMeshComponent>();
-        std::string assetPath;
-        if ( !smc.MaterialSlots.empty() && smc.MaterialSlots.front() )
-        {
-            if ( auto mat =
-                      m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>( smc.MaterialSlots.front() ) )
-                assetPath = mat->GetMetadata().Filepath.generic_string();
-        }
-        if ( assetPath.empty() && smc.MeshHandle )
-        {
-            if ( auto mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( smc.MeshHandle ) )
-                assetPath = mesh->GetMetadata().Filepath.generic_string();
-        }
-        if ( assetPath.empty() )
-            return;
-
-        std::error_code   ec;
-        const std::string png = ThumbnailCache::DiskPath( assetPath );
-        if ( !std::filesystem::exists( png, ec ) )
-            return;
-
-        auto image = m_PreviewThumbnails.Get( png );
-        if ( !image )
-            return;
-
-        if ( !m_PreviewUI )
-        {
-            m_PreviewUI = std::make_unique<UI::UIHelper>();
-            m_PreviewUI->Init();
-        }
-
-        constexpr float kSize = 64.0f;
-        ImGui::Indent();
-        m_PreviewUI->Image( image, ImVec2( kSize, kSize ) );
-        ImGui::SameLine();
-        ImGui::BeginGroup();
-        ImGui::TextDisabled( "Cached thumbnail" );
-        ImGui::TextDisabled( "Expand for the live preview" );
-        ImGui::EndGroup();
-        ImGui::Unindent();
-        ImGui::Spacing();
     }
 
     void ScenePropertiesPanel::DrawSearchBox()
@@ -446,15 +351,17 @@ namespace Desert::Editor
             ImGui::Separator();
         }
 
-        // Above the (scrolling) component list, so orbiting the preview never fights the list's scroll and
-        // the preview stays put while you edit fields below it.
-        DrawPreviewSection();
-
         DrawSearchBox();
 
         ImGui::BeginChild( "Components", ImVec2( 0.0f, 0.0f ), false, ImGuiWindowFlags_None );
         if ( !m_ComponentEditor )
             m_ComponentEditor = std::make_unique<ComponentEditor>( m_AssetManager, m_AnimationLibrary );
+        if ( !m_PreviewUI )
+        {
+            m_PreviewUI = std::make_unique<UI::UIHelper>();
+            m_PreviewUI->Init();
+        }
+        m_ComponentEditor->SetPreview( &m_Preview, m_PreviewUI.get(), &m_PreviewActive );
         m_ComponentEditor->Render( const_cast<ECS::Entity&>( selectedEntity ), m_Scene.get(),
                                    m_FieldSearch.c_str() );
         ImGui::EndChild();

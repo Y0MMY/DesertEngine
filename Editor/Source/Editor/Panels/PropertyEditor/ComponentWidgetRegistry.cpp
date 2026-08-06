@@ -1,5 +1,7 @@
 #include "ComponentWidgetRegistry.hpp"
 
+#include <Editor/Widgets/PreviewViewport.hpp>
+
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/Commands/SceneCommands.hpp>
 
@@ -123,4 +125,19 @@ namespace Desert::Editor
             }
         }
     }
+
+    bool ComponentEditContext::DrawPreview( const ImVec2& size ) const
+    {
+        if ( !Preview || !PreviewUI )
+            return false;
+
+        // Draw()'s own bool means "it has content yet", NOT "it drew something": it always submits an
+        // item of `size` and paints its own frame (with a "No preview" label when empty). So the caller
+        // must never add a placeholder of its own — hence `true` regardless.
+        Preview->Draw( *PreviewUI, size );
+        if ( PreviewUsed )
+            *PreviewUsed = true; // the panel pays for next frame's offscreen render only while it is drawn
+        return true;
+    }
+
 } // namespace Desert::Editor

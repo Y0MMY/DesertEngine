@@ -2,6 +2,7 @@
 
 #include "IComponentWidget.hpp"
 
+#include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Engine/Geometry/PrimitiveType.hpp>
 
 namespace Desert::Editor
@@ -9,7 +10,8 @@ namespace Desert::Editor
     class StaticMeshComponentWidget final : public ComponentWidget<ECS::StaticMeshComponent>
     {
     public:
-        StaticMeshComponentWidget( const Assets::AssetManager* assetManager );
+        StaticMeshComponentWidget( const Assets::AssetManager* assetManager,
+                                   const ComponentEditContext* ctx = nullptr );
 
         bool CanRemove() const override
         {
@@ -22,6 +24,10 @@ namespace Desert::Editor
         void        SetMeshAsset( ECS::StaticMeshComponent& staticMesh, const Assets::AssetHandle& handle );
         std::string GetPrimitiveName( const ECS::StaticMeshComponent& staticMesh ) const;
 
+        // The mesh thumbnail on the asset row: the panel's shared live preview when it lent one, a
+        // neutral framed glyph otherwise. Leaves the cursor on the same line for the slot field.
+        void DrawMeshThumbnail( float size ) const;
+
         // In-editor rigging section: place bones on an asset-backed static mesh and "Convert to Skinned".
         void RenderRigging( ECS::Entity& entity, ECS::StaticMeshComponent& staticMesh );
 
@@ -32,5 +38,7 @@ namespace Desert::Editor
 
     private:
         const Assets::AssetManager* m_AssetManager;
+        // The Details panel's shared preview, when it lent one — the mesh row draws it as a thumbnail.
+        const ComponentEditContext* m_Ctx = nullptr;
     };
 } // namespace Desert::Editor
