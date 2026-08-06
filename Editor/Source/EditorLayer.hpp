@@ -182,6 +182,14 @@ namespace Desert::Editor
         // Saveable layouts: pending "reset to default docking" and the save-layout modal state.
         bool m_ResetDefaultLayout  = false;
         bool m_ShowSaveLayoutPopup = false;
+
+        // Bottom drawer (Assets / Logs / Shader Code). Collapsing SHRINKS the dock node to its tab bar
+        // instead of closing the panels: a closed panel has to be rediscovered from a menu, a collapsed
+        // one is still right there. m_BottomHeight remembers the expanded size across toggles.
+        ImGuiID m_BottomDockId    = 0;
+        bool    m_BottomCollapsed = false;
+        float   m_BottomHeight    = 0.0f;
+        void    DrawBottomDrawerToggle();
         char m_LayoutNameBuf[64]   = {};
 #endif
         std::unique_ptr<Graphic::SceneRenderer> m_SceneRenderer;

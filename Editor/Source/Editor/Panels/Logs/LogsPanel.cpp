@@ -116,27 +116,46 @@ namespace Desert::Editor
         // Build the filtered subset (level toggles + case-insensitive search), optionally collapse runs of
         // consecutive duplicates, then render only the on-screen rows via a clipper. The clipper keeps this
         // O(visible) even for a huge log; all rows are single-line, so it is exact.
-        std::vector<std::pair<std::string, int>> filtered;
-        filtered.reserve( m_Entries.size() );
-        for ( const auto& entry : m_Entries )
+        // Rebuild the row list ONLY when something it depends on changed — see the note on m_Rows. Doing
+        // this per frame cost more than rendering the scene.
+        const bool viewDirty = m_RowsBuiltFromCount != m_Entries.size() || m_RowsInfo != m_ShowInfo ||
+                               m_RowsWarnings != m_ShowWarnings || m_RowsErrors != m_ShowErrors ||
+                               m_RowsCollapse != m_Collapse ||
+                               std::strncmp( m_RowsFilter, m_Filter, sizeof( m_RowsFilter ) ) != 0;
+        if ( viewDirty )
         {
-            if ( entry.Level == 0 && !m_ShowInfo )     continue;
-            if ( entry.Level == 1 && !m_ShowWarnings ) continue;
-            if ( entry.Level == 2 && !m_ShowErrors )   continue;
-            if ( !LogMatches( entry.Text, m_Filter ) ) continue;
-            filtered.emplace_back( entry.Text, entry.Level );
+            std::vector<std::pair<std::string, int>> filtered;
+            filtered.reserve( m_Entries.size() );
+            for ( const auto& entry : m_Entries )
+            {
+                if ( entry.Level == 0 && !m_ShowInfo )     continue;
+                if ( entry.Level == 1 && !m_ShowWarnings ) continue;
+                if ( entry.Level == 2 && !m_ShowErrors )   continue;
+                if ( !LogMatches( entry.Text, m_Filter ) ) continue;
+                filtered.emplace_back( entry.Text, entry.Level );
+            }
+
+            if ( m_Collapse )
+            {
+                m_Rows = CollapseConsecutive( filtered );
+            }
+            else
+            {
+                m_Rows.clear();
+                m_Rows.reserve( filtered.size() );
+                for ( auto& [text, level] : filtered )
+                    m_Rows.push_back( { std::move( text ), level, 1 } );
+            }
+
+            m_RowsBuiltFromCount = m_Entries.size();
+            m_RowsInfo           = m_ShowInfo;
+            m_RowsWarnings       = m_ShowWarnings;
+            m_RowsErrors         = m_ShowErrors;
+            m_RowsCollapse       = m_Collapse;
+            std::memcpy( m_RowsFilter, m_Filter, sizeof( m_RowsFilter ) );
         }
 
-        const std::vector<LogRun> rows =
-             m_Collapse ? CollapseConsecutive( filtered )
-                        : [&]
-             {
-                 std::vector<LogRun> r;
-                 r.reserve( filtered.size() );
-                 for ( const auto& [text, level] : filtered )
-                     r.push_back( { text, level, 1 } );
-                 return r;
-             }();
+        const std::vector<LogRun>& rows = m_Rows;
 
         ImGuiListClipper clipper;
         clipper.Begin( static_cast<int>( rows.size() ) );

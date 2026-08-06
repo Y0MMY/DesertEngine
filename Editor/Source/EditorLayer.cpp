@@ -926,6 +926,7 @@ namespace Desert::Editor
                 ImGuiID right  = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Right, 0.20f, nullptr, &center );
                 ImGuiID left   = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Left, 0.22f, nullptr, &center );
                 ImGuiID bottom = ::ImGui::DockBuilderSplitNode( center, ImGuiDir_Down, 0.28f, nullptr, &center );
+                m_BottomDockId = bottom; // remembered so the drawer can be collapsed/restored later
                 ImGuiID leftBottom = ::ImGui::DockBuilderSplitNode( left, ImGuiDir_Down, 0.40f, nullptr, &left );
                 ImGuiID rightBottom =
                      ::ImGui::DockBuilderSplitNode( right, ImGuiDir_Down, 0.50f, nullptr, &right );
@@ -1372,6 +1373,62 @@ namespace Desert::Editor
         }
     }
 
+    // Collapse/restore the bottom drawer (the dock node holding Assets / Logs / Shader Code).
+    //
+    // ImGui has no "collapse a dock node" call — a docked window trades its collapse arrow for a tab.
+    // So collapsing is done by SIZE: the node is squeezed down to its tab bar and restored to the height
+    // it had before. That keeps the tabs on screen, which is the whole point of collapsing rather than
+    // closing, and it leaves the user's own resize intact because the height is re-read at collapse time.
+    void EditorLayer::DrawBottomDrawerToggle()
+    {
+        namespace ImGui = ::ImGui;
+
+        // Resolve the drawer node from the Assets window's ACTUAL dock node, not from the id captured while
+        // building the default layout: that branch only runs for a fresh layout, so with a restored
+        // imgui.ini the id stayed 0 and this control was permanently dead.
+        ImGuiDockNode* node = m_BottomDockId ? ImGui::DockBuilderGetNode( m_BottomDockId ) : nullptr;
+        if ( !node )
+        {
+            if ( ImGuiWindow* assets = ImGui::FindWindowByName( PanelDisplayTitle( "Assets" ).c_str() );
+                 assets && assets->DockNode )
+            {
+                node           = assets->DockNode;
+                m_BottomDockId = node->ID;
+            }
+        }
+        if ( !node )
+        {
+            ImGui::TextDisabled( ICON_MDI_CHEVRON_DOWN );
+            return;
+        }
+
+        // Tab bar height + the node's own padding — what "collapsed" means for this node.
+        const float collapsedHeight = ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+
+        const char* icon = m_BottomCollapsed ? ICON_MDI_CHEVRON_UP : ICON_MDI_CHEVRON_DOWN;
+        if ( ImGui::SmallButton( icon ) )
+        {
+            m_BottomCollapsed = !m_BottomCollapsed;
+            if ( m_BottomCollapsed )
+            {
+                // Remember the CURRENT height, not the default: the user may have dragged the splitter.
+                m_BottomHeight = node->Size.y;
+                ImGui::DockBuilderSetNodeSize( m_BottomDockId, ImVec2( node->Size.x, collapsedHeight ) );
+            }
+            else
+            {
+                const float restore = m_BottomHeight > collapsedHeight
+                                           ? m_BottomHeight
+                                           : ImGui::GetMainViewport()->Size.y * 0.28f; // the layout default
+                ImGui::DockBuilderSetNodeSize( m_BottomDockId, ImVec2( node->Size.x, restore ) );
+            }
+            ImGui::DockBuilderFinish( m_BottomDockId );
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( m_BottomCollapsed ? "Expand the bottom drawer (Assets / Logs)"
+                                                 : "Collapse the bottom drawer (Assets / Logs)" );
+    }
+
     void EditorLayer::DrawStatusBar()
     {
         namespace ImGui  = ::ImGui;
@@ -1389,15 +1446,13 @@ namespace Desert::Editor
         ImGui::BeginChild( "##StatusBar", ImVec2( 0.0f, 0.0f ), false,
                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
-        // Far left, UE's status bar: the two drawers you reach for constantly. They are BUTTONS, not
-        // text — the bar is the one place in the editor that is always visible, so it is where a panel you
-        // closed by accident is found again.
-        if ( ImGui::SmallButton( ICON_MDI_FOLDER_MULTIPLE "  Content Drawer" ) )
-            Core::PanelRequests::Toggle( "Assets" );
-        ImGui::SameLine( 0.0f, 6.0f );
-        if ( ImGui::SmallButton( ICON_MDI_TEXT_BOX_OUTLINE "  Output Log" ) )
-            Core::PanelRequests::Toggle( "Logs" );
-        ImGui::SameLine( 0.0f, 6.0f );
+        // The "Content Drawer" / "Output Log" buttons that used to live here are gone. They duplicated
+        // the Assets and Logs panels that are already docked along the bottom — two ways to reach one
+        // thing, and the button version could only toggle a panel out of existence. What is left is a
+        // single chevron that COLLAPSES that bottom drawer instead: a closed panel has to be
+        // rediscovered from a menu, a collapsed one is still right there with its tabs visible.
+        DrawBottomDrawerToggle();
+        ImGui::SameLine( 0.0f, 12.0f );
 
         // Cmd: one line of Lua against the live scene, the same engine the Lua Console runs. UE puts a
         // console here for the same reason — a question about the running world should not need a panel.

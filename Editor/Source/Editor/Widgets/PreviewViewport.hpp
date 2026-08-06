@@ -110,6 +110,15 @@ namespace Desert::Editor
         // corners of that box. Using one rule for both leaves the other one small in frame.
         bool m_FrameIsRound = false;
 
+        // NOTE: the preview renders every frame ON PURPOSE. Skipping frames when nothing changed was tried
+        // and reverted: the target does not survive as a still image between frames, so the preview simply
+        // went blank. It also was not worth it — the second scene render measured ~6% of the frame, while
+        // the editor's real cost at the time was the Logs panel rebuilding its row list per frame.
+        // Anything reviving this must first make the last rendered image persist across skipped frames.
+        void RequestRender()
+        {
+        }
+
         uint32_t m_Width = 0, m_Height = 0;
     };
 } // namespace Desert::Editor
