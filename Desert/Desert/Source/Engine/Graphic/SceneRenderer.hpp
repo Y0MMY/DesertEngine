@@ -66,6 +66,12 @@ namespace Desert::Graphic
             bool                   ReceiveShadows  = true;
         };
 
+        // Each renderer claims a slot on construction — the index that says WHICH view is recording, so
+        // per-frame state can eventually be stored per renderer instead of being overwritten by the next
+        // one (EngineContext::GetActiveRendererSlot, Docs/RENDERER_FRAME_STATE.md). Slots are claimed in
+        // creation order and never reused; past kMaxRendererSlots they fold back to 0, which is the
+        // current behaviour for everyone anyway.
+        SceneRenderer();
         ~SceneRenderer() = default;
 
         void Init();
@@ -212,6 +218,9 @@ namespace Desert::Graphic
         }
 
     private:
+        // Which view this renderer is; see the constructor.
+        uint32_t m_RendererSlot = 0;
+
         void ClearMainFramebuffer();
         void CompositeRenderPass();
         void ExecuteRenderGraph();

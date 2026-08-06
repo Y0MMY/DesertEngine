@@ -186,8 +186,22 @@ namespace Desert::Graphic
         RebuildRenderGraph();
     }
 
+    SceneRenderer::SceneRenderer()
+    {
+        // Claimed in creation order: the main viewport is 0, each extra scene view takes the next. A
+        // process that opens more views than there are slots folds back to 0 — that is exactly today's
+        // behaviour (everyone shares one slot), so it degrades to the status quo rather than breaking.
+        static uint32_t s_NextSlot = 0;
+        m_RendererSlot             = s_NextSlot < EngineContext::kMaxRendererSlots ? s_NextSlot : 0;
+        ++s_NextSlot;
+    }
+
     NO_DISCARD Common::BoolResultStr SceneRenderer::BeginScene( const Desert::Core::Scene& scene )
     {
+        // Which renderer is recording, alongside which frame is in flight — see
+        // EngineContext::GetActiveRendererSlot. Set FIRST, before anything writes a per-frame resource.
+        EngineContext::GetInstance().SetActiveRendererSlot( m_RendererSlot );
+
         // Per-frame scene state — camera, lights, shadow cascades, IBL — is written into the parent
         // Material of the SHADER (MaterialPBRBase::Update*), and that parent is ONE object shared by every
         // mesh drawn with it. Its uniform buffers are a single mapped allocation each, written at offset 0
