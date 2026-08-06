@@ -166,6 +166,10 @@ namespace Desert::Editor
         smc.MeshHandle    = mesh;
         smc.MaterialSlots = materials;
 
+        // Upright, like the material preview sets it: the target entity is reused across previews, so a
+        // rotation left by an earlier one would tilt this mesh for no reason.
+        m_Target.GetComponent<ECS::TransformComponent>().Rotation = glm::vec3( 0.0f );
+
         m_MeshHandle  = mesh;
         m_HasContent  = true;
         m_Focus       = glm::vec3( 0.0f );
@@ -198,8 +202,15 @@ namespace Desert::Editor
         if ( mx.x < mn.x )
             return false; // no submeshes yet
 
-        m_Focus       = ( mn + mx ) * 0.5f;
-        m_FrameRadius = std::max( glm::length( mx - mn ) * 0.5f, 1.0f );
+        m_Focus = ( mn + mx ) * 0.5f;
+
+        // Half the LARGEST EXTENT, not half the diagonal — the same convention RadiusOfPrimitive uses for
+        // the material preview (a 100-unit cube gives 50, not 87). Framing by the diagonal pushes the
+        // camera ~1.7x further back for the same object, which is why a mesh sat small and far away while
+        // a material sphere filled its box.
+        const glm::vec3 extent = mx - mn;
+        m_FrameRadius          = std::max( glm::max( extent.x, glm::max( extent.y, extent.z ) ) * 0.5f, 1.0f );
+
         ResetView();
         return true;
     }

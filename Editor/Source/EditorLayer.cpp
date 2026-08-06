@@ -19,9 +19,7 @@
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
-#include "Editor/Core/ColliderFit.hpp"
 #include "Editor/Core/PanelRequests.hpp"
-#include "Editor/Core/Selection/ViewportMode.hpp"
 #include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -1516,38 +1514,9 @@ namespace Desert::Editor
         const float  btnH = ImGui::GetContentRegionAvail().y;
         const ImVec2 btnSize( btnH * 1.4f, btnH );
 
-        // LEFT cluster, UE's level-editor grammar: the things you do TO THE SCENE AS A WHOLE. Transform
-        // tools deliberately stay in the VIEWPORT's own toolbar (Godot model: edit tools sit directly above
-        // the picture they act on), and the RUN cluster stays pinned right, isolated so a stray click can
-        // never start Play.
-        {
-            const ImVec2 wide( 0.0f, btnH ); // auto-width, full strip height
-
-            if ( ImGui::Button( ICON_MDI_CONTENT_SAVE "  Save", wide ) )
-                m_SaveSceneRequested = true;
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Save the scene (Ctrl+S)" );
-
-            ImGui::SameLine();
-            if ( ImGui::Button( ICON_MDI_FOLDER_SEARCH "  Browse", wide ) )
-                Core::PanelRequests::Toggle( "Assets" );
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Show / hide the content browser" );
-
-            ImGui::SameLine();
-            ImGui::TextDisabled( "|" );
-            ImGui::SameLine();
-
-            // Collision: UE puts it here because it is a property of the SELECTED mesh you set while
-            // looking at the level, not a value you type. Every entry acts on the selection.
-            if ( ImGui::Button( ICON_MDI_SHAPE_OUTLINE "  Collision  " ICON_MDI_CHEVRON_DOWN, wide ) )
-                ImGui::OpenPopup( "##CollisionMenu" );
-            DrawCollisionMenu();
-        }
-
-        // NOTE: no "UV" menu, unlike the Static Mesh Editor screenshot this strip is modelled on — the
-        // engine has no UV tooling to put behind it, and a button that opens an empty menu is worse than
-        // no button.
+        // Nothing on the left. Save lives on Ctrl+S and in the File menu, the content browser and the log
+        // are drawers in the STATUS bar, and edit modes belong to the viewport's own strip — a second row
+        // of the same commands up here was just more chrome between the menu and the picture.
         const float spacing   = ImGui::GetStyle().ItemSpacing.x;
         const float playbackW = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
         ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - playbackW - 4.0f );
@@ -1558,59 +1527,6 @@ namespace Desert::Editor
         ImGui::EndChild();
         ImGui::PopStyleVar( 3 );
         ImGui::PopStyleColor();
-    }
-
-    void EditorLayer::DrawCollisionMenu()
-    {
-        namespace ImGui = ::ImGui;
-
-        if ( !ImGui::BeginPopup( "##CollisionMenu" ) )
-            return;
-
-        const auto sel = Core::SelectionManager::GetSelected();
-        auto       ref = sel ? m_MainScene->FindEntityByID( *sel ) : std::nullopt;
-        if ( !ref )
-        {
-            ImGui::TextDisabled( "Select an object first" );
-            ImGui::EndPopup();
-            return;
-        }
-
-        auto&      entity = const_cast<ECS::Entity&>( ref->get() );
-        const bool has    = entity.HasComponent<ECS::ColliderComponent>();
-
-        // Add-and-fit in ONE step per shape: a collider added at its default size wraps nothing, and the
-        // next thing anyone does is fit it anyway.
-        const auto addFitted = [&entity]( Physics::ShapeType shape )
-        {
-            auto& c      = entity.HasComponent<ECS::ColliderComponent>()
-                                ? entity.GetComponent<ECS::ColliderComponent>()
-                                : entity.AddComponent<ECS::ColliderComponent>();
-            c.Data.Shape = shape;
-            Core::FitColliderToMesh( entity, c.Data );
-        };
-
-        if ( ImGui::MenuItem( "Box Collision" ) )
-            addFitted( Physics::ShapeType::Box );
-        if ( ImGui::MenuItem( "Sphere Collision" ) )
-            addFitted( Physics::ShapeType::Sphere );
-        if ( ImGui::MenuItem( "Capsule Collision" ) )
-            addFitted( Physics::ShapeType::Capsule );
-
-        ImGui::Separator();
-        if ( !has )
-            ImGui::BeginDisabled();
-        if ( ImGui::MenuItem( "Fit to Mesh Bounds" ) )
-        {
-            auto& c = entity.GetComponent<ECS::ColliderComponent>();
-            Core::FitColliderToMesh( entity, c.Data );
-        }
-        if ( ImGui::MenuItem( "Remove Collision" ) )
-            entity.RemoveComponent<ECS::ColliderComponent>();
-        if ( !has )
-            ImGui::EndDisabled();
-
-        ImGui::EndPopup();
     }
 
     void EditorLayer::DrawProfilerWindow()
