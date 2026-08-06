@@ -10,6 +10,10 @@
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
 #include <Editor/Core/MeshResolve.hpp>
+#include <Editor/Widgets/ThumbnailCache.hpp>
+#include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
+#include <filesystem>
+#include <system_error>
 #include <Editor/Core/Rigging/RigBuilder.hpp>
 #include <Engine/Assets/Mesh/StaticMeshAsset.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
@@ -60,7 +64,7 @@ namespace Desert::Editor
         if ( !staticMesh.Primitive.has_value() )
         {
             Utils::ImGuiUtilities::BeginPropertyRow( "Asset", nullptr, assetRow );
-            DrawMeshThumbnail( kThumb );
+            DrawMeshThumbnail( staticMesh, kThumb );
 
             std::string currentSelectionName = "Select Mesh";
             bool        emptySlot            = true;
@@ -111,7 +115,7 @@ namespace Desert::Editor
         else
         {
             Utils::ImGuiUtilities::BeginPropertyRow( "Shape", nullptr, assetRow );
-            DrawMeshThumbnail( kThumb );
+            DrawMeshThumbnail( staticMesh, kThumb );
 
             const char* shapes[] = { "Cube", "Sphere", "Pyramid", "Plane", "Cylinder", "Capsule" };
             int currentShape = (int)staticMesh.Primitive.value();
@@ -136,27 +140,67 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::PopID();
     }
 
-    void StaticMeshComponentWidget::DrawMeshThumbnail( float size ) const
+    void StaticMeshComponentWidget::DrawMeshThumbnail( const ECS::StaticMeshComponent& staticMesh,
+                                                       float                           size ) const
     {
+        // A CACHED thumbnail, never a live second render. The engine's per-frame scene state (camera,
+        // lights, shadow cascades) is written into the SHARED parent material of the shader — one object
+        // for every PBR mesh — so a second SceneRenderer running each frame overwrites what the viewport
+        // just wrote, and the viewport lost its shadows. Until that state is per-instance, Details reads
+        // the PNG the asset browser already renders and nothing else.
+        // The widget is built fresh every frame (the registration constructs it per draw), so the decoded
+        // texture cache has to outlive it or the PNG would be re-decoded and re-uploaded 60 times a second.
+        static ThumbnailCache s_Thumbnails;
+
+        std::shared_ptr<Graphic::Image2D> thumb;
+        if ( m_AssetManager )
+        {
+            // The material says more about a cube than the cube does; fall back to the mesh asset.
+            std::string path;
+            if ( !staticMesh.MaterialSlots.empty() && staticMesh.MaterialSlots.front() )
+            {
+                if ( auto mat = m_AssetManager->FindByHandle<Assets::SurfaceMaterialAsset>(
+                          staticMesh.MaterialSlots.front() ) )
+                    path = mat->GetMetadata().Filepath.generic_string();
+            }
+            if ( path.empty() && staticMesh.MeshHandle )
+            {
+                if ( auto mesh = m_AssetManager->FindByHandle<Assets::MeshAsset>( staticMesh.MeshHandle ) )
+                    path = mesh->GetMetadata().Filepath.generic_string();
+            }
+
+            if ( !path.empty() )
+            {
+                std::error_code   ec;
+                const std::string png = ThumbnailCache::DiskPath( path );
+                if ( std::filesystem::exists( png, ec ) )
+                    thumb = s_Thumbnails.Get( png );
+            }
+        }
+
         const ImVec2 at = ImGui::GetCursorScreenPos();
         const ImVec2 br( at.x + size, at.y + size );
         ImDrawList*  dl = ImGui::GetWindowDrawList();
 
-        // The frame is drawn whatever happens, so an entity with no preview still reads as a row with a
-        // slot and a (blank) thumbnail rather than a ragged one.
+        ImGui::Dummy( ImVec2( size, size ) );
         dl->AddRectFilled( at, br, IM_COL32( 15, 15, 15, 255 ), 2.0f );
 
-        const bool drawn = m_Ctx && m_Ctx->DrawPreview( ImVec2( size, size ) );
-        if ( !drawn )
+        if ( thumb && m_Ctx && m_Ctx->UIHelper )
         {
-            ImGui::Dummy( ImVec2( size, size ) );
+            if ( const void* tex = m_Ctx->UIHelper->GetTextureID( thumb ) )
+                dl->AddImageRounded( reinterpret_cast<ImTextureID>( const_cast<void*>( tex ) ),
+                                     ImVec2( at.x + 1.0f, at.y + 1.0f ), ImVec2( br.x - 1.0f, br.y - 1.0f ),
+                                     ImVec2( 0, 0 ), ImVec2( 1, 1 ), IM_COL32_WHITE, 2.0f );
+        }
+        else
+        {
             const char*  icon = ICON_MDI_CUBE_OUTLINE;
             const ImVec2 ts   = ImGui::CalcTextSize( icon );
             dl->AddText( ImVec2( at.x + ( size - ts.x ) * 0.5f, at.y + ( size - ts.y ) * 0.5f ),
                          ImGui::GetColorU32( ImGuiCol_TextDisabled ), icon );
         }
         dl->AddRect( at, br, ImGui::GetColorU32( ImGuiCol_Border ), 2.0f );
-        Utils::ImGuiUtilities::Tooltip( "Live preview of what this entity renders" );
+        Utils::ImGuiUtilities::Tooltip( "Thumbnail rendered by the asset browser" );
 
         ImGui::SameLine();
     }
