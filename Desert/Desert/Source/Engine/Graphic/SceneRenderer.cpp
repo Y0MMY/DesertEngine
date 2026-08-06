@@ -186,14 +186,49 @@ namespace Desert::Graphic
         RebuildRenderGraph();
     }
 
-    SceneRenderer::SceneRenderer()
+    namespace
     {
-        // Claimed in creation order: the main viewport is 0, each extra scene view takes the next. A
-        // process that opens more views than there are slots folds back to 0 — that is exactly today's
-        // behaviour (everyone shares one slot), so it degrades to the status quo rather than breaking.
-        static uint32_t s_NextSlot = 0;
-        m_RendererSlot             = s_NextSlot < EngineContext::kMaxRendererSlots ? s_NextSlot : 0;
-        ++s_NextSlot;
+        // Which renderer slots are taken RIGHT NOW. A slot is a place to keep per-frame GPU state, so it
+        // is only owed to renderers that exist: the editor creates and destroys them freely (a scene view
+        // is opened and closed, a thumbnail renderer comes and goes), and a counter that only ever went up
+        // ran out after five of those — every renderer after that folded onto slot 0 and shared the main
+        // viewport's camera, which is precisely "the preview moves when I move the scene camera".
+        uint32_t s_SlotsInUse = 0; // bit i = slot i taken
+
+        uint32_t ClaimRendererSlot()
+        {
+            for ( uint32_t slot = 0; slot < EngineContext::kMaxRendererSlots; ++slot )
+            {
+                const uint32_t bit = 1u << slot;
+                if ( ( s_SlotsInUse & bit ) == 0 )
+                {
+                    s_SlotsInUse |= bit;
+                    return slot;
+                }
+            }
+
+            // More live renderers than slots: the newcomer shares slot 0 and says so, because the symptom
+            // (two views borrowing each other's camera) is otherwise a mystery.
+            LOG_WARN( "[SceneRenderer] No free renderer slot ({} in use) — this renderer shares slot 0 and "
+                      "will trade per-frame state with the main view.",
+                      EngineContext::kMaxRendererSlots );
+            return 0;
+        }
+
+        void ReleaseRendererSlot( uint32_t slot )
+        {
+            if ( slot < EngineContext::kMaxRendererSlots )
+                s_SlotsInUse &= ~( 1u << slot );
+        }
+    } // namespace
+
+    SceneRenderer::SceneRenderer() : m_RendererSlot( ClaimRendererSlot() )
+    {
+    }
+
+    SceneRenderer::~SceneRenderer()
+    {
+        ReleaseRendererSlot( m_RendererSlot );
     }
 
     NO_DISCARD Common::BoolResultStr SceneRenderer::BeginScene( const Desert::Core::Scene& scene )

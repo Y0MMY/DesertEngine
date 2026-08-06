@@ -75,6 +75,12 @@ A is the right long-term shape; B is the smaller change if the only goal is corr
   starts recording later still owes itself every write instead of finding the counter already drained by
   the first view.
 
+**Slots are leased, not consumed.** `SceneRenderer` claims the lowest free slot in its constructor and
+releases it in its destructor. An earlier version only counted upwards, so opening and closing scene views
+exhausted the range and every later renderer folded onto slot 0 — sharing the main viewport's camera,
+which showed up as "the Details preview moves when I move the scene camera". Running out now warns and
+falls back to slot 0 rather than doing it silently.
+
 **What is still shared, deliberately:** persistent storage buffers (grass simulation, anything whose state
 is the point). Two views legitimately share one simulation.
 

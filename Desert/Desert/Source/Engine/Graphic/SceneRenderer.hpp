@@ -72,7 +72,8 @@ namespace Desert::Graphic
         // creation order and never reused; past kMaxRendererSlots they fold back to 0, which is the
         // current behaviour for everyone anyway.
         SceneRenderer();
-        ~SceneRenderer() = default;
+        // Releases the renderer slot, so closing a scene view hands it back instead of using it up.
+        ~SceneRenderer();
 
         void Init();
 
