@@ -1,6 +1,7 @@
 #include "MeshRenderer.hpp"
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/ShadowCascades.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/PBRPush.hpp>
 #include <Engine/Graphic/Materials/Mesh/PBR/MaterialGlass.hpp>
@@ -1175,131 +1176,26 @@ namespace Desert::Graphic::System
         const auto& dirLights = m_SceneRenderer->GetDirectionLights();
         if ( dirLights.DirectionLights.empty() )
             return;
-        glm::vec3 lightDir = glm::vec3( dirLights.DirectionLights[0].Direction );
-        if ( glm::length( lightDir ) < 1e-4f )
-            return;
-        lightDir = glm::normalize( lightDir );
 
-        // Two ranges: the CAMERA's real near/far parametrize the unprojected frustum corners (they must
-        // match invVP below), while the shadow coverage is capped so far cascades stay usefully sized.
-        //
-        // IN WORLD UNITS, and a world unit is a CENTIMETRE. This was a bare 150.0f from the metre era, so
-        // after the units switch the cascades covered 150 cm — a metre and a half in front of the camera —
-        // and everything past that was simply unshadowed. Written through Units::Metres so it cannot rot
-        // again the next time the convention moves.
-        const float     kShadowMaxDistance = Common::Units::Metres( 150.0f );
-        const float     camNear   = camera->GetNear();
-        const float     camFar    = camera->GetFar();
-        const float     shadowFar = glm::min( camFar, kShadowMaxDistance );
-        const float     splitRange = shadowFar - camNear;
-        const float     ratio      = shadowFar / glm::max( camNear, 1e-4f );
+        // The fitting itself is pure math and lives in Engine/Graphic/ShadowCascades.hpp so a test can pin
+        // it down — this function only feeds it the scene's numbers and stores the result.
+        CascadeSetup setup;
+        setup.CameraView       = camera->GetViewMatrix();
+        setup.CameraProjection = camera->GetProjectionMatrix();
+        setup.CameraNear       = camera->GetNear();
+        setup.CameraFar        = camera->GetFar();
+        setup.LightDirection   = glm::vec3( dirLights.DirectionLights[0].Direction );
+        setup.MaxDistance      = kShadowMaxDistance;
+        setup.SplitLambda      = m_SplitLambda;
+        setup.CascadeCount     = kNumCascades;
+        setup.ShadowMapSize    = kShadowMapSize;
 
-        // Practical split scheme: blend uniform and logarithmic distributions (lambda).
-        float splitFar[kNumCascades];
-        for ( uint32_t i = 0; i < kNumCascades; ++i )
+        CascadeFit     fits[kMaxShadowCascades];
+        const uint32_t n = ComputeShadowCascades( setup, fits );
+        for ( uint32_t c = 0; c < n; ++c )
         {
-            const float p   = static_cast<float>( i + 1 ) / static_cast<float>( kNumCascades );
-            const float log = camNear * std::pow( ratio, p );
-            const float uni = camNear + splitRange * p;
-            splitFar[i]     = glm::mix( uni, log, m_SplitLambda );
-        }
-
-        // Full camera-frustum world corners (GL NDC z in [-1,1]). Each near corner shares a ray from the
-        // eye with its matching far corner, so a cascade slice = lerp(near,far) by the view-depth fraction.
-        const glm::mat4 camProj = camera->GetProjectionMatrix();
-        const glm::mat4 invVP   = glm::inverse( camProj * camera->GetViewMatrix() );
-        glm::vec3       nearCorners[4];
-        glm::vec3       farCorners[4];
-        int             ci = 0;
-        for ( int x = 0; x < 2; ++x )
-            for ( int y = 0; y < 2; ++y )
-            {
-                const glm::vec4 nc =
-                     invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, -1.0f, 1.0f ); // near plane
-                const glm::vec4 fc =
-                     invVP * glm::vec4( 2.0f * x - 1.0f, 2.0f * y - 1.0f, 1.0f, 1.0f ); // far plane
-                nearCorners[ci] = glm::vec3( nc ) / nc.w;
-                farCorners[ci]  = glm::vec3( fc ) / fc.w;
-                ++ci;
-            }
-
-        // ANALYTICAL slice bounding sphere (canonical stable-CSM). The 8 corners of a symmetric
-        // perspective slice all lie on a sphere whose centre is ON the view axis and whose radius is a
-        // pure function of the slice near/far distances and the frustum's angular half-slope k — it does
-        // NOT depend on camera orientation. Computing it from scalars (vs the old centroid + max-corner-
-        // distance, which is analytically rotation-invariant but accumulates orientation-varying FP noise)
-        // makes the radius bit-stable frame to frame, so the ceil() quantization never flip-flops → the
-        // ortho extent is constant → texel-snap keeps the grid world-locked → no shimmer on a static
-        // receiver as the camera turns.
-        const glm::vec3 nearRingCenter =
-             0.25f * ( nearCorners[0] + nearCorners[1] + nearCorners[2] + nearCorners[3] );
-        const glm::vec3 farRingCenter = 0.25f * ( farCorners[0] + farCorners[1] + farCorners[2] + farCorners[3] );
-        const glm::vec3 viewFwd       = glm::normalize( farRingCenter - nearRingCenter );
-        const glm::vec3 eye           = nearRingCenter - viewFwd * camNear; // frustum apex
-
-        // k = frustum angular half-slope (corner distance from the view axis per unit axis distance). Taken
-        // from the PROJECTION MATRIX, not the unprojected corners: the corner method carries orientation-
-        // varying FP noise, so the quantized radius (and thus the texel size) wobbles as the camera turns
-        // and the texel-snap can no longer hide it -> the shadow jitters. For a symmetric perspective proj,
-        // tan(fovY/2) = 1/P[1][1] and aspect = P[1][1]/P[0][0], both rotation-independent.
-        const float tanHalfY = 1.0f / glm::max( std::abs( camProj[1][1] ), 1e-6f );
-        const float aspect   = std::abs( camProj[1][1] / camProj[0][0] );
-        const float kSlope   = tanHalfY * std::sqrt( 1.0f + aspect * aspect );
-        const float k2       = kSlope * kSlope;
-
-        float lastFar = camNear;
-        for ( uint32_t c = 0; c < kNumCascades; ++c )
-        {
-            const float zNear = lastFar;     // slice near distance from the eye
-            const float zFar  = splitFar[c]; // slice far distance from the eye
-
-            float sphereZ, radius;
-            if ( k2 * ( zFar + zNear ) >= ( zFar - zNear ) )
-            {
-                // Near ring already enclosed by the far-ring sphere → the far ring alone bounds the slice.
-                sphereZ = zFar;
-                radius  = kSlope * zFar;
-            }
-            else
-            {
-                // General case: the sphere passes through both the near and far corner rings.
-                sphereZ        = 0.5f * ( zFar + zNear ) * ( 1.0f + k2 );
-                const float dz = sphereZ - zFar;
-                radius         = std::sqrt( dz * dz + k2 * zFar * zFar );
-            }
-            glm::vec3 center = eye + viewFwd * sphereZ;
-            radius           = std::ceil( radius * 16.0f ) / 16.0f; // quantize a bit for stability
-
-            const glm::vec3 up =
-                 glm::abs( lightDir.y ) > 0.99f ? glm::vec3( 0, 0, 1 ) : glm::vec3( 0, 1, 0 );
-
-            // Texel-snap stabilization (the part that actually keeps shadows from crawling). The cascade
-            // centre must move only in WHOLE shadow-map texels along the light's right/up axes, so the
-            // sampling grid stays world-locked as the camera moves/turns. The previous code snapped the
-            // lookAt TARGET, which by construction projects to the shadow-map origin (0,0) — so the round
-            // was always a no-op and no stabilization happened. Instead snap the centre in a FIXED light-
-            // space grid (orientation-only basis, independent of where the cascade sits), then rebuild the
-            // cascade around the snapped centre. radius is constant per cascade (analytic sphere above), so
-            // the texel size is constant and the snap holds frame to frame.
-            const float     worldPerTexel = ( 2.0f * radius ) / static_cast<float>( kShadowMapSize );
-            const glm::mat4 lightBasis    = glm::lookAt( -lightDir, glm::vec3( 0.0f ), up );
-            glm::vec3       centerLS      = glm::vec3( lightBasis * glm::vec4( center, 1.0f ) );
-            centerLS.x                    = std::floor( centerLS.x / worldPerTexel ) * worldPerTexel;
-            centerLS.y                    = std::floor( centerLS.y / worldPerTexel ) * worldPerTexel;
-            const glm::vec3 snappedCenter = glm::vec3( glm::inverse( lightBasis ) * glm::vec4( centerLS, 1.0f ) );
-
-            // Push the light eye back by 2*radius so casters between the light and the slice still cast.
-            const glm::mat4 view = glm::lookAt( snappedCenter - lightDir * ( radius * 2.0f ), snappedCenter, up );
-            // Near plane in world units too (0.1f was 10 cm when a unit was a metre; as a raw number it is
-            // now a tenth of a millimetre, which throws away shadow-map depth precision).
-            const glm::mat4 proj =
-                 glm::orthoRH_ZO( -radius, radius, -radius, radius, Common::Units::Cm( 10.0f ), radius * 4.0f );
-            m_CascadeVP[c] = proj * view;
-
-            // World size of one texel for this cascade (drives the PBR normal-offset / bias).
-            m_CascadeWorldPerTexel[c] = worldPerTexel;
-
-            lastFar = splitFar[c];
+            m_CascadeVP[c]            = fits[c].ViewProj;
+            m_CascadeWorldPerTexel[c] = fits[c].WorldPerTexel;
         }
     }
 

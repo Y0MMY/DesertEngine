@@ -3,6 +3,7 @@
 #include <Engine/Graphic/RenderConfig.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
+#include <Common/Core/Units.hpp>
 
 #include <Common/Core/Profiler.hpp>
 
@@ -224,9 +225,10 @@ namespace Desert::Graphic
 
         // Grass interactor: the player character bends grass away as it moves. The shader takes ONE influencer,
         // so use the first CharacterController entity (the player); a small array would extend this to NPCs.
-        // w = influence radius in metres (0 = disabled -> no bend).
+        // w = influence radius in WORLD UNITS, and a world unit is a centimetre — this was a bare 1.5f from
+        // the metre era, i.e. a radius of one and a half CENTIMETRES, so the grass never bent for anyone.
         {
-            constexpr float kGrassInteractRadius = 1.5f;
+            const float kGrassInteractRadius     = Common::Units::Metres( 1.5f );
             m_GrassInteractor                    = glm::vec4( 0.0f );
             const auto& reg                      = scene.GetRegistry();
             auto        chars = reg.view<const ECS::CharacterControllerComponent, const ECS::TransformComponent>();

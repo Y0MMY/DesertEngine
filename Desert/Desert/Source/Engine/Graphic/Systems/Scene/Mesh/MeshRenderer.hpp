@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Common/Core/Units.hpp>
+
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/Materials/MaterialOverrides.hpp>
@@ -110,6 +112,10 @@ namespace Desert::Graphic::System
         // Cascaded shadow maps: number of directional-shadow cascades (frustum splits) + per-map resolution.
         static constexpr uint32_t kNumCascades   = 4;
         static constexpr uint32_t kShadowMapSize = 2048;
+        // How far from the camera shadows are computed at all — in WORLD UNITS, and a world unit is a
+        // centimetre. It was a bare 150.0f from the metre era, which capped every shadow at a metre and a
+        // half after the units switch.
+        static inline const float kShadowMaxDistance = Common::Units::Metres( 150.0f );
 
         virtual Common::BoolResultStr Initialize() override;
         virtual void                  Shutdown() override;

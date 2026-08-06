@@ -137,7 +137,8 @@ namespace Desert::Graphic
         }
 
         // Grass "interactor": a single actor (the player character) that bends grass away as it moves.
-        // xyz = world position, w = influence radius in metres (0 = disabled). Refreshed each BeginScene.
+        // xyz = world position, w = influence radius in WORLD UNITS / centimetres (0 = disabled).
+        // Refreshed each BeginScene.
         const glm::vec4& GetGrassInteractor() const
         {
             return m_GrassInteractor;
