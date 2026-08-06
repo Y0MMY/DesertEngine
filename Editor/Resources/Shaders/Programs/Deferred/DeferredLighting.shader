@@ -35,6 +35,9 @@ Shader "DeferredLighting"
         Uniform(3) sampler2D u_GBufferB; // rgb = world normal, a = roughness
         Uniform(8) sampler2D u_SSAO;     // r = ambient-occlusion factor (1 = lit)
         Uniform(9) sampler2D u_GBufferEmissive; // rgb = HDR emissive (self-illumination, added below)
+        // RSM GI mode only: one-bounce indirect light PRE-RESOLVED into its own buffer by the GIResolve pass
+        // (already temporally denoised there). Unused — and left bound to its dummy — in the other GI modes.
+        Uniform(10) sampler2D u_GI;
 
         Out(0) vec4 oColor;
 
@@ -68,7 +71,7 @@ Shader "DeferredLighting"
         {
         	vec4 u_LightDir;   // xyz = direction the light travels (away from the sun); w unused
         	vec4 u_LightColor; // rgb = colour, a = intensity
-        	vec4 u_Params;     // x = debug mode (0..7; 7 = Light Complexity), y = SSGI intensity (0 = off), zw reserved
+        	vec4 u_Params;     // x = debug mode (0..9), y = GI intensity (0 = off), z = SSAO enabled, w = GI mode
         	vec4 u_CameraPos;  // xyz = camera world position (for the view vector); w unused
         };
 
@@ -299,11 +302,37 @@ Shader "DeferredLighting"
         	for (uint i = 0u; i < lightsMetadata.SpotLightCount; i++)
         		result += CalculateSpotLight(spotLights[i], worldPos, view, N, F0, metallic, roughness, albedo);
 
-        	// One-bounce screen-space GI (D6): coloured indirect fill from sun-lit neighbours (colour bleeding).
+        	// One-bounce GI (D6). Two interchangeable sources, picked by u_Params.w:
+        	//  1 = SCREEN-SPACE: gather from sun-lit G-buffer neighbours. Cheap and self-contained, but only
+        	//      geometry currently ON SCREEN can bounce, and there is no denoiser.
+        	//  2 = RSM: read the GIResolve buffer, which bounced light from everything the SUN sees (off-screen
+        	//      included) and was temporally accumulated. Costs an extra shadow-style pass + two fullscreen
+        	//      passes. Its intensity is already applied in GIResolve, so it is NOT scaled again here.
+        	// The RSM buffer is a jittered gather even after temporal accumulation, so read it through a 5x5
+        	// tent — single-tap leaves visible grain that glass refraction and SSR then magnify. UVs are
+        	// clamped because the global sampler is REPEAT.
         	vec3  indirect    = vec3(0.0);
         	float giIntensity = u_Params.y;
-        	if (giIntensity > 0.0)
+        	int   giMode      = int(u_Params.w + 0.5);
+        	if (giMode == 1 && giIntensity > 0.0)
+        	{
         		indirect = GatherIndirectGI(v_TexCoord, worldPos, N, L, radiance) * giIntensity;
+        	}
+        	else if (giMode == 2)
+        	{
+        		vec2  texel = 1.0 / vec2(textureSize(u_GI, 0));
+        		vec3  giAcc = vec3(0.0);
+        		float wsum  = 0.0;
+        		for (int gy = -2; gy <= 2; gy++)
+        			for (int gx = -2; gx <= 2; gx++)
+        			{
+        				float w  = (3.0 - abs(float(gx))) * (3.0 - abs(float(gy))); // 5x5 tent
+        				vec2  uv = clamp(v_TexCoord + vec2(gx, gy) * texel, vec2(0.001), vec2(0.999));
+        				giAcc += texture(u_GI, uv).rgb * w;
+        				wsum  += w;
+        			}
+        		indirect = giAcc / wsum;
+        	}
 
         	if (dbg == 6) { oColor = vec4(indirect, 1.0); return; } // Indirect GI only
 

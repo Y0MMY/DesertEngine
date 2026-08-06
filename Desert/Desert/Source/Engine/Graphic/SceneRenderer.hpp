@@ -32,6 +32,8 @@
 #include "Systems/Scene/Deferred/DeferredLightingRenderer.hpp"
 #include "Systems/Scene/Deferred/SSAORenderer.hpp"
 #include "Systems/Scene/Deferred/CopyRenderer.hpp"
+#include "Systems/Scene/Deferred/SSRRenderer.hpp"
+#include "Systems/Scene/Deferred/GIResolveRenderer.hpp"
 #include "Systems/Scene/Particles/ParticleRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
@@ -167,6 +169,13 @@ namespace Desert::Graphic
             return m_GBuffer;
         }
 
+        // Reflective Shadow Map (a G-buffer rendered from the sun) — the bounce source for GIMode::RSM.
+        // Same attachment layout as the G-buffer, at a fixed light-space resolution.
+        const std::shared_ptr<Framebuffer>& GetRSMBuffer() const
+        {
+            return m_RSMBuffer;
+        }
+
         // Active rendering path, refreshed from SceneSettings each BeginScene.
         Core::RenderPath GetRenderPath() const
         {
@@ -282,10 +291,38 @@ namespace Desert::Graphic
         std::shared_ptr<Framebuffer> m_GBuffer;                    // deferred G-buffer (MRT)
         std::shared_ptr<Framebuffer> m_SSAOBuffer;                 // deferred SSAO (AO factor)
         std::shared_ptr<Framebuffer> m_SceneColorCopy;             // scene snapshot for glass refraction
+        std::shared_ptr<Framebuffer> m_SSRBuffer;                  // SSR trace target (denoised, then composited)
+        std::shared_ptr<Framebuffer> m_GIBuffer;                   // RSM-GI resolve target (blur-read by lighting)
+        std::shared_ptr<Framebuffer> m_RSMBuffer;                  // reflective shadow map (G-buffer from the sun)
         Core::RenderPath m_RenderPath = Core::RenderPath::Forward; // refreshed from SceneSettings each BeginScene
         Core::DeferredDebugMode m_DeferredDebug = Core::DeferredDebugMode::Off; // G-buffer debug view (deferred)
         bool                    m_EnableSSAO    = true; // deferred SSAO pass on/off (refreshed from SceneSettings)
-        bool                    m_EnableSSGI    = true; // deferred SSGI (indirect bounce) on/off
+        Core::GIMode            m_GIMode        = Core::GIMode::ScreenSpace; // indirect-light source
+        float                   m_GIIntensity   = 2.0f;
+        bool                    m_EnableSSR     = false;
+        float                   m_SSRIntensity  = 1.0f;
+        float                   m_SSRMaxDistance = 40.0f;
+
+        // The RSM is a LOW-FREQUENCY input to a temporally-accumulated resolve, so it does not need to be
+        // re-rendered every frame — refreshing it every 4th frame (and immediately when the sun moves) keeps
+        // the GI stable while cutting the extra geometry pass to a quarter of its cost.
+        static constexpr uint32_t kRSMResolution   = 512;
+        static constexpr uint32_t kRSMRefreshEvery = 4;
+        glm::vec3                 m_RSMLastSunDir{ 0.0f };
+        uint32_t                  m_RSMFrameCounter = 0;
+
+        // Allocate the SSR / RSM-GI targets + their systems on FIRST USE, not in the constructor: each
+        // PreviewViewport (thumbnails, the Details mesh preview) owns a SceneRenderer, and a preview never
+        // enables either feature — building them up front multiplied a lot of VRAM by the preview count.
+        // Return false when the feature is unavailable; the failure is latched so it is not retried each frame.
+        bool EnsureGIResources();
+        bool EnsureSSRResources();
+        // Device can sample+blend RGBA32F colour attachments — the precondition both features share.
+        bool HasFloatRenderTargetSupport() const;
+        bool m_GIResourcesReady   = false;
+        bool m_GIResourcesFailed  = false;
+        bool m_SSRResourcesReady  = false;
+        bool m_SSRResourcesFailed = false;
         RenderGraphBuilder      m_RenderGraphBuilder;
         std::unordered_map<std::string, std::shared_ptr<IRenderSystem>> m_RenderSystems;
         PipelineCache                                                   m_PipelineCache;

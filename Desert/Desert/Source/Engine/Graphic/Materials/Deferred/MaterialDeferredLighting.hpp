@@ -28,7 +28,7 @@ namespace Desert::Graphic
     // Fullscreen deferred-lighting material: binds the scene renderer's G-buffer color targets (albedo/metallic,
     // normal/roughness, world-position) + the sun (+ its CSM shadow maps) + ALL point & spot lights (uploaded
     // into the shared SSBO layout the mesh PBR shader also uses) + a debug-mode selector, driving
-    // DeferredLighting.glsl.frag. Header-only (no new .cpp -> no premake regen).
+    // DeferredLighting.shader. Header-only (no new .cpp -> no premake regen).
     class MaterialDeferredLighting final : public Material
     {
     public:
@@ -39,6 +39,7 @@ namespace Desert::Graphic
             m_GBufferC        = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferC" ).get();
             m_GBufferEmissive = m_MaterialExecutor->GetTexture2DProperty( "u_GBufferEmissive" ).get();
             m_SSAO            = m_MaterialExecutor->GetTexture2DProperty( "u_SSAO" ).get();
+            m_GI              = m_MaterialExecutor->GetTexture2DProperty( "u_GI" ).get();
         }
 
         // gA = Albedo+Metallic, gB = Normal+Roughness, gC = WorldPosition; lightDir.xyz = direction the sun
@@ -49,7 +50,8 @@ namespace Desert::Graphic
                    const glm::vec4& lightDir, const glm::vec4& lightColor, const glm::vec4& cameraPos,
                    int debugMode, const ShaderProtocols::PointLight& pointLights,
                    const ShaderProtocols::SpotLight& spotLights, const DeferredShadowInput& shadow,
-                   const std::shared_ptr<Image2D>& aoImage, float giIntensity, bool ssaoEnabled )
+                   const std::shared_ptr<Image2D>& aoImage, float giIntensity, bool ssaoEnabled,
+                   int giMode = 0, const std::shared_ptr<Image2D>& giImage = nullptr )
         {
             if ( m_GBufferA && gA )
                 m_GBufferA->SetImage( gA.get() );
@@ -61,12 +63,19 @@ namespace Desert::Graphic
                 m_GBufferEmissive->SetImage( gE.get() );
             if ( m_SSAO && aoImage )
                 m_SSAO->SetImage( aoImage.get() );
+            // RSM mode only: the resolved indirect-light buffer. In the screen-space / off modes nothing is
+            // bound here and the shader never samples it (the descriptor keeps its dummy image).
+            if ( m_GI && giImage )
+                m_GI->SetImage( giImage.get() );
 
             SetLightDir( lightDir );
             SetLightColor( lightColor );
             SetCameraPos( cameraPos );
-            // u_Params: x = debug mode, y = SSGI intensity (0 = off), z = SSAO enabled (else shader uses AO=1).
-            SetParams( glm::vec4( static_cast<float>( debugMode ), giIntensity, ssaoEnabled ? 1.0f : 0.0f, 0.0f ) );
+            // u_Params: x = debug mode, y = GI intensity (0 = off), z = SSAO enabled (else shader uses AO=1),
+            // w = GI mode (0 = off, 1 = screen-space gather, 2 = RSM buffer). Mode picks WHERE the indirect
+            // light comes from; intensity scales it (the RSM path pre-applies it in GIResolve).
+            SetParams( glm::vec4( static_cast<float>( debugMode ), giIntensity, ssaoEnabled ? 1.0f : 0.0f,
+                                  static_cast<float>( giMode ) ) );
 
             UploadShadow( shadow );
 
@@ -145,6 +154,7 @@ namespace Desert::Graphic
         Texture2DProperty* m_GBufferB        = nullptr;
         Texture2DProperty* m_GBufferC        = nullptr;
         Texture2DProperty* m_GBufferEmissive = nullptr;
-        Texture2DProperty* m_SSAO     = nullptr;
+        Texture2DProperty* m_SSAO            = nullptr;
+        Texture2DProperty* m_GI              = nullptr;
     };
 } // namespace Desert::Graphic

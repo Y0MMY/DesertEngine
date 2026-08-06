@@ -194,12 +194,29 @@ namespace Desert::Editor
 
             // Deferred G-buffer debug view (UE-style buffer visualization) — only meaningful in Deferred.
             ImGui::BeginDisabled( s.RenderingPath != Core::RenderPath::Deferred );
-            const char* dbg[]  = { "Lit", "Albedo", "Normal", "Metallic", "Roughness", "AO" };
+            // Contiguous 0..6, so the index maps straight onto the enum. The heat-map modes (7/8/9) are
+            // deliberately absent: those live in the viewport's View Mode dropdown.
+            const char* dbg[]  = { "Lit", "Albedo", "Normal", "Metallic", "Roughness", "AO", "GI" };
             int         dbgCur = static_cast<int>( s.DeferredDebug );
             if ( ImGui::Combo( "Deferred Debug", &dbgCur, dbg, IM_ARRAYSIZE( dbg ) ) )
                 s.DeferredDebug = static_cast<Core::DeferredDebugMode>( dbgCur );
             ImGui::Checkbox( "Enable SSAO", &s.EnableSSAO );
-            ImGui::Checkbox( "Enable SSGI", &s.EnableSSGI );
+
+            const char* giModes[] = { "Off", "Screen Space", "RSM" };
+            int         giCur     = static_cast<int>( s.GlobalIllumination );
+            if ( ImGui::Combo( "Global Illumination", &giCur, giModes, IM_ARRAYSIZE( giModes ) ) )
+                s.GlobalIllumination = static_cast<Core::GIMode>( giCur );
+            ImGui::BeginDisabled( s.GlobalIllumination == Core::GIMode::Off );
+            ImGui::SliderFloat( "GI Intensity", &s.GIIntensity, 0.0f, 20.0f );
+            ImGui::EndDisabled();
+            if ( s.GlobalIllumination == Core::GIMode::RSM )
+                ImGui::TextDisabled( "RSM bounces off-screen geometry; its gather is dim (try ~6)." );
+
+            ImGui::Checkbox( "Enable SSR", &s.EnableSSR );
+            ImGui::BeginDisabled( !s.EnableSSR );
+            ImGui::SliderFloat( "SSR Intensity", &s.SSRIntensity, 0.0f, 1.0f );
+            ImGui::SliderFloat( "SSR Max Distance", &s.SSRMaxDistance, 1.0f, 200.0f );
+            ImGui::EndDisabled();
             ImGui::EndDisabled();
             ImGui::TextDisabled( "Deferred: static meshes only, directional light (WIP)." );
         }

@@ -176,6 +176,16 @@ namespace Desert::Graphic::System
         // G-buffer variant, so without this they only appear in the silhouette/outline pass — invisible
         // otherwise). Forward path draws them inside MeshGeometryPass.
         void RenderSkinnedManual();
+        // Reflective Shadow Map: the G-buffer rasterized from the SUN instead of the camera, into the scene
+        // renderer's RSM buffer. Every lit texel becomes a virtual point light for the RSM GI mode, which is
+        // what lets off-screen geometry bounce light. No-op unless the deferred pipeline exists.
+        void RenderRSMManual();
+        // World -> RSM clip for the pass above — the GI resolve needs it to project fragments into the
+        // sun's view. Valid after UpdateCascades(); identity before the first frame.
+        glm::mat4 GetRSMViewProj() const
+        {
+            return m_RSMViewProj;
+        }
 
         const std::shared_ptr<Framebuffer>& GetSilhouetteMaskFramebuffer() const
         {
@@ -315,6 +325,15 @@ namespace Desert::Graphic::System
         // per frame in the glass pass — sharing an opaque material across two passes/frame hangs the GPU.
         std::unique_ptr<StaticMaterialPBR> m_GlassMaterial;
         MaterialInstancePtr                m_GlassInstance;
+
+        // Reflective Shadow Map (G-buffer from the sun) — the off-screen bounce source for the RSM GI mode.
+        // Its camera UB carries the SUN's matrices, so like glass it needs its OWN material: sharing one with
+        // the opaque passes would write the same per-frame UB twice in a frame. m_RSMViewProj/m_RSMEye come
+        // from cascade 1 in UpdateCascades(); the pass reuses m_StaticGBufferPipeline.
+        std::unique_ptr<StaticMaterialPBR> m_RSMMaterial;
+        MaterialInstancePtr                m_RSMInstance;
+        glm::mat4                          m_RSMViewProj = glm::mat4( 1.0f );
+        glm::vec3                          m_RSMEye      = glm::vec3( 0.0f );
 
         std::shared_ptr<Shader>   m_GeometryShader;
         std::shared_ptr<Shader>   m_InstancedGeometryShader;

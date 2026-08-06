@@ -55,10 +55,24 @@ namespace Desert::Core
         Metallic  = 3,
         Roughness = 4,
         AO        = 5,
-        // 6 is reserved (an internal GI-only debug in the deferred shader).
+        GI        = 6, // indirect light only (whichever GIMode is active) — for judging GI in isolation
         LightComplexity    = 7, // per-pixel count of point/spot light volumes, heat-mapped (UE-style)
         Overdraw           = 8, // additive re-raster of all meshes -> heat-mapped overdraw count (both paths)
         MaterialComplexity = 9, // per-pixel sampled-texture count (from GBufferC.w), heat-mapped (UE-style)
+    };
+
+    // Source of the one-bounce indirect light (Deferred path only).
+    //  ScreenSpace — gathers from sun-lit G-buffer neighbours right inside the lighting pass. Cheap and
+    //                self-contained, but ONLY geometry currently on screen can bounce, and there is no
+    //                denoiser, so a wide radius reads as noise.
+    //  RSM         — bounces light off everything the SUN sees (off-screen geometry included) via a
+    //                reflective shadow map, resolved into its own buffer and temporally accumulated.
+    //                Better and stabler; costs one sun-view raster pass plus two fullscreen passes.
+    enum class GIMode : int
+    {
+        Off         = 0,
+        ScreenSpace = 1,
+        RSM         = 2,
     };
 
     // Reflected (REFLECT/PROPERTY) so the whole block (de)serializes generically via the reflection
@@ -83,8 +97,24 @@ namespace Desert::Core
         // turn off for maximum FPS.
         PROPERTY( DisplayName( "Enable SSAO" ), Category( "Rendering" ) )
         bool EnableSSAO = true;
-        PROPERTY( DisplayName( "Enable SSGI" ), Category( "Rendering" ) )
-        bool EnableSSGI = true;
+
+        PROPERTY( DisplayName( "Global Illumination" ), Category( "Rendering" ) )
+        GIMode GlobalIllumination = GIMode::ScreenSpace;
+        // ONE knob for both GI modes, but they are not on the same scale: the screen-space gather is
+        // bright at ~2, while the RSM gather is deliberately dim (32 taps, 1/d^2 with a distance floor)
+        // and wants ~6. Switching to RSM will look flat until this is raised — that is expected, not a bug.
+        PROPERTY( DisplayName( "GI Intensity" ), Category( "Rendering" ), Range( 0.0f, 20.0f ) )
+        float GIIntensity = 2.0f;
+
+        // Screen-space reflections: mirrors/metal/polished floors reflect what is on screen. Traced at
+        // quarter cost then temporally denoised; still bound by the usual SSR limit (off-screen and
+        // occluded geometry cannot reflect).
+        PROPERTY( DisplayName( "Enable SSR" ), Category( "Rendering" ) )
+        bool EnableSSR = false;
+        PROPERTY( DisplayName( "SSR Intensity" ), Category( "Rendering" ), Range( 0.0f, 1.0f ) )
+        float SSRIntensity = 1.0f;
+        PROPERTY( DisplayName( "SSR Max Distance" ), Category( "Rendering" ), Range( 1.0f, 200.0f ) )
+        float SSRMaxDistance = 40.0f;
 
         // Environment: skybox brightness now lives on the SkyboxComponent (entity) as
         // SkyboxComponent::Intensity — applied in the Skybox pass. Procedural sky lives there too. The old

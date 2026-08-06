@@ -57,13 +57,15 @@ namespace Desert::Graphic::System
         // Shades the G-buffer into the scene target. lightDir.xyz = the direction the sun travels;
         // lightColor.rgb/.a = colour/intensity; cameraPos.xyz = camera world position (view vector);
         // debugMode selects a raw channel (0 = lit); point/spot = the scene's dynamic lights.
+        // giMode picks the indirect-light source (0 = off, 1 = screen-space gather, 2 = the RSM giImage).
         void Execute( const std::shared_ptr<Framebuffer>& gbuffer, const glm::vec4& lightDir,
                       const glm::vec4& lightColor, const glm::vec4& cameraPos, int debugMode,
                       const ShaderProtocols::PointLight& pointLights,
                       const ShaderProtocols::SpotLight&  spotLights,
                       const DeferredShadowInput&         shadow,
                       const std::shared_ptr<Image2D>&    aoImage,
-                      float giIntensity, bool ssaoEnabled )
+                      float giIntensity, bool ssaoEnabled, int giMode = 0,
+                      const std::shared_ptr<Image2D>& giImage = nullptr )
         {
             const auto& target = m_TargetFramebuffer.lock();
             if ( !target || !gbuffer || !m_Pipeline || !m_Material )
@@ -82,7 +84,7 @@ namespace Desert::Graphic::System
             m_Material->Bind( gbuffer->GetColorAttachmentImage( 0 ), gbuffer->GetColorAttachmentImage( 1 ),
                               gbuffer->GetColorAttachmentImage( 2 ), gbuffer->GetColorAttachmentImage( 3 ),
                               lightDir, lightColor, cameraPos, debugMode, pointLights, spotLights, shadow, aoImage,
-                              giIntensity, ssaoEnabled );
+                              giIntensity, ssaoEnabled, giMode, giImage );
             renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_Material->GetMaterialExecutor() );
             renderer.EndRenderPass();
         }

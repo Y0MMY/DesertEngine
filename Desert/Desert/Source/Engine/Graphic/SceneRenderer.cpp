@@ -42,8 +42,17 @@ namespace Desert::Graphic
         fbSpec.DebugName = "Composite framebuffer";
         fbSpec.Samples   = static_cast<uint32_t>(
              std::clamp( RenderConfig::MSAASamples.load(), 1, RenderConfig::MaxMSAASamples.load() ) );
-        if ( fbSpec.Samples != 1 && fbSpec.Samples != 2 && fbSpec.Samples != 4 && fbSpec.Samples != 8 )
-            fbSpec.Samples = 1;
+        // Validate against the device's actual sample MASK, not a hardcoded 1/2/4/8 list. Clamping to the
+        // maximum is not enough: support is a bitmask, so a device can offer 1/4/8 and not 2 — the old
+        // check accepted 2 there and the framebuffer failed to create. Fall back to the next lower
+        // supported count rather than dropping straight to 1.
+        {
+            const uint32_t mask = EngineContext::GetInstance().GetCapabilities().MSAASampleMask;
+            while ( fbSpec.Samples > 1 && !( mask & fbSpec.Samples ) )
+                fbSpec.Samples >>= 1;
+            if ( fbSpec.Samples < 1 )
+                fbSpec.Samples = 1;
+        }
         RenderConfig::MSAASamplesActive = static_cast<int>( fbSpec.Samples );
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
         fbSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
@@ -83,6 +92,12 @@ namespace Desert::Graphic
         copySpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
         m_SceneColorCopy = Graphic::Framebuffer::Create( copySpec );
         m_SceneColorCopy->Resize( width, height );
+
+        // NOTE: SSR and RSM-GI resources are deliberately NOT created here — see EnsureSSRResources() /
+        // EnsureGIResources(). Every PreviewViewport (asset thumbnails, the Details mesh preview) builds its
+        // OWN SceneRenderer, so anything allocated in this constructor is paid for once PER PREVIEW. Between
+        // them SSR and RSM-GI want six full-screen RGBA32F targets plus a five-attachment RSM, and a preview
+        // never turns either feature on. They are now allocated on first actual use instead.
 
         // Scene systems render into the shared target framebuffer; post-process systems form an
         // explicit chain (Mesh silhouette mask -> Jump Flood outline -> Tonemap).
@@ -257,8 +272,12 @@ namespace Desert::Graphic
         // while it's active so the wireframe pipeline is actually used and the grid composites over it.
         m_RenderPath    = sceneSettings.WireframeMode ? Core::RenderPath::Forward : sceneSettings.RenderingPath;
         m_DeferredDebug = sceneSettings.DeferredDebug;
-        m_EnableSSAO    = sceneSettings.EnableSSAO;
-        m_EnableSSGI    = sceneSettings.EnableSSGI;
+        m_EnableSSAO     = sceneSettings.EnableSSAO;
+        m_GIMode         = sceneSettings.GlobalIllumination;
+        m_GIIntensity    = sceneSettings.GIIntensity;
+        m_EnableSSR      = sceneSettings.EnableSSR;
+        m_SSRIntensity   = sceneSettings.SSRIntensity;
+        m_SSRMaxDistance = sceneSettings.SSRMaxDistance;
 
         // Evaluate the scene-global SHARED wind once per frame so every wind-driven renderer (grass now;
         // clouds/hair/cloth next) reads one coherent direction + strength via GetWind(). Direction is a
@@ -426,6 +445,32 @@ namespace Desert::Graphic
                     aoImage = ssao->GetAOImage();
                 }
 
+            // RSM GI mode: rasterize the sun's G-buffer, then resolve one bounce out of it. The RSM is a
+            // LOW-FREQUENCY input to a temporally-accumulated resolve, so it is refreshed every Nth frame
+            // (and immediately when the sun moves) rather than every frame.
+            std::shared_ptr<Image2D> giImage;
+            if ( m_GIMode == Core::GIMode::RSM && meshRenderer && EnsureGIResources() )
+            {
+                const glm::vec3 sunDir( lightDir );
+                if ( glm::distance( sunDir, m_RSMLastSunDir ) > 1e-4f || m_RSMFrameCounter == 0 )
+                {
+                    DESERT_PROFILE_SCOPE( "Deferred: RSM" );
+                    meshRenderer->RenderRSMManual();
+                    m_RSMLastSunDir = sunDir;
+                }
+                m_RSMFrameCounter = ( m_RSMFrameCounter + 1 ) % kRSMRefreshEvery;
+
+                if ( auto* gi = UNIQUE_GET_AS( System::GIResolveRenderer, m_RenderSystems["GISystem"] ) )
+                {
+                    DESERT_PROFILE_SCOPE( "Deferred: GIResolve" );
+                    gi->Execute( m_GBuffer, m_RSMBuffer->GetColorAttachmentImage( 0 ),
+                                 m_RSMBuffer->GetColorAttachmentImage( 1 ),
+                                 m_RSMBuffer->GetColorAttachmentImage( 2 ), meshRenderer->GetRSMViewProj(),
+                                 viewProj, lightColor, m_GIIntensity );
+                    giImage = gi->GetGIImage();
+                }
+            }
+
             // Gather the same CSM data the forward material uses so the deferred sun casts identical shadows.
             DeferredShadowInput shadow;
             if ( meshRenderer )
@@ -442,10 +487,13 @@ namespace Desert::Graphic
                 }
             }
 
+            // The RSM path pre-applies its intensity in GIResolve, so pass 0 there to avoid scaling twice;
+            // the screen-space gather is scaled inside the lighting shader.
+            const float giIntensity = ( m_GIMode == Core::GIMode::ScreenSpace ) ? m_GIIntensity : 0.0f;
             UNIQUE_GET_AS( System::DeferredLightingRenderer, m_RenderSystems["DeferredLightingSystem"] )
                  ->Execute( m_GBuffer, lightDir, lightColor, cameraPos, static_cast<int>( m_DeferredDebug ),
-                            GetPointLights(), GetSpotLights(), shadow, aoImage, m_EnableSSGI ? 2.0f : 0.0f,
-                            m_EnableSSAO );
+                            GetPointLights(), GetSpotLights(), shadow, aoImage, giIntensity, m_EnableSSAO,
+                            static_cast<int>( m_GIMode ), giImage );
 
             // Custom-shader (generic) meshes have no G-buffer variant — draw them forward OVER
             // the deferred composite (before the glass snapshot so glass refracts them too).
@@ -464,6 +512,18 @@ namespace Desert::Graphic
                 copy->Execute( m_TargetFramebuffer->GetColorAttachmentImage( 0 ) );
                 sceneCopy = copy->GetImage();
             }
+
+            // SSR reflects the COMPOSITED opaque scene, so it runs off that same snapshot — reading the
+            // target while writing it would be a feedback loop. Before glass, so glass refracts the
+            // reflections too.
+            if ( m_EnableSSR && sceneCopy && EnsureSSRResources() )
+                if ( auto* ssr = UNIQUE_GET_AS( System::SSRRenderer, m_RenderSystems["SSRSystem"] ) )
+                {
+                    DESERT_PROFILE_SCOPE( "Deferred: SSR" );
+                    ssr->Execute( m_GBuffer, sceneCopy, viewProj, cameraPos, /*maxSteps*/ 32,
+                                  m_SSRMaxDistance, m_SSRIntensity, /*thickness*/ 0.5f );
+                }
+
             meshRenderer->RenderGlassManual( sceneCopy );
         }
 
@@ -573,6 +633,118 @@ namespace Desert::Graphic
         return BOOLSUCCESS;
     }
 
+    // Capability gate shared by the two Ensure* helpers. Both SSR and RSM-GI accumulate into RGBA32F
+    // targets that are sampled and blended, so a device that cannot do that cannot run either feature.
+    // Reads the introspection layer (Engine::Device) rather than assuming — the whole point of it.
+    bool SceneRenderer::HasFloatRenderTargetSupport() const
+    {
+        return EngineContext::GetInstance().GetCapabilities().SupportsFloatRenderTargets;
+    }
+
+    // Both Ensure* helpers below are LAZY on purpose: every PreviewViewport owns a SceneRenderer, so
+    // allocating these eagerly multiplied six full-screen RGBA32F targets (+ a 5-attachment RSM, + the
+    // systems' own ping-pong accumulation pairs) by the number of live previews — for features a preview
+    // never enables. They run outside any render pass, and go through WaitDeviceIdle before touching
+    // GPU resources, matching what Resize() below does. A failure is non-fatal and latched, so a broken
+    // shader cannot make this retry every frame.
+
+    bool SceneRenderer::EnsureGIResources()
+    {
+        if ( m_GIResourcesReady )
+            return true;
+        if ( m_GIResourcesFailed )
+            return false;
+
+        // ASK before allocating. The GI resolve and its temporal history are RGBA32F targets that get
+        // sampled and blended; on a device without blendable float attachments the framebuffers would be
+        // created and only fail later, deep in a pass.
+        if ( !HasFloatRenderTargetSupport() )
+        {
+            LOG_WARN( "[SceneRenderer] RSM GI needs blendable float render targets, which this device does "
+                      "not report — staying on the screen-space GI path." );
+            m_GIResourcesFailed = true;
+            return false;
+        }
+
+        Renderer::GetInstance().WaitDeviceIdle();
+
+        FramebufferSpecification giSpec;
+        giSpec.DebugName = "GIResolve";
+        giSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+        m_GIBuffer = Graphic::Framebuffer::Create( giSpec );
+        m_GIBuffer->Resize( m_TargetFramebuffer->GetFramebufferWidth(),
+                            m_TargetFramebuffer->GetFramebufferHeight() );
+
+        // Reflective Shadow Map: a G-buffer rendered from the sun. The attachment layout MUST mirror
+        // m_GBuffer (including the emissive target) — the RSM pass reuses the G-buffer pipeline, and that
+        // only works while the two render passes stay compatible. Fixed light-space resolution, so it does
+        // NOT resize with the viewport.
+        FramebufferSpecification rsmSpec;
+        rsmSpec.DebugName = "RSM";
+        rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA8F );  // Albedo (flux colour)
+        rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // Normal
+        rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // WorldPos
+        rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F ); // Emissive (unused)
+        rsmSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::DEPTH24STENCIL8 );
+        m_RSMBuffer = Graphic::Framebuffer::Create( rsmSpec );
+        m_RSMBuffer->Resize( kRSMResolution, kRSMResolution );
+
+        RegisterSystem<System::GIResolveRenderer>( "GISystem", this, m_GIBuffer, m_RenderGraphBuilder );
+        if ( !SP_CAST( System::GIResolveRenderer, m_RenderSystems["GISystem"] )->Initialize() )
+        {
+            LOG_WARN( "[SceneRenderer] GI resolve system unavailable — RSM GI produces no indirect light." );
+            m_GIResourcesFailed = true;
+            m_GIBuffer.reset();
+            m_RSMBuffer.reset();
+            return false;
+        }
+
+        m_GIResourcesReady = true;
+        return true;
+    }
+
+    bool SceneRenderer::EnsureSSRResources()
+    {
+        if ( m_SSRResourcesReady )
+            return true;
+        if ( m_SSRResourcesFailed )
+            return false;
+
+        // Same gate as GI: the trace target and its ping-pong history are sampled/blended RGBA32F.
+        if ( !HasFloatRenderTargetSupport() )
+        {
+            LOG_WARN( "[SceneRenderer] SSR needs blendable float render targets, which this device does not "
+                      "report — reflections stay off." );
+            m_SSRResourcesFailed = true;
+            return false;
+        }
+
+        Renderer::GetInstance().WaitDeviceIdle();
+
+        // SSR trace target (HDR reflection colour, reflectance in .a). Traced first, then denoised and
+        // composited — blending the raw single-sample trace straight onto the scene looks stippled.
+        FramebufferSpecification ssrSpec;
+        ssrSpec.DebugName = "SSRTrace";
+        ssrSpec.Attachments.Attachments.push_back( Core::Formats::ImageFormat::RGBA32F );
+        m_SSRBuffer = Graphic::Framebuffer::Create( ssrSpec );
+        m_SSRBuffer->Resize( m_TargetFramebuffer->GetFramebufferWidth(),
+                             m_TargetFramebuffer->GetFramebufferHeight() );
+
+        RegisterSystem<System::SSRRenderer>( "SSRSystem", this, m_TargetFramebuffer, m_RenderGraphBuilder );
+        const auto& ssrSys = SP_CAST( System::SSRRenderer, m_RenderSystems["SSRSystem"] );
+        ssrSys->SetTraceBuffer( m_SSRBuffer ); // must be set BEFORE Initialize()
+        if ( !ssrSys->Initialize() )
+        {
+            LOG_WARN( "[SceneRenderer] SSR system unavailable." );
+            m_SSRResourcesFailed = true;
+            m_SSRBuffer.reset();
+            return false;
+        }
+
+        m_SSRResourcesReady = true;
+        return true;
+    }
+
     void SceneRenderer::Resize( const uint32_t width, const uint32_t height )
     {
         if ( width == 0 && height == 0 )
@@ -590,6 +762,12 @@ namespace Desert::Graphic
             m_SSAOBuffer->Resize( width, height );
         if ( m_SceneColorCopy )
             m_SceneColorCopy->Resize( width, height );
+        if ( m_SSRBuffer )
+            m_SSRBuffer->Resize( width, height );
+        if ( m_GIBuffer )
+            m_GIBuffer->Resize( width, height );
+        // m_RSMBuffer is deliberately NOT resized: it is a fixed-resolution light-space target, unrelated
+        // to the viewport. Its accumulation history is invalidated by the GI system's own size check.
 
         // Keep the post-process chain framebuffers in lock-step with the scene target.
         if ( const auto& maskFb = UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
