@@ -33,9 +33,12 @@ namespace Desert::ShaderResources::API::Vulkan
             return m_Size;
         }
 
+        // Indexed by (frame x recording renderer slot) — see CopyIndex. @p frameIndex is kept in the
+        // signature because every caller has it; the slot is resolved here so a write and the descriptor
+        // that points at it can never disagree.
         const VkDescriptorBufferInfo& GetDescriptorBufferInfo( uint32_t frameIndex ) const
         {
-            return m_DescriptorInfos[frameIndex];
+            return m_DescriptorInfos[CopyIndex()];
         }
 
         virtual const void* GetData() const override
@@ -44,6 +47,9 @@ namespace Desert::ShaderResources::API::Vulkan
         }
 
     private:
+        // The copy belonging to (current frame in flight x recording renderer slot).
+        static uint32_t CopyIndex();
+
         void Release();
         void RT_Invalidate();
 

@@ -30,7 +30,7 @@ namespace Desert::Graphic
         void SetRawData( const void* data, uint32_t size )
         {
             m_Buffer->SetData( data, size );
-            m_DirtyCount = PropertyDirty::DirtyLifetime();
+            MarkDirty(); // every slot owes itself this write
         }
 
         // Replace the reflection-created buffer with an externally-owned one (e.g. a correctly-sized,
@@ -38,7 +38,7 @@ namespace Desert::Graphic
         void SetBuffer( const std::shared_ptr<ShaderResources::StorageBuffer>& buffer )
         {
             m_Buffer     = buffer;
-            m_DirtyCount = PropertyDirty::DirtyLifetime();
+            MarkDirty(); // every slot owes itself this write
         }
 
         const auto& GetStorageBuffer() const

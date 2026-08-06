@@ -59,20 +59,23 @@ namespace Desert::ShaderResources::API::Vulkan
         Release();
 
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
-        // Persistent = ONE buffer shared by every frame (GPU sim state must survive across frames); otherwise
-        // one buffer per frame in flight. The descriptor-info array stays sized to framesInFlight either way,
-        // so GetDescriptorBufferInfo(frameIndex) is always valid — persistent just points them all at buffer 0.
-        const uint32_t bufferCount = m_Persistent ? 1u : framesInFlight;
+        const uint32_t slots          = Engine::kMaxRendererSlots;
+        // Persistent = ONE buffer shared by every frame AND every view (GPU simulation state must survive
+        // across frames, and a second view must not get a fresh copy of a simulation that has been running).
+        // Otherwise one buffer per (frame in flight x renderer slot): the frame dimension keeps the GPU from
+        // reading a buffer being rewritten, and the SLOT dimension keeps a second view from overwriting the
+        // per-object material array or the pose the first view's draws reference.
+        const uint32_t copies = m_Persistent ? 1u : framesInFlight * slots;
 
-        m_Buffers.resize( bufferCount, VK_NULL_HANDLE );
-        m_MemoryAllocs.resize( bufferCount, nullptr );
-        m_MappedMemories.resize( bufferCount, nullptr );
-        m_DescriptorInfos.resize( framesInFlight );
+        m_Buffers.resize( copies, VK_NULL_HANDLE );
+        m_MemoryAllocs.resize( copies, nullptr );
+        m_MappedMemories.resize( copies, nullptr );
+        m_DescriptorInfos.resize( framesInFlight * slots );
 
         auto vulkanContext = SP_CAST( Desert::Graphic::API::Vulkan::VulkanContext,
                                       EngineContext::GetInstance().GetRendererContext() );
 
-        for ( uint32_t i = 0; i < bufferCount; ++i )
+        for ( uint32_t i = 0; i < copies; ++i )
         {
             VkBufferCreateInfo bufferInfo = {};
             bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -92,13 +95,13 @@ namespace Desert::ShaderResources::API::Vulkan
             m_MappedMemories[i] = vulkanContext->GetVulkanAllocator()->MapMemory( m_MemoryAllocs[i] );
         }
 
-        // Point every frame's descriptor at its buffer (persistent: all at buffer 0).
-        for ( uint32_t f = 0; f < framesInFlight; ++f )
+        // Point every (frame x slot) descriptor at its buffer (persistent: all at buffer 0).
+        for ( uint32_t i = 0; i < framesInFlight * slots; ++i )
         {
-            const uint32_t idx          = m_Persistent ? 0u : f;
-            m_DescriptorInfos[f].buffer = ( idx < m_Buffers.size() ) ? m_Buffers[idx] : VK_NULL_HANDLE;
-            m_DescriptorInfos[f].offset = 0;
-            m_DescriptorInfos[f].range  = m_Size;
+            const uint32_t idx          = m_Persistent ? 0u : i;
+            m_DescriptorInfos[i].buffer = ( idx < m_Buffers.size() ) ? m_Buffers[idx] : VK_NULL_HANDLE;
+            m_DescriptorInfos[i].offset = 0;
+            m_DescriptorInfos[i].range  = m_Size;
         }
     }
 
@@ -115,16 +118,24 @@ namespace Desert::ShaderResources::API::Vulkan
             m_LocalStorage.Allocate( m_Size );
         std::memcpy( static_cast<uint8_t*>( m_LocalStorage.Data ) + offset, data, size );
 
-        // Persistent buffers have a single mapping (index 0); per-frame buffers write the current frame's.
-        const uint32_t idx = m_Persistent ? 0u : EngineContext::GetInstance().GetCurrentFrameIndex();
+        // Persistent buffers have a single mapping (index 0); the rest write the copy belonging to this
+        // frame AND this view.
+        const uint32_t idx = m_Persistent ? 0u : CopyIndex();
         if ( idx < m_MappedMemories.size() && m_MappedMemories[idx] )
             std::memcpy( m_MappedMemories[idx] + offset, data, size );
     }
 
     uint8_t* VulkanStorageBuffer::MapMemory()
     {
-        const uint32_t idx = m_Persistent ? 0u : EngineContext::GetInstance().GetCurrentFrameIndex();
+        const uint32_t idx = m_Persistent ? 0u : CopyIndex();
         return idx < m_MappedMemories.size() ? m_MappedMemories[idx] : nullptr;
+    }
+
+    uint32_t VulkanStorageBuffer::CopyIndex()
+    {
+        const uint32_t slots = Engine::kMaxRendererSlots;
+        const uint32_t slot  = EngineContext::GetInstance().GetActiveRendererSlot();
+        return EngineContext::GetInstance().GetCurrentFrameIndex() * slots + ( slot < slots ? slot : 0 );
     }
 
     void VulkanStorageBuffer::UnmapMemory()

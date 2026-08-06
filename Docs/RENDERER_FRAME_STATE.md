@@ -69,18 +69,20 @@ A is the right long-term shape; B is the smaller change if the only goal is corr
   all resolve the recording slot in one place (`VulkanUniformBuffer::CopyIndex`). This is where two views
   stop overwriting each other's camera, lights, shadow cascades and IBL.
 
-**Still shared after B3, and why it matters:**
+* **B4** — storage buffers get the same `(frame x slot)` copies, EXCEPT the persistent ones (GPU
+  simulation state must survive across frames *and* views — a second view must not restart a running
+  simulation). Dirty tracking became per slot in `MaterialProperty` and `FieldProperty`, so a view that
+  starts recording later still owes itself every write instead of finding the counter already drained by
+  the first view.
 
-* **Storage buffers** — the per-object material array and the skinned pose. They are written per material
-  group per renderer, so two views still clash there. They are NOT duplicated yet because they are the big
-  ones (bones x objects), and the persistent variant deliberately keeps a single buffer; that needs a
-  decision about memory, not just a mechanical edit. Until then a second live view can show wrong
-  per-object material indices even though its lighting is now correct.
-* **One-shot writes** — a property is cleaned at most once per frame, for whichever slot is recording, so
-  `DirtyLifetime()` now spans `frames x slots`. A view opened LONG after a value was written once still
-  misses it until something touches that property again. The real fix is per-slot dirty tracking.
+**What is still shared, deliberately:** persistent storage buffers (grass simulation, anything whose state
+is the point). Two views legitimately share one simulation.
 
-So the live Details preview should stay off until storage buffers are covered as well.
+**Memory cost of B, measured in shapes rather than guesses:** uniform blocks are hundreds of bytes to a
+few KB, so their copies are kilobytes per material. Storage buffers are the big ones — a 100-bone pose is
+~6 KB per copy (2 frames x 4 slots = ~51 KB per character), and a per-object material array of 10k objects
+is ~640 KB per copy (~5 MB across frames and slots). If that ever matters, the fix is to allocate a slot's
+copies lazily on its first record rather than up front.
 
 ## The fix
 

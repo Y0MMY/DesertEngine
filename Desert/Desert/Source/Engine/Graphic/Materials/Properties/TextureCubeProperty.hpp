@@ -38,7 +38,7 @@ namespace Desert::Graphic
         void SetTexture( const ImageCube* texture )
         {
             m_Texture = texture;
-            m_DirtyCount = PropertyDirty::DirtyLifetime();
+            MarkDirty(); // every slot owes itself this write
         }
 
         const auto& GetUniform() const

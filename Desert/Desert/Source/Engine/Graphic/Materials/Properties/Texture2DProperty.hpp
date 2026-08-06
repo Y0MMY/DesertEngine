@@ -39,7 +39,7 @@ namespace Desert::Graphic
         void SetImage( const Image2D* texture )
         {
             m_Texture = texture;
-            m_DirtyCount = PropertyDirty::DirtyLifetime();
+            MarkDirty(); // every slot owes itself this write
         }
 
         const auto& GetUniform() const

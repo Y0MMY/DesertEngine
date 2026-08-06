@@ -47,7 +47,7 @@ namespace Desert::Graphic
                 }
             }
             m_Buffer->UnmapMemory();
-            m_DirtyCount = PropertyDirty::DirtyLifetime();
+            MarkDirty(); // every slot owes itself this write
         }
 
         // A field stays dirty for frames-in-flight frames, so this returns true until every per-frame
@@ -82,7 +82,7 @@ namespace Desert::Graphic
 
             m_Buffer->UnmapMemory();
 
-            m_DirtyCount = PropertyDirty::DirtyLifetime();
+            MarkDirty(); // every slot owes itself this write
         }
 
         const auto& GetUniform() const
