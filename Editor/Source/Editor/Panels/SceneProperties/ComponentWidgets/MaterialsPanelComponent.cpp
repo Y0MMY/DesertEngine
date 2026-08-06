@@ -792,7 +792,7 @@ namespace Desert::Editor
         // start the section collapsed. Slots are the only AUTHORED source of truth.
         if ( !overriddenByShader.empty() )
         {
-            ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.0f, 0.75f, 0.2f, 1.0f ) );
+            ImGui::PushStyleColor( ImGuiCol_Text, ThemeManager::GetWarningColor() );
             ImGui::TextWrapped( "%s Runtime shader override active ('%s', set by a script) — "
                                 "the material slots below are NOT used until it is cleared.",
                                 ICON_MDI_ALERT, overriddenByShader.c_str() );

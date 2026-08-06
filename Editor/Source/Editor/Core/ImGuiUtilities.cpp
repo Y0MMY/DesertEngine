@@ -162,10 +162,8 @@ namespace Desert::Editor::Utils
     bool ImGuiUtilities::VectorField( const char* id, float* values, int components, float speed,
                                       const char* format )
     {
-        // Gizmo axis colours, sampled from the UE reference (#CB2600 / #67A900 / #2C7EED). A fourth
-        // component (W) is deliberately neutral: it is not an axis in space.
-        static const ImU32 kAxis[4] = { IM_COL32( 203, 38, 0, 255 ), IM_COL32( 103, 169, 0, 255 ),
-                                        IM_COL32( 44, 126, 237, 255 ), IM_COL32( 150, 150, 150, 255 ) };
+        // The theme's axis colours — the same three the viewport gizmo and the CubeGrid handles use. A
+        // fourth component (W) is deliberately neutral: it is not an axis in space.
 
         if ( components <= 0 )
             return false;
@@ -189,9 +187,9 @@ namespace Desert::Editor::Utils
             // Painted after the field, so it sits ON the frame instead of being covered by it.
             const ImVec2 mn = ImGui::GetItemRectMin();
             const ImVec2 mx = ImGui::GetItemRectMax();
-            ImGui::GetWindowDrawList()->AddRectFilled( mn, ImVec2( mn.x + kEdge, mx.y ), kAxis[i < 4 ? i : 3],
-                                                       ImGui::GetStyle().FrameRounding,
-                                                       ImDrawFlags_RoundCornersLeft );
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                 mn, ImVec2( mn.x + kEdge, mx.y ), ImGui::GetColorU32( ThemeManager::GetAxisColor( i ) ),
+                 ImGui::GetStyle().FrameRounding, ImDrawFlags_RoundCornersLeft );
             ImGui::PopID();
 
             if ( i + 1 < components )

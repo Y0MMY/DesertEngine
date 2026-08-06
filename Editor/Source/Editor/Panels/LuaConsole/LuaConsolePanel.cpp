@@ -4,6 +4,8 @@
 
 #include <Engine/Scripting/ScriptEngine.hpp>
 
+#include <vector>
+
 #include <ImGui/imgui.h>
 
 #include <cctype>
@@ -53,6 +55,17 @@ namespace Desert::Editor
         return 0;
     }
 
+    namespace
+    {
+        // Commands typed into the status bar, waiting for the console's next frame.
+        std::vector<std::string> s_Queued;
+    } // namespace
+
+    void LuaConsolePanel::Submit( std::string command )
+    {
+        s_Queued.push_back( std::move( command ) );
+    }
+
     void LuaConsolePanel::Execute()
     {
         std::string code = m_Input;
@@ -99,6 +112,15 @@ namespace Desert::Editor
 
     void LuaConsolePanel::OnUIRender()
     {
+        // Anything typed into the status bar's Cmd field runs here, through the same Execute() as a line
+        // typed into the console itself — same engine, same log, same history.
+        for ( auto& queued : s_Queued )
+        {
+            std::snprintf( m_Input, sizeof( m_Input ), "%s", queued.c_str() );
+            Execute();
+        }
+        s_Queued.clear();
+
         if ( ImGui::Button( ICON_MDI_DELETE_SWEEP "  Clear" ) )
             m_Log.clear();
         ImGui::SameLine();

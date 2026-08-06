@@ -241,4 +241,40 @@ namespace Desert::Editor
         return C( 47, 47, 47 ); // #2F2F2F — UE's category bar, one step above the panel
     }
 
+    ImVec4 ThemeManager::GetAxisColor( int axis )
+    {
+        // Sampled from the UE reference's transform fields; the viewport gizmo uses the same three.
+        switch ( axis )
+        {
+            case 0:
+                return C( 203, 38, 0 ); // X
+            case 1:
+                return C( 103, 169, 0 ); // Y
+            case 2:
+                return C( 44, 126, 237 ); // Z
+            default:
+                return C( 150, 150, 150 );
+        }
+    }
+
+    ImVec4 ThemeManager::GetHighlightColor()
+    {
+        return C( 255, 170, 60 ); // amber: armed tool / live plane / mode is on
+    }
+
+    ImVec4 ThemeManager::GetWarningColor()
+    {
+        return C( 242, 191, 89 );
+    }
+
+    ImVec4 ThemeManager::GetErrorColor()
+    {
+        return C( 255, 115, 102 );
+    }
+
+    ImVec4 ThemeManager::GetSuccessColor()
+    {
+        return C( 92, 214, 122 );
+    }
+
 } // namespace Desert::Editor

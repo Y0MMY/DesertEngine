@@ -274,12 +274,12 @@ namespace Desert::Editor
             const SkinningAudit& audit = AuditSkinning( *skinned, bones.size() );
             ImGui::PushTextWrapPos( 0.0f );
             if ( audit.OutOfRange > 0 )
-                ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.4f, 1.0f ),
+                ImGui::TextColored( ThemeManager::GetErrorColor(),
                                     ICON_MDI_ALERT " %llu vertices reference a bone this skeleton does not "
                                                    "have - the mesh is bound to the wrong rig",
                                     static_cast<unsigned long long>( audit.OutOfRange ) );
             if ( audit.Unweighted > 0 )
-                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ),
+                ImGui::TextColored( ThemeManager::GetWarningColor(),
                                     ICON_MDI_ALERT " %llu vertices have no bone weights - they stay in bind "
                                                    "pose while the rest animates",
                                     static_cast<unsigned long long>( audit.Unweighted ) );

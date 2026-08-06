@@ -22,7 +22,9 @@
 #include <ImGui/imgui.h>
 #include <glm/glm.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Import/TextureDnD.hpp>
+#include <Editor/Core/ColliderFit.hpp>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
@@ -269,73 +271,11 @@ namespace Desert::Editor
     // UE auto-fits collision to the mesh instead of leaving a default 0.5 cube). HalfExtents/Radius are
     // world units, so we multiply the local AABB by the entity's scale (PhysicsECSSystem feeds these to
     // Jolt directly, ignoring the transform's scale).
-    static void FitColliderToMesh( ::Desert::ECS::Entity& entity, ::Desert::ECS::ColliderData& col )
-    {
-        if ( !entity.HasComponent<::Desert::ECS::StaticMeshComponent>() )
-            return;
-
-        const auto&     smc  = entity.GetComponent<::Desert::ECS::StaticMeshComponent>();
-        ::Desert::Mesh* mesh = nullptr;
-        if ( smc.MeshHandle )
-            mesh = ::Desert::Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
-        else if ( smc.RuntimeMesh )
-            mesh = smc.RuntimeMesh.get();
-        else if ( smc.Primitive.has_value() )
-            mesh = ::Desert::Geometry::PrimitiveMeshFactory::GetShared( smc.Primitive.value() );
-        if ( !mesh )
-            return;
-
-        glm::vec3 mn( std::numeric_limits<float>::max() );
-        glm::vec3 mx( std::numeric_limits<float>::lowest() );
-        for ( const auto& sm : mesh->GetSubmeshes() )
-        {
-            mn = glm::min( mn, sm.BoundingBox.Min );
-            mx = glm::max( mx, sm.BoundingBox.Max );
-        }
-        if ( mn.x > mx.x )
-            return; // no submeshes / empty mesh
-
-        const glm::vec3 scale = entity.GetComponent<::Desert::ECS::TransformComponent>().Scale;
-        const glm::vec3 half  = glm::abs( ( mx - mn ) * 0.5f * scale );
-
-        col.HalfExtents = half;
-        col.Radius      = glm::max( half.x, glm::max( half.y, half.z ) );
-        // Capsule cylinder half-height = total half-height minus the two hemispherical caps (radius).
-        col.HalfHeight = glm::max( 0.01f, half.y - col.Radius );
-    }
-
-    // The world-space half-extents FitColliderToMesh would produce, or nullopt when the entity has no
-    // mesh to measure. Same rule as the fit itself, so the warning below can never disagree with the
-    // button that silences it.
-    static std::optional<glm::vec3> MeshHalfExtents( ::Desert::ECS::Entity& entity )
-    {
-        if ( !entity.HasComponent<::Desert::ECS::StaticMeshComponent>() )
-            return std::nullopt;
-
-        const auto&     smc  = entity.GetComponent<::Desert::ECS::StaticMeshComponent>();
-        ::Desert::Mesh* mesh = nullptr;
-        if ( smc.MeshHandle )
-            mesh = ::Desert::Runtime::ResourceRegistry::GetMeshService()->Get( smc.MeshHandle );
-        else if ( smc.RuntimeMesh )
-            mesh = smc.RuntimeMesh.get();
-        else if ( smc.Primitive.has_value() )
-            mesh = ::Desert::Geometry::PrimitiveMeshFactory::GetShared( smc.Primitive.value() );
-        if ( !mesh )
-            return std::nullopt;
-
-        glm::vec3 mn( std::numeric_limits<float>::max() );
-        glm::vec3 mx( std::numeric_limits<float>::lowest() );
-        for ( const auto& sm : mesh->GetSubmeshes() )
-        {
-            mn = glm::min( mn, sm.BoundingBox.Min );
-            mx = glm::max( mx, sm.BoundingBox.Max );
-        }
-        if ( mn.x > mx.x )
-            return std::nullopt;
-
-        const glm::vec3 scale = entity.GetComponent<::Desert::ECS::TransformComponent>().Scale;
-        return glm::abs( ( mx - mn ) * 0.5f * scale );
-    }
+    // Collider fitting lives in Editor/Core/ColliderFit.hpp — the toolbar's Collision menu measures the
+    // same mesh the same way, and a warning that disagrees with the button that silences it is worse than
+    // no warning.
+    using ::Desert::Editor::Core::FitColliderToMesh;
+    using ::Desert::Editor::Core::MeshHalfExtents;
 
     // Collider editor: same auto-built reflected UI as the one-liner, PLUS a one-time auto-fit on Add and
     // a manual "Fit to Mesh Bounds" button.
@@ -642,7 +582,7 @@ namespace Desert::Editor
                     const float     worst = glm::max( delta.x, glm::max( delta.y, delta.z ) );
                     if ( worst > 0.25f )
                     {
-                        ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ) );
+                        ImGui::PushStyleColor( ImGuiCol_Text, ::Desert::Editor::ThemeManager::GetWarningColor() );
                         ImGui::TextWrapped( ICON_MDI_ALERT " Collision is %.0f%% off the mesh bounds "
                                                            "(mesh half-extents %.0f x %.0f x %.0f cm)",
                                             worst * 100.0f, meshHalf->x, meshHalf->y, meshHalf->z );

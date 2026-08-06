@@ -14,6 +14,7 @@
 #include <Common/Core/Math/AABB.hpp>
 #include <Common/Core/Units.hpp>
 
+#include <Editor/Core/ThemeManager.hpp>
 #include <ImGui/imgui.h>
 
 #include <algorithm>
@@ -22,6 +23,16 @@
 
 namespace Desert::Editor::Tools
 {
+    namespace
+    {
+        // The theme gives a colour its HUE; each overlay decides how present it should be. ImGui's
+        // alpha-multiplier overload of GetColorU32 only takes a style index, so fold the alpha in here.
+        ImVec4 WithAlpha( const ImVec4& c, float alpha )
+        {
+            return ImVec4( c.x, c.y, c.z, alpha );
+        }
+    } // namespace
+
     namespace
     {
         // Sparse voxel volume key: pack a grid cell into a 63-bit key (21 bits/axis, centred so negatives fit).
@@ -670,7 +681,8 @@ namespace Desert::Editor::Tools
         // Grid lines every K base cells (block boundaries) + the drawn size (world units) on the edges.
         auto drawGridAndDims = [&]( int uMin, int uMax, int vMin, int vMax, int na, float planeW, bool showDims )
         {
-            const ImU32 gcol = IM_COL32( 255, 185, 90, 120 );
+            // One amber for "you are acting on this right now" (ThemeManager), at the alpha each use needs.
+            const ImU32 gcol = ::ImGui::GetColorU32( WithAlpha( ThemeManager::GetHighlightColor(), 0.47f ) );
             const int   nu   = ( uMax + 1 - uMin ) / K;
             const int   nv   = ( vMax + 1 - vMin ) / K;
             if ( nu <= 256 && nv <= 256 )
@@ -745,7 +757,9 @@ namespace Desert::Editor::Tools
                          WorldToScreen( worldPt( (float)uMin, (float)vMin, na, botW ), viewProj, viewportPos,
                                         viewportSize, b ) )
                     {
-                        dl->AddLine( ImVec2( a.x, a.y ), ImVec2( b.x, b.y ), IM_COL32( 255, 185, 90, 220 ), 2.0f );
+                        dl->AddLine( ImVec2( a.x, a.y ), ImVec2( b.x, b.y ),
+                                     ::ImGui::GetColorU32( WithAlpha( ThemeManager::GetHighlightColor(), 0.86f ) ),
+                                     2.0f );
                         Common::Units::FormatLength( buf, sizeof( buf ), static_cast<float>( depth ) * u );
                         drawLabel( glm::vec2( ( a.x + b.x ) * 0.5f, ( a.y + b.y ) * 0.5f ), buf );
                     }
@@ -758,8 +772,11 @@ namespace Desert::Editor::Tools
         {
             const float     len     = static_cast<float>( K ) * u * 2.0f;
             const glm::vec3 axes[3] = { { len, 0, 0 }, { 0, len, 0 }, { 0, 0, len } };
-            const ImU32     cols[3] = { IM_COL32( 235, 80, 80, 255 ), IM_COL32( 90, 225, 90, 255 ),
-                                        IM_COL32( 90, 140, 250, 255 ) };
+            // The theme's axis colours — the CubeGrid's handles point at the same X/Y/Z as the gizmo and
+            // the transform fields, so they cannot have their own reds and greens.
+            const ImU32     cols[3] = { ::ImGui::GetColorU32( ThemeManager::GetAxisColor( 0 ) ),
+                                        ::ImGui::GetColorU32( ThemeManager::GetAxisColor( 1 ) ),
+                                        ::ImGui::GetColorU32( ThemeManager::GetAxisColor( 2 ) ) };
             glm::vec2       o;
             if ( WorldToScreen( gridOrigin, viewProj, viewportPos, viewportSize, o ) )
                 for ( int a = 0; a < 3; ++a )
@@ -896,8 +913,9 @@ namespace Desert::Editor::Tools
             m_UMax = std::max( aUb, cUb ) * K + K - 1;
             m_VMin = std::min( aVb, cVb ) * K;
             m_VMax = std::max( aVb, cVb ) * K + K - 1;
-            drawRect( m_UMin, m_UMax, m_VMin, m_VMax, na, planeW, IM_COL32( 250, 150, 40, 70 ),
-                      IM_COL32( 255, 170, 60, 255 ) );
+            drawRect( m_UMin, m_UMax, m_VMin, m_VMax, na, planeW,
+                      ::ImGui::GetColorU32( WithAlpha( ThemeManager::GetHighlightColor(), 0.27f ) ),
+                      ::ImGui::GetColorU32( ThemeManager::GetHighlightColor() ) );
             drawGridAndDims( m_UMin, m_UMax, m_VMin, m_VMax, na, planeW, true );
 
             if ( !::ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
@@ -912,8 +930,9 @@ namespace Desert::Editor::Tools
             if ( m_HasSel )
             {
                 const float planeW = planeWorldOf( m_PlaneNa, m_PlaneSign, m_PlaneCell );
-                drawRect( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, IM_COL32( 250, 150, 40, 55 ),
-                          IM_COL32( 255, 170, 60, 235 ) );
+                drawRect( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW,
+                          ::ImGui::GetColorU32( WithAlpha( ThemeManager::GetHighlightColor(), 0.22f ) ),
+                          ::ImGui::GetColorU32( WithAlpha( ThemeManager::GetHighlightColor(), 0.92f ) ) );
                 drawGridAndDims( m_UMin, m_UMax, m_VMin, m_VMax, m_PlaneNa, planeW, true );
             }
             // ...and the green Block preview ALWAYS tracks the cursor, so you always see where the next
@@ -924,8 +943,9 @@ namespace Desert::Editor::Tools
                 const int   bv     = FloorDiv( tV, K ) * K;
                 const float planeW = planeWorldOf( tNa, tSign, tPlaneCell );
                 drawGridAndDims( bu - 6 * K, bu + 7 * K - 1, bv - 6 * K, bv + 7 * K - 1, tNa, planeW, false );
-                drawRect( bu, bu + K - 1, bv, bv + K - 1, tNa, planeW, IM_COL32( 70, 220, 100, 70 ),
-                          IM_COL32( 90, 240, 120, 255 ) );
+                drawRect( bu, bu + K - 1, bv, bv + K - 1, tNa, planeW,
+                          ::ImGui::GetColorU32( WithAlpha( ThemeManager::GetSuccessColor(), 0.27f ) ),
+                          ::ImGui::GetColorU32( ThemeManager::GetSuccessColor() ) );
             }
         }
 
@@ -963,7 +983,8 @@ namespace Desert::Editor::Tools
                 const ImVec2 p( sp[k].x, sp[k].y );
                 const float  r = ( k == hovered ) ? 8.0f : 6.0f;
                 if ( m_CornerSel[k] )
-                    dl->AddCircleFilled( p, r, IM_COL32( 255, 170, 60, 235 ) );
+                    dl->AddCircleFilled(
+                         p, r, ::ImGui::GetColorU32( WithAlpha( ThemeManager::GetHighlightColor(), 0.92f ) ) );
                 else
                     dl->AddCircleFilled( p, r, IM_COL32( 25, 27, 32, 200 ) );
                 dl->AddCircle( p, r, IM_COL32( 250, 250, 250, 235 ), 0, 2.0f );

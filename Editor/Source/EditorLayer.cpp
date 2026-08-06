@@ -19,7 +19,9 @@
 #include <Engine/Core/Serialize/SceneSerializer.hpp>
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
+#include "Editor/Core/ColliderFit.hpp"
 #include "Editor/Core/PanelRequests.hpp"
+#include "Editor/Core/Selection/ViewportMode.hpp"
 #include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -1376,7 +1378,34 @@ namespace Desert::Editor
         ImGui::BeginChild( "##StatusBar", ImVec2( 0.0f, 0.0f ), false,
                            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
-        // Left: scene state + scene name (with the unsaved-changes dot) + current selection.
+        // Far left, UE's status bar: the two drawers you reach for constantly. They are BUTTONS, not
+        // text — the bar is the one place in the editor that is always visible, so it is where a panel you
+        // closed by accident is found again.
+        if ( ImGui::SmallButton( ICON_MDI_FOLDER_MULTIPLE "  Content Drawer" ) )
+            Core::PanelRequests::Open( "Assets" );
+        ImGui::SameLine( 0.0f, 6.0f );
+        if ( ImGui::SmallButton( ICON_MDI_TEXT_BOX_OUTLINE "  Output Log" ) )
+            Core::PanelRequests::Open( "Logs" );
+        ImGui::SameLine( 0.0f, 6.0f );
+
+        // Cmd: one line of Lua against the live scene, the same engine the Lua Console runs. UE puts a
+        // console here for the same reason — a question about the running world should not need a panel.
+        ImGui::TextDisabled( ICON_MDI_CONSOLE );
+        ImGui::SameLine( 0.0f, 4.0f );
+        ImGui::SetNextItemWidth( 220.0f );
+        if ( ImGui::InputTextWithHint( "##StatusCmd", "Enter Console Command", m_StatusCmd, sizeof( m_StatusCmd ),
+                                       ImGuiInputTextFlags_EnterReturnsTrue ) )
+        {
+            if ( m_StatusCmd[0] != '\0' )
+            {
+                Core::PanelRequests::Open( "Lua Console" );
+                LuaConsolePanel::Submit( m_StatusCmd );
+                m_StatusCmd[0] = '\0';
+            }
+        }
+        ImGui::SameLine( 0.0f, 16.0f );
+
+        // Then: scene state + current selection.
         ImGui::PushStyleColor( ImGuiCol_Text, stateColor );
         ImGui::TextUnformatted( stateText );
         ImGui::PopStyleColor();
@@ -1443,7 +1472,7 @@ namespace Desert::Editor
         if ( dirty )
         {
             // Amber star next to the version/config block = unsaved scene changes.
-            ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.25f, 1.0f ), "*" );
+            ImGui::TextColored( ThemeManager::GetWarningColor(), "*" );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Unsaved changes (Ctrl+S to save)" );
             ImGui::SameLine( 0.0f, ImGui::CalcTextSize( " " ).x );
@@ -1474,10 +1503,43 @@ namespace Desert::Editor
         const float  btnH = ImGui::GetContentRegionAvail().y;
         const ImVec2 btnSize( btnH * 1.4f, btnH );
 
-        // Transform-tool toggles moved into the VIEWPORT's own toolbar (Godot model: edit tools sit
-        // directly above the picture they act on). This strip keeps only the RUN cluster, pinned to
-        // the RIGHT edge — isolated from editing so a stray click can't start Play. The unsaved-
-        // changes marker lives in the status bar's version/config segment (no scene-name noise).
+        // LEFT cluster, UE's level-editor grammar: the things you do TO THE SCENE AS A WHOLE. Transform
+        // tools deliberately stay in the VIEWPORT's own toolbar (Godot model: edit tools sit directly above
+        // the picture they act on), and the RUN cluster stays pinned right, isolated so a stray click can
+        // never start Play.
+        {
+            const ImVec2 wide( 0.0f, btnH ); // auto-width, full strip height
+
+            if ( ImGui::Button( ICON_MDI_CONTENT_SAVE "  Save", wide ) )
+                m_SaveSceneRequested = true;
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Save the scene (Ctrl+S)" );
+
+            ImGui::SameLine();
+            if ( ImGui::Button( ICON_MDI_FOLDER_SEARCH "  Browse", wide ) )
+                Core::PanelRequests::Open( "Assets" );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Show the content browser" );
+
+            ImGui::SameLine();
+            ImGui::TextDisabled( "|" );
+            ImGui::SameLine();
+
+            // Collision: UE puts it here because it is a property of the SELECTED mesh you set while
+            // looking at the level, not a value you type. Every entry acts on the selection.
+            if ( ImGui::Button( ICON_MDI_SHAPE_OUTLINE "  Collision  " ICON_MDI_CHEVRON_DOWN, wide ) )
+                ImGui::OpenPopup( "##CollisionMenu" );
+            DrawCollisionMenu();
+
+            ImGui::SameLine();
+            if ( ImGui::Button( ICON_MDI_CURSOR_DEFAULT_OUTLINE "  Modes  " ICON_MDI_CHEVRON_DOWN, wide ) )
+                ImGui::OpenPopup( "##ModesMenu" );
+            DrawModesMenu();
+        }
+
+        // NOTE: no "UV" menu, unlike the Static Mesh Editor screenshot this strip is modelled on — the
+        // engine has no UV tooling to put behind it, and a button that opens an empty menu is worse than
+        // no button.
         const float spacing   = ImGui::GetStyle().ItemSpacing.x;
         const float playbackW = btnSize.x * 2.0f + spacing; // Play/Stop + Pause
         ImGui::SetCursorPosX( ImGui::GetWindowContentRegionMax().x - playbackW - 4.0f );
@@ -1488,6 +1550,83 @@ namespace Desert::Editor
         ImGui::EndChild();
         ImGui::PopStyleVar( 3 );
         ImGui::PopStyleColor();
+    }
+
+    void EditorLayer::DrawCollisionMenu()
+    {
+        namespace ImGui = ::ImGui;
+
+        if ( !ImGui::BeginPopup( "##CollisionMenu" ) )
+            return;
+
+        const auto sel = Core::SelectionManager::GetSelected();
+        auto       ref = sel ? m_MainScene->FindEntityByID( *sel ) : std::nullopt;
+        if ( !ref )
+        {
+            ImGui::TextDisabled( "Select an object first" );
+            ImGui::EndPopup();
+            return;
+        }
+
+        auto&      entity = const_cast<ECS::Entity&>( ref->get() );
+        const bool has    = entity.HasComponent<ECS::ColliderComponent>();
+
+        // Add-and-fit in ONE step per shape: a collider added at its default size wraps nothing, and the
+        // next thing anyone does is fit it anyway.
+        const auto addFitted = [&entity]( Physics::ShapeType shape )
+        {
+            auto& c      = entity.HasComponent<ECS::ColliderComponent>()
+                                ? entity.GetComponent<ECS::ColliderComponent>()
+                                : entity.AddComponent<ECS::ColliderComponent>();
+            c.Data.Shape = shape;
+            Core::FitColliderToMesh( entity, c.Data );
+        };
+
+        if ( ImGui::MenuItem( "Box Collision" ) )
+            addFitted( Physics::ShapeType::Box );
+        if ( ImGui::MenuItem( "Sphere Collision" ) )
+            addFitted( Physics::ShapeType::Sphere );
+        if ( ImGui::MenuItem( "Capsule Collision" ) )
+            addFitted( Physics::ShapeType::Capsule );
+
+        ImGui::Separator();
+        if ( !has )
+            ImGui::BeginDisabled();
+        if ( ImGui::MenuItem( "Fit to Mesh Bounds" ) )
+        {
+            auto& c = entity.GetComponent<ECS::ColliderComponent>();
+            Core::FitColliderToMesh( entity, c.Data );
+        }
+        if ( ImGui::MenuItem( "Remove Collision" ) )
+            entity.RemoveComponent<ECS::ColliderComponent>();
+        if ( !has )
+            ImGui::EndDisabled();
+
+        ImGui::EndPopup();
+    }
+
+    void EditorLayer::DrawModesMenu()
+    {
+        namespace ImGui = ::ImGui;
+        using Mode      = Core::EditorMode;
+
+        if ( !ImGui::BeginPopup( "##ModesMenu" ) )
+            return;
+
+        const Mode current = Core::ViewportMode::Get();
+        const auto item    = [current]( const char* label, Mode mode, const char* help )
+        {
+            if ( ImGui::MenuItem( label, nullptr, current == mode ) )
+                Core::ViewportMode::Set( mode );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%s", help );
+        };
+
+        item( ICON_MDI_CURSOR_DEFAULT_OUTLINE "  Select", Mode::Select, "Pick and transform objects" );
+        item( ICON_MDI_CUBE_OUTLINE "  Modeling", Mode::Modeling, "CubeGrid blockout tools" );
+        item( ICON_MDI_GRASS "  Foliage", Mode::Foliage, "Paint instanced foliage onto surfaces" );
+
+        ImGui::EndPopup();
     }
 
     void EditorLayer::DrawProfilerWindow()

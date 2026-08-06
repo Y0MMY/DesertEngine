@@ -37,6 +37,11 @@ namespace Desert::Editor
 
         void OnUIRender() override;
 
+        // Run a line typed somewhere else — the status bar's Cmd field. Queued rather than executed on the
+        // spot: the console owns the Lua engine, the log and the history, and a second entry point into
+        // them would be a second console.
+        static void Submit( std::string command );
+
     private:
         void Execute();
 

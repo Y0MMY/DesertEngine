@@ -53,9 +53,14 @@ namespace Desert::Editor
         // UE5-style toolbar strip below the menu bar: transform-gizmo mode toggles (left) + Play/Pause/Stop
         // (centre). Drawn inside the dockspace host window so it takes a fixed height above the docked panels.
         void DrawToolbar();
+        // Toolbar drop-downs: Collision acts on the SELECTION, Modes switches the viewport tool mode.
+        void DrawCollisionMenu();
+        void DrawModesMenu();
 
         // Bottom status bar: scene state (Edit/Play), scene name, current selection, and FPS/frame time.
         void DrawStatusBar();
+        // The status bar's console line (UE's "Enter Console Command"); handed to the Lua console to run.
+        char m_StatusCmd[256] = {};
         // Opens/closes panels whose context appeared or vanished (see IPanel::IsContextual).
         void UpdateContextualPanels();
 

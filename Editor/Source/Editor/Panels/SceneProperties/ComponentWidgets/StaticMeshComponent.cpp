@@ -9,6 +9,7 @@
 #include "Helper/MeshDetailsWidget.hpp"
 
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Core/MeshResolve.hpp>
 #include <Editor/Widgets/ThumbnailCache.hpp>
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
@@ -263,7 +264,7 @@ namespace Desert::Editor
         {
             if ( RigBuilder::IsActive() )
             {
-                ImGui::TextColored( ImVec4( 0.95f, 0.75f, 0.35f, 1.0f ),
+                ImGui::TextColored( ThemeManager::GetWarningColor(),
                                     ICON_MDI_ALERT " Another mesh is being rigged." );
                 ImGui::Dummy( ImVec2( 0.0f, 2.0f ) );
             }

@@ -3,6 +3,7 @@
 #include <ImGui/imgui.h>
 #include <Editor/Core/ImGuiUtilities.hpp>
 #include <Editor/Core/IconsMaterialDesignIcons.hpp>
+#include <Editor/Core/ThemeManager.hpp>
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
@@ -51,9 +52,9 @@ namespace Desert::Editor
         Utils::ImGuiUtilities::BeginPropertyRow( "Status" );
         ImGui::AlignTextToFramePadding();
         if ( valid )
-            ImGui::TextColored( ImVec4( 0.2f, 0.9f, 0.3f, 1.f ), ICON_MDI_CHECK " Valid" );
+            ImGui::TextColored( ThemeManager::GetSuccessColor(), ICON_MDI_CHECK " Valid" );
         else if ( prefab.Prefab )
-            ImGui::TextColored( ImVec4( 0.9f, 0.2f, 0.2f, 1.f ), ICON_MDI_ALERT " Missing" );
+            ImGui::TextColored( ThemeManager::GetErrorColor(), ICON_MDI_ALERT " Missing" );
         else
             ImGui::TextColored( ImVec4( 0.6f, 0.6f, 0.6f, 1.f ), ICON_MDI_MINUS " None" );
         Utils::ImGuiUtilities::EndPropertyRow();
