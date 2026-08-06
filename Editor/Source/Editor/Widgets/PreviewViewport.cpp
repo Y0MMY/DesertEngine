@@ -191,7 +191,8 @@ namespace Desert::Editor
         // corner — the vertices cannot lie.
         glm::vec3 mn( 1e9f );
         glm::vec3 mx( -1e9f );
-        bool      haveBounds = false;
+        bool      haveBounds   = false;
+        bool      usedVertices = false;
 
         if ( const auto* asset = Runtime::ResourceRegistry::GetMeshService()->GetAsset( m_MeshHandle ) )
         {
@@ -199,9 +200,10 @@ namespace Desert::Editor
             {
                 for ( const auto& v : staticAsset->GetVertices() )
                 {
-                    mn         = glm::min( mn, v.Position );
-                    mx         = glm::max( mx, v.Position );
-                    haveBounds = true;
+                    mn           = glm::min( mn, v.Position );
+                    mx           = glm::max( mx, v.Position );
+                    haveBounds   = true;
+                    usedVertices = true;
                 }
             }
         }
@@ -230,6 +232,30 @@ namespace Desert::Editor
         }
 
         const glm::vec3 extent = mx - mn;
+
+        // Say what was measured, ONCE per mesh. Three attempts at this framing were made blind because the
+        // only symptom available was "it looks wrong"; the numbers that decide the camera — where they came
+        // from, and what they are — belong in the log where they can be read.
+        static Assets::AssetHandle s_ReportedFor;
+        if ( s_ReportedFor != m_MeshHandle )
+        {
+            s_ReportedFor = m_MeshHandle;
+            if ( haveBounds )
+            {
+                LOG_INFO( "[Preview] mesh {} framed from {}: extent {:.1f} x {:.1f} x {:.1f}, centre "
+                          "({:.1f}, {:.1f}, {:.1f})",
+                          static_cast<uint64_t>( m_MeshHandle ), usedVertices ? "vertices" : "submesh AABBs",
+                          extent.x, extent.y, extent.z, ( mn.x + mx.x ) * 0.5f, ( mn.y + mx.y ) * 0.5f,
+                          ( mn.z + mx.z ) * 0.5f );
+            }
+            else
+            {
+                LOG_WARN( "[Preview] mesh {} has nothing to measure yet (no CPU vertices, no submesh "
+                          "bounds) — the preview keeps its stand-in framing and retries",
+                          static_cast<uint64_t>( m_MeshHandle ) );
+            }
+        }
+
         if ( !haveBounds || extent.x < 0.0f || glm::length( extent ) < 1e-4f )
             return false; // nothing measurable yet — keep the stand-in and retry next frame
 
@@ -329,6 +355,9 @@ namespace Desert::Editor
         // The preview is square, so one tan covers both axes. Never closer than the content's own radius,
         // or the camera would end up inside a long thin object.
         m_Distance = std::max( needed * kFitMargin, m_FrameRadius * 1.05f );
+
+        LOG_TRACE( "[Preview] fit: half-extent {:.1f} x {:.1f} x {:.1f} -> distance {:.1f} (radius {:.1f})",
+                   m_FrameHalfExtent.x, m_FrameHalfExtent.y, m_FrameHalfExtent.z, m_Distance, m_FrameRadius );
     }
 
     void PreviewViewport::ApplyCamera( uint32_t width, uint32_t height )
