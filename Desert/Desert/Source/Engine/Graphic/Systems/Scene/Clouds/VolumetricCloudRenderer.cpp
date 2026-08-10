@@ -303,8 +303,8 @@ namespace Desert::Graphic::System
         m_HistoryFilled = false;
 
         LOG_INFO(
-             "[Clouds] Temporal history released; the cloud layer now holds {:.2f} MiB of scaled "
-             "imagery for this view.",
+             "[Clouds] Temporal history {}x{} RGBA16F x2 released, freeing {:.2f} MiB.", m_ScatterWidth,
+             m_ScatterHeight,
              BytesToMiB( 2u * static_cast<uint64_t>( Core::Formats::CalculateImageSize(
                                    m_ScatterWidth, m_ScatterHeight, Core::Formats::ImageFormat::RGBA16F ) ) ) );
     }
