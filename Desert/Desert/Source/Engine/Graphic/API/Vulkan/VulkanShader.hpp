@@ -24,14 +24,6 @@ namespace Desert::Graphic::API::Vulkan
             std::vector<std::vector<VkDescriptorSet>> DescriptorSets; // frame -> set
         };
 
-        struct ReflectionData
-        {
-            std::unordered_map<SetPoint, ShaderResource::ShaderDescriptorSet>
-                 ShaderDescriptorSets; // SetPoint = set
-
-            std::optional<ShaderResources::ShaderLayout::PushConstantRange> PushConstantRanges;
-        };
-
     public:
         VulkanShader( const Assets::Asset<Assets::ShaderAsset>& asset, const ShaderDefines& defines,
                       const std::string& passName = {} );
@@ -113,7 +105,10 @@ namespace Desert::Graphic::API::Vulkan
         }
 
     private:
-        void                  Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
+        // Fails when a stage declares an image resource the engine cannot bind: reflection refuses to
+        // register it, so the descriptor layout would silently lack the binding. Better to lose the
+        // shader with a named reason than to bind something of the wrong shape.
+        Common::BoolResultStr Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
         Common::BoolResultStr CreateDescriptorsLayout();
 
         Common::BoolResultStr
@@ -131,7 +126,7 @@ namespace Desert::Graphic::API::Vulkan
 
         Core::Formats::ShaderProgramMeta             m_ProgramMeta;
 
-        ReflectionData                     m_ReflectionData;
+        ShaderResource::ReflectionData     m_ReflectionData;
         std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts; // set
 
         DescriptorSetInfo m_DescriptorSetInfo;

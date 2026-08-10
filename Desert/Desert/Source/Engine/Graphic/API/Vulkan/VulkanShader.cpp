@@ -1,4 +1,5 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShader.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanUtils/VulkanHelper.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanDevice.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanContext.hpp>
@@ -6,8 +7,6 @@
 
 #include <Engine/Core/ShaderCompiler/ShaderCompiler.hpp>
 #include <Engine/Core/ShaderCompiler/ShaderPreprocess/ShaderPreprocessor.hpp>
-
-#include <spirv_cross/spirv_glsl.hpp>
 
 namespace Desert::Graphic::API::Vulkan
 {
@@ -94,104 +93,39 @@ namespace Desert::Graphic::API::Vulkan
             VkShaderStageFlagBits vkStage = (VkShaderStageFlagBits)ReflectionUtils::StageToVkStage( stage );
             m_PipelineShaderStageCreateInfos.push_back( { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = vkStage, .module = module, .pName = "main" } );
 
-            Reflect( vkStage, spirv );
+            auto reflectResult = Reflect( vkStage, spirv );
+            if ( !reflectResult.IsSuccess() )
+                return Common::MakeError( reflectResult.GetError() );
         }
 
         return CreateDescriptorsLayout();
     }
 
-    void VulkanShader::Reflect( VkShaderStageFlagBits vkStage, const std::vector<uint32_t>& spirv )
+    Common::BoolResultStr VulkanShader::Reflect( VkShaderStageFlagBits        vkStage,
+                                                 const std::vector<uint32_t>& spirv )
     {
-        spirv_cross::CompilerGLSL compiler( spirv );
-        spirv_cross::ShaderResources resources = compiler.get_shader_resources();
-        Core::Formats::ShaderStage stage = ReflectionUtils::VkStageToStage( vkStage );
+        const Core::Formats::ShaderStage stage = ReflectionUtils::VkStageToStage( vkStage );
 
-        // Uniform Buffers
-        for ( const auto& resource : resources.uniform_buffers )
+        // The reflection proper lives in a device-free translation unit: it is the part that decides
+        // which descriptor bucket every resource lands in, and that decision used to be made from the
+        // variable's NAME. Keeping it free of VkDevice is what lets a test prove a sampler3D is not
+        // filed as a 2D sampler (Desert/Tests/Engine/ShaderReflection).
+        const auto diagnostics = ShaderReflection::ReflectStage( spirv, stage, m_ReflectionData );
+        if ( diagnostics.empty() )
         {
-            uint32_t set = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
-            uint32_t binding = compiler.get_decoration( resource.id, spv::DecorationBinding );
-            auto& ub = m_ReflectionData.ShaderDescriptorSets[set].UniformBuffers[binding];
-            ub.BindingPoint = binding; ub.Name = resource.name;
-            ub.ShaderStage = (Core::Formats::ShaderStage)((uint32_t)ub.ShaderStage | (uint32_t)stage);
-
-            const auto& structType = compiler.get_type( resource.base_type_id );
-            ub.Size = (uint32_t)compiler.get_declared_struct_size( structType );
-
-            // Populate fields once; multi-stage shaders call Reflect() per stage, avoid duplicates.
-            if ( ub.Fields.empty() )
-            {
-                for ( uint32_t i = 0; i < (uint32_t)structType.member_types.size(); ++i )
-                {
-                    ShaderResources::ShaderLayout::ShaderFieldLayout field;
-                    field.Name   = compiler.get_member_name( resource.base_type_id, i );
-                    field.Offset = compiler.type_struct_member_offset( structType, i );
-                    field.Size   = (uint32_t)compiler.get_declared_struct_member_size( structType, i );
-
-                    const auto& memberType = compiler.get_type( structType.member_types[i] );
-                    field.ArraySize = memberType.array.empty() ? 1u : memberType.array[0];
-
-                    ub.Fields.push_back( std::move( field ) );
-                }
-            }
+            return BOOLSUCCESS;
         }
 
-        // Samplers
-        for ( const auto& resource : resources.sampled_images )
+        // Every refused resource is named, with its real type, before the shader is dropped: a missing
+        // binding surfaces far from its cause, and a silently mis-filed one never surfaces at all.
+        for ( const auto& message : diagnostics )
         {
-            uint32_t set = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
-            uint32_t binding = compiler.get_decoration( resource.id, spv::DecorationBinding );
-            if ( resource.name.find( "Env" ) != std::string::npos || resource.name.find( "Cube" ) != std::string::npos ) {
-                auto& sc = m_ReflectionData.ShaderDescriptorSets[set].ImageCubeSamplers[binding];
-                sc.BindingPoint = binding; sc.Name = resource.name; sc.ShaderStage = (Core::Formats::ShaderStage)((uint32_t)sc.ShaderStage | (uint32_t)stage);
-            } else {
-                auto& s2 = m_ReflectionData.ShaderDescriptorSets[set].Image2DSamplers[binding];
-                s2.BindingPoint = binding; s2.Name = resource.name; s2.ShaderStage = (Core::Formats::ShaderStage)((uint32_t)s2.ShaderStage | (uint32_t)stage);
-            }
+            LOG_ERROR( "Shader '{}' [{}]: {}", m_ShaderName, GetStringShaderStage( stage ), message );
         }
 
-        // Storage Buffers
-        for ( const auto& resource : resources.storage_buffers )
-        {
-            uint32_t set = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
-            uint32_t binding = compiler.get_decoration( resource.id, spv::DecorationBinding );
-            auto& sb = m_ReflectionData.ShaderDescriptorSets[set].StorageBuffers[binding];
-            sb.BindingPoint = binding; sb.Name = resource.name; sb.ShaderStage = (Core::Formats::ShaderStage)((uint32_t)sb.ShaderStage | (uint32_t)stage);
-            auto& type = compiler.get_type( resource.base_type_id );
-            sb.Size = ( type.member_types.empty() || type.array.size() > 0 ) ? 0 : (uint32_t)compiler.get_declared_struct_size( type );
-        }
-
-        // Storage Images (e.g. writeonly imageCube / image2D in compute shaders)
-        for ( const auto& resource : resources.storage_images )
-        {
-            uint32_t set     = compiler.get_decoration( resource.id, spv::DecorationDescriptorSet );
-            uint32_t binding = compiler.get_decoration( resource.id, spv::DecorationBinding );
-            auto& si         = m_ReflectionData.ShaderDescriptorSets[set].StorageImage2DSamplers[binding];
-            si.BindingPoint  = binding;
-            si.Name          = resource.name;
-            si.ShaderStage   = (Core::Formats::ShaderStage)( (uint32_t)si.ShaderStage | (uint32_t)stage );
-        }
-
-        // Push Constants
-        if ( !resources.push_constant_buffers.empty() )
-        {
-            const auto& res = resources.push_constant_buffers[0];
-            auto& type = compiler.get_type( res.base_type_id );
-            const uint32_t declaredSize = (uint32_t)compiler.get_declared_struct_size( type );
-            if ( !m_ReflectionData.PushConstantRanges ) {
-                ShaderResources::ShaderLayout::PushConstantRange range;
-                range.Offset = 0; range.Size = declaredSize;
-                range.Name = res.name; range.ShaderStage = stage;
-                m_ReflectionData.PushConstantRanges = range;
-            } else {
-                m_ReflectionData.PushConstantRanges->ShaderStage = (Core::Formats::ShaderStage)((uint32_t)m_ReflectionData.PushConstantRanges->ShaderStage | (uint32_t)stage);
-                // Different stages may declare the same push-constant block but glslang strips members
-                // a stage doesn't use, so each reports a different declared size. The pipeline-layout
-                // range must span the largest, or a stage's access lands outside the range.
-                if ( declaredSize > m_ReflectionData.PushConstantRanges->Size )
-                    m_ReflectionData.PushConstantRanges->Size = declaredSize;
-            }
-        }
+        return Common::MakeFormattedError( "Shader '{}' [{}]: {} unsupported resource(s); first: {}", m_ShaderName,
+                                           GetStringShaderStage( stage ), diagnostics.size(),
+                                           diagnostics.front() );
     }
 
     Common::BoolResultStr VulkanShader::CreateDescriptorsLayout()
@@ -205,9 +139,13 @@ namespace Desert::Graphic::API::Vulkan
             };
             for ( const auto& [b, res] : descriptorSet.UniformBuffers ) Add( b, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, res.ShaderStage );
             for ( const auto& [b, res] : descriptorSet.Image2DSamplers ) Add( b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, res.ShaderStage );
+            for ( const auto& [b, res] : descriptorSet.Image3DSamplers )
+                Add( b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, res.ShaderStage );
             for ( const auto& [b, res] : descriptorSet.ImageCubeSamplers ) Add( b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, res.ShaderStage );
             for ( const auto& [b, res] : descriptorSet.StorageBuffers ) Add( b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, res.ShaderStage );
             for ( const auto& [b, res] : descriptorSet.StorageImage2DSamplers ) Add( b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, res.ShaderStage );
+            for ( const auto& [b, res] : descriptorSet.StorageImage3DSamplers )
+                Add( b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, res.ShaderStage );
 
             VkDescriptorSetLayoutCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = (uint32_t)bindings.size(), .pBindings = bindings.data() };
             if ( setIndex >= m_DescriptorSetLayouts.size() ) m_DescriptorSetLayouts.resize( setIndex + 1 );

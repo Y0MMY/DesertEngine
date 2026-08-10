@@ -553,6 +553,49 @@ TEST( DShaderParser, AutoBindingsSkipExplicit )
     EXPECT_NE( c.find( "layout(std430, binding = 2) buffer Counter" ), std::string::npos );   // auto next free
 }
 
+// CLD-15. Volumetric clouds sample 3D noise volumes, so `sampler3D` and `image3D` have to survive the
+// DSL untouched. They were EXPECTED to: the sugar rewrites `Uniform(n) T name;` without looking at T,
+// and storage-image format qualifiers are deliberately left as raw `layout(...)`. Expected, but never
+// asserted — and "probably passes through" is not something to find out from a garbage render.
+TEST( DShaderParser, PassesThrough3DSamplersAndStorageImages )
+{
+    const char* kVolume = R"(
+Shader "Volume"
+{
+    Compute
+    {
+        Uniform(0) sampler3D u_ShapeNoise;
+        Uniform sampler3D u_DetailNoise;
+        layout(binding = 4, rgba8) restrict writeonly uniform image3D u_OutVolume;
+
+        LocalSize(8, 8, 8);
+        void main()
+        {
+            vec4 n = texture(u_ShapeNoise, vec3(0.5)) + texture(u_DetailNoise, vec3(0.5));
+            imageStore(u_OutVolume, ivec3(gl_GlobalInvocationID), n);
+        }
+    }
+}
+)";
+    auto        res     = DShaderParser::Parse( kVolume );
+    ASSERT_TRUE( res.IsSuccess() ) << res.GetError();
+    const auto& cs = res.GetValue().Stages.at( ShaderStage::Compute );
+
+    EXPECT_NE( cs.find( "layout(binding = 0) uniform sampler3D u_ShapeNoise;" ), std::string::npos );
+
+    // Auto-numbering shares ONE binding space with both the explicit Uniform(0) and the raw
+    // layout(binding = 4), so the free slot here is 1 — a sampler3D takes part like any other.
+    EXPECT_NE( cs.find( "layout(binding = 1) uniform sampler3D u_DetailNoise;" ), std::string::npos );
+
+    // Format qualifiers are un-sugared by design: the raw storage-image line must survive verbatim,
+    // format included — rewriting it would silently change the image's format.
+    EXPECT_NE( cs.find( "layout(binding = 4, rgba8) restrict writeonly uniform image3D u_OutVolume;" ),
+               std::string::npos );
+
+    EXPECT_NE( cs.find( "layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;" ), std::string::npos );
+    EXPECT_EQ( cs.find( "Uniform(0)" ), std::string::npos );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );
