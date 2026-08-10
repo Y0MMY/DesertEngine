@@ -18,7 +18,8 @@ namespace Desert::ECS
     public:
         using System::System;
 
-        // Render-data collector (only touches SkyboxComponent state) — safe to run concurrently with the other collectors.
+        // Render-data collector (only touches sky component state) — safe to run concurrently with the other
+        // collectors.
         bool CanRunParallel() const override
         {
             return true;
@@ -43,51 +44,63 @@ namespace Desert::ECS
                 }
             }
 
-            const auto& skyboxes = registry.view<ECS::SkyboxComponent>();
-            for ( const auto skyboxEntity : skyboxes )
+            // The procedural atmosphere. Its presence-and-Enabled is what selects the Sky pass mode, the
+            // role the Skybox component's `Procedural` bool used to play.
+            bool atmosphereEnabled = false;
             {
-                auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
-
-                // One-shot Bake request from the editor: forward it for this frame, then clear it.
-                const bool bakeNow = skybox.RequestBake;
-                skybox.RequestBake = false;
-
-                Graphic::CloudSettings clouds;
-                clouds.Enabled    = skybox.EnableClouds;
-                clouds.Coverage   = skybox.CloudCoverage;
-                clouds.Density    = skybox.CloudDensity;
-                clouds.Tiling     = skybox.CloudTiling;
-                clouds.Brightness = skybox.CloudBrightness;
-                clouds.WindSpeed  = skybox.CloudWindSpeed;
-
-                Graphic::SkySettings sky;
-                sky.ZenithColor     = skybox.ZenithColor;
-                sky.HorizonColor    = skybox.HorizonColor;
-                sky.GroundColor     = skybox.GroundColor;
-                sky.NightColor      = skybox.NightColor;
-                sky.SunColor        = skybox.SunColor;
-                sky.SunsetColor     = skybox.SunsetColor;
-                sky.SkyBrightness   = skybox.SkyBrightness;
-                sky.HorizonFalloff  = skybox.HorizonFalloff;
-                sky.SunGlow         = skybox.SunGlow;
-                sky.SunsetIntensity = skybox.SunsetIntensity;
-                sky.StarIntensity   = skybox.StarIntensity;
-
-                // Procedural-sky config always flows to the renderer (it toggles the Sky-pass mode).
-                renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
-                     skybox.Procedural, sunDir, skybox.SunIntensity, skybox.SunDiskRadius, bakeNow, clouds, sky );
-
-                // The HDR cubemap is only needed when NOT procedural (and only if an asset is assigned).
-                if ( !skybox.Procedural )
+                auto atmospheres = registry.view<ECS::SkyAtmosphereComponent>();
+                for ( const auto atmosphereEntity : atmospheres )
                 {
+                    auto& atmosphere = registry.get<ECS::SkyAtmosphereComponent>( atmosphereEntity );
+
+                    // One-shot Bake request from the editor: forward it for this frame, then clear it.
+                    const bool bakeNow     = atmosphere.RequestBake;
+                    atmosphere.RequestBake = false;
+
+                    atmosphereEnabled = atmosphere.Data.Enabled;
+
+                    Graphic::SkySettings sky;
+                    sky.ZenithColor     = atmosphere.Data.ZenithColor;
+                    sky.HorizonColor    = atmosphere.Data.HorizonColor;
+                    sky.GroundColor     = atmosphere.Data.GroundColor;
+                    sky.NightColor      = atmosphere.Data.NightColor;
+                    sky.SunColor        = atmosphere.Data.SunColor;
+                    sky.SunsetColor     = atmosphere.Data.SunsetColor;
+                    sky.SkyBrightness   = atmosphere.Data.SkyBrightness;
+                    sky.HorizonFalloff  = atmosphere.Data.HorizonFalloff;
+                    sky.SunGlow         = atmosphere.Data.SunGlow;
+                    sky.SunsetIntensity = atmosphere.Data.SunsetIntensity;
+                    sky.StarIntensity   = atmosphere.Data.StarIntensity;
+
+                    // The component authors the sun as an angular DIAMETER in degrees, because that is the
+                    // number an artist reads; the shaders want the angular RADIUS in radians. One
+                    // conversion, here, so no shader ever has to know which of the two it was handed.
+                    const float sunAngularRadius = glm::radians( atmosphere.Data.SunAngularDiameter ) * 0.5f;
+
+                    // Procedural-sky config always flows to the renderer (it toggles the Sky-pass mode).
+                    renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
+                         atmosphere.Data.Enabled, sunDir, atmosphere.Data.SunIntensity, sunAngularRadius, bakeNow,
+                         Graphic::CloudSettings{}, sky );
+                    break;
+                }
+            }
+
+            // The HDR cubemap is the other Sky-pass mode: only when no atmosphere is driving the sky, and
+            // only if an asset is assigned.
+            if ( !atmosphereEnabled )
+            {
+                auto skyboxes = registry.view<ECS::SkyboxComponent>();
+                for ( const auto skyboxEntity : skyboxes )
+                {
+                    const auto& skybox = registry.get<ECS::SkyboxComponent>( skyboxEntity );
                     if ( auto skyboxAsset =
                               Runtime::ResourceRegistry::GetSkyboxService()->Get( skybox.SkyboxHandle ) )
                     {
                         renderCommandBuffer.Emplace<Graphic::Render::SkyboxCommand>( skyboxAsset,
                                                                                       skybox.Intensity );
                     }
+                    break;
                 }
-                break;
             }
         }
     };

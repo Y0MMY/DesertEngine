@@ -69,32 +69,34 @@ namespace Desert::Editor
         // visible behind the object; we make it a soft sky-blue (a dark ground read as muddy gray after
         // tonemap, which looked like "no sky"). The whole dome is a cohesive light blue so any view angle
         // gives a pleasant backdrop.
-        auto  skyEnt      = m_Scene->CreateNewEntity( "ThumbSky" );
-        auto& skyC        = skyEnt.AddComponent<ECS::SkyboxComponent>();
-        skyC.Procedural    = true;
-        skyC.ZenithColor   = { 0.26f, 0.46f, 0.78f };
-        skyC.HorizonColor  = { 0.62f, 0.73f, 0.87f };
-        skyC.GroundColor   = { 0.45f, 0.56f, 0.72f }; // visible behind the object (camera looks down)
-        skyC.SunColor      = { 1.00f, 0.95f, 0.85f };
-        skyC.SkyBrightness = 1.15f;
-        skyC.HorizonFalloff = 0.5f;
-        skyC.SunGlow       = 0.8f;
-        skyC.StarIntensity = 0.0f;
-        skyC.SunIntensity  = 16.0f;
-        skyC.SunDiskRadius = 0.02f;
-        skyC.RequestBake   = true;
+        auto  skyEnt             = m_Scene->CreateNewEntity( "ThumbSky" );
+        auto& skyC               = skyEnt.AddComponent<ECS::SkyAtmosphereComponent>();
+        skyC.Data.ZenithColor    = { 0.26f, 0.46f, 0.78f };
+        skyC.Data.HorizonColor   = { 0.62f, 0.73f, 0.87f };
+        skyC.Data.GroundColor    = { 0.45f, 0.56f, 0.72f }; // visible behind the object (camera looks down)
+        skyC.Data.SunColor       = { 1.00f, 0.95f, 0.85f };
+        skyC.Data.SkyBrightness  = 1.15f;
+        skyC.Data.HorizonFalloff = 0.5f;
+        skyC.Data.SunGlow        = 0.8f;
+        skyC.Data.StarIntensity  = 0.0f;
+        skyC.Data.SunIntensity   = 16.0f;
+        skyC.RequestBake         = true;
 
-        // Same values via the direct call (enabled from frame 0). See the note above re: GroundColor.
+        // The SAME values via the direct call (enabled from frame 0) — read off the component instead of
+        // being typed a second time, so the two routes cannot drift apart.
         Graphic::SkySettings sky;
-        sky.ZenithColor    = { 0.26f, 0.46f, 0.78f };
-        sky.HorizonColor   = { 0.62f, 0.73f, 0.87f };
-        sky.GroundColor    = { 0.45f, 0.56f, 0.72f };
-        sky.SunColor       = { 1.00f, 0.95f, 0.85f };
-        sky.SkyBrightness  = 1.15f;
-        sky.HorizonFalloff = 0.5f;
-        sky.SunGlow        = 0.8f;
-        sky.StarIntensity  = 0.0f;
-        m_Renderer->SetProceduralSky( true, sunDir, 16.0f, 0.02f, true, Graphic::CloudSettings{}, sky );
+        sky.ZenithColor    = skyC.Data.ZenithColor;
+        sky.HorizonColor   = skyC.Data.HorizonColor;
+        sky.GroundColor    = skyC.Data.GroundColor;
+        sky.SunColor       = skyC.Data.SunColor;
+        sky.SkyBrightness  = skyC.Data.SkyBrightness;
+        sky.HorizonFalloff = skyC.Data.HorizonFalloff;
+        sky.SunGlow        = skyC.Data.SunGlow;
+        sky.StarIntensity  = skyC.Data.StarIntensity;
+        // Angular DIAMETER in degrees on the component, angular RADIUS in radians in the pass.
+        const float sunAngularRadius = glm::radians( skyC.Data.SunAngularDiameter ) * 0.5f;
+        m_Renderer->SetProceduralSky( true, sunDir, skyC.Data.SunIntensity, sunAngularRadius, true,
+                                      Graphic::CloudSettings{}, sky );
 
         // Resize ONCE here (after the camera exists) so the camera projection becomes square. We render at
         // kRenderSize (2x the output) and downscale on write = supersampled anti-aliasing. Resize recreates
