@@ -78,14 +78,14 @@ namespace Desert::Graphic::System
         // has to run again; a hash would be shorter and would tell us nothing when it collided.
         struct WeatherFingerprint
         {
-            float   Coverage           = -1.0f;
-            float   CoverageContrast   = -1.0f;
-            float   WarpStrength       = -1.0f;
-            float   CloudType          = -1.0f;
-            float   CloudTypeVariance  = -1.0f;
-            float   Wetness            = -1.0f;
-            int32_t Seed               = -1;
-            int32_t Octaves            = -1;
+            float   Coverage          = -1.0f;
+            float   CoverageContrast  = -1.0f;
+            float   WarpStrength      = -1.0f;
+            float   CloudType         = -1.0f;
+            float   CloudTypeVariance = -1.0f;
+            float   Wetness           = -1.0f;
+            int32_t Seed              = -1;
+            int32_t Octaves           = -1;
 
             bool operator==( const WeatherFingerprint& ) const = default;
         };
@@ -115,9 +115,9 @@ namespace Desert::Graphic::System
         bool                     m_Present = false;
 
         // The size and tier m_ScatterImage was built for. A change in either rebuilds it.
-        uint32_t                      m_ScatterWidth  = 0;
-        uint32_t                      m_ScatterHeight = 0;
-        ECS::CloudResolutionScale     m_ScatterScale  = ECS::CloudResolutionScale::Half;
+        uint32_t                  m_ScatterWidth  = 0;
+        uint32_t                  m_ScatterHeight = 0;
+        ECS::CloudResolutionScale m_ScatterScale  = ECS::CloudResolutionScale::Half;
 
         WeatherFingerprint m_WeatherBaked{};
         bool               m_WeatherValid = false;

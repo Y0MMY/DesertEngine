@@ -11,8 +11,10 @@
 // The price is a restricted dialect — the GLSL/C++ intersection:
 //   * no swizzles (glm's are proxies), no `out` parameters, no arrays, no `inline`, no namespaces;
 //   * float literals carry the `f` suffix so C++ does not silently widen;
-//   * a struct is returned by value and built with its parenthesised constructor, which C++20 accepts
-//     for aggregates (P0960) and GLSL has always had;
+//   * a struct is returned by value through a NAMED LOCAL whose fields are assigned one at a time.
+//     GLSL's `Type(a, b, c)` constructor call is not C++ (parenthesised aggregate initialisation is a
+//     C++20 feature the toolchain in use does not implement), and C++'s `Type{a, b, c}` is not GLSL;
+//     assignment is the form both languages accept;
 //   * functions are defined before use, C-style, because GLSL has no forward declarations.
 //
 // SCALE, and why every distance here is a KILOMETRE.
@@ -107,12 +109,20 @@ CloudSphereHit CloudIntersectAltitudeSphere(vec3 originKm, vec3 dir, float plane
     float c = dot(originKm, originKm) + 2.0f * planetRadiusKm * originKm.y -
               (2.0f * planetRadiusKm * altitudeKm + altitudeKm * altitudeKm);
 
+    CloudSphereHit hit;
+    hit.Hit = false;
+    hit.T0  = 0.0f;
+    hit.T1  = 0.0f;
+
     float disc = b * b - c;
     if (disc < 0.0f)
-        return CloudSphereHit(false, 0.0f, 0.0f);
+        return hit;
 
     float s = sqrt(disc);
-    return CloudSphereHit(true, b - s, b + s);
+    hit.Hit = true;
+    hit.T0  = b - s;
+    hit.T1  = b + s;
+    return hit;
 }
 
 // The segment of the view ray that lies inside the cloud shell. Distances are in kilometres, measured
@@ -134,9 +144,14 @@ struct CloudShellHit
 //   * the ray misses the inner sphere entirely  -> the shell is the whole outer chord.
 CloudShellHit CloudShellBounds(vec3 originKm, vec3 dir, float planetRadiusKm, float bottomKm, float thicknessKm)
 {
+    CloudShellHit shell;
+    shell.Hit    = false;
+    shell.TEnter = 0.0f;
+    shell.TExit  = 0.0f;
+
     CloudSphereHit outer = CloudIntersectAltitudeSphere(originKm, dir, planetRadiusKm, bottomKm + thicknessKm);
     if (!outer.Hit || outer.T1 <= 0.0f)
-        return CloudShellHit(false, 0.0f, 0.0f);
+        return shell;
 
     CloudSphereHit inner = CloudIntersectAltitudeSphere(originKm, dir, planetRadiusKm, bottomKm);
 
@@ -152,16 +167,26 @@ CloudShellHit CloudShellBounds(vec3 originKm, vec3 dir, float planetRadiusKm, fl
     }
 
     if (tExit <= tEnter)
-        return CloudShellHit(false, 0.0f, 0.0f);
+        return shell;
 
-    return CloudShellHit(true, tEnter, tExit);
+    shell.Hit    = true;
+    shell.TEnter = tEnter;
+    shell.TExit  = tExit;
+    return shell;
 }
 
-// Normalized height inside the layer: 0 at the bottom surface, 1 at the top. Derived from the DISTANCE
-// TO THE PLANET CENTRE, not from world Y — over 150 km of cloudscape the shell curves away by a
-// kilometre and a half, and a flat-Y height fraction would flatten the far clouds into the layer floor.
+// Normalized height inside the layer, UNCLAMPED: 0 at the bottom surface, 1 at the top, negative below
+// and greater than 1 above. Derived from the DISTANCE TO THE PLANET CENTRE, not from world Y — over
+// 150 km of cloudscape the shell curves away by more than a kilometre, and a flat-Y height would flatten
+// every distant cloud into the layer floor.
+//
+// Unclamped because the light march needs to know that a sample has left the layer: clamping first turns
+// a shadow sample a kilometre above the cloud tops into one sitting exactly ON them, which shadows every
+// cloud with a copy of itself. The view march, whose samples are inside the shell by construction, wants
+// the clamped form below.
+//
 // Written in the expanded form for the same reason as the intersection above.
-float CloudHeightFraction(vec3 positionKm, float planetRadiusKm, float bottomKm, float thicknessKm)
+float CloudLayerHeight(vec3 positionKm, float planetRadiusKm, float bottomKm, float thicknessKm)
 {
     // |p - C| - R, with C = (0,-R,0), through the identity (|v|^2 - R^2) / (|v| + R). The numerator is
     // the expanded, cancellation-free form; the denominator is ~2R and loses nothing.
@@ -170,7 +195,12 @@ float CloudHeightFraction(vec3 positionKm, float planetRadiusKm, float bottomKm,
                      planetRadiusKm * planetRadiusKm) +
                 planetRadiusKm;
     float altitude = num / max(den, 1e-4f);
-    return clamp((altitude - bottomKm) / max(thicknessKm, 1e-6f), 0.0f, 1.0f);
+    return (altitude - bottomKm) / max(thicknessKm, 1e-6f);
+}
+
+float CloudHeightFraction(vec3 positionKm, float planetRadiusKm, float bottomKm, float thicknessKm)
+{
+    return clamp(CloudLayerHeight(positionKm, planetRadiusKm, bottomKm, thicknessKm), 0.0f, 1.0f);
 }
 
 // ---- Step scheduling -------------------------------------------------------------------------------
@@ -207,7 +237,11 @@ struct CloudMarchState
 
 CloudMarchState CloudMarchBegin(float tEnter)
 {
-    return CloudMarchState(tEnter, 0, false);
+    CloudMarchState s;
+    s.T        = tEnter;
+    s.EmptyRun = 0;
+    s.Fine     = false;
+    return s;
 }
 
 // One transition. `occupied` is the verdict at the CURRENT state: the cheap density in the coarse tier,
@@ -219,17 +253,33 @@ CloudMarchState CloudMarchAdvance(CloudMarchState s, bool occupied, float tEnter
     // Named `stride`, not `step`: GLSL has a built-in step() and a local of that name would hide it.
     float stride = CloudStepLength(s.T, minStep, maxStep, growth);
 
+    CloudMarchState next;
+    next.T        = s.T;
+    next.EmptyRun = 0;
+    next.Fine     = s.Fine;
+
     if (!s.Fine)
     {
         float coarse = stride * max(coarseMultiplier, 1.0f);
         if (occupied)
-            return CloudMarchState(max(tEnter, s.T - coarse), 0, true);
-        return CloudMarchState(s.T + coarse, 0, false);
+        {
+            next.T    = max(tEnter, s.T - coarse);
+            next.Fine = true;
+        }
+        else
+        {
+            next.T = s.T + coarse;
+        }
+        return next;
     }
 
     int  run  = occupied ? 0 : (s.EmptyRun + 1);
     bool fine = run < max(emptyBeforeCoarse, 1);
-    return CloudMarchState(s.T + stride, fine ? run : 0, fine);
+
+    next.T        = s.T + stride;
+    next.EmptyRun = fine ? run : 0;
+    next.Fine     = fine;
+    return next;
 }
 
 // ---- Beer, powder, phase ---------------------------------------------------------------------------

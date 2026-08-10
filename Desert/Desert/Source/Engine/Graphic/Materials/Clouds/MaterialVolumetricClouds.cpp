@@ -2,8 +2,7 @@
 
 namespace Desert::Graphic
 {
-    MaterialVolumetricClouds::MaterialVolumetricClouds()
-         : Material( "MaterialVolumetricClouds", "CloudComposite" )
+    MaterialVolumetricClouds::MaterialVolumetricClouds() : Material( "MaterialVolumetricClouds", "CloudComposite" )
     {
         m_ScatterTexture = m_MaterialExecutor->GetTexture2DProperty( "u_CloudScatter" ).get();
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudNoiseRules.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/WindEnv.hpp>
 
@@ -29,18 +30,18 @@ namespace Desert::Graphic
     struct CloudGpuPayload
     {
         // ---- vec4s. Colours are LINEAR; each `.w` carries the named companion scalar on its line. ----
-        glm::vec4 SunDirection;          // xyz toward sun (normalized), w = sun angular radius (radians)
-        glm::vec4 SunIrradiance;         // rgb, w = SunLightIntensityScale
-        glm::vec4 ZenithRadiance;        // rgb, w = AmbientSkyContribution
-        glm::vec4 GroundRadiance;        // rgb, w = AmbientGroundContribution
-        glm::vec4 ScatteringAlbedo;      // rgb, w = AmbientHeightBias
-        glm::vec4 ExtinctionTint;        // rgb, w = ExtinctionScale
-        glm::vec4 SunTint;               // rgb, w = PrecipitationDarkening
-        glm::vec4 ShadowTint;            // rgb, w = AtmosphericPerspective
+        glm::vec4 SunDirection;     // xyz toward sun (normalized), w = sun angular radius (radians)
+        glm::vec4 SunIrradiance;    // rgb, w = SunLightIntensityScale
+        glm::vec4 ZenithRadiance;   // rgb, w = AmbientSkyContribution
+        glm::vec4 GroundRadiance;   // rgb, w = AmbientGroundContribution
+        glm::vec4 ScatteringAlbedo; // rgb, w = AmbientHeightBias
+        glm::vec4 ExtinctionTint;   // rgb, w = ExtinctionScale
+        glm::vec4 SunTint;          // rgb, w = PrecipitationDarkening
+        glm::vec4 ShadowTint;       // rgb, w = AtmosphericPerspective
         glm::vec4 StratusGradient;
         glm::vec4 StratocumulusGradient;
         glm::vec4 CumulusGradient;
-        glm::vec4 SceneWind;             // xyz = the scene's wind velocity (world units/s), w = seconds
+        glm::vec4 SceneWind; // xyz = the scene's wind velocity (world units/s), w = seconds
 
         // ---- Cloud Layer ----
         float PlanetRadius; // from AtmosphereEnv — the cloud subsystem never owns a radius of its own
@@ -242,9 +243,8 @@ namespace Desert::Graphic
      * End below Start, and each one is a negative range or a division by zero in the shader. Repairing
      * them at the boundary means the shader can assume them, instead of every consumer re-checking.
      */
-    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data,
-                                            const AtmosphereEnv& atmosphere, const WindEnv& wind,
-                                            float timeSeconds )
+    inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const AtmosphereEnv& atmosphere,
+                                            const WindEnv& wind, float timeSeconds )
     {
         const glm::vec3 windVelocity =
              glm::vec3( wind.Direction.x, 0.0f, wind.Direction.y ) * wind.Strength * kCloudWindSpeedPerStrength;
@@ -264,12 +264,12 @@ namespace Desert::Graphic
         p.CumulusGradient       = data.CumulusGradient;
         p.SceneWind             = glm::vec4( windVelocity, timeSeconds );
 
-        p.PlanetRadius         = atmosphere.PlanetRadius;
-        p.LayerBottomAltitude  = data.LayerBottomAltitude;
-        p.LayerThickness       = glm::max( data.LayerThickness, 1.0f );
-        p.MaxViewDistance      = data.MaxViewDistance;
-        p.HorizonFadeStart     = data.HorizonFadeStart;
-        p.HorizonFadeEnd       = glm::max( data.HorizonFadeEnd, data.HorizonFadeStart );
+        p.PlanetRadius        = atmosphere.PlanetRadius;
+        p.LayerBottomAltitude = data.LayerBottomAltitude;
+        p.LayerThickness      = glm::max( data.LayerThickness, 1.0f );
+        p.MaxViewDistance     = data.MaxViewDistance;
+        p.HorizonFadeStart    = data.HorizonFadeStart;
+        p.HorizonFadeEnd      = glm::max( data.HorizonFadeEnd, data.HorizonFadeStart );
 
         p.Coverage            = data.Coverage;
         p.CoverageContrast    = glm::max( data.CoverageContrast, 1e-3f );
@@ -287,41 +287,41 @@ namespace Desert::Graphic
         p.TopGradientPower     = data.TopGradientPower;
         p.DensityHeightBias    = data.DensityHeightBias;
 
-        p.DetailStrength           = data.DetailStrength;
-        p.DetailTileSize           = glm::max( data.DetailTileSize, 1.0f );
-        p.DetailTypeBias           = data.DetailTypeBias;
-        p.BillowGradientPower      = data.BillowGradientPower;
-        p.BillowNoiseScale         = data.BillowNoiseScale;
-        p.HighFreqStrength         = data.HighFreqStrength;
-        p.HighFreqWispSharpness    = data.HighFreqWispSharpness;
-        p.HighFreqBillowSharpness  = data.HighFreqBillowSharpness;
-        p.HighFreqFadeStart        = data.HighFreqFadeStart;
-        p.HighFreqFadeEnd          = glm::max( data.HighFreqFadeEnd, data.HighFreqFadeStart );
-        p.CurlStrength             = data.CurlStrength;
-        p.CurlTileSize             = glm::max( data.CurlTileSize, 1.0f );
-        p.DensitySharpenLow        = data.DensitySharpenLow;
-        p.DensitySharpenHigh       = data.DensitySharpenHigh;
-        p.DensityScalePower        = data.DensityScalePower;
-        p.DistanceSoftening        = data.DistanceSoftening;
-        p.SofteningStartDistance   = data.SofteningStartDistance;
-        p.SofteningEndDistance     = glm::max( data.SofteningEndDistance, data.SofteningStartDistance );
-        p.NearFadeStart            = data.NearFadeStart;
-        p.NearFadeEnd              = glm::max( data.NearFadeEnd, data.NearFadeStart );
-        p.NearFadeMinDensity       = data.NearFadeMinDensity;
+        p.DetailStrength          = data.DetailStrength;
+        p.DetailTileSize          = glm::max( data.DetailTileSize, 1.0f );
+        p.DetailTypeBias          = data.DetailTypeBias;
+        p.BillowGradientPower     = data.BillowGradientPower;
+        p.BillowNoiseScale        = data.BillowNoiseScale;
+        p.HighFreqStrength        = data.HighFreqStrength;
+        p.HighFreqWispSharpness   = data.HighFreqWispSharpness;
+        p.HighFreqBillowSharpness = data.HighFreqBillowSharpness;
+        p.HighFreqFadeStart       = data.HighFreqFadeStart;
+        p.HighFreqFadeEnd         = glm::max( data.HighFreqFadeEnd, data.HighFreqFadeStart );
+        p.CurlStrength            = data.CurlStrength;
+        p.CurlTileSize            = glm::max( data.CurlTileSize, 1.0f );
+        p.DensitySharpenLow       = data.DensitySharpenLow;
+        p.DensitySharpenHigh      = data.DensitySharpenHigh;
+        p.DensityScalePower       = data.DensityScalePower;
+        p.DistanceSoftening       = data.DistanceSoftening;
+        p.SofteningStartDistance  = data.SofteningStartDistance;
+        p.SofteningEndDistance    = glm::max( data.SofteningEndDistance, data.SofteningStartDistance );
+        p.NearFadeStart           = data.NearFadeStart;
+        p.NearFadeEnd             = glm::max( data.NearFadeEnd, data.NearFadeStart );
+        p.NearFadeMinDensity      = data.NearFadeMinDensity;
 
-        p.LightMarchDistance           = data.LightMarchDistance;
-        p.LightConeSpread              = data.LightConeSpread;
-        p.PhaseForwardG                = data.PhaseForwardG;
-        p.PhaseBackwardG               = data.PhaseBackwardG;
-        p.PhaseBlend                   = data.PhaseBlend;
-        p.SilverLiningIntensity        = data.SilverLiningIntensity;
-        p.PowderStrength               = data.PowderStrength;
-        p.PowderScale                  = data.PowderScale;
+        p.LightMarchDistance            = data.LightMarchDistance;
+        p.LightConeSpread               = data.LightConeSpread;
+        p.PhaseForwardG                 = data.PhaseForwardG;
+        p.PhaseBackwardG                = data.PhaseBackwardG;
+        p.PhaseBlend                    = data.PhaseBlend;
+        p.SilverLiningIntensity         = data.SilverLiningIntensity;
+        p.PowderStrength                = data.PowderStrength;
+        p.PowderScale                   = data.PowderScale;
         p.MultiScatterExtinctionFalloff = data.MultiScatterExtinctionFalloff;
-        p.MultiScatterScatterFalloff   = data.MultiScatterScatterFalloff;
-        p.MultiScatterPhaseFalloff     = data.MultiScatterPhaseFalloff;
-        p.DistanceFadeStart            = data.DistanceFadeStart;
-        p.DistanceFadeEnd              = glm::max( data.DistanceFadeEnd, data.DistanceFadeStart );
+        p.MultiScatterScatterFalloff    = data.MultiScatterScatterFalloff;
+        p.MultiScatterPhaseFalloff      = data.MultiScatterPhaseFalloff;
+        p.DistanceFadeStart             = data.DistanceFadeStart;
+        p.DistanceFadeEnd               = glm::max( data.DistanceFadeEnd, data.DistanceFadeStart );
 
         p.AnimationSpeed          = data.AnimationSpeed;
         p.WindInfluence           = data.WindInfluence;
@@ -338,7 +338,10 @@ namespace Desert::Graphic
         p.CoarseStepMultiplier = glm::max( data.CoarseStepMultiplier, 1.0f );
         p.JitterStrength       = data.JitterStrength;
 
-        p.WeatherSeed              = data.WeatherSeed;
+        // Folded exactly as the noise volumes fold theirs: the component authors an int with a
+        // Range(0, 65535), the shader hashes a uint, and a value outside that range must land on its
+        // representative inside it rather than on a different cloudscape after sign extension.
+        p.WeatherSeed              = static_cast<int32_t>( CloudSeedFromComponent( data.WeatherSeed ) );
         p.WeatherOctaves           = glm::clamp( data.WeatherOctaves, 1, 8 );
         p.MaxSteps                 = glm::max( data.MaxSteps, 1 );
         p.EmptySamplesBeforeCoarse = glm::max( data.EmptySamplesBeforeCoarse, 1 );

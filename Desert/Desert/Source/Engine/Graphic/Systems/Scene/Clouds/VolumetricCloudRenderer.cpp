@@ -12,7 +12,6 @@
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Profiler.hpp>
 
-
 namespace Desert::Graphic::System
 {
     namespace
@@ -139,9 +138,9 @@ namespace Desert::Graphic::System
 
         // scene = cloud.rgb * One + scene * cloud.a. The raymarch emits PREMULTIPLIED radiance with
         // transmittance in alpha, so this is the over-operator with nothing left to reconstruct.
-        spec.BlendEnable          = true;
-        spec.SrcColorBlendFactor  = BlendFactor::One;
-        spec.DstColorBlendFactor  = BlendFactor::SrcAlpha;
+        spec.BlendEnable         = true;
+        spec.SrcColorBlendFactor = BlendFactor::One;
+        spec.DstColorBlendFactor = BlendFactor::SrcAlpha;
 
         // The pass is replayed by ExecuteTransparency with a LOAD begin, so the pipeline is built
         // against the framebuffer's LOAD render pass.
@@ -182,8 +181,8 @@ namespace Desert::Graphic::System
                 LOG_ERROR( "[Clouds] The {}x{} weather map ({:.2f} MiB) could not be created; the cloud "
                            "layer will not render for this view.",
                            kWeatherMapSize, kWeatherMapSize,
-                           BytesToMiB( Core::Formats::CalculateImageSize(
-                                kWeatherMapSize, kWeatherMapSize, Core::Formats::ImageFormat::RGBA8F ) ) );
+                           BytesToMiB( Core::Formats::CalculateImageSize( kWeatherMapSize, kWeatherMapSize,
+                                                                          Core::Formats::ImageFormat::RGBA8F ) ) );
                 m_ResourcesFailed = true;
                 return false;
             }
@@ -222,9 +221,9 @@ namespace Desert::Graphic::System
             return false;
         }
 
-        m_ScatterWidth  = scatterW;
-        m_ScatterHeight = scatterH;
-        m_ScatterScale  = m_Data.ResolutionScale;
+        m_ScatterWidth   = scatterW;
+        m_ScatterHeight  = scatterH;
+        m_ScatterScale   = m_Data.ResolutionScale;
         m_HasFrameResult = false;
 
         // The cost is announced, not discovered in a memory graph later. One line per allocation, and
@@ -268,7 +267,7 @@ namespace Desert::Graphic::System
 
         CloudRaymarchPush push{};
         push.InverseViewProjection = glm::inverse( viewProjection );
-        push.CameraPosition = glm::vec4( camera->GetPosition(), static_cast<float>( m_FrameIndex ) );
+        push.CameraPosition        = glm::vec4( camera->GetPosition(), static_cast<float>( m_FrameIndex ) );
 
         auto& renderer = Renderer::GetInstance();
 
@@ -279,8 +278,7 @@ namespace Desert::Graphic::System
         renderer.ComputeImageBeginWrite( m_ScatterImage.get() );
 
         m_RaymarchPipeline->SetOutput( kCloudScatterOutputBinding, m_ScatterImage.get(), 0 );
-        m_RaymarchPipeline->SetStorageBuffer( kSkyPayloadBinding,
-                                              m_SceneRenderer->GetAtmosphere().ParamsBuffer );
+        m_RaymarchPipeline->SetStorageBuffer( kSkyPayloadBinding, m_SceneRenderer->GetAtmosphere().ParamsBuffer );
         m_RaymarchPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         m_RaymarchPipeline->SetInput( kCloudShapeNoiseBinding, noise.ShapeNoise.get() );
         m_RaymarchPipeline->SetInput( kCloudDetailNoiseBinding, noise.DetailNoise.get() );
@@ -321,8 +319,8 @@ namespace Desert::Graphic::System
         }
         m_AtmosphereWarned = false;
 
-        const auto* noise = CloudNoiseVolumes::Get().Find(
-             MakeCloudNoiseKey( m_Data.ShapeSeed, m_Data.DetailSeed ) );
+        const auto* noise =
+             CloudNoiseVolumes::Get().Find( MakeCloudNoiseKey( m_Data.ShapeSeed, m_Data.DetailSeed ) );
         if ( !noise )
         {
             if ( !m_NoiseWarned )
@@ -371,8 +369,8 @@ namespace Desert::Graphic::System
             return;
 
         RenderGraphBuilder::PassConfig config;
-        config.Name  = "VolumetricCloudComposite";
-        config.Phase = RenderPhase::Transparency;
+        config.Name        = "VolumetricCloudComposite";
+        config.Phase       = RenderPhase::Transparency;
         config.ExecuteFunc = [this]()
         {
             if ( !m_HasFrameResult || !m_ScatterImage || !m_CompositeMaterial )

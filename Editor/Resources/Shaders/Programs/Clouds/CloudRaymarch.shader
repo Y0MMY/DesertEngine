@@ -184,8 +184,15 @@ Shader "CloudRaymarch"
                                                                               u_LightMarchDistance,
                                                                               u_LightConeSpread);
                             vec3  sampleKm = samplePos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
-                            float sampleH  = CloudHeightFraction(sampleKm, planetRadiusKm, bottomKm,
-                                                                 thicknessKm);
+                            float sampleH  = CloudLayerHeight(sampleKm, planetRadiusKm, bottomKm,
+                                                              thicknessKm);
+
+                            // A cone sample that has left the layer contributes nothing. Clamping its
+                            // height instead would place it exactly on the surface it flew past, and
+                            // every cloud top would then shadow itself with a copy of itself.
+                            if (sampleH < 0.0f || sampleH > 1.0f)
+                                continue;
+
                             sunDensityLength += CloudDensityCheap(samplePos, sampleH) *
                                                 CloudConeSampleWeight(s, u_LightMarchSamples,
                                                                       u_LightMarchDistance);
