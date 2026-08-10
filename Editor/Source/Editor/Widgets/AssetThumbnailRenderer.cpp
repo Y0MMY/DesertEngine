@@ -62,7 +62,9 @@ namespace Desert::Editor
         // Procedural sky entity (drawn by SkyboxECSSystem) — gives a real backdrop gradient. ALSO call the
         // direct SceneRenderer::SetProceduralSky below so the sky is enabled from frame 0 (the ECS command
         // path alone proved insufficient in this minimal scene). Sun dir = the ThumbLight.
-        const glm::vec3 sunDir = -glm::normalize( glm::vec3( 2.0f, -6.0f, 5.0f ) );
+        // Through the engine's ONE negation, not a second hand-written one (ECS::Rules::AtmosphereSunDirection):
+        // the light's Translation is the direction it TRAVELS, the sky wants the direction toward the sun.
+        const glm::vec3 sunDir = ECS::Rules::AtmosphereSunDirection( glm::vec3( 2.0f, -6.0f, 5.0f ) );
 
         // IMPORTANT: the fixed preview camera sits ABOVE the object (y=6.12) looking DOWN, so the backdrop
         // samples the sky's LOWER (ground) hemisphere — NOT the zenith. So GroundColor is what's actually
@@ -82,21 +84,11 @@ namespace Desert::Editor
         skyC.Data.SunIntensity   = 16.0f;
         skyC.RequestBake         = true;
 
-        // The SAME values via the direct call (enabled from frame 0) — read off the component instead of
-        // being typed a second time, so the two routes cannot drift apart.
-        Graphic::SkySettings sky;
-        sky.ZenithColor    = skyC.Data.ZenithColor;
-        sky.HorizonColor   = skyC.Data.HorizonColor;
-        sky.GroundColor    = skyC.Data.GroundColor;
-        sky.SunColor       = skyC.Data.SunColor;
-        sky.SkyBrightness  = skyC.Data.SkyBrightness;
-        sky.HorizonFalloff = skyC.Data.HorizonFalloff;
-        sky.SunGlow        = skyC.Data.SunGlow;
-        sky.StarIntensity  = skyC.Data.StarIntensity;
-        // Angular DIAMETER in degrees on the component, angular RADIUS in radians in the pass.
-        const float sunAngularRadius = glm::radians( skyC.Data.SunAngularDiameter ) * 0.5f;
-        m_Renderer->SetProceduralSky( true, sunDir, skyC.Data.SunIntensity, sunAngularRadius, true,
-                                      Graphic::CloudSettings{}, sky );
+        // The SAME values via the direct call (enabled from frame 0) — through the one packing helper, so
+        // this route and the ECS route cannot describe two different skies. The eight literals above used
+        // to be typed a second time here, which is how a field added to the component reached the viewport
+        // and not the thumbnails.
+        m_Renderer->SetProceduralSky( true, sunDir, /*bakeNow=*/true, Graphic::MakeSkySettings( skyC.Data ) );
 
         // Resize ONCE here (after the camera exists) so the camera projection becomes square. We render at
         // kRenderSize (2x the output) and downscale on write = supersampled anti-aliasing. Resize recreates

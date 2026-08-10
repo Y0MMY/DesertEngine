@@ -3,9 +3,13 @@
 #include <Engine/Graphic/Texture.hpp>
 #include <Engine/Runtime/ImageHandle.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
-#include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
+
+namespace Desert::ShaderResources
+{
+    class StorageBuffer;
+}
 
 namespace Desert::Graphic
 {
@@ -27,11 +31,15 @@ namespace Desert::Graphic
     public:
         static Environment Create( const std::shared_ptr<Assets::SkyboxAsset>& skyboxAsset );
 
-        // Builds an IBL environment from the engine-generated procedural atmosphere (no HDR asset): the
-        // sky is baked into an equirect panorama, then run through the same radiance/irradiance/prefilter
-        // pipeline. sunDir is the direction TOWARD the sun (normalized).
-        static Environment CreateProcedural( const glm::vec3& sunDir, float intensity, float diskRadius,
-                                             const SkySettings& sky );
+        // Builds an IBL environment from the engine-generated procedural atmosphere (no HDR asset): the sky
+        // is baked into an equirect panorama of @p panoramaWidth x @p panoramaHeight, then run through the
+        // same radiance/irradiance/prefilter pipeline. @p skyParams is the caller's sky parameter buffer —
+        // the same one the screen sky pass reads.
+        //
+        // The panorama size is authored (SkyAtmosphereData::EnvironmentResolution) rather than a constant
+        // because this cost is paid PER LIVE SceneRenderer, and the editor keeps several of those.
+        static Environment CreateProcedural( uint32_t panoramaWidth, uint32_t panoramaHeight,
+                                             ShaderResources::StorageBuffer* skyParams );
 
     private:
         static std::shared_ptr<ImageCube>

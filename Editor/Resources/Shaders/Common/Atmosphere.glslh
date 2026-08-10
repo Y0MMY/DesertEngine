@@ -1,15 +1,23 @@
 // Procedural ARTISTIC sky (gradient model). Driven by the view ray + sun direction; the whole look
 // (day / sunrise-sunset / night) is a function of the SUN ELEVATION (sunDir.y). Output is LINEAR HDR
-// (post-process tonemap applies exposure/gamma). Used by BOTH the screen sky pass (ProceduralSky.glsl.frag)
-// and the IBL bake (Compute/BakeProceduralSky.glsl.comp). The artistic palette/scalars come in via a
-// SkyConfig (the frag fills it from the editor's SkyboxComponent settings; the bake uses DefaultSkyConfig()).
+// (post-process tonemap applies exposure/gamma).
+//
+// THIS IS THE ENGINE'S ONLY SKY EVALUATION. The screen sky pass, the IBL bake and the volumetric cloud
+// pass all include this file and call EvaluateSky; there is no second copy of the maths in GLSL or in C++,
+// so the sky you SEE and the light it CASTS cannot drift apart.
+//
+// A pass gets its parameters through the SkyPacked loaders below: the LAYOUT lives here, in one place,
+// while the BINDING stays each pass's own business — which is what lets the graphics sky pass and a
+// compute cloud pass read the same buffer from different descriptor sets. Nothing in this file declares a
+// sampler, a derivative or any other fragment-only construct, so it compiles in a compute stage; the IBL
+// bake has been proving that on every platform CI builds for some time now.
 
 #ifndef ATMOSPHERE_GLSLH
 #define ATMOSPHERE_GLSLH
 
 const float ATM_PI = 3.141592653589793;
 
-// Editor-tunable palette + scalars (see ECS::SkyboxComponent). Colours are LINEAR.
+// Editor-tunable palette + scalars (see ECS::SkyAtmosphereData). Colours are LINEAR.
 struct SkyConfig
 {
     vec3  zenith;          // sky colour straight up (day)
@@ -25,21 +33,66 @@ struct SkyConfig
     float starIntensity;   // night star brightness
 };
 
-SkyConfig DefaultSkyConfig()
+// ---- The packed sky parameter block, mirrored by Graphic::SkyGpuPayload (Engine/Graphic/SkyPayload.hpp) ----
+//
+//   v[0]  xyz = direction TOWARD the sun (normalized), w = sun intensity
+//   v[1]  rgb = zenith colour,  w = sky brightness
+//   v[2]  rgb = horizon colour, w = horizon falloff
+//   v[3]  rgb = sun colour,     w = sun glow
+//   v[4]  rgb = sunset colour,  w = sunset intensity
+//   v[5]  rgb = ground colour,  w = star intensity
+//   v[6]  rgb = night colour,   w = sun angular RADIUS in RADIANS
+//
+// A pass declares its own buffer at its own binding, copies it into a SkyPacked, and calls the loaders:
+//
+//   ReadBuffer(1) SkyBuffer { vec4 u_SkyPacked[SKY_PACKED_VEC4_COUNT]; };
+//   SkyPacked s; for (int i = 0; i < SKY_PACKED_VEC4_COUNT; ++i) s.v[i] = u_SkyPacked[i];
+//   vec3 color = EvaluateSky( dir, UnpackSunDirection(s), UnpackSunIntensity(s),
+//                             UnpackSunAngularRadius(s), UnpackSkyConfig(s) );
+//
+// Adding a palette field is then one edit here plus one to the C++ mirror; no consumer changes a line.
+#define SKY_PACKED_VEC4_COUNT 7
+
+struct SkyPacked
+{
+    vec4 v[SKY_PACKED_VEC4_COUNT];
+};
+
+SkyConfig UnpackSkyConfig( SkyPacked s )
 {
     SkyConfig c;
-    c.zenith          = vec3( 0.08, 0.26, 0.70 );
-    c.horizon         = vec3( 0.50, 0.66, 0.92 );
-    c.sunColor        = vec3( 1.00, 0.96, 0.88 );
-    c.sunsetColor     = vec3( 1.00, 0.42, 0.18 );
-    c.ground          = vec3( 0.16, 0.19, 0.24 );
-    c.night           = vec3( 0.010, 0.020, 0.050 );
-    c.skyBrightness   = 1.0;
-    c.horizonFalloff  = 0.85;
-    c.sunGlow         = 1.0;
-    c.sunsetIntensity = 1.0;
-    c.starIntensity   = 1.0;
+    c.zenith          = s.v[1].rgb;
+    c.horizon         = s.v[2].rgb;
+    c.sunColor        = s.v[3].rgb;
+    c.sunsetColor     = s.v[4].rgb;
+    c.ground          = s.v[5].rgb;
+    c.night           = s.v[6].rgb;
+    c.skyBrightness   = s.v[1].w;
+    c.horizonFalloff  = s.v[2].w;
+    c.sunGlow         = s.v[3].w;
+    c.sunsetIntensity = s.v[4].w;
+    c.starIntensity   = s.v[5].w;
     return c;
+}
+
+// Direction TOWARD the sun. The CPU writes it normalized (there is exactly one negation in the engine,
+// ECS::Rules::AtmosphereSunDirection); normalizing again here costs nothing and makes the loader safe to
+// call from a pass that assembled the block itself.
+vec3 UnpackSunDirection( SkyPacked s )
+{
+    return normalize( s.v[0].xyz );
+}
+
+float UnpackSunIntensity( SkyPacked s )
+{
+    return s.v[0].w;
+}
+
+// RADIANS. The component authors an angular DIAMETER in degrees; the halving and the conversion happen
+// once, on the C++ side, so no shader has to know which of the two it was handed.
+float UnpackSunAngularRadius( SkyPacked s )
+{
+    return s.v[6].w;
 }
 
 float atm_hash13( vec3 p )

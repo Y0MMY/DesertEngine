@@ -2,9 +2,13 @@
 
 #include "Image.hpp"
 #include <Engine/Runtime/ImageHandle.hpp>
-#include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
+
+namespace Desert::ShaderResources
+{
+    class StorageBuffer;
+}
 
 namespace Desert::Graphic
 {
@@ -23,12 +27,12 @@ namespace Desert::Graphic
     public:
         virtual ~ComputeImages() = default;
 
-        static std::shared_ptr<Image2D>   ProccessForImage2D( const std::shared_ptr<Image>& image );
-        // Bakes the procedural atmosphere into an equirect HDR panorama (RGBA32F, Storage|Sample). No
-        // input image — the sky is generated in-shader from the sun direction/intensity/disk radius.
-        static std::shared_ptr<Image2D>   BakeProceduralPanorama( uint32_t width, uint32_t height,
-                                                                  const glm::vec3& sunDir, float intensity,
-                                                                  float diskRadius, const SkySettings& sky );
+        static std::shared_ptr<Image2D> ProccessForImage2D( const std::shared_ptr<Image>& image );
+        // Bakes the procedural atmosphere into an equirect HDR panorama (RGBA32F, Storage|Sample). No input
+        // image: the sky is generated in-shader from @p skyParams, which is the SAME buffer the screen sky
+        // pass reads, so the baked lighting and the visible sky cannot describe different skies.
+        static std::shared_ptr<Image2D> BakeProceduralPanorama( uint32_t width, uint32_t height,
+                                                                ShaderResources::StorageBuffer* skyParams );
         // Single dispatch: samples spec.InputHandle (2D panorama OR source cubemap) -> a fresh output cube.
         static std::shared_ptr<ImageCube> ProccessForImageCube( const ComputeImagesSpecification& spec );
         // GGX prefilter: convolves spec.InputHandle (radiance cube) per mip (roughness = mip/(mips-1))

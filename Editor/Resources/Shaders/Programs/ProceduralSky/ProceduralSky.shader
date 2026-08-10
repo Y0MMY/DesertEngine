@@ -2,66 +2,39 @@ Shader "ProceduralSky"
 {
     Fragment
     {
-        // Fully procedural physical sky: single-scattering Rayleigh + Mie atmosphere raymarched per pixel
-        // (no HDR texture — generated entirely on the GPU from the view ray and the sun direction). The sun
-        // direction is driven by the scene's directional light; output is LINEAR HDR (the post-process
-        // tonemap pass applies exposure/gamma downstream, exactly like the old skybox did).
+        // The engine-generated sky: an artistic gradient evaluated from the view ray and the sun direction
+        // (no HDR texture). Output is LINEAR HDR — the post-process tonemap pass applies exposure/gamma
+        // downstream, exactly like the old skybox did.
         //
-        // The atmosphere model lives in Common/Atmosphere.glslh and is shared with the IBL bake
-        // (Compute/BakeProceduralSky.glsl.comp) so the visible sky and the light it casts are identical.
+        // The model lives in Common/Atmosphere.glslh and is shared with the IBL bake
+        // (Compute/BakeProceduralSky) so the visible sky and the light it casts are identical.
 
         #include <Common/Atmosphere.glslh>
-        #include <Common/Clouds.glslh>
 
         In(0) vec3 v_RayDir;
         Out(0) vec4 oColor;
 
-        Uniform(1) SkyUB
+        // The sky parameter block. A std430 STORAGE buffer rather than a uniform block, because the
+        // volumetric cloud pass evaluates the same sky from a compute shader and ComputePipeline has no
+        // SetUniformBuffer — its binding surface is inputs, outputs, storage buffers and push constants.
+        // One buffer, one layout, three consumers.
+        //
+        // The binding is written explicitly as (1) and must stay equal to Graphic::kSkyPayloadBinding: the
+        // graphics descriptor write uses the buffer's OWN binding number while a compute dispatch passes
+        // one as an argument, and when those disagree the buffer quietly lands on another resource's slot.
+        ReadBuffer(1) SkyBuffer
         {
-            vec4 u_SunDirection; // xyz = direction TOWARD the sun (normalized), w = sun intensity
-            vec4 u_SkyParams;    // x = sun angular radius; y = clouds enabled (>0.5); z = coverage; w = density
-            vec4 u_CloudParams;  // x = layer base altitude; y = thickness; z = time (s); w = wind speed
-            vec4 u_CameraPos;    // xyz = world camera position
-            // --- artistic palette/scalars (from ECS::SkyboxComponent) ---
-            vec4 u_ZenithColor;  // rgb, w = skyBrightness
-            vec4 u_HorizonColor; // rgb, w = horizonFalloff
-            vec4 u_SunColor;     // rgb, w = sunGlow
-            vec4 u_SunsetColor;  // rgb, w = sunsetIntensity
-            vec4 u_GroundColor;  // rgb, w = starIntensity
-            vec4 u_NightColor;   // rgb (night sky tint)
-            vec4 u_WindDir;      // xy = shared scene wind direction (normalized, ground XZ), zw unused
+            vec4 u_SkyPacked[SKY_PACKED_VEC4_COUNT];
         };
 
         void main()
         {
-            vec3  dir    = normalize(v_RayDir);
-            vec3  sunDir = normalize(u_SunDirection.xyz);
-            float sunI   = u_SunDirection.w;
+            SkyPacked s;
+            for (int i = 0; i < SKY_PACKED_VEC4_COUNT; ++i)
+                s.v[i] = u_SkyPacked[i];
 
-            SkyConfig cfg;
-            cfg.zenith          = u_ZenithColor.rgb;
-            cfg.horizon         = u_HorizonColor.rgb;
-            cfg.sunColor        = u_SunColor.rgb;
-            cfg.sunsetColor     = u_SunsetColor.rgb;
-            cfg.ground          = u_GroundColor.rgb;
-            cfg.night           = u_NightColor.rgb;
-            cfg.skyBrightness   = u_ZenithColor.w;
-            cfg.horizonFalloff  = u_HorizonColor.w;
-            cfg.sunGlow         = u_SunColor.w;
-            cfg.sunsetIntensity = u_SunsetColor.w;
-            cfg.starIntensity   = u_GroundColor.w;
-
-            vec3 color = EvaluateSky(dir, sunDir, sunI, u_SkyParams.x, cfg);
-
-            // Procedural flat-layer clouds (composited over the sky). CloudParams: x=tiling, y=brightness, z=time,
-            // w=wind. SkyParams: z=coverage, w=density.
-            if (u_SkyParams.y > 0.5)
-            {
-                color = RenderClouds(color, dir, sunDir, sunI,
-                                     u_SkyParams.z, u_SkyParams.w,
-                                     u_CloudParams.x, u_CloudParams.y, u_CloudParams.z, u_CloudParams.w,
-                                     u_WindDir.xy);
-            }
+            vec3 color = EvaluateSky(normalize(v_RayDir), UnpackSunDirection(s), UnpackSunIntensity(s),
+                                     UnpackSunAngularRadius(s), UnpackSkyConfig(s));
 
             // (Dithering is done at the FINAL 8-bit output in the composite/tonemap pass — doing it here in linear
             // HDR is lost through Reinhard+gamma. See SceneComposite.glsl.frag.)
@@ -85,8 +58,7 @@ Shader "ProceduralSky"
             // DIRECTION-ONLY world-space view ray (camera rotation only — NO far-plane-worldPos minus cameraPos).
             // That subtraction of two large world-space points loses float precision and, as the camera MOVES, makes
             // the ray direction jitter frame-to-frame → the tiny sun/stars "boil". Unproject to VIEW space, then
-            // rotate to world with mat3(invView). Correct for the artistic sky (depends only on direction); the
-            // clouds use the camera position separately via the SkyUB.
+            // rotate to world with mat3(invView). Correct for this sky, which depends only on direction.
             vec4 viewH   = inverse(cameraUB.Projection) * position;
             vec3 viewRay = viewH.xyz / viewH.w;
             v_RayDir     = mat3(inverse(cameraUB.View)) * viewRay;

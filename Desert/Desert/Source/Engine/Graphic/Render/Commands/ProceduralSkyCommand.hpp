@@ -1,35 +1,30 @@
 #pragma once
 
 #include "../RenderCommand.hpp"
-#include <Engine/Graphic/CloudSettings.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
 
 #include <glm/glm.hpp>
 
 namespace Desert::Graphic::Render
 {
-    // Carries the procedural-sky configuration from the ECS (SkyAtmosphereComponent + directional light) to the
-    // SkyboxRenderer. The sun direction is the toward-sun direction (= -directional light direction).
+    // Carries the procedural-sky configuration from the ECS (SkyAtmosphereComponent + the atmosphere sun)
+    // to the SkyboxRenderer. SunDir is the direction TOWARD the sun, already normalized — the engine's one
+    // negation happened in ECS::Rules::AtmosphereSunDirection and must not happen again downstream.
     struct ProceduralSkyCommand : RenderCommand
     {
-        bool          Enabled;
-        glm::vec3     SunDir;
-        float         SunIntensity;
-        float         SunDiskRadius;
-        bool          BakeNow; // one-shot: editor Bake button requested an IBL rebuild this frame
-        CloudSettings Clouds;
-        SkySettings   Sky;
+        bool        Enabled;
+        glm::vec3   SunDir;
+        bool        BakeNow; // one-shot: the editor's Bake button requested an IBL rebuild this frame
+        SkySettings Sky;
 
-        ProceduralSkyCommand( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                              bool bakeNow, const CloudSettings& clouds, const SkySettings& sky )
-             : Enabled( enabled ), SunDir( sunDir ), SunIntensity( sunIntensity ),
-               SunDiskRadius( sunDiskRadius ), BakeNow( bakeNow ), Clouds( clouds ), Sky( sky )
+        ProceduralSkyCommand( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky )
+             : Enabled( enabled ), SunDir( sunDir ), BakeNow( bakeNow ), Sky( sky )
         {
         }
 
         void Execute( SceneRenderer& renderer ) override
         {
-            renderer.SetProceduralSky( Enabled, SunDir, SunIntensity, SunDiskRadius, BakeNow, Clouds, Sky );
+            renderer.SetProceduralSky( Enabled, SunDir, BakeNow, Sky );
         }
     };
 } // namespace Desert::Graphic::Render

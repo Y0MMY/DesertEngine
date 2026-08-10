@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 
+#include <bit>
 #include <chrono>
 #include <cmath>
 
@@ -236,6 +237,13 @@ namespace Desert::Graphic
                 s_SlotsInUse &= ~( 1u << slot );
         }
     } // namespace
+
+    uint32_t SceneRenderer::GetLiveRendererCount()
+    {
+        // The lease bitmask is already the answer — a separate counter would be a second source of truth
+        // for the same fact, and the two would disagree the first time a renderer overflowed the slots.
+        return static_cast<uint32_t>( std::popcount( s_SlotsInUse ) );
+    }
 
     SceneRenderer::SceneRenderer() : m_RendererSlot( ClaimRendererSlot() )
     {
@@ -904,17 +912,16 @@ namespace Desert::Graphic
              ->PrepareMaterial( material, intensity );
     }
 
-    void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity,
-                                          float sunDiskRadius, bool bakeNow, const CloudSettings& clouds,
+    void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow,
                                           const SkySettings& sky )
     {
-        // Inject the SHARED scene wind direction into the cloud config so clouds drift the same heading as
-        // grass; the per-sky drift RATE is authored on the cloud side, direction is scene-global.
-        CloudSettings windedClouds = clouds;
-        windedClouds.WindDir       = m_Wind.Direction;
-
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
-             ->SetProceduralSky( enabled, sunDir, sunIntensity, sunDiskRadius, bakeNow, windedClouds, sky );
+             ->SetProceduralSky( enabled, sunDir, bakeNow, sky );
+    }
+
+    const AtmosphereEnv& SceneRenderer::GetAtmosphere() const
+    {
+        return UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems.at( "SkyboxSystem" ) )->GetAtmosphere();
     }
 
     const std::optional<Environment>& SceneRenderer::GetEnvironment()

@@ -2,11 +2,13 @@
 
 #include <Engine/Graphic/Systems/RenderSystem.hpp>
 
+#include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialProceduralSky.hpp>
-#include <Engine/Graphic/CloudSettings.hpp>
+#include <Engine/Graphic/SkyRules.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
+#include <Engine/ShaderResources/StorageBuffer.hpp>
 
 #include <glm/glm.hpp>
 
@@ -25,32 +27,20 @@ namespace Desert::Graphic::System
         void PrepareCamera( Core::Camera* camera );
         void PrepareMaterial( const std::shared_ptr<MaterialSkybox>& material, float intensity = 1.0f );
 
-        // When enabled, the Sky pass renders the engine-generated procedural atmosphere instead of the
-        // HDR cubemap. The sun direction is the directional light's (toward-sun) direction.
-        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                               bool bakeNow, const CloudSettings& clouds, const SkySettings& sky )
-        {
-            m_UseProceduralSky = enabled;
-            m_SunDir           = sunDir;
-            m_SunIntensity     = sunIntensity;
-            m_SunDiskRadius    = sunDiskRadius;
-            m_Clouds           = clouds;
-            m_Sky              = sky;
+        // When enabled, the Sky pass renders the engine-generated atmosphere instead of the HDR cubemap.
+        // @p sunDir is the direction TOWARD the sun, normalized. @p bakeNow is the editor's one-shot
+        // request. Everything else the sky needs — palette, sun radiance, planet radius, bake knobs — is
+        // in @p sky, which MakeSkySettings produced from the component.
+        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky );
 
-            // Bake the sky IBL on FIRST enable (so the scene isn't unlit by default) or on an explicit
-            // Bake request from the editor. Moving the sun no longer auto-rebakes — the user controls it
-            // with the Bake button (baking is a heavy device-idle operation).
-            if ( enabled && ( bakeNow || !m_ProceduralEnv ) )
-                m_EnvDirty = true;
-        }
-
-        // Bakes / rebakes the procedural-sky IBL when needed (throttled). Call once per frame from a
-        // frame-boundary-safe point (BEFORE the render graph records), NOT from inside a pass.
+        // Bakes / rebakes the procedural-sky IBL when the rule says so (see ShouldRebakeSkyEnvironment).
+        // Call once per frame from a frame-boundary-safe point (BEFORE the render graph records), NOT from
+        // inside a pass — the bake idles the device.
         void EnsureProceduralEnvironment();
 
         const std::optional<Environment> GetEnvironment() const
         {
-            // While procedural sky is active, the baked atmosphere IBL drives ambient/reflections.
+            // While the procedural sky is active, the baked atmosphere IBL drives ambient/reflections.
             if ( m_UseProceduralSky && m_ProceduralEnv )
                 return m_ProceduralEnv;
 
@@ -61,33 +51,54 @@ namespace Desert::Graphic::System
             return std::nullopt;
         }
 
+        // The evaluated per-frame sky, for renderers that must agree with it (the volumetric clouds).
+        // Valid == false when no enabled atmosphere is driving this frame.
+        const AtmosphereEnv& GetAtmosphere() const
+        {
+            return m_Atmosphere;
+        }
+
         void RegisterPasses( RenderGraphBuilder& builder ) override;
 
     private:
         void Render();
 
+        // Writes the packed parameter block into the SSBO. One buffer serves the graphics pass and the
+        // bake's compute dispatch, so both are guaranteed to describe the same sky.
+        void UploadSkyParams();
+
     private:
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
 
-        Core::Camera*             m_ActiveCamera = nullptr;
-        float                     m_SkyboxIntensity = 1.0f; // HDR-cubemap brightness (SkyboxComponent::Intensity)
+        Core::Camera*                     m_ActiveCamera    = nullptr;
+        float                             m_SkyboxIntensity = 1.0f; // HDR-cubemap brightness
         std::shared_ptr<GraphicsPipeline> m_Pipeline;
-        std::shared_ptr<Shader>   m_Shader;
+        std::shared_ptr<Shader>           m_Shader;
 
         // Procedural sky (engine-generated atmosphere) — alternative to the HDR cubemap, same Sky pass.
         std::shared_ptr<GraphicsPipeline>      m_ProceduralPipeline;
         std::shared_ptr<Shader>                m_ProceduralShader;
         std::shared_ptr<MaterialProceduralSky> m_ProceduralMaterial;
-        bool      m_UseProceduralSky = false;
-        glm::vec3 m_SunDir           = glm::vec3( 0.0f, 1.0f, 0.0f );
-        float     m_SunIntensity     = 22.0f;
-        float     m_SunDiskRadius    = 0.02f;
-        CloudSettings m_Clouds;
+
+        // The sky parameter block, created NON-PERSISTENT so the backend keeps one copy per
+        // (frame in flight x renderer slot). A persistent buffer would be shared by every live
+        // SceneRenderer by design, and the mesh preview would overwrite the viewport's sky.
+        std::shared_ptr<ShaderResources::StorageBuffer> m_SkyParams;
+
+        bool          m_UseProceduralSky = false;
+        glm::vec3     m_SunDir           = glm::vec3( 0.0f, 1.0f, 0.0f ); // TOWARD the sun, normalized
         SkySettings   m_Sky;
+        AtmosphereEnv m_Atmosphere;
 
         // Baked sky IBL (radiance/irradiance/prefiltered cubes) generated from the procedural atmosphere.
         Environment m_ProceduralEnv;
         glm::vec3   m_BakedSunDir = glm::vec3( 0.0f, 1.0f, 0.0f );
-        bool        m_EnvDirty    = false;
+        bool        m_BakeRequested = false;
+
+        // The High-resolution memory report is emitted once per renderer, not once per bake: with the
+        // time-of-day driver a bake can happen every few seconds, and a cost that is announced every time
+        // stops being read. Same reasoning for the below-horizon warning, which is a per-frame condition.
+        bool m_HighResCostLogged  = false;
+        bool m_BelowHorizonLogged = false;
     };
 } // namespace Desert::Graphic::System

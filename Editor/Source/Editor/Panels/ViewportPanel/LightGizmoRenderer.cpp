@@ -8,6 +8,7 @@
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Geometry/SkinnedMesh.hpp>
 #include <Engine/Animation/Animator.hpp>
+#include <Engine/ECS/System/SystemRules.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -170,9 +171,9 @@ namespace Desert::Editor
     void LightGizmoRenderer::RenderDirectionLights( const std::shared_ptr<Desert::Core::Camera>& camera,
                                                     float width, float height )
     {
-        // Sun billboard + direction arrow. The light's DIRECTION is derived from its Translation
-        // (shading uses -normalize(T), same convention as SkyboxECSSystem) — the arrow shows where
-        // the light actually points, which a bare transform never made visible.
+        // Sun billboard + direction arrow. The light's DIRECTION is its Translation and the toward-sun
+        // vector is -normalize(T) — the one convention, through ECS::Rules::AtmosphereSunDirection. The
+        // arrow shows where the light actually points, which a bare transform never made visible.
         auto entities = m_Scene->GetAllEntities();
 
         const ImVec2 windowPos = ImGui::GetWindowPos();
@@ -184,16 +185,22 @@ namespace Desert::Editor
             if ( !entity.HasComponent<ECS::DirectionLightComponent>() )
                 continue;
 
-            // The entity's Translation is a DIRECTION encoding, not a place (the demo sun "sits"
-            // at (0.3, 0.9, 0.3)) — drawing the icon there parked it next to the origin. Instead
-            // the sun billboards IN THE SKY: camera-relative along the toward-sun direction, like
-            // a skybox element — same screen spot for a given direction, from anywhere.
+            // The entity's Translation is a DIRECTION encoding, not a place — drawing the icon there
+            // parked it next to the origin. Instead the sun billboards IN THE SKY: camera-relative along
+            // the toward-sun direction, like a skybox element — same screen spot for a given direction,
+            // from anywhere.
+            //
+            // The negation below is the engine's ONE negation, and it used to be missing here: the gizmo
+            // read Translation as if it pointed AT the sun while every other consumer read it as the
+            // direction the light TRAVELS. Both errors cancelled as long as the shipped scenes authored
+            // their suns upside down; once those were corrected, the compensating inversion had to go with
+            // them, or the icon would sit exactly opposite the sun the sky draws.
             const glm::vec3 t = glm::vec3( entity.GetWorldTransform()[3] );
-            if ( glm::length( t ) < 1e-4f )
+            if ( !::Desert::ECS::Rules::IsSunDirectionValid( t ) )
                 continue; // undefined direction — nothing meaningful to draw
 
-            const glm::vec3 towardSun = glm::normalize( t );          // scene -> sun
-            const glm::vec3 lightDir  = -towardSun;                   // sun -> scene (shading dir)
+            const glm::vec3 towardSun = ::Desert::ECS::Rules::AtmosphereSunDirection( t ); // scene -> sun
+            const glm::vec3 lightDir  = -towardSun;                                        // sun -> scene
             const glm::vec3 iconWorld = camera->GetPosition() + towardSun * 50.0f;
 
             glm::vec2 screenPos;
