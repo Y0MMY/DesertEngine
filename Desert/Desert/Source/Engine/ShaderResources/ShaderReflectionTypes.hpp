@@ -48,6 +48,19 @@ namespace Desert::ShaderResources::ShaderLayout
         Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::Fragment;
     };
 
+    // A `sampler3D` / `image3D` binding. Kept a distinct type from Image2DSampler even though the
+    // fields coincide: reflection puts a resource in exactly one bucket, and the bucket is what tells
+    // the backend which KIND of image view the binding needs. Sharing one type would make a 3D
+    // resource assignable to a 2D slot by accident — the very confusion this type exists to end.
+    struct Image3DSampler
+    {
+        uint32_t                   BindingPoint  = 0;
+        uint32_t                   DescriptorSet = 0;
+        uint32_t                   ArraySize     = 1;
+        std::string                Name;
+        Core::Formats::ShaderStage ShaderStage = Core::Formats::ShaderStage::Fragment;
+    };
+
     struct ImageCubeSampler
     {
         uint32_t                   BindingPoint  = 0;
