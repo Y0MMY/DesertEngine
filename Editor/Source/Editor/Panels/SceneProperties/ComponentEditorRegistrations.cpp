@@ -91,8 +91,9 @@ DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::UIDropdownComponent, Data, "
 // Sky Atmosphere is a CUSTOM entry: the reflected fields PLUS the sky-colour ramp (which needs the scene's
 // sun elevation, and that is not a field) and the IBL bake button. See
 // ComponentWidgets/SkyAtmosphereComponent.cpp.
-DESERT_REGISTER_REFLECTED_COMPONENT( ::Desert::ECS::VolumetricCloudsComponent, Data, "VolumetricCloudData",
-                                     "Volumetric Clouds" )
+// Volumetric Clouds is a CUSTOM entry too: the reflected fields PLUS the preset/quality selectors, which
+// have to write the fields around them, and the noise-seed change that has to reach the generation pass.
+// See ComponentWidgets/VolumetricCloudsComponent.cpp.
 
 namespace Desert::Editor
 {

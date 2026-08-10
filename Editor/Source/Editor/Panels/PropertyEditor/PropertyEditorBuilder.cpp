@@ -120,6 +120,24 @@ namespace Desert::Editor
                                                        nullptr, nullptr, format );
         }
 
+        // A vector whose components share a declared Range: N sliders bounded by it, exactly as a ranged
+        // scalar gets a slider and an unranged one a drag box.
+        //
+        // The unranged vector keeps the axis-coloured drag boxes, and that asymmetry is the point rather
+        // than an oversight. Those colours say "X, Y, Z of a direction in the world", which is true of a
+        // position and false of, say, the four normalized heights of a cloud density gradient — a field
+        // whose components are neither axes nor unbounded. Before this, Range on a vector was accepted by
+        // the annotation parser, carried all the way into the generated metadata, and then silently
+        // dropped here: the artist got three identical unbounded boxes and no hint of the 0..1 the field
+        // actually requires. An annotation that reaches the widget and does nothing is worse than no
+        // annotation, because it reads as a guarantee.
+        bool DrawRangedVector( const char* id, float* v, int n, const Reflection::PropertyMetadata& meta )
+        {
+            const float mn = meta.RangeMin;
+            const float mx = meta.RangeMax;
+            return ImGui::SliderScalarN( id, ImGuiDataType_Float, v, n, &mn, &mx, "%.3f" );
+        }
+
         // Blackbody colour for the temperature slider (Tanner Helland's approximation), normalised so the
         // brightest channel is 1: Kelvin sets the HUE, the light's own Intensity owns brightness.
         glm::vec3 KelvinToRGB( float kelvin )
@@ -541,10 +559,13 @@ namespace Desert::Editor
             // A vector is drawn with axis-coloured edges (X red / Y green / Z blue), the same colours the
             // viewport gizmo uses — the plain DragFloatN gave three identical boxes you had to count.
             // A COLOUR is not a vector in space and keeps its swatch; a field with a unit keeps the
-            // suffixed widget, which carries the unit INSIDE the value text.
+            // suffixed widget, which carries the unit INSIDE the value text; a field with a declared
+            // Range gets sliders bounded by it (DrawRangedVector).
             case FieldType::Vec2:
                 changed = UnitSuffix( field.Meta )
                                ? DrawUnitScalar( "##v", static_cast<float*>( p ), 2, field.Meta )
+                          : field.Meta.HasRange
+                               ? DrawRangedVector( "##v", static_cast<float*>( p ), 2, field.Meta )
                                : Utils::ImGuiUtilities::VectorField( "v", static_cast<float*>( p ), 2, 0.01f );
                 break;
 
@@ -552,6 +573,8 @@ namespace Desert::Editor
                 changed = field.Meta.IsColor ? ImGui::ColorEdit3( "##v", static_cast<float*>( p ) )
                           : UnitSuffix( field.Meta )
                                ? DrawUnitScalar( "##v", static_cast<float*>( p ), 3, field.Meta )
+                          : field.Meta.HasRange
+                               ? DrawRangedVector( "##v", static_cast<float*>( p ), 3, field.Meta )
                                : Utils::ImGuiUtilities::VectorField( "v", static_cast<float*>( p ), 3, 0.01f );
                 break;
 
@@ -559,6 +582,8 @@ namespace Desert::Editor
                 changed = field.Meta.IsColor ? ImGui::ColorEdit4( "##v", static_cast<float*>( p ) )
                           : UnitSuffix( field.Meta )
                                ? DrawUnitScalar( "##v", static_cast<float*>( p ), 4, field.Meta )
+                          : field.Meta.HasRange
+                               ? DrawRangedVector( "##v", static_cast<float*>( p ), 4, field.Meta )
                                : Utils::ImGuiUtilities::VectorField( "v", static_cast<float*>( p ), 4, 0.01f );
                 break;
 
