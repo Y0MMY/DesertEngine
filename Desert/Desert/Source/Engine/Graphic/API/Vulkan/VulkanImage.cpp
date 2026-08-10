@@ -783,9 +783,11 @@ namespace Desert::Graphic::API::Vulkan
 
     Core::Formats::ImagePixelData VulkanImage3D::GetImagePixels()
     {
-        // Volumes are produced on the GPU and consumed on the GPU; nothing in the engine reads one back,
-        // and a readback path nobody calls is a path nobody tests.
-        DESERT_VERIFY( false, "Image3D readback is not implemented" );
+        // A volume is produced on the GPU and consumed on the GPU. There is no readback by design, the
+        // same answer VulkanImage2D gives: a path with no caller is a path with no test, and a volume
+        // readback would be a 32 MiB stall written for nobody. Asking is a caller bug, so it stops here
+        // rather than handing back an empty buffer that reads as "the volume is blank".
+        DESERT_VERIFY( false, "Image3D has no CPU readback" );
         return {};
     }
 
