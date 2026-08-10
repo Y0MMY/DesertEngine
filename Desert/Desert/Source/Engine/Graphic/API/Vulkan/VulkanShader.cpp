@@ -39,7 +39,10 @@ namespace Desert::Graphic::API::Vulkan
     {
         auto device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
         for ( auto module : m_ShaderModules ) vkDestroyShaderModule( device, module, nullptr );
-        for ( auto layout : m_DescriptorSetLayouts ) vkDestroyDescriptorSetLayout( device, layout, nullptr );
+        // The layouts are NOT destroyed here: dropping this shader's references is all this object may
+        // do to them. A pipeline that outlives the shader it was built from keeps its own reference and
+        // its own valid contract, which is the difference between a stale pipeline and a corrupt one.
+        m_DescriptorSetLayouts.clear();
     }
 
     Common::BoolResultStr VulkanShader::Reload()
@@ -64,26 +67,40 @@ namespace Desert::Graphic::API::Vulkan
     {
         auto device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
 
-        // Cleanup old
-        for ( auto module : m_ShaderModules ) vkDestroyShaderModule( device, module, nullptr );
-        for ( auto layout : m_DescriptorSetLayouts ) vkDestroyDescriptorSetLayout( device, layout, nullptr );
-        
-        m_ShaderModules.clear();
-        m_DescriptorSetLayouts.clear();
-        m_PipelineShaderStageCreateInfos.clear();
-        m_ReflectionData.ShaderDescriptorSets.clear();
-        m_ReflectionData.PushConstantRanges = std::nullopt;
+        // TRANSACTIONAL. Everything is built into locals first, and the shader's own state is only
+        // replaced once every stage has compiled and reflected. Tearing the old state down up front
+        // meant a hot reload over a shader with one bad line left the object with no modules and no
+        // layouts — a "keeping the previous version" that had already thrown the previous version away,
+        // and an empty GetPipelineShaderStageCreateInfos() that the next pipeline build indexes [0] of.
+        std::vector<VkShaderModule>                  modules;
+        std::vector<VkPipelineShaderStageCreateInfo> stageInfos;
+        ShaderResource::ReflectionData               reflection;
+
+        const auto discard = [&modules, device]()
+        {
+            for ( auto module : modules )
+                vkDestroyShaderModule( device, module, nullptr );
+        };
 
         for ( const auto& [stage, source] : stages )
         {
             auto spirvResult = Core::ShaderCompiler::CompileGLSLToSPIRV( stage, source, m_ShaderPath.string() );
-            if ( !spirvResult.IsSuccess() ) return Common::MakeError( spirvResult.GetError() );
+            if ( !spirvResult.IsSuccess() )
+            {
+                discard();
+                return Common::MakeError( spirvResult.GetError() );
+            }
 
             const auto& spirv = spirvResult.GetValue();
             VkShaderModuleCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = (uint32_t)(spirv.size() * 4), .pCode = spirv.data() };
             VkShaderModule module;
-            VK_CHECK_RESULT_BOOL( vkCreateShaderModule( device, &ci, nullptr, &module ) );
-            m_ShaderModules.push_back( module );
+            if ( vkCreateShaderModule( device, &ci, nullptr, &module ) != VK_SUCCESS )
+            {
+                discard();
+                return Common::MakeFormattedError( "Shader '{}': vkCreateShaderModule failed for the {} stage",
+                                                   m_ShaderName, GetStringShaderStage( stage ) );
+            }
+            modules.push_back( module );
 
             // Debug name so RenderDoc/validation messages identify the module ("Unlit/Shadow [Vertex]").
             VKUtils::SetDebugUtilsObjectName( device, VK_OBJECT_TYPE_SHADER_MODULE,
@@ -91,26 +108,49 @@ namespace Desert::Graphic::API::Vulkan
                                               module );
 
             VkShaderStageFlagBits vkStage = (VkShaderStageFlagBits)ReflectionUtils::StageToVkStage( stage );
-            m_PipelineShaderStageCreateInfos.push_back( { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = vkStage, .module = module, .pName = "main" } );
+            stageInfos.push_back( { .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                    .stage  = vkStage,
+                                    .module = module,
+                                    .pName  = "main" } );
 
-            auto reflectResult = Reflect( vkStage, spirv );
+            auto reflectResult = Reflect( vkStage, spirv, reflection );
             if ( !reflectResult.IsSuccess() )
+            {
+                discard();
                 return Common::MakeError( reflectResult.GetError() );
+            }
         }
+
+        // Past this line the compile has succeeded, so the old state may go. The modules are ours alone
+        // (a pipeline copies what it needs at creation) and are destroyed; the layouts are only
+        // RELEASED, because a pipeline layout, a descriptor pool or an allocated set built from one is
+        // still using it and keeps it alive until it is itself rebuilt. Destroying them here is what
+        // produced "VkDescriptorSetLayout ... has been destroyed" and a pipeline layout with a different
+        // descriptor count from the set bound to it.
+        for ( auto module : m_ShaderModules )
+            vkDestroyShaderModule( device, module, nullptr );
+
+        m_ShaderModules                  = std::move( modules );
+        m_PipelineShaderStageCreateInfos = std::move( stageInfos );
+        m_ReflectionData                 = std::move( reflection );
+        m_DescriptorSetLayouts.clear();
 
         return CreateDescriptorsLayout();
     }
 
-    Common::BoolResultStr VulkanShader::Reflect( VkShaderStageFlagBits        vkStage,
-                                                 const std::vector<uint32_t>& spirv )
+    Common::BoolResultStr VulkanShader::Reflect( VkShaderStageFlagBits vkStage, const std::vector<uint32_t>& spirv,
+                                                 ShaderResource::ReflectionData& into )
     {
         const Core::Formats::ShaderStage stage = ReflectionUtils::VkStageToStage( vkStage );
 
         // The reflection proper lives in a device-free translation unit: it is the part that decides
         // which descriptor bucket every resource lands in, and that decision used to be made from the
         // variable's NAME. Keeping it free of VkDevice is what lets a test prove a sampler3D is not
-        // filed as a 2D sampler (Desert/Tests/Engine/ShaderReflection).
-        const auto diagnostics = ShaderReflection::ReflectStage( spirv, stage, m_ReflectionData );
+        // filed as a 2D sampler (Desert/Tests/Engine/ShaderReflection, Desert/Tests/Engine/ShaderCacheKey).
+        //
+        // It reflects into the caller's data, not straight into the shader's: a compile that fails
+        // halfway must not leave this object holding half a shader.
+        const auto diagnostics = ShaderReflection::ReflectStage( spirv, stage, into );
         if ( diagnostics.empty() )
         {
             return BOOLSUCCESS;
@@ -133,24 +173,23 @@ namespace Desert::Graphic::API::Vulkan
         auto device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
         for ( const auto& [setIndex, descriptorSet] : m_ReflectionData.ShaderDescriptorSets )
         {
-            std::vector<VkDescriptorSetLayoutBinding> bindings;
-            auto Add = [&]( uint32_t b, VkDescriptorType t, Core::Formats::ShaderStage s ) {
-                bindings.push_back( { .binding = b, .descriptorType = t, .descriptorCount = 1, .stageFlags = (VkShaderStageFlags)s } );
-            };
-            for ( const auto& [b, res] : descriptorSet.UniformBuffers ) Add( b, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, res.ShaderStage );
-            for ( const auto& [b, res] : descriptorSet.Image2DSamplers ) Add( b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, res.ShaderStage );
-            for ( const auto& [b, res] : descriptorSet.Image3DSamplers )
-                Add( b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, res.ShaderStage );
-            for ( const auto& [b, res] : descriptorSet.ImageCubeSamplers ) Add( b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, res.ShaderStage );
-            for ( const auto& [b, res] : descriptorSet.StorageBuffers ) Add( b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, res.ShaderStage );
-            for ( const auto& [b, res] : descriptorSet.StorageImage2DSamplers ) Add( b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, res.ShaderStage );
-            for ( const auto& [b, res] : descriptorSet.StorageImage3DSamplers )
-                Add( b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, res.ShaderStage );
+            // The binding list comes from the device-free reflection unit, so the shape a pipeline
+            // layout and a descriptor set have to agree on is computed by code a test can run without
+            // Vulkan (Tests/Engine/ShaderCacheKey drives it over the real cloud shaders).
+            const auto bindings = ShaderReflection::BuildLayoutBindings( descriptorSet );
 
-            VkDescriptorSetLayoutCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = (uint32_t)bindings.size(), .pBindings = bindings.data() };
-            if ( setIndex >= m_DescriptorSetLayouts.size() ) m_DescriptorSetLayouts.resize( setIndex + 1 );
-            VK_CHECK_RESULT_BOOL( vkCreateDescriptorSetLayout( device, &ci, nullptr, &m_DescriptorSetLayouts[setIndex] ) );
+            if ( setIndex >= m_DescriptorSetLayouts.size() )
+                m_DescriptorSetLayouts.resize( setIndex + 1 );
+
+            auto layout = std::make_shared<VulkanDescriptorSetLayout>( device, setIndex, bindings, m_ShaderName );
+            if ( layout->Handle() == VK_NULL_HANDLE )
+                return Common::MakeFormattedError( "Shader '{}': descriptor set layout {} could not be created",
+                                                   m_ShaderName, setIndex );
+
+            m_DescriptorSetLayouts[setIndex] = std::move( layout );
         }
+
+        ++m_ReloadGeneration;
         return BOOLSUCCESS;
     }
 

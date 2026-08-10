@@ -1,5 +1,6 @@
 #include "ShaderCompiler.hpp"
 #include <Engine/Core/ShaderCompiler/Includer/ShaderIncluder.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 #include <Engine/Graphic/Shader.hpp>
 
 #include <shaderc/shaderc.hpp>
@@ -11,7 +12,6 @@
 #include <format>
 #include <fstream>
 #include <optional>
-#include <unordered_set>
 
 namespace Desert::Core
 {
@@ -34,65 +34,9 @@ namespace Desert::Core
 
         // ---- SPIR-V disk cache -------------------------------------------------------------------
         // Content-addressed: the key hashes the assembled stage source PLUS the content of every
-        // (recursively) included file, so editing an include invalidates all shaders using it.
-        // Cache artifacts live in Cooked/ShaderCache/<key>.spv next to the other cooked assets.
-
-        constexpr uint64_t kFnvOffset = 1469598103934665603ull;
-        constexpr uint64_t kFnvPrime  = 1099511628211ull;
-
-        void FnvMix( uint64_t& h, std::string_view data )
-        {
-            for ( unsigned char c : data )
-            {
-                h ^= c;
-                h *= kFnvPrime;
-            }
-        }
-
-        // Mirrors ShaderIncluder resolution: #include "x" -> relative to the including file,
-        // #include <x> -> relative to the engine shader root. FileSystem is VFS-aware, so packaged
-        // games hash pak contents identically.
-        void HashIncludesRecursive( const std::string& source, const std::filesystem::path& requestingFile,
-                                    uint64_t& h, std::unordered_set<std::string>& visited, int depth = 0 )
-        {
-            if ( depth > 32 )
-                return;
-
-            size_t pos = 0;
-            while ( ( pos = source.find( "#include", pos ) ) != std::string::npos )
-            {
-                const size_t lineEnd = source.find( '\n', pos );
-                const std::string line =
-                     source.substr( pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos );
-                pos += 8;
-
-                const size_t qa = line.find_first_of( "\"<" );
-                if ( qa == std::string::npos )
-                    continue;
-                const char   closer = line[qa] == '"' ? '"' : '>';
-                const size_t qb     = line.find( closer, qa + 1 );
-                if ( qb == std::string::npos )
-                    continue;
-                const std::string name = line.substr( qa + 1, qb - qa - 1 );
-
-                const std::filesystem::path full =
-                     ( line[qa] == '"'
-                            ? requestingFile.parent_path() / name
-                            : Common::Constants::Path::SHADERDIR_PATH / name )
-                          .lexically_normal();
-
-                const std::string key = full.generic_string();
-                if ( !visited.insert( key ).second )
-                    continue;
-                if ( !Common::Utils::FileSystem::Exists( full ) )
-                    continue;
-
-                const std::string content = Common::Utils::FileSystem::ReadFileContent( full );
-                FnvMix( h, key );
-                FnvMix( h, content );
-                HashIncludesRecursive( content, full, h, visited, depth + 1 );
-            }
-        }
+        // (recursively) included file — Core::ComputeShaderCacheKey, shared with the hot-reload
+        // watcher so "what this stage is made of" has exactly one definition. Cache artifacts live in
+        // Cooked/ShaderCache/<key>.spv next to the other cooked assets.
 
         std::filesystem::path CachePathForKey( uint64_t key )
         {
@@ -138,18 +82,7 @@ namespace Desert::Core
     {
         // Cache key: stage + compile-options fingerprint + assembled source + every included file's
         // content (recursive). Content-addressed, so any edit produces a fresh key — no mtime races.
-        uint64_t key = kFnvOffset;
-        FnvMix( key, "vulkan1.1|v1" );
-#ifdef DESERT_CONFIG_DEBUG
-        FnvMix( key, "|debuginfo" ); // debug info changes the binary — keep configs apart
-#endif
-        key ^= static_cast<uint64_t>( stage );
-        key *= kFnvPrime;
-        FnvMix( key, source );
-        {
-            std::unordered_set<std::string> visited;
-            HashIncludesRecursive( source, shaderPath, key, visited );
-        }
+        const uint64_t key = ComputeShaderCacheKey( stage, source, shaderPath );
 
         if ( auto cached = TryLoadCachedSpirv( key ) )
             return Common::MakeSuccess( std::move( *cached ) );

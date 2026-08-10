@@ -41,6 +41,10 @@ namespace Desert::Runtime
         void PollMaterials( Assets::AssetManager& assetManager, Core::Scene* scene );
         void PollShaders( Assets::AssetManager& assetManager, Core::Scene* scene );
 
+        // Records @p path's mtime and reports whether it MOVED since the last poll. A file seen for the
+        // first time returns false: the first sighting is a baseline, not an edit.
+        bool TouchWatched( const std::filesystem::path& path );
+
         using Clock = std::filesystem::file_time_type;
         std::unordered_map<std::string, Clock> m_KnownTimes;
         float                                  m_Accum       = 0.0f;

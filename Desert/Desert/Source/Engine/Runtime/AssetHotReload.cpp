@@ -15,6 +15,7 @@
 #include <Engine/Runtime/Services/Material/MaterialService.hpp>
 #include <Engine/Runtime/Services/Shader/ShaderService.hpp>
 #include <Engine/Core/ShaderCompiler/DShader/DShaderParser.hpp>
+#include <Engine/Core/ShaderCompiler/ShaderCacheKey.hpp>
 
 namespace Desert::Runtime
 {
@@ -137,6 +138,26 @@ namespace Desert::Runtime
         }
     }
 
+    bool AssetHotReload::TouchWatched( const std::filesystem::path& path )
+    {
+        std::error_code ec;
+        const auto      mtime = std::filesystem::last_write_time( path, ec );
+        if ( ec )
+            return false; // deleted/missing — leave the in-memory version alone
+
+        const std::string key = path.generic_string();
+        auto              it  = m_KnownTimes.find( key );
+        if ( it == m_KnownTimes.end() )
+        {
+            m_KnownTimes[key] = mtime; // first sighting — baseline only
+            return false;
+        }
+
+        const bool changed = it->second != mtime;
+        it->second         = mtime;
+        return changed;
+    }
+
     void AssetHotReload::PollShaders( Assets::AssetManager& assetManager, Core::Scene* scene )
     {
         auto* shaderService = ResourceRegistry::GetShaderService();
@@ -149,24 +170,21 @@ namespace Desert::Runtime
                 continue;
             const auto& path = asset->GetMetadata().Filepath;
 
-            std::error_code ec;
-            const auto      mtime = std::filesystem::last_write_time( path, ec );
-            if ( ec )
+            // A shader is its .shader file AND every .glslh that file pulls in — the same closure the
+            // SPIR-V cache key hashes, so the two cannot disagree about what a shader is made of.
+            // Watching only the .shader was a real hole: a shared header could be edited and nothing
+            // recompiled until the next restart, which is the same silent staleness an under-specified
+            // cache key produces, arriving through the other door.
+            bool changed = TouchWatched( path );
+            for ( const auto& include : Core::CollectShaderIncludes( asset->GetShaderContent(), path ) )
+            {
+                changed = TouchWatched( include ) || changed;
+            }
+
+            if ( !changed || m_FirstScan )
                 continue;
 
             const std::string key = path.generic_string();
-            auto              it  = m_KnownTimes.find( key );
-            if ( it == m_KnownTimes.end() )
-            {
-                m_KnownTimes[key] = mtime;
-                continue;
-            }
-            if ( it->second == mtime || m_FirstScan )
-            {
-                it->second = mtime;
-                continue;
-            }
-            it->second = mtime;
 
             if ( const auto res = asset->Load(); !res )
             {
@@ -201,11 +219,19 @@ namespace Desert::Runtime
                 continue;
             }
 
-            LOG_INFO( "[HotReload] Shader '{}' recompiled", shader->GetName() );
+            // Renderer-owned pipelines (the batched PBR/shadow set, every compute pipeline, the
+            // cloud composite) are built once at init and keep the code they were built with until
+            // a restart. That is now merely STALE and no longer unsafe: the pipeline holds strong
+            // references to the descriptor set layouts it was built from, so recompiling under it
+            // cannot leave it bound to a layout that has been destroyed (see
+            // VulkanDescriptorSetLayout.hpp). Said on every recompile, because "the shader did not
+            // change anything" is otherwise indistinguishable from "the shader did not compile".
+            LOG_INFO( "[HotReload] Shader '{}' recompiled. Graph pipelines pick it up next frame; "
+                      "renderer-owned pipelines (compute, batched PBR/shadow, cloud composite) keep "
+                      "the previous code until the editor is restarted.",
+                      shader->GetName() );
 
-            // Rebuild cached pipelines against the new modules. Renderer-owned specialized
-            // pipelines (batched PBR/shadow/etc.) are built once at init and still need a
-            // restart to pick the change up.
+            // Rebuild cached pipelines against the new modules.
             if ( scene )
                 if ( auto* sceneRenderer = scene->GetSceneRenderer() )
                 {

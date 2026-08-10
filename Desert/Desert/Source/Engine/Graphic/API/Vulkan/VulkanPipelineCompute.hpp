@@ -75,6 +75,14 @@ namespace Desert::Graphic::API::Vulkan
 
         std::unique_ptr<VulkanMaterialBackend> m_VulkanMaterialBackend;
 
+        // THE layouts of this pipeline: the ones m_ComputePipelineLayout was built from, the ones the
+        // in-frame ring is allocated from, and the ones its pool is sized against. One capture, one
+        // contract — a descriptor set and the pipeline layout it is bound to cannot describe different
+        // shaders while both come from here. Strong references, so a shader recompile cannot pull them
+        // out from under a pipeline that is still using them.
+        std::vector<DescriptorSetLayoutRef> m_Layouts;
+        uint32_t                            m_ShaderGeneration = 0;
+
         VkCommandBuffer m_ActiveComputeCommandBuffer = nullptr;
 
         // Bound resources for the next Dispatch (set via SetInput/SetOutput/SetPushConstants).
