@@ -25,3 +25,11 @@ Reference screenshots for the modeling tools live in `ModelingImages/`.
   pinned it open by hand.
 * **Never render offscreen from `OnUIRender()`** — defer GPU work to `OnPreUpdate()`, or descriptor pools
   get destroyed while their sets are bound to the recording command buffer.
+* **Render-graph pass order is defined, so declare yours** — passes run in phase order (the topological
+  sort of the phase graph, ties broken by the registry's declaration order), and inside one phase by
+  `PassConfig::OrderInPhase` and then by the order `AddPass` was called in. Registration order is the
+  default because it is visible to the pass author, but it is a call-site ordering: if your pass must be
+  over or under a particular neighbour, say so with `OrderInPhase` (`RenderPassOrder::FarField` /
+  `NearField` in `Engine/Graphic/RenderGraphSort.hpp`) instead of relying on where `SceneRenderer::Init`
+  happens to register your system. The rules are pure functions there, covered by
+  `Tests/Engine/RenderGraphSort`.

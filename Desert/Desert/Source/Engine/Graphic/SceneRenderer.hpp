@@ -335,14 +335,25 @@ namespace Desert::Graphic
         bool m_SSRResourcesFailed = false;
         RenderGraphBuilder      m_RenderGraphBuilder;
         std::unordered_map<std::string, std::shared_ptr<IRenderSystem>> m_RenderSystems;
+
+        // The names above, in the order they were first registered. RebuildRenderGraph walks THIS, not
+        // the map: the map hands its systems out in hash-bucket order, so "the pass registered first"
+        // meant "the pass whose system name happened to hash low", and it changed whenever a system was
+        // added. The render graph tie-breaks equal passes inside a phase by registration order, so this
+        // vector is what turns the order of the RegisterSystem calls in Init into the draw order.
+        std::vector<std::string>                                        m_RenderSystemOrder;
         PipelineCache                                                   m_PipelineCache;
+
+        // Registers a system under `name`, or replaces the system already registered under it while
+        // keeping its original position in the registration order.
+        void TrackRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system );
+        void ForgetRenderSystem( const std::string& name );
 
     private:
         template <typename System, typename... Args>
         void RegisterSystem( const std::string& system, Args&&... args )
         {
-            m_RenderSystems.emplace( std::move( system ),
-                                     std::make_shared<System>( std::forward<Args>( args )... ) );
+            TrackRenderSystem( system, std::make_shared<System>( std::forward<Args>( args )... ) );
         }
     };
 } // namespace Desert::Graphic

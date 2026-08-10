@@ -24,6 +24,7 @@ namespace Desert::Graphic
         // Rebuild from scratch so every system and its framebuffers are recreated consistently —
         // stale systems hold weak_ptrs to framebuffers that get recreated here, which would dangle.
         m_RenderSystems.clear();
+        m_RenderSystemOrder.clear();
 
         // Pipelines key off framebuffer pointers that are recreated below; drop the cache so systems
         // request fresh pipelines during their Initialize().
@@ -1011,29 +1012,51 @@ namespace Desert::Graphic
         }
     } // namespace
 
+    void SceneRenderer::TrackRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system )
+    {
+        // Replacing a system keeps the slot it already holds in the registration order: an editor tool
+        // that re-registers its pass every time a setting changes must not walk to the back of the queue
+        // and start drawing over neighbours it used to draw under.
+        if ( m_RenderSystems.find( name ) == m_RenderSystems.end() )
+            m_RenderSystemOrder.push_back( name );
+
+        m_RenderSystems[name] = std::move( system );
+    }
+
+    void SceneRenderer::ForgetRenderSystem( const std::string& name )
+    {
+        m_RenderSystems.erase( name );
+        m_RenderSystemOrder.erase( std::remove( m_RenderSystemOrder.begin(), m_RenderSystemOrder.end(), name ),
+                                   m_RenderSystemOrder.end() );
+    }
+
     void SceneRenderer::RegisterExternalPass( ExternalPassSpecification&& spec )
     {
         DESERT_VERIFY( !spec.Name.empty() && spec.Execute );
-        auto key             = ExternalSystemKey( spec.Name );
-        m_RenderSystems[key] = std::make_shared<ExternalPassSystem>( this, std::move( spec ) );
+        TrackRenderSystem( ExternalSystemKey( spec.Name ),
+                           std::make_shared<ExternalPassSystem>( this, std::move( spec ) ) );
         RebuildRenderGraph();
     }
 
     void SceneRenderer::UnregisterExternalPass( const std::string& name )
     {
-        if ( m_RenderSystems.erase( ExternalSystemKey( name ) ) > 0 )
-            RebuildRenderGraph();
+        const auto key = ExternalSystemKey( name );
+        if ( m_RenderSystems.find( key ) == m_RenderSystems.end() )
+            return;
+
+        ForgetRenderSystem( key );
+        RebuildRenderGraph();
     }
 
     void SceneRenderer::RegisterRenderSystem( const std::string& name, std::shared_ptr<IRenderSystem> system )
     {
-        m_RenderSystems[name] = system;
+        TrackRenderSystem( name, std::move( system ) );
         RebuildRenderGraph();
     }
 
     void SceneRenderer::UnregisterRenderSystem( const std::string& name )
     {
-        m_RenderSystems.erase( name );
+        ForgetRenderSystem( name );
         RebuildRenderGraph();
     }
 
@@ -1041,9 +1064,16 @@ namespace Desert::Graphic
     {
         m_RenderGraphBuilder.Clear();
 
-        for ( auto& [name, system] : m_RenderSystems )
+        // Registration order, not map order: passes registered earlier draw earlier inside a phase
+        // (RenderGraphBuilder::AddPass), so walking the hash map here would have made the draw order a
+        // property of the system NAMES. Looking each name up also skips the null entries that the
+        // m_RenderSystems[...] accesses elsewhere in this file insert for systems that were never
+        // registered — the map walk used to call RegisterPasses through those.
+        for ( const auto& name : m_RenderSystemOrder )
         {
-            system->RegisterPasses( m_RenderGraphBuilder );
+            const auto it = m_RenderSystems.find( name );
+            if ( it != m_RenderSystems.end() && it->second )
+                it->second->RegisterPasses( m_RenderGraphBuilder );
         }
 
         m_RenderGraphBuilder.AddPhaseDependency( RenderPhase::DepthPrePass, RenderPhase::Geometry );
