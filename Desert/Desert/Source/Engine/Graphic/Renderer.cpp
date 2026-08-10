@@ -142,14 +142,24 @@ namespace Desert::Graphic
         s_RendererAPI->DispatchComputeCull( pipeline, groupCountX, groupCountY, groupCountZ );
     }
 
-    void Renderer::ComputeImageBeginWrite( Image2D* image )
+    void Renderer::ComputeImageBeginWrite( Image* image )
     {
         s_RendererAPI->ComputeImageBeginWrite( image );
     }
 
-    void Renderer::ComputeImageEndWrite( Image2D* image )
+    void Renderer::ComputeImageEndWrite( Image* image )
     {
         s_RendererAPI->ComputeImageEndWrite( image );
+    }
+
+    void Renderer::ComputeImageBeginRead( Image* image )
+    {
+        s_RendererAPI->ComputeImageBeginRead( image );
+    }
+
+    void Renderer::ComputeImageEndRead( Image* image )
+    {
+        s_RendererAPI->ComputeImageEndRead( image );
     }
 
     void Renderer::CopyDepthImage( Image2D* src, Image2D* dst )

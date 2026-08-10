@@ -560,11 +560,13 @@ namespace Desert::Graphic::API::Vulkan
                               1, &barrier, 0, nullptr, 0, nullptr );
     }
 
-    void VulkanRendererAPI::ComputeImageBeginWrite( Image2D* image )
+    void VulkanRendererAPI::ComputeImageBeginWrite( Image* image )
     {
         if ( !m_CurrentCommandBuffer )
             return;
-        auto* vkImage = dynamic_cast<VulkanImage2D*>( image );
+        // IVulkanImage, not VulkanImage2D: 2D targets, cubes and volumes all transition the same way,
+        // and each supplies its own aspect mask and layer count.
+        auto* vkImage = dynamic_cast<IVulkanImage*>( image );
         if ( !vkImage )
             return;
 
@@ -583,11 +585,11 @@ namespace Desert::Graphic::API::Vulkan
                                    VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT );
     }
 
-    void VulkanRendererAPI::ComputeImageEndWrite( Image2D* image )
+    void VulkanRendererAPI::ComputeImageEndWrite( Image* image )
     {
         if ( !m_CurrentCommandBuffer )
             return;
-        auto* vkImage = dynamic_cast<VulkanImage2D*>( image );
+        auto* vkImage = dynamic_cast<IVulkanImage*>( image );
         if ( !vkImage )
             return;
 
@@ -595,6 +597,46 @@ namespace Desert::Graphic::API::Vulkan
         vkImage->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                                    VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT );
+    }
+
+    void VulkanRendererAPI::ComputeImageBeginRead( Image* image )
+    {
+        if ( !m_CurrentCommandBuffer )
+            return;
+        auto* vkImage = dynamic_cast<IVulkanImage*>( image );
+        if ( !vkImage )
+            return;
+
+        // Source stage covers both producers this is used for: a depth attachment written by the
+        // late-fragment depth test, and a colour attachment written by fragment output. The aspect mask
+        // is the image's own, so a D24S8 attachment is barriered as DEPTH|STENCIL.
+        vkImage->TransitionLayout( m_CurrentCommandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+                                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                   VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                                   VK_ACCESS_SHADER_READ_BIT );
+    }
+
+    void VulkanRendererAPI::ComputeImageEndRead( Image* image )
+    {
+        if ( !m_CurrentCommandBuffer )
+            return;
+        auto* vkImage = dynamic_cast<IVulkanImage*>( image );
+        if ( !vkImage )
+            return;
+
+        // Hand the image back in the layout its owner expects to find it in next frame — for the scene
+        // depth attachment that is DEPTH_STENCIL_ATTACHMENT_OPTIMAL. Leaving it in SHADER_READ_ONLY would
+        // make the next depth pass begin from the wrong layout, which the render pass does not fix.
+        vkImage->TransitionLayout( m_CurrentCommandBuffer, vkImage->GetDefaultLayout(),
+                                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                   VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                   VK_ACCESS_SHADER_READ_BIT,
+                                   VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT );
     }
 
     void VulkanRendererAPI::CopyDepthImage( Image2D* src, Image2D* dst )

@@ -9,8 +9,11 @@
 
 namespace Desert::Graphic
 {
+    class Image3D;
+
     using ImageCubeRef = std::shared_ptr<ImageCube>;
     using Image2DRef   = std::shared_ptr<Image2D>;
+    using Image3DRef   = std::shared_ptr<Image3D>;
 
     class Image
     {
@@ -34,10 +37,9 @@ namespace Desert::Graphic
             return m_Hash;
         }
 
-        static uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format );
-        // Calculates the byte size of an image based on dimensions and format
-        static uint32_t CalculateImageSize( uint32_t width, uint32_t height,
-                                            const Core::Formats::ImageFormat& format );
+        // Byte size and bytes-per-pixel now live with the format they describe, as total functions:
+        // Core::Formats::GetBytesPerPixel / CalculateImageSize (Core/Formats/ImageFormat.hpp). They used
+        // to be statics here that returned 0 for any format they did not recognise.
 
     private:
         const Common::UUID m_Hash;
@@ -79,10 +81,32 @@ namespace Desert::Graphic
         static std::shared_ptr<ImageCube> Copy( const std::shared_ptr<ImageCube>& targetImageCube );
     };
 
+    /**
+     * @brief A volume texture: sampled as `sampler3D`, written by compute as `image3D`.
+     *
+     * Single mip level by design — see the note on Core::Formats::Image3DSpecification. Create() takes no
+     * mip generator for the same reason: an argument that could only ever be ignored.
+     *
+     * The backend gives every volume a LINEAR / REPEAT sampler that does NOT follow the global Scene
+     * Settings texture filter. Interpolating a noise volume is part of the algorithm, not a quality
+     * preference: with "Nearest" selected for textures, a trilinearly-sampled cloud volume would turn
+     * into visible voxels.
+     */
+    class Image3D : public Image, public DynamicResources
+    {
+    public:
+        virtual ~Image3D() = default;
+
+        [[nodiscard]] virtual uint32_t GetDepth() const = 0;
+
+        virtual Core::Formats::Image3DSpecification& GetImageSpecification() = 0;
+
+        static std::shared_ptr<Image3D> Create( const Core::Formats::Image3DSpecification& spec );
+    };
+
     namespace Utils
     {
-        static inline uint32_t GetBytesPerPixel( const Core::Formats::ImageFormat& format );
-        bool                   IsDepthFormat( Core::Formats::ImageFormat format );
+        bool IsDepthFormat( Core::Formats::ImageFormat format );
         bool                   HasStencilComponent( Core::Formats::ImageFormat format );
         inline uint32_t        CalculateMipCount( uint32_t width, uint32_t height, uint32_t depth = 1 )
         {

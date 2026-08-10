@@ -21,21 +21,38 @@ namespace Desert::Graphic::API::Vulkan
             return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
 
-        static void CreateSampler( VkDevice device, VkSampler& outSampler )
+        // Where a sampler's filtering comes from.
+        enum class SamplerFilterPolicy
+        {
+            // Follow the global Scene Settings texture filter (RenderConfig) — ordinary textures, whose
+            // filtering IS a user quality preference.
+            Global,
+            // Always LINEAR with REPEAT addressing, whatever the user picked. For volumes whose
+            // interpolation is part of the algorithm: with "Nearest" selected for texture quality, a
+            // trilinearly-sampled noise volume would render as visible voxels instead of clouds.
+            AlwaysLinear
+        };
+
+        static void CreateSampler( VkDevice device, VkSampler& outSampler, SamplerFilterPolicy policy )
         {
             // Global filter selected in Scene Settings (pushed into RenderConfig by SceneRenderer):
             // Nearest | Bilinear (linear, nearest mip) | Trilinear (linear, linear mip) | Anisotropic.
-            using FM            = Graphic::TextureFilterMode;
-            const int  mode     = Graphic::RenderConfig::TextureFilter.load();
-            const bool nearest  = mode == static_cast<int>( FM::Nearest );
-            const bool linearMip = mode == static_cast<int>( FM::Trilinear ) || mode == static_cast<int>( FM::Anisotropic );
+            using FM             = Graphic::TextureFilterMode;
+            const bool forceLinear = policy == SamplerFilterPolicy::AlwaysLinear;
+            const int  mode      = Graphic::RenderConfig::TextureFilter.load();
+            const bool nearest   = !forceLinear && mode == static_cast<int>( FM::Nearest );
+            const bool linearMip = forceLinear || mode == static_cast<int>( FM::Trilinear ) ||
+                                   mode == static_cast<int>( FM::Anisotropic );
 
             const VkFilter            filter  = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
             const VkSamplerMipmapMode mipMode = linearMip ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
             // Anisotropy: only when requested AND the device supports it (MaxAnisotropy > 1 = supported).
+            // Never for a volume: anisotropic filtering of a 3D noise field buys nothing and is not
+            // guaranteed for VK_IMAGE_TYPE_3D.
             const float deviceMaxAniso = Graphic::RenderConfig::MaxAnisotropy.load();
-            const bool  useAniso       = mode == static_cast<int>( FM::Anisotropic ) && deviceMaxAniso > 1.0f;
+            const bool  useAniso =
+                 !forceLinear && mode == static_cast<int>( FM::Anisotropic ) && deviceMaxAniso > 1.0f;
             // User-selected level (4/8/16x), clamped to what the device supports.
             const float requestedAniso = static_cast<float>( Graphic::RenderConfig::AnisotropyLevel.load() );
             const float maxAniso =
@@ -55,6 +72,18 @@ namespace Desert::Graphic::API::Vulkan
                  .minLod           = 0.0f,
                  .maxLod           = 100.0f,
                  .borderColor      = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE };
+
+            // Guard the promise, not the branch: everything above is derived from several variables, and
+            // a later edit that reintroduces the global filter into this path would otherwise be found
+            // only by looking at a voxelised sky.
+            if ( forceLinear )
+            {
+                DESERT_VERIFY( info.magFilter == VK_FILTER_LINEAR && info.minFilter == VK_FILTER_LINEAR &&
+                                    info.addressModeU == VK_SAMPLER_ADDRESS_MODE_REPEAT &&
+                                    info.addressModeV == VK_SAMPLER_ADDRESS_MODE_REPEAT &&
+                                    info.addressModeW == VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                               "A volume sampler must be LINEAR/REPEAT regardless of the texture filter" );
+            }
 
             VK_CHECK_RESULT( vkCreateSampler( device, &info, nullptr, &outSampler ) );
         }
@@ -89,17 +118,31 @@ namespace Desert::Graphic::API::Vulkan
 
     VkFormat GetImageVulkanFormat( const Core::Formats::ImageFormat& format )
     {
-        switch ( format )
-        {
-            case Core::Formats::ImageFormat::RGBA8F:         return VK_FORMAT_R8G8B8A8_UNORM;
-            case Core::Formats::ImageFormat::RGBA32F:        return VK_FORMAT_R32G32B32A32_SFLOAT;
-            case Core::Formats::ImageFormat::BGRA8F:         return VK_FORMAT_B8G8R8A8_UNORM;
-            case Core::Formats::ImageFormat::DEPTH32F:       return VK_FORMAT_D32_SFLOAT;
-            case Core::Formats::ImageFormat::DEPTH24STENCIL8: 
-                return SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
-                     ->GetPhysicalDevice()->GetDepthFormat();
-            default: return VK_FORMAT_UNDEFINED;
-        }
+        // DEPTH24STENCIL8 is the one entry the table cannot answer on its own — it means "whatever packed
+        // depth+stencil format this physical device picked". Everything else is fixed, so the device is
+        // only consulted when it actually has a say.
+        const VkFormat deviceDepthFormat =
+             format == Core::Formats::ImageFormat::DEPTH24STENCIL8
+                  ? SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
+                         ->GetPhysicalDevice()
+                         ->GetDepthFormat()
+                  : VK_FORMAT_UNDEFINED;
+
+        return Utils::GetVulkanFormat( format, deviceDepthFormat );
+    }
+
+    VkImageAspectFlags GetImageVulkanAspect( Core::Formats::ImageFormat format )
+    {
+        const Core::Formats::ImageAspect aspect = Core::Formats::GetImageAspect( format );
+
+        VkImageAspectFlags flags = 0;
+        if ( aspect & Core::Formats::ImageAspect_Colour )
+            flags |= VK_IMAGE_ASPECT_COLOR_BIT;
+        if ( aspect & Core::Formats::ImageAspect_Depth )
+            flags |= VK_IMAGE_ASPECT_DEPTH_BIT;
+        if ( aspect & Core::Formats::ImageAspect_Stencil )
+            flags |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        return flags;
     }
 
     // --- VulkanImage2D ---
@@ -133,8 +176,8 @@ namespace Desert::Graphic::API::Vulkan
                               ->GetVulkanAllocator()
                               .get();
 
-        const uint32_t size =
-             Image::CalculateImageSize( m_Specification.Width, m_Specification.Height, m_Specification.Format );
+        const uint64_t size = Core::Formats::CalculateImageSize( m_Specification.Width, m_Specification.Height,
+                                                                 m_Specification.Format );
         const VkImageLayout finalLayout =
              Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
@@ -148,7 +191,7 @@ namespace Desert::Graphic::API::Vulkan
                   .GetValue();
 
         void* mapped = allocator->MapMemory( stagingAlloc );
-        memcpy( mapped, Utils::GetPixelDataPtr( data ), size );
+        memcpy( mapped, Utils::GetPixelDataPtr( data ), static_cast<size_t>( size ) );
         allocator->UnmapMemory( stagingAlloc );
 
         auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
@@ -243,7 +286,7 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.ImageView = Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, aspect, VK_IMAGE_VIEW_TYPE_2D, 1, m_Resource.MipLevels );
 
         if ( m_Specification.Properties & Core::Formats::Sample )
-            Utils::CreateSampler( vkDevice, m_Resource.Sampler );
+            Utils::CreateSampler( vkDevice, m_Resource.Sampler, Utils::SamplerFilterPolicy::Global );
 
         for ( uint32_t i = 0; i < m_Resource.MipLevels; ++i )
             m_MipViews.push_back( Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, aspect, VK_IMAGE_VIEW_TYPE_2D, 1, 1, i ) );
@@ -252,13 +295,14 @@ namespace Desert::Graphic::API::Vulkan
 
         if ( Core::Formats::HasData( m_Specification.Data ) )
         {
-            uint32_t size = Image::CalculateImageSize( m_Specification.Width, m_Specification.Height, m_Specification.Format );
+            uint64_t size = Core::Formats::CalculateImageSize( m_Specification.Width, m_Specification.Height,
+                                                               m_Specification.Format );
             VkBuffer staging; VmaAllocation stagingAlloc;
             VkBufferCreateInfo bInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT };
             stagingAlloc = allocator->RT_AllocateBuffer( "Staging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging ).GetValue();
-            
+
             void* mapped = allocator->MapMemory( stagingAlloc );
-            memcpy( mapped, Utils::GetPixelDataPtr( m_Specification.Data ), size );
+            memcpy( mapped, Utils::GetPixelDataPtr( m_Specification.Data ), static_cast<size_t>( size ) );
             allocator->UnmapMemory( stagingAlloc );
 
             // Transition UNDEFINED -> TRANSFER_DST_OPTIMAL -> finalDefaultLayout
@@ -378,7 +422,7 @@ namespace Desert::Graphic::API::Vulkan
         auto allocator =
              SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
 
-        const uint32_t     srcSize = Image::CalculateImageSize( w, h, fmt ); // GPU bytes
+        const uint64_t     srcSize = Core::Formats::CalculateImageSize( w, h, fmt ); // GPU bytes
         VkBuffer           staging = VK_NULL_HANDLE;
         VkBufferCreateInfo bInfo   = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                        .size  = srcSize,
@@ -398,9 +442,9 @@ namespace Desert::Graphic::API::Vulkan
                                                                      : original );
         CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
 
-        std::vector<uint8_t> raw( srcSize );
+        std::vector<uint8_t> raw( static_cast<size_t>( srcSize ) );
         void*                mapped = allocator->MapMemory( stagingAlloc );
-        memcpy( raw.data(), mapped, srcSize );
+        memcpy( raw.data(), mapped, static_cast<size_t>( srcSize ) );
         allocator->UnmapMemory( stagingAlloc );
         allocator->RT_DestroyBuffer( staging, stagingAlloc );
 
@@ -444,7 +488,11 @@ namespace Desert::Graphic::API::Vulkan
                                           VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
                                           VkAccessFlags srcAccess, VkAccessFlags dstAccess )
     {
-        VkImageSubresourceRange range{ .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        // The aspect comes from the FORMAT. This used to be a hardcoded COLOR bit, which is why the scene
+        // depth attachment could not be moved to SHADER_READ_ONLY for a compute read: naming COLOR on a
+        // D24S8 image is a VUID-VkImageMemoryBarrier-image-03319 violation, and naming DEPTH alone on a
+        // packed depth+stencil image is another.
+        VkImageSubresourceRange range{ .aspectMask     = GetImageVulkanAspect( m_Specification.Format ),
                                        .baseMipLevel   = 0,
                                        .levelCount     = m_Resource.MipLevels,
                                        .baseArrayLayer = 0,
@@ -453,6 +501,11 @@ namespace Desert::Graphic::API::Vulkan
                                                                m_Resource.Layout, newLayout, srcStage,
                                                                dstStage, range );
         m_Resource.Layout = newLayout;
+    }
+
+    VkImageLayout VulkanImage2D::GetDefaultLayout() const
+    {
+        return Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
     }
 
     VkImageView VulkanImage2D::GetMipView( uint32_t level ) const { return m_MipViews[level]; }
@@ -516,7 +569,7 @@ namespace Desert::Graphic::API::Vulkan
         m_Resource.Allocation = allocResult.GetValue();
 
         m_Resource.ImageView = Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_CUBE, 6, m_Resource.MipLevels );
-        Utils::CreateSampler( vkDevice, m_Resource.Sampler );
+        Utils::CreateSampler( vkDevice, m_Resource.Sampler, Utils::SamplerFilterPolicy::Global );
 
         for ( uint32_t i = 0; i < m_Resource.MipLevels; ++i )
             m_MipViews.push_back( Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_CUBE, 6, 1, i ) );
@@ -533,27 +586,236 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanImageCube::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )
     {
-        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format, 
+        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format,
                                                                m_Resource.Layout, newLayout, 6, mip == 0 ? m_Resource.MipLevels : 1 );
         m_Resource.Layout = newLayout;
+    }
+
+    void VulkanImageCube::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout,
+                                            VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                                            VkAccessFlags srcAccess, VkAccessFlags dstAccess )
+    {
+        VkImageSubresourceRange range{ .aspectMask     = GetImageVulkanAspect( m_Specification.Format ),
+                                       .baseMipLevel   = 0,
+                                       .levelCount     = m_Resource.MipLevels,
+                                       .baseArrayLayer = 0,
+                                       .layerCount     = 6 };
+        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, srcAccess, dstAccess,
+                                                               m_Resource.Layout, newLayout, srcStage,
+                                                               dstStage, range );
+        m_Resource.Layout = newLayout;
+    }
+
+    VkImageLayout VulkanImageCube::GetDefaultLayout() const
+    {
+        return Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
     }
 
     VkImageView VulkanImageCube::GetMipView( uint32_t level ) const { return m_MipViews[level]; }
     Core::Formats::ImagePixelData VulkanImageCube::GetImagePixels() { return {}; }
 
+    // --- VulkanImage3D ---
+
+    VulkanImage3D::VulkanImage3D( const Core::Formats::Image3DSpecification& spec ) : m_Specification( spec ) {}
+    VulkanImage3D::~VulkanImage3D() { Release(); }
+    void VulkanImage3D::Use( uint32_t slot ) const {}
+    Common::BoolResultStr VulkanImage3D::Invalidate() { return RT_Invalidate(); }
+    Common::BoolResultStr VulkanImage3D::RT_Invalidate() { Release(); return CreateResource(); }
+
+    Common::BoolResultStr VulkanImage3D::Release()
+    {
+        if ( !m_Resource.Image ) return BOOLSUCCESS;
+        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
+        // Deferred by frame index inside the allocator, so a volume released while a frame that still
+        // references it is in flight is destroyed only once the GPU is done with it.
+        allocator->RT_DestroyImage( m_Resource.Image, m_Resource.Allocation, m_Resource.ImageView, m_Resource.Sampler, m_MipViews );
+        m_Resource = {}; m_MipViews.clear(); m_IsLoaded = false;
+        return BOOLSUCCESS;
+    }
+
+    Common::BoolResultStr VulkanImage3D::CreateResource()
+    {
+        if ( m_Specification.Width == 0 || m_Specification.Height == 0 || m_Specification.Depth == 0 )
+            return Common::MakeFormattedError<bool>( "Image3D '{}': zero extent {}x{}x{}", m_Specification.Tag,
+                                                     m_Specification.Width, m_Specification.Height,
+                                                     m_Specification.Depth );
+
+        // A volume is a sampled/storage texture, never an attachment: Vulkan cannot render into a 3D image
+        // without a layered framebuffer, which the engine does not create. Refuse loudly rather than
+        // produce an image whose usage flags silently do not match how it is bound.
+        if ( !( m_Specification.Properties & ( Core::Formats::Storage | Core::Formats::Sample ) ) )
+            return Common::MakeFormattedError<bool>(
+                 "Image3D '{}': Properties must request Storage and/or Sample (got {})", m_Specification.Tag,
+                 static_cast<uint32_t>( m_Specification.Properties ) );
+
+        auto vkDevice = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
+        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
+
+        m_Resource.Format     = GetImageVulkanFormat( m_Specification.Format );
+        m_Resource.MipLevels  = 1;
+        m_Resource.LayerCount = 1;
+        m_Resource.Layout     = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        const VkImageLayout finalDefaultLayout =
+             Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
+
+        VkImageCreateInfo info = {
+             .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+             .imageType     = VK_IMAGE_TYPE_3D,
+             .format        = m_Resource.Format,
+             .extent        = { m_Specification.Width, m_Specification.Height, m_Specification.Depth },
+             .mipLevels     = 1,
+             // A 3D image has exactly one layer: its slices are the depth extent, not array elements.
+             .arrayLayers   = 1,
+             .samples       = VK_SAMPLE_COUNT_1_BIT,
+             .tiling        = VK_IMAGE_TILING_OPTIMAL,
+             .usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+             .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
+             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+
+        if ( m_Specification.Properties & Core::Formats::Storage ) info.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+
+        auto allocResult = allocator->RT_AllocateImage( m_Specification.Tag, info, VMA_MEMORY_USAGE_GPU_ONLY, m_Resource.Image );
+        if ( !allocResult.IsSuccess() ) return Common::MakeError<bool>( allocResult.GetError() );
+        m_Resource.Allocation = allocResult.GetValue();
+
+        // Name the VkImage as well as the VMA allocation, so a capture lists "CloudShapeNoise" rather
+        // than a nameless 128x128x128 volume.
+        if ( !m_Specification.Tag.empty() )
+            VKUtils::SetDebugUtilsObjectName( vkDevice, VK_OBJECT_TYPE_IMAGE, m_Specification.Tag,
+                                              m_Resource.Image );
+
+        const VkImageAspectFlags aspect = GetImageVulkanAspect( m_Specification.Format );
+
+        m_Resource.ImageView = Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, aspect,
+                                                  VK_IMAGE_VIEW_TYPE_3D, 1, 1 );
+        // ComputePipeline::SetOutput binds GetMipView( mip ); a volume has one level, so the mip view IS
+        // the whole-image view. Kept in the vector so Release() hands it to the same deletion queue.
+        m_MipViews.push_back( Utils::CreateView( vkDevice, m_Resource.Image, m_Resource.Format, aspect,
+                                                 VK_IMAGE_VIEW_TYPE_3D, 1, 1 ) );
+
+        if ( m_Specification.Properties & Core::Formats::Sample )
+            Utils::CreateSampler( vkDevice, m_Resource.Sampler, Utils::SamplerFilterPolicy::AlwaysLinear );
+
+        auto cmd = CommandBufferAllocator::GetInstance().RT_AllocateCommandBufferGraphic( true ).GetValue();
+
+        if ( Core::Formats::HasData( m_Specification.Data ) )
+        {
+            const uint64_t size = Core::Formats::CalculateImageSize(
+                 m_Specification.Width, m_Specification.Height, m_Specification.Depth, m_Specification.Format );
+
+            VkBuffer           staging;
+            VmaAllocation      stagingAlloc;
+            VkBufferCreateInfo bInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                         .size  = size,
+                                         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT };
+            auto stagingResult = allocator->RT_AllocateBuffer( "VolumeStaging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging );
+            if ( !stagingResult.IsSuccess() )
+            {
+                CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+                return Common::MakeFormattedError<bool>( "Image3D '{}': {} byte staging buffer failed: {}",
+                                                         m_Specification.Tag, size, stagingResult.GetError() );
+            }
+            stagingAlloc = stagingResult.GetValue();
+
+            void* mapped = allocator->MapMemory( stagingAlloc );
+            memcpy( mapped, Utils::GetPixelDataPtr( m_Specification.Data ), static_cast<size_t>( size ) );
+            allocator->UnmapMemory( stagingAlloc );
+
+            TransitionLayout( cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
+
+            // One copy for the whole volume: bufferRowLength/bufferImageHeight stay 0, meaning the source
+            // is tightly packed at the image's own extent — which is what CalculateImageSize sized.
+            VkBufferImageCopy copy = {
+                 .imageSubresource = { .aspectMask = aspect, .layerCount = 1 },
+                 .imageExtent      = { m_Specification.Width, m_Specification.Height, m_Specification.Depth } };
+            vkCmdCopyBufferToImage( cmd, staging, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy );
+
+            TransitionLayout( cmd, finalDefaultLayout );
+
+            allocator->RT_DestroyBuffer( staging, stagingAlloc );
+        }
+        else
+        {
+            TransitionLayout( cmd, finalDefaultLayout );
+        }
+
+        CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
+
+        m_IsLoaded = true;
+        return Common::MakeSuccess( true );
+    }
+
+    void VulkanImage3D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )
+    {
+        // `mip` selects a sub-range on the 2D and cube paths; a volume has exactly one level, so the only
+        // meaningful value is 0. Refuse anything else instead of transitioning the wrong subresource and
+        // then tracking a layout the image is not actually in.
+        DESERT_VERIFY( mip == 0, "Image3D has exactly one mip level" );
+
+        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format,
+                                                               m_Resource.Layout, newLayout, 1, 1 );
+        m_Resource.Layout = newLayout;
+    }
+
+    void VulkanImage3D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout,
+                                          VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                                          VkAccessFlags srcAccess, VkAccessFlags dstAccess )
+    {
+        VkImageSubresourceRange range{ .aspectMask     = GetImageVulkanAspect( m_Specification.Format ),
+                                       .baseMipLevel   = 0,
+                                       .levelCount     = 1,
+                                       .baseArrayLayer = 0,
+                                       .layerCount     = 1 };
+        Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, srcAccess, dstAccess,
+                                                               m_Resource.Layout, newLayout, srcStage,
+                                                               dstStage, range );
+        m_Resource.Layout = newLayout;
+    }
+
+    VkImageLayout VulkanImage3D::GetDefaultLayout() const
+    {
+        return Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
+    }
+
+    VkImageView VulkanImage3D::GetMipView( uint32_t level ) const
+    {
+        // Single-level by construction; anything else is a caller bug worth naming rather than an
+        // out-of-range read of m_MipViews.
+        DESERT_VERIFY( level == 0, "Image3D has exactly one mip level" );
+        return m_MipViews[0];
+    }
+
+    Core::Formats::ImagePixelData VulkanImage3D::GetImagePixels()
+    {
+        // A volume is produced on the GPU and consumed on the GPU. There is no readback by design, the
+        // same answer VulkanImage2D gives: a path with no caller is a path with no test, and a volume
+        // readback would be a 32 MiB stall written for nobody. Asking is a caller bug, so it stops here
+        // rather than handing back an empty buffer that reads as "the volume is blank".
+        DESERT_VERIFY( false, "Image3D has no CPU readback" );
+        return {};
+    }
+
     // --- Live sampler recreation (texture-filter setting change) ---
 
-    static void RecreateSamplerImpl( VulkanImageResource& res )
+    static void RecreateSamplerImpl( VulkanImageResource& res, Utils::SamplerFilterPolicy policy )
     {
         auto vkDevice =
              SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
         if ( res.Sampler )
             vkDestroySampler( vkDevice, res.Sampler, nullptr );
         res.Sampler = VK_NULL_HANDLE;
-        Utils::CreateSampler( vkDevice, res.Sampler ); // reads RenderConfig::TextureFilter
+        Utils::CreateSampler( vkDevice, res.Sampler, policy );
     }
 
-    void VulkanImage2D::RecreateSampler() { RecreateSamplerImpl( m_Resource ); }
-    void VulkanImageCube::RecreateSampler() { RecreateSamplerImpl( m_Resource ); }
+    void VulkanImage2D::RecreateSampler() { RecreateSamplerImpl( m_Resource, Utils::SamplerFilterPolicy::Global ); }
+    void VulkanImageCube::RecreateSampler() { RecreateSamplerImpl( m_Resource, Utils::SamplerFilterPolicy::Global ); }
+    // A volume keeps LINEAR through a filter change too — this is the call that would otherwise undo it,
+    // since Renderer::RecreateImageSamplers walks EVERY registered image when the setting moves.
+    void VulkanImage3D::RecreateSampler()
+    {
+        if ( m_Resource.Sampler )
+            RecreateSamplerImpl( m_Resource, Utils::SamplerFilterPolicy::AlwaysLinear );
+    }
 
 } // namespace Desert::Graphic::API::Vulkan

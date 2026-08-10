@@ -125,6 +125,31 @@ namespace Desert::Graphic::API::Vulkan
              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, getFallback );
     }
 
+    VkWriteDescriptorSet DescriptorSetBuilder::GetSampler3DWDS( VulkanMaterialBackend* materialBackend,
+                                                                const uint32_t frame, const uint32_t set,
+                                                                const uint32_t               dstBinding,
+                                                                const uint32_t               descriptorCount,
+                                                                const VkDescriptorImageInfo* pImageInfo )
+    {
+        VkDescriptorSet descriptorSet = materialBackend->GetDescriptorSet( frame, set );
+        if ( descriptorSet == VK_NULL_HANDLE )
+        {
+            VkWriteDescriptorSet writeDescriptor = {};
+            writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            return writeDescriptor;
+        }
+
+        VkWriteDescriptorSet writeDescriptor = {};
+        writeDescriptor.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptor.descriptorType       = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writeDescriptor.dstSet               = descriptorSet;
+        writeDescriptor.dstBinding           = dstBinding;
+        writeDescriptor.descriptorCount      = descriptorCount;
+        writeDescriptor.pImageInfo           = pImageInfo;
+        return writeDescriptor;
+    }
+
     VkWriteDescriptorSet DescriptorSetBuilder::GetStorageWDS( VulkanMaterialBackend* materialBackend,
                                                               const uint32_t frame, const uint32_t set,
                                                               const uint32_t               dstBinding,

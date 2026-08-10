@@ -57,8 +57,10 @@ namespace Desert::Graphic::API::Vulkan
         virtual void DispatchComputeCull( const ComputePipeline* pipeline, uint32_t groupCountX,
                                           uint32_t groupCountY, uint32_t groupCountZ ) override;
 
-        virtual void ComputeImageBeginWrite( Image2D* image ) override;
-        virtual void ComputeImageEndWrite( Image2D* image ) override;
+        virtual void ComputeImageBeginWrite( Image* image ) override;
+        virtual void ComputeImageEndWrite( Image* image ) override;
+        virtual void ComputeImageBeginRead( Image* image ) override;
+        virtual void ComputeImageEndRead( Image* image ) override;
 
         virtual void CopyDepthImage( Image2D* src, Image2D* dst ) override;
         virtual void SetScissor( int32_t x, int32_t y, uint32_t width, uint32_t height ) override;

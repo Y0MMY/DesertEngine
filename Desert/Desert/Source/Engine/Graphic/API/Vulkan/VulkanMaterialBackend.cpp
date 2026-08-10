@@ -369,10 +369,13 @@ namespace Desert::Graphic::API::Vulkan
                     std::vector<VkWriteDescriptorSet> writes;
 
                     // Track infos to keep them alive until vkUpdateDescriptorSets
+                    // Every write below stores a POINTER into this vector, so it must not reallocate:
+                    // the reserve has to count every image binding that follows, 3D included.
                     std::vector<VkDescriptorImageInfo> imageInfos;
-                    imageInfos.reserve( descriptorSet.Image2DSamplers.size() +
-                                        descriptorSet.ImageCubeSamplers.size() +
-                                        descriptorSet.StorageImage2DSamplers.size() );
+                    imageInfos.reserve(
+                         descriptorSet.Image2DSamplers.size() + descriptorSet.ImageCubeSamplers.size() +
+                         descriptorSet.StorageImage2DSamplers.size() + descriptorSet.Image3DSamplers.size() +
+                         descriptorSet.StorageImage3DSamplers.size() );
 
                     std::vector<VkDescriptorBufferInfo> bufferInfos;
                     bufferInfos.reserve( descriptorSet.UniformBuffers.size() +
@@ -398,47 +401,89 @@ namespace Desert::Graphic::API::Vulkan
                                                                                &bufferInfos.back() ) );
                     }
 
-                    // IMAGE 2D SAMPLERS
-                    for ( const auto& [binding, imageLayout] : descriptorSet.Image2DSamplers )
+                    // IMAGES — one loop over every declared image binding, each tagged with the fallback
+                    // its VIEW TYPE requires. Driving off CollectImageBindings rather than walking the
+                    // buckets here is what makes "every declared binding gets a descriptor" true by
+                    // construction: a reflection bucket that gains a kind cannot be quietly skipped,
+                    // because the kind arrives in this switch. A binding left out is not a visual
+                    // glitch — it is an undefined descriptor the shader samples anyway.
+                    for ( const auto& [binding, kind] : ShaderResource::CollectImageBindings( descriptorSet ) )
                     {
-                        auto fallbackImage =
-                             FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F );
-
-                        if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
+                        switch ( kind )
                         {
-                            imageInfos.push_back( vulkanImage->GetResource().GetDescriptorInfo() );
-                            writes.push_back( DescriptorSetBuilder::GetSampler2DWDS(
-                                 this, frame, setIndex, binding, 1, &imageInfos.back() ) );
-                        }
-                    }
-
-                    // IMAGE CUBE SAMPLERS
-                    for ( const auto& [binding, imageLayout] : descriptorSet.ImageCubeSamplers )
-                    {
-                        auto fallbackCube =
-                             FallbackTextures::Get().GetFallbackTextureCube( Core::Formats::ImageFormat::RGBA8F );
-
-                        if ( auto vulkanImage = sp_cast<VulkanImageCube>( fallbackCube ) )
-                        {
-                            imageInfos.push_back( vulkanImage->GetResource().GetDescriptorInfo() );
-                            writes.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
-                                 this, frame, setIndex, binding, 1, &imageInfos.back() ) );
-                        }
-                    }
-
-                    // STORAGE IMAGES — init with dedicated storage fallback (has VK_IMAGE_USAGE_STORAGE_BIT)
-                    for ( const auto& [binding, _] : descriptorSet.StorageImage2DSamplers )
-                    {
-                        auto fallbackImage = FallbackTextures::Get().GetFallbackStorageImage2D(
-                             Core::Formats::ImageFormat::RGBA32F );
-
-                        if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallbackImage ) )
-                        {
-                            VkDescriptorImageInfo storageInfo = {
-                                 VK_NULL_HANDLE, vulkanImage->GetResource().ImageView, VK_IMAGE_LAYOUT_GENERAL };
-                            imageInfos.push_back( storageInfo );
-                            writes.push_back( DescriptorSetBuilder::GetStorageWDS( this, frame, setIndex, binding,
-                                                                                   1, &imageInfos.back() ) );
+                            case ShaderResource::FallbackImageKind::Sampled2D:
+                            {
+                                auto fallback = FallbackTextures::Get().GetFallbackTexture2D(
+                                     Core::Formats::ImageFormat::RGBA32F );
+                                if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallback ) )
+                                {
+                                    imageInfos.push_back( vulkanImage->GetResource().GetDescriptorInfo() );
+                                    writes.push_back( DescriptorSetBuilder::GetSampler2DWDS(
+                                         this, frame, setIndex, binding, 1, &imageInfos.back() ) );
+                                }
+                                break;
+                            }
+                            case ShaderResource::FallbackImageKind::SampledCube:
+                            {
+                                auto fallback = FallbackTextures::Get().GetFallbackTextureCube(
+                                     Core::Formats::ImageFormat::RGBA8F );
+                                if ( auto vulkanImage = sp_cast<VulkanImageCube>( fallback ) )
+                                {
+                                    imageInfos.push_back( vulkanImage->GetResource().GetDescriptorInfo() );
+                                    writes.push_back( DescriptorSetBuilder::GetSamplerCubeWDS(
+                                         this, frame, setIndex, binding, 1, &imageInfos.back() ) );
+                                }
+                                break;
+                            }
+                            case ShaderResource::FallbackImageKind::Sampled3D:
+                            {
+                                // A volume needs a VOLUME fallback: a 2D view in a `sampler3D` does not
+                                // fail, it samples the wrong thing.
+                                auto fallback = FallbackTextures::Get().GetFallbackTexture3D(
+                                     Core::Formats::ImageFormat::RGBA8F );
+                                if ( auto vulkanImage = sp_cast<VulkanImage3D>( fallback ) )
+                                {
+                                    imageInfos.push_back( vulkanImage->GetResource().GetDescriptorInfo() );
+                                    writes.push_back( DescriptorSetBuilder::GetSampler3DWDS(
+                                         this, frame, setIndex, binding, 1, &imageInfos.back() ) );
+                                }
+                                break;
+                            }
+                            case ShaderResource::FallbackImageKind::Storage2D:
+                            {
+                                // Dedicated storage fallback — it carries VK_IMAGE_USAGE_STORAGE_BIT,
+                                // which the sampled one does not.
+                                auto fallback = FallbackTextures::Get().GetFallbackStorageImage2D(
+                                     Core::Formats::ImageFormat::RGBA32F );
+                                if ( auto vulkanImage = sp_cast<VulkanImage2D>( fallback ) )
+                                {
+                                    imageInfos.push_back( { VK_NULL_HANDLE, vulkanImage->GetResource().ImageView,
+                                                            VK_IMAGE_LAYOUT_GENERAL } );
+                                    writes.push_back( DescriptorSetBuilder::GetStorageWDS(
+                                         this, frame, setIndex, binding, 1, &imageInfos.back() ) );
+                                }
+                                break;
+                            }
+                            case ShaderResource::FallbackImageKind::Storage3D:
+                            {
+                                auto fallback = FallbackTextures::Get().GetFallbackStorageImage3D(
+                                     Core::Formats::ImageFormat::RGBA8F );
+                                if ( auto vulkanImage = sp_cast<VulkanImage3D>( fallback ) )
+                                {
+                                    imageInfos.push_back( { VK_NULL_HANDLE, vulkanImage->GetResource().ImageView,
+                                                            VK_IMAGE_LAYOUT_GENERAL } );
+                                    writes.push_back( DescriptorSetBuilder::GetStorageWDS(
+                                         this, frame, setIndex, binding, 1, &imageInfos.back() ) );
+                                }
+                                break;
+                            }
+                            default:
+                                // The workspace compiles with warnings off, so an unhandled kind would
+                                // otherwise leave the descriptor undefined in silence. Name it instead.
+                                LOG_ERROR( "InitializeWithFallbacks: image binding {} has no fallback for "
+                                           "kind {}; its descriptor is left UNWRITTEN",
+                                           binding, static_cast<int>( kind ) );
+                                break;
                         }
                     }
 
