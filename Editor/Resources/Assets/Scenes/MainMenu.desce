@@ -2298,7 +2298,7 @@
     "ClipContents": false
    },
    "UIText": {
-    "Text": "НАСТРОЙКИ",
+    "Text": "\u041d\u0410\u0421\u0422\u0420\u041e\u0419\u041a\u0418",
     "FontSize": 30.0,
     "Align": 0,
     "VerticalAlign": 1,
@@ -2337,7 +2337,7 @@
     "ClipContents": false
    },
    "UIText": {
-    "Text": "Разрешение      1920 x 1080",
+    "Text": "\u0420\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u0438\u0435      1920 x 1080",
     "FontSize": 20.0,
     "Align": 0,
     "VerticalAlign": 1,
@@ -2376,7 +2376,7 @@
     "ClipContents": false
    },
    "UIText": {
-    "Text": "Громкость        80%",
+    "Text": "\u0413\u0440\u043e\u043c\u043a\u043e\u0441\u0442\u044c        80%",
     "FontSize": 20.0,
     "Align": 0,
     "VerticalAlign": 1,
@@ -2415,7 +2415,7 @@
     "ClipContents": false
    },
    "UIText": {
-    "Text": "Экран-состояние: Back возвращает на Main",
+    "Text": "\u042d\u043a\u0440\u0430\u043d-\u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0435: Back \u0432\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u0435\u0442 \u043d\u0430 Main",
     "FontSize": 16.0,
     "Align": 0,
     "VerticalAlign": 1,
@@ -2513,5 +2513,6 @@
     ]
    }
   }
- ]
+ ],
+ "SceneVersion": 1
 }
