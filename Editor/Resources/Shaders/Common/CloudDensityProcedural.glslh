@@ -1,0 +1,194 @@
+// The v1 density source: a PROCEDURAL cloudscape — weather map, height envelope, base shape volume,
+// detail erosion. It implements the two functions Common/CloudDensity.glslh declares and nothing else
+// reaches past it.
+//
+// Why procedural at all: the reference's density is a pair of 512x512x64 volumes baked from Guerrilla's
+// internal Houdini tools, which we cannot ship (RESEARCH_REFERENCE J.1 risk 1). What replaces them is
+// the older, better-documented Nubis1/2 construction — a coverage/type weather map, the vertical
+// envelope, and detail erosion — reimplemented from the published formulas.
+//
+// Requires, in this order, from the including shader:
+//   #include <Common/CloudNoise.glslh>     (the curl encoding constants)
+//   #include <Common/CloudGeometry.glslh>  (CloudRemapRange)
+//   #include <Common/CloudParams.glslh>    (the parameter block)
+
+#ifndef CLOUD_DENSITY_PROCEDURAL_GLSLH
+#define CLOUD_DENSITY_PROCEDURAL_GLSLH
+
+#include <Common/CloudDensity.glslh>
+
+layout(binding = 3) uniform sampler3D u_ShapeNoise;
+layout(binding = 4) uniform sampler3D u_DetailNoise;
+layout(binding = 5) uniform sampler2D u_CurlNoise;
+layout(binding = 6) uniform sampler2D u_WeatherMap;
+
+// ---- Sampling coordinates --------------------------------------------------------------------------
+
+// Where on the weather map a world position lands. The map tiles across the sky at WeatherTileSize, and
+// whole cloud SYSTEMS drift across it at WeatherScrollMultiplier — much slower than the clouds' own
+// shape, which is what makes a sky read as weather rather than as a scrolling texture.
+vec2 CloudWeatherUV(vec3 worldPos)
+{
+    vec3  wind   = CloudWindVelocity();
+    float t      = CloudTime();
+    vec2  offset = vec2(wind.x, wind.z) * (t * u_WeatherScrollMultiplier);
+    return (vec2(worldPos.x, worldPos.z) + offset) / u_WeatherTileSize;
+}
+
+vec4 CloudSampleWeather(vec3 worldPos)
+{
+    return texture(u_WeatherMap, CloudWeatherUV(worldPos));
+}
+
+// The shape lookup drifts with the wind and SHEARS with height: the top of a layer moves faster than its
+// base, which is what leans a cumulus over instead of sliding it sideways as a rigid block.
+vec3 CloudShapeSamplePos(vec3 worldPos, float heightFraction)
+{
+    vec3  wind = CloudWindVelocity();
+    float t    = CloudTime();
+    float shear = 1.0f + u_WindHeightShear * heightFraction;
+    return worldPos + wind * (t * u_ShapeScrollMultiplier * shear);
+}
+
+// Detail drifts faster than shape (the classic "boiling" look) and also rises: convection carries the
+// small structure upward through the layer while the layer as a whole moves downwind.
+vec3 CloudDetailSamplePos(vec3 worldPos, float heightFraction)
+{
+    vec3  wind = CloudWindVelocity();
+    float t    = CloudTime();
+    float shear = 1.0f + u_WindHeightShear * heightFraction;
+    return worldPos + wind * (t * u_DetailScrollMultiplier * shear) + vec3(0.0f, t * u_WindUpliftSpeed, 0.0f);
+}
+
+// ---- The vertical envelope -------------------------------------------------------------------------
+
+// One cloud type's height profile. The four components of the gradient are the base-in start/end and the
+// top-out start/end, in normalized layer height; the two powers shape how flat the bottom and how round
+// the top of the cloud is. This is the envelope method of the Nubis slides, which is what a PROCEDURAL
+// profile has to be built from once there is no baked dimensional-profile channel to read.
+float CloudGradientProfile(float heightFraction, vec4 gradient)
+{
+    float baseIn = CloudRemapRange(heightFraction, gradient.x, gradient.y, 0.0f, 1.0f);
+    float topOut = CloudRemapRange(heightFraction, gradient.z, gradient.w, 1.0f, 0.0f);
+    return pow(baseIn, u_BaseGradientPower) * pow(topOut, u_TopGradientPower);
+}
+
+// Blend the three authored profiles by the cloud type of this place on the map: 0 = flat stratus,
+// 0.5 = stratocumulus, 1 = towering cumulus.
+float CloudHeightGradient(float heightFraction, float cloudType)
+{
+    float stratus       = CloudGradientProfile(heightFraction, u_StratusGradient);
+    float stratocumulus = CloudGradientProfile(heightFraction, u_StratocumulusGradient);
+    float cumulus       = CloudGradientProfile(heightFraction, u_CumulusGradient);
+
+    float t = clamp(cloudType, 0.0f, 1.0f);
+    if (t < 0.5f)
+        return mix(stratus, stratocumulus, t * 2.0f);
+    return mix(stratocumulus, cumulus, (t - 0.5f) * 2.0f);
+}
+
+// The anvil: near the top of the layer the coverage exponent is pulled below 1, which widens the cloud
+// there instead of letting it taper — the cumulonimbus spreading out against the tropopause.
+float CloudAnvilCoverage(float coverage, float heightFraction)
+{
+    float exponent = CloudRemapRange(heightFraction, 0.7f, 0.8f, 1.0f, mix(1.0f, 0.5f, clamp(u_AnvilBias, 0.0f, 1.0f)));
+    return pow(clamp(coverage, 0.0f, 1.0f), exponent);
+}
+
+// ---- The functions the seam declares ---------------------------------------------------------------
+
+// The rain-laden fraction at this place on the map, for the lighting's precipitation darkening. See the
+// note in Common/CloudDensity.glslh for why this is a function of the seam and not a read in the loop.
+float CloudPrecipitationAt(vec3 worldPos)
+{
+    return CloudSampleWeather(worldPos).b;
+}
+
+// Coarse tier and shadow ray: weather x envelope x base shape. One 2D fetch and one 3D fetch, no detail,
+// no lighting. This is what makes the empty-space skip pay for itself — see CloudMarchAdvance.
+float CloudDensityCheap(vec3 worldPos, float heightFraction)
+{
+    vec4  weather  = CloudSampleWeather(worldPos);
+    float coverage = CloudAnvilCoverage(weather.r, heightFraction);
+    if (coverage <= 0.0f)
+        return 0.0f;
+
+    float gradient = CloudHeightGradient(heightFraction, weather.g);
+    if (gradient <= 0.0f)
+        return 0.0f;
+
+    vec4  shape = texture(u_ShapeNoise, CloudShapeSamplePos(worldPos, heightFraction) / u_ShapeTileSize);
+    float fbm   = shape.g * 0.625f + shape.b * 0.25f + shape.a * 0.125f;
+
+    // Erode the Perlin-Worley base by its own Worley octaves, then cut the result by coverage. Two
+    // remaps rather than one: the first decides the SHAPE of a cloud, the second decides how much sky is
+    // filled, and folding them together makes Coverage change the shape as well as the amount.
+    float base = CloudRemapRange(shape.r, fbm * u_ShapeErosionStrength + u_BaseShapeRemapMin, 1.0f, 0.0f, 1.0f);
+    float dimensional = base * gradient;
+    return CloudRemapRange(dimensional, 1.0f - coverage, 1.0f, 0.0f, 1.0f);
+}
+
+// Fine tier: everything above, plus the detail erosion, the curl warp, the high-frequency layer and the
+// three distance terms.
+float CloudDensityFull(vec3 worldPos, float heightFraction, float distanceFromCamera)
+{
+    float density = CloudDensityCheap(worldPos, heightFraction);
+    if (density <= 0.0f)
+        return 0.0f;
+
+    vec4 weather = CloudSampleWeather(worldPos);
+
+    // Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
+    // without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
+    // is strongest at the cloud base, where the shear against still air is.
+    vec3 curl = (texture(u_CurlNoise, vec2(worldPos.x, worldPos.z) / u_CurlTileSize).rgb - 0.5f) *
+                CLOUD_CURL_DECODE_SCALE;
+    vec3 detailPos = CloudDetailSamplePos(worldPos, heightFraction) +
+                     curl * (u_CurlStrength * u_DetailTileSize * (1.0f - heightFraction));
+
+    vec4 detail = texture(u_DetailNoise, detailPos / u_DetailTileSize);
+
+    // Two erosion families: wispy (the low pair of channels) and billowy (the high pair), blended by the
+    // authored Detail Type. Billow takes over as the sample gets denser, which is why the blend gradient
+    // is a power of the density rather than a constant.
+    float wispy          = mix(detail.r, detail.g, density);
+    float billowGradient = pow(clamp(density, 0.0f, 1.0f), u_BillowGradientPower);
+    float billowy        = mix(detail.b, detail.a, billowGradient) * u_BillowNoiseScale;
+    float noiseComposite = mix(wispy, billowy, u_DetailTypeBias);
+
+    // The extra close-range layer: ridged versions of the same two channels, faded out with distance
+    // because past a few kilometres it is smaller than a pixel and turns into noise.
+    float hfWisps   = 1.0f - pow(abs(abs(detail.g * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqWispSharpness);
+    float hfBillows = pow(abs(abs(detail.a * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqBillowSharpness);
+    float highFreq  = clamp(mix(hfWisps, hfBillows, u_DetailTypeBias), 0.0f, 1.0f);
+    float hfFade    = CloudRemapRange(distanceFromCamera, u_HighFreqFadeStart, u_HighFreqFadeEnd, 0.0f, 1.0f);
+    noiseComposite  = mix(mix(noiseComposite, highFreq, u_HighFreqStrength), noiseComposite, hfFade);
+
+    density = CloudRemapRange(density, noiseComposite * u_DetailStrength, 1.0f, 0.0f, 1.0f);
+
+    // The weather map's density-scale channel, shaped by its own contrast, then a sharpening whose
+    // exponent runs from the thin-region value to the dense-region one with that same scale.
+    float poweredScale = pow(clamp(weather.a, 0.0f, 1.0f), u_DensityScalePower);
+    density *= poweredScale;
+    density = pow(density, mix(u_DensitySharpenLow, u_DensitySharpenHigh, max(poweredScale, 1e-4f)));
+
+    // Distance softening: the explicit answer to distance aliasing. There is no mip chain on the noise
+    // volumes in v1 and no runtime LOD selection — the reference computed a mip level and then sampled
+    // without it, with maxLod = 0 on every sampler, which is a dead knob wearing the costume of a
+    // feature (RESEARCH_REFERENCE J.3 #11). This term is what actually attenuates far detail, and it is
+    // a slider an artist can see.
+    float soften = CloudRemapRange(distanceFromCamera, u_SofteningStartDistance, u_SofteningEndDistance,
+                                   0.0f, 1.0f) * u_DistanceSoftening;
+    density = pow(density, mix(1.0f, 0.5f, soften)) * mix(1.0f, 0.666f, soften);
+
+    // Near fade: stops the screen filling with white the instant the camera enters a cloud.
+    density *= CloudRemapRange(distanceFromCamera, u_NearFadeStart, u_NearFadeEnd, u_NearFadeMinDensity, 1.0f);
+
+    // Heavier tops. Centred on the middle of the layer so the bias redistributes density rather than
+    // scaling the whole cloud, and clamped because the range reaches 2.
+    density *= max(1.0f + u_DensityHeightBias * (heightFraction - 0.5f), 0.0f);
+
+    return clamp(density, 0.0f, 1.0f);
+}
+
+#endif // CLOUD_DENSITY_PROCEDURAL_GLSLH

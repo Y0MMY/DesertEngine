@@ -1,0 +1,57 @@
+// The SEAM between the raymarch and the field it marches through.
+//
+// The march loop, the light march and the compositor reach the density field through exactly two
+// functions, and through nothing else:
+//
+//     float CloudDensityCheap( vec3 worldPos, float heightFraction );
+//     float CloudDensityFull ( vec3 worldPos, float heightFraction, float distanceFromCamera );
+//
+//   worldPos            ABSOLUTE world position of the sample, in world units (centimetres). Absolute,
+//                       not camera-relative: the noise lookup is what anchors a cloud to the world, and
+//                       a camera-relative lookup would drag the whole cloudscape along behind the
+//                       camera. The camera-relative rule of the requirements is about the SHELL
+//                       geometry, where the planet radius would otherwise swamp a float; nothing of
+//                       that scale is ever formed here.
+//   heightFraction      0 at the bottom of the layer, 1 at the top, measured along the planet radius.
+//   distanceFromCamera  world units; drives the high-frequency fade, the distance softening and the
+//                       near fade, all of which are distance effects rather than position effects.
+//
+// and one accessor for the weather field the LIGHTING needs:
+//
+//     float CloudPrecipitationAt( vec3 worldPos );
+//
+// Density is a scalar and cannot carry a second quantity, and the rain-laden darkening of a cloud base
+// is authored in the weather map exactly like coverage is. Reading the map from the march loop to get it
+// would put the density source's own images back in the loop's hands, which is the one thing this seam
+// exists to prevent — so it is a third function of the seam rather than a fourth image binding in the
+// raymarch. An implementation with no notion of precipitation returns 0 and loses nothing else.
+//
+// Both density functions return a value in [0,1]. CHEAP is the coarse tier of the empty-space skip and
+// the shadow ray:
+// weather map x height gradient x base shape, with no detail fetch and no lighting. FULL adds the detail
+// volume, the curl warp, the high-frequency layer and every distance term.
+//
+// WHY THE SEAM EXISTS. A second density source is a named follow-up: baked "hero cloud" volumes
+// (Nubis3 NVDFs) are out of v1 only because the shapes they need are not ours to ship. Adding them later
+// must be a second implementation of these two functions and a second C++ function that binds the images
+// they read — not an edit to the march loop, the light march, the compositor or the component. That is
+// the whole contract; there is nothing else to implement.
+//
+// The v1 implementation is Common/CloudDensityProcedural.glslh. A shader includes THAT, not this file;
+// this file is the statement of what an implementation has to provide, and it is where a second one
+// starts reading.
+
+#ifndef CLOUD_DENSITY_GLSLH
+#define CLOUD_DENSITY_GLSLH
+
+// Sampler bindings an implementation may use. They are listed here rather than in the implementation
+// because they are half of the contract: the C++ side (Graphic::CloudDensitySource) binds these numbers,
+// and ComputePipeline::SetInput takes the binding as an argument without consulting reflection — a
+// number that disagrees does not fail, it samples somebody else's image.
+//
+//   3  sampler3D  the 128^3 shape volume   (Graphic::kCloudShapeNoiseBinding)
+//   4  sampler3D  the 32^3 detail volume   (Graphic::kCloudDetailNoiseBinding)
+//   5  sampler2D  the 128^2 curl map       (Graphic::kCloudCurlNoiseBinding)
+//   6  sampler2D  the 512^2 weather map    (Graphic::kCloudWeatherMapBinding)
+
+#endif // CLOUD_DENSITY_GLSLH
