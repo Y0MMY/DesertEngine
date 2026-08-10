@@ -20,6 +20,12 @@ namespace Desert::Graphic::API::Vulkan
     VulkanMaterialBackend::VulkanMaterialBackend( const std::shared_ptr<Shader>& shader )
          : MaterialBackend( shader ), m_VulkanShader( SP_CAST( VulkanShader, shader ) )
     {
+        // Captured ONCE, and kept. Every set this backend allocates below belongs to these layouts for
+        // as long as the backend lives, so a recompile of the shader cannot leave the sets pointing at
+        // a contract that no longer exists — see VulkanDescriptorSetLayout.hpp.
+        m_Layouts          = m_VulkanShader->GetAllDescriptorSetLayouts();
+        m_ShaderGeneration = m_VulkanShader->GetReloadGeneration();
+
         CreateDescriptorPool();
         AllocateDescriptorSets();
 
@@ -70,7 +76,7 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanMaterialBackend::CreateDescriptorPool()
     {
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
-        const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
+        const uint32_t setCount       = static_cast<uint32_t>( m_Layouts.size() );
 
         auto& descriptorSets = m_VulkanShader->GetShaderDescriptorSets();
 
@@ -122,7 +128,7 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanMaterialBackend::AllocateDescriptorSets()
     {
         const uint32_t framesInFlight = EngineContext::GetInstance().GetMaxFramesInFlight();
-        const uint32_t setCount       = m_VulkanShader->GetDescriptorSetLayoutCount();
+        const uint32_t setCount       = static_cast<uint32_t>( m_Layouts.size() );
 
         const uint32_t slots = EngineContext::kMaxRendererSlots;
 
@@ -132,9 +138,7 @@ namespace Desert::Graphic::API::Vulkan
              std::vector<std::vector<uint64_t>>(
                   slots, std::vector<uint64_t>( setCount, std::numeric_limits<uint64_t>::max() ) ) );
 
-        std::vector<VkDescriptorSetLayout> layouts( setCount );
-        for ( uint32_t set = 0; set < setCount; ++set )
-            layouts[set] = m_VulkanShader->GetDescriptorSetLayout( set );
+        const std::vector<VkDescriptorSetLayout> layouts = RawHandles( m_Layouts );
 
         for ( uint32_t frame = 0; frame < framesInFlight; ++frame )
         {
@@ -296,9 +300,42 @@ namespace Desert::Graphic::API::Vulkan
         }
     }
 
+    void VulkanMaterialBackend::ReportShapeDriftOnce()
+    {
+        if ( m_ShapeDriftReported || !m_VulkanShader )
+            return;
+        if ( m_VulkanShader->GetReloadGeneration() == m_ShaderGeneration )
+            return;
+
+        // The shader was recompiled after these sets were allocated. That is HARMLESS as long as the new
+        // layout has the same shape: Vulkan compares descriptor set layouts by content, not by handle,
+        // so a recompile that only changed the code leaves the sets perfectly bindable. What is NOT
+        // harmless is a recompile that added or removed a binding — the pipeline built from the new
+        // layout and these sets then describe different shaders, which is the
+        // "has N total descriptors, but ... has M total descriptors" the validation layer reports on
+        // every bind. Say which it is, once, naming both counts.
+        const auto&    current = m_VulkanShader->GetAllDescriptorSetLayouts();
+        const uint32_t was     = m_Layouts.empty() || !m_Layouts[0] ? 0u : m_Layouts[0]->DescriptorCount();
+        const uint32_t now     = current.empty() || !current[0] ? 0u : current[0]->DescriptorCount();
+
+        m_ShaderGeneration   = m_VulkanShader->GetReloadGeneration();
+        m_ShapeDriftReported = was != now;
+
+        if ( was != now )
+        {
+            LOG_ERROR( "Material on shader '{}': its descriptor sets were allocated against a layout of "
+                       "{} descriptor(s) and the shader now declares {}. The sets stay valid — they own "
+                       "their layout — but any pipeline rebuilt from the new one cannot be bound to "
+                       "them. Restart the editor to pick the change up.",
+                       m_VulkanShader->GetName(), was, now );
+        }
+    }
+
     void VulkanMaterialBackend::BindDescriptorSets( VkCommandBuffer cmdBuffer, VkPipelineLayout layout,
                                                     VkPipelineBindPoint bindPoint, uint32_t frameIndex )
     {
+        ReportShapeDriftOnce();
+
         const uint32_t slot = EngineContext::GetInstance().GetActiveRendererSlot();
         if ( frameIndex >= m_DescriptorSets.size() || slot >= m_DescriptorSets[frameIndex].size() ||
              m_DescriptorSets[frameIndex][slot].empty() )

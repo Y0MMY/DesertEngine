@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Engine/Graphic/Shader.hpp>
+#include <Engine/Graphic/API/Vulkan/VulkanDescriptorSetLayout.hpp>
 #include <Engine/Graphic/API/Vulkan/VulkanShaderResource.hpp>
 
 #include <vulkan/vulkan.h>
@@ -62,16 +63,17 @@ namespace Desert::Graphic::API::Vulkan
         {
             return m_PipelineShaderStageCreateInfos;
         }
-        const auto& GetDescriptorSetLayout( uint32_t set ) const
+        /**
+         * The layout for @p set, as a STRONG reference.
+         *
+         * Every caller is expected to keep it for as long as it keeps whatever it builds from it — a
+         * pipeline layout, a descriptor pool, an allocated set. A recompile replaces this shader's
+         * references; it does not reach into objects that are still standing on the old ones. See
+         * VulkanDescriptorSetLayout.hpp for the failure this arrangement exists to make impossible.
+         */
+        DescriptorSetLayoutRef GetDescriptorSetLayout( uint32_t set ) const
         {
-            static VkDescriptorSetLayout nullLayout = VK_NULL_HANDLE;
-
-            if ( set >= m_DescriptorSetLayouts.size() )
-            {
-                return nullLayout;
-            }
-
-            return m_DescriptorSetLayouts[set];
+            return set < m_DescriptorSetLayouts.size() ? m_DescriptorSetLayouts[set] : nullptr;
         }
 
         const auto GetDescriptorSetLayoutCount() const
@@ -79,9 +81,22 @@ namespace Desert::Graphic::API::Vulkan
             return m_DescriptorSetLayouts.size();
         }
 
-        const auto& GetAllDescriptorSetLayouts() const
+        const std::vector<DescriptorSetLayoutRef>& GetAllDescriptorSetLayouts() const
         {
             return m_DescriptorSetLayouts;
+        }
+
+        /**
+         * Bumped by every successful recompile.
+         *
+         * What it is for: an object built from this shader records the generation it was built at, and
+         * a later mismatch means "you are running code this shader no longer contains". That is a
+         * legitimate state — a hot reload cannot reach a pipeline the renderer built and owns — but it
+         * is never a silent one.
+         */
+        uint32_t GetReloadGeneration() const
+        {
+            return m_ReloadGeneration;
         }
 
         auto& GetShaderDescriptorSets()
@@ -108,7 +123,8 @@ namespace Desert::Graphic::API::Vulkan
         // Fails when a stage declares an image resource the engine cannot bind: reflection refuses to
         // register it, so the descriptor layout would silently lack the binding. Better to lose the
         // shader with a named reason than to bind something of the wrong shape.
-        Common::BoolResultStr Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary );
+        Common::BoolResultStr Reflect( VkShaderStageFlagBits flag, const std::vector<uint32_t>& spirvBinary,
+                                       ShaderResource::ReflectionData& into );
         Common::BoolResultStr CreateDescriptorsLayout();
 
         Common::BoolResultStr
@@ -126,8 +142,12 @@ namespace Desert::Graphic::API::Vulkan
 
         Core::Formats::ShaderProgramMeta             m_ProgramMeta;
 
-        ShaderResource::ReflectionData     m_ReflectionData;
-        std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts; // set
+        ShaderResource::ReflectionData      m_ReflectionData;
+        std::vector<DescriptorSetLayoutRef> m_DescriptorSetLayouts; // indexed by set
+
+        // Monotonic; 0 means "never compiled". Never reset, so a comparison against a recorded value
+        // stays meaningful for the life of the process.
+        uint32_t m_ReloadGeneration = 0;
 
         DescriptorSetInfo m_DescriptorSetInfo;
     };

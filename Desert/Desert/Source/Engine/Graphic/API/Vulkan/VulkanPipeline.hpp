@@ -61,6 +61,10 @@ namespace Desert::Graphic::API::Vulkan
         VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
         VkPipeline       m_Pipeline= VK_NULL_HANDLE;
 
+        // The descriptor set layouts m_PipelineLayout was built from, held so they outlive it. A shader
+        // recompile replaces the shader's references; this pipeline keeps its own until it is rebuilt.
+        std::vector<DescriptorSetLayoutRef> m_Layouts;
+
         VkPipelineVertexInputStateCreateInfo   m_VertexInputInfo{};
         VkPipelineInputAssemblyStateCreateInfo m_InputAssembly{};
         VkPipelineDynamicStateCreateInfo       m_DynamicStateInfo{};

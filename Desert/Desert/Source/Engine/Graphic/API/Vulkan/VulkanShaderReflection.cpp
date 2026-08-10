@@ -1,5 +1,6 @@
 #include <Engine/Graphic/API/Vulkan/VulkanShaderReflection.hpp>
 
+#include <algorithm>
 #include <format>
 
 namespace Desert::Graphic::API::Vulkan::ShaderReflection
@@ -252,6 +253,51 @@ namespace Desert::Graphic::API::Vulkan::ShaderReflection
         }
 
         return diagnostics;
+    }
+
+    std::vector<VkDescriptorSetLayoutBinding> BuildLayoutBindings( const ShaderResource::ShaderDescriptorSet& set )
+    {
+        std::vector<VkDescriptorSetLayoutBinding> bindings;
+
+        const auto add = [&bindings]( uint32_t binding, VkDescriptorType type, Core::Formats::ShaderStage stage )
+        {
+            bindings.push_back( { .binding         = binding,
+                                  .descriptorType  = type,
+                                  .descriptorCount = 1,
+                                  .stageFlags      = static_cast<VkShaderStageFlags>( stage ) } );
+        };
+
+        for ( const auto& [binding, resource] : set.UniformBuffers )
+            add( binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, resource.ShaderStage );
+        for ( const auto& [binding, resource] : set.Image2DSamplers )
+            add( binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, resource.ShaderStage );
+        for ( const auto& [binding, resource] : set.Image3DSamplers )
+            add( binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, resource.ShaderStage );
+        for ( const auto& [binding, resource] : set.ImageCubeSamplers )
+            add( binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, resource.ShaderStage );
+        for ( const auto& [binding, resource] : set.StorageBuffers )
+            add( binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, resource.ShaderStage );
+        for ( const auto& [binding, resource] : set.StorageImage2DSamplers )
+            add( binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, resource.ShaderStage );
+        for ( const auto& [binding, resource] : set.StorageImage3DSamplers )
+            add( binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, resource.ShaderStage );
+
+        // Sorted because the buckets above are unordered_maps: the same shader would otherwise produce
+        // the same SET of bindings in a different ORDER from run to run. Vulkan does not care, but a
+        // human comparing two logs of a mismatch does, and so does a test that prints what it found.
+        std::sort( bindings.begin(), bindings.end(),
+                   []( const VkDescriptorSetLayoutBinding& a, const VkDescriptorSetLayoutBinding& b )
+                   { return a.binding < b.binding; } );
+
+        return bindings;
+    }
+
+    uint32_t CountDescriptors( const std::vector<VkDescriptorSetLayoutBinding>& bindings )
+    {
+        uint32_t total = 0;
+        for ( const auto& binding : bindings )
+            total += binding.descriptorCount;
+        return total;
     }
 
 } // namespace Desert::Graphic::API::Vulkan::ShaderReflection

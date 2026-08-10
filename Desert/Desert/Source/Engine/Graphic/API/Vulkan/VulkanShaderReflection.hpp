@@ -51,4 +51,19 @@ namespace Desert::Graphic::API::Vulkan::ShaderReflection
                                                          Core::Formats::ShaderStage      stage,
                                                          ShaderResource::ReflectionData& data );
 
+    /**
+     * The descriptor-set layout bindings one reflected set turns into, sorted by binding number.
+     *
+     * Pure, and deliberately here rather than inside VulkanShader: this is the SHAPE a pipeline layout
+     * and a descriptor set have to agree on, and when they disagree the validation layer reports it as
+     * a count ("has 8 total descriptors, but ... has 9"). A device-free function is one a test can
+     * evaluate for a real shader on a machine with no Vulkan, which is the only way that count is
+     * checkable here at all.
+     */
+    std::vector<VkDescriptorSetLayoutBinding>
+    BuildLayoutBindings( const ShaderResource::ShaderDescriptorSet& set );
+
+    /** Total descriptors across @p bindings — the number the validation layer compares. */
+    uint32_t CountDescriptors( const std::vector<VkDescriptorSetLayoutBinding>& bindings );
+
 } // namespace Desert::Graphic::API::Vulkan::ShaderReflection

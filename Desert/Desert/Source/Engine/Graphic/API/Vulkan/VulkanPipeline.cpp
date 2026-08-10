@@ -142,6 +142,9 @@ namespace Desert::Graphic::API::Vulkan
             vkDestroyPipelineLayout( device, m_PipelineLayout, nullptr );
             m_PipelineLayout = VK_NULL_HANDLE;
         }
+
+        // After the pipeline layout, never before: it was built from these.
+        m_Layouts.clear();
     }
 
     void VulkanPipeline::Invalidate()
@@ -172,8 +175,14 @@ namespace Desert::Graphic::API::Vulkan
         VulkanShader* vulkanShader =
              std::static_pointer_cast<Graphic::API::Vulkan::VulkanShader>( m_Specification.Shader ).get();
 
-        const auto  descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
-        const auto& pushConstant         = SetUpPushConstantRange();
+        // Captured and KEPT for the life of this pipeline layout: a shader recompile publishes new
+        // layouts and drops its own references, and a pipeline layout built from destroyed ones is the
+        // "VkPipelineLayout references a VkDescriptorSetLayout that has been destroyed" the validation
+        // layer reports on every bind. See VulkanDescriptorSetLayout.hpp.
+        m_Layouts = vulkanShader->GetAllDescriptorSetLayouts();
+
+        const std::vector<VkDescriptorSetLayout> descriptorSetLayouts = RawHandles( m_Layouts );
+        const auto&                              pushConstant         = SetUpPushConstantRange();
 
         VkPipelineLayoutCreateInfo layoutInfo = {
              .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,

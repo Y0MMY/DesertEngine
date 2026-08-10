@@ -35,14 +35,38 @@ namespace Desert::Graphic::API::Vulkan
         void ResetFrameUpdateState( uint32_t frameIndex );
         bool HasDescriptorSets() const;
 
+        /** The layouts this backend's descriptor sets were allocated from, captured at construction. */
+        const std::vector<DescriptorSetLayoutRef>& GetLayouts() const
+        {
+            return m_Layouts;
+        }
+
+        /** The shader's reload generation at the moment those sets were allocated. */
+        uint32_t GetShaderGeneration() const
+        {
+            return m_ShaderGeneration;
+        }
+
     private:
         void InitializeWithFallbacks();
 
         void AllocateDescriptorSets();
         void CreateDescriptorPool();
 
+        // Says so, once, if the shader has been recompiled into a DIFFERENT SHAPE since these sets were
+        // allocated. Silent when the recompile kept the same bindings, because that case is genuinely
+        // fine — Vulkan compares set layouts by content.
+        void ReportShapeDriftOnce();
+
         std::shared_ptr<VulkanShader> m_VulkanShader; // TODO: weak ptr
         VkDescriptorPool              m_DescriptorPool = VK_NULL_HANDLE;
+
+        // The layouts every set below was allocated from, held for as long as those sets exist. Not
+        // re-read from the shader: a recompile publishes new layouts, and a set allocated from the old
+        // one has to keep the old one alive to stay legal.
+        std::vector<DescriptorSetLayoutRef> m_Layouts;
+        uint32_t                            m_ShaderGeneration   = 0;
+        bool                                m_ShapeDriftReported = false;
 
         // [frame][renderer slot][set].
         //

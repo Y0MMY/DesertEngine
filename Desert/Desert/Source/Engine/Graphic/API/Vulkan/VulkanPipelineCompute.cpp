@@ -214,37 +214,21 @@ namespace Desert::Graphic::API::Vulkan
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                               ->GetVulkanLogicalDevice();
 
-        // Pool sized for the whole ring: one set per dispatch, each holding this shader's resources.
-        const auto vulkanShader = sp_cast<VulkanShader>( m_Specification.Shader );
-
-        uint32_t combinedImageSamplerCount = 0;
-        uint32_t storageImageCount         = 0;
-        uint32_t storageBufferCount        = 0;
-        uint32_t uniformBufferCount        = 0;
-        for ( const auto& [setIndex, descriptorSet] : vulkanShader->GetShaderDescriptorSets() )
+        // Pool sized from the CAPTURED layout's own bindings — the same contract the sets below are
+        // allocated from — rather than from the shader's current reflection, which a recompile may have
+        // moved on from since this pipeline was built.
+        std::unordered_map<int, uint32_t> countsByType;
+        for ( const auto& layout : m_Layouts )
         {
-            combinedImageSamplerCount += (uint32_t)descriptorSet.Image2DSamplers.size();
-            combinedImageSamplerCount += (uint32_t)descriptorSet.Image3DSamplers.size();
-            combinedImageSamplerCount += (uint32_t)descriptorSet.ImageCubeSamplers.size();
-            storageImageCount += (uint32_t)descriptorSet.StorageImage2DSamplers.size();
-            storageImageCount += (uint32_t)descriptorSet.StorageImage3DSamplers.size();
-            storageBufferCount += (uint32_t)descriptorSet.StorageBuffers.size();
-            uniformBufferCount += (uint32_t)descriptorSet.UniformBuffers.size();
+            if ( !layout )
+                continue;
+            for ( const auto& binding : layout->Bindings() )
+                countsByType[static_cast<int>( binding.descriptorType )] += binding.descriptorCount;
         }
 
         std::vector<VkDescriptorPoolSize> poolSizes;
-        if ( combinedImageSamplerCount > 0 )
-            poolSizes.push_back( { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                   combinedImageSamplerCount * kInFrameRingSize } );
-        if ( storageImageCount > 0 )
-            poolSizes.push_back(
-                 { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, storageImageCount * kInFrameRingSize } );
-        if ( storageBufferCount > 0 )
-            poolSizes.push_back(
-                 { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storageBufferCount * kInFrameRingSize } );
-        if ( uniformBufferCount > 0 )
-            poolSizes.push_back(
-                 { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBufferCount * kInFrameRingSize } );
+        for ( const auto& [type, count] : countsByType )
+            poolSizes.push_back( { static_cast<VkDescriptorType>( type ), count * kInFrameRingSize } );
         if ( poolSizes.empty() )
             poolSizes.push_back( { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kInFrameRingSize } );
 
@@ -254,7 +238,13 @@ namespace Desert::Graphic::API::Vulkan
                                              .pPoolSizes    = poolSizes.data() };
         VK_CHECK_RESULT( vkCreateDescriptorPool( device, &poolInfo, nullptr, &m_InFramePool ) );
 
-        VkDescriptorSetLayout layout0 = vulkanShader->GetDescriptorSetLayout( 0 );
+        // The ring is allocated from the layout THIS PIPELINE captured at Invalidate, never from the
+        // shader's current one. Re-reading the shader here is what produced the mismatch this whole
+        // arrangement exists to prevent: a shader recompiled after the pipeline was built publishes a
+        // layout with a different descriptor count, and a set allocated from it cannot be bound to a
+        // pipeline layout made from the old one ("has 8 total descriptors, but ... has 9").
+        VkDescriptorSetLayout layout0 =
+             m_Layouts.empty() || !m_Layouts[0] ? VK_NULL_HANDLE : m_Layouts[0]->Handle();
 
         std::vector<VkDescriptorSetLayout> layouts( kInFrameRingSize, layout0 );
         m_InFrameRing.resize( kInFrameRingSize );
@@ -285,8 +275,38 @@ namespace Desert::Graphic::API::Vulkan
 
         VkDevice device = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )
                               ->GetVulkanLogicalDevice();
-        const auto vulkanShader         = sp_cast<VulkanShader>( m_Specification.Shader );
-        auto       descriptorSetLayouts = vulkanShader->GetAllDescriptorSetLayouts();
+        const auto vulkanShader = sp_cast<VulkanShader>( m_Specification.Shader );
+
+        // Captured ONCE, here, and used for everything this pipeline binds: the pipeline layout below,
+        // the in-frame ring, and the pool that ring is allocated from. Holding the references is what
+        // keeps the layouts alive if the shader recompiles under us, and using only these is what keeps
+        // the set and the pipeline layout describing the same contract.
+        m_Layouts          = vulkanShader->GetAllDescriptorSetLayouts();
+        m_ShaderGeneration = vulkanShader->GetReloadGeneration();
+
+        // The material backend allocated its descriptor sets in this pipeline's constructor. If the
+        // shader was recompiled between then and now, those sets belong to a different contract than
+        // the pipeline layout about to be built, and every dispatch through the immediate path would
+        // bind them — the exact "N total descriptors, but M total descriptors" the layer reports. Say
+        // it with both numbers and rebuild the backend, rather than leaving it to be found on a GPU.
+        if ( m_VulkanMaterialBackend && m_VulkanMaterialBackend->GetShaderGeneration() != m_ShaderGeneration )
+        {
+            const auto&    backendLayouts = m_VulkanMaterialBackend->GetLayouts();
+            const uint32_t was =
+                 backendLayouts.empty() || !backendLayouts[0] ? 0 : backendLayouts[0]->DescriptorCount();
+            const uint32_t now = m_Layouts.empty() || !m_Layouts[0] ? 0 : m_Layouts[0]->DescriptorCount();
+
+            LOG_ERROR( "ComputePipeline '{}': shader '{}' was recompiled between this pipeline's "
+                       "construction and its Invalidate (generation {} -> {}); its material's descriptor "
+                       "sets describe {} descriptor(s) and the pipeline layout would describe {}. "
+                       "Rebuilding the material against the new layout.",
+                       m_Specification.DebugName, vulkanShader->GetName(),
+                       m_VulkanMaterialBackend->GetShaderGeneration(), m_ShaderGeneration, was, now );
+
+            m_VulkanMaterialBackend = std::make_unique<VulkanMaterialBackend>( m_Specification.Shader );
+        }
+
+        const std::vector<VkDescriptorSetLayout> descriptorSetLayouts = RawHandles( m_Layouts );
 
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
         pipelineLayoutCreateInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -351,6 +371,10 @@ namespace Desert::Graphic::API::Vulkan
             m_InFrameRing.clear();
             m_InFrameCursor = 0;
         }
+
+        // Released LAST: everything above was built from these, so they may only be let go once nothing
+        // is standing on them. This is the release order the ownership is there to make obvious.
+        m_Layouts.clear();
 
         m_ActiveComputeCommandBuffer = VK_NULL_HANDLE;
     }
