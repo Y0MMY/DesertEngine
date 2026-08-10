@@ -93,6 +93,9 @@
 #include <Engine/ECS/System/ScriptSystem.hpp>
 #include <Engine/ECS/System/AudioECSSystem.hpp>
 
+#include <algorithm> // std::sort / std::transform (scene list)
+#include <cctype>    // std::tolower (scene filter)
+
 namespace Desert::Editor
 {
     static constexpr uint32_t s_ShaderLibraryPanelIndex = 2;
