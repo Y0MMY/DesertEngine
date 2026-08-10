@@ -1,8 +1,6 @@
 #include "RenderGraphBuilder.hpp"
 #include "RenderPhaseRegistry.hpp"
 #include <algorithm>
-#include <stack>
-#include <queue>
 
 namespace Desert::Graphic
 {
@@ -16,17 +14,14 @@ namespace Desert::Graphic
 
     void RenderGraphBuilder::AddPass( const PassConfig& config )
     {
-        InternalPassData passData;
-        passData.Config = config;
+        PassConfig stored = config;
+        stored.RegistrationIndex = m_NextRegistrationIndex++;
 
-        for ( const auto& dep : config.Dependencies )
-        {
-            if ( dep.RequiredPhase != RenderPhase::None )
-                passData.RequiredPhases.insert( dep.RequiredPhase );
-        }
+        LOG_DEBUG( "Added pass '{}' to phase '{}' (order {}, registration #{}) with {} dependencies",
+                   stored.Name, RenderPhaseToString( stored.Phase ), stored.OrderInPhase,
+                   stored.RegistrationIndex, stored.Dependencies.size() );
 
-        m_Passes.push_back( passData );
-        m_PhasePasses[config.Phase].push_back( config );
+        m_PhasePasses[stored.Phase].push_back( std::move( stored ) );
     }
 
     void RenderGraphBuilder::AddPass( const std::string& name, RenderPhaseID phase,
@@ -34,7 +29,8 @@ namespace Desert::Graphic
                                       const GraphicsPipelineSpecification&     pipelineSpec,
                                       std::shared_ptr<Framebuffer>             targetFramebuffer,
                                       const std::vector<RenderPassDependency>& dependencies,
-                                      const std::optional<glm::vec4>&          clearColor )
+                                      const std::optional<glm::vec4>&          clearColor,
+                                      int32_t                                  orderInPhase )
     {
         PassConfig config;
         config.Name              = name;
@@ -44,21 +40,9 @@ namespace Desert::Graphic
         config.TargetFramebuffer = targetFramebuffer;
         config.Dependencies      = dependencies;
         config.ClearColor        = clearColor;
+        config.OrderInPhase      = orderInPhase;
 
-        InternalPassData passData;
-        passData.Config = config;
-
-        for ( const auto& dep : config.Dependencies )
-        {
-            if ( dep.RequiredPhase != RenderPhase::None )
-                passData.RequiredPhases.insert( dep.RequiredPhase );
-        }
-
-        m_Passes.push_back( passData );
-        m_PhasePasses[phase].push_back( config );
-
-        LOG_DEBUG( "Added pass '{}' to phase '{}' with {} dependencies", name,
-                   RenderPhaseToString( phase ), dependencies.size() );
+        AddPass( config );
     }
 
     void RenderGraphBuilder::AddPhaseDependency( RenderPhaseID requiredPhase, RenderPhaseID dependentPhase )
@@ -108,75 +92,57 @@ namespace Desert::Graphic
 
     void RenderGraphBuilder::TopologicalSort()
     {
-        // Kahn's algorithm on the phase dependency graph.
-        // m_PhaseDependencies[B] = { A } means B depends on A (A must execute before B).
+        // Both levels of the order are decided by the pure functions in RenderGraphSort.hpp; this
+        // function only feeds them and then does the one thing they cannot: create the GPU render pass
+        // objects. Keeping the decision out of here is what makes it testable at all — see the header.
 
-        std::unordered_map<RenderPhaseID, int>                     inDegree;
-        std::unordered_map<RenderPhaseID, std::vector<RenderPhaseID>> dependents;
+        std::set<RenderPhaseID> presentPhases;
+        for ( const auto& [phase, passes] : m_PhasePasses )
+            presentPhases.insert( phase );
 
-        for ( const auto& [phase, _] : m_PhasePasses )
-            inDegree.emplace( phase, 0 );
-
-        for ( const auto& [dependent, prereqs] : m_PhaseDependencies )
-        {
-            inDegree.emplace( dependent, 0 );
-            for ( RenderPhaseID prereq : prereqs )
-            {
-                inDegree.emplace( prereq, 0 );
-                dependents[prereq].push_back( dependent );
-            }
-        }
-
-        for ( const auto& [dependent, prereqs] : m_PhaseDependencies )
-            inDegree[dependent] += static_cast<int>( prereqs.size() );
-
-        // Seed the ready-queue in registry declaration order so phases without
-        // dependencies (or with equal priority) appear in a stable, predictable sequence.
-        // User-registered phases appear after built-ins, in their registration order.
         const auto& declOrder = RenderPhaseRegistry::GetInstance().GetDeclarationOrder();
-        std::queue<RenderPhaseID> ready;
-        for ( RenderPhaseID p : declOrder )
-        {
-            auto it = inDegree.find( p );
-            if ( it != inDegree.end() && it->second == 0 )
-                ready.push( p );
-        }
+        m_PhaseOrder          = OrderRenderPhases( presentPhases, m_PhaseDependencies, declOrder );
 
-        m_PhaseOrder.clear();
-        while ( !ready.empty() )
+        // An unregistered phase ID used to lose its passes without a word — the sort simply never
+        // reached them. They are placed at the end now, and the mistake is named out loud, because
+        // "my pass never ran" is otherwise indistinguishable from "my pass drew nothing".
+        for ( RenderPhaseID phase : presentPhases )
         {
-            RenderPhaseID cur = ready.front();
-            ready.pop();
-            m_PhaseOrder.push_back( cur );
-
-            for ( RenderPhaseID dep : dependents[cur] )
+            if ( std::find( declOrder.begin(), declOrder.end(), phase ) == declOrder.end() )
             {
-                if ( --inDegree[dep] == 0 )
-                    ready.push( dep );
+                LOG_ERROR( "Render graph: phase ID {} owns {} pass(es) but was never registered with "
+                           "RenderPhaseRegistry; it is ordered last. Register it before building.",
+                           phase, m_PhasePasses[phase].size() );
             }
         }
 
-        // Build the flat sorted pass list and cache RenderPass objects.
+        std::vector<RenderPassOrderKey> keys;
+        std::vector<PassConfig*>        passes;
+        for ( auto& [phase, phasePasses] : m_PhasePasses )
+        {
+            for ( auto& pass : phasePasses )
+            {
+                keys.push_back( RenderPassOrderKey{ pass.Phase, pass.OrderInPhase,
+                                                    pass.RegistrationIndex } );
+                passes.push_back( &pass );
+            }
+        }
+
         m_SortedPasses.clear();
-        for ( RenderPhaseID phase : m_PhaseOrder )
+        m_SortedPasses.reserve( passes.size() );
+        for ( std::size_t index : OrderRenderPasses( keys, m_PhaseOrder ) )
         {
-            auto it = m_PhasePasses.find( phase );
-            if ( it != m_PhasePasses.end() )
+            PassConfig& pass = *passes[index];
+            if ( pass.TargetFramebuffer && !pass.CachedRenderPass )
             {
-                for ( auto& pass : it->second )
-                {
-                    if ( pass.TargetFramebuffer && !pass.CachedRenderPass )
-                    {
-                        RenderPassSpecification rpSpec;
-                        rpSpec.TargetFramebuffer = pass.TargetFramebuffer;
-                        rpSpec.DebugName         = pass.Name;
-                        if ( pass.ClearColor )
-                            rpSpec.ClearColor.Color = *pass.ClearColor;
-                        pass.CachedRenderPass = RenderPass::Create( rpSpec );
-                    }
-                    m_SortedPasses.push_back( pass );
-                }
+                RenderPassSpecification rpSpec;
+                rpSpec.TargetFramebuffer = pass.TargetFramebuffer;
+                rpSpec.DebugName         = pass.Name;
+                if ( pass.ClearColor )
+                    rpSpec.ClearColor.Color = *pass.ClearColor;
+                pass.CachedRenderPass = RenderPass::Create( rpSpec );
             }
+            m_SortedPasses.push_back( pass );
         }
     }
 
@@ -224,12 +190,15 @@ namespace Desert::Graphic
 
     void RenderGraphBuilder::Clear()
     {
-        m_Passes.clear();
         m_PhasePasses.clear();
         m_PhaseOrder.clear();
         m_SortedPasses.clear();
         m_PhaseDependencies.clear();
         m_TextureDependencies.clear();
+
+        // Registration numbers restart with the graph. A rebuild registers the same passes again, so
+        // reusing the counter would only make the numbers in the log grow without changing the order.
+        m_NextRegistrationIndex = 0;
 
         LOG_DEBUG( "Render graph builder cleared" );
     }
