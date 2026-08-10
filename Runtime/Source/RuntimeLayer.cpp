@@ -16,6 +16,7 @@
 #include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
 #include <Engine/ECS/System/CloudNoiseECSSystem.hpp>
+#include <Engine/ECS/System/VolumetricCloudsECSSystem.hpp>
 #include <Engine/ECS/System/TimeOfDayECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
@@ -90,6 +91,9 @@ namespace Desert::Player
         // job thread, and putting it here keeps the collectors one uninterrupted parallel run.
         m_Scene->AddSystem<ECS::CloudNoiseECSSystem>();
         m_Scene->AddSystem<ECS::SkyboxECSSystem>();
+        // Collects the cloud settings for the frame; it only reads the component, so it belongs with the
+        // other parallel-capable collectors rather than beside the noise system above.
+        m_Scene->AddSystem<ECS::VolumetricCloudsECSSystem>();
         m_Scene->AddSystem<ECS::TerrainECSSystem>();
         m_Scene->AddSystem<ECS::PointLightECSSystem>();
         m_Scene->AddSystem<ECS::SpotLightECSSystem>();
