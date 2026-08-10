@@ -130,6 +130,21 @@ test on the render system's registration asserts the phase ID equals 700.
 **CLD-21a — within `Transparency`, the cloud composite must execute BEFORE the particle billboards.**
 *Statement:* the cloud render system is registered ahead of `ParticleRenderer` in `SceneRenderer::Init`, and
 the graph's now-deterministic intra-phase order (CLD-19) preserves that.
+
+> **CORRECTION (architect, after T5 landed).** CLD-19's diagnosis — and the identical claim in
+> `RESEARCH_ENGINE.md` §3.1 — was **wrong**. Passes inside a phase already emerged in registration
+> order; `m_PhasePasses` is a vector. The real disorder sat on either side of it:
+> `SceneRenderer::RebuildRenderGraph` iterated an `unordered_map` of render systems, so "registered
+> first" meant "name hashed low" and reshuffled whenever a system was added, and the phase-level
+> topological queue drained from `unordered_map` edge lists. Implementing CLD-19 as written would
+> have produced a sort that is deterministic while ordering by nothing meaningful, and CLD-21a's
+> mechanism — register the cloud system ahead of the particle one — would still not have held.
+>
+> As landed: order inside a phase is an explicit `OrderInPhase` key first, registration index
+> second. **The cloud composite states its own place** (`RenderPassOrder::FarField`) instead of
+> relying on where its system is registered. Found by the T5 developer by reading the code the
+> requirement cited.
+
 *Rationale:* clouds are the far field and particles are the near field; sparks and smoke drawn by an emitter
 in front of the camera must sit **over** the cloudscape, not be erased by it. Ordering the other way is the
 same class of mistake as the particle "top-down" bug (`SceneRenderer.cpp:1146-1151`).
