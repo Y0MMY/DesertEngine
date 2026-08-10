@@ -377,8 +377,16 @@ push-constant struct's `sizeof` is asserted ≤ 128 in a static_assert **and** i
 These are deliverables of this programme, not assumptions. Each is real work with its own acceptance.
 
 **CLD-10 — 3D images.** Add `Core::Formats::Image3DSpecification` (`Tag, Width, Height, Depth, Format,
-Mips, Data, Properties`) and `Graphic::Image3D` + `Graphic::API::Vulkan::VulkanImage3D` using
-`VK_IMAGE_TYPE_3D` / `VK_IMAGE_VIEW_TYPE_3D`, supporting `Storage | Sample`, `Mips = 1` only.
+Data, Properties`) and `Graphic::Image3D` + `Graphic::API::Vulkan::VulkanImage3D` using
+`VK_IMAGE_TYPE_3D` / `VK_IMAGE_VIEW_TYPE_3D`, supporting `Storage | Sample`, single mip only.
+
+> **CORRECTION (architect, during T3 review).** The specification originally carried a `Mips` field
+> constrained to `Mips = 1`. The field is gone: the engine has no 3D mip generator, so a `Mips` argument
+> could only ever be honoured at the value 1 — a setting the caller can set and the engine cannot obey is
+> a dead setting, which DC §1.3 forbids. Raised by the T3 developer, who declined to add it.
+>
+> If volume mips are ever needed (a distant-LOD noise chain is the plausible reason), the generator comes
+> first and the field comes with it.
 *Rationale:* verified absent — `Image.hpp:15,46,70` declares only `Image`, `Image2D`, `ImageCube`;
 `VK_IMAGE_TYPE_3D` appears only in commented-out vendored code (ENG §3.5).
 *Acceptance:* creation of a 128³ `RGBA8F` `Storage|Sample` image succeeds and reports the correct byte size
@@ -464,8 +472,16 @@ lists shows the same order.
 *Statement:* a sixth entry in the enum (`ImageFormat.hpp:17-25`, today exactly five: `RGBA8F`, `RGBA32F`,
 `BGRA8F`, `DEPTH24STENCIL8`, `DEPTH32F`), mapped to `VK_FORMAT_R16G16B16A16_SFLOAT`, added to
 `Image::GetBytesPerPixel` (`Image.cpp:91-104`, which currently **returns 0** for anything but the two RGBA
-formats), and gated on `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` at device selection like the others
-(`VulkanDevice.cpp:327`). The cloud scatter target and both history images use it.
+formats). The cloud scatter target and both history images use it.
+
+> **CORRECTION (architect, during T3 review).** This requirement said `RGBA16F` should be "gated on
+> `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` at device selection **like the others**". There are no others:
+> `IsFormatSupported` (`VulkanDevice.cpp:327`) has no callers at all, so no format in this engine is
+> gated that way today. Adding an entry to the tables makes such a query *possible*; it does not make it
+> existing practice. Introducing real device-feature gating is a separate piece of work with its own
+> justification — not something to smuggle in as "like the others".
+>
+> Reported by the T3 developer, who checked the cited line instead of trusting the phrase.
 *Rationale:* architect decision — half the history memory (CLD-34: 47.5 MiB instead of 95 MiB per live
 renderer at Full), and we are already inside both the format tables and the image classes for CLD-10, so a
 second visit to the same code costs more than doing it now. **Precision:** `RGBA16F` carries radiance and
@@ -484,7 +500,23 @@ fallback. The unknown-format case fails loudly; incompleteness is caught by the 
 flag.**
 *Statement:* three changes to `Graphic/Image.cpp:91-104`:
 1. Every enumerator of `ImageFormat` gets an explicit `case` returning its real size — `RGBA8F` 4, **`RGBA16F` 8**, `RGBA32F` 16, `BGRA8F` 4, `DEPTH24STENCIL8` 4, `DEPTH32F` 4. The function becomes total; no enumerator is left to a fallback.
-2. **The trailing `return 0U;` after the switch is deleted.** Today the `switch` has no `default:` label — so `-Wswitch` *would* fire — but the unconditional `return 0U;` on line 103 makes the function compile and return a wrong answer anyway. Removing it is what makes an unhandled enumerator a **compile error** (missing return on a control path) rather than a warning someone may or may not have enabled.
+2. **The trailing `return 0U;` after the switch is deleted**, and exhaustiveness is enforced by the LANGUAGE, not by a warning flag.
+
+> **CORRECTION (architect, during T3 review).** This requirement originally reasoned that the `switch` has
+> no `default:` label "so `-Wswitch` *would* fire". **It would not.** The workspace compiles with
+> `warnings "Off"` (`BuildScripts/Workspace.lua:22`), which reaches the compiler as `-w` — and `-w`
+> defeats `-Wswitch` *and* any `#pragma GCC diagnostic error` placed around it. The T3 developer tested
+> this rather than assuming it, and built the guarantee out of the language instead: the lookups are
+> `constexpr`, and a `static_assert` constant-evaluates every one of them for every enumerator, so a
+> format without a case falls off the end of a constant expression — ill-formed, hence a hard build
+> failure. Verified independently by the architect: adding a seventh enumerator fails the build with
+> exit 2 at that `static_assert`.
+>
+> The general lesson, worth more than the fix: **a safety net whose mechanism has not been tested is a
+> belief, not a net.** This one was believed by both the analyst and the architect.
+>
+> Consequence for reviewers: "no new compiler warnings" is not a meaningful acceptance criterion in this
+> repository while `-w` is global. Do not report it as one.
 3. The remaining unreachable path — a value outside the enum, e.g. a corrupted or cast integer — logs `LOG_ERROR` with the numeric value and the caller's context and returns via the engine's failure convention, never `0`.
 Same treatment for `CalculateImageSize` (`:106-110`) and its new depth-aware overload (CLD-10), which
 multiply by whatever `GetBytesPerPixel` returned and therefore inherit the zero.
