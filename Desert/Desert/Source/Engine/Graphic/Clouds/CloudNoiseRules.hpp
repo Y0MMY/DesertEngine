@@ -39,12 +39,11 @@ namespace Desert::Graphic
     // log rather than discovered in a memory graph.
     inline constexpr uint64_t CloudNoiseSetBytes()
     {
-        return Core::Formats::CalculateImageSize( kCloudShapeNoiseSize, kCloudShapeNoiseSize,
-                                                  kCloudShapeNoiseSize, kCloudNoiseFormat ) +
+        return Core::Formats::CalculateImageSize( kCloudShapeNoiseSize, kCloudShapeNoiseSize, kCloudShapeNoiseSize,
+                                                  kCloudNoiseFormat ) +
                Core::Formats::CalculateImageSize( kCloudDetailNoiseSize, kCloudDetailNoiseSize,
                                                   kCloudDetailNoiseSize, kCloudNoiseFormat ) +
-               Core::Formats::CalculateImageSize( kCloudCurlNoiseSize, kCloudCurlNoiseSize,
-                                                  kCloudNoiseFormat );
+               Core::Formats::CalculateImageSize( kCloudCurlNoiseSize, kCloudCurlNoiseSize, kCloudNoiseFormat );
     }
 
     // ---- Seeds ------------------------------------------------------------------------------------

@@ -110,7 +110,7 @@ namespace Desert::ECS
 
             auto& clouds = registry.get<ECS::VolumetricCloudsComponent>( entities[chosen] );
 
-            const bool force            = clouds.RequestRegenerateNoise;
+            const bool force              = clouds.RequestRegenerateNoise;
             clouds.RequestRegenerateNoise = false;
 
             // A disabled cloud layer is not rendered, so its 8 MiB of noise is 8 MiB of nothing. Treating

@@ -119,15 +119,15 @@ namespace Desert::Graphic
 
     CloudNoiseVolumes::Entry* CloudNoiseVolumes::FindEntry( const CloudNoiseKey& key )
     {
-        const auto it = std::find_if( m_Entries.begin(), m_Entries.end(),
-                                      [&key]( const Entry& e ) { return e.Key == key; } );
+        const auto it =
+             std::find_if( m_Entries.begin(), m_Entries.end(), [&key]( const Entry& e ) { return e.Key == key; } );
         return it != m_Entries.end() ? &( *it ) : nullptr;
     }
 
     const CloudNoiseVolumes::Entry* CloudNoiseVolumes::FindEntry( const CloudNoiseKey& key ) const
     {
-        const auto it = std::find_if( m_Entries.begin(), m_Entries.end(),
-                                      [&key]( const Entry& e ) { return e.Key == key; } );
+        const auto it =
+             std::find_if( m_Entries.begin(), m_Entries.end(), [&key]( const Entry& e ) { return e.Key == key; } );
         return it != m_Entries.end() ? &( *it ) : nullptr;
     }
 
@@ -172,14 +172,14 @@ namespace Desert::Graphic
 
     void CloudNoiseVolumes::Release( const CloudNoiseKey& key )
     {
-        const auto it = std::find_if( m_Entries.begin(), m_Entries.end(),
-                                      [&key]( const Entry& e ) { return e.Key == key; } );
+        const auto it =
+             std::find_if( m_Entries.begin(), m_Entries.end(), [&key]( const Entry& e ) { return e.Key == key; } );
         if ( it == m_Entries.end() )
         {
             // A Release without a matching Acquire is a bookkeeping bug in the caller, and silently
             // ignoring it is how a set ends up leaked or freed twice. Name the key and carry on.
-            LOG_ERROR( "[CloudNoise] Release of an unheld key (shape seed {}, detail seed {}).",
-                       key.ShapeSeed, key.DetailSeed );
+            LOG_ERROR( "[CloudNoise] Release of an unheld key (shape seed {}, detail seed {}).", key.ShapeSeed,
+                       key.DetailSeed );
             return;
         }
 
@@ -213,8 +213,8 @@ namespace Desert::Graphic
         CloudNoiseSet built;
         built.ShapeNoise =
              CreateVolume( "CloudShapeNoise_" + std::to_string( entry.Key.ShapeSeed ), kCloudShapeNoiseSize );
-        built.DetailNoise = CreateVolume( "CloudDetailNoise_" + std::to_string( entry.Key.DetailSeed ),
-                                          kCloudDetailNoiseSize );
+        built.DetailNoise =
+             CreateVolume( "CloudDetailNoise_" + std::to_string( entry.Key.DetailSeed ), kCloudDetailNoiseSize );
         built.CurlNoise = CreateCurlMap( "CloudCurlNoise_" + std::to_string( curlSeed ), kCloudCurlNoiseSize );
 
         if ( !built.IsComplete() )
@@ -232,8 +232,8 @@ namespace Desert::Graphic
         const uint32_t detailGroups = GroupCount( kCloudDetailNoiseSize );
         const uint32_t curlGroups   = GroupCount( kCloudCurlNoiseSize );
 
-        const bool shapeOk = DispatchNoise( kShapeShaderName, built.ShapeNoise.get(), entry.Key.ShapeSeed,
-                                            volumeGroups, volumeGroups, volumeGroups );
+        const bool shapeOk  = DispatchNoise( kShapeShaderName, built.ShapeNoise.get(), entry.Key.ShapeSeed,
+                                             volumeGroups, volumeGroups, volumeGroups );
         const bool detailOk = DispatchNoise( kDetailShaderName, built.DetailNoise.get(), entry.Key.DetailSeed,
                                              detailGroups, detailGroups, detailGroups );
         const bool curlOk =
@@ -255,7 +255,7 @@ namespace Desert::Graphic
 
         LOG_INFO( "[CloudNoise] Generated the noise set for shape seed {} / detail seed {} (curl seed {}): "
                   "shape {}^3 + detail {}^3 + curl {}^2, RGBA8, {:.2f} MiB total.",
-                  entry.Key.ShapeSeed, entry.Key.DetailSeed, curlSeed, kCloudShapeNoiseSize,
-                  kCloudDetailNoiseSize, kCloudCurlNoiseSize, BytesToMiB( CloudNoiseSetBytes() ) );
+                  entry.Key.ShapeSeed, entry.Key.DetailSeed, curlSeed, kCloudShapeNoiseSize, kCloudDetailNoiseSize,
+                  kCloudCurlNoiseSize, BytesToMiB( CloudNoiseSetBytes() ) );
     }
 } // namespace Desert::Graphic
