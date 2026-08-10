@@ -83,8 +83,10 @@ namespace Desert::Graphic::API::Vulkan
         {
             uniformBufferCount += (uint32_t)descriptorSet.UniformBuffers.size();
             combinedImageSamplerCount += (uint32_t)descriptorSet.Image2DSamplers.size();
+            combinedImageSamplerCount += (uint32_t)descriptorSet.Image3DSamplers.size();
             combinedImageSamplerCount += (uint32_t)descriptorSet.ImageCubeSamplers.size();
             storageImageCount += (uint32_t)descriptorSet.StorageImage2DSamplers.size();
+            storageImageCount += (uint32_t)descriptorSet.StorageImage3DSamplers.size();
             storageBufferCount += (uint32_t)descriptorSet.StorageBuffers.size();
         }
 
