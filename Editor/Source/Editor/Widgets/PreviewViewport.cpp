@@ -162,21 +162,10 @@ namespace Desert::Editor
         skyC.RequestBake         = true;
 
         // Same values through the direct call so the sky is enabled from frame 0 (the ECS command path alone
-        // proved insufficient in a minimal scene — see AssetThumbnailRenderer).
-        Graphic::SkySettings sky;
-        sky.ZenithColor    = skyC.Data.ZenithColor;
-        sky.HorizonColor   = skyC.Data.HorizonColor;
-        sky.GroundColor    = skyC.Data.GroundColor;
-        sky.SunColor       = skyC.Data.SunColor;
-        sky.SkyBrightness  = skyC.Data.SkyBrightness;
-        sky.HorizonFalloff = skyC.Data.HorizonFalloff;
-        sky.SunGlow        = skyC.Data.SunGlow;
-        sky.StarIntensity  = 0.0f;
-        // The component authors the sun as an angular DIAMETER in degrees; the pass wants the RADIUS in
-        // radians. Same conversion the sky system does, so both routes describe the same sun.
-        const float sunAngularRadius = glm::radians( skyC.Data.SunAngularDiameter ) * 0.5f;
-        m_Renderer->SetProceduralSky( true, -glm::normalize( kLightTravel ), skyC.Data.SunIntensity,
-                                      sunAngularRadius, true, Graphic::CloudSettings{}, sky );
+        // proved insufficient in a minimal scene — see AssetThumbnailRenderer). One packing helper, one
+        // negation: the palette is read off the component and the sun comes from the light's travel vector.
+        m_Renderer->SetProceduralSky( true, ECS::Rules::AtmosphereSunDirection( kLightTravel ),
+                                      /*bakeNow=*/true, Graphic::MakeSkySettings( skyC.Data ) );
 
         m_Inited = true;
     }

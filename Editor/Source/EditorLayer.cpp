@@ -76,6 +76,7 @@
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/ECS/System/TimeOfDayECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/Graphic/Materials/DataDrivenMaterial.hpp>
 #include <Editor/Core/Rigging/RigBuilder.hpp>
@@ -615,6 +616,9 @@ namespace Desert::Editor
     {
         scene.AddSystem<ECS::MeshECSSystem>();
         scene.AddSystem<ECS::TextECSSystem>();
+        // BEFORE the collectors: it writes the atmosphere sun's transform, which the sky collector, the
+        // light collector and the shadow path all read this same frame.
+        scene.AddSystem<ECS::TimeOfDayECSSystem>();
         scene.AddSystem<ECS::SkyboxECSSystem>();
         scene.AddSystem<ECS::TerrainECSSystem>();
         scene.AddSystem<ECS::PointLightECSSystem>();
@@ -1884,11 +1888,14 @@ namespace Desert::Editor
         auto mat = [&]( const std::string& name, std::initializer_list<std::pair<const char*, glm::vec4>> params )
         { return Editor::MaterialAssetUtils::CreatePBRMaterialAsset( m_AssetManager.get(), name, params ); };
 
-        // Sun (Translation encodes the direction; shading uses -normalize(T)) + procedural sky.
+        // Sun (Translation encodes the direction the light TRAVELS; the sky uses -normalize(T)) + sky.
+        // This is the site that MINTED the upside-down sun the shipped Sandbox/Starter scenes carried:
+        // normalize(-0.35, -0.9, -0.25) reproduces their corrected value [-0.3509, -0.9023, -0.2506]
+        // exactly, so a scene rebuilt from here now matches the one on disk instead of contradicting it.
         auto& sun = m_MainScene->CreateNewEntity( "Sun" );
         sun.AddComponent<ECS::DirectionLightComponent>();
         sun.GetComponent<ECS::TransformComponent>().Translation =
-             glm::normalize( glm::vec3( 0.35f, 0.9f, 0.25f ) );
+             glm::normalize( glm::vec3( -0.35f, -0.9f, -0.25f ) );
 
         auto& sky = m_MainScene->CreateNewEntity( "Sky" );
         sky.AddComponent<ECS::SkyAtmosphereComponent>();
@@ -2020,8 +2027,12 @@ namespace Desert::Editor
         {
             auto& sun = m_MainScene->CreateNewEntity( "CB_Sun" );
             sun.AddComponent<ECS::DirectionLightComponent>();
+            // Translation is the direction the light TRAVELS, so a sun ABOVE the horizon points DOWN.
+            // This site used to author +Y and put its own sun 57.7 degrees underground; the committed
+            // CornellDemo scene carries the corrected value and this now reproduces it exactly
+            // (normalize(0.6, -1, 0.2) == [0.5071, -0.8452, 0.1690]).
             sun.GetComponent<ECS::TransformComponent>().Translation =
-                 glm::normalize( glm::vec3( -0.6f, 1.0f, -0.2f ) );
+                 glm::normalize( glm::vec3( 0.6f, -1.0f, 0.2f ) );
         }
     }
 

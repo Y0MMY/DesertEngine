@@ -12,10 +12,19 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <vector>
+
 using Desert::ECS::LocomotionComponent;
+using Desert::ECS::Rules::AtmosphereSunDirection;
 using Desert::ECS::Rules::DecomposeTransform;
+using Desert::ECS::Rules::FallbackAtmosphereSunDirection;
+using Desert::ECS::Rules::IsSunDirectionValid;
 using Desert::ECS::Rules::LocomotionClipFor;
+using Desert::ECS::Rules::SelectAtmosphereSun;
 using Desert::ECS::Rules::SocketLocalTransform;
+using Desert::ECS::Rules::SunCandidate;
 
 namespace Units = Common::Units;
 
@@ -144,6 +153,156 @@ TEST( SocketRules, DecomposeRoundTripsTranslationScaleAndRotation )
     // Rotation comes back in RADIANS, like TransformComponent stores it — a degree here would be the
     // whole bug of "the weapon is rotated 57 times too far".
     EXPECT_NEAR( out.Rotation.y, yaw, 0.01f );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Which directional light is THE SUN
+//
+// Six rules, one test each. Before this, "the sun" was whichever directional light the registry happened
+// to visit first — and the sky and the lighting used different iteration orders, so they could disagree
+// about it with nothing said anywhere.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    SunCandidate Sun( uint64_t id, bool marked, int index = 0, bool valid = true )
+    {
+        return SunCandidate{ .Id = id, .Marked = marked, .Index = index, .DirectionValid = valid };
+    }
+} // namespace
+
+// Rule 1: a degenerate Translation is not a direction — normalizing it yields NaN and the sun points
+// nowhere, so such a light is not a candidate at all.
+TEST( AtmosphereSunRules, DegenerateDirectionsAreIgnoredEvenWhenMarked )
+{
+    const std::array<SunCandidate, 2> candidates{ Sun( 1, /*marked=*/true, 0, /*valid=*/false ),
+                                                  Sun( 9, /*marked=*/false, 0, /*valid=*/true ) };
+
+    const auto selection = SelectAtmosphereSun( candidates, 0 );
+    ASSERT_TRUE( selection.Chosen.has_value() );
+    EXPECT_EQ( candidates[*selection.Chosen].Id, 9u ) << "the marked one had no usable direction";
+    EXPECT_TRUE( selection.Fallback );
+}
+
+// Rule 2: a marked light at the wanted index beats an unmarked one, whatever the ids say.
+TEST( AtmosphereSunRules, MarkedBeatsUnmarkedRegardlessOfId )
+{
+    const std::array<SunCandidate, 2> candidates{ Sun( 1, /*marked=*/false ), Sun( 500, /*marked=*/true ) };
+
+    const auto selection = SelectAtmosphereSun( candidates, 0 );
+    ASSERT_TRUE( selection.Chosen.has_value() );
+    EXPECT_EQ( candidates[*selection.Chosen].Id, 500u );
+    EXPECT_FALSE( selection.Fallback );
+    EXPECT_TRUE( selection.Collisions.empty() );
+}
+
+// Rule 3: several marked at the same index -> lowest id, deterministically, and every loser is named.
+TEST( AtmosphereSunRules, TieIsBrokenByLowestIdAndIsOrderIndependent )
+{
+    const std::array<SunCandidate, 3> ascending{ Sun( 7, true ), Sun( 3, true ), Sun( 11, true ) };
+    const std::array<SunCandidate, 3> shuffled{ Sun( 11, true ), Sun( 7, true ), Sun( 3, true ) };
+
+    const auto a = SelectAtmosphereSun( ascending, 0 );
+    const auto b = SelectAtmosphereSun( shuffled, 0 );
+
+    ASSERT_TRUE( a.Chosen.has_value() );
+    ASSERT_TRUE( b.Chosen.has_value() );
+    EXPECT_EQ( ascending[*a.Chosen].Id, 3u );
+    EXPECT_EQ( shuffled[*b.Chosen].Id, 3u ) << "the same scene in a different order picks the same sun";
+
+    // Both losers are reported so the caller can name every colliding entity, not just the count.
+    EXPECT_EQ( a.Collisions.size(), 2u );
+    std::vector<uint64_t> collided;
+    for ( const size_t i : a.Collisions )
+        collided.push_back( ascending[i].Id );
+    std::sort( collided.begin(), collided.end() );
+    EXPECT_EQ( collided, ( std::vector<uint64_t>{ 7u, 11u } ) );
+}
+
+// Rule 4: marked at an index the engine cannot render is TREATED AS UNMARKED, and reported. The field is
+// authorable, but v1 renders exactly one directional light, so index 1 confers nothing.
+//
+// "Treated as unmarked" is the whole content of the rule, and it has two halves that must both hold:
+// the light loses its priority, but it does NOT lose its candidacy — it still competes in the lowest-id
+// fallback like any other unmarked light.
+TEST( AtmosphereSunRules, MarkedAtAnotherIndexLosesItsPriorityButNotItsCandidacy )
+{
+    // Half one: a light marked at index 1 does NOT outrank a light properly marked at index 0, even
+    // though its id is lower. This is the half that would break if the index were ignored.
+    const std::array<SunCandidate, 2> contested{ Sun( 4, /*marked=*/true, /*index=*/1 ),
+                                                 Sun( 8, /*marked=*/true, /*index=*/0 ) };
+
+    const auto winner = SelectAtmosphereSun( contested, 0 );
+    ASSERT_TRUE( winner.Chosen.has_value() );
+    EXPECT_EQ( contested[*winner.Chosen].Id, 8u ) << "index 0 is the only index that drives the sky";
+    EXPECT_FALSE( winner.Fallback );
+    ASSERT_EQ( winner.WrongIndex.size(), 1u );
+    EXPECT_EQ( contested[winner.WrongIndex.front()].Id, 4u ) << "and the demotion is reported, not silent";
+
+    // Half two: with no properly-marked light present it is an ordinary unmarked candidate, so the plain
+    // lowest-id fallback applies and its low id wins. Demoted is not disqualified.
+    const std::array<SunCandidate, 2> uncontested{ Sun( 4, /*marked=*/true, /*index=*/1 ),
+                                                   Sun( 8, /*marked=*/false, /*index=*/0 ) };
+
+    const auto fallback = SelectAtmosphereSun( uncontested, 0 );
+    ASSERT_TRUE( fallback.Chosen.has_value() );
+    EXPECT_EQ( uncontested[*fallback.Chosen].Id, 4u );
+    EXPECT_TRUE( fallback.Fallback );
+    EXPECT_EQ( fallback.WrongIndex.size(), 1u );
+}
+
+// Rule 5: nobody ticked the box -> the lowest-id valid light still drives the sky, and says so. The sky
+// must never go missing because of an unticked checkbox.
+TEST( AtmosphereSunRules, FallsBackToTheLowestIdWhenNothingIsMarked )
+{
+    const std::array<SunCandidate, 3> candidates{ Sun( 30, false ), Sun( 10, false ), Sun( 20, false ) };
+
+    const auto selection = SelectAtmosphereSun( candidates, 0 );
+    ASSERT_TRUE( selection.Chosen.has_value() );
+    EXPECT_EQ( candidates[*selection.Chosen].Id, 10u );
+    EXPECT_TRUE( selection.Fallback );
+}
+
+// Rule 6: nothing usable at all -> no selection; the caller uses the documented fallback direction.
+TEST( AtmosphereSunRules, NoValidCandidateSelectsNothing )
+{
+    const std::array<SunCandidate, 2> candidates{ Sun( 1, true, 0, /*valid=*/false ),
+                                                 Sun( 2, false, 0, /*valid=*/false ) };
+
+    EXPECT_FALSE( SelectAtmosphereSun( candidates, 0 ).Chosen.has_value() );
+    EXPECT_FALSE( SelectAtmosphereSun( std::span<const SunCandidate>{}, 0 ).Chosen.has_value() );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The ONE negation
+// ---------------------------------------------------------------------------------------------------
+
+TEST( AtmosphereSunRules, TowardSunIsTheOppositeOfTheTravelDirection )
+{
+    // The corrected value the shipped scenes now carry: the light travels DOWN, so the sun is UP.
+    const glm::vec3 travel( -0.3508783f, -0.9022585f, -0.2506274f );
+    const glm::vec3 toward = AtmosphereSunDirection( travel );
+
+    EXPECT_NEAR( glm::length( toward ), 1.0f, 1e-5f );
+    EXPECT_GT( toward.y, 0.0f ) << "a sun above the horizon";
+    EXPECT_NEAR( glm::degrees( std::asin( toward.y ) ), 64.5f, 0.1f );
+
+    // Applying it twice returns the travel direction — which is exactly what a second, "compensating"
+    // negation elsewhere in the engine would undo.
+    const glm::vec3 back = -toward;
+    EXPECT_NEAR( back.x, glm::normalize( travel ).x, 1e-5f );
+    EXPECT_NEAR( back.y, glm::normalize( travel ).y, 1e-5f );
+}
+
+TEST( AtmosphereSunRules, DirectionValidityUsesOneEpsilon )
+{
+    EXPECT_FALSE( IsSunDirectionValid( glm::vec3( 0.0f ) ) );
+    EXPECT_FALSE( IsSunDirectionValid( glm::vec3( 1e-5f, 0.0f, 0.0f ) ) );
+    EXPECT_TRUE( IsSunDirectionValid( glm::vec3( 0.0f, -1.0f, 0.0f ) ) );
+
+    // The documented no-light fallback points ABOVE the horizon, so an empty scene is lit, not black.
+    EXPECT_NEAR( glm::length( FallbackAtmosphereSunDirection() ), 1.0f, 1e-5f );
+    EXPECT_GT( FallbackAtmosphereSunDirection().y, 0.0f );
 }
 
 int main( int argc, char** argv )

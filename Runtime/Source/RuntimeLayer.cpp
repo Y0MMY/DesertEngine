@@ -15,6 +15,7 @@
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/ECS/System/TimeOfDayECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
 #include <Engine/ECS/System/SpotLightSystem.hpp>
@@ -80,6 +81,9 @@ namespace Desert::Player
         // Same system set + order as the editor's Play mode.
         m_Scene->AddSystem<ECS::MeshECSSystem>();
         m_Scene->AddSystem<ECS::TextECSSystem>();
+        // BEFORE the collectors: it writes the atmosphere sun's transform, which the sky collector, the
+        // light collector and the shadow path all read this same frame.
+        m_Scene->AddSystem<ECS::TimeOfDayECSSystem>();
         m_Scene->AddSystem<ECS::SkyboxECSSystem>();
         m_Scene->AddSystem<ECS::TerrainECSSystem>();
         m_Scene->AddSystem<ECS::PointLightECSSystem>();
