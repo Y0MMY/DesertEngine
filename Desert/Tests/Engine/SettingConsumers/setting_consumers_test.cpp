@@ -104,7 +104,9 @@ namespace
 
     // The four tasks that owe the cloud component its readers. Naming the task per field is what keeps a
     // forgotten field from disappearing into "the clouds are not done yet".
-    constexpr const char* kT7 = "T7 - noise generation: seeds the shape, detail and curl volumes";
+    // T7 has LANDED and consumes ShapeSeed, DetailSeed, Enabled and the regenerate request. It does not
+    // consume the erosion-shaping fields below: those shape how the volumes are SAMPLED, which is the
+    // raymarch's job. A debt booked against a finished task reads as paid, so they are owed by T8.
     constexpr const char* kT8 = "T8 - weather map and raymarch: samples the density field and lights it";
     constexpr const char* kT8Steps =
          "T8 - weather map and raymarch: the step schedule and the sampling budget of the march";
@@ -153,10 +155,10 @@ namespace
          { "DetailSeed", kCloudWidget },
          { "DetailTypeBias", nullptr, kT8 },
          { "BillowGradientPower", nullptr, kT8 },
-         { "BillowNoiseScale", nullptr, kT7 },
+         { "BillowNoiseScale", nullptr, kT8 },
          { "HighFreqStrength", nullptr, kT8 },
-         { "HighFreqWispSharpness", nullptr, kT7 },
-         { "HighFreqBillowSharpness", nullptr, kT7 },
+         { "HighFreqWispSharpness", nullptr, kT8 },
+         { "HighFreqBillowSharpness", nullptr, kT8 },
          { "HighFreqFadeStart", nullptr, kT8 },
          { "HighFreqFadeEnd", nullptr, kT8 },
          { "CurlStrength", nullptr, kT8 },
