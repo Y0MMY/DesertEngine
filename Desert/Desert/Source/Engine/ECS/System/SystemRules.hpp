@@ -120,10 +120,10 @@ namespace Desert::ECS::Rules
     // the sun, and would fire once per frame instead of once per scene load.
     struct AtmosphereSunSelection
     {
-        std::optional<size_t> Chosen;             // index into the candidate span
-        bool                  Fallback = false;   // rule 5: nothing was marked, lowest id taken
-        std::vector<size_t>   Collisions;         // rule 3: further marked candidates at wantedIndex
-        std::vector<size_t>   WrongIndex;         // rule 4: marked, but at an index v1 does not render
+        std::optional<size_t> Chosen;           // index into the candidate span
+        bool                  Fallback = false; // rule 5: nothing was marked, lowest id taken
+        std::vector<size_t>   Collisions;       // rule 3: further marked candidates at wantedIndex
+        std::vector<size_t>   WrongIndex;       // rule 4: marked, but at an index v1 does not render
     };
 
     // Rules, in order:
@@ -135,8 +135,7 @@ namespace Desert::ECS::Rules
     //  5. nothing marked -> lowest-Id valid candidate, reported as a fallback, because the sky must not go
     //     missing just because nobody ticked a box;
     //  6. nothing valid -> no selection; the caller uses FallbackAtmosphereSunDirection().
-    inline AtmosphereSunSelection SelectAtmosphereSun( std::span<const SunCandidate> candidates,
-                                                      int                           wantedIndex )
+    inline AtmosphereSunSelection SelectAtmosphereSun( std::span<const SunCandidate> candidates, int wantedIndex )
     {
         AtmosphereSunSelection result;
 

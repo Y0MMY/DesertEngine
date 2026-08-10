@@ -63,7 +63,16 @@ namespace Desert::ECS
             }
 
             bool atmosphereEnabled = false;
-            if ( primarySky )
+            if ( !primarySky )
+            {
+                // No sky component at all. Say so EXPLICITLY rather than emitting nothing: the renderer
+                // keeps its sky state across frames, so a component deleted mid-session would otherwise
+                // leave the last one it saw on screen — and would keep publishing an AtmosphereEnv marked
+                // valid for a sky that no longer exists.
+                renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
+                     false, Rules::FallbackAtmosphereSunDirection(), /*bakeNow=*/false, Graphic::SkySettings{} );
+            }
+            else
             {
                 auto& atmosphere = registry.get<ECS::SkyAtmosphereComponent>( skyEntities[*primarySky] );
 

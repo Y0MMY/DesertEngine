@@ -60,7 +60,7 @@ namespace Desert::Graphic
         const glm::vec3 dir = glm::normalize( towardSun );
 
         AtmosphereEnv env;
-        env.SunDirection = dir;
+        env.SunDirection  = dir;
         env.SunIrradiance = sky.SunColor * sky.SunIntensity;
 
         // Identical blend to Atmosphere.glslh: day = smoothstep(-0.10, 0.20, sunDir.y).

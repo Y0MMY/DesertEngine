@@ -62,8 +62,8 @@ namespace Desert::ECS
             sky.Data.TimeOfDay =
                  Graphic::AdvanceTimeOfDay( sky.Data.TimeOfDay, ts.GetSeconds(), sky.Data.DayLengthSeconds );
 
-            const glm::vec3 travel = Graphic::SunDirectionFromTimeOfDay(
-                 sky.Data.TimeOfDay, sky.Data.Latitude, sky.Data.NorthOffset );
+            const glm::vec3 travel =
+                 Graphic::SunDirectionFromTimeOfDay( sky.Data.TimeOfDay, sky.Data.Latitude, sky.Data.NorthOffset );
 
             const auto sun = FindAtmosphereSun( registry );
             if ( !sun )
@@ -74,7 +74,7 @@ namespace Desert::ECS
             // The MAGNITUDE is preserved, not normalized away: some scenes author the sun's Translation as
             // a position-like vector and the editor's own direction widget keeps its length for exactly
             // that reason. Only the heading is ours to drive.
-            const float length = glm::length( transform.Translation );
+            const float length    = glm::length( transform.Translation );
             transform.Translation = travel * ( length > Rules::kSunDirectionEpsilon ? length : 1.0f );
         }
 

@@ -194,8 +194,8 @@ TEST( PrimarySky, PicksTheLowestIdAndIsOrderIndependent )
 
 TEST( EnvironmentResolution, LadderIsWorkGroupAligned )
 {
-    for ( const auto res : { SkyEnvironmentResolution::Low, SkyEnvironmentResolution::Medium,
-                             SkyEnvironmentResolution::High } )
+    for ( const auto res :
+          { SkyEnvironmentResolution::Low, SkyEnvironmentResolution::Medium, SkyEnvironmentResolution::High } )
     {
         const auto size = EnvironmentPanoramaSize( res );
         // The bake dispatches in 32x32 groups and the shader has no partial-group path, so a size that is
@@ -216,8 +216,7 @@ TEST( EnvironmentResolution, PanoramaCostIsTheAdvertisedNumber )
                  1e-6 );
     EXPECT_NEAR( BytesToMiB( SkyEnvironmentBakeCost( SkyEnvironmentResolution::Medium ).PanoramaBytes ), 8.0,
                  1e-6 );
-    EXPECT_NEAR( BytesToMiB( SkyEnvironmentBakeCost( SkyEnvironmentResolution::Low ).PanoramaBytes ), 2.0,
-                 1e-6 );
+    EXPECT_NEAR( BytesToMiB( SkyEnvironmentBakeCost( SkyEnvironmentResolution::Low ).PanoramaBytes ), 2.0, 1e-6 );
 
     // The cube chain does NOT scale with the ladder — it is a fixed 1024-texel face either way. That is
     // the fact the log line exists to tell you, so it had better be true.
@@ -319,12 +318,11 @@ TEST( AtmosphereEnvRule, NightFactorMatchesTheShadersDayBlend )
         float SunY;
         float ExpectedNight;
     };
-    const Case cases[] = {
-         { -0.20f, 1.0f },  // below the smoothstep's low edge -> full night
-         { -0.10f, 1.0f },  // exactly the low edge
-         { 0.05f, 0.5f },   // the midpoint: smoothstep(t=0.5) = 0.5
-         { 0.20f, 0.0f },   // the high edge -> full day
-         { 0.90f, 0.0f } };
+    const Case cases[] = { { -0.20f, 1.0f }, // below the smoothstep's low edge -> full night
+                           { -0.10f, 1.0f }, // exactly the low edge
+                           { 0.05f, 0.5f },  // the midpoint: smoothstep(t=0.5) = 0.5
+                           { 0.20f, 0.0f },  // the high edge -> full day
+                           { 0.90f, 0.0f } };
 
     for ( const auto& c : cases )
     {
@@ -362,8 +360,7 @@ TEST( AtmosphereEnvRule, CarriesTheSunAndThePlanetAndNormalizes )
     data.PlanetRadius       = 6360.0f;
 
     const auto env = EvaluateAtmosphere( MakeSkySettings( data ),
-                                         glm::vec3( 0.0f, 5.0f, 0.0f ) /*deliberately un-normalized*/,
-                                         nullptr );
+                                         glm::vec3( 0.0f, 5.0f, 0.0f ) /*deliberately un-normalized*/, nullptr );
 
     EXPECT_NEAR( glm::length( env.SunDirection ), 1.0f, 1e-6f );
     EXPECT_FLOAT_EQ( env.SunIrradiance.r, 4.0f );

@@ -96,7 +96,12 @@ namespace Desert::Graphic::System
 
         // The evaluated sky other renderers consume. It is rebuilt from this frame's numbers rather than
         // accumulated, so a frame in which the sky is switched off publishes Valid == false immediately.
-        if ( enabled )
+        //
+        // The parameter buffer is part of the condition, not an afterthought: the published contract is
+        // "ParamsBuffer is null exactly when Valid is false", and a missing ProceduralSky shader leaves the
+        // buffer uncreated. Publishing Valid == true with no buffer would hand a consumer a null it was
+        // told could not happen.
+        if ( enabled && m_SkyParams )
         {
             m_Atmosphere = EvaluateAtmosphere( m_Sky, m_SunDir, m_SkyParams.get() );
 
@@ -159,8 +164,7 @@ namespace Desert::Graphic::System
         // skybox-swap path) since we're recreating GPU images that prior frames may have referenced.
         Renderer::GetInstance().WaitDeviceIdle();
 
-        Environment baked =
-             EnvironmentManager::CreateProcedural( size.Width, size.Height, m_SkyParams.get() );
+        Environment baked = EnvironmentManager::CreateProcedural( size.Width, size.Height, m_SkyParams.get() );
         if ( !baked )
         {
             // Keep the previous environment and say why; the user can retry with the Bake button. Do NOT

@@ -267,7 +267,7 @@ TEST( AtmosphereSunRules, FallsBackToTheLowestIdWhenNothingIsMarked )
 TEST( AtmosphereSunRules, NoValidCandidateSelectsNothing )
 {
     const std::array<SunCandidate, 2> candidates{ Sun( 1, true, 0, /*valid=*/false ),
-                                                 Sun( 2, false, 0, /*valid=*/false ) };
+                                                  Sun( 2, false, 0, /*valid=*/false ) };
 
     EXPECT_FALSE( SelectAtmosphereSun( candidates, 0 ).Chosen.has_value() );
     EXPECT_FALSE( SelectAtmosphereSun( std::span<const SunCandidate>{}, 0 ).Chosen.has_value() );

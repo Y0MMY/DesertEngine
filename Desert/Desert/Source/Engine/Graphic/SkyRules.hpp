@@ -86,10 +86,9 @@ namespace Desert::Graphic
         // Already unit length: sin^2(H) + cos^2(H) * (cos^2(lat) + sin^2(lat)) == 1.
         const glm::vec3 towardSunSolar( -sinH, std::cos( latitude ) * cosH, -std::sin( latitude ) * cosH );
 
-        const glm::vec3 towardSun =
-             glm::vec3( glm::rotate( glm::mat4( 1.0f ), glm::radians( northOffsetDeg ),
-                                     glm::vec3( 0.0f, 1.0f, 0.0f ) ) *
-                        glm::vec4( towardSunSolar, 0.0f ) );
+        const glm::vec3 towardSun = glm::vec3(
+             glm::rotate( glm::mat4( 1.0f ), glm::radians( northOffsetDeg ), glm::vec3( 0.0f, 1.0f, 0.0f ) ) *
+             glm::vec4( towardSunSolar, 0.0f ) );
 
         return -towardSun;
     }
@@ -140,8 +139,7 @@ namespace Desert::Graphic
 
         // Clamped before acos: antipodal directions land on exactly -1 - 1e-7 in float and acos() of that
         // is NaN, which compares false against every threshold and silently disables rebaking forever.
-        const float cosAngle =
-             glm::clamp( glm::dot( bakedSunDir / baked, currentSunDir / current ), -1.0f, 1.0f );
+        const float cosAngle = glm::clamp( glm::dot( bakedSunDir / baked, currentSunDir / current ), -1.0f, 1.0f );
         return glm::degrees( std::acos( cosAngle ) ) > thresholdDeg;
     }
 

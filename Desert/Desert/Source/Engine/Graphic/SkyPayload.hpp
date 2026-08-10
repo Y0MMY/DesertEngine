@@ -44,7 +44,8 @@ namespace Desert::Graphic
     static_assert( offsetof( SkyGpuPayload, Night ) == 96 );
 
     // Size the buffer is created with, and the size every writer must hand to SetData.
-    inline constexpr uint32_t kSkyPayloadBytes = kSkyPackedVec4Count * static_cast<uint32_t>( sizeof( glm::vec4 ) );
+    inline constexpr uint32_t kSkyPayloadBytes =
+         kSkyPackedVec4Count * static_cast<uint32_t>( sizeof( glm::vec4 ) );
 
     // Binding number the sky parameter buffer is declared at, in BOTH sky shaders.
     //
