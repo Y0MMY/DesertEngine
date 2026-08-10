@@ -88,6 +88,8 @@ namespace Desert::Editor
         // ===== Popups =====
         void DrawPopups();
         void DrawOpenScenePopup();
+        // "Discard unsaved changes?" for a scene opened by drag-drop / double-click (see m_PendingOpenScene).
+        void DrawConfirmOpenScenePopup();
         void DrawSaveScenePopup();
         void DrawNewScenePopup();
         void DrawReloadScenePopup();
@@ -222,5 +224,13 @@ namespace Desert::Editor
         std::vector<Common::Filepath> m_AvailableScenes;
         std::vector<Common::Filepath> m_RecentScenes;
         int                           m_SelectedSceneIndex = -1;
+        // Open Scene popup: substring filter over the (recursive) scene list — with subfolders the list is
+        // long enough that scrolling for a name is worse than typing it.
+        char m_SceneFilter[128] = {};
+
+        // A scene a panel asked to open (dropped on the viewport, double-clicked in the browser) while the
+        // current one had unsaved edits: held until the confirm popup says discard/save/cancel.
+        std::optional<Common::Filepath> m_PendingOpenScene;
+        bool                            m_ConfirmOpenScenePopup = false;
     };
 } // namespace Desert::Editor

@@ -6,6 +6,7 @@
 
 #include "FileExplorerPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/SceneOpenRequest.hpp>
 #include <Editor/Core/AssetFileOps.hpp>
 #include <Editor/Core/AssetReferences.hpp>
 #include <Editor/Panels/NodeGraph/NodeGraphPanel.hpp>
@@ -1230,6 +1231,8 @@ namespace Desert::Editor
                 type = ::Desert::Editor::DragPayloads::MeshAsset;
             else if ( entry.Type == FileType::Font )
                 type = ::Desert::Editor::DragPayloads::FontFile;
+            else if ( entry.Type == FileType::Scene )
+                type = ::Desert::Editor::DragPayloads::SceneFile;
 
             ImGui::SetDragDropPayload( type, assetPath.c_str(), assetPath.size() + 1 );
 
@@ -1994,6 +1997,8 @@ namespace Desert::Editor
             ChangeDirectory( entry );
         else if ( doubleClicked && entry->Type == FileType::ShaderGraph )
             NodeGraphPanel::RequestOpen( entry->AssetPath ); // opens the Node Graph panel with this graph
+        else if ( doubleClicked && entry->Type == FileType::Scene )
+            Core::SceneOpenRequest::Request( entry->AssetPath ); // same guarded load as a drop / the menu
 
         ImGui::PopID();
         return doubleClicked;

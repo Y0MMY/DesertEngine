@@ -22,6 +22,7 @@
 #include "Editor/Core/CrashRecovery.hpp"
 #include "Editor/Core/LayoutManager.hpp"
 #include "Editor/Core/PanelRequests.hpp"
+#include "Editor/Core/SceneOpenRequest.hpp"
 #include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -463,6 +464,23 @@ namespace Desert::Editor
                 ++m_StartupNext;
             }
             return BOOLSUCCESS;
+        }
+
+        // A scene handed over by a panel (dropped on the viewport, double-clicked in the asset browser).
+        // It goes through the SAME deferred load as the menu — but a drag is easy to do by accident, so
+        // unsaved work is not thrown away silently: the confirm popup decides, and only then do we queue.
+        if ( auto requested = Editor::Core::SceneOpenRequest::Consume() )
+        {
+            const Common::Filepath path( *requested );
+            if ( CommandHistory::Get().Revision() != s_SavedRevision )
+            {
+                m_PendingOpenScene      = path;
+                m_ConfirmOpenScenePopup = true;
+            }
+            else
+            {
+                LoadScene( path );
+            }
         }
 
         // Scene loads wait until the startup stages finished (a scene expects cooked/preloaded assets).
@@ -1303,19 +1321,61 @@ namespace Desert::Editor
         }
     }
 
+    // Case-insensitive matching for the scene filter (ASCII: scene paths on disk are ASCII).
+    static std::string Lowercased( const std::string& text )
+    {
+        std::string out = text;
+        std::transform( out.begin(), out.end(), out.begin(),
+                        []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        return out;
+    }
+
+    // How a scene is NAMED in the pickers: its path relative to the scenes root ("Levels/Arena.desce"),
+    // not the bare filename. With subfolders in play, filenames alone are both ambiguous (two "Test.desce"
+    // in different folders read identically) and lose the only structure the user gave their scenes.
+    static std::string SceneLabel( const Common::Filepath& path )
+    {
+        std::error_code   ec;
+        const std::string rel =
+             std::filesystem::relative( path, Common::Constants::Path::SCENE_PATH, ec ).generic_string();
+
+        // Outside the scenes root (a recent scene from elsewhere): a "../../.." chain says nothing.
+        if ( ec || rel.empty() || rel.rfind( "..", 0 ) == 0 )
+            return path.filename().string();
+        return rel;
+    }
+
     void EditorLayer::PrepareScenePopup()
     {
         m_AvailableScenes.clear();
 
         const auto scenePath = Common::Constants::Path::SCENE_PATH;
 
-        for ( const auto& entry : std::filesystem::directory_iterator( scenePath ) )
+        // RECURSIVE: scenes live in subfolders (Levels/, Autosave/, per-feature folders), and a flat scan
+        // of the root simply did not list them — they were unreachable from this menu. The error_code
+        // overloads also make a missing scenes directory an empty list instead of a thrown exception.
+        std::error_code ec;
+        auto            it = std::filesystem::recursive_directory_iterator(
+             scenePath, std::filesystem::directory_options::skip_permission_denied, ec );
+        const auto end = std::filesystem::recursive_directory_iterator();
+        for ( ; !ec && it != end; it.increment( ec ) )
         {
-            if ( entry.path().extension() == Common::Constants::Extensions::SCENE_EXTENSION )
-                m_AvailableScenes.push_back( entry.path() );
+            if ( it->path().extension() != Common::Constants::Extensions::SCENE_EXTENSION )
+                continue;
+
+            std::error_code fileEc; // separate: a failed stat must not end the whole walk
+            if ( std::filesystem::is_regular_file( it->path(), fileEc ) )
+                m_AvailableScenes.push_back( it->path() );
         }
 
+        // Sorted by the label the list shows, which keeps every folder's scenes contiguous (they share the
+        // "Folder/" prefix) — that is what the folder headers in the popup rely on.
+        std::sort( m_AvailableScenes.begin(), m_AvailableScenes.end(),
+                   []( const Common::Filepath& a, const Common::Filepath& b )
+                   { return SceneLabel( a ) < SceneLabel( b ); } );
+
         m_SelectedSceneIndex = -1;
+        m_SceneFilter[0]     = '\0';
     }
 
     void EditorLayer::DrawProjectSection()
@@ -1688,6 +1748,7 @@ namespace Desert::Editor
     void EditorLayer::DrawPopups()
     {
         DrawOpenScenePopup();
+        DrawConfirmOpenScenePopup();
         DrawSaveScenePopup();
         DrawNewScenePopup();
         DrawReloadScenePopup();
@@ -2145,11 +2206,12 @@ namespace Desert::Editor
 
             for ( const auto& path : m_RecentScenes )
             {
-                std::string label = path.filename().string();
+                const std::string label = SceneLabel( path );
                 if ( ImGui::MenuItem( label.c_str() ) )
                 {
                     LoadScene( path );
                 }
+                Utils::ImGuiUtilities::Tooltip( path.string().c_str() );
             }
         }
 
@@ -2431,31 +2493,71 @@ namespace Desert::Editor
             ImGui::TextUnformatted( "Select Scene" );
             ImGui::Separator();
 
+            ImGui::SetNextItemWidth( 450.0f );
+            ImGui::InputTextWithHint( "##SceneFilter", ICON_MDI_MAGNIFY " Filter", m_SceneFilter,
+                                      sizeof( m_SceneFilter ) );
+
             ImGui::BeginChild( "SceneList", ImVec2( 450, 300 ), true );
+
+            const std::string filter  = Lowercased( m_SceneFilter );
+            bool              loadNow = false; // double-click = pick AND load, in one gesture
+            std::string       shownFolder;     // last folder header drawn
+            bool              haveFolder = false;
+            bool              anyShown   = false;
 
             for ( int i = 0; i < static_cast<int>( m_AvailableScenes.size() ); ++i )
             {
-                const auto filename = m_AvailableScenes[i].filename().string();
+                const std::string label = SceneLabel( m_AvailableScenes[i] );
+                if ( !filter.empty() && Lowercased( label ).find( filter ) == std::string::npos )
+                    continue;
 
-                if ( ImGui::Selectable( filename.c_str(), m_SelectedSceneIndex == i ) )
+                // Split "Folder/Sub/Scene.desce" into its folder header and the scene's own name.
+                const size_t      slash  = label.find_last_of( '/' );
+                const std::string folder = slash == std::string::npos ? std::string() : label.substr( 0, slash );
+                const std::string name   = slash == std::string::npos ? label : label.substr( slash + 1 );
+
+                if ( !haveFolder || folder != shownFolder )
                 {
-                    m_SelectedSceneIndex = i;
+                    if ( anyShown )
+                        ImGui::Spacing();
+                    if ( folder.empty() )
+                        ImGui::TextDisabled( ICON_MDI_FOLDER_HOME " Scenes" );
+                    else
+                        ImGui::TextDisabled( ICON_MDI_FOLDER " %s", folder.c_str() );
+                    shownFolder = folder;
+                    haveFolder  = true;
                 }
 
-                if ( ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+                anyShown = true;
+
+                ImGui::PushID( i ); // two folders may hold the same filename
+                ImGui::Indent( 12.0f );
+                if ( ImGui::Selectable( name.c_str(), m_SelectedSceneIndex == i,
+                                        ImGuiSelectableFlags_AllowDoubleClick ) )
                 {
                     m_SelectedSceneIndex = i;
+                    if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+                        loadNow = true;
                 }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "%s", m_AvailableScenes[i].string().c_str() );
+                ImGui::Unindent( 12.0f );
+                ImGui::PopID();
             }
+
+            if ( !anyShown )
+                ImGui::TextDisabled( m_AvailableScenes.empty() ? "No scenes found" : "No match" );
 
             ImGui::EndChild();
 
             ImGui::Separator();
 
-            if ( ImGui::Button( "Load", ImVec2( 120, 0 ) ) )
+            const bool hasSelection =
+                 m_SelectedSceneIndex >= 0 && m_SelectedSceneIndex < static_cast<int>( m_AvailableScenes.size() );
+
+            if ( ImGui::Button( "Load", ImVec2( 120, 0 ) ) || loadNow )
             {
-                if ( m_SelectedSceneIndex >= 0 &&
-                     m_SelectedSceneIndex < static_cast<int>( m_AvailableScenes.size() ) )
+                if ( hasSelection )
                 {
                     LoadScene( m_AvailableScenes[m_SelectedSceneIndex] );
                 }
@@ -2472,6 +2574,62 @@ namespace Desert::Editor
 
             ImGui::EndPopup();
         }
+    }
+
+    // Guard for the scene handed over by a panel (viewport drop / asset double-click): the document is
+    // about to be replaced, and unlike the menu path this can be triggered by a slip of the mouse. Only
+    // shown when there is something to lose — a clean scene opens straight away.
+    void EditorLayer::DrawConfirmOpenScenePopup()
+    {
+        namespace ImGui = ::ImGui;
+
+        if ( m_ConfirmOpenScenePopup )
+        {
+            ImGui::OpenPopup( "Open Scene?" );
+            m_ConfirmOpenScenePopup = false;
+        }
+
+        ImGui::SetNextWindowPos( ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                                 ImVec2( 0.5f, 0.5f ) );
+
+        if ( !ImGui::BeginPopupModal( "Open Scene?", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+            return;
+
+        const bool havePending = m_PendingOpenScene.has_value();
+
+        ImGui::TextUnformatted( "The current scene has unsaved changes." );
+        ImGui::TextDisabled( "Open %s", havePending ? SceneLabel( *m_PendingOpenScene ).c_str() : "" );
+        ImGui::Separator();
+
+        if ( ImGui::Button( "Save and Open", ImVec2( 130, 0 ) ) )
+        {
+            m_MainScene->Serialize( m_AssetManager.get() );
+            s_SavedRevision = CommandHistory::Get().Revision();
+            if ( havePending )
+                LoadScene( *m_PendingOpenScene );
+            m_PendingOpenScene.reset();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+
+        if ( ImGui::Button( "Discard", ImVec2( 110, 0 ) ) )
+        {
+            if ( havePending )
+                LoadScene( *m_PendingOpenScene );
+            m_PendingOpenScene.reset();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+
+        if ( ImGui::Button( "Cancel", ImVec2( 110, 0 ) ) )
+        {
+            m_PendingOpenScene.reset();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
 
     void EditorLayer::DrawSaveScenePopup()

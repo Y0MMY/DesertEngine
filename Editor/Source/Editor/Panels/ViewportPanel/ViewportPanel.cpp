@@ -1,5 +1,6 @@
 #include "ViewportPanel.hpp"
 #include <Editor/Core/DragPayloads.hpp>
+#include <Editor/Core/SceneOpenRequest.hpp>
 #include <Editor/Core/EditorPreferences.hpp>
 
 #include <Editor/Core/Selection/SelectionManager.hpp>
@@ -881,6 +882,17 @@ namespace Desert::Editor
                 const std::string path( static_cast<const char*>( payload->Data ),
                                         payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
                 AssignMaterialAtCursor( path );
+            }
+
+            // Drag a scene (.desce) onto the viewport to OPEN it — the document is replaced, so the load
+            // itself is deferred to the editor (GPU teardown between frames, and it asks first when the
+            // current scene has unsaved changes).
+            if ( const ImGuiPayload* payload =
+                      ImGui::AcceptDragDropPayload( ::Desert::Editor::DragPayloads::SceneFile ) )
+            {
+                const std::string path( static_cast<const char*>( payload->Data ),
+                                        payload->DataSize > 0 ? payload->DataSize - 1 : 0 );
+                Core::SceneOpenRequest::Request( path );
             }
             ImGui::EndDragDropTarget();
         }
