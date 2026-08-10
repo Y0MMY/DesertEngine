@@ -257,10 +257,9 @@ namespace
     // merely names the type.
     bool MentionsWord( const std::string& haystack, const std::string& word )
     {
-        const auto boundary = []( char c ) { return !( std::isalnum( static_cast<unsigned char>( c ) ) ||
-                                                       c == '_' ); };
-        for ( std::size_t at = haystack.find( word ); at != std::string::npos;
-              at             = haystack.find( word, at + 1 ) )
+        const auto boundary = []( char c )
+        { return !( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' ); };
+        for ( std::size_t at = haystack.find( word ); at != std::string::npos; at = haystack.find( word, at + 1 ) )
         {
             const bool leftOk  = at == 0 || boundary( haystack[at - 1] );
             const bool rightOk = at + word.size() >= haystack.size() || boundary( haystack[at + word.size()] );
@@ -351,9 +350,8 @@ TEST( SettingConsumers, TheSkyComponentOwesNothingToAFutureTask )
 // leave out. When a cloud pass lands, this number drops and the drop is a reviewable edit.
 TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBeenWrittenFor )
 {
-    const std::ptrdiff_t pending =
-         std::count_if( std::begin( kCloudRows ), std::end( kCloudRows ),
-                        []( const Row& r ) { return r.Task != nullptr; } );
+    const std::ptrdiff_t pending = std::count_if( std::begin( kCloudRows ), std::end( kCloudRows ),
+                                                  []( const Row& r ) { return r.Task != nullptr; } );
 
     // 95 fields, five of which the Details widget already consumes: the two selectors and the three
     // noise seeds.

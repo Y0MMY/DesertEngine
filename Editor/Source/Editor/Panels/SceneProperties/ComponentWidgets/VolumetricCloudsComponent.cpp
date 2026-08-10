@@ -39,8 +39,8 @@ namespace Desert::Editor
         // is what stops "I dropped to Medium" from also erasing "Storm" — two independent dials that a
         // combined "something changed" flag would silently couple.
         void ReconcileSelectors( ECS::Entity& entity, Data& data, const Graphic::CloudPresetValues& lookBefore,
-                                 const Graphic::CloudQualityValues& qualityBefore,
-                                 ECS::CloudPreset presetBefore, ECS::CloudQuality tierBefore )
+                                 const Graphic::CloudQualityValues& qualityBefore, ECS::CloudPreset presetBefore,
+                                 ECS::CloudQuality tierBefore )
         {
             if ( data.Preset != presetBefore )
             {
@@ -97,7 +97,7 @@ namespace Desert::Editor
         e.Add               = []( ECS::Entity& en ) { en.AddComponent<C>(); };
         e.Remove            = []( ECS::Entity& en ) { en.RemoveComponent<C>(); };
         e.DataPtr           = []( ECS::Entity& en ) -> void* { return &en.GetComponent<C>().Data; };
-        e.Draw = []( ECS::Entity& en, ::Desert::Core::Scene* scene, const ComponentEditContext& ctx )
+        e.Draw              = []( ECS::Entity& en, ::Desert::Core::Scene* scene, const ComponentEditContext& ctx )
         {
             (void)scene;
             auto& clouds = en.GetComponent<C>();
@@ -122,8 +122,7 @@ namespace Desert::Editor
             // generated, so changing one has no effect at all until the volumes are rebuilt. Raising the
             // request here is what makes them live settings rather than three sliders that appear to do
             // nothing. A preset changes seeds too, hence the check after the reconcile rather than before.
-            if ( data.ShapeSeed != shapeSeed || data.DetailSeed != detailSeed ||
-                 data.WeatherSeed != weatherSeed )
+            if ( data.ShapeSeed != shapeSeed || data.DetailSeed != detailSeed || data.WeatherSeed != weatherSeed )
                 clouds.RequestRegenerateNoise = true;
         };
         return e;
@@ -132,7 +131,6 @@ namespace Desert::Editor
 
 namespace
 {
-    const int _desert_volumetric_clouds_component_reg =
-         ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
-              ::Desert::Editor::MakeVolumetricCloudsEntry() );
+    const int _desert_volumetric_clouds_component_reg = ::Desert::Editor::ComponentWidgetRegistry::Get().Register(
+         ::Desert::Editor::MakeVolumetricCloudsEntry() );
 } // namespace

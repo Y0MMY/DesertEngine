@@ -37,9 +37,9 @@ namespace
 {
     // The thirteen fields a preset owns (SkyAtmosphereData rows 2-14).
     constexpr const char* kPaletteFields[] = {
-         "SkyBrightness", "HorizonFalloff", "ZenithColor",        "HorizonColor", "GroundColor",
-         "NightColor",    "SunIntensity",   "SunColor",           "SunAngularDiameter",
-         "SunGlow",       "SunsetColor",    "SunsetIntensity",    "StarIntensity",
+         "SkyBrightness", "HorizonFalloff",  "ZenithColor",   "HorizonColor",       "GroundColor",
+         "NightColor",    "SunIntensity",    "SunColor",      "SunAngularDiameter", "SunGlow",
+         "SunsetColor",   "SunsetIntensity", "StarIntensity",
     };
 
     const TypeInfo& SkyType()

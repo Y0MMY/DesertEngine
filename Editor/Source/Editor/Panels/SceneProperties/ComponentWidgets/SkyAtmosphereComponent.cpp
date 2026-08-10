@@ -158,8 +158,7 @@ namespace Desert::Editor
 
             // Snapshot the palette AFTER the preset row, so applying a preset is not then mistaken for a
             // hand edit of the values it just wrote.
-            const Graphic::SkyPresetValues paletteBefore =
-                 Graphic::ExtractSkyPresetValues( atmosphere.Data );
+            const Graphic::SkyPresetValues paletteBefore = Graphic::ExtractSkyPresetValues( atmosphere.Data );
 
             const bool changed = PropertyEditorBuilder::Draw( &atmosphere.Data, "SkyAtmosphereData",
                                                               ctx.AssetMgr(), ctx.UIHelper, ctx.FieldFilter );

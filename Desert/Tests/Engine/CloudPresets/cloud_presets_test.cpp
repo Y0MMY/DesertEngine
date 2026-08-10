@@ -108,19 +108,18 @@ TEST( CloudPresets, EveryEnumeratorExceptCustomHasExactlyOneRow )
 
     for ( const auto& enumerator : preset->EnumValues )
     {
-        const auto id    = static_cast<CloudPreset>( enumerator.Value );
-        const auto* row  = Graphic::FindCloudPreset( id );
-        const bool custom = id == CloudPreset::Custom;
+        const auto  id     = static_cast<CloudPreset>( enumerator.Value );
+        const auto* row    = Graphic::FindCloudPreset( id );
+        const bool  custom = id == CloudPreset::Custom;
         EXPECT_EQ( row == nullptr, custom ) << enumerator.Name << " has the wrong number of table rows";
     }
 
     // Every row appears once, so a copy-pasted entry cannot shadow another preset.
     for ( const Graphic::CloudPresetEntry& entry : Graphic::kCloudPresets )
     {
-        const std::ptrdiff_t count = std::count_if( std::begin( Graphic::kCloudPresets ),
-                                                    std::end( Graphic::kCloudPresets ),
-                                                    [&entry]( const Graphic::CloudPresetEntry& other )
-                                                    { return other.Id == entry.Id; } );
+        const std::ptrdiff_t count =
+             std::count_if( std::begin( Graphic::kCloudPresets ), std::end( Graphic::kCloudPresets ),
+                            [&entry]( const Graphic::CloudPresetEntry& other ) { return other.Id == entry.Id; } );
         EXPECT_EQ( count, 1 ) << entry.Name << " appears more than once";
         EXPECT_NE( entry.Name, nullptr );
     }
@@ -160,8 +159,7 @@ TEST( CloudPresets, ApplyingTheSamePresetTwiceChangesNothingTheSecondTime )
         Graphic::ApplyPreset( entry.Id, once );
         VolumetricCloudData twice = once;
         Graphic::ApplyPreset( entry.Id, twice );
-        EXPECT_TRUE( Graphic::ExtractPresetValues( once ) == Graphic::ExtractPresetValues( twice ) )
-             << entry.Name;
+        EXPECT_TRUE( Graphic::ExtractPresetValues( once ) == Graphic::ExtractPresetValues( twice ) ) << entry.Name;
     }
 }
 
@@ -352,8 +350,7 @@ TEST( CloudQualityTiers, MovingAnySingleKnobFallsBackToCustom )
     expectCustom( []( VolumetricCloudData& d ) { d.MaxStepSize += 1.0f; }, "MaxStepSize" );
     expectCustom( []( VolumetricCloudData& d ) { d.StepGrowthRate += 0.001f; }, "StepGrowthRate" );
     expectCustom( []( VolumetricCloudData& d ) { d.CoarseStepMultiplier += 0.5f; }, "CoarseStepMultiplier" );
-    expectCustom( []( VolumetricCloudData& d ) { d.EmptySamplesBeforeCoarse += 1; },
-                  "EmptySamplesBeforeCoarse" );
+    expectCustom( []( VolumetricCloudData& d ) { d.EmptySamplesBeforeCoarse += 1; }, "EmptySamplesBeforeCoarse" );
     expectCustom( []( VolumetricCloudData& d ) { d.LightMarchSamples += 1; }, "LightMarchSamples" );
     expectCustom( []( VolumetricCloudData& d ) { d.MultiScatterOctaves += 1; }, "MultiScatterOctaves" );
     expectCustom( []( VolumetricCloudData& d ) { d.TemporalMode = CloudTemporalMode::Off; }, "TemporalMode" );
@@ -447,8 +444,7 @@ TEST( CloudQualityTiers, EveryTierValueLiesInsideItsFieldsDeclaredRange )
 // them across all 7 x 4 combinations is cheap and catches a preset authored against the wrong tier.
 TEST( CloudPresets, EveryPresetTimesEveryTierSatisfiesTheOrderingInvariants )
 {
-    const auto nonDecreasing = []( const glm::vec4& g )
-    { return g.x <= g.y && g.y <= g.z && g.z <= g.w; };
+    const auto nonDecreasing = []( const glm::vec4& g ) { return g.x <= g.y && g.y <= g.z && g.z <= g.w; };
 
     for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
     {
