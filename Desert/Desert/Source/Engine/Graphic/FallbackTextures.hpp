@@ -14,6 +14,13 @@ namespace Desert::Graphic
         GetFallbackTextureCube( Core::Formats::ImageFormat format ) const = 0;
         virtual const std::shared_ptr<Image2D>&
         GetFallbackStorageImage2D( Core::Formats::ImageFormat format ) const = 0;
+        // Volumes. A `sampler3D` / `image3D` binding that nobody wrote is an UNDEFINED descriptor, and the
+        // 2D fallbacks cannot stand in for it: a 2D view in a 3D binding is exactly the silent mis-bind
+        // the reflection work was done to prevent.
+        virtual const std::shared_ptr<Image3D>&
+        GetFallbackTexture3D( Core::Formats::ImageFormat format ) const = 0;
+        virtual const std::shared_ptr<Image3D>&
+        GetFallbackStorageImage3D( Core::Formats::ImageFormat format ) const = 0;
 
     public:
         FallbackTextures( const FallbackTextures& )            = delete;
