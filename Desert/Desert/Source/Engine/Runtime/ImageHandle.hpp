@@ -10,7 +10,11 @@ namespace Desert::Runtime
         enum class Type : uint8_t
         {
             Image2D,
-            ImageCube
+            ImageCube,
+            // Volume textures. Registering them with the ImageService is what makes them participate in
+            // engine-wide image operations — in particular Renderer::RecreateImageSamplers on a texture
+            // filter change, which a volume must survive with its LINEAR sampler intact.
+            Image3D
         };
 
         ImageHandle() = default;

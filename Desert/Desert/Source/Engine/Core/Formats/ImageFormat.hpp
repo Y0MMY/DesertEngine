@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Common/Core/Core.hpp>
+#include <Common/Core/Logger.hpp>
+
 #include <variant>
 #include <optional>
 #include <vector>
@@ -17,6 +20,11 @@ namespace Desert::Core::Formats
     enum class ImageFormat
     {
         RGBA8F,
+        // Half-float colour. Carries pre-tonemap radiance and transmittance for the volumetric targets at
+        // half the memory of RGBA32F — three 1920x1080 targets cost 47.5 MiB per live SceneRenderer
+        // instead of 95 MiB. Half's ~0.05% relative precision is finer than the 8-bit swapchain and the
+        // tonemap downstream of it.
+        RGBA16F,
         RGBA32F,
         BGRA8F,
         DEPTH24STENCIL8,
@@ -24,15 +32,135 @@ namespace Desert::Core::Formats
         DEPTH32F
     };
 
+    // How many enumerators ImageFormat has. Bump it in the same edit that adds a format: the
+    // static_assert further down then constant-evaluates every format lookup for the new value, and the
+    // build FAILS until each of them has a case for it. See the note on "Format facts" below for why
+    // this is a hand-maintained count and not a compiler warning.
+    constexpr uint32_t kImageFormatCount = 6;
+
     enum ImageProperties : uint32_t
     {
         Storage = 0x1,
         Sample  = 0x2,
     };
 
+    // Which planes of an image a barrier or a view must name. The bit values mirror VK_IMAGE_ASPECT_*,
+    // but this is the engine's own vocabulary on purpose: Core knows nothing about Vulkan, and the
+    // backend translates explicitly rather than punning on the numbers.
+    enum ImageAspect : uint32_t
+    {
+        ImageAspect_Colour  = 0x1,
+        ImageAspect_Depth   = 0x2,
+        ImageAspect_Stencil = 0x4,
+    };
+
     constexpr ImageProperties operator|( ImageProperties a, ImageProperties b )
     {
         return static_cast<ImageProperties>( static_cast<uint32_t>( a ) | static_cast<uint32_t>( b ) );
+    }
+
+    // ── Format facts ───────────────────────────────────────────────────────────────────────────────
+    //
+    // The lookups below are TOTAL over ImageFormat: every enumerator has an explicit case, there is no
+    // `default:` label, and NOTHING is returned after the switch. That combination is deliberate. The
+    // previous version of GetBytesPerPixel handled two formats and ended in `return 0U;`, so a format it
+    // did not know about produced a bytes-per-pixel of 0 — which CalculateImageSize then multiplied into
+    // a zero-byte staging buffer for a real image. The corruption surfaced far away from the format that
+    // caused it, which is the expensive part.
+    //
+    // Adding a format without extending them has to break the BUILD, not a test somebody may not run.
+    // The obvious mechanism — -Wswitch on a switch with no `default:` — does NOT work here and is worth
+    // knowing about: the workspace compiles with `warnings "Off"` (BuildScripts/Workspace.lua:22), which
+    // becomes `-w`, and `-w` overrides -Wswitch AND every `#pragma diagnostic error` that tries to
+    // promote it back (verified, clang 17, 2026-08). So the guard is the language instead of a flag:
+    // these are `constexpr`, and LookupsAreTotal() below constant-evaluates them for every enumerator.
+    // Falling off the end of a constexpr function during constant evaluation is ill-formed, so a missing
+    // case is a compile error in any configuration and under any warning settings.
+
+    constexpr uint32_t GetBytesPerPixel( ImageFormat format )
+    {
+        switch ( format )
+        {
+            case ImageFormat::RGBA8F:
+                return 4; // 4 channels, 8 bits each
+            case ImageFormat::RGBA16F:
+                return 8; // 4 channels, 16 bits each
+            case ImageFormat::RGBA32F:
+                return 16; // 4 channels, 32 bits each
+            case ImageFormat::BGRA8F:
+                return 4;
+            case ImageFormat::DEPTH24STENCIL8:
+                return 4; // 24-bit depth + 8-bit stencil, packed into one 32-bit texel
+            case ImageFormat::DEPTH32F:
+                return 4;
+        }
+
+        // Unreachable for any declared enumerator — only a corrupted or cast-in integer arrives here, so
+        // this is a programmer error, not a data error. Name the value and stop; never hand back a size
+        // that a caller will turn into an allocation.
+        LOG_ERROR( "GetBytesPerPixel: ImageFormat value {} is outside the enumeration",
+                   static_cast<uint32_t>( format ) );
+        DESERT_VERIFY( false, "ImageFormat outside the enumeration" );
+    }
+
+    // Which planes a barrier or an image view must name for this format.
+    constexpr ImageAspect GetImageAspect( ImageFormat format )
+    {
+        switch ( format )
+        {
+            case ImageFormat::RGBA8F:
+            case ImageFormat::RGBA16F:
+            case ImageFormat::RGBA32F:
+            case ImageFormat::BGRA8F:
+                return ImageAspect_Colour;
+            // A packed depth+stencil image has BOTH planes, and a barrier that names only DEPTH is a
+            // VUID-VkImageMemoryBarrier-image-03319 violation. This is exactly what stopped the scene
+            // depth image from being transitioned for a compute read.
+            case ImageFormat::DEPTH24STENCIL8:
+                return static_cast<ImageAspect>( ImageAspect_Depth | ImageAspect_Stencil );
+            case ImageFormat::DEPTH32F:
+                return ImageAspect_Depth;
+        }
+
+        LOG_ERROR( "GetImageAspect: ImageFormat value {} is outside the enumeration",
+                   static_cast<uint32_t>( format ) );
+        DESERT_VERIFY( false, "ImageFormat outside the enumeration" );
+    }
+
+    namespace Detail
+    {
+        // The exhaustiveness guard. Every lookup above is called once per enumerator inside a constant
+        // expression, so a format without a case makes this call fall off the end of a constexpr
+        // function — ill-formed, hence a compile error. The `== 0` comparisons exist only to give the
+        // loop something to do; the totality is enforced by the evaluation itself, not by the answers.
+        constexpr bool LookupsAreTotal()
+        {
+            for ( uint32_t i = 0; i < kImageFormatCount; ++i )
+            {
+                const ImageFormat format = static_cast<ImageFormat>( i );
+                if ( GetBytesPerPixel( format ) == 0 )
+                    return false;
+                if ( GetImageAspect( format ) == 0 )
+                    return false;
+            }
+            return true;
+        }
+    } // namespace Detail
+
+    static_assert( Detail::LookupsAreTotal(),
+                   "Every ImageFormat enumerator needs a case in GetBytesPerPixel and GetImageAspect, and "
+                   "kImageFormatCount must count them all." );
+
+    // Byte size of a tightly-packed image. 64-bit because a volume is easy to size past 4 GiB, and a
+    // silently truncated allocation size belongs to the same family of bugs as a zero bytes-per-pixel.
+    constexpr uint64_t CalculateImageSize( uint32_t width, uint32_t height, ImageFormat format )
+    {
+        return static_cast<uint64_t>( width ) * height * GetBytesPerPixel( format );
+    }
+
+    constexpr uint64_t CalculateImageSize( uint32_t width, uint32_t height, uint32_t depth, ImageFormat format )
+    {
+        return static_cast<uint64_t>( width ) * height * depth * GetBytesPerPixel( format );
     }
 
     using ImagePixelData =
@@ -97,6 +225,24 @@ namespace Desert::Core::Formats
         const uint32_t        Height;
         const ImageFormat     Format;
         const uint32_t        Mips = 1;
+        ImagePixelData        Data;
+        const ImageProperties Properties;
+    };
+
+    // A volume texture — the shape/detail noise the volumetric passes sample, and any other
+    // compute-generated 3D field.
+    //
+    // There is deliberately NO `Mips` field. The engine has no 3D mip generator (MipMap2DGenerator and
+    // MipMapCubeGenerator have no 3D counterpart, and blitting a volume chain is a separate piece of
+    // work), so a mip count above 1 could be requested but never filled — a setting that does nothing.
+    // Volumes are therefore single-level, and shaders sample them without an explicit LOD.
+    struct Image3DSpecification
+    {
+        const std::string     Tag;
+        const uint32_t        Width;
+        const uint32_t        Height;
+        const uint32_t        Depth;
+        const ImageFormat     Format;
         ImagePixelData        Data;
         const ImageProperties Properties;
     };

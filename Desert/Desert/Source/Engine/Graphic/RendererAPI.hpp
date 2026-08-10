@@ -106,10 +106,21 @@ namespace Desert::Graphic
 
         // Transition a storage image to GENERAL for compute writes in the current frame command buffer,
         // making prior graphics (color/shader) writes visible to compute. Pair with ComputeImageEndWrite.
-        virtual void ComputeImageBeginWrite( Image2D* image ) = 0;
+        // Takes Image*, not Image2D*: a compute pass writes volumes as well as 2D targets, and the aspect
+        // mask comes from the image's format rather than from its dimensionality.
+        virtual void ComputeImageBeginWrite( Image* image ) = 0;
         // Transition the storage image back to SHADER_READ_ONLY for later sampling (e.g. tonemap),
         // making the compute writes visible to the fragment stage.
-        virtual void ComputeImageEndWrite( Image2D* image ) = 0;
+        virtual void ComputeImageEndWrite( Image* image ) = 0;
+
+        // Present an image that a graphics pass produced to a compute SAMPLER, and hand it back
+        // afterwards. This is what lets a compute pass read the scene DEPTH attachment: depth lives in
+        // DEPTH_STENCIL_ATTACHMENT_OPTIMAL, ComputePipeline::SetInput binds the tracked layout verbatim,
+        // and a depth-attachment layout in a COMBINED_IMAGE_SAMPLER is a validation error. EndRead
+        // restores the image's default layout so the owning framebuffer can keep using it as an
+        // attachment next frame. Works for any format — the aspect is derived, never assumed to be COLOR.
+        virtual void ComputeImageBeginRead( Image* image ) = 0;
+        virtual void ComputeImageEndRead( Image* image )   = 0;
 
         // Set the scissor rectangle (framebuffer pixels, top-left origin) on the current command buffer —
         // used by the 2D batcher to clip UI children to a parent rect. Reset by passing the full viewport;

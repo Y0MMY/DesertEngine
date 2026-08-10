@@ -71,8 +71,13 @@ namespace Desert::Graphic
                                   uint32_t groupCountZ );
 
         // Layout helpers for compute storage targets used in the frame command buffer (see RendererAPI).
-        void ComputeImageBeginWrite( Image2D* image );
-        void ComputeImageEndWrite( Image2D* image );
+        void ComputeImageBeginWrite( Image* image );
+        void ComputeImageEndWrite( Image* image );
+
+        // Layout helpers for an image a compute dispatch SAMPLES that a graphics pass owns — the scene
+        // depth attachment above all. See RendererAPI for why this is not a one-line transition.
+        void ComputeImageBeginRead( Image* image );
+        void ComputeImageEndRead( Image* image );
 
         // Copy the depth aspect of @p src into @p dst (Deferred: G-buffer depth -> scene target depth so
         // depth-tested overlays occlude against static geometry). Call outside a render pass.

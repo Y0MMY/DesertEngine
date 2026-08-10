@@ -55,6 +55,31 @@ namespace Desert::Graphic
         DESERT_VERIFY( false, "Unknown RenderingAPI" );
     }
 
+    std::shared_ptr<Image3D> Image3D::Create( const Core::Formats::Image3DSpecification& spec )
+    {
+        switch ( RendererAPI::GetAPIType() )
+        {
+            case RendererAPIType::None:
+                return nullptr;
+            case RendererAPIType::Vulkan:
+            {
+                const auto& image  = std::make_shared<API::Vulkan::VulkanImage3D>( spec );
+                const auto  result = image->RT_Invalidate();
+                if ( !result.IsSuccess() )
+                {
+                    // Handing back a half-built volume would push the failure into the first dispatch
+                    // that binds it, with no connection to the allocation that actually failed.
+                    LOG_ERROR( "Image3D::Create: volume '{}' {}x{}x{} failed: {}", spec.Tag, spec.Width,
+                               spec.Height, spec.Depth, result.GetError() );
+                    return nullptr;
+                }
+
+                return image;
+            }
+        }
+        DESERT_VERIFY( false, "Unknown RenderingAPI" );
+    }
+
     std::shared_ptr<Desert::Graphic::ImageCube>
     ImageCube::Copy( const std::shared_ptr<ImageCube>& targetImageCube )
     {
@@ -87,26 +112,5 @@ namespace Desert::Graphic
             }
         }
     } // namespace Utils
-
-    uint32_t Image::GetBytesPerPixel( const Core::Formats::ImageFormat& format )
-    {
-
-        switch ( format )
-        {
-            case Core::Formats::ImageFormat::RGBA8F:
-                return 4; // RGBA = 4 channels, 8 bits each
-
-            case Core::Formats::ImageFormat::RGBA32F:
-                return 4 * 4;
-        }
-
-        return 0U;
-    }
-
-    uint32_t Image::CalculateImageSize( uint32_t width, uint32_t height, const Core::Formats::ImageFormat& format )
-    {
-        uint32_t pixelCount = width * height;
-        return pixelCount * GetBytesPerPixel( format );
-    }
 
 } // namespace Desert::Graphic

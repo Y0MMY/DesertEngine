@@ -63,6 +63,29 @@ namespace Desert::Graphic::API::Vulkan
         return it != m_BoundOutputs.end() ? it->second.Image : nullptr;
     }
 
+    namespace
+    {
+        // A sampled input is bound with the descriptor write that matches its DIMENSIONALITY. This is not
+        // cosmetic: GetSampler2DWDS substitutes a 2D fallback texture whenever the supplied image info is
+        // incomplete, and a 2D view landing in a `sampler3D` (or a `samplerCube`) binding does not fail —
+        // it quietly samples the wrong thing, which is the most expensive failure mode there is.
+        enum class SampledImageKind
+        {
+            Texture2D,
+            Cube,
+            Volume
+        };
+
+        SampledImageKind ClassifySampledImage( Image* image )
+        {
+            if ( dynamic_cast<Image3D*>( image ) )
+                return SampledImageKind::Volume;
+            if ( dynamic_cast<ImageCube*>( image ) )
+                return SampledImageKind::Cube;
+            return SampledImageKind::Texture2D;
+        }
+    } // namespace
+
     void VulkanPipelineCompute::RecordDescriptorsAndDispatch( VkCommandBuffer cmd, VkDescriptorSet descriptorSet,
                                                               uint32_t groupsX, uint32_t groupsY,
                                                               uint32_t groupsZ )
@@ -85,18 +108,49 @@ namespace Desert::Graphic::API::Vulkan
                                                                   binding, 1, &infos.back() ) );
         }
 
-        // Inputs: sampled images (2D or cube share the same VkDescriptorImageInfo shape). Use the
-        // image's actual tracked layout — a sampled input may be SHADER_READ_ONLY (a separate source
-        // image) or GENERAL (a mip of an image currently being written by this same chain).
+        // Inputs: sampled images (2D, cube and volume share the same VkDescriptorImageInfo shape, but not
+        // the same write builder — see ClassifySampledImage). Use the image's actual tracked layout: a
+        // sampled input may be SHADER_READ_ONLY (a separate source image), GENERAL (a mip of an image
+        // this same chain is writing) or, for the scene depth, whatever ComputeImageBeginRead left.
         for ( const auto& [binding, image] : m_BoundInputs )
         {
             auto* img = dynamic_cast<IVulkanImage*>( image );
             if ( !img )
                 continue;
-            const auto& r = img->GetResource();
+            const auto&            r    = img->GetResource();
+            const SampledImageKind kind = ClassifySampledImage( image );
+
+            if ( kind == SampledImageKind::Volume &&
+                 ( r.ImageView == VK_NULL_HANDLE || r.Sampler == VK_NULL_HANDLE ||
+                   r.Layout == VK_IMAGE_LAYOUT_UNDEFINED ) )
+            {
+                // No fallback exists for a volume, and dispatching with a stale descriptor would read
+                // whatever the previous user of this ring slot bound. Say exactly what is missing and
+                // drop the dispatch instead.
+                LOG_ERROR( "ComputePipeline '{}': volume input at binding {} is not sampleable "
+                           "(view={}, sampler={}, layout={}); dispatch skipped",
+                           m_Specification.DebugName, binding, r.ImageView != VK_NULL_HANDLE,
+                           r.Sampler != VK_NULL_HANDLE, static_cast<int>( r.Layout ) );
+                return;
+            }
+
             infos.push_back( { r.Sampler, r.ImageView, r.Layout } );
-            writes.push_back( DescriptorSetBuilder::GetSampler2DWDS( m_VulkanMaterialBackend.get(), 0, 0,
-                                                                    binding, 1, &infos.back() ) );
+
+            switch ( kind )
+            {
+                case SampledImageKind::Volume:
+                    writes.push_back( DescriptorSetBuilder::GetSampler3DWDS( m_VulkanMaterialBackend.get(), 0,
+                                                                             0, binding, 1, &infos.back() ) );
+                    break;
+                case SampledImageKind::Cube:
+                    writes.push_back( DescriptorSetBuilder::GetSamplerCubeWDS( m_VulkanMaterialBackend.get(), 0,
+                                                                               0, binding, 1, &infos.back() ) );
+                    break;
+                case SampledImageKind::Texture2D:
+                    writes.push_back( DescriptorSetBuilder::GetSampler2DWDS( m_VulkanMaterialBackend.get(), 0,
+                                                                             0, binding, 1, &infos.back() ) );
+                    break;
+            }
         }
 
         // Storage buffers (read-write; e.g. a luminance histogram). The descriptor buffer info lives in
