@@ -748,6 +748,11 @@ namespace Desert::Graphic::API::Vulkan
 
     void VulkanImage3D::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )
     {
+        // `mip` selects a sub-range on the 2D and cube paths; a volume has exactly one level, so the only
+        // meaningful value is 0. Refuse anything else instead of transitioning the wrong subresource and
+        // then tracking a layout the image is not actually in.
+        DESERT_VERIFY( mip == 0, "Image3D has exactly one mip level" );
+
         Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format,
                                                                m_Resource.Layout, newLayout, 1, 1 );
         m_Resource.Layout = newLayout;
