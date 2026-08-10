@@ -148,34 +148,35 @@ namespace Desert::Editor
         // Procedural sky as the backdrop. Unlike the thumbnails (fixed camera looking down, so only the
         // ground hemisphere showed) this camera can point anywhere, so the whole dome is kept cohesive and
         // fairly dark — a neutral studio backdrop that doesn't compete with the asset.
-        auto  skyEnt        = m_Scene->CreateNewEntity( "PreviewSky" );
-        auto& skyC          = skyEnt.AddComponent<ECS::SkyboxComponent>();
-        skyC.Procedural     = true;
-        skyC.ZenithColor    = { 0.10f, 0.13f, 0.19f };
-        skyC.HorizonColor   = { 0.22f, 0.25f, 0.31f };
-        skyC.GroundColor    = { 0.13f, 0.14f, 0.17f };
-        skyC.SunColor       = { 1.00f, 0.95f, 0.85f };
-        skyC.SkyBrightness  = 1.0f;
-        skyC.HorizonFalloff = 0.6f;
-        skyC.SunGlow        = 0.5f;
-        skyC.StarIntensity  = 0.0f;
-        skyC.SunIntensity   = 10.0f;
-        skyC.SunDiskRadius  = 0.02f;
-        skyC.RequestBake    = true;
+        auto  skyEnt             = m_Scene->CreateNewEntity( "PreviewSky" );
+        auto& skyC               = skyEnt.AddComponent<ECS::SkyAtmosphereComponent>();
+        skyC.Data.ZenithColor    = { 0.10f, 0.13f, 0.19f };
+        skyC.Data.HorizonColor   = { 0.22f, 0.25f, 0.31f };
+        skyC.Data.GroundColor    = { 0.13f, 0.14f, 0.17f };
+        skyC.Data.SunColor       = { 1.00f, 0.95f, 0.85f };
+        skyC.Data.SkyBrightness  = 1.0f;
+        skyC.Data.HorizonFalloff = 0.6f;
+        skyC.Data.SunGlow        = 0.5f;
+        skyC.Data.StarIntensity  = 0.0f;
+        skyC.Data.SunIntensity   = 10.0f;
+        skyC.RequestBake         = true;
 
         // Same values through the direct call so the sky is enabled from frame 0 (the ECS command path alone
         // proved insufficient in a minimal scene — see AssetThumbnailRenderer).
         Graphic::SkySettings sky;
-        sky.ZenithColor    = skyC.ZenithColor;
-        sky.HorizonColor   = skyC.HorizonColor;
-        sky.GroundColor    = skyC.GroundColor;
-        sky.SunColor       = skyC.SunColor;
-        sky.SkyBrightness  = skyC.SkyBrightness;
-        sky.HorizonFalloff = skyC.HorizonFalloff;
-        sky.SunGlow        = skyC.SunGlow;
+        sky.ZenithColor    = skyC.Data.ZenithColor;
+        sky.HorizonColor   = skyC.Data.HorizonColor;
+        sky.GroundColor    = skyC.Data.GroundColor;
+        sky.SunColor       = skyC.Data.SunColor;
+        sky.SkyBrightness  = skyC.Data.SkyBrightness;
+        sky.HorizonFalloff = skyC.Data.HorizonFalloff;
+        sky.SunGlow        = skyC.Data.SunGlow;
         sky.StarIntensity  = 0.0f;
-        m_Renderer->SetProceduralSky( true, -glm::normalize( kLightTravel ), skyC.SunIntensity, skyC.SunDiskRadius,
-                                      true, Graphic::CloudSettings{}, sky );
+        // The component authors the sun as an angular DIAMETER in degrees; the pass wants the RADIUS in
+        // radians. Same conversion the sky system does, so both routes describe the same sun.
+        const float sunAngularRadius = glm::radians( skyC.Data.SunAngularDiameter ) * 0.5f;
+        m_Renderer->SetProceduralSky( true, -glm::normalize( kLightTravel ), skyC.Data.SunIntensity,
+                                      sunAngularRadius, true, Graphic::CloudSettings{}, sky );
 
         m_Inited = true;
     }

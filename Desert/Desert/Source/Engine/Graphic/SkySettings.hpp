@@ -4,8 +4,9 @@
 
 namespace Desert::Graphic
 {
-    // Artistic procedural-sky palette + scalars, carried from ECS::SkyboxComponent through the render command
-    // to the procedural-sky pass (SkyUB). Mirrors the reflected sky fields on the component. Colours are LINEAR.
+    // Artistic procedural-sky palette + scalars, carried from ECS::SkyAtmosphereComponent through the render
+    // command to the procedural-sky pass (SkyUB). Mirrors the reflected palette fields on that component's
+    // data block. Colours are LINEAR.
     struct SkySettings
     {
         glm::vec3 ZenithColor  = { 0.08f, 0.26f, 0.70f };

@@ -436,8 +436,7 @@ namespace Desert::Editor
             sun.GetComponent<ECS::TransformComponent>().Translation = { -0.4f, -1.0f, -0.5f };
 
             auto& skyEnt    = m_MainScene->CreateNewEntity( "Skybox" );
-            auto& sky       = skyEnt.AddComponent<ECS::SkyboxComponent>();
-            sky.Procedural  = true;
+            auto& sky       = skyEnt.AddComponent<ECS::SkyAtmosphereComponent>();
             sky.RequestBake = true;
         }
 
@@ -1891,8 +1890,8 @@ namespace Desert::Editor
         sun.GetComponent<ECS::TransformComponent>().Translation =
              glm::normalize( glm::vec3( 0.35f, 0.9f, 0.25f ) );
 
-        auto& sky                                           = m_MainScene->CreateNewEntity( "Sky" );
-        sky.AddComponent<ECS::SkyboxComponent>().Procedural = true;
+        auto& sky = m_MainScene->CreateNewEntity( "Sky" );
+        sky.AddComponent<ECS::SkyAtmosphereComponent>();
 
         prim( "Ground", Geometry::PrimitiveType::Cube, { 0.0f, -0.1f, 0.0f }, { 24.0f, 0.2f, 24.0f },
               mat( "Starter_Ground", { { "AlbedoColor", { 0.55f, 0.55f, 0.58f, 1.0f } },

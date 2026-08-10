@@ -51,10 +51,12 @@ namespace Desert::Editor
             if ( has( "UI " ) || has( "Panel" ) || has( "Button" ) || has( "Layout" ) || has( "Canvas" ) ||
                  has( "Anchor" ) )
                 return "UI";
-            if ( has( "Light" ) )
+            // Before the Skybox branch: the atmosphere IS the scene's key light source (it drives the sun
+            // and the IBL bake), and it must not be swallowed by a "Sky" substring landing in Rendering.
+            if ( has( "Atmosphere" ) || has( "Light" ) )
                 return "Lighting";
             if ( has( "Mesh" ) || has( "Text" ) || has( "Particle" ) || has( "Skybox" ) || has( "Terrain" ) ||
-                 has( "Sprite" ) || has( "Decal" ) || has( "Foliage" ) )
+                 has( "Sprite" ) || has( "Decal" ) || has( "Foliage" ) || has( "Cloud" ) )
                 return "Rendering";
             if ( has( "Collider" ) || has( "Rigid" ) || has( "Character" ) || has( "Physics" ) ||
                  has( "Projectile" ) )

@@ -39,6 +39,10 @@ namespace Desert::Editor
                 return "PointLightComponent";
             if ( entity.HasComponent<ECS::SpotLightComponent>() )
                 return "SpotLightComponent";
+            // Before Skybox: an entity carrying both is a procedural sky that also keeps an HDR fallback,
+            // and the atmosphere is what it is named for.
+            if ( entity.HasComponent<ECS::SkyAtmosphereComponent>() )
+                return "SkyAtmosphereComponent";
             if ( entity.HasComponent<ECS::SkyboxComponent>() )
                 return "SkyboxComponent";
             if ( entity.HasComponent<ECS::TerrainComponent>() )
@@ -59,6 +63,8 @@ namespace Desert::Editor
             if ( entity.HasComponent<ECS::DirectionLightComponent>() ||
                  entity.HasComponent<ECS::PointLightComponent>() )
                 return ICON_MDI_LIGHTBULB;
+            if ( entity.HasComponent<ECS::SkyAtmosphereComponent>() )
+                return ICON_MDI_WEATHER_SUNSET;
             if ( entity.HasComponent<ECS::SkyboxComponent>() )
                 return ICON_MDI_EARTH;
             if ( entity.HasComponent<ECS::TerrainComponent>() )

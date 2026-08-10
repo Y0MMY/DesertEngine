@@ -8,7 +8,7 @@
 
 namespace Desert::Graphic::Render
 {
-    // Carries the procedural-sky configuration from the ECS (SkyboxComponent + directional light) to the
+    // Carries the procedural-sky configuration from the ECS (SkyAtmosphereComponent + directional light) to the
     // SkyboxRenderer. The sun direction is the toward-sun direction (= -directional light direction).
     struct ProceduralSkyCommand : RenderCommand
     {

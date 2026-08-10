@@ -1009,11 +1009,16 @@ namespace Desert::Core::Serialize
 
         // ---- Skybox (now FULLY REFLECTED via RA3) ----
         // No more hand-written SkyboxComponentSer / field mapping: the whole component reflects, and its
-        // SkyboxHandle round-trips as a path through the AssetResolver. (RequestBake has no PROPERTY → it's
-        // excluded automatically.) Compat note: old scenes stored the HDR under key "SkyboxPath"; the
-        // reflected field is "SkyboxHandle", so an old HDR selection needs re-pick — procedural sky +
-        // clouds carry over (those field names are unchanged).
+        // SkyboxHandle round-trips as a path through the AssetResolver. It now carries the HDR path ONLY —
+        // the procedural sky lives under "SkyAtmosphere" and the clouds under "VolumetricClouds".
         Register( MakeReflectedSelf<ECS::SkyboxComponent>( "Skybox", "SkyboxComponent" ) );
+
+        // ---- Sky / clouds ----
+        // Data-block components, so one line each is the whole of save/load, duplicate and undo.
+        Register( MakeReflected<ECS::SkyAtmosphereComponent, ECS::SkyAtmosphereData>(
+             "SkyAtmosphere", "SkyAtmosphereData", &ECS::SkyAtmosphereComponent::Data ) );
+        Register( MakeReflected<ECS::VolumetricCloudsComponent, ECS::VolumetricCloudData>(
+             "VolumetricClouds", "VolumetricCloudData", &ECS::VolumetricCloudsComponent::Data ) );
 
         // ---- Script (manual: .lua path + exposed-property values) ----
         Register( MakeScript() );
