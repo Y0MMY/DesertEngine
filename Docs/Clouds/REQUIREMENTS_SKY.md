@@ -288,7 +288,29 @@ that quality belongs in a separate tier) / `D` derived (no field). Colours are *
 | 21 | `RebakeSunAngleThreshold` | `float` | degrees | 0.25 – 45 | `5.0` | how far the sun must move before an automatic rebake | *(new)* | **Q** |
 | 22 | `EnvironmentResolution` | `enum class SkyEnvironmentResolution : uint8_t { Low, Medium, High }` | – | – | `Medium` | equirect bake size: 512×256 / **1024×512 (today's fixed value, `SceneEnvironment.cpp:55-56`)** / 2048×1024 | *(new; replaces the hardcoded constant)* | **Q** |
 | 23 | `ActivePreset` | `enum class SkyPreset : uint8_t { Custom, ClearNoon, GoldenHour, OvercastGrey, Night, StudioNeutral }` | – | – | `Custom` | **display only** — which preset the palette last came from; reverts to `Custom` on the first edit of any `P` field (SKY-37) | *(new)* | A |
+| 24 | `PlanetRadius` | `float` | **kilometres** | 1 – 20000 | `6360.0` | radius of the planet the sky and the cloud shell both sit on | *(new; architect amendment, see SKY-41)* | A |
 | — | `RequestBake` | `bool` | – | – | `false` | one-shot bake request from the editor button; **no `PROPERTY`** ⇒ transient | `SkyboxComponent::RequestBake` (`:1505-1506`) | A |
+
+**SKY-41 — `PlanetRadius` lives here, on the sky, and is the ONLY planet radius in the engine. The cloud
+shell reads it through `AtmosphereEnv`; a cloud-local radius is forbidden.**
+
+*Why (architect amendment, added during T1 review):* the cloud requirements (CLD-70, CLD-75c) need a planet
+radius for the shell intersection and named this component as its owner, but this table never carried the
+field — I ruled on it in the cloud analyst's channel and failed to propagate the ruling here, and the T1
+developer found the contradiction while implementing. The ruling itself stands: a radius that differs
+between the sky and the clouds produces a horizon that disagrees with itself, and that is a defect nobody
+finds by looking. One value, one owner.
+
+*The planet centre is DERIVED, not authored:* it is `PlanetRadius` below the world origin along +Y. Two
+authorable values that must agree is the duplicate-state trap this programme has already ruled against
+twice; if a scene ever needs an off-origin centre, that is a new field with its own justification.
+
+*Unit note:* authored in kilometres because 6360 is readable and 636000000 centimetres is not. The
+conversion to world units happens once, on the C++ side, and the cloud shell intersection is computed in
+km-space for the float-precision reason given in CLD-24a.
+
+*Accept:* the field exists with `Units("km")` and its range; `AtmosphereEnv` carries it; a test asserts the
+km→world-unit conversion; `git grep` finds no second planet-radius constant in the cloud code.
 
 `ActivePreset` is an **enum, not a string** — and not because strings are unsupported (they are fully
 supported; see the correction in §0). The reasons are:
