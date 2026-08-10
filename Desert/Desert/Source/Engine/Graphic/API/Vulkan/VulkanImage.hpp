@@ -56,6 +56,8 @@ namespace Desert::Graphic::API::Vulkan
                     return VK_FORMAT_D32_SFLOAT;
                 case Core::Formats::ImageFormat::DEPTH24STENCIL8:
                     return deviceDepthFormat;
+                case Core::Formats::ImageFormat::Count:
+                    break; // the sentinel is not a format — fall through to the error path below
             }
 
             LOG_ERROR( "GetVulkanFormat: ImageFormat value {} is outside the enumeration",

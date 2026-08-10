@@ -29,14 +29,27 @@ namespace Desert::Core::Formats
         BGRA8F,
         DEPTH24STENCIL8,
 
-        DEPTH32F
+        DEPTH32F,
+
+        // Not a format. Every real format goes ABOVE this line, and the count below is derived from it,
+        // so there is no number for anyone to remember to bump — which is the whole reason it exists.
+        // A hand-maintained constant was tried first, pinned to the last enumerator with
+        // `static_assert( DEPTH32F + 1 == kImageFormatCount )`. That catches a format INSERTED mid-enum
+        // (every later value shifts) but NOT one APPENDED after DEPTH32F, because DEPTH32F's own value
+        // does not move — verified by mutation, the appended-format build succeeded. A sentinel moves in
+        // both cases.
+        //
+        // The lookups below deliberately have a `case` for it that falls through to their error path:
+        // Count is not a format, so asking for its size is the same programmer error as passing a
+        // cast-in integer, and the switches stay exhaustive over the enum either way.
+        Count
     };
 
-    // How many enumerators ImageFormat has. Bump it in the same edit that adds a format: the
-    // static_assert further down then constant-evaluates every format lookup for the new value, and the
-    // build FAILS until each of them has a case for it. See the note on "Format facts" below for why
-    // this is a hand-maintained count and not a compiler warning.
-    constexpr uint32_t kImageFormatCount = 6;
+    // Derived, never written down. The exhaustiveness guard further down walks 0..Count and
+    // constant-evaluates every format lookup for each value, so a format added without a case in one of
+    // them fails the BUILD. See the note on "Format facts" below for why that guard is a constant
+    // expression rather than a compiler warning.
+    constexpr uint32_t kImageFormatCount = static_cast<uint32_t>( ImageFormat::Count );
 
     enum ImageProperties : uint32_t
     {
@@ -93,11 +106,13 @@ namespace Desert::Core::Formats
                 return 4; // 24-bit depth + 8-bit stencil, packed into one 32-bit texel
             case ImageFormat::DEPTH32F:
                 return 4;
+            case ImageFormat::Count:
+                break; // the sentinel is not a format — fall through to the error path below
         }
 
-        // Unreachable for any declared enumerator — only a corrupted or cast-in integer arrives here, so
-        // this is a programmer error, not a data error. Name the value and stop; never hand back a size
-        // that a caller will turn into an allocation.
+        // Reached only by the sentinel or by a corrupted / cast-in integer, so this is a programmer
+        // error, not a data error. Name the value and stop; never hand back a size that a caller will
+        // turn into an allocation.
         LOG_ERROR( "GetBytesPerPixel: ImageFormat value {} is outside the enumeration",
                    static_cast<uint32_t>( format ) );
         DESERT_VERIFY( false, "ImageFormat outside the enumeration" );
@@ -120,6 +135,8 @@ namespace Desert::Core::Formats
                 return static_cast<ImageAspect>( ImageAspect_Depth | ImageAspect_Stencil );
             case ImageFormat::DEPTH32F:
                 return ImageAspect_Depth;
+            case ImageFormat::Count:
+                break; // the sentinel is not a format — fall through to the error path below
         }
 
         LOG_ERROR( "GetImageAspect: ImageFormat value {} is outside the enumeration",
