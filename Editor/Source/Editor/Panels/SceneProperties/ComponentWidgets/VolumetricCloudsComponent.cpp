@@ -86,6 +86,13 @@ namespace Desert::Editor
     // Written out rather than using DESERT_REGISTER_CUSTOM_COMPONENT because that macro cannot fill
     // ReflectedTypeName / DataPtr, and without them the collapsed-header summary and the Details search
     // filter would silently skip this component.
+    //
+    // ON THE LOSS OF MULTI-SELECT EDITING. The generic reflected entry broadcasts a field edit to every
+    // selected entity that has the same component (DrawMulti). This one does not, deliberately: a
+    // broadcast writes the raw value into the siblings but cannot carry the preset reconcile with it, so
+    // every sibling would keep claiming a weather preset its values no longer match — a name that lies,
+    // which is the exact failure this widget exists to prevent. The cost is small because a scene is
+    // meant to have ONE cloud component: the collector already warns when it finds more.
     ComponentEditorEntry MakeVolumetricCloudsEntry()
     {
         using C = ::Desert::ECS::VolumetricCloudsComponent;
@@ -97,9 +104,8 @@ namespace Desert::Editor
         e.Add               = []( ECS::Entity& en ) { en.AddComponent<C>(); };
         e.Remove            = []( ECS::Entity& en ) { en.RemoveComponent<C>(); };
         e.DataPtr           = []( ECS::Entity& en ) -> void* { return &en.GetComponent<C>().Data; };
-        e.Draw              = []( ECS::Entity& en, ::Desert::Core::Scene* scene, const ComponentEditContext& ctx )
+        e.Draw              = []( ECS::Entity& en, ::Desert::Core::Scene*, const ComponentEditContext& ctx )
         {
-            (void)scene;
             auto& clouds = en.GetComponent<C>();
             Data& data   = clouds.Data;
 
