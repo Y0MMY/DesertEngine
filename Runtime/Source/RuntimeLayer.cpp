@@ -15,6 +15,7 @@
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/TextECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/ECS/System/CloudNoiseECSSystem.hpp>
 #include <Engine/ECS/System/TimeOfDayECSSystem.hpp>
 #include <Engine/ECS/System/TerrainECSSystem.hpp>
 #include <Engine/ECS/System/PointLightSystem.hpp>
@@ -84,6 +85,10 @@ namespace Desert::Player
         // BEFORE the collectors: it writes the atmosphere sun's transform, which the sky collector, the
         // light collector and the shadow path all read this same frame.
         m_Scene->AddSystem<ECS::TimeOfDayECSSystem>();
+        // Owns the shared cloud noise volumes. Placed next to the other sequential system rather than
+        // inside the collector group below: it creates and destroys GPU images, so it must not run on a
+        // job thread, and putting it here keeps the collectors one uninterrupted parallel run.
+        m_Scene->AddSystem<ECS::CloudNoiseECSSystem>();
         m_Scene->AddSystem<ECS::SkyboxECSSystem>();
         m_Scene->AddSystem<ECS::TerrainECSSystem>();
         m_Scene->AddSystem<ECS::PointLightECSSystem>();
