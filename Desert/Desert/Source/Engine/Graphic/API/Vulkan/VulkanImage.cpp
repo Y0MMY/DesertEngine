@@ -37,11 +37,11 @@ namespace Desert::Graphic::API::Vulkan
         {
             // Global filter selected in Scene Settings (pushed into RenderConfig by SceneRenderer):
             // Nearest | Bilinear (linear, nearest mip) | Trilinear (linear, linear mip) | Anisotropic.
-            using FM             = Graphic::TextureFilterMode;
+            using FM               = Graphic::TextureFilterMode;
             const bool forceLinear = policy == SamplerFilterPolicy::AlwaysLinear;
-            const int  mode      = Graphic::RenderConfig::TextureFilter.load();
-            const bool nearest   = !forceLinear && mode == static_cast<int>( FM::Nearest );
-            const bool linearMip = forceLinear || mode == static_cast<int>( FM::Trilinear ) ||
+            const int  mode        = Graphic::RenderConfig::TextureFilter.load();
+            const bool nearest     = !forceLinear && mode == static_cast<int>( FM::Nearest );
+            const bool linearMip   = forceLinear || mode == static_cast<int>( FM::Trilinear ) ||
                                    mode == static_cast<int>( FM::Anisotropic );
 
             const VkFilter            filter  = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
@@ -587,7 +587,8 @@ namespace Desert::Graphic::API::Vulkan
     void VulkanImageCube::TransitionLayout( VkCommandBuffer cmd, VkImageLayout newLayout, uint32_t mip )
     {
         Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, m_Resource.Format,
-                                                               m_Resource.Layout, newLayout, 6, mip == 0 ? m_Resource.MipLevels : 1 );
+                                                               m_Resource.Layout, newLayout, 6,
+                                                               mip == 0 ? m_Resource.MipLevels : 1 );
         m_Resource.Layout = newLayout;
     }
 
@@ -601,8 +602,8 @@ namespace Desert::Graphic::API::Vulkan
                                        .baseArrayLayer = 0,
                                        .layerCount     = 6 };
         Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, srcAccess, dstAccess,
-                                                               m_Resource.Layout, newLayout, srcStage,
-                                                               dstStage, range );
+                                                               m_Resource.Layout, newLayout, srcStage, dstStage,
+                                                               range );
         m_Resource.Layout = newLayout;
     }
 
@@ -616,20 +617,40 @@ namespace Desert::Graphic::API::Vulkan
 
     // --- VulkanImage3D ---
 
-    VulkanImage3D::VulkanImage3D( const Core::Formats::Image3DSpecification& spec ) : m_Specification( spec ) {}
-    VulkanImage3D::~VulkanImage3D() { Release(); }
-    void VulkanImage3D::Use( uint32_t slot ) const {}
-    Common::BoolResultStr VulkanImage3D::Invalidate() { return RT_Invalidate(); }
-    Common::BoolResultStr VulkanImage3D::RT_Invalidate() { Release(); return CreateResource(); }
+    VulkanImage3D::VulkanImage3D( const Core::Formats::Image3DSpecification& spec ) : m_Specification( spec )
+    {
+    }
+    VulkanImage3D::~VulkanImage3D()
+    {
+        Release();
+    }
+    void VulkanImage3D::Use( uint32_t slot ) const
+    {
+    }
+    Common::BoolResultStr VulkanImage3D::Invalidate()
+    {
+        return RT_Invalidate();
+    }
+    Common::BoolResultStr VulkanImage3D::RT_Invalidate()
+    {
+        Release();
+        return CreateResource();
+    }
 
     Common::BoolResultStr VulkanImage3D::Release()
     {
-        if ( !m_Resource.Image ) return BOOLSUCCESS;
-        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
+        if ( !m_Resource.Image )
+            return BOOLSUCCESS;
+        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                              ->GetVulkanAllocator()
+                              .get();
         // Deferred by frame index inside the allocator, so a volume released while a frame that still
         // references it is in flight is destroyed only once the GPU is done with it.
-        allocator->RT_DestroyImage( m_Resource.Image, m_Resource.Allocation, m_Resource.ImageView, m_Resource.Sampler, m_MipViews );
-        m_Resource = {}; m_MipViews.clear(); m_IsLoaded = false;
+        allocator->RT_DestroyImage( m_Resource.Image, m_Resource.Allocation, m_Resource.ImageView,
+                                    m_Resource.Sampler, m_MipViews );
+        m_Resource = {};
+        m_MipViews.clear();
+        m_IsLoaded = false;
         return BOOLSUCCESS;
     }
 
@@ -648,8 +669,11 @@ namespace Desert::Graphic::API::Vulkan
                  "Image3D '{}': Properties must request Storage and/or Sample (got {})", m_Specification.Tag,
                  static_cast<uint32_t>( m_Specification.Properties ) );
 
-        auto vkDevice = SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
-        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )->GetVulkanAllocator().get();
+        auto vkDevice =
+             SP_CAST( VulkanLogicalDevice, EngineContext::GetInstance().GetDevice() )->GetVulkanLogicalDevice();
+        auto allocator = SP_CAST( VulkanContext, EngineContext::GetInstance().GetRendererContext() )
+                              ->GetVulkanAllocator()
+                              .get();
 
         m_Resource.Format     = GetImageVulkanFormat( m_Specification.Format );
         m_Resource.MipLevels  = 1;
@@ -660,23 +684,27 @@ namespace Desert::Graphic::API::Vulkan
              Utils::GetDefaultLayout( m_Specification.Format, m_Specification.Properties );
 
         VkImageCreateInfo info = {
-             .sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-             .imageType     = VK_IMAGE_TYPE_3D,
-             .format        = m_Resource.Format,
-             .extent        = { m_Specification.Width, m_Specification.Height, m_Specification.Depth },
-             .mipLevels     = 1,
+             .sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+             .imageType = VK_IMAGE_TYPE_3D,
+             .format    = m_Resource.Format,
+             .extent    = { m_Specification.Width, m_Specification.Height, m_Specification.Depth },
+             .mipLevels = 1,
              // A 3D image has exactly one layer: its slices are the depth extent, not array elements.
-             .arrayLayers   = 1,
-             .samples       = VK_SAMPLE_COUNT_1_BIT,
-             .tiling        = VK_IMAGE_TILING_OPTIMAL,
-             .usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+             .arrayLayers = 1,
+             .samples     = VK_SAMPLE_COUNT_1_BIT,
+             .tiling      = VK_IMAGE_TILING_OPTIMAL,
+             .usage =
+                  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
              .sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
              .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
 
-        if ( m_Specification.Properties & Core::Formats::Storage ) info.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        if ( m_Specification.Properties & Core::Formats::Storage )
+            info.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
 
-        auto allocResult = allocator->RT_AllocateImage( m_Specification.Tag, info, VMA_MEMORY_USAGE_GPU_ONLY, m_Resource.Image );
-        if ( !allocResult.IsSuccess() ) return Common::MakeError<bool>( allocResult.GetError() );
+        auto allocResult =
+             allocator->RT_AllocateImage( m_Specification.Tag, info, VMA_MEMORY_USAGE_GPU_ONLY, m_Resource.Image );
+        if ( !allocResult.IsSuccess() )
+            return Common::MakeError<bool>( allocResult.GetError() );
         m_Resource.Allocation = allocResult.GetValue();
 
         // Name the VkImage as well as the VMA allocation, so a capture lists "CloudShapeNoise" rather
@@ -709,7 +737,8 @@ namespace Desert::Graphic::API::Vulkan
             VkBufferCreateInfo bInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                          .size  = size,
                                          .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT };
-            auto stagingResult = allocator->RT_AllocateBuffer( "VolumeStaging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging );
+            auto               stagingResult =
+                 allocator->RT_AllocateBuffer( "VolumeStaging", bInfo, VMA_MEMORY_USAGE_CPU_TO_GPU, staging );
             if ( !stagingResult.IsSuccess() )
             {
                 CommandBufferAllocator::GetInstance().RT_FlushCommandBufferGraphic( cmd );
@@ -729,7 +758,8 @@ namespace Desert::Graphic::API::Vulkan
             VkBufferImageCopy copy = {
                  .imageSubresource = { .aspectMask = aspect, .layerCount = 1 },
                  .imageExtent      = { m_Specification.Width, m_Specification.Height, m_Specification.Depth } };
-            vkCmdCopyBufferToImage( cmd, staging, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy );
+            vkCmdCopyBufferToImage( cmd, staging, m_Resource.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                    &copy );
 
             TransitionLayout( cmd, finalDefaultLayout );
 
@@ -768,8 +798,8 @@ namespace Desert::Graphic::API::Vulkan
                                        .baseArrayLayer = 0,
                                        .layerCount     = 1 };
         Graphic::API::Vulkan::Utils::InsertImageMemoryBarrier( cmd, m_Resource.Image, srcAccess, dstAccess,
-                                                               m_Resource.Layout, newLayout, srcStage,
-                                                               dstStage, range );
+                                                               m_Resource.Layout, newLayout, srcStage, dstStage,
+                                                               range );
         m_Resource.Layout = newLayout;
     }
 
@@ -808,8 +838,14 @@ namespace Desert::Graphic::API::Vulkan
         Utils::CreateSampler( vkDevice, res.Sampler, policy );
     }
 
-    void VulkanImage2D::RecreateSampler() { RecreateSamplerImpl( m_Resource, Utils::SamplerFilterPolicy::Global ); }
-    void VulkanImageCube::RecreateSampler() { RecreateSamplerImpl( m_Resource, Utils::SamplerFilterPolicy::Global ); }
+    void VulkanImage2D::RecreateSampler()
+    {
+        RecreateSamplerImpl( m_Resource, Utils::SamplerFilterPolicy::Global );
+    }
+    void VulkanImageCube::RecreateSampler()
+    {
+        RecreateSamplerImpl( m_Resource, Utils::SamplerFilterPolicy::Global );
+    }
     // A volume keeps LINEAR through a filter change too — this is the call that would otherwise undo it,
     // since Renderer::RecreateImageSamplers walks EVERY registered image when the setting moves.
     void VulkanImage3D::RecreateSampler()

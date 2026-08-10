@@ -151,12 +151,12 @@ namespace Desert::Graphic::API::Vulkan
         // --- IVulkanImage Interface ---
         [[nodiscard]] const VulkanImageResource& GetResource() const override { return m_Resource; }
         void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, uint32_t mip = 0 ) override;
-        void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout,
-                               VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
-                               VkAccessFlags srcAccess, VkAccessFlags dstAccess ) override;
+        void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, VkPipelineStageFlags srcStage,
+                               VkPipelineStageFlags dstStage, VkAccessFlags srcAccess,
+                               VkAccessFlags dstAccess ) override;
         [[nodiscard]] VkImageLayout GetDefaultLayout() const override;
-        [[nodiscard]] VkImageView GetMipView( uint32_t level ) const override;
-        void RecreateSampler() override;
+        [[nodiscard]] VkImageView   GetMipView( uint32_t level ) const override;
+        void                        RecreateSampler() override;
 
         // --- Vulkan Specific ---
         Common::BoolResultStr RT_Invalidate();
@@ -200,9 +200,9 @@ namespace Desert::Graphic::API::Vulkan
         // --- IVulkanImage Interface ---
         [[nodiscard]] const VulkanImageResource& GetResource() const override { return m_Resource; }
         void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, uint32_t mip = 0 ) override;
-        void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout,
-                               VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
-                               VkAccessFlags srcAccess, VkAccessFlags dstAccess ) override;
+        void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, VkPipelineStageFlags srcStage,
+                               VkPipelineStageFlags dstStage, VkAccessFlags srcAccess,
+                               VkAccessFlags dstAccess ) override;
         [[nodiscard]] VkImageLayout GetDefaultLayout() const override;
         [[nodiscard]] VkImageView GetMipView( uint32_t level ) const override;
         void RecreateSampler() override;
@@ -235,28 +235,52 @@ namespace Desert::Graphic::API::Vulkan
         ~VulkanImage3D() override;
 
         // --- Image3D Interface ---
-        [[nodiscard]] uint32_t GetWidth() const override { return m_Specification.Width; }
-        [[nodiscard]] uint32_t GetHeight() const override { return m_Specification.Height; }
-        [[nodiscard]] uint32_t GetDepth() const override { return m_Specification.Depth; }
-        [[nodiscard]] Core::Formats::ImageFormat GetImageFormat() const override { return m_Specification.Format; }
-        [[nodiscard]] uint32_t GetMipmapLevels() const override { return m_Resource.MipLevels; }
-        [[nodiscard]] bool IsLoaded() const override { return m_IsLoaded; }
-        [[nodiscard]] Core::Formats::Image3DSpecification& GetImageSpecification() override { return m_Specification; }
+        [[nodiscard]] uint32_t GetWidth() const override
+        {
+            return m_Specification.Width;
+        }
+        [[nodiscard]] uint32_t GetHeight() const override
+        {
+            return m_Specification.Height;
+        }
+        [[nodiscard]] uint32_t GetDepth() const override
+        {
+            return m_Specification.Depth;
+        }
+        [[nodiscard]] Core::Formats::ImageFormat GetImageFormat() const override
+        {
+            return m_Specification.Format;
+        }
+        [[nodiscard]] uint32_t GetMipmapLevels() const override
+        {
+            return m_Resource.MipLevels;
+        }
+        [[nodiscard]] bool IsLoaded() const override
+        {
+            return m_IsLoaded;
+        }
+        [[nodiscard]] Core::Formats::Image3DSpecification& GetImageSpecification() override
+        {
+            return m_Specification;
+        }
         [[nodiscard]] Core::Formats::ImagePixelData GetImagePixels() override;
 
-        void Use( uint32_t slot = 0 ) const override;
+        void                  Use( uint32_t slot = 0 ) const override;
         Common::BoolResultStr Invalidate() override;
         Common::BoolResultStr Release() override;
 
         // --- IVulkanImage Interface ---
-        [[nodiscard]] const VulkanImageResource& GetResource() const override { return m_Resource; }
+        [[nodiscard]] const VulkanImageResource& GetResource() const override
+        {
+            return m_Resource;
+        }
         void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, uint32_t mip = 0 ) override;
-        void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout,
-                               VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
-                               VkAccessFlags srcAccess, VkAccessFlags dstAccess ) override;
+        void TransitionLayout( VkCommandBuffer cmdBuffer, VkImageLayout newLayout, VkPipelineStageFlags srcStage,
+                               VkPipelineStageFlags dstStage, VkAccessFlags srcAccess,
+                               VkAccessFlags dstAccess ) override;
         [[nodiscard]] VkImageLayout GetDefaultLayout() const override;
-        [[nodiscard]] VkImageView GetMipView( uint32_t level ) const override;
-        void RecreateSampler() override;
+        [[nodiscard]] VkImageView   GetMipView( uint32_t level ) const override;
+        void                        RecreateSampler() override;
 
         // --- Vulkan Specific ---
         Common::BoolResultStr RT_Invalidate();
@@ -269,8 +293,8 @@ namespace Desert::Graphic::API::Vulkan
         VulkanImageResource                 m_Resource;
         // Kept as a vector purely so RT_DestroyImage's deferred-deletion entry takes the same shape as
         // the 2D and cube paths; a volume has exactly one view in it.
-        std::vector<VkImageView>            m_MipViews;
-        bool                                m_IsLoaded = false;
+        std::vector<VkImageView> m_MipViews;
+        bool                     m_IsLoaded = false;
     };
 
 } // namespace Desert::Graphic::API::Vulkan

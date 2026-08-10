@@ -139,16 +139,16 @@ namespace Desert::Graphic::API::Vulkan
             switch ( kind )
             {
                 case SampledImageKind::Volume:
-                    writes.push_back( DescriptorSetBuilder::GetSampler3DWDS( m_VulkanMaterialBackend.get(), 0,
-                                                                             0, binding, 1, &infos.back() ) );
+                    writes.push_back( DescriptorSetBuilder::GetSampler3DWDS( m_VulkanMaterialBackend.get(), 0, 0,
+                                                                             binding, 1, &infos.back() ) );
                     break;
                 case SampledImageKind::Cube:
-                    writes.push_back( DescriptorSetBuilder::GetSamplerCubeWDS( m_VulkanMaterialBackend.get(), 0,
-                                                                               0, binding, 1, &infos.back() ) );
+                    writes.push_back( DescriptorSetBuilder::GetSamplerCubeWDS( m_VulkanMaterialBackend.get(), 0, 0,
+                                                                               binding, 1, &infos.back() ) );
                     break;
                 case SampledImageKind::Texture2D:
-                    writes.push_back( DescriptorSetBuilder::GetSampler2DWDS( m_VulkanMaterialBackend.get(), 0,
-                                                                             0, binding, 1, &infos.back() ) );
+                    writes.push_back( DescriptorSetBuilder::GetSampler2DWDS( m_VulkanMaterialBackend.get(), 0, 0,
+                                                                             binding, 1, &infos.back() ) );
                     break;
             }
         }

@@ -106,7 +106,7 @@ namespace Desert::Graphic
 
     namespace Utils
     {
-        bool IsDepthFormat( Core::Formats::ImageFormat format );
+        bool                   IsDepthFormat( Core::Formats::ImageFormat format );
         bool                   HasStencilComponent( Core::Formats::ImageFormat format );
         inline uint32_t        CalculateMipCount( uint32_t width, uint32_t height, uint32_t depth = 1 )
         {
