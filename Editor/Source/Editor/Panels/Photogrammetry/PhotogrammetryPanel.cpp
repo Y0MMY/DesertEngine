@@ -625,20 +625,18 @@ namespace Desert::Editor
         m_PreviewScene->AddSystem<ECS::MeshECSSystem>();
         m_PreviewScene->AddSystem<ECS::SkyboxECSSystem>();
 
-        auto  skyEnt        = m_PreviewScene->CreateNewEntity( "PrevSky" );
-        auto& skyC          = skyEnt.AddComponent<ECS::SkyboxComponent>();
-        skyC.Procedural     = true;
-        skyC.ZenithColor    = { 0.26f, 0.46f, 0.78f };
-        skyC.HorizonColor   = { 0.62f, 0.73f, 0.87f };
-        skyC.GroundColor    = { 0.45f, 0.56f, 0.72f };
-        skyC.SunColor       = { 1.00f, 0.95f, 0.85f };
-        skyC.SkyBrightness  = 1.15f;
-        skyC.HorizonFalloff = 0.5f;
-        skyC.SunGlow        = 0.8f;
-        skyC.StarIntensity  = 0.0f;
-        skyC.SunIntensity   = 16.0f;
-        skyC.SunDiskRadius  = 0.02f;
-        skyC.RequestBake    = true;
+        auto  skyEnt             = m_PreviewScene->CreateNewEntity( "PrevSky" );
+        auto& skyC               = skyEnt.AddComponent<ECS::SkyAtmosphereComponent>();
+        skyC.Data.ZenithColor    = { 0.26f, 0.46f, 0.78f };
+        skyC.Data.HorizonColor   = { 0.62f, 0.73f, 0.87f };
+        skyC.Data.GroundColor    = { 0.45f, 0.56f, 0.72f };
+        skyC.Data.SunColor       = { 1.00f, 0.95f, 0.85f };
+        skyC.Data.SkyBrightness  = 1.15f;
+        skyC.Data.HorizonFalloff = 0.5f;
+        skyC.Data.SunGlow        = 0.8f;
+        skyC.Data.StarIntensity  = 0.0f;
+        skyC.Data.SunIntensity   = 16.0f;
+        skyC.RequestBake         = true;
 
         m_PreviewInit = true;
     }

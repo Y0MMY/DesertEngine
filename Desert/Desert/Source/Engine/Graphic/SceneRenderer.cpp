@@ -909,7 +909,7 @@ namespace Desert::Graphic
                                           const SkySettings& sky )
     {
         // Inject the SHARED scene wind direction into the cloud config so clouds drift the same heading as
-        // grass. The Skybox only authors the per-sky drift RATE (CloudWindSpeed); direction is scene-global.
+        // grass; the per-sky drift RATE is authored on the cloud side, direction is scene-global.
         CloudSettings windedClouds = clouds;
         windedClouds.WindDir       = m_Wind.Direction;
 

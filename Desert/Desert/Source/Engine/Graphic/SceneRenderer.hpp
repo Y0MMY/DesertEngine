@@ -122,7 +122,7 @@ namespace Desert::Graphic
         void SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled );
         const std::optional<Environment>& GetEnvironment();
 
-        // Procedural sky configuration (from the SkyboxComponent + directional light via the ECS).
+        // Procedural sky configuration (from the SkyAtmosphereComponent + directional light via the ECS).
         // bakeNow = one-shot request from the editor's Bake button (rebuild the sky IBL).
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
                                bool bakeNow, const CloudSettings& clouds, const SkySettings& sky );

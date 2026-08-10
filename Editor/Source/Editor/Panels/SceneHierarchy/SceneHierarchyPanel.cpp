@@ -210,6 +210,8 @@ namespace Desert::Editor
             return "PointLight";
         if ( entity.HasComponent<ECS::SpotLightComponent>() )
             return "SpotLight";
+        if ( entity.HasComponent<ECS::SkyAtmosphereComponent>() )
+            return "SkyAtmosphereActor";
         if ( entity.HasComponent<ECS::SkyboxComponent>() )
             return "SkyboxActor";
         if ( entity.HasComponent<ECS::TerrainComponent>() )
@@ -261,6 +263,8 @@ namespace Desert::Editor
         else if ( entity.HasComponent<ECS::DirectionLightComponent>() ||
                   entity.HasComponent<ECS::PointLightComponent>() )
             icon = ICON_MDI_LIGHTBULB;
+        else if ( entity.HasComponent<ECS::SkyAtmosphereComponent>() )
+            icon = ICON_MDI_WEATHER_SUNSET;
         else if ( entity.HasComponent<ECS::SkyboxComponent>() )
             icon = ICON_MDI_EARTH;
         else if ( entity.HasComponent<ECS::TerrainComponent>() )

@@ -53,15 +53,16 @@ namespace Desert::Scripting
 
         // The single registration list (mirrors the reflected-component serializers).
         constexpr ReflectedComponentEntry kReflectedComponents[] = {
-            MakeEntry<ECS::CameraComponent>( "Camera", "CameraData" ),
-            MakeEntry<ECS::DirectionLightComponent>( "DirectionLight", "DirectionalLightData" ),
-            MakeEntry<ECS::PointLightComponent>( "PointLight", "PointLightData" ),
-            MakeEntry<ECS::SpotLightComponent>( "SpotLight", "SpotLightData" ),
-            MakeEntry<ECS::TerrainComponent>( "Terrain", "TerrainData" ),
-            MakeEntry<ECS::ColliderComponent>( "Collider", "ColliderData" ),
-            MakeEntry<ECS::RigidBodyComponent>( "RigidBody", "RigidBodyData" ),
-            MakeEntry<ECS::CharacterControllerComponent>( "CharacterController",
-                                                          "CharacterControllerData" ),
+             MakeEntry<ECS::CameraComponent>( "Camera", "CameraData" ),
+             MakeEntry<ECS::DirectionLightComponent>( "DirectionLight", "DirectionalLightData" ),
+             MakeEntry<ECS::PointLightComponent>( "PointLight", "PointLightData" ),
+             MakeEntry<ECS::SpotLightComponent>( "SpotLight", "SpotLightData" ),
+             MakeEntry<ECS::TerrainComponent>( "Terrain", "TerrainData" ),
+             MakeEntry<ECS::ColliderComponent>( "Collider", "ColliderData" ),
+             MakeEntry<ECS::RigidBodyComponent>( "RigidBody", "RigidBodyData" ),
+             MakeEntry<ECS::CharacterControllerComponent>( "CharacterController", "CharacterControllerData" ),
+             MakeEntry<ECS::SkyAtmosphereComponent>( "SkyAtmosphere", "SkyAtmosphereData" ),
+             MakeEntry<ECS::VolumetricCloudsComponent>( "VolumetricClouds", "VolumetricCloudData" ),
         };
 
         const ReflectedComponentEntry* FindEntry( const std::string& name )

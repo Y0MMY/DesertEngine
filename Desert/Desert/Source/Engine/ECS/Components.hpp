@@ -25,6 +25,11 @@
 
 #include <Engine/Reflection/ReflectionMacros.hpp>
 
+// Components big enough to own a file. They live in Desert::ECS like everything below, and are included
+// here so that "the components" remains one include for every consumer.
+#include <Engine/ECS/SkyAtmosphereComponent.hpp>
+#include <Engine/ECS/VolumetricCloudsComponent.hpp>
+
 namespace Desert
 {
     class Mesh;
@@ -379,17 +384,39 @@ namespace Desert::ECS
         }
     };
 
+    // ON THE TWO PAIRS OF SUN NUMBERS. Colour x Intensity here is the ILLUMINANCE arriving at scene
+    // surfaces — what every PBR surface integrates. SkyAtmosphereData::SunColor x SunIntensity is the
+    // RADIANCE of the sky and of the solar disk — what the camera sees when it looks up. Two different
+    // quantities with different consumers, not one value stored twice: neither is derived from the other,
+    // and no code path reads one where it means the other. See SkyAtmosphereComponent.hpp.
     struct DirectionalLightData
     {
         REFLECT()
 
-        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color, Temperature )
+        PROPERTY( DisplayName( "Color" ), Category( "Light" ), Color, Temperature,
+                  Tooltip( "Tint of the illumination arriving at scene surfaces. The sun you SEE in the sky "
+                           "is the Sky Atmosphere component's Sun Color / Sun Intensity." ) )
         glm::vec3 Color = glm::vec3( 1.0f );
 
         PROPERTY( DisplayName( "Intensity" ), Category( "Light" ), Range( 0.0f, 10.0f ), Summary, Units( "x" ),
-                  Tooltip( "Linear multiplier on the light colour. NOT a photometric unit (lux/candela): "
-                           "the renderer multiplies radiance by this number directly." ) )
+                  Tooltip( "Brightness of the illumination arriving at scene surfaces. NOT a photometric "
+                           "unit (lux/candela): the renderer multiplies radiance by this number directly. "
+                           "The sun you SEE in the sky is the Sky Atmosphere component's Sun Color / Sun "
+                           "Intensity." ) )
         float Intensity = 1.0f;
+
+        // Defaults to true so that every scene authored before this field existed keeps working: a field
+        // missing from the file keeps its C++ default, so the one directional light such a scene has
+        // becomes its atmosphere sun with no migration.
+        PROPERTY( DisplayName( "Atmosphere Sun Light" ), Category( "Atmosphere" ),
+                  Tooltip( "This light drives the sky, the sky's IBL bake and the cloud lighting." ) )
+        bool AtmosphereSunLight = true;
+
+        PROPERTY( DisplayName( "Atmosphere Sun Light Index" ), Category( "Atmosphere" ), Range( 0, 0 ),
+                  EditCondition( "AtmosphereSunLight" ),
+                  Tooltip( "The engine renders exactly one directional light; index 1 is reserved for a "
+                           "future second sun." ) )
+        int AtmosphereSunLightIndex = 0;
     };
 
     struct DirectionLightComponent
@@ -1439,9 +1466,14 @@ namespace Desert::ECS
         UIButtonData Data;
     };
 
+    // The HDR-cubemap background, and nothing else. The procedural atmosphere (palette, sun, stars, the
+    // IBL bake request) moved to SkyAtmosphereComponent and the flat cloud layer to
+    // VolumetricCloudsComponent; the old fields are gone rather than deprecated, so there is exactly one
+    // place each value can live.
+    //
     // Reflected (REFLECT/PROPERTY) so it (de)serializes generically — the SkyboxHandle round-trips as an
-    // asset PATH via the serializer's AssetResolver. RequestBake has NO PROPERTY → excluded from
-    // reflection (transient). All fields kept flat (no Data sub-struct) so existing accessors are unchanged.
+    // asset PATH via the serializer's AssetResolver. Fields kept flat (no Data sub-struct) so existing
+    // accessors are unchanged.
     struct SkyboxComponent
     {
         REFLECT()
@@ -1453,57 +1485,6 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Intensity" ), Category( "Skybox" ), Range( 0.0f, 10.0f ) )
         float Intensity = 1.0f;
-
-        // Engine-generated procedural atmosphere (Rayleigh+Mie).
-        PROPERTY( DisplayName( "Procedural" ), Category( "Skybox" ) )
-        bool Procedural = false;
-        PROPERTY( DisplayName( "Sun Intensity" ), Category( "Skybox" ), Range( 1.0f, 50.0f ) )
-        float SunIntensity = 22.0f; // atmosphere sun radiance scale
-        PROPERTY( DisplayName( "Sun Disk Size" ), Category( "Skybox" ), Range( 0.002f, 0.1f ) )
-        float SunDiskRadius = 0.02f; // sun angular radius (radians)
-
-        // --- Artistic sky palette + scalars (the day/sunset/night look is driven by the sun elevation; these
-        // tune the colours/intensities). See ProceduralSky shader / Atmosphere.glslh SkyConfig. ---
-        PROPERTY( DisplayName( "Zenith Color" ), Category( "Sky Color" ), Color )
-        glm::vec3 ZenithColor = { 0.08f, 0.26f, 0.70f };
-        PROPERTY( DisplayName( "Horizon Color" ), Category( "Sky Color" ), Color )
-        glm::vec3 HorizonColor = { 0.50f, 0.66f, 0.92f };
-        PROPERTY( DisplayName( "Ground Color" ), Category( "Sky Color" ), Color )
-        glm::vec3 GroundColor = { 0.16f, 0.19f, 0.24f };
-        PROPERTY( DisplayName( "Night Color" ), Category( "Sky Color" ), Color )
-        glm::vec3 NightColor = { 0.010f, 0.020f, 0.050f };
-        PROPERTY( DisplayName( "Sky Brightness" ), Category( "Sky Color" ), Range( 0.0f, 4.0f ) )
-        float SkyBrightness = 1.0f;
-        PROPERTY( DisplayName( "Horizon Falloff" ), Category( "Sky Color" ), Range( 0.1f, 2.0f ) )
-        float HorizonFalloff = 0.85f;
-
-        PROPERTY( DisplayName( "Sun Color" ), Category( "Sun & Sky" ), Color )
-        glm::vec3 SunColor = { 1.00f, 0.96f, 0.88f };
-        PROPERTY( DisplayName( "Sun Glow" ), Category( "Sun & Sky" ), Range( 0.0f, 5.0f ) )
-        float SunGlow = 1.0f;
-        PROPERTY( DisplayName( "Sunset Color" ), Category( "Sun & Sky" ), Color )
-        glm::vec3 SunsetColor = { 1.00f, 0.42f, 0.18f };
-        PROPERTY( DisplayName( "Sunset Intensity" ), Category( "Sun & Sky" ), Range( 0.0f, 3.0f ) )
-        float SunsetIntensity = 1.0f;
-        PROPERTY( DisplayName( "Star Intensity" ), Category( "Sun & Sky" ), Range( 0.0f, 5.0f ) )
-        float StarIntensity = 1.0f;
-
-        // Procedural flat-layer clouds (e2gamedev-style; painted in the sky shader, visual only).
-        PROPERTY( DisplayName( "Clouds" ), Category( "Clouds" ) )
-        bool EnableClouds = false;
-        PROPERTY( DisplayName( "Coverage" ), Category( "Clouds" ), Range( 0.0f, 1.0f ) )
-        float CloudCoverage = 0.5f; // 0 = clear sky, 1 = overcast
-        PROPERTY( DisplayName( "Density" ), Category( "Clouds" ), Range( 0.0f, 2.0f ) )
-        float CloudDensity = 1.0f; // opacity multiplier
-        PROPERTY( DisplayName( "Tiling" ), Category( "Clouds" ), Range( 0.2f, 10.0f ) )
-        float CloudTiling = 1.5f; // cloud scale (bigger = smaller cells)
-        PROPERTY( DisplayName( "Brightness" ), Category( "Clouds" ), Range( 0.0f, 3.0f ) )
-        float CloudBrightness = 1.0f; // cloud albedo multiplier
-        PROPERTY( DisplayName( "Wind Speed" ), Category( "Clouds" ), Range( 0.0f, 50.0f ) )
-        float CloudWindSpeed = 8.0f; // horizontal drift speed (animation)
-
-        // Transient (not serialized — no PROPERTY): set by the editor's "Bake" button.
-        bool RequestBake = false;
     };
 
     // Scene-outliner grouping node: an otherwise-empty entity that acts as a FOLDER for organizing the
