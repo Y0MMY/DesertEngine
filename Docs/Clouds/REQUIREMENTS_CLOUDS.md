@@ -105,9 +105,9 @@ Five stages. Positions are relative to the numbered steps of `SceneRenderer::OnU
 |---|---|---|---|---|---|
 | S0 | Noise volume generation | compute, **immediate** (`ComputePipeline::Dispatch`) | once per process, and on seed/tile change | push constants (seed, dims) | `ShapeNoise` 128³ RGBA8F, `DetailNoise` 32³ RGBA8F, `CurlNoise` 128×128 RGBA8F |
 | S1 | Weather map generation | compute, **in-frame** | new step 7.5, only when the weather fields are dirty | weather fields (SSBO) | `WeatherMap` 512×512 RGBA8F storage image |
-| S2 | Raymarch | compute, **in-frame** | new step 7.5, after S1 | S0 volumes, S1 map, scene depth, params SSBO, push constants | `CloudScatterTransmittance` **RGBA16F** at `ResolutionScale`, `.rgb` = in-scattered radiance (premultiplied), `.a` = transmittance |
-| S3 | Temporal resolve | compute, **in-frame** | new step 7.5, after S2 | S2 output, history image, previous view-projection | resolved **RGBA16F** + new history |
-| S4 | Composite | **graphics**, `RenderPhase::Transparency` | step 8, `ExecuteTransparency()` | S3 output, scene depth | scene colour target (LOAD, blended) |
+| S2 | Raymarch | compute, **in-frame** | new step 7.5, after S1 | S0 volumes, S1 map, scene depth, params SSBO, push constants | `CloudScatterTransmittance` **RGBA16F** at `ResolutionScale`, `.rgb` = in-scattered radiance (premultiplied), `.a` = transmittance; **and `CloudDepthGuide` RGBA8** — the distance each ray was allowed to run to (T9: S4 cannot read the scene depth, see CLD-32) |
+| S3 | Temporal resolve | compute, **in-frame** | new step 7.5, after S2, **only when `TemporalMode = Reprojection`** | S2 output, history image, previous view-projection | the resolved image, which IS the new history — one ping-pong half, not a third target |
+| S4 | Composite | **graphics**, `RenderPhase::Transparency` | step 8, `ExecuteTransparency()` | S3's output (or S2's, with `TemporalMode = Off`) and the depth guide — ~~scene depth~~, which this pass cannot sample | scene colour target (LOAD, blended) |
 
 **CLD-20 — S0..S3 are compute dispatches issued from a new `SceneRenderer::ExecuteVolumetricClouds()`
 called between the deferred block (step 7) and `ExecuteTransparency()` (step 8).**
@@ -292,6 +292,30 @@ resulting UV (the standard trick, sketched but disabled in the reference, REF §
 the reprojected UV leaves the screen or the sample falls outside a `TemporalClampScale`-scaled min/max box of
 the 3×3 current neighbourhood. Blend weight is `TemporalBlendFactor`. `TemporalMode = Off` makes S3 a no-op
 and S4 still bilaterally upsamples.
+
+> **CORRECTION (T9 developer, as landed).** Three things in this requirement did not survive contact.
+>
+> 1. **"Rejected" versus "clamped" — the statement and its own acceptance disagreed.** The statement above
+>    says history is rejected when it falls outside the box; the acceptance three lines down says an outside
+>    sample "is clamped onto the box boundary", and CLD-32b calls the mechanism "the neighbourhood clamp"
+>    throughout. As landed: leaving the SCREEN rejects (the pixel resolves to the marched frame, bit for
+>    bit); leaving the BOX clamps onto the boundary and is then blended. Rejecting on the box would snap a
+>    disoccluded pixel to a single frame of a jittered half-resolution march, which is the flicker the
+>    accumulation exists to remove.
+> 2. **S4 cannot read the scene depth, so S3 is not where the low-resolution depth comes from.** The
+>    composite is a graphics pass inside a render pass that has the depth attachment bound, and sampling a
+>    bound attachment is a feedback loop — the same constraint that put CLD-29's depth read in compute. The
+>    guide the bilateral filter weights by is therefore written by S2, which already holds the number
+>    (`CloudGeometryLimit`), into an RGBA8 image at the raymarch's own resolution. It costs six lines in the
+>    march and no extra dispatch; the alternative was a second compute pass re-reading the depth to
+>    recompute what S2 had just worked out. It also means the guide exists in BOTH temporal modes, which
+>    CLD-32a constraint 2 requires and an S3-owned guide could not have delivered.
+> 3. **What the bilateral filter actually fixes.** With no full-resolution depth in the composite, the
+>    reference for each pixel is the nearest tap's distance, not the pixel's own. That removes the SMEAR
+>    across a silhouette — a foreground texel no longer bleeds cloud into the open sky beside it — but it
+>    cannot place the silhouette more finely than the cloud buffer's own grid. Sub-texel edge placement
+>    would need a full-resolution depth copy, which is a full-resolution image this programme has not
+>    budgeted (CLD-34) and which nothing else in the frame needs.
 *Rationale:* at `ResolutionScale = Half` with 64 steps the raw march boils visibly; the reference's
 "temporal upscaling" is a marketing name for a spatial split with no history at all (REF §D.2), so there is
 nothing to port and this is designed from scratch. The bilateral upsample replaces the reference's plain
@@ -319,10 +343,36 @@ at the top of the temporal shader.** With their trigger and their mitigation kno
 | Artefact | Trigger | Knob that trades it away |
 |---|---|---|
 | **Disocclusion trails** — a smear behind geometry that uncovers new cloud | translating past a foreground object; flying out of a canyon | lower `TemporalBlendFactor` weight is *worse*; the fix is the neighbourhood clamp — lower `TemporalClampScale` |
-| **Inertia / lag on fast rotation** — clouds "catch up" after a whip pan | angular velocity high enough that most reprojected UVs leave the screen | raise `TemporalBlendFactor` (more current frame), or `TemporalMode = Off` |
+| **Inertia / lag on fast rotation** — clouds "catch up" after a whip pan | ~~angular velocity high enough that most reprojected UVs leave the screen~~ **corrected below** — any rotation, on the pixels that STAYED on screen | raise `TemporalBlendFactor` (more current frame), or `TemporalMode = Off` |
 | **Shell-parallax error** — reprojection assumes the pixel sits on the shell mid-surface, so very near clouds reproject slightly wrong | camera inside or just below the layer | inherent to camera-only reprojection; bounded because near clouds are also where `NearFadeMinDensity` thins them |
 | **Ghosting on wind-driven silhouette change** — an edge that changed because the cloud moved, not because the camera did | high `AnimationSpeed`/`WindInfluence`, e.g. the Storm preset | the neighbourhood clamp; this is the case the clamp exists for |
 | **Sun-glint flicker** — a bright forward-scatter pixel enters and leaves the clamp box | looking near the sun with high `SilverLiningIntensity` | raise `TemporalClampScale` (accepting more ghosting) |
+
+> **CORRECTION (T9 developer, table checked against the landed code).** Four of the five rows survive:
+> each names a mechanism that exists, and the knob named in each row is the one that drives that mechanism.
+> Row 2's TRIGGER is backwards.
+>
+> A pixel whose reprojected UV leaves the screen has NO history — `CloudReprojectThroughShell` reports
+> `Valid = false`, and `CloudTemporalResolve` returns the marched frame bit for bit. Those pixels are the
+> ones with no inertia at all. The lag is in the pixels that stayed on screen and were blended: the
+> reprojection is exact for a rotation about the eye, but the shell mid-surface stand-in is not exact for
+> anything else, and where the reprojection is slightly wrong the accumulation converges to the new answer
+> at the rate `TemporalBlendFactor` sets. So the artefact is real, the knob is right, and only the
+> explanation of when it appears was wrong: it is not the pixels that left the screen, it is the ones that
+> did not.
+>
+> Verified for the other four, in the code that shipped:
+> * **Disocclusion trails** — the reprojected UV of a disoccluded pixel is on-screen and valid, so only the
+>   box catches it; a narrower box (lower `TemporalClampScale`) pulls the stale sample further toward the
+>   current neighbourhood, and a lower `TemporalBlendFactor` keeps more of the stale sample. Both directions
+>   as stated.
+> * **Shell parallax** — `CloudReprojectThroughShell` intersects `bottomKm + 0.5 * thicknessKm`, so the
+>   error is exactly as described, and `NearFadeMinDensity` is a real field of §4.2 acting on the near end.
+> * **Wind ghosting** — the reprojection contains no wind term at all (CLD-32a constraint 1), so the clamp
+>   is indeed the ONLY mechanism that can notice a silhouette that moved on its own.
+> * **Sun-glint flicker** — `SilverLiningIntensity` multiplies the forward lobe alone
+>   (`CloudDualLobePhase`), so it is the field that makes such a pixel bright; widening the box lets the
+>   bright history survive the clamp.
 
 *Rationale:* `DEV_CONTRACT.md:82-86` and ENG §5.1 — we cannot look at the result here, so an artefact that is
 not named in advance will be reported later as a bug and re-investigated from scratch. Naming them is the
@@ -354,6 +404,7 @@ Grep-checkable.
 | `CurlNoise` | 128 × 128 | `RGBA8F` (64 KiB) | same | ✅ `Image2D`, `Storage \| Sample` |
 | `WeatherMap` | 512 × 512 | `RGBA8F` (1 MiB) | one per `SceneRenderer`, lazily allocated | ✅ |
 | `CloudScatterTransmittance` | target × `ResolutionScale` | `RGBA16F` | per `SceneRenderer`, lazily allocated | ❌ **needs CLD-18** |
+| `CloudDepthGuide` | same | `RGBA8F` | per `SceneRenderer`, lazily allocated, **in both temporal modes** | ✅ (added by T9 — see below) |
 | `CloudHistory` ×2 (ping-pong) | same | `RGBA16F` | per `SceneRenderer`, lazily allocated, only when `TemporalMode != Off` | ❌ CLD-18 |
 | `CloudParams` SSBO | ≈ 512 B | std430 | **non-persistent** `StorageBuffer::Create( …, persistent = false )` | ✅ `StorageBuffer.hpp:29-30` |
 | Scene depth (read) | target | `DEPTH24STENCIL8` (`SceneRenderer.cpp:58`) | borrowed | ⚠️ **needs CLD-13** |
@@ -369,6 +420,22 @@ At Full resolution with temporal on, three 1920×1080 `RGBA16F` images is **≈ 
 *Acceptance:* code review against the `EnsureSSRResources` shape; a `LOG_INFO` line naming the resolution,
 format and total bytes; a unit test asserts the byte arithmetic for `Half`/`Full` × `Off`/`Reprojection`
 against the four figures above.
+
+> **CORRECTION (T9 developer, as landed).** Two problems with the figures.
+>
+> *The table never quoted four figures* — only the two `Reprojection` ones. And they omit the depth guide
+> that CLD-32's bilateral upsample needs, because the resource table above did not have it. The guide is
+> `RGBA8F` at the raymarch's own resolution, a quarter of a colour target's bytes, and it is needed in both
+> temporal modes. The four figures at 1920×1080, as `Graphic::CloudScaledImageBytes` computes them and as
+> `Tests/Engine/CloudTemporal` asserts them:
+>
+> | | `Off` | `Reprojection` |
+> |---|---|---|
+> | **Full** | 23.73 MiB | 55.37 MiB *(was quoted as 47.5)* |
+> | **Half** (default High tier) | 5.93 MiB | 13.84 MiB *(was quoted as 11.9)* |
+>
+> The weather map is deliberately outside these figures, exactly as it was in the original: it is one fixed
+> megabyte that does not move with the view size or with any of these settings.
 
 **CLD-35 — the cloud parameter block is a non-persistent `StorageBuffer`, never a persistent one, and never
 a hand-rolled global.**
@@ -1119,7 +1186,7 @@ when its subject is deliberately broken (`DEV_CONTRACT.md:90-91`).
 
 | # | Criterion | Test target / method |
 |---|---|---|
-| CLD-87 | **Cloud math.** Shell intersection (CLD-24), step scheduling (CLD-25), coarse/fine schedule (CLD-26), HG + dual-lobe phase + in-scatter height dependence (CLD-27), multi-scatter octaves (CLD-28), Beer transmittance (CLD-25), depth linearisation (CLD-29), reprojection + neighbourhood clamp (CLD-32). | `Tests/Engine/CloudMath/` over header-only `Graphic/CloudMath.hpp` — no renderer, no GPU (model: `Tests/Engine/ShadowCascades/`) |
+| CLD-87 | **Cloud math.** Shell intersection (CLD-24), step scheduling (CLD-25), coarse/fine schedule (CLD-26), HG + dual-lobe phase + in-scatter height dependence (CLD-27), multi-scatter octaves (CLD-28), Beer transmittance (CLD-25), depth linearisation (CLD-29), reprojection + neighbourhood clamp (CLD-32). | `Tests/Engine/CloudMath/` over header-only `Graphic/CloudMath.hpp` — no renderer, no GPU (model: `Tests/Engine/ShadowCascades/`). *T9: the reprojection, the clamp, the blend, the depth-guide packing and the bilateral weights live in `Tests/Engine/CloudTemporal/` instead, over `Common/CloudTemporal.glslh` compiled as C++ — the same arrangement, one binary per stage.* |
 | CLD-88 | **No dead parameters.** For every reflected field of `VolumetricCloudData`, perturb it in isolation using its reflection offset/type and assert `PackCloudUniforms()` produces different bytes. Fields that are legitimately CPU-only (`Preset`, `QualityLevel`, `ResolutionScale`, `Enabled`, `ShapeSeed`, `DetailSeed`, `WeatherSeed`, `RequestRegenerateNoise`) are listed in an explicit allow-list, and the test additionally asserts the allow-list contains *exactly* those names — so growing it is a deliberate, reviewable edit. | `Tests/Engine/CloudParams/` |
 | CLD-89 | **GPU payload layout.** `static_assert` + test on `sizeof`/`offsetof` of the params SSBO struct and the push-constant struct against the documented std430/std140 layout; push constant `sizeof <= 128`. | `Tests/Engine/CloudParams/` — this is what stops the `SkyUBData`-style silent mirror divergence (ENG §1.2) |
 | CLD-90 | **Presets.** Table completeness (CLD-50), default == PartlyCloudy (CLD-51), Apply/Match round-trip and `Custom` on edit (CLD-52), quality untouched (CLD-53), every value in range (CLD-54). | `Tests/Engine/CloudPresets/` |
@@ -1132,7 +1199,7 @@ when its subject is deliberately broken (`DEV_CONTRACT.md:90-91`).
 | CLD-96a | **Deterministic pass order** (CLD-19): shuffled registration across phases sorts by (phase, registration); two builds of the same graph are identical; clouds-before-particles in `Transparency` holds. | `Tests/Engine/RenderGraphSort/` — owned by the render-graph task, but it is B's blocking dependency, so B's DoD checks it exists and passes |
 | CLD-96b | **`RGBA16F`** (CLD-18): `GetBytesPerPixel == 8`; 2D and 3D size arithmetic agree; the four per-renderer memory figures of CLD-34 are reproduced by the allocator's own arithmetic. | `Tests/Engine/CloudParams/` |
 | CLD-96c | **Depth aspect selection** (CLD-13): format → aspect mapping for `DEPTH24STENCIL8`, `DEPTH32F` and each colour format. | pure unit test, no device |
-| CLD-96d | **Temporal `Off` is real** (CLD-32a.2): with `TemporalMode = Off` the resolve output equals the raymarch output bit-for-bit. | `Tests/Engine/CloudMath/` |
+| CLD-96d | **Temporal `Off` is real** (CLD-32a.2): with `TemporalMode = Off` the resolve output equals the raymarch output bit-for-bit. | `Tests/Engine/CloudTemporal/` — a separate binary, so the temporal stage's tests do not need the raymarch's fixtures. As landed the statement is stronger: with `Off` the resolve is not dispatched at all and the composite is bound to the raymarch target, so the test drives that decision (`CloudSelectCompositeSource`) and `memcmp`s the image the composite would read against the image the march wrote. The blend itself is separately asserted bit-exact for a weight of 1 and for unusable history, including infinite and NaN history values. |
 | CLD-96e | **No silent zero on an unknown format** (CLD-18a): exact byte count asserted for all six `ImageFormat` enumerators; grep confirms neither `GetBytesPerPixel` nor `CalculateImageSize` contains a `return 0`; a locally-added seventh enumerator without a `case` is shown to **fail the build**, not the test (demonstrated once by the developer and reported, then reverted). | `Tests/Engine/CloudParams/` + a one-off build demonstration in the report |
 
 **Not verifiable here — must be listed as such in the developer's report**

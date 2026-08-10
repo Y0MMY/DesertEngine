@@ -30,6 +30,7 @@ namespace Desert::Graphic::System
 
         constexpr const char* kWeatherShaderName   = "CloudWeather";
         constexpr const char* kRaymarchShaderName  = "CloudRaymarch";
+        constexpr const char* kTemporalShaderName  = "CloudTemporalResolve";
         constexpr const char* kCompositeShaderName = "CloudComposite";
 
         constexpr uint32_t GroupCount( uint32_t extent )
@@ -81,10 +82,15 @@ namespace Desert::Graphic::System
     {
         m_WeatherPipeline.reset();
         m_RaymarchPipeline.reset();
+        m_TemporalPipeline.reset();
         m_CompositePipeline.reset();
         m_CompositeMaterial.reset();
         m_WeatherMap.reset();
         m_ScatterImage.reset();
+        m_DepthGuideImage.reset();
+        m_HistoryImages[0].reset();
+        m_HistoryImages[1].reset();
+        m_HistoryFilled = false;
         m_ParamsBuffer.reset();
     }
 
@@ -115,6 +121,7 @@ namespace Desert::Graphic::System
 
         m_WeatherPipeline  = makeCompute( kWeatherShaderName );
         m_RaymarchPipeline = makeCompute( kRaymarchShaderName );
+        m_TemporalPipeline = makeCompute( kTemporalShaderName );
 
         const auto target = m_TargetFramebuffer.lock();
         if ( !target )
@@ -154,7 +161,7 @@ namespace Desert::Graphic::System
         if ( m_CompositePipeline )
             m_CompositePipeline->Invalidate();
 
-        return m_WeatherPipeline && m_RaymarchPipeline && m_CompositePipeline;
+        return m_WeatherPipeline && m_RaymarchPipeline && m_TemporalPipeline && m_CompositePipeline;
     }
 
     void VolumetricCloudRenderer::SetCloudSettings( bool present, const ECS::VolumetricCloudData& data )
@@ -196,7 +203,7 @@ namespace Desert::Graphic::System
         const uint32_t scatterW = CloudScaledExtent( width, m_Data.ResolutionScale );
         const uint32_t scatterH = CloudScaledExtent( height, m_Data.ResolutionScale );
 
-        if ( m_ScatterImage && scatterW == m_ScatterWidth && scatterH == m_ScatterHeight &&
+        if ( m_ScatterImage && m_DepthGuideImage && scatterW == m_ScatterWidth && scatterH == m_ScatterHeight &&
              m_Data.ResolutionScale == m_ScatterScale )
             return true;
 
@@ -204,6 +211,11 @@ namespace Desert::Graphic::System
         // reason the sky bake idles before swapping its cubes.
         if ( m_ScatterImage )
             Renderer::GetInstance().WaitDeviceIdle();
+
+        // The history is sized to the scatter target, so a resize invalidates it as well. Released here
+        // rather than resized in place: the accumulated frames were resolved at the old size and mean
+        // nothing at the new one, and EnsureHistory rebuilds the pair on the next resolve.
+        ReleaseHistory();
 
         const Core::Formats::Image2DSpecification spec{
              .Tag        = "CloudScatterTransmittance",
@@ -225,23 +237,124 @@ namespace Desert::Graphic::System
             return false;
         }
 
+        // The composite's bilateral guide. RGBA8 and not a float format because it carries ONE number per
+        // texel, packed into two normalized channels (Common/CloudTemporal.glslh) — a quarter of the bytes
+        // an RGBA16F would spend to say the same thing.
+        const Core::Formats::Image2DSpecification guideSpec{
+             .Tag        = "CloudDepthGuide",
+             .Width      = scatterW,
+             .Height     = scatterH,
+             .Format     = Core::Formats::ImageFormat::RGBA8F,
+             .Mips       = 1u,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+
+        m_DepthGuideImage = Image2D::Create( guideSpec, nullptr );
+        if ( !m_DepthGuideImage )
+        {
+            LOG_ERROR( "[Clouds] The {}x{} RGBA8 cloud depth guide could not be created; the cloud layer "
+                       "will not render for this view.",
+                       scatterW, scatterH );
+            m_ResourcesFailed = true;
+            return false;
+        }
+
         m_ScatterWidth   = scatterW;
         m_ScatterHeight  = scatterH;
         m_ScatterScale   = m_Data.ResolutionScale;
         m_HasFrameResult = false;
 
         // The cost is announced, not discovered in a memory graph later. One line per allocation, and
-        // an allocation only happens on a resolution or tier change.
-        LOG_INFO( "[Clouds] Scatter target {}x{} RGBA16F ({:.2f} MiB) + weather map {}x{} RGBA8 "
-                  "({:.2f} MiB) for a {}x{} view.",
+        // an allocation only happens on a resolution or tier change. The total is the same arithmetic
+        // CloudScaledImageBytes states and the unit test pins, so the log and the test cannot drift.
+        LOG_INFO( "[Clouds] Scatter target {}x{} RGBA16F ({:.2f} MiB) + depth guide RGBA8 ({:.2f} MiB) + "
+                  "weather map {}x{} RGBA8 ({:.2f} MiB) for a {}x{} view. Scaled imagery totals "
+                  "{:.2f} MiB with the temporal history and {:.2f} MiB without it.",
                   scatterW, scatterH,
                   BytesToMiB( Core::Formats::CalculateImageSize( scatterW, scatterH,
                                                                  Core::Formats::ImageFormat::RGBA16F ) ),
+                  BytesToMiB( Core::Formats::CalculateImageSize( scatterW, scatterH,
+                                                                 Core::Formats::ImageFormat::RGBA8F ) ),
                   kWeatherMapSize, kWeatherMapSize,
                   BytesToMiB( Core::Formats::CalculateImageSize( kWeatherMapSize, kWeatherMapSize,
                                                                  Core::Formats::ImageFormat::RGBA8F ) ),
-                  width, height );
+                  width, height,
+                  BytesToMiB( CloudScaledImageBytes( width, height, m_Data.ResolutionScale,
+                                                     ECS::CloudTemporalMode::Reprojection ) ),
+                  BytesToMiB( CloudScaledImageBytes( width, height, m_Data.ResolutionScale,
+                                                     ECS::CloudTemporalMode::Off ) ) );
 
+        return true;
+    }
+
+    void VolumetricCloudRenderer::ReleaseHistory()
+    {
+        if ( !m_HistoryImages[0] && !m_HistoryImages[1] )
+        {
+            m_HistoryFilled = false;
+            return;
+        }
+
+        // Same rule as the scatter target: descriptors of frames still in flight may name these images.
+        Renderer::GetInstance().WaitDeviceIdle();
+        m_HistoryImages[0].reset();
+        m_HistoryImages[1].reset();
+        m_HistoryFilled = false;
+
+        LOG_INFO(
+             "[Clouds] Temporal history {}x{} RGBA16F x2 released, freeing {:.2f} MiB.", m_ScatterWidth,
+             m_ScatterHeight,
+             BytesToMiB( 2u * static_cast<uint64_t>( Core::Formats::CalculateImageSize(
+                                   m_ScatterWidth, m_ScatterHeight, Core::Formats::ImageFormat::RGBA16F ) ) ) );
+    }
+
+    bool VolumetricCloudRenderer::EnsureHistory()
+    {
+        if ( m_HistoryFailed )
+            return false;
+        if ( m_HistoryImages[0] && m_HistoryImages[1] )
+            return true;
+
+        for ( uint32_t i = 0; i < 2; ++i )
+        {
+            const Core::Formats::Image2DSpecification spec{
+                 .Tag        = i == 0 ? "CloudHistory0" : "CloudHistory1",
+                 .Width      = m_ScatterWidth,
+                 .Height     = m_ScatterHeight,
+                 .Format     = Core::Formats::ImageFormat::RGBA16F,
+                 .Mips       = 1u,
+                 .Usage      = Core::Formats::Image2DUsage::Image2D,
+                 .Properties = Core::Formats::Storage | Core::Formats::Sample,
+            };
+
+            m_HistoryImages[i] = Image2D::Create( spec, nullptr );
+            if ( !m_HistoryImages[i] )
+            {
+                // Latched, never retried per frame, and NOT fatal: without a history the composite reads
+                // the marched image directly, which is precisely the Temporal Mode = Off configuration —
+                // a noisier sky, not a missing one. Said once, with the number, so the log explains the
+                // noise instead of leaving it to be re-diagnosed from a screenshot.
+                LOG_ERROR( "[Clouds] The {}x{} RGBA16F temporal history ({:.2f} MiB for the pair) could "
+                           "not be created; the cloud layer falls back to the un-accumulated march.",
+                           m_ScatterWidth, m_ScatterHeight,
+                           BytesToMiB( 2u * static_cast<uint64_t>( Core::Formats::CalculateImageSize(
+                                                 m_ScatterWidth, m_ScatterHeight,
+                                                 Core::Formats::ImageFormat::RGBA16F ) ) ) );
+                m_HistoryImages[0].reset();
+                m_HistoryImages[1].reset();
+                m_HistoryFailed = true;
+                return false;
+            }
+        }
+
+        m_HistoryWrite  = 0;
+        m_HistoryFilled = false;
+
+        LOG_INFO(
+             "[Clouds] Temporal history {}x{} RGBA16F x2 ({:.2f} MiB) allocated.", m_ScatterWidth, m_ScatterHeight,
+             BytesToMiB( 2u * static_cast<uint64_t>( Core::Formats::CalculateImageSize(
+                                   m_ScatterWidth, m_ScatterHeight, Core::Formats::ImageFormat::RGBA16F ) ) ) );
         return true;
     }
 
@@ -264,8 +377,6 @@ namespace Desert::Graphic::System
         DESERT_PROFILE_SCOPE( "Clouds: Raymarch" );
 
         const auto* camera = m_SceneRenderer->GetMainCamera();
-        if ( !camera )
-            return;
 
         const glm::mat4 viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 
@@ -280,8 +391,10 @@ namespace Desert::Graphic::System
         // sampler, and SetInput binds the tracked layout verbatim.
         renderer.ComputeImageBeginRead( depthImage );
         renderer.ComputeImageBeginWrite( m_ScatterImage.get() );
+        renderer.ComputeImageBeginWrite( m_DepthGuideImage.get() );
 
         m_RaymarchPipeline->SetOutput( kCloudScatterOutputBinding, m_ScatterImage.get(), 0 );
+        m_RaymarchPipeline->SetOutput( kCloudDepthGuideBinding, m_DepthGuideImage.get(), 0 );
         m_RaymarchPipeline->SetStorageBuffer( kSkyPayloadBinding, m_SceneRenderer->GetAtmosphere().ParamsBuffer );
         m_RaymarchPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         m_RaymarchPipeline->SetInput( kCloudShapeNoiseBinding, noise.ShapeNoise.get() );
@@ -294,17 +407,70 @@ namespace Desert::Graphic::System
         renderer.DispatchComputeInFrame( m_RaymarchPipeline.get(), GroupCount( m_ScatterWidth ),
                                          GroupCount( m_ScatterHeight ), 1 );
 
+        renderer.ComputeImageEndWrite( m_DepthGuideImage.get() );
         renderer.ComputeImageEndWrite( m_ScatterImage.get() );
         renderer.ComputeImageEndRead( depthImage );
+    }
+
+    void VolumetricCloudRenderer::DispatchTemporalResolve()
+    {
+        DESERT_PROFILE_SCOPE( "Clouds: TemporalResolve" );
+
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+
+        const glm::mat4 projection     = camera->GetProjectionMatrix();
+        const glm::mat4 view           = camera->GetViewMatrix();
+        const glm::mat4 viewProjection = projection * view;
+
+        // Flip FIRST: after this, m_HistoryWrite names the image this frame resolves into, which is also
+        // the image the composite magnifies and the image the next frame will read as history. One index
+        // instead of two, and the composite never has to guess which half of the pair is current.
+        m_HistoryWrite ^= 1u;
+
+        Image2D* write = m_HistoryImages[m_HistoryWrite].get();
+        Image2D* read  = m_HistoryImages[m_HistoryWrite ^ 1u].get();
+
+        const CloudTemporalPush push = MakeCloudTemporalPush( projection, view, m_PreviousViewProjection,
+                                                              camera->GetPosition(), m_HistoryFilled );
+
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.ComputeImageBeginWrite( write );
+
+        m_TemporalPipeline->SetOutput( kCloudResolvedOutputBinding, write, 0 );
+        m_TemporalPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
+        m_TemporalPipeline->SetInput( kCloudCurrentFrameBinding, m_ScatterImage.get() );
+        m_TemporalPipeline->SetInput( kCloudHistoryBinding, read );
+        m_TemporalPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
+
+        renderer.DispatchComputeInFrame( m_TemporalPipeline.get(), GroupCount( m_ScatterWidth ),
+                                         GroupCount( m_ScatterHeight ), 1 );
+
+        renderer.ComputeImageEndWrite( write );
+
+        // Only now is there a resolved frame to reproject FROM, and only now does the camera it was
+        // rendered with become "the previous camera". Setting either earlier would reproject the first
+        // blended frame against a camera that never produced an image.
+        m_PreviousViewProjection = viewProjection;
+        m_HistoryFilled          = true;
     }
 
     void VolumetricCloudRenderer::ExecuteInFrame()
     {
         DESERT_PROFILE_SCOPE( "Clouds: ExecuteInFrame" );
 
-        m_HasFrameResult = false;
+        m_HasFrameResult  = false;
+        m_CompositeSource = CloudCompositeSource::Raymarch;
 
-        if ( !m_Present || !m_Data.Enabled || !m_WeatherPipeline || !m_RaymarchPipeline || !m_ParamsBuffer )
+        if ( !m_Present || !m_Data.Enabled || !m_WeatherPipeline || !m_RaymarchPipeline || !m_TemporalPipeline ||
+             !m_ParamsBuffer )
+            return;
+
+        // Checked here rather than inside the dispatches: without a camera there is no frame, and letting
+        // each stage discover that separately is how m_HasFrameResult ends up true for a frame in which
+        // nothing was dispatched, leaving the composite to magnify whatever was in the target before.
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+        if ( !camera )
             return;
 
         const AtmosphereEnv& atmosphere = m_SceneRenderer->GetAtmosphere();
@@ -362,6 +528,25 @@ namespace Desert::Graphic::System
         // S2.
         DispatchRaymarch( *noise, target->GetDepthAttachmentImage().get() );
 
+        // S3. Not a branch inside the resolve shader — a stage that either happens or does not. With
+        // Temporal Mode = Off nothing is dispatched, no history is held, and the composite is pointed at
+        // the image the march just wrote, so what reaches the screen is the marched frame bit for bit.
+        bool historyReady = false;
+        if ( CloudTemporalUsesHistory( m_Data.TemporalMode ) )
+        {
+            if ( EnsureHistory() )
+            {
+                DispatchTemporalResolve();
+                historyReady = true;
+            }
+        }
+        else
+        {
+            ReleaseHistory();
+        }
+
+        m_CompositeSource = CloudSelectCompositeSource( m_Data.TemporalMode, historyReady );
+
         // Wrapped, not free-running: the index rides in a float push constant, and past 2^24 the
         // increment stops changing it — the jitter pattern would then freeze into a fixed dither.
         m_FrameIndex     = ( m_FrameIndex + 1 ) % kJitterSequenceLength;
@@ -379,9 +564,14 @@ namespace Desert::Graphic::System
         config.Phase       = RenderPhase::Transparency;
         config.ExecuteFunc = [this]()
         {
-            if ( !m_HasFrameResult || !m_ScatterImage || !m_CompositeMaterial )
+            if ( !m_HasFrameResult || !m_ScatterImage || !m_DepthGuideImage || !m_CompositeMaterial )
                 return;
-            m_CompositeMaterial->Bind( m_ScatterImage.get() );
+
+            const Image2D* resolved = m_CompositeSource == CloudCompositeSource::TemporalHistory
+                                           ? m_HistoryImages[m_HistoryWrite].get()
+                                           : m_ScatterImage.get();
+
+            m_CompositeMaterial->Bind( resolved, m_DepthGuideImage.get() );
             Renderer::GetInstance().SubmitFullscreenQuad( m_CompositePipeline.get(),
                                                           m_CompositeMaterial->GetMaterialExecutor() );
         };

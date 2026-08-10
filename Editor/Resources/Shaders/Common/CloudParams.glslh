@@ -128,6 +128,11 @@ layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
     float u_StepGrowthRate;
     float u_CoarseStepMultiplier;
     float u_JitterStrength;
+    // Read by the temporal resolve alone. Temporal MODE is not here: it decides whether that stage runs
+    // at all and which image the composite binds, which is a decision the CPU makes once — a copy of it
+    // in this block would be a second answer to the same question, free to disagree with the first.
+    float u_TemporalBlendFactor;
+    float u_TemporalClampScale;
 
     int u_WeatherSeed;
     int u_WeatherOctaves;

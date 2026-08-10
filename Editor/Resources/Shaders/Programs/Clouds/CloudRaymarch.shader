@@ -27,11 +27,22 @@ Shader "CloudRaymarch"
         #include <Common/CloudNoise.glslh>
         #include <Common/CloudGeometry.glslh>
         #include <Common/CloudParams.glslh>
+        #include <Common/CloudTemporal.glslh>
         #include <Common/CloudDensityProcedural.glslh>
 
         // rgba16f: radiance is pre-tonemap HDR and transmittance is in [0,1]; half carries about three
         // decimal digits, which is an order of magnitude more than the 0.005 early-out needs.
         layout(binding = 0, rgba16f) restrict writeonly uniform image2D u_CloudScatter;
+
+        // The DEPTH GUIDE for the composite's bilateral magnification: the distance this ray was allowed
+        // to run to, packed into two rgba8 channels by CloudEncodeGuideDistance.
+        //
+        // It is written HERE, by the pass that already holds the number, rather than recomputed by a
+        // second dispatch that would sample the scene depth all over again to learn what this one just
+        // worked out. The composite cannot read the scene depth for itself — it draws into a framebuffer
+        // that has the depth attachment bound — so somebody has to hand it across, and this is the
+        // cheapest place: two lines and no extra fetches.
+        layout(binding = 8, rgba8) restrict writeonly uniform image2D u_CloudDepthGuide;
 
         // The SAME sky parameter buffer the screen sky pass and the IBL bake read — bound by handle, not
         // rebuilt. Its layout lives in Common/Atmosphere.glslh and nothing here names a member of it, so
@@ -113,15 +124,20 @@ Shader "CloudRaymarch"
             float thicknessKm    = CloudKmFromWorld(u_LayerThickness);
             vec3  originKm       = cameraPos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
 
+            // Computed before the shell test and stored unconditionally: the guide describes where the
+            // GEOMETRY is, which is true whether or not this ray met the cloud layer, and a pixel that
+            // returned early without writing it would leave the composite weighting today's colours by a
+            // distance from some earlier frame.
+            float geometryLimit = CloudGeometryLimit(u_InverseViewProjection, cameraPos, ndc,
+                                                     NearestSceneDepth(coord, size), u_MaxViewDistance);
+            imageStore(u_CloudDepthGuide, coord, CloudEncodeGuideDistance(geometryLimit));
+
             CloudShellHit shell = CloudShellBounds(originKm, dir, planetRadiusKm, bottomKm, thicknessKm);
             if (!shell.Hit)
             {
                 imageStore(u_CloudScatter, coord, result);
                 return;
             }
-
-            float geometryLimit = CloudGeometryLimit(u_InverseViewProjection, cameraPos, ndc,
-                                                     NearestSceneDepth(coord, size), u_MaxViewDistance);
 
             float tEnter = CloudWorldFromKm(shell.TEnter);
             float tExit  = min(CloudWorldFromKm(shell.TExit), geometryLimit);

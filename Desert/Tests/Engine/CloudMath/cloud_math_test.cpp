@@ -766,7 +766,9 @@ TEST( CloudDepth, GeometryNeverExtendsTheMarchBeyondTheViewDistance )
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
     // std430 rounds the block up to its 16-byte alignment; the buffer must cover that, not sizeof.
-    EXPECT_EQ( sizeof( CloudGpuPayload ), 484u );
+    // 492 and not 484 since the temporal stage landed: Temporal Blend Factor and Temporal Clamp Scale are
+    // read by the resolve shader and so are two more floats in the block. The rounded size is unchanged.
+    EXPECT_EQ( sizeof( CloudGpuPayload ), 492u );
     EXPECT_EQ( kCloudPayloadBytes, 496u );
     EXPECT_GE( kCloudPayloadBytes, sizeof( CloudGpuPayload ) );
     EXPECT_EQ( kCloudPayloadBytes % 16u, 0u );
@@ -788,7 +790,8 @@ TEST( CloudPayload, EveryFieldReachesADistinctOffset )
     EXPECT_EQ( offsetof( CloudGpuPayload, Coverage ), 216u );
     EXPECT_EQ( offsetof( CloudGpuPayload, LightMarchDistance ), 356u );
     EXPECT_EQ( offsetof( CloudGpuPayload, MinStepSize ), 440u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, MultiScatterOctaves ), 480u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, TemporalBlendFactor ), 460u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, MultiScatterOctaves ), 488u );
 }
 
 TEST( CloudPayload, PackingCarriesTheComponentAndTheAtmosphereThrough )
