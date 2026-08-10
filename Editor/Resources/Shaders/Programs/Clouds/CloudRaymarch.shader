@@ -208,6 +208,11 @@ Shader "CloudRaymarch"
                                                         u_PhaseBackwardG, u_PhaseBlend,
                                                         u_SilverLiningIntensity);
 
+                        // The published form takes a LOW-LOD density here — the unerroded profile. This
+                        // passes the full one instead: a second CloudDensityCheap call at every shaded
+                        // sample is two more texture fetches for a term that only shapes how quickly the
+                        // in-scatter saturates. The property that matters, and the one the reference
+                        // lost, is that the FIRST argument is the height fraction and not a constant.
                         float inScatter = CloudInScatterProbability(height, density, tauSun);
                         float powder    = CloudPowder(density, u_PowderStrength, u_PowderScale);
 
@@ -254,8 +259,14 @@ Shader "CloudRaymarch"
             for (int i = 0; i < SKY_PACKED_VEC4_COUNT; ++i)
                 sky.v[i] = u_SkyPacked[i];
 
-            vec3 skyColour = EvaluateSky(dir, UnpackSunDirection(sky), UnpackSunIntensity(sky),
-                                         UnpackSunAngularRadius(sky), UnpackSkyConfig(sky));
+            // Evaluated with a sun INTENSITY of zero, deliberately. Aerial perspective is the light the
+            // air in front of the cloud scatters toward the camera: the sky gradient and the sun's broad
+            // halo belong in it, the solar DISC does not. Leaving the disc in would paint a small
+            // blinding spot onto any distant cloud that happened to cross the sun. Zeroing the intensity
+            // removes exactly the disc term (core * sunIntensity) and leaves the halo, which is scaled
+            // by sunGlow instead.
+            vec3 skyColour = EvaluateSky(dir, UnpackSunDirection(sky), 0.0f, UnpackSunAngularRadius(sky),
+                                         UnpackSkyConfig(sky));
 
             float aerial = CloudRemapRange(tEnter, u_DistanceFadeStart, u_DistanceFadeEnd, 0.0f, 1.0f) *
                            clamp(u_ShadowTint.w, 0.0f, 1.0f);

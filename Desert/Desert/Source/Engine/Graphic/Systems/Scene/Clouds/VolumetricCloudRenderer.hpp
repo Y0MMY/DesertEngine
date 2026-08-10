@@ -67,12 +67,6 @@ namespace Desert::Graphic::System
         /** @brief Stages S1 and S2. Must be called outside any render pass. */
         void ExecuteInFrame();
 
-        /** @brief The raymarch output the composite samples, or null before the first march. */
-        const std::shared_ptr<Image2D>& GetScatterImage() const
-        {
-            return m_ScatterImage;
-        }
-
     private:
         // The Weather-group fields the map is baked from. Compared field by field to decide whether S1
         // has to run again; a hash would be shorter and would tell us nothing when it collided.

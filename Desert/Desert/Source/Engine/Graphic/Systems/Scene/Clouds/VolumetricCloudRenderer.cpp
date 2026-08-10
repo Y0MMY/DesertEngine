@@ -24,6 +24,10 @@ namespace Desert::Graphic::System
         // maximum, and both dispatches bounds-check, so a target that is not a multiple of 8 is fine.
         constexpr uint32_t kWorkGroupSize = 8;
 
+        // Length of the per-frame jitter sequence. Any small number does: the dither only has to differ
+        // from frame to frame for the temporal stage to average it away.
+        constexpr uint32_t kJitterSequenceLength = 64;
+
         constexpr const char* kWeatherShaderName   = "CloudWeather";
         constexpr const char* kRaymarchShaderName  = "CloudRaymarch";
         constexpr const char* kCompositeShaderName = "CloudComposite";
@@ -358,7 +362,9 @@ namespace Desert::Graphic::System
         // S2.
         DispatchRaymarch( *noise, target->GetDepthAttachmentImage().get() );
 
-        ++m_FrameIndex;
+        // Wrapped, not free-running: the index rides in a float push constant, and past 2^24 the
+        // increment stops changing it — the jitter pattern would then freeze into a fixed dither.
+        m_FrameIndex     = ( m_FrameIndex + 1 ) % kJitterSequenceLength;
         m_HasFrameResult = true;
     }
 
