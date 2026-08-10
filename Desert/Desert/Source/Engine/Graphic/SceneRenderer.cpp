@@ -164,6 +164,18 @@ namespace Desert::Graphic
         if ( !SP_CAST( System::CopyRenderer, m_RenderSystems["SceneColorCopySystem"] )->Initialize() )
             LOG_WARN( "[SceneRenderer] Scene-color copy system unavailable (glass refraction off)." );
 
+        // Volumetric clouds: two compute stages issued outside the graph (ExecuteVolumetricClouds) and
+        // one composite pass in the Transparency phase. Registered ahead of the particles for reading
+        // order only — the composite states its own place in the phase with RenderPassOrder::FarField,
+        // so it does not depend on this line. Non-fatal: clouds must never take a scene down.
+        RegisterSystem<System::VolumetricCloudRenderer>( "VolumetricCloudSystem", this, m_TargetFramebuffer,
+                                                         m_RenderGraphBuilder );
+        if ( const auto cloudInit =
+                  SP_CAST( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
+                       ->Initialize();
+             !cloudInit )
+            LOG_WARN( "[SceneRenderer] Volumetric cloud system unavailable: {}", cloudInit.GetError() );
+
         // GPU particles: compute-simulated billboards drawn in the Transparency phase. Non-fatal.
         RegisterSystem<System::ParticleRenderer>( "ParticleSystem", this, m_TargetFramebuffer,
                                                   m_RenderGraphBuilder );
@@ -534,6 +546,16 @@ namespace Desert::Graphic
                 }
 
             meshRenderer->RenderGlassManual( sceneCopy );
+        }
+
+        // Volumetric clouds: the weather-map and raymarch dispatches. HERE and not earlier — the march
+        // reads the scene depth, which only exists after the graph in Forward and after the G-buffer
+        // depth copy in Deferred, and an in-frame compute dispatch has to be issued outside an open
+        // render pass. Both hold at exactly this point. The composite draw follows in the Transparency
+        // phase below.
+        {
+            DESERT_PROFILE_SCOPE( "VolumetricClouds" );
+            ExecuteVolumetricClouds();
         }
 
         // Transparent billboards (GPU particles) over the finished opaque scene. Runs in BOTH paths here,
@@ -1172,6 +1194,18 @@ namespace Desert::Graphic
 
         if ( currentFb )
             renderer.EndRenderPass();
+    }
+
+    void SceneRenderer::SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data )
+    {
+        UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
+             ->SetCloudSettings( present, data );
+    }
+
+    void SceneRenderer::ExecuteVolumetricClouds()
+    {
+        UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
+             ->ExecuteInFrame();
     }
 
     void SceneRenderer::ExecuteTransparency()

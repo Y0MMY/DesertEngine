@@ -1,0 +1,462 @@
+// Geometry, scheduling and lighting maths for the volumetric cloud raymarch — the ONE source of truth.
+//
+// This file is compiled TWICE, from the same text:
+//   * as GLSL, by Programs/Clouds/CloudRaymarch.shader;
+//   * as C++, by Desert/Tests/Engine/CloudMath/CloudGeometryReference.hpp, which the CloudMath tests drive.
+// Vulkan does not run in the development environment, so the marched picture cannot be looked at. A CPU
+// re-implementation would only prove that the copy agrees with itself. Sharing the text means a passing
+// test is a statement about the code the GPU runs. The arrangement is the one Common/CloudNoise.glslh
+// already established for the noise.
+//
+// The price is a restricted dialect — the GLSL/C++ intersection:
+//   * no swizzles (glm's are proxies), no `out` parameters, no arrays, no `inline`, no namespaces;
+//   * float literals carry the `f` suffix so C++ does not silently widen;
+//   * a struct is returned by value through a NAMED LOCAL whose fields are assigned one at a time.
+//     GLSL's `Type(a, b, c)` constructor call is not C++ (parenthesised aggregate initialisation is a
+//     C++20 feature the toolchain in use does not implement), and C++'s `Type{a, b, c}` is not GLSL;
+//     assignment is the form both languages accept;
+//   * functions are defined before use, C-style, because GLSL has no forward declarations.
+//
+// SCALE, and why every distance here is a KILOMETRE.
+// The engine's world unit is one centimetre and the planet radius is 6360 km = 6.36e8 world units. The
+// quadratic of a ray/sphere test carries r^2, which at that scale is 4.0e17 — an ulp of 3.2e10 in a
+// 24-bit mantissa, i.e. not a single significant digit of the discriminant survives. In kilometres
+// r^2 is 4.0e7 with an ulp of 4, which is workable.
+//
+// It is NOT sufficient on its own, and that is the part the requirement did not say. `dot(c,c) - r*r`
+// subtracts two numbers around 4.0e7 to produce 2*R*altitude, which for a camera 2 m up is 25 km^2 —
+// the cancellation throws away four of the seven digits. Every intersection below is therefore written
+// in the ALGEBRAICALLY EXPANDED form, where the same quantity comes out as a sum of small terms and no
+// cancellation happens at all:
+//
+//      |o - C|^2 - (R+a)^2  ==  dot(o,o) + 2*R*o.y - 2*R*a - a*a          with C = (0, -R, 0)
+//
+// and the camera-relative rule of the requirement falls out of it: the ray origin IS the camera, the
+// centre is only ever touched through R multiplied by a small number, and no planet-scale magnitude is
+// ever formed.
+
+#ifndef CLOUD_GEOMETRY_GLSLH
+#define CLOUD_GEOMETRY_GLSLH
+
+const float CLOUD_PI = 3.141592653589793f;
+
+// One world unit is one centimetre (Common::Units), so a kilometre is 100 000 of them. Both directions
+// are spelled out rather than left to the reader: the raymarch converts in both, and a stray reciprocal
+// is a 1e10 error that still renders something.
+const float CLOUD_WORLD_UNITS_PER_KM = 100000.0f;
+
+float CloudKmFromWorld(float worldUnits)
+{
+    return worldUnits * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
+}
+
+float CloudWorldFromKm(float km)
+{
+    return km * CLOUD_WORLD_UNITS_PER_KM;
+}
+
+// Extinction of a FULLY DENSE cloud per WORLD UNIT, at ExtinctionScale = 1. Real cloud extinction is
+// around 0.05 per metre, which is 5e-4 per centimetre — so one optical depth accumulates over about
+// 20 m of solid cloud, and a kilometre of it is opaque many times over. ExtinctionScale then reads as a
+// multiplier on a physical quantity rather than as an arbitrary number, which is the difference between
+// "1.0 looks right" and "1.0 IS right".
+//
+// The reference had the extinction coefficient as a literal 1.0 in the accumulation line and a
+// DENSITY_SCALE define that was never referenced anywhere (RESEARCH_REFERENCE J.3 #12).
+const float CLOUD_EXTINCTION_PER_WORLD_UNIT = 0.0005f;
+
+// Rescales `v` from [lo,hi] onto [newLo,newHi], clamped to that range. Named with a Range suffix so it
+// cannot collide with Common/CloudNoise.glslh's CloudRemap01 when a shader includes both.
+float CloudRemapRange(float v, float lo, float hi, float newLo, float newHi)
+{
+    float d = hi - lo;
+    // A zero-width source range is a division by zero on the GPU: inf, then NaN through the mix, and a
+    // NaN pixel survives every blend it touches. Collapse to the low end instead.
+    if (abs(d) < 1e-6f)
+        return newLo;
+    return newLo + clamp((v - lo) / d, 0.0f, 1.0f) * (newHi - newLo);
+}
+
+// ---- Ray / sphere ----------------------------------------------------------------------------------
+
+// The two signed roots of a ray/sphere intersection. SIGNED, not absolute: the reference's slab test
+// took abs() of every plane distance and therefore reported hits on geometry BEHIND the camera
+// (RESEARCH_REFERENCE J.3 #6). A negative root here means "behind me", and every caller below reads it
+// that way.
+struct CloudSphereHit
+{
+    bool  Hit;
+    float T0; // near root, may be negative
+    float T1; // far root, may be negative
+};
+
+// Intersection with a sphere CONCENTRIC WITH THE PLANET whose surface sits `altitudeKm` above the
+// planet surface. Everything is in kilometres and relative to the camera:
+//
+//   originKm   camera position in the world frame, in km. The world origin lies ON the planet surface
+//              with +Y up, so the planet centre is (0, -planetRadiusKm, 0) and never has to be formed.
+//   dir        normalized view direction.
+//
+// The expanded quadratic is the whole point of this function — see the header comment.
+CloudSphereHit CloudIntersectAltitudeSphere(vec3 originKm, vec3 dir, float planetRadiusKm, float altitudeKm)
+{
+    // b = dot(dir, centre - origin), written out: centre - origin = (-o.x, -R - o.y, -o.z).
+    float b = -(dot(dir, originKm) + dir.y * planetRadiusKm);
+
+    // c = |centre - origin|^2 - (R + a)^2, expanded so the R^2 terms cancel SYMBOLICALLY instead of
+    // numerically. Every surviving term is small: dot(o,o) is the camera's distance from the origin
+    // squared, and 2*R*o.y is twice the radius times the altitude.
+    float c = dot(originKm, originKm) + 2.0f * planetRadiusKm * originKm.y -
+              (2.0f * planetRadiusKm * altitudeKm + altitudeKm * altitudeKm);
+
+    CloudSphereHit hit;
+    hit.Hit = false;
+    hit.T0  = 0.0f;
+    hit.T1  = 0.0f;
+
+    float disc = b * b - c;
+    if (disc < 0.0f)
+        return hit;
+
+    float s = sqrt(disc);
+    hit.Hit = true;
+    hit.T0  = b - s;
+    hit.T1  = b + s;
+    return hit;
+}
+
+// The segment of the view ray that lies inside the cloud shell. Distances are in kilometres, measured
+// from the camera along `dir`, and TEnter is never negative: the part of the shell behind the camera is
+// not marched.
+struct CloudShellHit
+{
+    bool  Hit;
+    float TEnter;
+    float TExit;
+};
+
+// One branch structure for every configuration — camera below the layer, inside it, above it, and
+// looking up, down, along the horizon or away from the planet.
+//
+//   * no forward intersection with the OUTER sphere at all -> the shell is behind us: a miss;
+//   * the ray meets the INNER sphere ahead      -> the shell ends where the ray dives under the layer;
+//   * the ray starts INSIDE the inner sphere    -> the shell starts where the ray climbs out of it;
+//   * the ray misses the inner sphere entirely  -> the shell is the whole outer chord.
+CloudShellHit CloudShellBounds(vec3 originKm, vec3 dir, float planetRadiusKm, float bottomKm, float thicknessKm)
+{
+    CloudShellHit shell;
+    shell.Hit    = false;
+    shell.TEnter = 0.0f;
+    shell.TExit  = 0.0f;
+
+    CloudSphereHit outer = CloudIntersectAltitudeSphere(originKm, dir, planetRadiusKm, bottomKm + thicknessKm);
+    if (!outer.Hit || outer.T1 <= 0.0f)
+        return shell;
+
+    CloudSphereHit inner = CloudIntersectAltitudeSphere(originKm, dir, planetRadiusKm, bottomKm);
+
+    float tEnter = max(outer.T0, 0.0f);
+    float tExit  = outer.T1;
+
+    if (inner.Hit && inner.T1 > 0.0f)
+    {
+        if (inner.T0 > 0.0f)
+            tExit = inner.T0; // the ray dives below the layer before leaving the outer shell
+        else
+            tEnter = inner.T1; // the camera is below the layer; the shell begins where we climb out
+    }
+
+    if (tExit <= tEnter)
+        return shell;
+
+    shell.Hit    = true;
+    shell.TEnter = tEnter;
+    shell.TExit  = tExit;
+    return shell;
+}
+
+// Normalized height inside the layer, UNCLAMPED: 0 at the bottom surface, 1 at the top, negative below
+// and greater than 1 above. Derived from the DISTANCE TO THE PLANET CENTRE, not from world Y — over
+// 150 km of cloudscape the shell curves away by more than a kilometre, and a flat-Y height would flatten
+// every distant cloud into the layer floor.
+//
+// Unclamped because the light march needs to know that a sample has left the layer: clamping first turns
+// a shadow sample a kilometre above the cloud tops into one sitting exactly ON them, which shadows every
+// cloud with a copy of itself. The view march, whose samples are inside the shell by construction, wants
+// the clamped form below.
+//
+// Written in the expanded form for the same reason as the intersection above.
+float CloudLayerHeight(vec3 positionKm, float planetRadiusKm, float bottomKm, float thicknessKm)
+{
+    // |p - C| - R, with C = (0,-R,0), through the identity (|v|^2 - R^2) / (|v| + R). The numerator is
+    // the expanded, cancellation-free form; the denominator is ~2R and loses nothing.
+    float num = dot(positionKm, positionKm) + 2.0f * planetRadiusKm * positionKm.y;
+    float den = sqrt(dot(positionKm, positionKm) + 2.0f * planetRadiusKm * positionKm.y +
+                     planetRadiusKm * planetRadiusKm) +
+                planetRadiusKm;
+    float altitude = num / max(den, 1e-4f);
+    return (altitude - bottomKm) / max(thicknessKm, 1e-6f);
+}
+
+float CloudHeightFraction(vec3 positionKm, float planetRadiusKm, float bottomKm, float thicknessKm)
+{
+    return clamp(CloudLayerHeight(positionKm, planetRadiusKm, bottomKm, thicknessKm), 0.0f, 1.0f);
+}
+
+// ---- Step scheduling -------------------------------------------------------------------------------
+
+// Distance-adaptive step length, in WORLD UNITS. Steps grow with distance because a cloud a hundred
+// kilometres away covers fewer pixels than one overhead, so the same angular error costs a longer step.
+// The clamp is what makes MinStepSize and MaxStepSize mean what the Details panel says they mean.
+float CloudStepLength(float t, float minStep, float maxStep, float growth)
+{
+    return clamp(minStep + growth * t, min(minStep, maxStep), max(minStep, maxStep));
+}
+
+// The empty-space skip, as a state machine over scalars.
+//
+// The reference skips empty space with a signed distance field baked into the alpha channel of its
+// modelling volume (RESEARCH_REFERENCE C.3). We have no SDF and cannot have one: our density field is
+// procedural, evaluated on the fly from a weather map and two noise volumes, so there is nothing to bake
+// a distance to. What replaces it is two tiers plus the analytic shell bounds:
+//
+//   * outside the shell, zero samples — CloudShellBounds already clipped the ray;
+//   * inside it, march at `stride * coarseMultiplier` evaluating only the CHEAP density (weather map x
+//     height gradient x base shape: no detail fetch, no light march);
+//   * on a non-zero cheap sample, step BACK one coarse stride and switch to fine sampling, so the
+//     leading edge that the coarse stride jumped over is not cut off the front of every cloud;
+//   * after `emptyBeforeCoarse` consecutive empty FINE samples, return to coarse.
+//
+// This is the Nubis1/2 miss-counting heuristic, and it needs no extra memory at all.
+struct CloudMarchState
+{
+    float T;        // distance along the ray, world units
+    int   EmptyRun; // consecutive empty fine samples
+    bool  Fine;     // false = coarse tier (cheap density only)
+};
+
+CloudMarchState CloudMarchBegin(float tEnter)
+{
+    CloudMarchState s;
+    s.T        = tEnter;
+    s.EmptyRun = 0;
+    s.Fine     = false;
+    return s;
+}
+
+// One transition. `occupied` is the verdict at the CURRENT state: the cheap density in the coarse tier,
+// the full density in the fine tier. The caller does the sampling; this function owns nothing but the
+// schedule, which is why it is testable without a GPU.
+CloudMarchState CloudMarchAdvance(CloudMarchState s, bool occupied, float tEnter, float minStep, float maxStep,
+                                  float growth, float coarseMultiplier, int emptyBeforeCoarse)
+{
+    // Named `stride`, not `step`: GLSL has a built-in step() and a local of that name would hide it.
+    float stride = CloudStepLength(s.T, minStep, maxStep, growth);
+
+    CloudMarchState next;
+    next.T        = s.T;
+    next.EmptyRun = 0;
+    next.Fine     = s.Fine;
+
+    if (!s.Fine)
+    {
+        float coarse = stride * max(coarseMultiplier, 1.0f);
+        if (occupied)
+        {
+            next.T    = max(tEnter, s.T - coarse);
+            next.Fine = true;
+        }
+        else
+        {
+            next.T = s.T + coarse;
+        }
+        return next;
+    }
+
+    int  run  = occupied ? 0 : (s.EmptyRun + 1);
+    bool fine = run < max(emptyBeforeCoarse, 1);
+
+    next.T        = s.T + stride;
+    next.EmptyRun = fine ? run : 0;
+    next.Fine     = fine;
+    return next;
+}
+
+// ---- Beer, powder, phase ---------------------------------------------------------------------------
+
+// Beer-Lambert. The transmittance the march accumulates is a SEPARATE scalar initialised to 1 and only
+// ever multiplied by this, so it is monotonically non-increasing and the early-out can be gated on it.
+// The reference used one variable as both the scattered-light accumulator and the loop guard, which is
+// why its early-out never fired (RESEARCH_REFERENCE J.3 #5).
+float CloudBeerTransmittance(float opticalDepth)
+{
+    return exp(-max(opticalDepth, 0.0f));
+}
+
+// The powder ("dark edge") term: thin cloud edges facing the sun are darker than Beer alone predicts
+// because a single-scattering model cannot see the light that scattered out sideways.
+float CloudPowder(float density, float strength, float scale)
+{
+    return 1.0f - clamp(strength, 0.0f, 1.0f) * exp(-max(scale, 0.0f) * max(density, 0.0f));
+}
+
+// Henyey-Greenstein, the published form. g = 0 is isotropic and returns 1/(4pi) for every angle.
+//
+// The reference passed g = 1.0 for its forward lobe, which makes the numerator (1 - g^2) exactly zero:
+// the silver lining it was supposed to produce was not merely weak, it was identically absent
+// (RESEARCH_REFERENCE J.3 #3). The component's range stops at 0.99 for that reason, and the max() below
+// keeps the denominator away from zero at grazing angles rather than trusting the range.
+float CloudHenyeyGreenstein(float cosTheta, float g)
+{
+    float g2 = g * g;
+    float d  = 1.0f + g2 - 2.0f * g * cosTheta;
+    return (1.0f - g2) / (4.0f * CLOUD_PI * pow(max(d, 1e-4f), 1.5f));
+}
+
+// Two lobes: a broad backward one that lifts the side of the sky away from the sun, and a narrow forward
+// one that is the silver lining. SilverLiningIntensity multiplies the FORWARD lobe only — it is a rim
+// control, and applying it to both would just be a brightness slider.
+float CloudDualLobePhase(float cosTheta, float forwardG, float backwardG, float blend, float silver)
+{
+    float back = CloudHenyeyGreenstein(cosTheta, backwardG);
+    float fwd  = CloudHenyeyGreenstein(cosTheta, forwardG) * max(silver, 0.0f);
+    return mix(back, fwd, clamp(blend, 0.0f, 1.0f));
+}
+
+// In-scatter probability, the Nubis2 formulation, as a function of the NORMALIZED HEIGHT in the layer.
+//
+// The reference substituted the literal 0.5 for the height fraction in both terms, so its vertical
+// gradient — the thing that makes a cloud base darker than its top — was a constant
+// (RESEARCH_REFERENCE J.3 #4). `heightFraction` is the first argument here precisely so that mistake
+// cannot be repeated silently: a caller that passes a constant is passing a constant on purpose.
+float CloudInScatterProbability(float heightFraction, float densityLowLod, float opticalDepthToSun)
+{
+    float depthProbability = mix(0.05f + pow(clamp(densityLowLod, 0.0f, 1.0f),
+                                             CloudRemapRange(heightFraction, 0.3f, 0.85f, 0.5f, 2.0f)),
+                                 1.0f, clamp(opticalDepthToSun * 2.0f, 0.0f, 1.0f));
+    float verticalProbability = pow(CloudRemapRange(heightFraction, 0.07f, 0.14f, 0.1f, 1.0f), 0.8f);
+    return clamp(depthProbability * verticalProbability, 0.0f, 1.0f);
+}
+
+// Multiple scattering, approximated by N octaves with geometric falloff (Wrenninge et al. / Schneider).
+// Octave i attenuates with extinction^(a^i), contributes scatter^(b^i) and flattens its phase by c^i.
+// It costs arithmetic, not samples: the optical depth is the one already marched toward the sun, so a
+// higher octave count never traces another ray. Single scattering alone leaves thick cloud cores black.
+//
+// Per-channel, because ExtinctionTint is per-channel: a cloud thick enough to matter is where the small
+// colour shift through thickness is visible at all.
+vec3 CloudMultiScatter(float opticalDepthToSun, vec3 extinctionTint, float cosTheta, int octaves,
+                       float extinctionFalloff, float scatterFalloff, float phaseFalloff, float forwardG,
+                       float backwardG, float blend, float silver)
+{
+    vec3  total         = vec3(0.0f, 0.0f, 0.0f);
+    float extinctionMul = 1.0f;
+    float scatterMul    = 1.0f;
+    float phaseMul      = 1.0f;
+    int   octaveCount   = clamp(octaves, 1, 8);
+
+    for (int i = 0; i < octaveCount; ++i)
+    {
+        float phase = CloudDualLobePhase(cosTheta, forwardG * phaseMul, backwardG * phaseMul, blend, silver);
+        vec3  beer  = exp(-max(opticalDepthToSun * extinctionMul, 0.0f) * extinctionTint);
+        total = total + beer * (scatterMul * phase);
+        extinctionMul *= extinctionFalloff;
+        scatterMul *= scatterFalloff;
+        phaseMul *= phaseFalloff;
+    }
+    return total;
+}
+
+// ---- The cone march toward the sun -----------------------------------------------------------------
+//
+// The reference pre-integrates density toward the sun into a 256x256x32 voxel grid sized for a 2 km box,
+// and marches it AWAY from the sun (RESEARCH_REFERENCE J.3 #2), so its self-shadowing comes from the
+// wrong side. Over a 150 km cloudscape that grid is meaningless anyway. What replaces it is a short cone
+// march along the actual sun direction, defined here so that "which way does it go" is a testable fact
+// rather than a sign somewhere in a loop.
+
+// Distance from the shaded sample to the i-th cone SEGMENT BOUNDARY, in world units. Exponential rather
+// than uniform: the first samples resolve the terminator on this cloud, the last one reaches far enough
+// to be shadowed by the next cloud over.
+float CloudConeBoundary(int i, int count, float marchDistance)
+{
+    float t = float(i) / float(max(count, 1));
+    // (e^2t - 1)/(e^2 - 1): 0 at t=0, 1 at t=1, and about four times denser at the near end.
+    return marchDistance * (exp(2.0f * t) - 1.0f) / (exp(2.0f) - 1.0f);
+}
+
+// Length the i-th sample stands for. Multiplying the sampled density by this is what turns a set of
+// point samples into an optical DEPTH — the reference omitted the step length entirely.
+float CloudConeSampleWeight(int i, int count, float marchDistance)
+{
+    return CloudConeBoundary(i + 1, count, marchDistance) - CloudConeBoundary(i, count, marchDistance);
+}
+
+// Offset of the i-th cone sample from the shaded point, in world units.
+//
+// The along-sun component is the midpoint of the segment and is always POSITIVE, so every sample lies
+// toward the sun by construction — the property the test asserts. The lateral component is a
+// golden-angle spiral in the plane orthogonal to the sun, widening with distance, which is what softens
+// a self-shadow terminator that a single straight ray renders as a hard line. `spread` = 1 opens the
+// cone to a 45-degree half-angle at the far end.
+vec3 CloudConeSampleOffset(vec3 sunDir, int i, int count, float marchDistance, float spread)
+{
+    float r = 0.5f * (CloudConeBoundary(i, count, marchDistance) + CloudConeBoundary(i + 1, count, marchDistance));
+    float t = ( float(i) + 0.5f ) / float(max(count, 1));
+
+    // A basis orthogonal to the sun. The reference axis is swapped near the poles because cross() with a
+    // nearly parallel vector loses all its precision, and a zero-length tangent is a NaN sample.
+    vec3 reference = abs(sunDir.y) < 0.99f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    vec3 tangentX  = normalize(cross(reference, sunDir));
+    vec3 tangentY  = cross(sunDir, tangentX);
+
+    float angle  = float(i) * 2.399963229728653f; // golden angle, radians
+    float radius = r * clamp(spread, 0.0f, 1.0f) * sqrt(t);
+
+    return sunDir * r + (tangentX * cos(angle) + tangentY * sin(angle)) * radius;
+}
+
+// ---- Ambient ---------------------------------------------------------------------------------------
+
+// The ambient a cloud sample receives: the sky from above and the ground bounce from below, leaning
+// toward one or the other by where the sample sits in the layer.
+//
+// heightBias = 0 removes the height dependence entirely (an even split, which is what a flat overcast
+// wants); heightBias = 1 hands the blend to the height fraction, so the top of a cloud is lit by sky and
+// its base by ground. The component contributes MULTIPLIERS ONLY — the two radiances come from the
+// atmosphere, evaluated through the same model the visible sky uses, so a cloud cannot disagree with the
+// sky it hangs in about what time of day it is.
+vec3 CloudAmbient(vec3 skyRadiance, vec3 groundRadiance, float skyMultiplier, float groundMultiplier,
+                  float heightBias, float heightFraction)
+{
+    float blend = mix(0.5f, clamp(heightFraction, 0.0f, 1.0f), clamp(heightBias, 0.0f, 1.0f));
+    return mix(groundRadiance * groundMultiplier, skyRadiance * skyMultiplier, blend);
+}
+
+// ---- Scene depth -----------------------------------------------------------------------------------
+
+// Distance from the camera to the geometry the depth buffer recorded, in WORLD UNITS.
+//
+// Reconstructed through the camera's own inverse view-projection rather than through a hand-derived
+// linearisation, so it holds whatever near/far planes and whatever depth convention the projection was
+// built with; the test proves it by round-tripping a point through the engine's real projection matrix.
+// `deviceDepth` is the value stored in the depth attachment and `ndc` is the pixel in [-1,1]^2.
+float CloudDistanceFromDepth(mat4 invViewProj, vec3 cameraPos, vec2 ndc, float deviceDepth)
+{
+    vec4 clip  = vec4(ndc.x, ndc.y, deviceDepth, 1.0f);
+    vec4 world = invViewProj * clip;
+    return length(vec3(world.x, world.y, world.z) / max(world.w, 1e-9f) - cameraPos);
+}
+
+// Where the march has to stop. Depth clears to 1.0 (RenderPass.hpp), i.e. "nothing was drawn here", and
+// that pixel is sky all the way to MaxViewDistance rather than geometry at the far plane. This is the
+// ONE occlusion path: it works identically in Forward and Deferred because it reads the depth
+// attachment both paths write, not a G-buffer only one of them has.
+float CloudGeometryLimit(mat4 invViewProj, vec3 cameraPos, vec2 ndc, float deviceDepth, float maxViewDistance)
+{
+    if (deviceDepth >= 1.0f)
+        return maxViewDistance;
+    return min(CloudDistanceFromDepth(invViewProj, cameraPos, ndc, deviceDepth), maxViewDistance);
+}
+
+#endif // CLOUD_GEOMETRY_GLSLH

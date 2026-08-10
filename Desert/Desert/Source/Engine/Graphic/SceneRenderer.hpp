@@ -35,6 +35,7 @@
 #include "Systems/Scene/Deferred/SSRRenderer.hpp"
 #include "Systems/Scene/Deferred/GIResolveRenderer.hpp"
 #include "Systems/Scene/Particles/ParticleRenderer.hpp"
+#include "Systems/Scene/Clouds/VolumetricCloudRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
 
@@ -126,6 +127,11 @@ namespace Desert::Graphic
         // sunDir is the direction TOWARD the sun, already normalized; bakeNow is the one-shot request from
         // the editor's Bake button.
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky );
+
+        // This frame's volumetric-cloud settings (from VolumetricCloudsComponent, via the ECS).
+        // `present` is false when the scene has no cloud component at all — said explicitly, because the
+        // renderer keeps its settings across frames and would otherwise keep marching a deleted one.
+        void SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data );
 
         // The evaluated per-frame sky: sun direction and radiance, ambient above/below, night factor, the
         // planet radius, and an OPAQUE handle to the packed sky-parameter buffer. This is the whole surface
@@ -253,6 +259,12 @@ namespace Desert::Graphic
         // graph they land on the target BEFORE the composite and get painted over wherever geometry
         // exists (visible against sky, gone against the ground — the particle "top-down" bug).
         void ExecuteTransparency();
+        // Volumetric clouds: the weather-map and raymarch COMPUTE dispatches. Called between the
+        // deferred block and ExecuteTransparency() — the one point in the frame where the scene depth is
+        // finished in BOTH paths and no render pass is open (an in-frame dispatch inside one is
+        // illegal). The composite itself is a graph pass in Transparency and is replayed by
+        // ExecuteTransparency, ordered ahead of the particles by RenderPassOrder::FarField.
+        void ExecuteVolumetricClouds();
         // UI-phase passes (the Render2D canvas) drawn as a LOAD overlay AFTER the deferred lighting
         // composite — same reason as ExecuteTransparency/ExecuteDebugOverlay: recorded inside the graph
         // they land on the target BEFORE the composite (painted over) AND a CLEAR begin would wipe the

@@ -1,0 +1,159 @@
+// THE volumetric-cloud parameter block, byte for byte. Declared once, included by every cloud pass that
+// needs it (the weather-map generator and the raymarch), so the two can never disagree about the layout.
+//
+// The C++ side of this layout is Graphic::CloudGpuPayload (Engine/Graphic/Clouds/CloudPayload.hpp). The
+// two are kept in step by static_asserts on every offset there plus a unit test on sizeof/offsetof — the
+// SkyUBData-style silent mirror divergence is a corrupted frame with no error message, and it is exactly
+// what a layout declared twice produces the first time somebody inserts a field in the middle of one of
+// them.
+//
+// Raw `layout(std430, ...)` rather than the ReadBuffer(n) sugar, deliberately: the sugar is expanded by
+// the engine's own parser, and this header is also fed straight to glslc during development to prove the
+// shaders compile. Raw layout is the sanctioned escape for structural GLSL.
+//
+// LAYOUT RULES that make the mirror trivial: every vec4 comes first, every scalar after. std430 gives a
+// vec4 a 16-byte alignment and a float or int a 4-byte one, and C++ agrees on both, so a run of vec4s
+// followed by a run of 4-byte scalars has the same offsets in both languages with no padding anywhere
+// except at the very end.
+//
+// UNITS: every distance is in WORLD UNITS (centimetres) exactly as the component authors it. The
+// kilometre space the shell intersection needs is entered inside the raymarch, once, through
+// Common/CloudGeometry.glslh — not here, so that nothing has to ask which of the two a member is in.
+
+#ifndef CLOUD_PARAMS_GLSLH
+#define CLOUD_PARAMS_GLSLH
+
+// The binding the cloud parameter buffer is bound at, in EVERY cloud pass. ComputePipeline's
+// SetStorageBuffer takes the binding as an explicit argument and does not consult reflection, so this
+// number and Graphic::kCloudParamsBinding have to be the same one — a mismatch does not fail, it lands
+// the buffer on another descriptor (VUID-VkWriteDescriptorSet-descriptorType-00319 at best, someone
+// else's data at worst).
+#define CLOUD_PARAMS_BINDING 2
+
+layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
+{
+    // ---- vec4s -------------------------------------------------------------------------------------
+    // Colours are LINEAR. The `.w` of each carries a named companion scalar rather than padding; the
+    // pairing is written on the line and mirrored in CloudPayload.hpp.
+    vec4 u_SunDirection;           // xyz = TOWARD the sun (normalized), w = sun angular radius, radians
+    vec4 u_SunIrradiance;          // rgb = sun radiance from the atmosphere,  w = SunLightIntensityScale
+    vec4 u_ZenithRadiance;         // rgb = sky ambient from above,            w = AmbientSkyContribution
+    vec4 u_GroundRadiance;         // rgb = ground-bounce ambient from below,  w = AmbientGroundContribution
+    vec4 u_ScatteringAlbedo;       // rgb = single-scattering albedo,          w = AmbientHeightBias
+    vec4 u_ExtinctionTint;         // rgb = per-channel extinction tint,       w = ExtinctionScale
+    vec4 u_SunTint;                // rgb = artistic tint of the lit side,     w = PrecipitationDarkening
+    vec4 u_ShadowTint;             // rgb = artistic tint of the shadowed side,w = AtmosphericPerspective
+    vec4 u_StratusGradient;        // base-in start/end, top-out start/end, normalized layer height
+    vec4 u_StratocumulusGradient;  // the same four heights for stratocumulus
+    vec4 u_CumulusGradient;        // the same four heights for cumulus
+    vec4 u_SceneWind;              // xyz = the SCENE's wind velocity (world units/s), w = time in seconds
+
+    // ---- Cloud Layer -------------------------------------------------------------------------------
+    float u_PlanetRadius;          // world units; from the atmosphere, never authored by the cloud component
+    float u_LayerBottomAltitude;
+    float u_LayerThickness;
+    float u_MaxViewDistance;
+    float u_HorizonFadeStart;
+    float u_HorizonFadeEnd;
+
+    // ---- Weather -----------------------------------------------------------------------------------
+    float u_Coverage;
+    float u_CoverageContrast;
+    float u_WeatherTileSize;
+    float u_WeatherWarpStrength;
+    float u_CloudType;
+    float u_CloudTypeVariance;
+    float u_AnvilBias;
+    float u_Wetness;
+
+    // ---- Shape -------------------------------------------------------------------------------------
+    float u_ShapeTileSize;
+    float u_BaseShapeRemapMin;
+    float u_ShapeErosionStrength;
+    float u_BaseGradientPower;
+    float u_TopGradientPower;
+    float u_DensityHeightBias;
+
+    // ---- Detail ------------------------------------------------------------------------------------
+    float u_DetailStrength;
+    float u_DetailTileSize;
+    float u_DetailTypeBias;
+    float u_BillowGradientPower;
+    float u_BillowNoiseScale;
+    float u_HighFreqStrength;
+    float u_HighFreqWispSharpness;
+    float u_HighFreqBillowSharpness;
+    float u_HighFreqFadeStart;
+    float u_HighFreqFadeEnd;
+    float u_CurlStrength;
+    float u_CurlTileSize;
+    float u_DensitySharpenLow;
+    float u_DensitySharpenHigh;
+    float u_DensityScalePower;
+    float u_DistanceSoftening;
+    float u_SofteningStartDistance;
+    float u_SofteningEndDistance;
+    float u_NearFadeStart;
+    float u_NearFadeEnd;
+    float u_NearFadeMinDensity;
+
+    // ---- Lighting ----------------------------------------------------------------------------------
+    float u_LightMarchDistance;
+    float u_LightConeSpread;
+    float u_PhaseForwardG;
+    float u_PhaseBackwardG;
+    float u_PhaseBlend;
+    float u_SilverLiningIntensity;
+    float u_PowderStrength;
+    float u_PowderScale;
+    float u_MultiScatterExtinctionFalloff;
+    float u_MultiScatterScatterFalloff;
+    float u_MultiScatterPhaseFalloff;
+    float u_DistanceFadeStart;
+    float u_DistanceFadeEnd;
+
+    // ---- Animation ---------------------------------------------------------------------------------
+    float u_AnimationSpeed;
+    float u_WindInfluence;
+    float u_WindDirectionOffset;   // degrees, applied about the world up axis
+    float u_ShapeScrollMultiplier;
+    float u_DetailScrollMultiplier;
+    float u_WeatherScrollMultiplier;
+    float u_WindHeightShear;
+    float u_WindUpliftSpeed;
+
+    // ---- Quality -----------------------------------------------------------------------------------
+    float u_MinStepSize;
+    float u_MaxStepSize;
+    float u_StepGrowthRate;
+    float u_CoarseStepMultiplier;
+    float u_JitterStrength;
+
+    int u_WeatherSeed;
+    int u_WeatherOctaves;
+    int u_MaxSteps;
+    int u_EmptySamplesBeforeCoarse;
+    int u_LightMarchSamples;
+    int u_MultiScatterOctaves;
+};
+
+// The wind the CLOUDS drift with: the scene's single shared wind, scaled by the layer's own influence
+// and rotated by its own offset. There is exactly one wind in the engine (SceneSettings) and the cloud
+// component contributes a multiplier and an angle to it — never a second direction, or the grass and the
+// sky would blow different ways.
+vec3 CloudWindVelocity()
+{
+    float a = radians(u_WindDirectionOffset);
+    float s = sin(a);
+    float c = cos(a);
+    vec3  w = vec3(u_SceneWind.x, u_SceneWind.y, u_SceneWind.z) * u_WindInfluence;
+    return vec3(w.x * c - w.z * s, w.y, w.x * s + w.z * c);
+}
+
+// Animated time. AnimationSpeed at 0 freezes the sky without freezing anything else in the frame.
+float CloudTime()
+{
+    return u_SceneWind.w * u_AnimationSpeed;
+}
+
+#endif // CLOUD_PARAMS_GLSLH
