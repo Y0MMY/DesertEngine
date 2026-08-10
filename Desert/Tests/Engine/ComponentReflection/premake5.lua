@@ -8,6 +8,11 @@ project(test_name)
     targetdir ("%{wks.location}/build/Bin/Tests/%{cfg.buildcfg}")
     objdir ("%{wks.location}/build/Tests/Intermediates/%{cfg.buildcfg}")
 
+    -- Reflection.gen.cpp is written by DesertHeaderTool, which runs as a PREBUILD STEP OF `Desert` — so
+    -- without this the parallel build can compile the table for this test before the codegen has rewritten
+    -- it, and the test then reports on a stale component set. Build-order only; nothing is linked from it.
+    dependson { "Desert" }
+
     -- The GENERATED reflection table is the thing under test, so it is compiled straight into the test
     -- rather than linked from the engine: the registrations are static initializers in an anonymous
     -- namespace, and Reflection.gen.cpp + the registry are the only two translation units they need.

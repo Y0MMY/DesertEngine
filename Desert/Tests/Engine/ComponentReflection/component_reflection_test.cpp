@@ -7,6 +7,8 @@
 // generated translation unit is compiled straight into this binary and its static initializers fill the
 // registry before main().
 
+#include <Common/Core/Units.hpp>
+
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
@@ -105,10 +107,11 @@ TEST( SkyAtmosphereReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "RebakeSunAngleThreshold",
          "EnvironmentResolution",
          "ActivePreset",
+         "PlanetRadius",
     };
 
     const TypeInfo& sky = Type( "SkyAtmosphereData" );
-    EXPECT_EQ( sky.Fields.size(), 23u );
+    EXPECT_EQ( sky.Fields.size(), 24u );
     EXPECT_EQ( FieldNames( sky ), expected );
 }
 
@@ -128,7 +131,7 @@ TEST( SkyAtmosphereReflection, CategoriesAndTypesMatchTheSpecification )
 {
     const TypeInfo& sky = Type( "SkyAtmosphereData" );
 
-    EXPECT_EQ( CountInCategory( sky, "Atmosphere" ), 4u ); // Enabled, brightness, falloff, preset
+    EXPECT_EQ( CountInCategory( sky, "Atmosphere" ), 5u ); // enabled, brightness, falloff, preset, radius
     EXPECT_EQ( CountInCategory( sky, "Sky Color" ), 4u );  // the four palette colours
     EXPECT_EQ( CountInCategory( sky, "Sun" ), 6u );
     EXPECT_EQ( CountInCategory( sky, "Night Sky" ), 1u );
@@ -163,6 +166,31 @@ TEST( SkyAtmosphereReflection, SunAngularDiameterIsDegreesAndMatchesTheRadiusItR
     const float degrees = DefaultOf<float>( sky, "SunAngularDiameter" );
     const float radians = degrees * 3.14159265358979323846f / 180.0f;
     EXPECT_NEAR( radians * 0.5f, 0.02f, 1e-5f );
+}
+
+// The one planet radius in the engine. It is authored in KILOMETRES — 6360 is a number a reviewer can
+// check, 636000000 is not — so it must not carry Length, which means centimetres everywhere else in this
+// codebase. If it ever silently becomes a world-unit field, the default changes by a factor of 100000 and
+// the cloud shell ends up inside the ground.
+TEST( SkyAtmosphereReflection, PlanetRadiusIsKilometresAndConvertsToWorldUnits )
+{
+    const TypeInfo&  sky    = Type( "SkyAtmosphereData" );
+    const FieldInfo* radius = Find( sky, "PlanetRadius" );
+    ASSERT_NE( radius, nullptr );
+
+    EXPECT_EQ( radius->Type, FieldType::Float );
+    EXPECT_EQ( radius->Meta.Units, "km" );
+    EXPECT_FALSE( radius->Meta.IsLength ) << "Length means centimetres; this field is kilometres";
+    EXPECT_TRUE( radius->Meta.HasRange );
+    EXPECT_FLOAT_EQ( radius->Meta.RangeMin, 1.0f );
+    EXPECT_FLOAT_EQ( radius->Meta.RangeMax, 20000.0f );
+
+    const float km = DefaultOf<float>( sky, "PlanetRadius" );
+    EXPECT_FLOAT_EQ( km, 6360.0f );
+    EXPECT_FLOAT_EQ( Common::Units::Metres( km * 1000.0f ), 636000000.0f );
+
+    // The centre is derived, not authored: no second field may exist for it.
+    EXPECT_EQ( Find( sky, "PlanetCenter" ), nullptr ) << "the centre is PlanetRadius below the origin";
 }
 
 TEST( SkyAtmosphereReflection, PresetAndResolutionAreEnumsWithEveryEnumerator )

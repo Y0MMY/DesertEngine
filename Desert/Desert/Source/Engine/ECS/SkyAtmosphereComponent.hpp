@@ -136,6 +136,19 @@ namespace Desert::ECS
                   Tooltip( "Which preset the palette came from. Reverts to Custom as soon as any sky colour "
                            "or sun value is edited." ) )
         SkyPreset ActivePreset = SkyPreset::Custom;
+
+        // KILOMETRES, and deliberately not Length: 6360 is a number a human can read and check, while the
+        // same value in world units is 636000000. The conversion to centimetres happens once, on the C++
+        // side, at the point the value is handed to a shader.
+        //
+        // The planet CENTRE is derived from this, never authored: it sits PlanetRadius below the world
+        // origin along +Y. A second authorable value that must agree with this one is exactly the
+        // duplicated state that produces a horizon disagreeing with itself.
+        PROPERTY( DisplayName( "Planet Radius" ), Category( "Atmosphere" ), Range( 1.0f, 20000.0f ), Units( "km" ),
+                  Tooltip( "Radius of the planet the sky and the volumetric cloud shell both sit on. This "
+                           "is the only planet radius in the engine: the clouds read it from here, so the "
+                           "horizon of the sky and the horizon of the cloud layer cannot disagree." ) )
+        float PlanetRadius = 6360.0f;
     };
 
     struct SkyAtmosphereComponent

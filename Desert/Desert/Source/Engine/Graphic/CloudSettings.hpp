@@ -7,12 +7,15 @@ namespace Desert::Graphic
     // Procedural flat-layer cloud config (e2gamedev-style; painted in the sky shader, NOT volumetric).
     // Carried through the render command to the procedural-sky pass.
     //
-    // NOTHING AUTHORS THIS ANY MORE. The six flat-layer fields it mirrored left SkyboxComponent for the
-    // volumetric VolumetricCloudsComponent, so every caller now passes a default-constructed value and the
-    // shader's cloud branch is never taken. This struct, the RenderClouds call in ProceduralSky.shader and
-    // Common/Clouds.glslh all die together with the flat path when the volumetric pass replaces them —
-    // deleting them here would mean reshaping the SkyUB block and its hand-maintained shader mirror for a
-    // layout the volumetric work replaces again straight away.
+    // NOTHING AUTHORS THIS ANY MORE, AND IT IS SCHEDULED FOR DELETION. The six flat-layer fields it
+    // mirrored left SkyboxComponent for the volumetric VolumetricCloudsComponent, so every caller now
+    // passes a default-constructed value and the shader's cloud branch is never taken.
+    //
+    // This struct, the RenderClouds call in ProceduralSky.shader and Common/Clouds.glslh are deleted by
+    // the SKY PASS REWRITE (the task that replaces the SkyUB uniform block with the std430 sky SSBO —
+    // requirement SKY-13, and its removal is a condition of that task's acceptance). It was kept alive for
+    // exactly one step because deleting it earlier meant reshaping SkyUB and its hand-maintained shader
+    // mirror for a layout that rewrite replaces again immediately, with no way to see the result here.
     struct CloudSettings
     {
         bool  Enabled    = false;
