@@ -123,6 +123,8 @@ namespace Desert::Graphic
         float StepGrowthRate;
         float CoarseStepMultiplier;
         float JitterStrength;
+        float TemporalBlendFactor;
+        float TemporalClampScale;
 
         int32_t WeatherSeed;
         int32_t WeatherOctaves;
@@ -155,9 +157,10 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, LightMarchDistance ) == 356 );
     static_assert( offsetof( CloudGpuPayload, AnimationSpeed ) == 408 );
     static_assert( offsetof( CloudGpuPayload, MinStepSize ) == 440 );
-    static_assert( offsetof( CloudGpuPayload, WeatherSeed ) == 460 );
-    static_assert( offsetof( CloudGpuPayload, MultiScatterOctaves ) == 480 );
-    static_assert( sizeof( CloudGpuPayload ) == 484,
+    static_assert( offsetof( CloudGpuPayload, TemporalBlendFactor ) == 460 );
+    static_assert( offsetof( CloudGpuPayload, WeatherSeed ) == 468 );
+    static_assert( offsetof( CloudGpuPayload, MultiScatterOctaves ) == 488 );
+    static_assert( sizeof( CloudGpuPayload ) == 492,
                    "The block ends at the last int. glm's vec4 has a 4-byte alignment (no SIMD gentypes "
                    "in this build), so C++ adds no tail padding — std430 does, which is why the buffer "
                    "below is created at the rounded-up size and not at sizeof." );
@@ -180,6 +183,13 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudCurlNoiseBinding     = 5;
     inline constexpr uint32_t kCloudWeatherMapBinding    = 6;
     inline constexpr uint32_t kCloudSceneDepthBinding    = 7;
+    inline constexpr uint32_t kCloudDepthGuideBinding    = 8; // raymarch: the RGBA8 upsampling guide
+
+    // The temporal resolve's own bindings. Its output is the history image it fills; its two inputs are
+    // the frame the raymarch just produced and the frame this stage produced last time.
+    inline constexpr uint32_t kCloudResolvedOutputBinding = 0;
+    inline constexpr uint32_t kCloudCurrentFrameBinding   = 3;
+    inline constexpr uint32_t kCloudHistoryBinding        = 4;
 
     /**
      * Per-dispatch data for the raymarch: everything that changes with the CAMERA rather than with the
@@ -197,6 +207,125 @@ namespace Desert::Graphic
     static_assert( sizeof( CloudRaymarchPush ) <= 128,
                    "Vulkan guarantees only 128 bytes of push-constant space, and the engine emits a "
                    "single range of exactly the size handed to SetPushConstants." );
+
+    /**
+     * Per-dispatch data for the temporal resolve. Mirrors the PushConstant block of
+     * Programs/Clouds/CloudTemporalResolve.shader.
+     *
+     * It fills the guaranteed push-constant range EXACTLY, and that is what shapes it. The stage needs
+     * two transforms — this frame's pixel-to-ray, and last frame's world-to-screen — plus the camera
+     * position for the shell intersection, which is 64 + 64 + 16 = 144 bytes if both are written as
+     * matrices. Only clip x, y and w are ever read out of the second one (clip z is not used by a
+     * reprojection), so it travels as three rows instead of four and the block closes at 128.
+     */
+    struct CloudTemporalPush
+    {
+        // NDC to a CAMERA-RELATIVE world point: the inverse of ( projection x the view's ROTATION ), with
+        // the eye translation removed before the inversion rather than subtracted after it.
+        //
+        // This is not a stylistic preference, it is a measured one. Inverting the absolute view-projection
+        // in single precision loses direction accuracy in proportion to how far the camera sits from the
+        // world origin, because the reconstruction resolves a near-plane offset of a few tens of units out
+        // of coordinates of a few hundred thousand. Measured with the engine's own glm::perspective /
+        // glm::lookAt at a 60 degree field of view: 1.2e-3 rad of ray error with the camera 2 km up, and
+        // 1.7e-2 rad — a full degree, ten pixels of history sampled from the wrong place — with the camera
+        // 30 km from the origin. Removing the translation first leaves 1e-7 rad in every case, because the
+        // matrix being inverted then contains no large magnitude at all.
+        glm::mat4 InverseViewProjection;
+
+        // Rows 0, 1 and 3 of ( previousViewProjection x translate( cameraPosition ) ). Premultiplying the
+        // camera translation makes the shader multiply a CAMERA-RELATIVE point: the reprojected sample can
+        // sit 150 km away, and a planet-scale absolute coordinate through a projection matrix is the
+        // precision trap CLD-24a exists to avoid.
+        glm::vec4 PrevReprojectionRow0;
+        glm::vec4 PrevReprojectionRow1;
+        glm::vec4 PrevReprojectionRow3;
+
+        // xyz = camera position in world units; w = 1 when the history image already holds a resolved
+        // frame, 0 on the first dispatch after allocation. The flag rides here rather than in the
+        // parameter block because it describes the RESOURCE's state this frame, not the artist's settings.
+        glm::vec4 CameraPosition;
+    };
+
+    static_assert( sizeof( CloudTemporalPush ) == 128 );
+
+    static_assert( sizeof( CloudTemporalPush ) <= 128,
+                   "Vulkan guarantees only 128 bytes of push-constant space. If this ever has to grow, "
+                   "the thing to drop is the inverse view-projection: the ray direction it reconstructs "
+                   "could come from three interpolated corner rays instead. Do not drop the previous "
+                   "rows — there is no cheaper form of a projection." );
+
+    /**
+     * Fill the temporal push constant. Pure, and separate from the dispatch so the reprojection can be
+     * driven end to end by a test: this function is where the previous view-projection becomes three
+     * rows, and an error here is a cloudscape that lags or smears with no message anywhere.
+     *
+     * @param projection             this frame's projection matrix.
+     * @param view                   this frame's view matrix. Taken apart from the projection, and not as
+     *                               the product, because the eye translation has to be dropped before the
+     *                               inversion — see the note on InverseViewProjection above.
+     * @param previousViewProjection the product, from the frame that filled the history image.
+     */
+    inline CloudTemporalPush MakeCloudTemporalPush( const glm::mat4& projection, const glm::mat4& view,
+                                                    const glm::mat4& previousViewProjection,
+                                                    const glm::vec3& cameraPosition, bool historyValid )
+    {
+        // A view matrix is rotation x translate( -eye ), so its fourth column is the entire translation.
+        // Replacing it with the identity's leaves the rotation exactly — no subtraction, no cancellation.
+        glm::mat4 viewRotation = view;
+        viewRotation[3]        = glm::vec4( 0.0f, 0.0f, 0.0f, 1.0f );
+
+        // previousViewProjection x translate( cameraPosition ). A translation only changes the fourth
+        // column, so the product is written out directly rather than through a full 4x4 multiply by a
+        // matrix that is three quarters identity. The cancellation that matters above is harmless here:
+        // this column is added to terms carrying a reprojected point up to 150 km long.
+        glm::mat4 relative = previousViewProjection;
+        relative[3]        = previousViewProjection * glm::vec4( cameraPosition, 1.0f );
+
+        CloudTemporalPush push{};
+        push.InverseViewProjection = glm::inverse( projection * viewRotation );
+        push.PrevReprojectionRow0  = glm::vec4( relative[0][0], relative[1][0], relative[2][0], relative[3][0] );
+        push.PrevReprojectionRow1  = glm::vec4( relative[0][1], relative[1][1], relative[2][1], relative[3][1] );
+        push.PrevReprojectionRow3  = glm::vec4( relative[0][3], relative[1][3], relative[2][3], relative[3][3] );
+        push.CameraPosition        = glm::vec4( cameraPosition, historyValid ? 1.0f : 0.0f );
+        return push;
+    }
+
+    /**
+     * The WHOLE meaning of VolumetricCloudData::TemporalMode, in one predicate.
+     *
+     * Off is a configuration, not a failure branch: no history images are allocated, the resolve is not
+     * dispatched, and the composite magnifies the raymarch target itself — so what reaches the screen is
+     * the marched image, bit for bit, and the Low tier (which authors Off) pays nothing for a stage it
+     * does not use. The mode is deliberately absent from the GPU parameter block: it selects which passes
+     * run, which is a decision that has to be made on this side, and a second copy on the far side of the
+     * bus would be free to disagree with it.
+     */
+    inline constexpr bool CloudTemporalUsesHistory( ECS::CloudTemporalMode mode )
+    {
+        return mode == ECS::CloudTemporalMode::Reprojection;
+    }
+
+    /** Which low-resolution image the composite magnifies. */
+    enum class CloudCompositeSource
+    {
+        Raymarch,        // the S2 target itself — Temporal Mode = Off, or history that could not be allocated
+        TemporalHistory, // the S3 output for this frame
+    };
+
+    /**
+     * @param historyReady the two history images exist AND the resolve ran this frame.
+     *
+     * The second argument is not defensive padding: image allocation is lazy and can fail, and CLD-34
+     * requires that failure to be latched and survivable. A cloudscape with no temporal accumulation is a
+     * noisier cloudscape; a composite pointed at an image that was never created is a black screen.
+     */
+    inline constexpr CloudCompositeSource CloudSelectCompositeSource( ECS::CloudTemporalMode mode,
+                                                                      bool                   historyReady )
+    {
+        return CloudTemporalUsesHistory( mode ) && historyReady ? CloudCompositeSource::TemporalHistory
+                                                                : CloudCompositeSource::Raymarch;
+    }
 
     /** Pixel divisor of each resolution tier: Quarter is a quarter of the pixels per axis... */
     inline constexpr uint32_t CloudResolutionDivisor( ECS::CloudResolutionScale scale )
@@ -221,6 +350,35 @@ namespace Desert::Graphic
     {
         const uint32_t divisor = CloudResolutionDivisor( scale );
         return extent / divisor > 1u ? extent / divisor : 1u;
+    }
+
+    /**
+     * Bytes of resolution-scaled cloud imagery a live SceneRenderer holds for a @p width x @p height view.
+     *
+     * Everything here is per SceneRenderer and the editor builds several of them, so this is a number
+     * somebody has to be able to check — CLD-34 asks for it in the log, and the test pins it against the
+     * arithmetic below rather than against a figure typed into a document:
+     *
+     *   scatter target      RGBA16F at the scaled size, always;
+     *   depth guide         RGBA8   at the scaled size, always — the composite's bilateral upsample reads
+     *                       it, and that upsample runs in both temporal modes (CLD-32a constraint 2);
+     *   history x2          RGBA16F at the scaled size, only with Temporal Mode = Reprojection.
+     *
+     * The 512x512 weather map is NOT counted: it is one fixed megabyte that does not move with the view
+     * size or with any of these settings, and folding it in would hide the term that does.
+     */
+    inline constexpr uint64_t CloudScaledImageBytes( uint32_t width, uint32_t height,
+                                                     ECS::CloudResolutionScale scale, ECS::CloudTemporalMode mode )
+    {
+        const uint32_t scaledWidth  = CloudScaledExtent( width, scale );
+        const uint32_t scaledHeight = CloudScaledExtent( height, scale );
+
+        const uint64_t colour =
+             Core::Formats::CalculateImageSize( scaledWidth, scaledHeight, Core::Formats::ImageFormat::RGBA16F );
+        const uint64_t guide =
+             Core::Formats::CalculateImageSize( scaledWidth, scaledHeight, Core::Formats::ImageFormat::RGBA8F );
+
+        return colour + guide + ( CloudTemporalUsesHistory( mode ) ? 2u * colour : 0u );
     }
 
     /**
@@ -337,6 +495,13 @@ namespace Desert::Graphic
         p.StepGrowthRate       = glm::max( data.StepGrowthRate, 0.0f );
         p.CoarseStepMultiplier = glm::max( data.CoarseStepMultiplier, 1.0f );
         p.JitterStrength       = data.JitterStrength;
+
+        // Clamped to the range the Details panel offers, for the same reason the fade pairs are repaired
+        // above: a blend factor of 0 would freeze the sky on its first frame forever, and a negative
+        // clamp scale would invert the neighbourhood box into an empty one that rejects every history
+        // sample. Both are one keystroke away in a scene file edited by hand.
+        p.TemporalBlendFactor = glm::clamp( data.TemporalBlendFactor, 0.02f, 1.0f );
+        p.TemporalClampScale  = glm::max( data.TemporalClampScale, 0.0f );
 
         // Folded exactly as the noise volumes fold theirs: the component authors an int with a
         // Range(0, 65535), the shader hashes a uint, and a value outside that range must land on its

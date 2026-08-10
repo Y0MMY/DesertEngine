@@ -1,0 +1,281 @@
+// Temporal resolve and bilateral upsampling maths for the volumetric clouds — the ONE source of truth.
+//
+// Compiled TWICE from this same text, exactly as Common/CloudGeometry.glslh is:
+//   * as GLSL, by Programs/Clouds/CloudTemporalResolve.shader, Programs/Clouds/CloudComposite.shader and
+//     Programs/Clouds/CloudRaymarch.shader (the encode half);
+//   * as C++, by Desert/Tests/Engine/CloudTemporal/CloudTemporalReference.hpp, which the CloudTemporal
+//     tests drive.
+// Vulkan does not run in the development environment. A CPU re-implementation would only prove that the
+// copy agrees with itself, so the text is shared and a passing test is a statement about the code the GPU
+// runs. The restricted GLSL/C++ dialect is described at the top of Common/CloudGeometry.glslh and applies
+// here unchanged: no swizzles, no `out` parameters, no arrays, `f`-suffixed literals, structs returned
+// through a named local whose fields are assigned one at a time, functions defined before use.
+//
+// Requires, from the including shader:
+//   #include <Common/CloudGeometry.glslh>   (CloudIntersectAltitudeSphere, CLOUD_WORLD_UNITS_PER_KM)
+//
+// Nothing here reads a uniform, a buffer or an image. Every input arrives as an argument — which is what
+// makes the whole stage testable on a machine with no GPU.
+
+#ifndef CLOUD_TEMPORAL_GLSLH
+#define CLOUD_TEMPORAL_GLSLH
+
+// ---- The low-resolution depth guide ----------------------------------------------------------------
+//
+// The composite magnifies a cloud image that was marched at Resolution Scale. Plain bilinear magnification
+// blends across a GEOMETRY SILHOUETTE: the low-resolution texel that straddles a mountain edge marched
+// only as far as the mountain (CLD-29 clamps every ray to the scene depth), so it carries almost no cloud,
+// and bilinear then smears that emptiness a full-resolution pixel or two into the open sky beside it.
+//
+// The fix needs to know, per low-resolution texel, HOW FAR that texel's march was allowed to go. The
+// composite is a graphics pass inside a render pass that has the depth attachment bound, so it cannot
+// sample the depth itself — that is a feedback loop, and the reason CLD-29 does the depth read in compute.
+// The raymarch therefore writes the distance it stopped at into a small RGBA8 guide image next to its
+// colour target, and the composite reads THAT.
+//
+// ENCODING. RGBA8 is four normalized bytes, and a distance runs from centimetres to 150 kilometres, so it
+// is stored as v = d / (d + K) — the projective form, which spends its precision where the eye is, not
+// spread flat over the range — with v carried in 16 bits across two channels. K = 1 km makes the relative
+// error 0.02 % at 100 m and 0.16 % at 100 km; below about 10 m it degrades, which does not matter because
+// the guide is only ever compared against another guide sample to ask "same surface or not".
+const float CLOUD_GUIDE_DISTANCE_SCALE = CLOUD_WORLD_UNITS_PER_KM;
+
+// How far two guide samples may disagree, RELATIVELY, and still be treated as the same surface. Not a
+// component field on purpose: it is a property of the encoding and of what "an edge" means, not a look
+// control, and §4.3 of the requirements keeps that kind of constant out of the Details panel. 5 % is well
+// above the encoding's own error at every distance and well below the jump across any real silhouette.
+const float CLOUD_GUIDE_RELATIVE_TOLERANCE = 0.05f;
+
+vec4 CloudEncodeGuideDistance(float distanceWorldUnits)
+{
+    float d = max(distanceWorldUnits, 0.0f);
+    float v = clamp(d / (d + CLOUD_GUIDE_DISTANCE_SCALE), 0.0f, 1.0f);
+
+    // The high byte is floor(v*255)/255, which an rgba8 UNORM store reproduces EXACTLY (it encodes n/255);
+    // the low byte carries what is left over. Splitting as v*65535 into two bytes instead would put values
+    // above 255/255 in the low channel, where imageStore clamps them and silently loses the top of every
+    // bucket.
+    float scaled = v * 255.0f;
+    float high   = floor(scaled);
+    return vec4(high * (1.0f / 255.0f), scaled - high, 0.0f, 0.0f);
+}
+
+float CloudDecodeGuideDistance(vec4 encoded)
+{
+    float v = clamp(encoded.x + encoded.y * (1.0f / 255.0f), 0.0f, 1.0f);
+    // d = K*v/(1-v). The clamp on the denominator is not decoration: v = 1 means "infinitely far", which
+    // the 16-bit quantisation can produce and which would otherwise be a division by zero — an inf that
+    // survives every weight it touches.
+    return CLOUD_GUIDE_DISTANCE_SCALE * v / max(1.0f - v, 1.0f / 65535.0f);
+}
+
+// ---- The bilateral upsample ------------------------------------------------------------------------
+
+// Weight of one tap, given how far its guide distance is from the reference. A Cauchy kernel rather than
+// a hard cut: a step function makes the filter switch between taps along a contour and turns a soft
+// silhouette into a stair, and 1/(1+x^2) is one multiply-add-divide with no exp().
+float CloudGuideSimilarity(float tapDistance, float referenceDistance, float relativeTolerance)
+{
+    float scale = max(abs(referenceDistance), 1.0f) * max(relativeTolerance, 1e-4f);
+    float x     = (tapDistance - referenceDistance) / scale;
+    return 1.0f / (1.0f + x * x);
+}
+
+// The four weights of a bilateral magnification, in the tap order (00, 10, 01, 11) of a texel quad.
+struct CloudUpsampleWeights
+{
+    float W00;
+    float W10;
+    float W01;
+    float W11;
+};
+
+// Bilinear weights, re-weighted by how well each tap's guide distance agrees with the tap the pixel sits
+// closest to, and renormalized.
+//
+// The REFERENCE is the nearest tap, not the pixel's own scene depth: the composite has no full-resolution
+// depth to compare against (see the encoding note above), so the best available statement is "this pixel
+// belongs to whatever surface the texel it sits inside belongs to". That makes this filter fix the
+// SMEAR across a silhouette — a foreground texel no longer bleeds into a sky pixel beside it — while
+// leaving the silhouette itself quantised to the cloud buffer's own grid, which no upsample can undo
+// without a full-resolution guide.
+//
+// Where the guide agrees everywhere — open sky, a flat wall, and every pixel at Resolution Scale = Full —
+// every similarity is 1 and this is exactly bilinear. That degeneration is the property the test pins.
+CloudUpsampleWeights CloudBilateralUpsampleWeights(vec2 fraction, float d00, float d10, float d01, float d11,
+                                                   float relativeTolerance)
+{
+    float fx = clamp(fraction.x, 0.0f, 1.0f);
+    float fy = clamp(fraction.y, 0.0f, 1.0f);
+
+    float b00 = (1.0f - fx) * (1.0f - fy);
+    float b10 = fx * (1.0f - fy);
+    float b01 = (1.0f - fx) * fy;
+    float b11 = fx * fy;
+
+    float bestWeight = b00;
+    float reference  = d00;
+    if (b10 > bestWeight)
+    {
+        bestWeight = b10;
+        reference  = d10;
+    }
+    if (b01 > bestWeight)
+    {
+        bestWeight = b01;
+        reference  = d01;
+    }
+    if (b11 > bestWeight)
+    {
+        bestWeight = b11;
+        reference  = d11;
+    }
+
+    float w00 = b00 * CloudGuideSimilarity(d00, reference, relativeTolerance);
+    float w10 = b10 * CloudGuideSimilarity(d10, reference, relativeTolerance);
+    float w01 = b01 * CloudGuideSimilarity(d01, reference, relativeTolerance);
+    float w11 = b11 * CloudGuideSimilarity(d11, reference, relativeTolerance);
+
+    // The nearest tap keeps its own weight in full (its similarity to itself is exactly 1) and that weight
+    // is at least a quarter, so the sum can never approach zero and there is no degenerate branch to
+    // write — and therefore none to leave untested.
+    float inverseSum = 1.0f / (w00 + w10 + w01 + w11);
+
+    CloudUpsampleWeights weights;
+    weights.W00 = w00 * inverseSum;
+    weights.W10 = w10 * inverseSum;
+    weights.W01 = w01 * inverseSum;
+    weights.W11 = w11 * inverseSum;
+    return weights;
+}
+
+// ---- Reprojection through the shell ----------------------------------------------------------------
+
+// Where this pixel's cloud was on the screen of the PREVIOUS frame, and whether that answer is usable.
+struct CloudReprojection
+{
+    bool Valid;
+    vec2 Uv;
+};
+
+// Camera-only reprojection (CLD-32a constraint 1). There are no motion vectors and no per-object motion:
+// the clouds' own movement is wind, and wind is already integrated into the march through the animated
+// sample position, so a reprojected cloud pixel is correct to first order without one.
+//
+// The pixel is assumed to sit on the shell's MID-SURFACE — the sphere halfway up the layer. A volumetric
+// pixel has no single depth, and the mid-surface is the cheapest stand-in that is right where it matters:
+// the error it makes is a parallax error that grows as a cloud comes close to the camera, which is
+// exactly where NearFadeMinDensity is already thinning the cloud out.
+//
+// The previous view-projection arrives as THREE ROWS rather than a matrix, and premultiplied by the
+// current camera's translation, for two reasons that are the same reason: only clip x, y and w are needed
+// (z is never used), and multiplying a CAMERA-RELATIVE offset keeps every magnitude in the arithmetic
+// small — 128 bytes of push constant hold the current inverse view-projection, three rows and the camera
+// position exactly, with nothing left over for a fourth row nobody reads.
+//
+// `Valid` is false when the pixel had no cloud shell in front of it last frame or when it reprojects off
+// the screen. Both mean the same thing to the caller: there is no history for this pixel, use the frame
+// that was just marched.
+CloudReprojection CloudReprojectThroughShell(vec2 uv, mat4 invViewProjection, vec3 cameraPositionKm,
+                                             float planetRadiusKm, float bottomKm, float thicknessKm,
+                                             vec4 previousRow0, vec4 previousRow1, vec4 previousRow3)
+{
+    CloudReprojection result;
+    result.Valid = false;
+    result.Uv    = uv;
+
+    vec2 ndc = vec2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+
+    // The ray comes from the inverse view-projection at two depths, exactly as the raymarch builds it, so
+    // the two stages cannot disagree about which direction a pixel points in.
+    vec4 nearH = invViewProjection * vec4(ndc.x, ndc.y, 0.0f, 1.0f);
+    vec4 farH  = invViewProjection * vec4(ndc.x, ndc.y, 1.0f, 1.0f);
+    vec3 nearP = vec3(nearH.x, nearH.y, nearH.z) / nearH.w;
+    vec3 farP  = vec3(farH.x, farH.y, farH.z) / farH.w;
+    vec3 dir   = normalize(farP - nearP);
+
+    CloudSphereHit mid =
+         CloudIntersectAltitudeSphere(cameraPositionKm, dir, planetRadiusKm, bottomKm + 0.5f * thicknessKm);
+    if (!mid.Hit)
+        return result;
+
+    // The first root AHEAD of the camera. From inside the mid-sphere (any camera below mid-layer altitude)
+    // T0 is negative and T1 is the exit; from outside it, T0 is the entry. A ray with neither root ahead
+    // is looking away from the layer and has no cloud to carry over.
+    float t = mid.T0 > 0.0f ? mid.T0 : mid.T1;
+    if (t <= 0.0f)
+        return result;
+
+    vec3 relative = dir * (t * CLOUD_WORLD_UNITS_PER_KM);
+    vec4 point    = vec4(relative.x, relative.y, relative.z, 1.0f);
+
+    float clipW = dot(previousRow3, point);
+    if (clipW <= 1e-6f)
+        return result; // behind the previous camera: dividing by this would fold the point back on-screen
+
+    vec2 previousNdc = vec2(dot(previousRow0, point) / clipW, dot(previousRow1, point) / clipW);
+    vec2 previousUv  = vec2(previousNdc.x * 0.5f + 0.5f, 0.5f - previousNdc.y * 0.5f);
+
+    result.Uv    = previousUv;
+    result.Valid = previousUv.x >= 0.0f && previousUv.x <= 1.0f && previousUv.y >= 0.0f && previousUv.y <= 1.0f;
+    return result;
+}
+
+// ---- The neighbourhood clamp and the blend ---------------------------------------------------------
+
+// The per-channel box the history sample is allowed to live in.
+struct CloudTemporalBox
+{
+    vec4 Lo;
+    vec4 Hi;
+};
+
+// The 3x3 min/max box of the CURRENT frame, widened (or narrowed) about its own centre by Temporal Clamp
+// Scale. At 1.0 this is the plain min/max box; the widening is monotone, which is what makes the knob
+// read the way the tooltip says it does — larger keeps more history and ghosts more, smaller rejects more
+// history and flickers more.
+CloudTemporalBox CloudNeighbourhoodBox(vec4 neighbourhoodMin, vec4 neighbourhoodMax, float clampScale)
+{
+    vec4 centre = (neighbourhoodMin + neighbourhoodMax) * 0.5f;
+    vec4 extent = (neighbourhoodMax - neighbourhoodMin) * (0.5f * max(clampScale, 0.0f));
+
+    CloudTemporalBox box;
+    box.Lo = centre - extent;
+    box.Hi = centre + extent;
+    return box;
+}
+
+// A history sample inside the box passes through untouched; one outside is pulled onto the boundary
+// rather than thrown away. Throwing it away would make a disoccluded pixel snap to a single frame of a
+// jittered, half-resolution march — which is the flicker the accumulation exists to remove — whereas the
+// boundary value is the closest thing to the history that the current neighbourhood can vouch for.
+vec4 CloudClampToNeighbourhood(vec4 history, CloudTemporalBox box)
+{
+    return min(max(history, box.Lo), box.Hi);
+}
+
+// The resolve itself.
+//
+// `currentWeight` is Temporal Blend Factor: the share of the frame that was just marched. Two cases
+// return the current frame BIT FOR BIT rather than through the blend, and both are reachable:
+//
+//   * no usable history — the first frame after the images are allocated, and every pixel whose
+//     reprojection left the screen;
+//   * a weight of exactly 1, which is what the Low tier authors.
+//
+// Written as an early return and not as mix(history, current, 1.0): mix is free to evaluate
+// history + (current - history) * w, which is not the identity at w = 1 for large values, and
+// current * 1 + history * 0 is a NaN the moment the history holds an inf — which uninitialised image
+// memory is entitled to.
+vec4 CloudTemporalResolve(vec4 current, vec4 history, bool historyUsable, float currentWeight,
+                          CloudTemporalBox box)
+{
+    float weight = clamp(currentWeight, 0.0f, 1.0f);
+    if (!historyUsable || weight >= 1.0f)
+        return current;
+
+    vec4 clamped = CloudClampToNeighbourhood(history, box);
+    return current * weight + clamped * (1.0f - weight);
+}
+
+#endif // CLOUD_TEMPORAL_GLSLH
