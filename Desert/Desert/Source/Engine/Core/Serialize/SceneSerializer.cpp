@@ -3,6 +3,7 @@
 #include <Engine/ECS/Entity.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Core/Serialize/EntitySerializer.hpp>
+#include <Engine/Core/Serialize/SceneMigration.hpp>
 #include <Engine/Runtime/Factory/PrefabFactory.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionSerializer.hpp>
@@ -27,6 +28,9 @@ namespace Desert::Core
         // Scene-wide settings — reflected, so the whole block round-trips through the generic serializer.
         std::optional<rfl::Generic>     Settings;
         std::optional<int>              UnitVersion;
+        // Schema generation, absent => 0. A SECOND version integer on purpose - see kSceneVersion in
+        // SceneMigration.hpp for why it must not be folded into UnitVersion.
+        std::optional<int> SceneVersion;
     };
 
     namespace
@@ -97,8 +101,9 @@ namespace Desert::Core
     std::string SceneSerializer::SerializeToJson() const
     {
         SceneSerialized scene;
-        scene.SceneName   = m_Scene->GetSceneName();
-        scene.UnitVersion = kUnitVersion;
+        scene.SceneName    = m_Scene->GetSceneName();
+        scene.UnitVersion  = kUnitVersion;
+        scene.SceneVersion = kSceneVersion;
 
         // Helper to check if any ancestor has a PrefabComponent
         auto isPrefabChild = [&]( ECS::Entity entity ) -> bool
@@ -147,6 +152,23 @@ namespace Desert::Core
         }
 
         LOG_INFO( "Loading scene: {0}", sceneData->SceneName );
+
+        // Sky schema migration - HERE, on the parsed tree, and not after the entities exist. Once the sky
+        // fields left SkyboxComponent there is no component left for them to land in, and the load loop
+        // below iterates the component REGISTRY rather than the file, so an old "Skybox" payload's sky
+        // values would be read by nobody and the scene would open with a default sky.
+        //
+        // Independent of MigrateMetresToUnits at the bottom of this function, and it has to be: an old
+        // metres-era scene runs BOTH in one load. They cannot interact because no sky field is a length -
+        // colours, multipliers, angles and a radius already authored in kilometres.
+        if ( sceneData->SceneVersion.value_or( 0 ) < kSceneVersion )
+        {
+            const SkyMigrationReport report = MigrateSkyV0ToV1( sceneData->Entities );
+            LOG_INFO( "[SceneMigration] '{0}': sky schema v0 -> v1 - {1} entity(ies), {2} carried, {3} "
+                      "defaulted, {4} rejected",
+                      sceneData->SceneName, report.Entities, report.FieldsCarried, report.FieldsDefaulted,
+                      report.FieldsRejected );
+        }
 
         // Restore the scene name (was only logged before — so a renamed+saved scene reverted on load).
         if ( !sceneData->SceneName.empty() )
@@ -253,6 +275,7 @@ namespace Desert::Core
 
         // Scenes written before the world unit became a centimetre carry no UnitVersion — upgrade them
         // once here, so opening an old level still shows it at the right size (re-saving stamps v1).
+        // Runs on the LIVE scene, unlike the sky migration above, and neither depends on the other.
         if ( sceneData->UnitVersion.value_or( 0 ) < kUnitVersion )
             MigrateMetresToUnits( *m_Scene );
     }
