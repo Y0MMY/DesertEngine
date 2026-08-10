@@ -15,16 +15,15 @@ Shader "BakeProceduralSky"
 
         layout(binding = 0, rgba32f) restrict writeonly uniform image2D outputPanorama;
 
-        PushConstant PushConstants
+        // The SAME sky parameter buffer the screen pass reads — not a second hand-packed mirror of it. The
+        // bake used to receive these as a push-constant block, which meant two layouts to keep in step and
+        // a silent corruption of everything after the first field that fell out of order.
+        //
+        // The binding number is bound explicitly from C++ (ComputePipeline::SetStorageBuffer) and must stay
+        // equal to Graphic::kSkyPayloadBinding and to the number the graphics sky shader declares.
+        ReadBuffer(1) SkyBuffer
         {
-            vec4 u_SunDirection; // xyz = direction TOWARD the sun (normalized), w = sun intensity
-            vec4 u_SkyParams;    // x = sun angular radius; y = skyBrightness; z = horizonFalloff; w = sunGlow
-            vec4 u_Zenith;       // rgb, w = sunsetIntensity
-            vec4 u_Horizon;      // rgb, w = starIntensity
-            vec4 u_SunColor;     // rgb
-            vec4 u_SunsetColor;  // rgb
-            vec4 u_Ground;       // rgb
-            vec4 u_Night;        // rgb
+            vec4 u_SkyPacked[SKY_PACKED_VEC4_COUNT];
         };
 
         LocalSize(32, 32, 1);
@@ -43,21 +42,12 @@ Shader "BakeProceduralSky"
             // Direction for this panorama texel (y-up, matching the engine's equirect convention).
             vec3 dir = vec3(st * cos(phi), cos(theta), st * sin(phi));
 
-            // Build the SkyConfig from the editor's sky settings so the baked IBL matches the visible sky exactly.
-            SkyConfig cfg;
-            cfg.zenith          = u_Zenith.rgb;
-            cfg.horizon         = u_Horizon.rgb;
-            cfg.sunColor        = u_SunColor.rgb;
-            cfg.sunsetColor     = u_SunsetColor.rgb;
-            cfg.ground          = u_Ground.rgb;
-            cfg.night           = u_Night.rgb;
-            cfg.skyBrightness   = u_SkyParams.y;
-            cfg.horizonFalloff  = u_SkyParams.z;
-            cfg.sunGlow         = u_SkyParams.w;
-            cfg.sunsetIntensity = u_Zenith.w;
-            cfg.starIntensity   = u_Horizon.w;
+            SkyPacked s;
+            for (int i = 0; i < SKY_PACKED_VEC4_COUNT; ++i)
+                s.v[i] = u_SkyPacked[i];
 
-            vec3 color = EvaluateSky(dir, normalize(u_SunDirection.xyz), u_SunDirection.w, u_SkyParams.x, cfg);
+            vec3 color = EvaluateSky(dir, UnpackSunDirection(s), UnpackSunIntensity(s),
+                                     UnpackSunAngularRadius(s), UnpackSkyConfig(s));
 
             imageStore(outputPanorama, coord, vec4(color, 1.0));
         }

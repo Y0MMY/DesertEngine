@@ -3,6 +3,7 @@
 #include <Engine/Graphic/RendererAPI.hpp>
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/ComputeImages.hpp>
+#include <Engine/Graphic/SkyRules.hpp>
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
@@ -44,16 +45,13 @@ namespace Desert::Graphic
         return {};
     }
 
-    static constexpr uint32_t kEnvFaceMapSize    = 1024;
-    static constexpr uint32_t kIrradianceMapSize = 32;
+    // The cube chain's sizes live in SkyRules.hpp, because the environment-cost report has to compute the
+    // same numbers and a second copy of them is how a report starts lying.
+    static constexpr uint32_t kEnvFaceMapSize    = kSkyEnvCubeFaceSize;
+    static constexpr uint32_t kIrradianceMapSize = kSkyEnvIrradianceFaceSize;
     static constexpr uint32_t kBRDF_LUT_Size     = 256;
-    static constexpr uint32_t kMipsCount         = 11;
+    static constexpr uint32_t kMipsCount         = kSkyEnvPrefilterMips;
     static constexpr uint32_t kWorkGroups        = 32;
-
-    // Equirect panorama resolution for the procedural-sky bake. The atmosphere is low-frequency, so a
-    // modest panorama is plenty to feed the radiance cube + convolutions (tunable for sun-disk crispness).
-    static constexpr uint32_t kProceduralPanoramaW = 1024;
-    static constexpr uint32_t kProceduralPanoramaH = 512;
 
     std::shared_ptr<Desert::Graphic::ImageCube>
     EnvironmentManager::ConvertPanoramaToCubemapCross( const Runtime::ImageHandle& panorama )
@@ -84,14 +82,13 @@ namespace Desert::Graphic
         return ComputeImages::ProccessForImageCube( processingInfo );
     }
 
-    Environment EnvironmentManager::CreateProcedural( const glm::vec3& sunDir, float intensity, float diskRadius,
-                                                      const SkySettings& sky )
+    Environment EnvironmentManager::CreateProcedural( uint32_t panoramaWidth, uint32_t panoramaHeight,
+                                                      ShaderResources::StorageBuffer* skyParams )
     {
         auto* imageService = Runtime::ResourceRegistry::GetImageService();
 
         // Bake the atmosphere into an equirect HDR panorama, then run the standard IBL pipeline on it.
-        auto panorama = ComputeImages::BakeProceduralPanorama( kProceduralPanoramaW, kProceduralPanoramaH,
-                                                               sunDir, intensity, diskRadius, sky );
+        auto panorama = ComputeImages::BakeProceduralPanorama( panoramaWidth, panoramaHeight, skyParams );
         if ( !panorama )
             return {};
         const auto panoramaHandle =

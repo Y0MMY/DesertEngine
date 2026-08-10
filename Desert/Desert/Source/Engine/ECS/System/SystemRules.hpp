@@ -7,7 +7,11 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace Desert::ECS::Rules
 {
@@ -65,5 +69,121 @@ namespace Desert::ECS::Rules
         glm::decompose( m, out.Scale, rotation, out.Translation, skew, perspective );
         out.Rotation = glm::eulerAngles( rotation );
         return out;
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Which directional light is THE SUN
+    // ---------------------------------------------------------------------------------------------------
+    //
+    // There was no notion of "the sun" in this engine: identity was uniqueness, selection was "whichever
+    // one the registry visited first", and the sky and the lighting used DIFFERENT iteration orders (an
+    // entt group in Scene, a view in the sky collector) — so in a scene with two directional lights they
+    // could pick different ones and nothing said so. The rule below is the single answer, and because it
+    // is a function of plain numbers, the test can hold it to all six cases including the tie-break.
+
+    // Below this length a Translation is not a direction at all — normalizing it yields NaN and the sun
+    // ends up pointing nowhere. Two different epsilons for this existed in the engine; this is the one.
+    inline constexpr float kSunDirectionEpsilon = 1e-4f;
+
+    inline bool IsSunDirectionValid( const glm::vec3& lightTranslation )
+    {
+        return glm::length( lightTranslation ) > kSunDirectionEpsilon;
+    }
+
+    // THE ENGINE'S ONE NEGATION. TransformComponent::Translation on a directional light is the direction
+    // the light TRAVELS (sun -> scene); the atmosphere, the IBL bake and the cloud pass all want the
+    // direction TOWARD the sun. Every one of them goes through here. Two negations is how a sky ends up
+    // lit from below — which is precisely the bug the viewport's light gizmo shipped with.
+    inline glm::vec3 AtmosphereSunDirection( const glm::vec3& lightTranslation )
+    {
+        return -glm::normalize( lightTranslation );
+    }
+
+    // Used when a scene has no usable directional light at all, so the sky is still lit rather than black.
+    inline glm::vec3 FallbackAtmosphereSunDirection()
+    {
+        return glm::normalize( glm::vec3( 0.3f, 0.9f, 0.3f ) );
+    }
+
+    struct SunCandidate
+    {
+        // Entity UUID. A plain integer rather than Common::UUID so the rule stays link-free: the tests that
+        // exercise it deliberately do not link the engine, and UUID's constructors live in a .cpp.
+        uint64_t Id             = 0;
+        bool     Marked         = false; // DirectionalLightData::AtmosphereSunLight
+        int      Index          = 0;     // DirectionalLightData::AtmosphereSunLightIndex
+        bool     DirectionValid = false; // IsSunDirectionValid( Translation )
+    };
+
+    // The selection AND everything worth complaining about, so the rule itself stays pure. Logging belongs
+    // to the caller — a LOG_WARN in here would drag the logger into every test that asks a question about
+    // the sun, and would fire once per frame instead of once per scene load.
+    struct AtmosphereSunSelection
+    {
+        std::optional<size_t> Chosen;             // index into the candidate span
+        bool                  Fallback = false;   // rule 5: nothing was marked, lowest id taken
+        std::vector<size_t>   Collisions;         // rule 3: further marked candidates at wantedIndex
+        std::vector<size_t>   WrongIndex;         // rule 4: marked, but at an index v1 does not render
+    };
+
+    // Rules, in order:
+    //  1. candidates whose direction is degenerate are ignored entirely;
+    //  2. prefer marked candidates at `wantedIndex`;
+    //  3. several of those -> lowest Id wins, the rest are reported as collisions;
+    //  4. marked at another index -> treated as unmarked and reported (the field is authorable, but the
+    //     engine renders exactly one directional light, so index != 0 is not a thing that can work);
+    //  5. nothing marked -> lowest-Id valid candidate, reported as a fallback, because the sky must not go
+    //     missing just because nobody ticked a box;
+    //  6. nothing valid -> no selection; the caller uses FallbackAtmosphereSunDirection().
+    inline AtmosphereSunSelection SelectAtmosphereSun( std::span<const SunCandidate> candidates,
+                                                      int                           wantedIndex )
+    {
+        AtmosphereSunSelection result;
+
+        for ( size_t i = 0; i < candidates.size(); ++i )
+        {
+            const SunCandidate& c = candidates[i];
+            if ( !c.DirectionValid )
+                continue;
+            if ( !c.Marked )
+                continue;
+
+            if ( c.Index != wantedIndex )
+            {
+                result.WrongIndex.push_back( i );
+                continue;
+            }
+
+            if ( !result.Chosen )
+            {
+                result.Chosen = i;
+                continue;
+            }
+
+            // Lowest id wins; the loser is a collision either way, so both branches record one.
+            if ( c.Id < candidates[*result.Chosen].Id )
+            {
+                result.Collisions.push_back( *result.Chosen );
+                result.Chosen = i;
+            }
+            else
+            {
+                result.Collisions.push_back( i );
+            }
+        }
+
+        if ( result.Chosen )
+            return result;
+
+        for ( size_t i = 0; i < candidates.size(); ++i )
+        {
+            if ( !candidates[i].DirectionValid )
+                continue;
+            if ( !result.Chosen || candidates[i].Id < candidates[*result.Chosen].Id )
+                result.Chosen = i;
+        }
+
+        result.Fallback = result.Chosen.has_value();
+        return result;
     }
 } // namespace Desert::ECS::Rules

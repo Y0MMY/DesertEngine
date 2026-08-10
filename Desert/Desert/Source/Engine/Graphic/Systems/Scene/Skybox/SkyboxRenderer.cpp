@@ -1,5 +1,7 @@
 #include "SkyboxRenderer.hpp"
 #include <Engine/Graphic/Renderer.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/SkyPayload.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 
@@ -53,6 +55,13 @@ namespace Desert::Graphic::System
             m_ProceduralPipeline->Invalidate();
 
             m_ProceduralMaterial = std::make_shared<MaterialProceduralSky>();
+
+            // Created here, not through shader reflection: the reflection path allocates a fixed 36 bytes,
+            // which is not this block. persistent = false is load-bearing — it gives the backend one copy
+            // per (frame in flight x renderer slot), which is what keeps a second live SceneRenderer (the
+            // mesh preview, a thumbnail, another scene view) from overwriting this one's sky.
+            m_SkyParams = ShaderResources::StorageBuffer::Create( "SkyBuffer", kSkyPayloadBytes,
+                                                                  kSkyPayloadBinding, /*persistent=*/false );
         }
 
         return BOOLSUCCESS;
@@ -77,20 +86,88 @@ namespace Desert::Graphic::System
         m_SkyboxIntensity = intensity;
     }
 
+    void SkyboxRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow,
+                                           const SkySettings& sky )
+    {
+        m_UseProceduralSky = enabled;
+        m_SunDir           = glm::normalize( sunDir );
+        m_Sky              = sky;
+        m_BakeRequested    = m_BakeRequested || bakeNow;
+
+        // The evaluated sky other renderers consume. It is rebuilt from this frame's numbers rather than
+        // accumulated, so a frame in which the sky is switched off publishes Valid == false immediately.
+        if ( enabled )
+        {
+            m_Atmosphere = EvaluateAtmosphere( m_Sky, m_SunDir, m_SkyParams.get() );
+
+            // A sun below the horizon is a legal authored state (it is night), but it is also what an
+            // inverted Translation looks like — and that mistake shipped in four scenes. Say it once, with
+            // the number, rather than leaving "why is everything black" to be discovered.
+            if ( m_Atmosphere.SunDirection.y < 0.0f && !m_BelowHorizonLogged )
+            {
+                LOG_WARN( "[SkyAtmosphere] The atmosphere sun is BELOW the horizon (elevation {:.1f} deg) — "
+                          "the sky renders as night. If that is not intended, the light's Translation is "
+                          "the direction the light TRAVELS, so a sun overhead points DOWN.",
+                          glm::degrees( std::asin( glm::clamp( m_Atmosphere.SunDirection.y, -1.0f, 1.0f ) ) ) );
+                m_BelowHorizonLogged = true;
+            }
+        }
+        else
+        {
+            m_Atmosphere = AtmosphereEnv{};
+        }
+
+        UploadSkyParams();
+    }
+
+    void SkyboxRenderer::UploadSkyParams()
+    {
+        if ( !m_SkyParams || !m_UseProceduralSky )
+            return;
+
+        const SkyGpuPayload payload = PackSky( m_SunDir, m_Sky );
+        m_SkyParams->SetData( &payload, kSkyPayloadBytes );
+    }
+
     void SkyboxRenderer::EnsureProceduralEnvironment()
     {
-        if ( !m_UseProceduralSky || !m_EnvDirty )
+        if ( !m_UseProceduralSky )
             return;
+
+        const bool explicitRequest = m_BakeRequested;
+        m_BakeRequested            = false;
+
+        if ( !ShouldRebakeSkyEnvironment( m_BakedSunDir, m_SunDir, m_Sky.RebakeSunAngleThreshold,
+                                          m_Sky.AutoRebakeEnvironment, static_cast<bool>( m_ProceduralEnv ),
+                                          explicitRequest ) )
+            return;
+
+        const SkyEnvironmentSize size = EnvironmentPanoramaSize( m_Sky.EnvironmentResolution );
+
+        if ( m_Sky.EnvironmentResolution == ECS::SkyEnvironmentResolution::High && !m_HighResCostLogged )
+        {
+            const SkyEnvironmentCost cost = SkyEnvironmentBakeCost( m_Sky.EnvironmentResolution );
+            LOG_INFO( "[SkyAtmosphere] Environment bake at High ({}x{}): panorama {:.1f} MiB + "
+                      "radiance/irradiance/prefiltered cubes {:.1f} MiB = {:.1f} MiB — paid PER LIVE "
+                      "SceneRenderer ({} live now).",
+                      size.Width, size.Height, BytesToMiB( cost.PanoramaBytes ), BytesToMiB( cost.CubeBytes ),
+                      BytesToMiB( cost.TotalBytes ), SceneRenderer::GetLiveRendererCount() );
+            m_HighResCostLogged = true;
+        }
 
         // The bake runs immediate compute dispatches; idle the device first (mirrors the editor's
         // skybox-swap path) since we're recreating GPU images that prior frames may have referenced.
         Renderer::GetInstance().WaitDeviceIdle();
 
         Environment baked =
-             EnvironmentManager::CreateProcedural( m_SunDir, m_SunIntensity, m_SunDiskRadius, m_Sky );
+             EnvironmentManager::CreateProcedural( size.Width, size.Height, m_SkyParams.get() );
         if ( !baked )
         {
-            m_EnvDirty = false; // bake failed (e.g. shader missing) — keep prior env; user can retry via Bake.
+            // Keep the previous environment and say why; the user can retry with the Bake button. Do NOT
+            // stamp m_BakedSunDir — a failed bake must not look like an up-to-date one.
+            LOG_ERROR( "[SkyAtmosphere] Environment bake at {}x{} failed — the previous environment is "
+                       "kept. The BakeProceduralSky compute shader is the usual cause.",
+                       size.Width, size.Height );
             return;
         }
 
@@ -106,8 +183,7 @@ namespace Desert::Graphic::System
             imageService->Unregister( previous.PreFilteredMap );
         }
 
-        m_BakedSunDir = glm::normalize( m_SunDir );
-        m_EnvDirty    = false;
+        m_BakedSunDir = m_SunDir;
     }
 
     void SkyboxRenderer::RegisterPasses( RenderGraphBuilder& builder )
@@ -127,8 +203,7 @@ namespace Desert::Graphic::System
         // Engine-generated procedural atmosphere (no HDR asset needed).
         if ( m_UseProceduralSky && m_ProceduralPipeline && m_ProceduralMaterial && m_ActiveCamera )
         {
-            m_ProceduralMaterial->Update( m_ActiveCamera, m_SunDir, m_SunIntensity, m_SunDiskRadius, m_Clouds,
-                                          m_Sky );
+            m_ProceduralMaterial->Update( m_ActiveCamera, m_SkyParams );
             renderer.SubmitFullscreenQuad( m_ProceduralPipeline.get(),
                                            m_ProceduralMaterial->GetMaterialExecutor() );
             return;

@@ -7,7 +7,7 @@
 #include <Engine/Graphic/Materials/MaterialOverrides.hpp>
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
-#include <Engine/Graphic/CloudSettings.hpp>
+#include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
 #include <Engine/Graphic/WindEnv.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
@@ -122,10 +122,20 @@ namespace Desert::Graphic
         void SetOutlineSettings( const glm::vec3& color, float width, float smoothness, bool enabled );
         const std::optional<Environment>& GetEnvironment();
 
-        // Procedural sky configuration (from the SkyAtmosphereComponent + directional light via the ECS).
-        // bakeNow = one-shot request from the editor's Bake button (rebuild the sky IBL).
-        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, float sunIntensity, float sunDiskRadius,
-                               bool bakeNow, const CloudSettings& clouds, const SkySettings& sky );
+        // Procedural sky configuration (from the SkyAtmosphereComponent + the atmosphere sun, via the ECS).
+        // sunDir is the direction TOWARD the sun, already normalized; bakeNow is the one-shot request from
+        // the editor's Bake button.
+        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky );
+
+        // The evaluated per-frame sky: sun direction and radiance, ambient above/below, night factor, the
+        // planet radius, and an OPAQUE handle to the packed sky-parameter buffer. This is the whole surface
+        // the volumetric cloud pass consumes — it never sees the sky's authoring representation, so a
+        // change to the palette cannot break it. Mirrors GetWind()/WindEnv.
+        const AtmosphereEnv& GetAtmosphere() const;
+
+        // How many SceneRenderers are alive right now. Every one of them pays for its own baked sky
+        // environment, which is why the bake announces its cost with this number beside it.
+        static uint32_t GetLiveRendererCount();
 
         const auto& GetMainCamera() const
         {

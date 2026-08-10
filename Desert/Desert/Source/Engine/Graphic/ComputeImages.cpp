@@ -5,7 +5,8 @@
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Graphic/Image.hpp>
-#include <Engine/Graphic/SkySettings.hpp>
+#include <Engine/Graphic/SkyPayload.hpp>
+#include <Engine/ShaderResources/StorageBuffer.hpp>
 
 #include <algorithm>
 
@@ -33,11 +34,10 @@ namespace Desert::Graphic
     }
 
     std::shared_ptr<Image2D> ComputeImages::BakeProceduralPanorama( uint32_t width, uint32_t height,
-                                                                    const glm::vec3& sunDir, float intensity,
-                                                                    float diskRadius, const SkySettings& sky )
+                                                                    ShaderResources::StorageBuffer* skyParams )
     {
         const auto shader = GetComputeShader( "BakeProceduralSky" );
-        if ( !shader )
+        if ( !shader || !skyParams )
             return nullptr;
 
         Core::Formats::Image2DSpecification outputInfo = {
@@ -53,33 +53,15 @@ namespace Desert::Graphic
         if ( !output )
             return nullptr;
 
-        // Matches the push-constant block in BakeProceduralSky.glsl.comp (8 vec4 = 128 bytes, the guaranteed
-        // push-constant minimum). Carries the artistic SkyConfig so the baked IBL matches the visible sky.
-        struct PushData
-        {
-            glm::vec4 SunDirection; // xyz toward sun, w intensity
-            glm::vec4 SkyParams;    // x radius, y skyBrightness, z horizonFalloff, w sunGlow
-            glm::vec4 Zenith;       // rgb, w sunsetIntensity
-            glm::vec4 Horizon;      // rgb, w starIntensity
-            glm::vec4 SunColor;     // rgb
-            glm::vec4 SunsetColor;  // rgb
-            glm::vec4 Ground;       // rgb
-            glm::vec4 Night;        // rgb
-        } push;
-        push.SunDirection = glm::vec4( glm::normalize( sunDir ), intensity );
-        push.SkyParams    = glm::vec4( diskRadius, sky.SkyBrightness, sky.HorizonFalloff, sky.SunGlow );
-        push.Zenith       = glm::vec4( sky.ZenithColor, sky.SunsetIntensity );
-        push.Horizon      = glm::vec4( sky.HorizonColor, sky.StarIntensity );
-        push.SunColor     = glm::vec4( sky.SunColor, 0.0f );
-        push.SunsetColor  = glm::vec4( sky.SunsetColor, 0.0f );
-        push.Ground       = glm::vec4( sky.GroundColor, 0.0f );
-        push.Night        = glm::vec4( sky.NightColor, 0.0f );
-
         auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = "BakeProceduralSky" } );
         pipeline->Invalidate();
 
         pipeline->SetOutput( 0, output.get(), 0 );
-        pipeline->SetPushConstants( &push, sizeof( push ) );
+        // The bake reads the sky through the same std430 block the screen pass does — no second hand-packed
+        // mirror to keep in step. The binding is passed EXPLICITLY here while the graphics path uses the
+        // buffer's own binding number, so the two must be the same constant or the descriptor aliases
+        // something else entirely (that failure is a validation error, not a wrong picture).
+        pipeline->SetStorageBuffer( kSkyPayloadBinding, skyParams );
         pipeline->Dispatch( std::max( 1u, width / kWorkGroupSize ), std::max( 1u, height / kWorkGroupSize ),
                             1u );
 
