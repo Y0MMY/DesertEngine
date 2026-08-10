@@ -22,7 +22,7 @@ using Desert::Graphic::RenderPassOrderKey;
 using Desert::Graphic::RenderPhaseDependencies;
 using Desert::Graphic::RenderPhaseID;
 
-namespace RenderPhase = Desert::Graphic::RenderPhase;
+namespace RenderPhase     = Desert::Graphic::RenderPhase;
 namespace RenderPassOrder = Desert::Graphic::RenderPassOrder;
 
 namespace
@@ -31,17 +31,16 @@ namespace
     // builder feeds the sort.
     std::vector<RenderPhaseID> BuiltinDeclarationOrder()
     {
-        return { RenderPhase::k_BuiltinOrder,
-                 RenderPhase::k_BuiltinOrder + RenderPhase::k_BuiltinCount };
+        return { RenderPhase::k_BuiltinOrder, RenderPhase::k_BuiltinOrder + RenderPhase::k_BuiltinCount };
     }
 
     // The five phase edges SceneRenderer::RebuildRenderGraph declares.
     RenderPhaseDependencies EnginePhaseEdges()
     {
         RenderPhaseDependencies deps;
-        deps[RenderPhase::Geometry] = { RenderPhase::DepthPrePass, RenderPhase::Sky };
-        deps[RenderPhase::Outline]  = { RenderPhase::Geometry };
-        deps[RenderPhase::Lighting] = { RenderPhase::Geometry };
+        deps[RenderPhase::Geometry]    = { RenderPhase::DepthPrePass, RenderPhase::Sky };
+        deps[RenderPhase::Outline]     = { RenderPhase::Geometry };
+        deps[RenderPhase::Lighting]    = { RenderPhase::Geometry };
         deps[RenderPhase::PostProcess] = { RenderPhase::Lighting };
         return deps;
     }
@@ -62,8 +61,8 @@ namespace
         std::vector<RenderPassOrderKey> keys;
         for ( std::size_t i = 0; i < passes.size(); ++i )
         {
-            keys.push_back( RenderPassOrderKey{ passes[i].Phase, passes[i].OrderInPhase,
-                                                static_cast<uint64_t>( i ) } );
+            keys.push_back(
+                 RenderPassOrderKey{ passes[i].Phase, passes[i].OrderInPhase, static_cast<uint64_t>( i ) } );
         }
 
         std::vector<std::string> names;
@@ -79,20 +78,18 @@ namespace
 
 TEST( PhaseOrder, EngineEdgesProduceTheExpectedFrame )
 {
-    const std::set<RenderPhaseID> present = { RenderPhase::DepthPrePass, RenderPhase::Sky,
-                                              RenderPhase::Geometry,     RenderPhase::Outline,
-                                              RenderPhase::Lighting,     RenderPhase::Transparency,
-                                              RenderPhase::PostProcess,  RenderPhase::UI,
-                                              RenderPhase::Debug };
+    const std::set<RenderPhaseID> present = {
+         RenderPhase::DepthPrePass, RenderPhase::Sky,      RenderPhase::Geometry,
+         RenderPhase::Outline,      RenderPhase::Lighting, RenderPhase::Transparency,
+         RenderPhase::PostProcess,  RenderPhase::UI,       RenderPhase::Debug };
 
     const std::vector<RenderPhaseID> order =
          OrderRenderPhases( present, EnginePhaseEdges(), BuiltinDeclarationOrder() );
 
-    const std::vector<RenderPhaseID> expected = { RenderPhase::DepthPrePass, RenderPhase::Sky,
-                                                  RenderPhase::Geometry,     RenderPhase::Outline,
-                                                  RenderPhase::Lighting,     RenderPhase::Transparency,
-                                                  RenderPhase::PostProcess,  RenderPhase::UI,
-                                                  RenderPhase::Debug };
+    const std::vector<RenderPhaseID> expected = {
+         RenderPhase::DepthPrePass, RenderPhase::Sky,      RenderPhase::Geometry,
+         RenderPhase::Outline,      RenderPhase::Lighting, RenderPhase::Transparency,
+         RenderPhase::PostProcess,  RenderPhase::UI,       RenderPhase::Debug };
     EXPECT_EQ( order, expected );
 }
 
@@ -102,9 +99,8 @@ TEST( PhaseOrder, DependenciesBeatDeclarationOrder )
     RenderPhaseDependencies deps;
     deps[RenderPhase::Geometry] = { RenderPhase::Debug };
 
-    const std::set<RenderPhaseID> present = { RenderPhase::Geometry, RenderPhase::Debug };
-    const std::vector<RenderPhaseID> order =
-         OrderRenderPhases( present, deps, BuiltinDeclarationOrder() );
+    const std::set<RenderPhaseID>    present = { RenderPhase::Geometry, RenderPhase::Debug };
+    const std::vector<RenderPhaseID> order   = OrderRenderPhases( present, deps, BuiltinDeclarationOrder() );
 
     ASSERT_EQ( order.size(), 2u );
     EXPECT_EQ( order[0], RenderPhase::Debug );
@@ -143,10 +139,9 @@ TEST( PhaseOrder, AnUnregisteredPhaseIsPlacedLastInsteadOfDropped )
 
 TEST( PhaseOrder, IsIdenticalWhenTheSameGraphIsBuiltTwice )
 {
-    const std::set<RenderPhaseID> present = { RenderPhase::DepthPrePass, RenderPhase::Sky,
-                                              RenderPhase::Geometry,     RenderPhase::Outline,
-                                              RenderPhase::Lighting,     RenderPhase::Transparency,
-                                              RenderPhase::PostProcess,  RenderPhase::Debug };
+    const std::set<RenderPhaseID> present = {
+         RenderPhase::DepthPrePass, RenderPhase::Sky,          RenderPhase::Geometry,    RenderPhase::Outline,
+         RenderPhase::Lighting,     RenderPhase::Transparency, RenderPhase::PostProcess, RenderPhase::Debug };
 
     const std::vector<RenderPhaseID> first =
          OrderRenderPhases( present, EnginePhaseEdges(), BuiltinDeclarationOrder() );
@@ -189,6 +184,19 @@ TEST( PassOrder, EqualPassesKeepRegistrationOrder )
 
     const std::vector<std::string> expected = { "MeshGeometryPass", "TerrainPass", "GrassPass" };
     EXPECT_EQ( SortNames( passes, phaseOrder ), expected );
+
+    // And it must still hold past the size where a sort stops being an insertion sort — with a handful
+    // of elements even a comparator that ignores the tie-break keeps the input order by luck, which is
+    // how "undefined" survives a review.
+    std::vector<Pass>        many;
+    std::vector<std::string> manyExpected;
+    for ( int i = 0; i < 64; ++i )
+    {
+        const std::string name = "Pass" + std::to_string( i );
+        many.push_back( Pass{ name, RenderPhase::Geometry, RenderPassOrder::Default } );
+        manyExpected.push_back( name );
+    }
+    EXPECT_EQ( SortNames( many, phaseOrder ), manyExpected );
 }
 
 TEST( PassOrder, ExplicitPlacementOverrulesRegistrationOrder )
@@ -226,9 +234,8 @@ TEST( PassOrder, NearFieldSortsAfterDefaultAndFarField )
 // mistake as the particle "top-down" bug.
 TEST( PassOrder, CloudsCompositeBeforeParticlesInTransparency )
 {
-    const std::vector<RenderPhaseID> phaseOrder =
-         OrderRenderPhases( { RenderPhase::Geometry, RenderPhase::Transparency }, EnginePhaseEdges(),
-                            BuiltinDeclarationOrder() );
+    const std::vector<RenderPhaseID> phaseOrder = OrderRenderPhases(
+         { RenderPhase::Geometry, RenderPhase::Transparency }, EnginePhaseEdges(), BuiltinDeclarationOrder() );
 
     // Registration order agrees with the intent (clouds first) ...
     const std::vector<Pass> registeredCloudsFirst = {
@@ -265,7 +272,7 @@ TEST( PassOrder, ShuffledRegistrationAcrossPhasesSortsByPhaseThenRegistration )
          { "Skybox", RenderPhase::Sky, RenderPassOrder::Default },
     };
 
-    const std::vector<std::string> expected = { "Cascade0", "Cascade1", "Skybox",   "Terrain",
+    const std::vector<std::string> expected = { "Cascade0", "Cascade1",  "Skybox",    "Terrain",
                                                 "Grass",    "Particles", "DebugLines" };
     EXPECT_EQ( SortNames( passes, phaseOrder ), expected );
 }
@@ -291,14 +298,20 @@ TEST( PassOrder, ADuplicateRegistrationIndexStillGivesOneDefinedOrder )
 {
     // The registration index is unique by construction, but the sort must not degrade into
     // "unspecified" if a caller ever hands in equal keys — that is the very failure being fixed.
+    //
+    // Deliberately more passes than a sort switches to insertion sort for: std::sort leaves equal
+    // elements wherever the partitioning put them, and with a handful of elements that accidentally
+    // looks like input order. This is exactly how an undefined order passes review.
     const std::vector<RenderPhaseID> phaseOrder = { RenderPhase::Geometry };
 
     std::vector<RenderPassOrderKey> keys;
-    keys.push_back( RenderPassOrderKey{ RenderPhase::Geometry, RenderPassOrder::Default, 4 } );
-    keys.push_back( RenderPassOrderKey{ RenderPhase::Geometry, RenderPassOrder::Default, 4 } );
-    keys.push_back( RenderPassOrderKey{ RenderPhase::Geometry, RenderPassOrder::Default, 4 } );
+    std::vector<std::size_t>        expected;
+    for ( std::size_t i = 0; i < 64; ++i )
+    {
+        keys.push_back( RenderPassOrderKey{ RenderPhase::Geometry, RenderPassOrder::Default, 4 } );
+        expected.push_back( i );
+    }
 
-    const std::vector<std::size_t> expected = { 0, 1, 2 };
     EXPECT_EQ( OrderRenderPasses( keys, phaseOrder ), expected );
     EXPECT_EQ( OrderRenderPasses( keys, phaseOrder ), OrderRenderPasses( keys, phaseOrder ) );
 }

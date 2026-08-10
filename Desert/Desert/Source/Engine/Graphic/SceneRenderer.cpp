@@ -1026,9 +1026,8 @@ namespace Desert::Graphic
     void SceneRenderer::ForgetRenderSystem( const std::string& name )
     {
         m_RenderSystems.erase( name );
-        m_RenderSystemOrder.erase(
-             std::remove( m_RenderSystemOrder.begin(), m_RenderSystemOrder.end(), name ),
-             m_RenderSystemOrder.end() );
+        m_RenderSystemOrder.erase( std::remove( m_RenderSystemOrder.begin(), m_RenderSystemOrder.end(), name ),
+                                   m_RenderSystemOrder.end() );
     }
 
     void SceneRenderer::RegisterExternalPass( ExternalPassSpecification&& spec )

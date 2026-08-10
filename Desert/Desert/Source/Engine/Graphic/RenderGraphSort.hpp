@@ -170,9 +170,8 @@ namespace Desert::Graphic
                    {
                        const auto lhsRank = rankOf( keys[lhs].Phase );
                        const auto rhsRank = rankOf( keys[rhs].Phase );
-                       return std::tie( lhsRank, keys[lhs].OrderInPhase, keys[lhs].RegistrationIndex,
-                                        lhs ) < std::tie( rhsRank, keys[rhs].OrderInPhase,
-                                                          keys[rhs].RegistrationIndex, rhs );
+                       return std::tie( lhsRank, keys[lhs].OrderInPhase, keys[lhs].RegistrationIndex, lhs ) <
+                              std::tie( rhsRank, keys[rhs].OrderInPhase, keys[rhs].RegistrationIndex, rhs );
                    } );
 
         return indices;

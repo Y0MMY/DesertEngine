@@ -71,13 +71,12 @@ namespace Desert::Graphic
         // away — if your pass must be over or under a specific neighbour, say so with `orderInPhase`,
         // and the coupling survives someone reshuffling Init.
         void AddPass( const PassConfig& config );
-        void AddPass( const std::string& name, RenderPhaseID phase,
-                      std::function<void()>                    executeFunc,
+        void AddPass( const std::string& name, RenderPhaseID phase, std::function<void()> executeFunc,
                       const GraphicsPipelineSpecification&     pipelineSpec      = {},
                       std::shared_ptr<Framebuffer>             targetFramebuffer = nullptr,
                       const std::vector<RenderPassDependency>& dependencies      = {},
                       const std::optional<glm::vec4>&          clearColor        = std::nullopt,
-                      int32_t                                  orderInPhase = RenderPassOrder::Default );
+                      int32_t                                  orderInPhase      = RenderPassOrder::Default );
 
         void AddPhaseDependency( RenderPhaseID requiredPhase, RenderPhaseID dependentPhase );
         void AddTextureDependency( const std::string& textureName,
@@ -100,11 +99,11 @@ namespace Desert::Graphic
         // frame's draw order, and an unordered_map hands out its contents in hash-bucket order — stable
         // for a given set of keys, and quietly different the moment a system is added. The sort must not
         // be able to notice which container it read from.
-        std::vector<RenderPhaseID>                          m_PhaseOrder;
-        std::map<RenderPhaseID, std::vector<PassConfig>>    m_PhasePasses;
+        std::vector<RenderPhaseID>                       m_PhaseOrder;
+        std::map<RenderPhaseID, std::vector<PassConfig>> m_PhasePasses;
 
-        RenderPhaseDependencies                                          m_PhaseDependencies;
-        std::map<std::string, std::pair<RenderPhaseID, RenderPhaseID>>   m_TextureDependencies;
+        RenderPhaseDependencies                                        m_PhaseDependencies;
+        std::map<std::string, std::pair<RenderPhaseID, RenderPhaseID>> m_TextureDependencies;
 
         std::vector<PassConfig> m_SortedPasses;
 

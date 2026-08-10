@@ -14,12 +14,12 @@ namespace Desert::Graphic
 
     void RenderGraphBuilder::AddPass( const PassConfig& config )
     {
-        PassConfig stored = config;
+        PassConfig stored        = config;
         stored.RegistrationIndex = m_NextRegistrationIndex++;
 
-        LOG_DEBUG( "Added pass '{}' to phase '{}' (order {}, registration #{}) with {} dependencies",
-                   stored.Name, RenderPhaseToString( stored.Phase ), stored.OrderInPhase,
-                   stored.RegistrationIndex, stored.Dependencies.size() );
+        LOG_DEBUG( "Added pass '{}' to phase '{}' (order {}, registration #{}) with {} dependencies", stored.Name,
+                   RenderPhaseToString( stored.Phase ), stored.OrderInPhase, stored.RegistrationIndex,
+                   stored.Dependencies.size() );
 
         m_PhasePasses[stored.Phase].push_back( std::move( stored ) );
     }
@@ -29,8 +29,7 @@ namespace Desert::Graphic
                                       const GraphicsPipelineSpecification&     pipelineSpec,
                                       std::shared_ptr<Framebuffer>             targetFramebuffer,
                                       const std::vector<RenderPassDependency>& dependencies,
-                                      const std::optional<glm::vec4>&          clearColor,
-                                      int32_t                                  orderInPhase )
+                                      const std::optional<glm::vec4>& clearColor, int32_t orderInPhase )
     {
         PassConfig config;
         config.Name              = name;
@@ -122,8 +121,7 @@ namespace Desert::Graphic
         {
             for ( auto& pass : phasePasses )
             {
-                keys.push_back( RenderPassOrderKey{ pass.Phase, pass.OrderInPhase,
-                                                    pass.RegistrationIndex } );
+                keys.push_back( RenderPassOrderKey{ pass.Phase, pass.OrderInPhase, pass.RegistrationIndex } );
                 passes.push_back( &pass );
             }
         }
