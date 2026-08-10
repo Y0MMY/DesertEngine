@@ -8,6 +8,7 @@
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/ECS/System/MeshECSSystem.hpp>
 #include <Engine/ECS/System/SkyboxECSSystem.hpp>
+#include <Engine/Graphic/SkyPresets.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <algorithm>
@@ -147,19 +148,14 @@ namespace Desert::Editor
 
         // Procedural sky as the backdrop. Unlike the thumbnails (fixed camera looking down, so only the
         // ground hemisphere showed) this camera can point anywhere, so the whole dome is kept cohesive and
-        // fairly dark — a neutral studio backdrop that doesn't compete with the asset.
-        auto  skyEnt             = m_Scene->CreateNewEntity( "PreviewSky" );
-        auto& skyC               = skyEnt.AddComponent<ECS::SkyAtmosphereComponent>();
-        skyC.Data.ZenithColor    = { 0.10f, 0.13f, 0.19f };
-        skyC.Data.HorizonColor   = { 0.22f, 0.25f, 0.31f };
-        skyC.Data.GroundColor    = { 0.13f, 0.14f, 0.17f };
-        skyC.Data.SunColor       = { 1.00f, 0.95f, 0.85f };
-        skyC.Data.SkyBrightness  = 1.0f;
-        skyC.Data.HorizonFalloff = 0.6f;
-        skyC.Data.SunGlow        = 0.5f;
-        skyC.Data.StarIntensity  = 0.0f;
-        skyC.Data.SunIntensity   = 10.0f;
-        skyC.RequestBake         = true;
+        // fairly dark — a neutral studio backdrop that doesn't compete with the asset. Those numbers are
+        // the Studio Neutral preset, which exists precisely so this backdrop and the one an artist can
+        // pick in Details are the same set of values rather than two copies drifting apart.
+        auto  skyEnt = m_Scene->CreateNewEntity( "PreviewSky" );
+        auto& skyC   = skyEnt.AddComponent<ECS::SkyAtmosphereComponent>();
+        Graphic::ApplySkyPreset( ECS::SkyPreset::StudioNeutral, skyC.Data );
+        skyC.Data.ActivePreset = ECS::SkyPreset::StudioNeutral;
+        skyC.RequestBake       = true;
 
         // Same values through the direct call so the sky is enabled from frame 0 (the ECS command path alone
         // proved insufficient in a minimal scene — see AssetThumbnailRenderer). One packing helper, one

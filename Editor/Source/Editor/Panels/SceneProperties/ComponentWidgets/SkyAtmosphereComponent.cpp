@@ -2,10 +2,12 @@
 
 #include <ImGui/imgui.h>
 
+#include <Editor/Core/Commands/SceneCommands.hpp>
 #include <Editor/Panels/PropertyEditor/ComponentWidgetRegistry.hpp>
 #include <Editor/Panels/PropertyEditor/PropertyEditorBuilder.hpp>
 #include <Engine/ECS/Components.hpp>
 #include <Engine/Core/Scene.hpp>
+#include <Engine/Graphic/SkyPresets.hpp>
 
 #include <cmath>
 
@@ -66,6 +68,43 @@ namespace Desert::Editor
             if ( !haveSun )
                 ImGui::TextDisabled( "No directional light in the scene — sun position unknown" );
         }
+
+        // The preset picker. ActivePreset is a ReadOnly reflected field — the grid shows what the palette
+        // came from, it does not let you choose from there — so choosing happens here, in the one control
+        // that also has to write the thirteen palette fields behind it.
+        //
+        // The apply is ONE undo step over the whole entity, not the per-field byte copy the reflected grid
+        // records: undoing a preset has to put back thirteen values, and undoing a one-byte enum would
+        // leave the new palette wearing the old name.
+        void DrawPresetRow( ECS::Entity& entity, ECS::SkyAtmosphereData& sky )
+        {
+            ImGui::TextUnformatted( "Preset" );
+            ImGui::SameLine();
+            ImGui::PushItemWidth( -1 );
+            if ( ImGui::BeginCombo( "##skypreset", Graphic::SkyPresetName( sky.ActivePreset ) ) )
+            {
+                for ( const Graphic::SkyPresetEntry& entry : Graphic::kSkyPresets )
+                {
+                    if ( ImGui::Selectable( entry.Name, entry.Id == sky.ActivePreset ) )
+                    {
+                        const ECS::SkyPreset picked = entry.Id;
+                        Commands::MutateEntityUndoable( entity.GetComponent<ECS::UUIDComponent>().UUID,
+                                                        [picked, &sky]
+                                                        {
+                                                            Graphic::ApplySkyPreset( picked, sky );
+                                                            sky.ActivePreset = picked;
+                                                        } );
+                    }
+                    if ( entry.Id == sky.ActivePreset )
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopItemWidth();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Replaces the sky colours and the sun's look. Time of day, the "
+                                   "environment-bake settings and the planet radius are left alone." );
+        }
     } // namespace
 
     // All 23 fields of the atmosphere are AUTO-GENERATED from its REFLECT()/PROPERTY() metadata
@@ -112,10 +151,24 @@ namespace Desert::Editor
             }
 
             if ( !ctx.FieldFilter )
+            {
                 DrawSkyRamp( atmosphere.Data, sunElevation, haveSun );
+                DrawPresetRow( en, atmosphere.Data );
+            }
 
-            PropertyEditorBuilder::Draw( &atmosphere.Data, "SkyAtmosphereData", ctx.AssetMgr(), ctx.UIHelper,
-                                         ctx.FieldFilter );
+            // Snapshot the palette AFTER the preset row, so applying a preset is not then mistaken for a
+            // hand edit of the values it just wrote.
+            const Graphic::SkyPresetValues paletteBefore = Graphic::ExtractSkyPresetValues( atmosphere.Data );
+
+            const bool changed = PropertyEditorBuilder::Draw( &atmosphere.Data, "SkyAtmosphereData",
+                                                              ctx.AssetMgr(), ctx.UIHelper, ctx.FieldFilter );
+
+            // The preset name follows the VALUES, and only the palette values. Gating on the palette
+            // rather than on "some widget reported a change" is what keeps dragging the time of day or
+            // the rebake threshold from clearing a name that is still true; deriving the name with
+            // MatchSkyPreset rather than forcing Custom means dialling a colour back also restores it.
+            if ( changed && !( Graphic::ExtractSkyPresetValues( atmosphere.Data ) == paletteBefore ) )
+                atmosphere.Data.ActivePreset = Graphic::MatchSkyPreset( atmosphere.Data );
 
             // ── Environment lighting (IBL) bake — the sky's contribution to scene lighting/reflections is
             //    baked into cubemaps; this is a heavy device-idle op, so it's an explicit action. ──
