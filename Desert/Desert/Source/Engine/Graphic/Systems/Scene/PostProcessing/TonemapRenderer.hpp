@@ -81,7 +81,7 @@ namespace Desert::Graphic::System
 
         float m_Exposure   = 1.0f;
         float m_Gamma      = 2.2f;
-        float m_WhitePoint = 4.0f;
+        float m_WhitePoint = 8.0f;
 
         std::weak_ptr<Image2D> m_BloomImage;
         float                  m_BloomIntensity = 0.0f;

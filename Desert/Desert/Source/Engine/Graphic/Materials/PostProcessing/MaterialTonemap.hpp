@@ -29,7 +29,7 @@ namespace Desert::Graphic
         MPROPERTY( float, ExposureKey,         "u_ExposureKey",         0.18f )
         MPROPERTY( float, AutoExposureEnabled, "u_AutoExposureEnabled", 0.0f )
         MPROPERTY( float, ChromaticBloom,      "u_ChromaticBloom",      0.0f )
-        MPROPERTY( float, WhitePoint, "u_WhitePoint", 4.0f )
+        MPROPERTY( float, WhitePoint, "u_WhitePoint", 8.0f )
 
     private:
         Texture2DProperty* m_GeometryTexture = nullptr;

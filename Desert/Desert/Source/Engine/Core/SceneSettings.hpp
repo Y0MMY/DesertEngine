@@ -138,7 +138,7 @@ namespace Desert::Core
         // what this pass used to hard-code, and why every HDR highlight (a lit cloud above all) clipped to
         // a flat white silhouette instead of keeping its shading.
         PROPERTY( DisplayName( "White Point" ), Category( "Post Processing" ), Range( 1.0f, 20.0f ) )
-        float WhitePoint = 4.0f;
+        float WhitePoint = 8.0f;
 
         // Auto-exposure / eye adaptation.
         PROPERTY( DisplayName( "Auto Exposure" ), Category( "Post Processing" ) )

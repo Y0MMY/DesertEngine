@@ -371,11 +371,11 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Ambient Sky Contribution" ), Category( "Lighting" ), Range( 0.0f, 3.0f ),
                   EditCondition( "Enabled" ),
                   Tooltip( "Multiplier on the sky ambient term taken from the atmosphere." ) )
-        float AmbientSkyContribution = 1.00f;
+        float AmbientSkyContribution = 1.80f;
 
         PROPERTY( DisplayName( "Ambient Ground Contribution" ), Category( "Lighting" ), Range( 0.0f, 3.0f ),
                   EditCondition( "Enabled" ), Tooltip( "Multiplier on the ground-bounce ambient term." ) )
-        float AmbientGroundContribution = 0.25f;
+        float AmbientGroundContribution = 0.55f;
 
         PROPERTY( DisplayName( "Ambient Height Bias" ), Category( "Lighting" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ), Tooltip( "How much ambient favours cloud tops over cloud bases." ) )
@@ -389,11 +389,11 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Sun Tint" ), Category( "Lighting" ), Color, EditCondition( "Enabled" ),
                   Tooltip( "Artistic tint of the lit side. An override on the atmosphere's sun colour, not "
                            "a replacement for it." ) )
-        glm::vec3 SunTint = { 1.0f, 1.0f, 1.0f };
+        glm::vec3 SunTint = { 1.00f, 0.98f, 0.94f };
 
         PROPERTY( DisplayName( "Shadow Tint" ), Category( "Lighting" ), Color, EditCondition( "Enabled" ),
                   Tooltip( "Artistic tint of the shadowed side." ) )
-        glm::vec3 ShadowTint = { 1.0f, 1.0f, 1.0f };
+        glm::vec3 ShadowTint = { 1.00f, 0.97f, 0.93f };
 
         PROPERTY( DisplayName( "Precipitation Darkening" ), Category( "Lighting" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ), Tooltip( "How much Wetness darkens the cloud base." ) )
