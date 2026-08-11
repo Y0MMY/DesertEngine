@@ -96,7 +96,10 @@ local function getVulkanLibs(config)
         table.insert(libs, vulkan.lib .. "/spirv-cross-core" .. suffix .. ".lib")
         table.insert(libs, vulkan.lib .. "/spirv-cross-glsl" .. suffix .. ".lib")
 
-        table.insert(libs, vulkan.lib .. "/OGLCompiler" .. suffix .. ".lib")
+        -- OGLCompiler.lib is deliberately NOT here. It was a legacy glslang shim (OGLCompilersDLL,
+        -- two process-attach stubs) that glslang 14 folded into the main library and stopped shipping,
+        -- so the SDK this build pins to — 1.3.290 — has no such file and the link died on it. What it
+        -- used to provide comes in through shaderc_combined, which bundles glslang and SPIRV-Tools.
     else
         -- Link by name (the lib dirs are set workspace-wide in PlatformMacOS.lua);
         -- gmake mangles absolute library paths into broken -l flags.
