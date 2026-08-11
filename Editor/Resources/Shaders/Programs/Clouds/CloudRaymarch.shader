@@ -244,13 +244,15 @@ Shader "CloudRaymarch"
 
                         vec3 scattering = albedo * (sunColour * (energy * inScatter * powder) + ambient);
 
-                        // Analytic in-scatter integration over the step (Hillaire): the closed form of
-                        // integrating a constant source through the step's own extinction. A plain
-                        // `L += scattering * dt * T` overshoots wherever the step is long enough for the
-                        // transmittance to change inside it, which is exactly where the steps are long.
+                        // Analytic in-scatter integration over the step — see CloudIntegrateInScatter,
+                        // which is where the reasoning and the energy bound live, and which the CloudMath
+                        // tests drive as C++. This site used to divide by sigma, leaving a spurious
+                        // 1/sigma_t (per CENTIMETRE, so about five thousand) in every cloud's radiance:
+                        // the clouds saturated to flat white at any exposure while the silhouette stayed
+                        // correct, because transmittance is accumulated separately and was never wrong.
                         float sigma      = max(density * sigmaScale, 1e-9f);
                         float stepTrans  = CloudBeerTransmittance(sigma * dt);
-                        vec3  integrated = (scattering - scattering * stepTrans) / sigma;
+                        vec3  integrated = CloudIntegrateInScatter(scattering, sigma, dt);
 
                         scattered += transmittance * integrated;
                         transmittance *= stepTrans;

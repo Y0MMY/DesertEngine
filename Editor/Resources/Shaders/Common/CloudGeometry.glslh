@@ -293,6 +293,24 @@ float CloudBeerTransmittance(float opticalDepth)
     return exp(-max(opticalDepth, 0.0f));
 }
 
+// How much of a step's in-scattered light reaches the eye — the analytic integration of a source that is
+// constant across the step through that step's own extinction (Hillaire's energy-conserving form).
+//
+// `scattering` is albedo * incoming light: the single-scattering albedo is sigma_s/sigma_t, so this is
+// the source WITHOUT the scattering coefficient. Hillaire writes Sint = (S - S*exp(-sigma*dt))/sigma for
+// an S that carries sigma_s; substituting S = sigma_t * scattering cancels the division, which is why
+// there is no sigma in the denominator here and why writing one is such an easy mistake to make. It cost
+// this renderer a factor of 1/sigma_t — and sigma_t is per centimetre, so that factor was ~5000 and every
+// cloud saturated to flat white while its silhouette stayed correct.
+//
+// The property that makes that impossible to reintroduce quietly: the result is bounded by `scattering`.
+// A step cannot scatter more light toward the eye than the source it is integrating.
+vec3 CloudIntegrateInScatter(vec3 scattering, float sigma, float dt)
+{
+    float stepTransmittance = CloudBeerTransmittance(max(sigma, 0.0f) * max(dt, 0.0f));
+    return scattering * (1.0f - stepTransmittance);
+}
+
 // The powder ("dark edge") term: thin cloud edges facing the sun are darker than Beer alone predicts
 // because a single-scattering model cannot see the light that scattered out sideways.
 float CloudPowder(float density, float strength, float scale)

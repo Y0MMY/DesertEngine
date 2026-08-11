@@ -500,6 +500,61 @@ TEST( CloudBeer, IsOneAtZeroMonotoneAndMultiplicative )
                  R::CloudBeerTransmittance( a ) * R::CloudBeerTransmittance( b ), 1e-5f );
 }
 
+// ---- The per-step in-scatter integration ------------------------------------------------------------
+
+TEST( CloudIntegrateInScatter, NeverReturnsMoreLightThanTheSourceItIntegrates )
+{
+    // The invariant, and the only one that mattered: a step cannot scatter more toward the eye than the
+    // source it is integrating. The shader used to divide this by sigma, and sigma is per CENTIMETRE
+    // (0.0005 * ExtinctionScale), so the result came back thousands of times the source and every cloud
+    // saturated to flat white at any exposure. One assertion on the bound catches that whole class.
+    const glm::vec3 scattering( 0.9f, 0.85f, 0.8f );
+
+    for ( float sigma : { 1e-9f, 1.75e-4f, 0.01f, 1.0f, 100.0f } )
+    {
+        for ( float dt : { 0.0f, 1.0f, 700.0f, 100000.0f } )
+        {
+            const glm::vec3 integrated = R::CloudIntegrateInScatter( scattering, sigma, dt );
+            for ( int c = 0; c < 3; ++c )
+            {
+                EXPECT_GE( integrated[c], 0.0f );
+                EXPECT_LE( integrated[c], scattering[c] );
+            }
+        }
+    }
+}
+
+TEST( CloudIntegrateInScatter, SaturatesToTheWholeSourceAsTheStepGoesOpaque )
+{
+    const glm::vec3 scattering( 1.0f, 1.0f, 1.0f );
+
+    // Nothing crossed, nothing scattered.
+    EXPECT_NEAR( R::CloudIntegrateInScatter( scattering, 0.5f, 0.0f ).x, 0.0f, 1e-6f );
+
+    // Thoroughly opaque: the step delivers the source itself.
+    EXPECT_NEAR( R::CloudIntegrateInScatter( scattering, 1.0f, 200.0f ).x, 1.0f, 1e-6f );
+
+    // And it climbs there monotonically — a longer step is never darker than a shorter one.
+    float previous = -1.0f;
+    for ( float dt = 0.0f; dt <= 20.0f; dt += 0.5f )
+    {
+        const float value = R::CloudIntegrateInScatter( scattering, 0.3f, dt ).x;
+        EXPECT_GT( value, previous );
+        previous = value;
+    }
+}
+
+TEST( CloudIntegrateInScatter, DegeneratesToTheNaiveProductForAThinStep )
+{
+    // Where the step is optically thin the closed form has to agree with sigma*dt*source, which is what
+    // makes it a refinement of the naive accumulation rather than a different model.
+    const glm::vec3 scattering( 2.0f, 2.0f, 2.0f );
+    const float     sigma = 1.75e-4f; // the real per-centimetre figure at ExtinctionScale 0.35
+    const float     dt    = 50.0f;
+
+    EXPECT_NEAR( R::CloudIntegrateInScatter( scattering, sigma, dt ).x, 2.0f * sigma * dt, 1e-4f );
+}
+
 TEST( CloudPowder, DarkensThinEdgesAndVanishesWhereItIsTurnedOff )
 {
     EXPECT_FLOAT_EQ( R::CloudPowder( 0.5f, 0.0f, 2.0f ), 1.0f ); // strength 0 = no effect at all
