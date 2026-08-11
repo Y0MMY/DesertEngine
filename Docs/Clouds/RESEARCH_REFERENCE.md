@@ -1144,3 +1144,59 @@ built, not a file to be copied.
 2. `CloudTemporalResolve` gave a pixel with no usable history the current frame bit for bit — a raw
    jittered half-resolution sample beside an interior averaging ten frames, along the whole screen edge
    the camera turns toward. It now resolves to the 3×3 mean of the current frame.
+
+## L. Parity audit, 2026-08-12 — what we ended up with, checked against the reference
+
+Asked directly: did we reimplement this one-to-one? **No, and in most places deliberately not.** Read
+against the working copy at `/Users/daniilsavcenko/Desktop/Programming/C++/myptoject`, element by element.
+
+### L.1 Present on both sides, ours equal or ahead
+
+| Element | Reference | Ours |
+|---|---|---|
+| Vertical envelope by cloud type | `GetCloudLayerDensity` (`compute.comp:161-172`), three profiles hard-coded in the shader | `CloudHeightGradient` — the same three, but AUTHORED per preset as four-component gradients plus base/top powers |
+| Weather map composition | `GetBaseDensity` (`:174-193`): r = coverage, b = type | `CloudDensityCheap`: r = coverage, g = type, b = precipitation, a = density scale |
+| Shape erosion fbm | `0.625*g + 0.25*b + 0.125*w` (`:187`) | identical weights, `CloudDensityProcedural.glslh` |
+| Coverage / anvil | `pow(coverage, ValueRemap(height, 0.7, 0.8, 1.0, 0.8))` (`:185`) | `CloudAnvilCoverage`, same shape, the 0.5 endpoint exposed as Anvil Bias |
+| Curl warp at the cloud base | `GetDetailDensity` (`:195-210`) | same, `curl * (1 - heightFraction)` |
+| Wind skew with height | `SkewSamplePointWithWind` (`:97`) | `CloudShapeSamplePos` / `CloudDetailSamplePos`, plus an uplift term |
+| Sun cone march | six hard-coded offsets rotated into a sun basis (`:211-240`) | `CloudConeSampleOffset` — golden-angle spiral, count authored, and a basis that does not degenerate near the poles |
+| Phase function | single HG, and `eccentricity = 1.0` makes it identically ZERO (J.3 #3) | dual-lobe HG with a silver-lining term |
+| In-scatter probability | `Remap(0.5, …)` twice — the height fraction replaced by a constant (J.3 #4) | the real height fraction |
+| Beer / powder | both present | both, with powder strength and scale authored |
+| Multiple scattering | none in the Nubis2 path | `CloudMultiScatter`, octaves with extinction/scatter/phase falloff |
+| Step integration | `mTransmittance += full * light_energy * alpha` (`computeNubisCubed.comp:370`) | `CloudIntegrateInScatter` — Hillaire's analytic form, bounded by its source and tested |
+| Temporal | `reproject.comp` is a stub, body commented out (section D) | reprojection through the shell, neighbourhood clamp, mean fallback with no history |
+| Sky | Preetham, tonemapped INSIDE the sky (J.3 #13), `UP` convention inconsistent with the cloud code | one shared atmosphere model, evaluated in the ray's own direction, tonemapped once at the end |
+| Empty-space skip | baked SDF channel (Nubis3) / miss counting (Nubis2) | coarse/fine tier with miss counting — no bake required |
+
+### L.2 Present there, absent here
+
+1. **The two-tint cloud colour ramp** (`computeNubisCubed.comp:356-371`, J.5 #6) — **the one gap that shows.**
+   The reference never lets a cloud be white: it ramps between `_colB`, a cool blue anchored to the sky
+   (`0.23, 0.36, 0.47`), and `_colA`, a warm cream (`1.0, 0.87, 0.65`), both mixed toward the sky colour by
+   sun elevation. We have the knobs for this — `ScatteringAlbedo`, `SunTint`, `ShadowTint` — and **every
+   preset leaves all three at pure white**, so our only colour comes from the sun and the sky ambient.
+   With the numbers the Cirrus scene actually carries, that is `sunColour = SunColor x SunIntensity x
+   SunLightIntensityScale = (24.2, 23.2, 21.3)` against `ambient ~ (0.05, 0.14, 0.36)` — a ratio of about
+   **160:1**. A lit face therefore saturates while a shaded one falls to nearly black, which is precisely
+   the "white texture, correct shape" reading. The reference avoids the problem by never using physical
+   magnitudes at all.
+2. **The light voxel grid** (J.5 #2) — we cone-march per shaded sample instead. Costlier, and correct: the
+   reference's grid marches AWAY from the sun (J.3 #2).
+3. **God rays** — a radial blur in `tone.frag:54-90`. We have no equivalent.
+4. **Star field / night sky** — `GetStarColor` (`compute.comp:471`). Absent here.
+5. **Baked NVDF hero clouds** — out by decision, see section K.
+
+### L.3 What to do about L.2.1
+
+Ours is the more physical model and it is not the thing to throw away; what is missing is that nobody has
+ever authored the colour. Three levers, in the order worth trying:
+
+* **White Point 4 -> 8** (Scene Settings). A lit cloud lands around 5-7 with the radiance fix in; a white
+  point of 4 still clips its core, 8 fits the whole range and keeps the gradient.
+* **Ambient Sky Contribution up.** 160:1 is not what a cloud's shaded side does in life — the sky dome is
+  a large source. Raising it lifts shadows out of near-black without touching the lit side.
+* **Then, and only then, the tints.** `ShadowTint` toward the reference's cool blue and `SunTint` toward
+  its warm cream reproduce its look through knobs we already have — as art direction, on top of a model
+  that is right, rather than in place of one.
