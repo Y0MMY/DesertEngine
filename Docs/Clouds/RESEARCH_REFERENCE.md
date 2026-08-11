@@ -1101,3 +1101,46 @@ Every file in `img/`, with what it actually shows.
 | `near.gif` | yes | **Could not be read** — 24.4 MB, above the image-reading limit. No claim made about its contents. |
 | `cloud_short.gif` | **no** | **Could not be read** — 59.1 MB. No claim made. |
 | `cloud_day_night.gif` | **no** | **Could not be read** — 95.6 MB. No claim made. |
+
+## K. Addendum, 2026-08-11 — permission, and the decision it did not change
+
+**Permission.** One of the three authors (Janet Wang / `YueZhang1027`) granted use of the code in
+writing, including substantial verbatim copying, with attribution waived. That grant was re-examined
+against the repository rather than taken at face value, and two facts bound it:
+
+1. **`github.com/YueZhang1027/CIS5650-Final-Project-Frostnova` carries NO licence file** (GitHub API,
+   `license: null`). The MIT `LICENSE` described in J.2 exists only in the local working copy this
+   document was written from and names *our* copyright holder — a boilerplate carry-over, as J.2 already
+   said. Upstream, the default applies: all rights reserved.
+2. **The repository has three contributors** — `YueZhang1027` (75 commits), `xinyuniu123` (45),
+   `xchennnw` (44) — matching the three authors named in A.1. A grant from one covers one author's
+   contributions; the other two remain copyright holders of theirs, and in a project of this size the
+   contributions are interleaved rather than separable by directory. `src/vdb/*` adds a fourth party
+   (GPL-3, Callum James, J.2) whom nobody in the team can license to us at all.
+
+**Decision: unchanged from J.2 — reimplement, not port.** Not primarily for the licensing, but because
+the port does not buy what it would cost. Re-verified against the repository today:
+
+* **The two defects that prompted this pass are not fixable from here.** The flat-white clouds were our
+  tonemapper (see below), and the edge flicker is temporal — and section D still holds: `reproject.comp`
+  is a stub with its body commented out. There is no reprojection in this repository to take.
+* **Our raymarch is already at or past its lighting model.** `CloudRaymarch.shader` integrates
+  multi-scattered Beer, a dual-lobe phase with silver lining, powder, a sun cone march, sky/ground
+  ambient and aerial perspective — without defects 3, 4 and 5 of J.3, which the reference has.
+* **Its shape model is baked, ours is procedural.** Taking it means ~190 MB of `src/images/vdb` +
+  `src/images/noise` — assets Guerrilla's tools produced, which J.2 already marks *do not redistribute* —
+  into a public repository, in exchange for losing an infinite procedural cloudscape.
+
+J.5 stands unchanged as the list of what is still worth taking, and every item on it is an idea to be
+built, not a file to be copied.
+
+**What was actually fixed, same day (commit `clouds: the tonemapper that was not one…`):**
+
+1. `SceneComposite.shader` hard-coded the extended-Reinhard white point to 1.0, at which the operator
+   reduces algebraically to the identity: nothing was tonemapped and every luminance above 1 clipped at
+   the 8-bit store. That, and not the cloud model, is what rendered lit clouds as flat white cut-outs.
+   The white point is now `SceneSettings::WhitePoint` (default 4.0).
+   Note the symmetry with J.3 defect 13: the reference double-tonemaps, we did not tonemap at all.
+2. `CloudTemporalResolve` gave a pixel with no usable history the current frame bit for bit — a raw
+   jittered half-resolution sample beside an interior averaging ten frames, along the whole screen edge
+   the camera turns toward. It now resolves to the 3×3 mean of the current frame.
