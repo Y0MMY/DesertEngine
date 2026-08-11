@@ -23,6 +23,16 @@ group "Tests"
     project "RunAllTests"
         kind "Utility"
 
+        -- This project's postbuild WRITES run_tests.bat and then CALLS it, so it must be the last thing
+        -- the solution builds. Without these edges MSBuild is free to build it alongside the test
+        -- projects, and did: the Windows log shows "[ERROR] JobSystem.exe not found" interleaved with
+        -- the linker still emitting ShadowCascades.exe. Every test was reported missing because it was
+        -- still being compiled. (The same loop exists in BuildAllTests above with the dependson
+        -- commented out, which is presumably where this went.)
+        for _, premake_file in ipairs(test_premake_files) do
+            dependson(path.getname(path.getdirectory(premake_file)))
+        end
+
     if os.target() == "windows" then
         postbuildcommands {
             "if exist \"%{wks.location}\\run_tests.bat\" del \"%{wks.location}\\run_tests.bat\"",
@@ -32,7 +42,7 @@ group "Tests"
             "echo set TEST_DIR=%{wks.location}\\build\\Bin\\Tests\\%{cfg.buildcfg}>> \"%{wks.location}\\run_tests.bat\"",
             "echo set REPORT_DIR=%{wks.location}\\build\\TestReports>> \"%{wks.location}\\run_tests.bat\"",
             "echo if not exist \"!REPORT_DIR!\" mkdir \"!REPORT_DIR!\">> \"%{wks.location}\\run_tests.bat\"",
-            "echo set ERROR='0'>> \"%{wks.location}\\run_tests.bat\"",
+            "echo set ERROR=0>> \"%{wks.location}\\run_tests.bat\"",
             "echo echo ===== Starting Tests =====>> \"%{wks.location}\\run_tests.bat\"",
         }
 
@@ -45,18 +55,18 @@ group "Tests"
                 "echo   \"!TEST_DIR!\\"..test_name..".exe\" --gtest_output=xml:\"!REPORT_DIR!\\"..test_name..".xml\">> \"%{wks.location}\\run_tests.bat\"",
                 "echo   if !ERRORLEVEL! NEQ 0 (>> \"%{wks.location}\\run_tests.bat\"",
                 "echo     echo [FAIL] "..test_name..">> \"%{wks.location}\\run_tests.bat\"",
-                "echo     set ERROR='1'>> \"%{wks.location}\\run_tests.bat\"",
+                "echo     set ERROR=1>> \"%{wks.location}\\run_tests.bat\"",
                 "echo   )>> \"%{wks.location}\\run_tests.bat\"",
                 "echo ) else (>> \"%{wks.location}\\run_tests.bat\"",
                 "echo   echo [ERROR] "..test_name..".exe not found>> \"%{wks.location}\\run_tests.bat\"",
-                "echo   set ERROR='1'>> \"%{wks.location}\\run_tests.bat\"",
+                "echo   set ERROR=1>> \"%{wks.location}\\run_tests.bat\"",
                 "echo )>> \"%{wks.location}\\run_tests.bat\"",
             }
         end
 
         postbuildcommands {
             "echo echo ===== Test Results =====>> \"%{wks.location}\\run_tests.bat\"",
-            "echo if !ERROR! == '0' (>> \"%{wks.location}\\run_tests.bat\"",
+            "echo if \"!ERROR!\" == \"0\" (>> \"%{wks.location}\\run_tests.bat\"",
             "echo   echo ALL TESTS PASSED>> \"%{wks.location}\\run_tests.bat\"",
             "echo ) else (>> \"%{wks.location}\\run_tests.bat\"",
             "echo   echo SOME TESTS FAILED>> \"%{wks.location}\\run_tests.bat\"",
