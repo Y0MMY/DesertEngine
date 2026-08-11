@@ -43,6 +43,22 @@ if not exist "%ROOT%\ThirdParty\optick\src\optick.h" (
 )
 
 REM ---------------------------------------------------------------------------
+REM 2b. volk (Vulkan meta-loader) headers — not a submodule, and ThirdParty/volk/ is gitignored.
+REM     scripts/MacOS/Setup.sh has always cloned this; the Windows script did not, on the belief —
+REM     written into the comment there — that the LunarG SDK ships it on Windows. It does not matter
+REM     whether the SDK has a copy: the include is <volk/volk.h> and the directory on the include path
+REM     is ThirdParty (Desert/Dependencies.lua, `base = baseDir`), not the SDK. Windows therefore failed
+REM     with "Cannot open include file: 'volk/volk.h'" the moment it got as far as compiling.
+REM ---------------------------------------------------------------------------
+if not exist "%ROOT%\ThirdParty\volk\volk.h" (
+    echo --- Cloning volk into ThirdParty/volk
+    if exist "%ROOT%\ThirdParty\volk" rmdir /S /Q "%ROOT%\ThirdParty\volk"
+    git clone --depth 1 https://github.com/zeux/volk.git "%ROOT%\ThirdParty\volk" || exit /b 1
+) else (
+    echo --- volk headers present
+)
+
+REM ---------------------------------------------------------------------------
 REM 3. meshoptimizer (mesh simplification / LOD generation) — not a submodule.
 REM     Pinned to v0.20, the version BuildScripts/ThirdParty/MeshOptimizer.lua expects.
 REM ---------------------------------------------------------------------------

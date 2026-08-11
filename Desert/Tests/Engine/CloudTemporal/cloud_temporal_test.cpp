@@ -280,14 +280,16 @@ TEST( CloudBilateralUpsample, TheNearestTapIsNeverTheOneThatIsRejected )
     // Whichever corner the pixel sits closest to becomes the reference, so its own similarity is exactly
     // 1 and it cannot be argued away by its neighbours — the property that keeps the sum away from zero
     // and makes the degenerate branch unnecessary.
-    const float near          = 100000.0f;
-    const float far           = 15000000.0f;
+    // Not named `near`/`far`: <windows.h> still #defines both to nothing (16-bit segment qualifiers),
+    // gtest reaches that header on Windows, and `const float near = ...` compiles to `const float = ...`.
+    const float nearDistance  = 100000.0f;
+    const float farDistance   = 15000000.0f;
     const float corners[4][2] = { { 0.1f, 0.1f }, { 0.9f, 0.1f }, { 0.1f, 0.9f }, { 0.9f, 0.9f } };
 
     for ( int corner = 0; corner < 4; ++corner )
     {
-        float d[4] = { far, far, far, far };
-        d[corner]  = near;
+        float d[4] = { farDistance, farDistance, farDistance, farDistance };
+        d[corner]  = nearDistance;
 
         const R::CloudUpsampleWeights w =
              R::CloudBilateralUpsampleWeights( glm::vec2( corners[corner][0], corners[corner][1] ), d[0], d[1],

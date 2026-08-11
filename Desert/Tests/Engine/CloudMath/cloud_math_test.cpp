@@ -349,8 +349,11 @@ TEST( CloudHeightFraction, FollowsThePlanetCurvatureRatherThanWorldY )
     // 200 km along the ground, at the altitude of the layer base. On a flat model the height fraction
     // there would still be 0; on the shell the surface has dropped away by about 3 km, so the same world
     // Y is well up inside the layer. Getting this wrong flattens every distant cloud into the floor.
-    const glm::vec3 far( 200.0f, kBottomKm, 0.0f );
-    EXPECT_GT( R::CloudHeightFraction( far, kPlanetRadiusKm, kBottomKm, kThicknessKm ), 0.5f );
+    // Not named `far`: <windows.h> still #defines `near` and `far` to nothing (16-bit segment
+    // qualifiers), gtest reaches that header on Windows, and the declaration below then compiles to
+    // `const glm::vec3 ( ... )`.
+    const glm::vec3 farAlongGround( 200.0f, kBottomKm, 0.0f );
+    EXPECT_GT( R::CloudHeightFraction( farAlongGround, kPlanetRadiusKm, kBottomKm, kThicknessKm ), 0.5f );
 }
 
 // ---- Units ----------------------------------------------------------------------------------------
