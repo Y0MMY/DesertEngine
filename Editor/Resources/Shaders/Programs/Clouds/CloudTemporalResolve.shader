@@ -37,8 +37,14 @@ Shader "CloudTemporalResolve"
         //   Inertia on fast rotation - clouds "catch up" after a whip pan.
         //     Trigger: angular velocity high enough that most reprojected UVs leave the screen.
         //     Knob:    raise Temporal Blend Factor, or Temporal Mode = Off. Note that the pixels which
-        //              left the screen are already resolved to the current frame exactly; the inertia is
-        //              in the pixels that stayed.
+        //              left the screen carry no history at all; the inertia is in the pixels that stayed.
+        //
+        //   Softness in the band that a turn uncovers - one frame of 3x3 blur along the leading edge.
+        //     Trigger: any camera rotation, strongest at the screen edge it turns toward.
+        //     Knob:    none, and deliberately. This is what the edge costs instead of BOILING: a pixel
+        //              with no history resolves to the neighbourhood mean rather than to one jittered
+        //              half-resolution sample. It lasts exactly until that pixel has a history of its
+        //              own, which is the next frame.
         //
         //   Shell-parallax error - the reprojection puts every pixel on the shell mid-surface, so a cloud
         //              much nearer than that reprojects slightly wrong.
@@ -111,6 +117,9 @@ Shader "CloudTemporalResolve"
             // history value that nothing near this pixel supports.
             vec4 neighbourhoodMin = current;
             vec4 neighbourhoodMax = current;
+            // Summed in the same loop: the mean is what a pixel with no history resolves to, and taking
+            // it here means the nine taps are fetched once and used twice.
+            vec4 neighbourhoodSum = vec4(0.0f, 0.0f, 0.0f, 0.0f);
             for (int dy = -1; dy <= 1; ++dy)
             {
                 for (int dx = -1; dx <= 1; ++dx)
@@ -119,8 +128,13 @@ Shader "CloudTemporalResolve"
                     vec4  c   = texelFetch(u_CloudCurrent, tap, 0);
                     neighbourhoodMin = min(neighbourhoodMin, c);
                     neighbourhoodMax = max(neighbourhoodMax, c);
+                    neighbourhoodSum = neighbourhoodSum + c;
                 }
             }
+
+            // Nine taps always, because the border ones are CLAMPED into range rather than skipped — the
+            // divisor is a constant and there is no edge case to get wrong.
+            vec4 neighbourhoodMean = neighbourhoodSum * (1.0f / 9.0f);
 
             CloudTemporalBox box = CloudNeighbourhoodBox(neighbourhoodMin, neighbourhoodMax,
                                                          u_TemporalClampScale);
@@ -143,7 +157,8 @@ Shader "CloudTemporalResolve"
             // detail is undefined there. The image has one mip, and this says so.
             vec4 history = textureLod(u_CloudHistory, reprojection.Uv, 0.0f);
 
-            vec4 resolved = CloudTemporalResolve(current, history, historyUsable, u_TemporalBlendFactor, box);
+            vec4 resolved = CloudTemporalResolve(current, neighbourhoodMean, history, historyUsable,
+                                                  u_TemporalBlendFactor, box);
 
             imageStore(u_CloudResolved, coord, resolved);
         }

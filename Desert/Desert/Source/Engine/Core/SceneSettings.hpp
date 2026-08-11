@@ -134,6 +134,11 @@ namespace Desert::Core
         float Exposure       = 1.0f; // manual exposure (used when auto-exposure is off)
         PROPERTY( DisplayName( "Gamma" ), Category( "Post Processing" ), Range( 1.0f, 3.0f ) )
         float Gamma          = 2.2f;
+        // The luminance that tonemaps to pure white. 1.0 makes extended Reinhard the IDENTITY — which is
+        // what this pass used to hard-code, and why every HDR highlight (a lit cloud above all) clipped to
+        // a flat white silhouette instead of keeping its shading.
+        PROPERTY( DisplayName( "White Point" ), Category( "Post Processing" ), Range( 1.0f, 20.0f ) )
+        float WhitePoint = 4.0f;
 
         // Auto-exposure / eye adaptation.
         PROPERTY( DisplayName( "Auto Exposure" ), Category( "Post Processing" ) )

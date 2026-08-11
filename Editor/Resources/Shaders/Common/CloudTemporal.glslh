@@ -256,23 +256,37 @@ vec4 CloudClampToNeighbourhood(vec4 history, CloudTemporalBox box)
 
 // The resolve itself.
 //
-// `currentWeight` is Temporal Blend Factor: the share of the frame that was just marched. Two cases
-// return the current frame BIT FOR BIT rather than through the blend, and both are reachable:
+// `currentWeight` is Temporal Blend Factor: the share of the frame that was just marched.
 //
-//   * no usable history — the first frame after the images are allocated, and every pixel whose
-//     reprojection left the screen;
-//   * a weight of exactly 1, which is what the Low tier authors.
-//
-// Written as an early return and not as mix(history, current, 1.0): mix is free to evaluate
+// A WEIGHT OF EXACTLY 1 returns the current frame BIT FOR BIT — that is what the Low tier authors, and
+// it has to be the marched frame itself rather than a blend that happens to round to it. Written as an
+// early return and not as mix(history, current, 1.0): mix is free to evaluate
 // history + (current - history) * w, which is not the identity at w = 1 for large values, and
 // current * 1 + history * 0 is a NaN the moment the history holds an inf — which uninitialised image
 // memory is entitled to.
-vec4 CloudTemporalResolve(vec4 current, vec4 history, bool historyUsable, float currentWeight,
-                          CloudTemporalBox box)
+//
+// NO USABLE HISTORY resolves to `currentMean`, the 3x3 mean of the frame that was just marched, and NOT
+// to this pixel's own texel. That case is reachable every frame — it is every pixel whose reprojection
+// left the screen — so it is not a rare fallback but a BAND along the edge of the screen whose width
+// grows with how fast the camera turns. Resolving it to one texel put a single jittered, half-resolution
+// sample next to an interior that is the average of ten frames, and the seam between the two boiled:
+// stable in the middle of the screen, crawling at the sides. The mean is the better estimate of the very
+// thing the accumulation converges to — the jitter is a per-pixel dither, so averaging the neighbours
+// averages over its phases in ONE frame — and it costs nothing, because those nine taps were already
+// fetched to build the clamp box. The price is that a newly exposed pixel is soft for the one frame
+// before it has history of its own, which is the trade every guard-band-less reprojection makes.
+//
+// The mean is taken from the CURRENT frame alone, never from the history, so the inf/NaN that
+// uninitialised image memory is entitled to still cannot reach the output through this path.
+vec4 CloudTemporalResolve(vec4 current, vec4 currentMean, vec4 history, bool historyUsable,
+                          float currentWeight, CloudTemporalBox box)
 {
     float weight = clamp(currentWeight, 0.0f, 1.0f);
-    if (!historyUsable || weight >= 1.0f)
+    if (weight >= 1.0f)
         return current;
+
+    if (!historyUsable)
+        return currentMean;
 
     vec4 clamped = CloudClampToNeighbourhood(history, box);
     return current * weight + clamped * (1.0f - weight);

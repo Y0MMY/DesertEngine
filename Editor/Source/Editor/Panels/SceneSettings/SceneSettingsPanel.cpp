@@ -114,6 +114,11 @@ namespace Desert::Editor
             ImGui::SliderFloat( "Exposure (manual)", &s.Exposure, 0.0f, 5.0f );
             ImGui::EndDisabled();
             ImGui::SliderFloat( "Gamma", &s.Gamma, 1.0f, 3.0f );
+            ImGui::SliderFloat( "White Point", &s.WhitePoint, 1.0f, 20.0f );
+            Utils::ImGuiUtilities::Tooltip(
+                 "Luminance that maps to pure white. At 1.0 the tonemapper is the identity and every "
+                 "highlight above 1.0 clips to flat white; raise it to keep shading inside bright "
+                 "content (clouds, the sun's surroundings, emissive surfaces)." );
 
             ImGui::Spacing();
             ImGui::Checkbox( "Bloom", &s.EnableBloom );

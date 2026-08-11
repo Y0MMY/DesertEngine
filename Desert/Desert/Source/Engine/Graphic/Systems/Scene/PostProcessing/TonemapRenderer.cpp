@@ -80,8 +80,9 @@ namespace Desert::Graphic::System
 
         std::shared_ptr<Image2D> avgLuminance = m_AutoExposureImage.lock();
 
-        MaterialTonemap::Params params{ m_Exposure, m_Gamma, m_BloomIntensity, m_ExposureKey,
-                                        m_AutoExposureEnabled, m_ChromaticBloom };
+        MaterialTonemap::Params params{
+             m_Exposure,       m_Gamma,     m_BloomIntensity, m_ExposureKey, m_AutoExposureEnabled,
+             m_ChromaticBloom, m_WhitePoint };
 
         auto& renderer = Renderer::GetInstance();
         m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage(), bloomImage, avgLuminance, params );

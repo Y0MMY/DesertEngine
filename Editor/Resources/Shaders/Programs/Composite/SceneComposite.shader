@@ -16,11 +16,20 @@ Shader "SceneComposite"
             float u_ExposureKey;          // middle-grey target for auto-exposure
             float u_AutoExposureEnabled;  // > 0.5 -> use measured luminance instead of manual exposure
             float u_ChromaticBloom;       // lens dispersion strength on the bloom halo (0 = off)
+            float u_WhitePoint;           // the luminance that maps to pure white (see the operator below)
         };
 
         void main()
         {
-            const float pureWhite = 1.0;
+            // The luminance that maps to pure white. It is a UNIFORM and not a constant, and that is the
+            // whole point of this line: extended Reinhard is
+            //     L' = L * (1 + L / W^2) / (1 + L)
+            // and at W = 1 that expression reduces ALGEBRAICALLY to L' = L. The operator was hard-coded to
+            // W = 1, so this pass tonemapped nothing — every luminance above 1 walked through untouched and
+            // was clipped by the 8-bit store. That is what flattened bright content into paper silhouettes:
+            // a cloud lit to 2.0 and one lit to 6.0 both wrote 255 and lost every gradient between them.
+            // W is the value that now maps to 1.0, so everything below it keeps its shading.
+            float pureWhite = max(u_WhitePoint, 1.0);
 
             // Auto-exposure: scale so the adapted average luminance maps to the key value; else manual exposure.
             float exposure = u_Exposure;

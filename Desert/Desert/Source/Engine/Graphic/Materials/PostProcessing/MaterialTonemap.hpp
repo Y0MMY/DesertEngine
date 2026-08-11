@@ -17,6 +17,7 @@ namespace Desert::Graphic
             float ExposureKey;
             bool  AutoExposure;
             float ChromaticBloom; // lens dispersion strength on the bloom halo (0 = off)
+            float WhitePoint;     // luminance that maps to pure white (1 = no rolloff at all)
         };
 
         void Bind( const std::shared_ptr<Image2D>& targetImage, const std::shared_ptr<Image2D>& bloomImage,
@@ -28,6 +29,7 @@ namespace Desert::Graphic
         MPROPERTY( float, ExposureKey,         "u_ExposureKey",         0.18f )
         MPROPERTY( float, AutoExposureEnabled, "u_AutoExposureEnabled", 0.0f )
         MPROPERTY( float, ChromaticBloom,      "u_ChromaticBloom",      0.0f )
+        MPROPERTY( float, WhitePoint, "u_WhitePoint", 4.0f )
 
     private:
         Texture2DProperty* m_GeometryTexture = nullptr;

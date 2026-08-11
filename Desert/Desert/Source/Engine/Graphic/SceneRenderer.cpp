@@ -335,6 +335,8 @@ namespace Desert::Graphic
 
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetParams( sceneSettings.Exposure, sceneSettings.Gamma );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetWhitePoint( sceneSettings.WhitePoint );
 
         UNIQUE_GET_AS( System::MeshRenderer, m_RenderSystems["MeshSystem"] )
              ->SetWireframe( sceneSettings.WireframeMode );

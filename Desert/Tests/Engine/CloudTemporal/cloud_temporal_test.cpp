@@ -574,7 +574,7 @@ TEST( CloudTemporalBlend, TheAuthoredWeightIsTheShareOfTheCurrentFrame )
     const glm::vec4           current( 1.0f, 2.0f, 3.0f, 0.5f );
     const glm::vec4           history( 5.0f, 6.0f, 7.0f, 0.9f );
 
-    const glm::vec4 resolved = R::CloudTemporalResolve( current, history, true, 0.25f, box );
+    const glm::vec4 resolved = R::CloudTemporalResolve( current, current, history, true, 0.25f, box );
 
     for ( int c = 0; c < 4; ++c )
         EXPECT_NEAR( resolved[c], current[c] * 0.25f + history[c] * 0.75f, 1e-6f );
@@ -589,7 +589,7 @@ TEST( CloudTemporalBlend, ALowerWeightKeepsMoreOfTheHistory )
     float previous = 0.0f;
     for ( float weight = 0.9f; weight >= 0.05f; weight -= 0.1f )
     {
-        const glm::vec4 resolved = R::CloudTemporalResolve( current, history, true, weight, box );
+        const glm::vec4 resolved = R::CloudTemporalResolve( current, current, history, true, weight, box );
         EXPECT_GT( resolved.x, previous );
         previous = resolved.x;
     }
@@ -604,7 +604,7 @@ TEST( CloudTemporalBlend, TheHistoryIsClampedBeforeItIsBlendedIn )
     const glm::vec4           current( 0.5f );
     const glm::vec4           wildHistory( 40.0f );
 
-    const glm::vec4 resolved = R::CloudTemporalResolve( current, wildHistory, true, 0.1f, box );
+    const glm::vec4 resolved = R::CloudTemporalResolve( current, current, wildHistory, true, 0.1f, box );
     EXPECT_NEAR( resolved.x, 0.5f * 0.1f + 1.0f * 0.9f, 1e-6f );
 }
 
@@ -627,21 +627,51 @@ TEST( CloudTemporalOff, AWeightOfOneReturnsTheCurrentFrameBitForBit )
 
     for ( const glm::vec4& current : samples )
         for ( const glm::vec4& history : hostileHistories )
-            EXPECT_TRUE( SameBits( R::CloudTemporalResolve( current, history, true, 1.0f, box ), current ) );
+            EXPECT_TRUE(
+                 SameBits( R::CloudTemporalResolve( current, current, history, true, 1.0f, box ), current ) );
 }
 
-TEST( CloudTemporalOff, HistoryThatIsNotUsableReturnsTheCurrentFrameBitForBit )
+TEST( CloudTemporalOff, HistoryThatIsNotUsableResolvesToTheNeighbourhoodMean )
 {
     // Two ways to get here and both are ordinary: the first frame after the images are allocated (the
     // memory holds whatever the allocator left in it), and any pixel whose reprojection left the screen.
+    // The second happens EVERY frame the camera turns, along the edge it turns toward, which is why the
+    // answer is the 3x3 mean and not this pixel's own jittered texel — one sample of a dithered
+    // half-resolution march beside an interior that averages ten frames is the seam that crawls.
     const R::CloudTemporalBox box = BoxOf( glm::vec4( 0.0f ), glm::vec4( 1.0f ), 1.0f );
     const glm::vec4           current( 0.125f, 7.5f, 1e-12f, 0.75f );
+    const glm::vec4           mean( 0.2f, 6.0f, 0.5f, 0.6f );
 
     const glm::vec4 garbage( std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
                              -std::numeric_limits<float>::infinity(), 1e38f );
 
-    for ( float weight : { 0.02f, 0.1f, 0.5f, 1.0f } )
-        EXPECT_TRUE( SameBits( R::CloudTemporalResolve( current, garbage, false, weight, box ), current ) );
+    // Every weight below 1 — and the garbage history reaches the output through no path at all.
+    for ( float weight : { 0.02f, 0.1f, 0.5f } )
+        EXPECT_TRUE( SameBits( R::CloudTemporalResolve( current, mean, garbage, false, weight, box ), mean ) );
+
+    // A weight of exactly 1 is the authored "no accumulation" and still answers with the marched frame
+    // itself, history or no history.
+    EXPECT_TRUE( SameBits( R::CloudTemporalResolve( current, mean, garbage, false, 1.0f, box ), current ) );
+}
+
+TEST( CloudTemporalOff, AFlatNeighbourhoodWithNoHistoryIsStillTheCurrentFrameBitForBit )
+{
+    // Where the mean has nothing to average — open sky, a cloud interior, every pixel of a still frame at
+    // Resolution Scale = Full — the fallback degenerates to the texel it replaced. That degeneration is
+    // what keeps the change confined to the band it was written for.
+    const R::CloudTemporalBox box = BoxOf( glm::vec4( 0.0f ), glm::vec4( 1.0f ), 1.0f );
+
+    const glm::vec4 samples[] = { glm::vec4( 0.0f, 0.0f, 0.0f, 1.0f ),
+                                  glm::vec4( 1.2345678f, 1e-8f, 6.02e23f, 0.5f ),
+                                  glm::vec4( -3.5f, 1e-30f, 12345.678f, 0.0f ) };
+
+    const glm::vec4 garbage( std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity(), 1e38f );
+
+    for ( const glm::vec4& current : samples )
+        for ( float weight : { 0.02f, 0.1f, 0.5f } )
+            EXPECT_TRUE(
+                 SameBits( R::CloudTemporalResolve( current, current, garbage, false, weight, box ), current ) );
 }
 
 // ---- CLD-32a / CLD-96d: `Off` is a configuration, not a failure branch -------------------------------
@@ -678,7 +708,8 @@ namespace
             // A one-texel neighbourhood is the honest reduction of the 3x3 for a flat test image, and it
             // is the tightest box the clamp can be given.
             const R::CloudTemporalBox box = BoxOf( marched[i], marched[i], clampScale );
-            frame.Composited[i] = R::CloudTemporalResolve( marched[i], history[i], true, blendFactor, box );
+            frame.Composited[i] =
+                 R::CloudTemporalResolve( marched[i], marched[i], history[i], true, blendFactor, box );
         }
         return frame;
     }
