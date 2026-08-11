@@ -176,7 +176,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\VulkanSDK
-          key: vulkan-sdk-${{ env.VULKAN_SDK_VERSION }}
+          # The suffix is part of the key because the cache stores an INSTALL, not a download: a cached
+          # tree built without the debug component would make the install step below skip, and the
+          # component would never appear. Change the component set -> change this suffix.
+          key: vulkan-sdk-${{ env.VULKAN_SDK_VERSION }}-debuglibs
 
       - name: Install Vulkan SDK
         if: steps.cache-vulkan.outputs.cache-hit != 'true'
@@ -186,8 +189,13 @@ jobs:
           $url = "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe"
           Write-Host "Downloading $url"
           Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\vulkan.exe"
+          # com.lunarg.vulkan.debug — the "Debuggable Shader API Libraries", which is where the debug
+          # halves of the shader libs (shadercd.lib and friends) live. It is an OPTIONAL component, and
+          # a bare `install` with --default-answer takes the core only, so the Debug configuration
+          # linked against a shadercd.lib that was never installed. The cache key above carries the
+          # component set for exactly this reason — see the note on it.
           & "$env:RUNNER_TEMP\vulkan.exe" --root "C:\VulkanSDK\$ver" --accept-licenses `
-              --default-answer --confirm-command install
+              --default-answer --confirm-command install com.lunarg.vulkan.debug
           if ($LASTEXITCODE -ne 0) { throw "Vulkan SDK install failed ($LASTEXITCODE)" }
 
       - name: Export VULKAN_SDK
