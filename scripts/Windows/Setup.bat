@@ -65,11 +65,48 @@ if "%VULKAN_SDK%"=="" (
 )
 
 REM ---------------------------------------------------------------------------
-REM 5. Version header + project files
+REM 5. premake5 (project generator) — fetched, not vendored.
+REM     This step used to run "%ROOT%\vendor\bin\premake5.exe" unconditionally. That file has never
+REM     been in the repository and cannot be: .gitignore excludes *.exe, so committing it is not an
+REM     option that was passed over, it is one that is refused. Every clean checkout therefore failed
+REM     here with cmd's "The system cannot find the path specified" — including CI, on every commit.
+REM     Fetched on demand like Optick and meshoptimizer above, and pinned to the version the macOS
+REM     side installs from its package manager, so both platforms generate with the same generator.
+REM ---------------------------------------------------------------------------
+set "PREMAKE_VERSION=5.0.0-beta8"
+set "PREMAKE=%ROOT%\vendor\bin\premake5.exe"
+
+REM A premake5 already on PATH wins: a developer who installed one should not get a second copy.
+where premake5 >NUL 2>&1
+if not errorlevel 1 (
+    set "PREMAKE=premake5"
+    echo --- premake5 found on PATH
+) else (
+    if not exist "%PREMAKE%" (
+        echo --- Downloading premake5 %PREMAKE_VERSION%
+        if not exist "%ROOT%\vendor\bin" mkdir "%ROOT%\vendor\bin"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+            "$ErrorActionPreference = 'Stop';" ^
+            "$url = 'https://github.com/premake/premake-core/releases/download/v%PREMAKE_VERSION%/premake-%PREMAKE_VERSION%-windows.zip';" ^
+            "$zip = Join-Path $env:TEMP 'premake5.zip';" ^
+            "Invoke-WebRequest -Uri $url -OutFile $zip;" ^
+            "Expand-Archive -Path $zip -DestinationPath '%ROOT%\vendor\bin' -Force;" ^
+            "Remove-Item $zip -Force"
+        if errorlevel 1 (
+            echo [ERROR] could not download premake5. Install it manually and put premake5.exe on PATH.
+            exit /b 1
+        )
+    ) else (
+        echo --- premake5 present in vendor\bin
+    )
+)
+
+REM ---------------------------------------------------------------------------
+REM 6. Version header + project files
 REM ---------------------------------------------------------------------------
 call "%ROOT%\scripts\Windows\GenVersion.bat"
 echo --- Generating project files
-"%ROOT%\vendor\bin\premake5.exe" vs2022 || exit /b 1
+"%PREMAKE%" vs2022 || exit /b 1
 
 echo.
 echo === Setup complete ===
