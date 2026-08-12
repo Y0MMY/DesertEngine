@@ -149,8 +149,21 @@ Shader "CloudRaymarch"
 
             // Dither the entry point by a fraction of one step. Applied to the START and not to each
             // step, so the schedule stays the tested one.
+            //
+            // Dithered over the COARSE stride, not the fine one. The lattice that decides where a cloud
+            // BEGINS is the coarse tier's, and its period is CoarseStepMultiplier times the fine stride
+            // (CloudMarchAdvance: `coarse = stride * coarseMultiplier`) — the fine lattice is merely
+            // anchored to it by the one-stride back-step. Dithering by a fine stride therefore spread the
+            // start over only a THIRD of the period that matters, and a box filter of width P/3 over a
+            // periodic error of period P leaves sin(60 deg)/(pi/3) = 83% of it standing. That residue is
+            // what stacked into flat horizontal slabs above the horizon, where a grazing ray's entry
+            // distance changes so fast per pixel row that the lattice phase beats against the pixel grid
+            // every two or three rows. Over the full period the average is unbiased and the banding goes.
             float jitter = CloudJitter(vec2(coord), u_CameraPosition.w) * clamp(u_JitterStrength, 0.0f, 1.0f);
-            tEnter += jitter * CloudStepLength(tEnter, u_MinStepSize, u_MaxStepSize, u_StepGrowthRate);
+            float tStart = tEnter + jitter *
+                                         CloudStepLength(tEnter, u_MinStepSize, u_MaxStepSize,
+                                                         u_StepGrowthRate) *
+                                         max(u_CoarseStepMultiplier, 1.0f);
 
             vec3  sunDir   = u_SunDirection.xyz;
             float cosTheta = dot(dir, sunDir);
@@ -160,7 +173,10 @@ Shader "CloudRaymarch"
             float transmittance = 1.0f;
             vec3  scattered     = vec3(0.0f, 0.0f, 0.0f);
 
-            CloudMarchState state = CloudMarchBegin(tEnter);
+            // The march starts at the DITHERED position; tEnter stays the ray's true entry and is what
+            // the horizon and distance fades below are measured against, so those keep a value that does
+            // not carry a per-pixel dither.
+            CloudMarchState state = CloudMarchBegin(tStart);
 
             // A `for` with MaxSteps as its bound, never a `while` over a procedural field: an
             // unbounded loop is how one bad parameter combination becomes a GPU hang instead of a bad
@@ -259,7 +275,7 @@ Shader "CloudRaymarch"
                     }
                 }
 
-                state = CloudMarchAdvance(state, occupied, tEnter, u_MinStepSize, u_MaxStepSize,
+                state = CloudMarchAdvance(state, occupied, tStart, u_MinStepSize, u_MaxStepSize,
                                           u_StepGrowthRate, u_CoarseStepMultiplier,
                                           u_EmptySamplesBeforeCoarse);
             }
