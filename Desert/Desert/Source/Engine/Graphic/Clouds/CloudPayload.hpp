@@ -132,6 +132,12 @@ namespace Desert::Graphic
         int32_t EmptySamplesBeforeCoarse;
         int32_t LightMarchSamples;
         int32_t MultiScatterOctaves;
+
+        // ---- Cloud shadow map ----
+        // Half-width of the sun-space shadow map in world units, and whether the march reads it at all.
+        // Appended, not inserted: every offset asserted below is a promise to the shaders.
+        float   CloudShadowExtent;
+        int32_t CloudShadowEnabled;
     };
 
     // Offsets of the vec4 run, and of the first and last scalar. Spot-checking three of them would not
@@ -160,7 +166,9 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, TemporalBlendFactor ) == 460 );
     static_assert( offsetof( CloudGpuPayload, WeatherSeed ) == 468 );
     static_assert( offsetof( CloudGpuPayload, MultiScatterOctaves ) == 488 );
-    static_assert( sizeof( CloudGpuPayload ) == 492,
+    static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 492 );
+    static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 496 );
+    static_assert( sizeof( CloudGpuPayload ) == 500,
                    "The block ends at the last int. glm's vec4 has a 4-byte alignment (no SIMD gentypes "
                    "in this build), so C++ adds no tail padding — std430 does, which is why the buffer "
                    "below is created at the rounded-up size and not at sizeof." );
@@ -184,12 +192,31 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudWeatherMapBinding    = 6;
     inline constexpr uint32_t kCloudSceneDepthBinding    = 7;
     inline constexpr uint32_t kCloudDepthGuideBinding    = 8; // raymarch: the RGBA8 upsampling guide
+    inline constexpr uint32_t kCloudShadowMapBinding     = 9; // raymarch: the sun-space shadow map it reads
+
+    // The shadow pass's own output binding. Its inputs are the same weather map and noise volumes the
+    // raymarch binds, at the same numbers — one density field, one set of bindings.
+    inline constexpr uint32_t kCloudShadowOutputBinding = 0;
 
     // The temporal resolve's own bindings. Its output is the history image it fills; its two inputs are
     // the frame the raymarch just produced and the frame this stage produced last time.
     inline constexpr uint32_t kCloudResolvedOutputBinding = 0;
     inline constexpr uint32_t kCloudCurrentFrameBinding   = 3;
     inline constexpr uint32_t kCloudHistoryBinding        = 4;
+
+    /**
+     * Per-dispatch data for the shadow-map pass: where the map is centred and how far it reaches.
+     *
+     * Both numbers must be the ones the RAYMARCH projects with. The extent goes through
+     * CloudShadowExtentOf on both sides rather than being clamped twice, and the centre is the same
+     * camera position both passes are handed in the same frame.
+     */
+    struct CloudShadowPush
+    {
+        glm::vec4 Centre; // xyz = world centre (the camera), w = half-width in world units
+    };
+
+    static_assert( sizeof( CloudShadowPush ) == 16 );
 
     /**
      * Per-dispatch data for the raymarch: everything that changes with the CAMERA rather than with the
@@ -401,6 +428,14 @@ namespace Desert::Graphic
      * End below Start, and each one is a negative range or a division by zero in the shader. Repairing
      * them at the boundary means the shader can assume them, instead of every consumer re-checking.
      */
+    // The shadow map's half-width, clamped once and read by BOTH the pass that fills the map and the
+    // payload the march projects with. A map narrower than the layer is thick cannot contain a single sun
+    // ray through it; one wider than the far fade covers sky nothing will ever read.
+    inline float CloudShadowExtentOf( const ECS::VolumetricCloudData& data )
+    {
+        return glm::clamp( data.CloudShadowExtent, data.LayerThickness, glm::max( data.HorizonFadeEnd, 1.0f ) );
+    }
+
     inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const AtmosphereEnv& atmosphere,
                                             const WindEnv& wind, float timeSeconds )
     {
@@ -512,6 +547,9 @@ namespace Desert::Graphic
         p.EmptySamplesBeforeCoarse = glm::max( data.EmptySamplesBeforeCoarse, 1 );
         p.LightMarchSamples        = glm::max( data.LightMarchSamples, 1 );
         p.MultiScatterOctaves      = glm::clamp( data.MultiScatterOctaves, 1, 8 );
+
+        p.CloudShadowExtent  = CloudShadowExtentOf( data );
+        p.CloudShadowEnabled = data.CloudShadowMap ? 1 : 0;
 
         return p;
     }

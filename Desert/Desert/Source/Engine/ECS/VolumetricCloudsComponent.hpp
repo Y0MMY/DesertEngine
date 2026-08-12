@@ -498,6 +498,21 @@ namespace Desert::ECS
                   Tooltip( "Shadow-ray samples per shaded sample." ) )
         int LightMarchSamples = 4;
 
+        PROPERTY( DisplayName( "Cloud Shadow Map" ), Category( "Quality" ),
+                  Tooltip( "Precompute the sun's optical depth into a 2D map once per frame instead of "
+                           "marching a cone of samples from every shaded point. The cone is twelve of "
+                           "the eighteen texture fetches a shaded sample costs; the map is one. Its cost "
+                           "is fixed rather than proportional to how much cloud is on screen. Turn off "
+                           "to compare - the cone softens a self-shadow terminator slightly more." ) )
+        bool CloudShadowMap = true;
+
+        PROPERTY( DisplayName( "Cloud Shadow Extent" ), Category( "Quality" ), Length,
+                  Range( Common::Units::Metres( 2000.0f ), Common::Units::Metres( 200000.0f ) ),
+                  EditCondition( "CloudShadowMap" ),
+                  Tooltip( "Half-width of the shadow map around the camera. Smaller is sharper and "
+                           "covers less sky; clouds beyond it fall back to the cone march." ) )
+        float CloudShadowExtent = Common::Units::Metres( 30000.0f );
+
         PROPERTY( DisplayName( "Multi Scatter Octaves" ), Category( "Quality" ), Range( 1, 4 ),
                   Tooltip( "Multiple-scattering octaves. Arithmetic only - no extra rays are traced." ) )
         int MultiScatterOctaves = 2;

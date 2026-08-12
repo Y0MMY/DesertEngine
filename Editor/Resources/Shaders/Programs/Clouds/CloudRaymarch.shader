@@ -28,6 +28,7 @@ Shader "CloudRaymarch"
         #include <Common/CloudGeometry.glslh>
         #include <Common/CloudParams.glslh>
         #include <Common/CloudTemporal.glslh>
+        #include <Common/CloudShadow.glslh>
         #include <Common/CloudDensityProcedural.glslh>
 
         // rgba16f: radiance is pre-tonemap HDR and transmittance is in [0,1]; half carries about three
@@ -56,6 +57,10 @@ Shader "CloudRaymarch"
         // back afterwards. Point-sampled with texelFetch, never filtered: a filtered depth across a
         // silhouette averages foreground and background into a distance where nothing is.
         Uniform(7) sampler2D u_SceneDepth;
+
+        // The sun-space shadow map: the optical depth toward the sun, precomputed once per column by
+        // Programs/Clouds/CloudShadowMap.shader. Read in ONE fetch where the cone march took twelve.
+        Uniform(9) sampler2D u_CloudShadowMap;
 
         PushConstant CloudPush
         {
@@ -223,9 +228,22 @@ Shader "CloudRaymarch"
                     {
                         float dt = CloudStepLength(state.T, u_MinStepSize, u_MaxStepSize, u_StepGrowthRate);
 
-                        // --- optical depth toward the sun, by cone march ---
+                        // --- optical depth toward the sun ---
                         float sunDensityLength = 0.0f;
-                        for (int s = 0; s < coneCount; ++s)
+
+                        // The map answers for any sample inside its extent; anything beyond it, and the
+                        // whole thing when it is switched off, falls back to the cone below. The fallback
+                        // is not a rare path — the map is centred on the camera, so the far half of a
+                        // 150 km shell is always outside it — which is why the cone stays.
+                        vec2 shadowUv = CloudShadowUv(worldPos, cameraPos, sunDir, u_CloudShadowExtent);
+                        bool shadowed = u_CloudShadowEnabled != 0 && CloudShadowInside(shadowUv);
+                        if (shadowed)
+                        {
+                            sunDensityLength = CloudShadowDensityLength(
+                                 textureLod(u_CloudShadowMap, shadowUv, 0.0f), height);
+                        }
+
+                        for (int s = 0; !shadowed && s < coneCount; ++s)
                         {
                             vec3  samplePos = worldPos + coneOffset[s];
                             vec3  sampleKm  = samplePos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);

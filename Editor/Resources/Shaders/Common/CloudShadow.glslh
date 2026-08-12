@@ -1,0 +1,138 @@
+// The cloud SHADOW MAP's projection and sampling maths — the ONE source of truth.
+//
+// Compiled TWICE from this same text, exactly as Common/CloudGeometry.glslh is:
+//   * as GLSL, by Programs/Clouds/CloudShadowMap.shader (which writes it) and
+//     Programs/Clouds/CloudRaymarch.shader (which reads it);
+//   * as C++, by Desert/Tests/Engine/CloudMath/CloudGeometryReference.hpp, which the CloudMath tests drive.
+// The restricted GLSL/C++ dialect described at the top of Common/CloudGeometry.glslh applies here
+// unchanged: no swizzles, no `out` parameters, no arrays, `f`-suffixed literals, functions defined
+// before use.
+//
+// Requires, from the including shader:
+//   #include <Common/CloudGeometry.glslh>   (CloudRemapRange)
+//
+// ---- WHAT THIS REPLACES ----------------------------------------------------------------------------
+//
+// The optical depth from a shaded sample toward the sun. The march computes it by walking a CONE of
+// samples up the sun ray, which is correct and which costs two texture fetches per cone sample — twelve
+// of the eighteen a shaded sample takes at six samples, i.e. two thirds of the whole raymarch. Every one
+// of those walks re-derives something that depends only on WHERE THE SAMPLE IS, not on which ray reached
+// it, so neighbouring pixels re-walk almost the same air a hundred times over.
+//
+// A shadow map computes it once per column, in its own pass, and the march reads it in ONE fetch.
+//
+// ---- WHY IT IS PARAMETERISED ON THE SUN, NOT ON THE GROUND -----------------------------------------
+//
+// Every point on one sun ray must land on one texel — that is the whole property that makes a single
+// fetch answer "how much cloud is between me and the sun". So the map's plane is the plane ORTHOGONAL TO
+// THE SUN, and a world position projects onto it by dropping its component along the sun. A ground-plane
+// (XZ) parameterisation would only have this property with the sun straight overhead, and would smear
+// into uselessness exactly at the low sun angles where cloud shadows are most visible.
+//
+// ---- WHY FOUR SLICES AND NOT ONE -------------------------------------------------------------------
+//
+// A column has no single answer: a sample near the cloud top has almost nothing between it and the sun,
+// one near the base has the whole column. Storing one number and scaling it by height is the obvious
+// cheap approximation and it is a bad one — it makes every cloud self-shadow as a linear ramp regardless
+// of where its mass actually sits. So the pass records the accumulated density-length at FOUR heights up
+// the column and the march interpolates between the two that bracket its sample. Four values is one
+// RGBA fetch: the same cost as one.
+//
+// What is stored is DENSITY-LENGTH, not optical depth — the same quantity the cone march accumulates,
+// before ExtinctionScale multiplies it. That keeps ExtinctionScale a live slider instead of something
+// baked into the map.
+
+#ifndef CLOUD_SHADOW_GLSLH
+#define CLOUD_SHADOW_GLSLH
+
+// The height fractions, from the layer BASE upward, at which the column's accumulated density-length is
+// recorded. Slice i holds "how much cloud lies between height CLOUD_SHADOW_SLICE_HEIGHT(i) and the top".
+// The topmost slice is deliberately not 1.0: a sample exactly at the layer top has nothing above it by
+// construction, so a stored 1.0 would spend a channel on a value that is always zero.
+float CloudShadowSliceHeight(int slice)
+{
+    // 0.0, 0.25, 0.5, 0.75 — evenly spaced from the base up, leaving the always-zero top implicit.
+    return float(slice) * 0.25f;
+}
+
+// An orthonormal basis for the plane orthogonal to the sun. Deterministic and shared: the pass that
+// WRITES the map and the march that READS it must agree on it exactly, or every shadow lands somewhere
+// other than the cloud that cast it.
+//
+// The reference axis is swapped near the poles for the same reason CloudConeSampleOffset swaps it —
+// cross() with a nearly parallel vector loses all its precision, and a zero-length tangent is a NaN.
+vec3 CloudShadowRight(vec3 sunDir)
+{
+    vec3 reference = abs(sunDir.y) < 0.99f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+    return normalize(cross(reference, sunDir));
+}
+
+vec3 CloudShadowUp(vec3 sunDir)
+{
+    return cross(sunDir, CloudShadowRight(sunDir));
+}
+
+// Where @p worldPos lands on the map. @p centre is the world point the map is built around (the camera,
+// so the covered area follows the viewer) and @p extent is the map's HALF-WIDTH in world units.
+//
+// Returns UV in [0,1] at the covered area and outside it beyond — the caller decides what to do with a
+// sample that has left the map, and CloudShadowInside is how it asks.
+vec2 CloudShadowUv(vec3 worldPos, vec3 centre, vec3 sunDir, float extent)
+{
+    vec3  offset = worldPos - centre;
+    float scale  = 0.5f / max(extent, 1.0f);
+
+    float u = dot(offset, CloudShadowRight(sunDir)) * scale + 0.5f;
+    float v = dot(offset, CloudShadowUp(sunDir)) * scale + 0.5f;
+    return vec2(u, v);
+}
+
+// Whether a UV is on the map at all. Sampling outside it would clamp to the border and shadow a cloud
+// with whatever happened to be at the edge, which reads as a hard line across the sky.
+bool CloudShadowInside(vec2 uv)
+{
+    return uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
+}
+
+// The inverse of CloudShadowUv, for the pass that fills the map: the point on the plane through @p centre
+// that this texel's sun ray passes through. The ray itself is then that point plus any multiple of the
+// sun direction, which is what the shell intersection turns into an entry and an exit.
+vec3 CloudShadowPlanePoint(vec2 uv, vec3 centre, vec3 sunDir, float extent)
+{
+    float span = 2.0f * max(extent, 1.0f);
+    float x    = (uv.x - 0.5f) * span;
+    float y    = (uv.y - 0.5f) * span;
+    return centre + CloudShadowRight(sunDir) * x + CloudShadowUp(sunDir) * y;
+}
+
+// The density-length between a sample at @p heightFraction and the top of the layer, read out of the four
+// slices this texel stores.
+//
+// Piecewise-linear between the bracketing slices, and zero at the top by construction rather than by
+// storage. Monotonically non-increasing in height — more cloud lies above a low sample than a high one —
+// which is the property the test pins, because a shadow term that went the other way would light cloud
+// bases and darken cloud tops.
+float CloudShadowDensityLength(vec4 slices, float heightFraction)
+{
+    float h = clamp(heightFraction, 0.0f, 1.0f);
+
+    // Position within the four stored heights (0, 0.25, 0.5, 0.75) plus the implicit zero at 1.0.
+    //
+    // The index is clamped to 3 BEFORE the fraction is taken, not after: at h exactly 1.0 the unclamped
+    // floor is 4, which leaves a fraction of zero and returns the last stored slice in full — the layer
+    // top reporting the whole column above it. Clamping first makes that case f = 1 and the answer zero,
+    // which is what "nothing lies above the top" means.
+    float t = h * 4.0f;
+    int   i = min(int(floor(t)), 3);
+    float f = t - float(i);
+
+    // Between the last stored slice and the implicit zero at the layer top.
+    if (i == 3)
+        return slices.w * (1.0f - clamp(f, 0.0f, 1.0f));
+
+    float lo = i == 0 ? slices.x : (i == 1 ? slices.y : slices.z);
+    float hi = i == 0 ? slices.y : (i == 1 ? slices.z : slices.w);
+    return lo + (hi - lo) * clamp(f, 0.0f, 1.0f);
+}
+
+#endif // CLOUD_SHADOW_GLSLH

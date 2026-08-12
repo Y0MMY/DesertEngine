@@ -28,7 +28,12 @@ namespace Desert::Graphic::System
         // from frame to frame for the temporal stage to average it away.
         constexpr uint32_t kJitterSequenceLength = 64;
 
+        // The shadow map's resolution. 512 over the default 30 km extent is ~117 m a texel, which is
+        // about what the cone march it replaces resolved anyway (its own radius was 400 m).
+        constexpr uint32_t kCloudShadowMapSize = 512;
+
         constexpr const char* kWeatherShaderName   = "CloudWeather";
+        constexpr const char* kShadowShaderName    = "CloudShadowMap";
         constexpr const char* kRaymarchShaderName  = "CloudRaymarch";
         constexpr const char* kTemporalShaderName  = "CloudTemporalResolve";
         constexpr const char* kCompositeShaderName = "CloudComposite";
@@ -81,11 +86,13 @@ namespace Desert::Graphic::System
     void VolumetricCloudRenderer::Shutdown()
     {
         m_WeatherPipeline.reset();
+        m_ShadowPipeline.reset();
         m_RaymarchPipeline.reset();
         m_TemporalPipeline.reset();
         m_CompositePipeline.reset();
         m_CompositeMaterial.reset();
         m_WeatherMap.reset();
+        m_CloudShadowMap.reset();
         m_ScatterImage.reset();
         m_DepthGuideImage.reset();
         m_HistoryImages[0].reset();
@@ -120,6 +127,7 @@ namespace Desert::Graphic::System
         };
 
         m_WeatherPipeline  = makeCompute( kWeatherShaderName );
+        m_ShadowPipeline   = makeCompute( kShadowShaderName );
         m_RaymarchPipeline = makeCompute( kRaymarchShaderName );
         m_TemporalPipeline = makeCompute( kTemporalShaderName );
 
@@ -198,6 +206,28 @@ namespace Desert::Graphic::System
                 return false;
             }
             m_WeatherValid = false;
+        }
+
+        if ( !m_CloudShadowMap )
+        {
+            const Core::Formats::Image2DSpecification spec{
+                 .Tag        = "CloudShadowMap",
+                 .Width      = kCloudShadowMapSize,
+                 .Height     = kCloudShadowMapSize,
+                 .Format     = Core::Formats::ImageFormat::RGBA16F,
+                 .Mips       = 1u,
+                 .Usage      = Core::Formats::Image2DUsage::Image2D,
+                 .Properties = Core::Formats::Storage | Core::Formats::Sample,
+            };
+            m_CloudShadowMap = Image2D::Create( spec, nullptr );
+            if ( !m_CloudShadowMap )
+            {
+                // Not fatal: the march falls back to the cone for every sample, which is what it did
+                // before this map existed. Say so once rather than rendering slowly and silently.
+                LOG_WARN( "[Clouds] The {}x{} cloud shadow map could not be created; the raymarch will "
+                          "cone-march every shaded sample instead.",
+                          kCloudShadowMapSize, kCloudShadowMapSize );
+            }
         }
 
         const uint32_t scatterW = CloudScaledExtent( width, m_Data.ResolutionScale );
@@ -372,6 +402,34 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_WeatherMap.get() );
     }
 
+    void VolumetricCloudRenderer::DispatchShadowMap( const CloudNoiseSet& noise )
+    {
+        DESERT_PROFILE_SCOPE( "Clouds: ShadowMap" );
+
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+
+        // The centre and the extent the march will project with. Pushed from ONE place to both passes in
+        // the same frame: if they ever disagreed, every shadow would land somewhere other than the cloud
+        // that cast it — a coordinate bug wearing a lighting bug's clothes.
+        CloudShadowPush push{};
+        push.Centre = glm::vec4( camera->GetPosition(), CloudShadowExtentOf( m_Data ) );
+
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.ComputeImageBeginWrite( m_CloudShadowMap.get() );
+        m_ShadowPipeline->SetOutput( kCloudShadowOutputBinding, m_CloudShadowMap.get(), 0 );
+        m_ShadowPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
+        m_ShadowPipeline->SetInput( kCloudShapeNoiseBinding, noise.ShapeNoise.get() );
+        m_ShadowPipeline->SetInput( kCloudDetailNoiseBinding, noise.DetailNoise.get() );
+        m_ShadowPipeline->SetInput( kCloudCurlNoiseBinding, noise.CurlNoise.get() );
+        m_ShadowPipeline->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
+        m_ShadowPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
+
+        renderer.DispatchComputeInFrame( m_ShadowPipeline.get(), GroupCount( kCloudShadowMapSize ),
+                                         GroupCount( kCloudShadowMapSize ), 1 );
+        renderer.ComputeImageEndWrite( m_CloudShadowMap.get() );
+    }
+
     void VolumetricCloudRenderer::DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage )
     {
         DESERT_PROFILE_SCOPE( "Clouds: Raymarch" );
@@ -402,6 +460,10 @@ namespace Desert::Graphic::System
         m_RaymarchPipeline->SetInput( kCloudCurlNoiseBinding, noise.CurlNoise.get() );
         m_RaymarchPipeline->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
         m_RaymarchPipeline->SetInput( kCloudSceneDepthBinding, depthImage );
+        // Always bound, even when the march will not read it: a declared sampler with no image is an
+        // invalid descriptor set, not an unused one.
+        m_RaymarchPipeline->SetInput( kCloudShadowMapBinding,
+                                      m_CloudShadowMap ? m_CloudShadowMap.get() : m_WeatherMap.get() );
         m_RaymarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_RaymarchPipeline.get(), GroupCount( m_ScatterWidth ),
@@ -524,6 +586,11 @@ namespace Desert::Graphic::System
             m_WeatherBaked = wanted;
             m_WeatherValid = true;
         }
+
+        // S1b. The shadow map follows the weather map and precedes the march that reads it. Rebuilt
+        // every frame: it is centred on the camera and parameterised on the sun, and both move.
+        if ( m_CloudShadowMap && m_ShadowPipeline && m_Data.CloudShadowMap )
+            DispatchShadowMap( *noise );
 
         // S2.
         DispatchRaymarch( *noise, target->GetDepthAttachmentImage().get() );

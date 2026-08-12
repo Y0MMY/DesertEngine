@@ -140,6 +140,11 @@ layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
     int u_EmptySamplesBeforeCoarse;
     int u_LightMarchSamples;
     int u_MultiScatterOctaves;
+
+    // Cloud shadow map: half-width in world units, and whether the march reads it instead of marching a
+    // cone. Appended to match CloudGpuPayload, whose offsets are static_asserted against this order.
+    float u_CloudShadowExtent;
+    int   u_CloudShadowEnabled;
 };
 
 // The wind the CLOUDS drift with: the scene's single shared wind, scaled by the layer's own influence

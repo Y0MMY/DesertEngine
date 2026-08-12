@@ -50,5 +50,10 @@ namespace Desert::Tests::CloudGeometryRef
 
 #include <Common/CloudGeometry.glslh>
 
+// The shadow map's projection and read-out, compiled from the same text the two shaders include. This is
+// the header whose agreement matters most: the pass that FILLS the map and the march that READS it both
+// project through it, and a disagreement puts every shadow somewhere other than the cloud that cast it.
+#include <Common/CloudShadow.glslh>
+
     } // namespace
 } // namespace Desert::Tests::CloudGeometryRef

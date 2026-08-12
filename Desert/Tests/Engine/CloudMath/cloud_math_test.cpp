@@ -24,6 +24,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace R = Desert::Tests::CloudGeometryRef;
@@ -828,13 +829,117 @@ TEST( CloudDepth, GeometryNeverExtendsTheMarchBeyondTheViewDistance )
 
 // ---- The GPU payload --------------------------------------------------------------------------------
 
+// ---- The cloud shadow map ---------------------------------------------------------------------------
+
+TEST( CloudShadowProjection, EveryPointOnOneSunRayLandsOnOneTexel )
+{
+    // THE property the whole map rests on. If two points on the same sun ray projected to different
+    // texels, a single fetch could not answer "how much cloud is between me and the sun" at all.
+    for ( const glm::vec3& sun : { glm::vec3( 0.0f, 1.0f, 0.0f ), glm::normalize( glm::vec3( 1.0f, 1.0f, 0.0f ) ),
+                                   glm::normalize( glm::vec3( 0.3f, 0.05f, -0.9f ) ) } )
+    {
+        const glm::vec3 centre( 1000.0f, 2000.0f, -500.0f );
+        const glm::vec3 point( 12345.0f, 6789.0f, -4321.0f );
+        const glm::vec2 uv = R::CloudShadowUv( point, centre, sun, 30000.0f );
+
+        for ( const float along : { -50000.0f, -1.0f, 0.0f, 1.0f, 50000.0f } )
+        {
+            const glm::vec2 moved = R::CloudShadowUv( point + sun * along, centre, sun, 30000.0f );
+            EXPECT_NEAR( moved.x, uv.x, 1e-4f ) << "slid " << along << " along the sun";
+            EXPECT_NEAR( moved.y, uv.y, 1e-4f );
+        }
+    }
+}
+
+TEST( CloudShadowProjection, TheCentreIsTheMiddleAndTheExtentIsTheEdge )
+{
+    const glm::vec3 sun = glm::normalize( glm::vec3( 0.4f, 0.8f, 0.2f ) );
+    const glm::vec3 centre( 0.0f, 3000.0f, 0.0f );
+    const float     extent = 25000.0f;
+
+    const glm::vec2 middle = R::CloudShadowUv( centre, centre, sun, extent );
+    EXPECT_NEAR( middle.x, 0.5f, 1e-5f );
+    EXPECT_NEAR( middle.y, 0.5f, 1e-5f );
+    EXPECT_TRUE( R::CloudShadowInside( middle ) );
+
+    // One extent along either basis axis is exactly the border, and past it is off the map.
+    const glm::vec3 right = R::CloudShadowRight( sun );
+    EXPECT_NEAR( R::CloudShadowUv( centre + right * extent, centre, sun, extent ).x, 1.0f, 1e-5f );
+    EXPECT_FALSE(
+         R::CloudShadowInside( R::CloudShadowUv( centre + right * ( extent * 1.01f ), centre, sun, extent ) ) );
+}
+
+TEST( CloudShadowProjection, TheBasisIsOrthonormalEvenWithTheSunAtThePole )
+{
+    // The pole is where a careless basis degenerates: cross() with a nearly parallel reference loses all
+    // its precision, and a zero-length tangent is a NaN that spreads to every shadow on screen.
+    for ( const glm::vec3& sun :
+          { glm::vec3( 0.0f, 1.0f, 0.0f ), glm::vec3( 0.0f, -1.0f, 0.0f ),
+            glm::normalize( glm::vec3( 0.001f, 1.0f, 0.0f ) ), glm::normalize( glm::vec3( 1.0f, 0.02f, 0.0f ) ) } )
+    {
+        const glm::vec3 right = R::CloudShadowRight( sun );
+        const glm::vec3 up    = R::CloudShadowUp( sun );
+
+        EXPECT_NEAR( glm::length( right ), 1.0f, 1e-4f );
+        EXPECT_NEAR( glm::length( up ), 1.0f, 1e-4f );
+        EXPECT_NEAR( glm::dot( right, up ), 0.0f, 1e-4f );
+        EXPECT_NEAR( glm::dot( right, sun ), 0.0f, 1e-4f );
+        EXPECT_NEAR( glm::dot( up, sun ), 0.0f, 1e-4f );
+    }
+}
+
+TEST( CloudShadowProjection, UvAndTheWorldPointRoundTrip )
+{
+    const glm::vec3 sun = glm::normalize( glm::vec3( -0.2f, 0.6f, 0.77f ) );
+    const glm::vec3 centre( 500.0f, 1500.0f, 250.0f );
+    const float     extent = 40000.0f;
+
+    for ( float u = 0.0f; u <= 1.0f; u += 0.25f )
+        for ( float v = 0.0f; v <= 1.0f; v += 0.25f )
+        {
+            const glm::vec3 point = R::CloudShadowPlanePoint( glm::vec2( u, v ), centre, sun, extent );
+            const glm::vec2 back  = R::CloudShadowUv( point, centre, sun, extent );
+            EXPECT_NEAR( back.x, u, 1e-4f );
+            EXPECT_NEAR( back.y, v, 1e-4f );
+        }
+}
+
+TEST( CloudShadowReadout, MoreCloudLiesAboveALowSampleThanAHighOne )
+{
+    // The slices are cumulative from the top down, so the read-out must never increase with height. A
+    // shadow term that went the other way would light cloud bases and darken cloud tops — which is
+    // exactly the defect J.3 #2 records in the reference's light grid, arrived at from the other side.
+    const glm::vec4 slices( 9.0f, 6.0f, 3.0f, 1.0f ); // base -> 0.25 -> 0.5 -> 0.75
+
+    float previous = std::numeric_limits<float>::max();
+    for ( float h = 0.0f; h <= 1.0f; h += 0.02f )
+    {
+        const float value = R::CloudShadowDensityLength( slices, h );
+        EXPECT_LE( value, previous + 1e-5f ) << "height " << h;
+        EXPECT_GE( value, 0.0f );
+        previous = value;
+    }
+
+    // The stored heights come back exactly, and the top has nothing above it by construction.
+    EXPECT_NEAR( R::CloudShadowDensityLength( slices, 0.0f ), 9.0f, 1e-5f );
+    EXPECT_NEAR( R::CloudShadowDensityLength( slices, 0.25f ), 6.0f, 1e-5f );
+    EXPECT_NEAR( R::CloudShadowDensityLength( slices, 0.75f ), 1.0f, 1e-5f );
+    EXPECT_NEAR( R::CloudShadowDensityLength( slices, 1.0f ), 0.0f, 1e-5f );
+}
+
+TEST( CloudShadowReadout, AnEmptyColumnShadowsNothingAtAnyHeight )
+{
+    for ( float h = 0.0f; h <= 1.0f; h += 0.1f )
+        EXPECT_FLOAT_EQ( R::CloudShadowDensityLength( glm::vec4( 0.0f ), h ), 0.0f );
+}
+
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
     // std430 rounds the block up to its 16-byte alignment; the buffer must cover that, not sizeof.
-    // 492 and not 484 since the temporal stage landed: Temporal Blend Factor and Temporal Clamp Scale are
-    // read by the resolve shader and so are two more floats in the block. The rounded size is unchanged.
-    EXPECT_EQ( sizeof( CloudGpuPayload ), 492u );
-    EXPECT_EQ( kCloudPayloadBytes, 496u );
+    // 500 and not 492 since the shadow map landed: its extent and its enable flag are read by the march
+    // and so are two more scalars in the block, and the rounding now goes to 512 rather than 496.
+    EXPECT_EQ( sizeof( CloudGpuPayload ), 500u );
+    EXPECT_EQ( kCloudPayloadBytes, 512u );
     EXPECT_GE( kCloudPayloadBytes, sizeof( CloudGpuPayload ) );
     EXPECT_EQ( kCloudPayloadBytes % 16u, 0u );
 }

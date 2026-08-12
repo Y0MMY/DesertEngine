@@ -107,10 +107,14 @@ namespace Desert::Graphic::System
         void ReleaseHistory();
 
         void DispatchWeather();
+        // Fills the sun-space shadow map from the weather map and the shape noise. Runs before the
+        // raymarch, which reads it in one fetch where it used to march a cone.
+        void DispatchShadowMap( const CloudNoiseSet& noise );
         void DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage );
         void DispatchTemporalResolve();
 
         std::shared_ptr<ComputePipeline>  m_WeatherPipeline;
+        std::shared_ptr<ComputePipeline>  m_ShadowPipeline;
         std::shared_ptr<ComputePipeline>  m_RaymarchPipeline;
         std::shared_ptr<ComputePipeline>  m_TemporalPipeline;
         std::shared_ptr<GraphicsPipeline> m_CompositePipeline;
@@ -118,6 +122,7 @@ namespace Desert::Graphic::System
         std::unique_ptr<MaterialVolumetricClouds> m_CompositeMaterial;
 
         std::shared_ptr<Image2D> m_WeatherMap;
+        std::shared_ptr<Image2D> m_CloudShadowMap;
         std::shared_ptr<Image2D> m_ScatterImage;
         std::shared_ptr<Image2D> m_DepthGuideImage;
 
