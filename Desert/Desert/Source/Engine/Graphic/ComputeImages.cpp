@@ -93,8 +93,18 @@ namespace Desert::Graphic
 
         pipeline->SetInput( 0, input );
         pipeline->SetOutput( 1, output.get(), 0 );
-        pipeline->Dispatch( std::max( 1u, spec.Width / kWorkGroupSize ),
-                            std::max( 1u, spec.Height / kWorkGroupSize ), 6u );
+
+        // Dispatched over the FACE, not over the cross. ImageCubeSpecification::Width is the width of the
+        // CROSS — VulkanImageCube derives `faceSize = Width / 4` and creates the image at that extent —
+        // while the shaders normalize by `imageSize(outputTexture)`, which is the face. Dispatching the
+        // cross dimensions therefore launched 4x3 = TWELVE times the invocations the image has texels,
+        // and the surplus ones computed a direction outside the face and threw the result away on an
+        // out-of-range imageStore. For DiffuseIrradiance, where every invocation integrates 65536
+        // samples, that was 4.8 billion samples per bake instead of 400 million — and the bake runs
+        // every time the sun rotates 5 degrees. ProccessForImageCubeMips below already had this right.
+        const uint32_t faceSize = std::max( 1u, spec.Width / 4u );
+        const uint32_t groups   = ( faceSize + kWorkGroupSize - 1u ) / kWorkGroupSize;
+        pipeline->Dispatch( groups, groups, 6u );
 
         return output;
     }

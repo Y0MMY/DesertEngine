@@ -28,6 +28,11 @@ Shader "PanoramaToCubemap"
         LocalSize(32, 32, 1);
         void main(void)
         {
+        	// The dispatch covers the face rounded up to whole workgroups; anything past the edge has no
+        	// texel to write. See the note on the dispatch in ComputeImages::ProccessForImageCube.
+        	if (any(greaterThanEqual(ivec2(gl_GlobalInvocationID.xy), imageSize(outputTexture))))
+        		return;
+
         	vec3 direction = getSamplingVector();
 
             float phi = atan(direction.z, direction.x);

@@ -78,6 +78,12 @@ Shader "DiffuseIrradiance"
         LocalSize(32, 32, 1);
         void main(void)
         {
+        	// An invocation outside the face has nothing to write, and each one of them would otherwise run
+        	// the full 65536-sample integral before an out-of-range imageStore discarded it. The dispatch is
+        	// rounded up to whole workgroups, so this is what makes that rounding free.
+        	if (any(greaterThanEqual(ivec2(gl_GlobalInvocationID.xy), imageSize(outputTexture))))
+        		return;
+
         	vec3 N = getSamplingVector();
 
         	vec3 S, T;
