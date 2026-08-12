@@ -351,6 +351,66 @@ TEST( AtmosphereEnvRule, AmbientFollowsTheSameGradientTheShaderDraws )
     EXPECT_NEAR( night.GroundRadiance.b, 0.24f * 0.30f, 1e-5f );
 }
 
+TEST( AtmosphereEnvRule, TheSunTakesTheSunsetColourAsItGoesDown )
+{
+    // SunIrradiance is what the cloud march is lit by, and it is the ONLY route by which the colour of
+    // the light reaches a cloud. It used to be SunColor * SunIntensity with no dependence on elevation,
+    // so the sky reddened at dusk and every cloud in it stayed noon-white. The tint now mirrors
+    // Atmosphere.glslh's own — mix(sunsetColor, sunColor, smoothstep(0, 0.25, sunUp)) — which is what
+    // makes "the sky and the clouds see one sun" a fact rather than a comment.
+    SkyAtmosphereData data;
+    data.SunColor     = { 1.0f, 1.0f, 1.0f }; // deliberately neutral: any warmth must come from the ramp
+    data.SunsetColor  = { 1.0f, 0.4f, 0.2f };
+    data.SunIntensity = 10.0f;
+
+    const SkySettings sky = MakeSkySettings( data );
+
+    // High: the sun's own colour, untouched.
+    const auto high = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ), nullptr );
+    EXPECT_NEAR( high.SunIrradiance.r / high.SunIrradiance.b, 1.0f, 1e-5f );
+
+    // On the horizon: the sunset colour, and therefore red-dominant.
+    const auto low = EvaluateAtmosphere( sky, glm::vec3( 1.0f, 0.0f, 0.0f ), nullptr );
+    EXPECT_GT( low.SunIrradiance.r / low.SunIrradiance.b, 4.0f );
+
+    // And it reddens MONOTONICALLY on the way down — no band that jumps.
+    float previousRatio = 0.0f;
+    for ( float y = 0.30f; y >= 0.0f; y -= 0.02f )
+    {
+        const auto  env   = EvaluateAtmosphere( sky, glm::vec3( 1.0f, y, 0.0f ), nullptr );
+        const float ratio = env.SunIrradiance.r / std::max( env.SunIrradiance.b, 1e-6f );
+        EXPECT_GE( ratio, previousRatio - 1e-5f ) << "sun y = " << y;
+        previousRatio = ratio;
+    }
+}
+
+TEST( AtmosphereEnvRule, TheSunStopsLightingCloudsOnceItIsDown )
+{
+    // NightFactor was computed here and consumed by nothing, so a cloud at midnight went on receiving the
+    // full noon irradiance while the sky behind it had gone dark. What lights a cloud after sunset is the
+    // night sky, and that arrives through ZenithRadiance instead.
+    SkyAtmosphereData data;
+    data.SunColor     = { 1.0f, 1.0f, 1.0f };
+    data.SunIntensity = 10.0f;
+
+    const SkySettings sky   = MakeSkySettings( data );
+    const auto        night = EvaluateAtmosphere( sky, glm::vec3( 0.0f, -1.0f, 0.0f ), nullptr );
+
+    EXPECT_FLOAT_EQ( night.NightFactor, 1.0f );
+    EXPECT_NEAR( night.SunIrradiance.r, 0.0f, 1e-6f );
+    EXPECT_NEAR( night.SunIrradiance.g, 0.0f, 1e-6f );
+    EXPECT_NEAR( night.SunIrradiance.b, 0.0f, 1e-6f );
+
+    // Never negative on the way there, and never brighter than the daylight value.
+    const auto noon = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ), nullptr );
+    for ( float y = 1.0f; y >= -1.0f; y -= 0.05f )
+    {
+        const auto env = EvaluateAtmosphere( sky, glm::vec3( 0.3f, y, 0.0f ), nullptr );
+        EXPECT_GE( env.SunIrradiance.r, 0.0f ) << "sun y = " << y;
+        EXPECT_LE( env.SunIrradiance.r, noon.SunIrradiance.r + 1e-5f ) << "sun y = " << y;
+    }
+}
+
 TEST( AtmosphereEnvRule, CarriesTheSunAndThePlanetAndNormalizes )
 {
     SkyAtmosphereData data;

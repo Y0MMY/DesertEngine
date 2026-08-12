@@ -60,17 +60,32 @@ namespace Desert::Graphic
         const glm::vec3 dir = glm::normalize( towardSun );
 
         AtmosphereEnv env;
-        env.SunDirection  = dir;
-        env.SunIrradiance = sky.SunColor * sky.SunIntensity;
+        env.SunDirection = dir;
 
         // Identical blend to Atmosphere.glslh: day = smoothstep(-0.10, 0.20, sunDir.y).
         const float day = glm::smoothstep( -0.10f, 0.20f, dir.y );
+
+        // The sun's COLOUR is a function of its elevation, and that function already exists: this is
+        // Atmosphere.glslh:145 verbatim, the same tint the shader gives the solar disc and its glow.
+        // Mirroring it is what keeps the promise made two comments up — that the sky and the clouds see
+        // ONE sun. This used to read `sky.SunColor * sky.SunIntensity`, with no dependence on elevation
+        // at all, so the sky went to sunset orange while every cloud hanging in it stayed lit by the same
+        // noon white. Since SunIrradiance is read by the cloud march and nothing else, that white was
+        // the whole reason a cloud could never take the colour of the light falling on it.
+        const glm::vec3 sunTint = glm::mix( sky.SunsetColor, sky.SunColor, glm::smoothstep( 0.0f, 0.25f, dir.y ) );
+
+        env.NightFactor = 1.0f - day;
+
+        // ...and it goes out at night. NightFactor was computed here and read by nothing in the engine,
+        // so a cloud at midnight was still receiving the full noon irradiance while the sky around it had
+        // long since gone dark. What lights a cloud after sunset is the night sky, which arrives through
+        // ZenithRadiance below.
+        env.SunIrradiance = sunTint * sky.SunIntensity * ( 1.0f - env.NightFactor );
 
         env.ZenithRadiance = glm::mix( sky.NightColor, sky.ZenithColor, day ) * sky.SkyBrightness;
         env.GroundRadiance = glm::mix( sky.GroundColor * 0.30f, sky.GroundColor, day );
 
         env.SunAngularRadius = sky.SunAngularRadius;
-        env.NightFactor      = 1.0f - day;
         env.PlanetRadius     = sky.PlanetRadius;
         env.Valid            = true;
         env.ParamsBuffer     = paramsBuffer;
