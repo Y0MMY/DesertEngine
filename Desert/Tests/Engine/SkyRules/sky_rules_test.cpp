@@ -25,6 +25,8 @@ using Desert::Graphic::EnvironmentPanoramaSize;
 using Desert::Graphic::EvaluateAtmosphere;
 using Desert::Graphic::kSkyPackedVec4Count;
 using Desert::Graphic::kSkyPayloadBytes;
+using Desert::Graphic::kSkyRebakeMaxDeferSeconds;
+using Desert::Graphic::kSkyRebakeSettleSeconds;
 using Desert::Graphic::MakeSkySettings;
 using Desert::Graphic::PackSky;
 using Desert::Graphic::PlanetRadiusToWorldUnits;
@@ -32,6 +34,7 @@ using Desert::Graphic::ResolveSkyMode;
 using Desert::Graphic::SelectPrimarySky;
 using Desert::Graphic::ShouldRebakeSkyEnvironment;
 using Desert::Graphic::SkyEnvironmentBakeCost;
+using Desert::Graphic::SkyEnvironmentRebakeMayRun;
 using Desert::Graphic::SkyGpuPayload;
 using Desert::Graphic::SkyMode;
 using Desert::Graphic::SkySettings;
@@ -136,6 +139,50 @@ TEST( Rebake, FirstBakeHappensEvenWithAutoRebakeOff )
     // RE-baking, not a request to render an unlit world.
     EXPECT_TRUE( ShouldRebakeSkyEnvironment( SunAt( 0.0f ), SunAt( 0.0f ), 5.0f, /*autoRebake=*/false,
                                              /*hasEnvironment=*/false, false ) );
+}
+
+TEST( RebakeDebounce, ADragCollapsesIntoOneBakeWhenItEnds )
+{
+    // The angular threshold says the environment is STALE; this rule says when to act on it. At 5 degrees
+    // a drag crosses the threshold several times a second, and every crossing used to idle the device and
+    // rebuild four cube images. Nothing runs while the sun is still moving...
+    for ( float held = 0.0f; held < kSkyRebakeSettleSeconds; held += 0.01f )
+        EXPECT_FALSE( SkyEnvironmentRebakeMayRun( held, /*secondsSinceStale=*/0.05f, kSkyRebakeSettleSeconds,
+                                                  kSkyRebakeMaxDeferSeconds ) )
+             << "sun still for " << held << " s";
+
+    // ...and exactly once it stops.
+    EXPECT_TRUE( SkyEnvironmentRebakeMayRun( kSkyRebakeSettleSeconds, 0.05f, kSkyRebakeSettleSeconds,
+                                             kSkyRebakeMaxDeferSeconds ) );
+}
+
+TEST( RebakeDebounce, ASunThatNeverStopsStillGetsBaked )
+{
+    // The trap this bound exists for: the time-of-day driver moves the sun EVERY frame, so "wait until it
+    // holds still" alone would defer the bake forever and freeze the environment at whatever hour the
+    // scene was opened at. Sun permanently in motion, and it still refreshes.
+    EXPECT_FALSE( SkyEnvironmentRebakeMayRun( 0.0f, kSkyRebakeMaxDeferSeconds * 0.5f, kSkyRebakeSettleSeconds,
+                                              kSkyRebakeMaxDeferSeconds ) );
+    EXPECT_TRUE( SkyEnvironmentRebakeMayRun( 0.0f, kSkyRebakeMaxDeferSeconds, kSkyRebakeSettleSeconds,
+                                             kSkyRebakeMaxDeferSeconds ) );
+}
+
+TEST( RebakeDebounce, EitherConditionIsEnoughAndNeitherGoesBackwards )
+{
+    // Monotone in both arguments: waiting longer never turns a bake back off, which is what keeps the
+    // deferral from oscillating at the boundary.
+    for ( float still = 0.0f; still <= 0.30f; still += 0.01f )
+    {
+        bool seenTrue = false;
+        for ( float stale = 0.0f; stale <= 2.0f; stale += 0.05f )
+        {
+            const bool may =
+                 SkyEnvironmentRebakeMayRun( still, stale, kSkyRebakeSettleSeconds, kSkyRebakeMaxDeferSeconds );
+            if ( seenTrue )
+                EXPECT_TRUE( may ) << "still " << still << " stale " << stale;
+            seenTrue = seenTrue || may;
+        }
+    }
 }
 
 TEST( Rebake, ThresholdIsHonouredOnBothSides )

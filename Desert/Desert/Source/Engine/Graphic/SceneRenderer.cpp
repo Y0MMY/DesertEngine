@@ -387,7 +387,7 @@ namespace Desert::Graphic
         // graph records its command buffer — so the heavy compute + device idle stays at a safe boundary.
         {
             DESERT_PROFILE_SCOPE( "Sky: EnsureProceduralEnv" );
-            skyboxSystem->EnsureProceduralEnvironment();
+            skyboxSystem->EnsureProceduralEnvironment( sceneRenderInfo.Timestep.GetSeconds() );
         }
 
         // Recompute CSM cascade matrices once per frame BEFORE the render graph records (intra-phase pass

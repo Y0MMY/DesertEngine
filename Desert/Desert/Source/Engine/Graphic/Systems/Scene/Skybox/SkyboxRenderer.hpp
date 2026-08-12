@@ -33,10 +33,12 @@ namespace Desert::Graphic::System
         // in @p sky, which MakeSkySettings produced from the component.
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky );
 
-        // Bakes / rebakes the procedural-sky IBL when the rule says so (see ShouldRebakeSkyEnvironment).
-        // Call once per frame from a frame-boundary-safe point (BEFORE the render graph records), NOT from
-        // inside a pass — the bake idles the device.
-        void EnsureProceduralEnvironment();
+        // Bakes / rebakes the procedural-sky IBL when the rule says so (see ShouldRebakeSkyEnvironment
+        // for WHETHER, SkyEnvironmentRebakeMayRun for WHEN). Call once per frame from a
+        // frame-boundary-safe point (BEFORE the render graph records), NOT from inside a pass — the bake
+        // idles the device. @p deltaSeconds drives the debounce that keeps a drag from baking on every
+        // frame it crosses the angular threshold.
+        void EnsureProceduralEnvironment( float deltaSeconds );
 
         const std::optional<Environment> GetEnvironment() const
         {
@@ -94,6 +96,13 @@ namespace Desert::Graphic::System
         Environment m_ProceduralEnv;
         glm::vec3   m_BakedSunDir = glm::vec3( 0.0f, 1.0f, 0.0f );
         bool        m_BakeRequested = false;
+
+        // Debounce state (see SkyEnvironmentRebakeMayRun). m_SecondsSinceSunMoved is how long the sun has
+        // held still, m_SecondsSinceStale how long a rebake has been wanted; the first collapses a drag
+        // into one bake, the second stops a sun that never stops from deferring it forever.
+        glm::vec3 m_LastSeenSunDir       = glm::vec3( 0.0f, 1.0f, 0.0f );
+        float     m_SecondsSinceSunMoved = 0.0f;
+        float     m_SecondsSinceStale    = 0.0f;
 
         // The High-resolution memory report is emitted once per renderer, not once per bake: with the
         // time-of-day driver a bake can happen every few seconds, and a cost that is announced every time

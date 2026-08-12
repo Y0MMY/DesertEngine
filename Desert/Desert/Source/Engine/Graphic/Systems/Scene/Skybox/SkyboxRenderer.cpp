@@ -134,7 +134,7 @@ namespace Desert::Graphic::System
         m_SkyParams->SetData( &payload, kSkyPayloadBytes );
     }
 
-    void SkyboxRenderer::EnsureProceduralEnvironment()
+    void SkyboxRenderer::EnsureProceduralEnvironment( float deltaSeconds )
     {
         if ( !m_UseProceduralSky )
             return;
@@ -142,10 +142,37 @@ namespace Desert::Graphic::System
         const bool explicitRequest = m_BakeRequested;
         m_BakeRequested            = false;
 
+        // How long the sun has held still. Compared by direction rather than by "did anything write it",
+        // because the time-of-day driver rewrites the same value every frame when it is paused.
+        const float dt = glm::max( deltaSeconds, 0.0f );
+        if ( glm::dot( m_LastSeenSunDir - m_SunDir, m_LastSeenSunDir - m_SunDir ) > 1e-12f )
+        {
+            m_LastSeenSunDir       = m_SunDir;
+            m_SecondsSinceSunMoved = 0.0f;
+        }
+        else
+        {
+            m_SecondsSinceSunMoved += dt;
+        }
+
         if ( !ShouldRebakeSkyEnvironment( m_BakedSunDir, m_SunDir, m_Sky.RebakeSunAngleThreshold,
                                           m_Sky.AutoRebakeEnvironment, static_cast<bool>( m_ProceduralEnv ),
                                           explicitRequest ) )
+        {
+            m_SecondsSinceStale = 0.0f;
             return;
+        }
+
+        m_SecondsSinceStale += dt;
+
+        // The Bake button and the very first bake are answers to a question the user just asked, or the
+        // difference between an ambient-lit world and an unlit one. Neither waits.
+        const bool immediate = explicitRequest || !m_ProceduralEnv;
+        if ( !immediate && !SkyEnvironmentRebakeMayRun( m_SecondsSinceSunMoved, m_SecondsSinceStale,
+                                                        kSkyRebakeSettleSeconds, kSkyRebakeMaxDeferSeconds ) )
+            return;
+
+        m_SecondsSinceStale = 0.0f;
 
         const SkyEnvironmentSize size = EnvironmentPanoramaSize( m_Sky.EnvironmentResolution );
 

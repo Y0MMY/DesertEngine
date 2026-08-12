@@ -143,6 +143,29 @@ namespace Desert::Graphic
         return glm::degrees( std::acos( cosAngle ) ) > thresholdDeg;
     }
 
+    // How long the sun must hold STILL before a wanted rebake is allowed to run.
+    inline constexpr float kSkyRebakeSettleSeconds = 0.15f;
+    // ...and the longest a wanted rebake may be held back while the sun keeps moving. Without this second
+    // bound a sun that never stops — which is exactly what the time-of-day driver does — would defer the
+    // bake forever and freeze the environment at the hour the scene was opened at.
+    inline constexpr float kSkyRebakeMaxDeferSeconds = 1.0f;
+
+    // Whether a rebake that ShouldRebakeSkyEnvironment has already ASKED for may run this frame.
+    //
+    // The angular threshold decides that the environment is stale; this decides when to act on it. They
+    // are different questions, and conflating them is what made dragging the sun unusable: at 5 degrees
+    // per step a drag crosses the threshold several times a second, and every crossing idled the device
+    // and rebuilt four cube images. Waiting for the drag to END collapses that whole gesture into one
+    // bake, and the deferral bound keeps a continuously moving sun refreshing at ~1 Hz regardless.
+    //
+    // @p secondsSinceSunMoved counts from the last frame the sun direction actually changed;
+    // @p secondsSinceStale counts from the frame the rebake was first wanted.
+    inline bool SkyEnvironmentRebakeMayRun( float secondsSinceSunMoved, float secondsSinceStale,
+                                            float settleSeconds, float maxDeferSeconds )
+    {
+        return secondsSinceSunMoved >= settleSeconds || secondsSinceStale >= maxDeferSeconds;
+    }
+
     // ---------------------------------------------------------------------------------------------------
     // What the bake costs
     // ---------------------------------------------------------------------------------------------------
