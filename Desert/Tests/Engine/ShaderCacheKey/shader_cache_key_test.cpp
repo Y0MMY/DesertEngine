@@ -302,16 +302,16 @@ TEST_F( ShaderRootFixture, TheClosureListsEachFileOnce )
 
 // ---- The descriptor count a pipeline layout and a bound set have to agree on ------------------------
 
-TEST_F( ShaderRootFixture, TheRaymarchDeclaresNineDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheRaymarchDeclaresTenDescriptorsInSetZero )
 {
     // The regression guard for the failure this test file exists for. The raymarch gained a second
-    // storage image (the composite's depth guide, binding 8) and went from eight descriptors to nine;
-    // a pipeline built before that change and a set allocated after it could not be bound together.
-    // Nine is not a magic number here — it is counted from the shader's own text by the engine's own
-    // reflection, so it moves when the shader does.
+    // storage image (the composite's depth guide, binding 8) and went from eight descriptors to nine,
+    // then the cloud shadow map (binding 9) took it to ten; a pipeline built before either change and a
+    // set allocated after it could not be bound together. Ten is not a magic number here — it is counted
+    // from the shader's own text by the engine's own reflection, so it moves when the shader does.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 9u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 10u );
 
     EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // scatter target
     EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // sky params
@@ -322,6 +322,27 @@ TEST_F( ShaderRootFixture, TheRaymarchDeclaresNineDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // weather map
     EXPECT_TRUE( HasBinding( bindings, 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // scene depth
     EXPECT_TRUE( HasBinding( bindings, 8, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // depth guide
+    EXPECT_TRUE( HasBinding( bindings, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // cloud shadow map
+}
+
+TEST_F( ShaderRootFixture, TheShadowMapDeclaresItsOwnSixDescriptors )
+{
+    // It writes one storage image and reads the same density field the raymarch does, at the same
+    // binding numbers — one field, one set of bindings, so a mismatch between the two passes would have
+    // to be written twice to go unnoticed.
+    //
+    // SIX, including the curl noise at binding 5 that this pass never samples: the declaration comes
+    // from the density header it includes, and a declared sampler with no image bound is an invalid
+    // descriptor set rather than an unused one. That is precisely what this count is here to catch.
+    const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudShadowMap.shader" ) );
+
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 6u );
+    EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // the map it fills
+    EXPECT_TRUE( HasBinding( bindings, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // cloud params
+    EXPECT_TRUE( HasBinding( bindings, 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // shape noise
+    EXPECT_TRUE( HasBinding( bindings, 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // detail noise
+    EXPECT_TRUE( HasBinding( bindings, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // curl noise
+    EXPECT_TRUE( HasBinding( bindings, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // weather map
 }
 
 TEST_F( ShaderRootFixture, TheTemporalResolveDeclaresItsFourDescriptors )

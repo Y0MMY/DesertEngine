@@ -107,6 +107,11 @@ namespace
     // T7 has LANDED and consumes ShapeSeed, DetailSeed, Enabled and the regenerate request. It does not
     // consume the erosion-shaping fields below: those shape how the volumes are SAMPLED, which is the
     // raymarch's job. A debt booked against a finished task reads as paid, so they are owed by T8.
+    // Both cloud-shadow fields are read on the CPU where the payload is packed: the extent through
+    // CloudShadowExtentOf, which the shadow pass and the march both project with, and the toggle straight
+    // into the block the march branches on.
+    constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
+
     constexpr const char* kT8 = "T8 - weather map and raymarch: samples the density field and lights it";
     constexpr const char* kT8Steps =
          "T8 - weather map and raymarch: the step schedule and the sampling budget of the march";
@@ -219,6 +224,8 @@ namespace
          { "EmptySamplesBeforeCoarse", nullptr, kT8Steps },
          { "LightMarchSamples", nullptr, kT8Steps },
          { "MultiScatterOctaves", nullptr, kT8Steps },
+         { "CloudShadowMap", kCloudPayload },
+         { "CloudShadowExtent", kCloudPayload },
          { "TemporalMode", nullptr, kT9 },
          { "TemporalBlendFactor", nullptr, kT9 },
          { "TemporalClampScale", nullptr, kT9 },
