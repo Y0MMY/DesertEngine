@@ -46,6 +46,7 @@ namespace Desert::ECS
         Clear,
         FairWeather,
         PartlyCloudy,
+        SummerCumulus,
         Stratus,
         Overcast,
         Storm,

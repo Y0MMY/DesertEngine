@@ -332,7 +332,7 @@ TEST( VolumetricCloudReflection, QualityAndPresetSelectorsAreEnums )
          { "QualityLevel", 5u },
          { "ResolutionScale", 3u },
          { "TemporalMode", 2u },
-         { "Preset", 8u },
+         { "Preset", 9u }, // Custom + eight presets, Summer Cumulus included
     };
 
     for ( const auto& c : cases )
