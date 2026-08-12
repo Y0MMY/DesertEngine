@@ -170,6 +170,21 @@ Shader "CloudRaymarch"
             vec3  sunColour = u_SunIrradiance.xyz * u_SunIrradiance.w * u_SunTint.xyz;
             float sigmaScale = u_ExtinctionTint.w * CLOUD_EXTINCTION_PER_WORLD_UNIT;
 
+            // The cone toward the sun is the SAME for every shaded sample on this ray: its basis, its
+            // golden-angle spiral and its segment weights depend on sunDir and the authored distance and
+            // spread, never on where along the ray we are. It used to be rebuilt at every shaded sample —
+            // two crosses, a normalize, sin, cos, sqrt and four exp() per cone sample, times up to
+            // sixteen samples, times up to 128 steps. Built once here instead; the values are identical.
+            int coneCount = clamp(u_LightMarchSamples, 1, CLOUD_MAX_LIGHT_MARCH_SAMPLES);
+            vec3  coneOffset[CLOUD_MAX_LIGHT_MARCH_SAMPLES];
+            float coneWeight[CLOUD_MAX_LIGHT_MARCH_SAMPLES];
+            for (int s = 0; s < coneCount; ++s)
+            {
+                coneOffset[s] = CloudConeSampleOffset(sunDir, s, coneCount, u_LightMarchDistance,
+                                                      u_LightConeSpread);
+                coneWeight[s] = CloudConeSampleWeight(s, coneCount, u_LightMarchDistance);
+            }
+
             float transmittance = 1.0f;
             vec3  scattered     = vec3(0.0f, 0.0f, 0.0f);
 
@@ -210,12 +225,10 @@ Shader "CloudRaymarch"
 
                         // --- optical depth toward the sun, by cone march ---
                         float sunDensityLength = 0.0f;
-                        for (int s = 0; s < u_LightMarchSamples; ++s)
+                        for (int s = 0; s < coneCount; ++s)
                         {
-                            vec3 samplePos = worldPos + CloudConeSampleOffset(sunDir, s, u_LightMarchSamples,
-                                                                              u_LightMarchDistance,
-                                                                              u_LightConeSpread);
-                            vec3  sampleKm = samplePos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
+                            vec3  samplePos = worldPos + coneOffset[s];
+                            vec3  sampleKm  = samplePos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
                             float sampleH  = CloudLayerHeight(sampleKm, planetRadiusKm, bottomKm,
                                                               thicknessKm);
 
@@ -225,9 +238,7 @@ Shader "CloudRaymarch"
                             if (sampleH < 0.0f || sampleH > 1.0f)
                                 continue;
 
-                            sunDensityLength += CloudDensityCheap(samplePos, sampleH) *
-                                                CloudConeSampleWeight(s, u_LightMarchSamples,
-                                                                      u_LightMarchDistance);
+                            sunDensityLength += CloudDensityCheap(samplePos, sampleH) * coneWeight[s];
                         }
                         float tauSun = sunDensityLength * sigmaScale;
 

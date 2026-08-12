@@ -496,7 +496,7 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Light March Samples" ), Category( "Quality" ), Range( 1, 16 ),
                   Tooltip( "Shadow-ray samples per shaded sample." ) )
-        int LightMarchSamples = 6;
+        int LightMarchSamples = 4;
 
         PROPERTY( DisplayName( "Multi Scatter Octaves" ), Category( "Quality" ), Range( 1, 4 ),
                   Tooltip( "Multiple-scattering octaves. Arithmetic only - no extra rays are traced." ) )

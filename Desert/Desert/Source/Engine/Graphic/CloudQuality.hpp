@@ -92,12 +92,15 @@ namespace Desert::Graphic
                 .StepGrowthRate           = 0.008f,
                 .CoarseStepMultiplier     = 3.0f,
                 .EmptySamplesBeforeCoarse = 8,
-                .LightMarchSamples        = 6,
-                .MultiScatterOctaves      = 2,
-                .TemporalMode             = ECS::CloudTemporalMode::Reprojection,
-                .TemporalBlendFactor      = 0.10f,
-                .TemporalClampScale       = 1.50f,
-                .JitterStrength           = 1.00f,
+                // 4, not 6. The cone march is 12 of the 18 texture fetches a shaded sample costs — two
+                // per cone sample — so this one number is two thirds of the raymarch. Four keeps the
+                // shadow terminator readable; Ultra below still authors 8 for stills and captures.
+                .LightMarchSamples   = 4,
+                .MultiScatterOctaves = 2,
+                .TemporalMode        = ECS::CloudTemporalMode::Reprojection,
+                .TemporalBlendFactor = 0.10f,
+                .TemporalClampScale  = 1.50f,
+                .JitterStrength      = 1.00f,
            } },
          { ECS::CloudQuality::Ultra, "Ultra",
            CloudQualityValues{

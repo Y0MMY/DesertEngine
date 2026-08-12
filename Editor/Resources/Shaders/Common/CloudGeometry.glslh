@@ -405,6 +405,10 @@ float CloudConeBoundary(int i, int count, float marchDistance)
 
 // Length the i-th sample stands for. Multiplying the sampled density by this is what turns a set of
 // point samples into an optical DEPTH — the reference omitted the step length entirely.
+// Upper bound on the cone-march sample count, matching the Light March Samples property's Range(1, 16).
+// The raymarch builds the cone table once per ray into fixed-size arrays, and this is their size.
+#define CLOUD_MAX_LIGHT_MARCH_SAMPLES 16
+
 float CloudConeSampleWeight(int i, int count, float marchDistance)
 {
     return CloudConeBoundary(i + 1, count, marchDistance) - CloudConeBoundary(i, count, marchDistance);

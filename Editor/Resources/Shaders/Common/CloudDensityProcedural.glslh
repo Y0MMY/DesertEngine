@@ -106,9 +106,12 @@ float CloudPrecipitationAt(vec3 worldPos)
 
 // Coarse tier and shadow ray: weather x envelope x base shape. One 2D fetch and one 3D fetch, no detail,
 // no lighting. This is what makes the empty-space skip pay for itself — see CloudMarchAdvance.
-float CloudDensityCheap(vec3 worldPos, float heightFraction)
+// The body of CloudDensityCheap, given a weather sample the caller already has. Split out so that
+// CloudDensityFull — which needs the same texel again for its density-scale channel — pays for one 2D
+// fetch instead of two. The fetch is not free at the rate this runs: once per fine sample plus once per
+// cone sample, so up to seven per shaded step.
+float CloudDensityCheapFrom(vec4 weather, vec3 worldPos, float heightFraction)
 {
-    vec4  weather  = CloudSampleWeather(worldPos);
     float coverage = CloudAnvilCoverage(weather.r, heightFraction);
     if (coverage <= 0.0f)
         return 0.0f;
@@ -128,15 +131,19 @@ float CloudDensityCheap(vec3 worldPos, float heightFraction)
     return CloudRemapRange(dimensional, 1.0f - coverage, 1.0f, 0.0f, 1.0f);
 }
 
+float CloudDensityCheap(vec3 worldPos, float heightFraction)
+{
+    return CloudDensityCheapFrom(CloudSampleWeather(worldPos), worldPos, heightFraction);
+}
+
 // Fine tier: everything above, plus the detail erosion, the curl warp, the high-frequency layer and the
 // three distance terms.
 float CloudDensityFull(vec3 worldPos, float heightFraction, float distanceFromCamera)
 {
-    float density = CloudDensityCheap(worldPos, heightFraction);
+    vec4  weather = CloudSampleWeather(worldPos);
+    float density = CloudDensityCheapFrom(weather, worldPos, heightFraction);
     if (density <= 0.0f)
         return 0.0f;
-
-    vec4 weather = CloudSampleWeather(worldPos);
 
     // Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
     // without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
