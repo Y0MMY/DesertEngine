@@ -291,10 +291,17 @@ TEST( CloudShellPrecision, TheExpandedFormBeatsKilometreSpaceWhichBeatsWorldUnit
                                    ref.TEnter;
 
     EXPECT_LT( expandedError, 0.001 ) << "expanded form relative error " << expandedError;
+
+    // Both naive forms are an order of magnitude worse, which is the property the header's expanded form
+    // exists for. What is NOT asserted, deliberately: that the kilometre one beats the world-unit one.
+    // Both are dominated by the same catastrophic cancellation in dot(c,c) - r*r, their errors land
+    // within a factor of two of each other, and which comes out ahead depends on how the compiler
+    // contracts the expression — MSVC ordered them the other way round (1.36e-4 vs 1.08e-4) and failed a
+    // test that was never really about the units. The claim worth making is that neither is usable.
     EXPECT_LT( expandedError * 10.0, naiveKmError )
          << "expanded " << expandedError << " vs naive km " << naiveKmError;
-    EXPECT_LT( naiveKmError, naiveWorldError )
-         << "naive km " << naiveKmError << " vs naive world units " << naiveWorldError;
+    EXPECT_LT( expandedError * 10.0, naiveWorldError )
+         << "expanded " << expandedError << " vs naive world units " << naiveWorldError;
 }
 
 TEST( CloudShellPrecision, ACameraTwoMetresUpStillAgreesWithTheDoubleReference )

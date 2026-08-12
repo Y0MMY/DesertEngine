@@ -85,7 +85,14 @@ TEST( VectorImageRaster, HoleIsCutByNonZeroWinding )
         d="M12 1 A11 11 0 1 0 12 23 A11 11 0 1 0 12 1 Z M12 7 A5 5 0 1 1 12 17 A5 5 0 1 1 12 7 Z"/></svg>)SVG" );
     ASSERT_FALSE( r.Sdf.empty() );
     EXPECT_FALSE( r.Inside( r.Size / 2, r.Size / 2 ) ); // the hole
-    EXPECT_TRUE( r.Inside( r.Size / 2, 1 ) );           // the rim above it
+
+    // Sampled at the MIDDLE of the rim, not at its outer edge. The ring maps to a raster circle centred
+    // on (16,16) with radius 11 * 32/24 = 14.67 px, so the row-1 sample this used to take sits 15 px out
+    // — past the outer edge, and it only ever read as solid because the apex of the arc rounded its way
+    // back over the pixel centre by a sixth of a pixel. MSVC flattened the arc a hair differently and
+    // the test failed there and nowhere else. Mid-rim is (6.67 + 14.67) / 2 = 10.7 px above the centre,
+    // which no rounding is going to argue with.
+    EXPECT_TRUE( r.Inside( r.Size / 2, 5 ) ); // the rim above the hole
 }
 
 TEST( VectorImageRaster, PaddingStaysOutside )
