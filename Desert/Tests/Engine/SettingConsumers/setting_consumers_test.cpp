@@ -224,6 +224,8 @@ namespace
          { "EmptySamplesBeforeCoarse", nullptr, kT8Steps },
          { "LightMarchSamples", nullptr, kT8Steps },
          { "MultiScatterOctaves", nullptr, kT8Steps },
+         { "AmbientOcclusion", kCloudPayload },
+         { "AutoDistanceFade", kCloudPayload },
          { "CloudShadowMap", kCloudPayload },
          { "CloudShadowExtent", kCloudPayload },
          { "TemporalMode", nullptr, kT9 },

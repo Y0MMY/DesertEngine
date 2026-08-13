@@ -904,6 +904,69 @@ TEST( CloudShadowProjection, UvAndTheWorldPointRoundTrip )
         }
 }
 
+TEST( CloudShadowColumnRule, TheColumnIsTheLayerAndNotTheOtherSideOfThePlanet )
+{
+    // The test that was missing when this shipped, and it would have caught it on the first run. The map
+    // is built on a plane through the CAMERA, which normally sits BELOW the layer, and the pass marched
+    // -sunDir from there: away from the clouds, into the planet, and out the far side, where a ray/sphere
+    // test happily reported the shell nine thousand kilometres away. Every self-shadow inside the map's
+    // extent was made of density sampled there.
+    //
+    // The property, stated so it cannot be satisfied by accident: both ends of the column sit at the
+    // layer's own altitudes, and every sample between them is inside the layer.
+    const glm::vec3 camera( 0.0f, 0.002f, 0.0f ); // 2 m up, in kilometres
+
+    for ( const float elevationDeg : { 20.0f, 45.0f, 60.0f, 80.0f } )
+    {
+        const float     e   = glm::radians( elevationDeg );
+        const glm::vec3 sun = glm::normalize( glm::vec3( std::cos( e ), std::sin( e ), 0.0f ) );
+
+        for ( const float lateralKm : { -25.0f, 0.0f, 25.0f } )
+        {
+            const glm::vec3 plane  = camera + R::CloudShadowRight( sun ) * lateralKm;
+            const auto      column = R::CloudShadowColumn( plane, sun, kPlanetRadiusKm, kBottomKm, kThicknessKm );
+
+            ASSERT_TRUE( column.Hit ) << "elevation " << elevationDeg << " lateral " << lateralKm;
+            EXPECT_GT( column.TExit, column.TEnter );
+
+            // The ends are the layer's own surfaces, and the whole span is a couple of layer thicknesses
+            // at most — not a chord across the planet.
+            EXPECT_LT( column.TExit - column.TEnter, kThicknessKm * 20.0f )
+                 << "elevation " << elevationDeg << ": a column of " << ( column.TExit - column.TEnter )
+                 << " km is not a cloud layer";
+
+            for ( float f = 0.0f; f <= 1.0f; f += 0.1f )
+            {
+                const float     t      = glm::mix( column.TEnter, column.TExit, f );
+                const glm::vec3 sample = plane + sun * t;
+                const float     h      = R::CloudLayerHeight( sample, kPlanetRadiusKm, kBottomKm, kThicknessKm );
+                EXPECT_GE( h, -1e-3f ) << "elevation " << elevationDeg << " f " << f;
+                EXPECT_LE( h, 1.0f + 1e-3f ) << "elevation " << elevationDeg << " f " << f;
+            }
+        }
+    }
+}
+
+TEST( CloudShadowColumnRule, TheTopEndIsTheEndNEARESTTheSun )
+{
+    // The march walks from TExit down, and the slices are recorded on a falling height. If the two ends
+    // were the other way round every column would be integrated upside down: cloud tops would carry the
+    // whole column's shadow and cloud bases none.
+    const glm::vec3 plane( 0.0f, 0.002f, 0.0f );
+    const glm::vec3 sun = glm::normalize( glm::vec3( 0.4f, 0.9f, 0.0f ) );
+
+    const auto column = R::CloudShadowColumn( plane, sun, kPlanetRadiusKm, kBottomKm, kThicknessKm );
+    ASSERT_TRUE( column.Hit );
+
+    const float topHeight =
+         R::CloudLayerHeight( plane + sun * column.TExit, kPlanetRadiusKm, kBottomKm, kThicknessKm );
+    const float bottomHeight =
+         R::CloudLayerHeight( plane + sun * column.TEnter, kPlanetRadiusKm, kBottomKm, kThicknessKm );
+
+    EXPECT_NEAR( topHeight, 1.0f, 1e-3f );
+    EXPECT_NEAR( bottomHeight, 0.0f, 1e-3f );
+}
+
 TEST( CloudShadowReadout, MoreCloudLiesAboveALowSampleThanAHighOne )
 {
     // The slices are cumulative from the top down, so the read-out must never increase with height. A
@@ -936,9 +999,9 @@ TEST( CloudShadowReadout, AnEmptyColumnShadowsNothingAtAnyHeight )
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
     // std430 rounds the block up to its 16-byte alignment; the buffer must cover that, not sizeof.
-    // 500 and not 492 since the shadow map landed: its extent and its enable flag are read by the march
-    // and so are two more scalars in the block, and the rounding now goes to 512 rather than 496.
-    EXPECT_EQ( sizeof( CloudGpuPayload ), 500u );
+    // 508 and not 500 since Ambient Occlusion and Auto Distance Fade landed — the occlusion strength the
+    // march scales the sky term by, and the flag that says the fade ranges come from the layer geometry.
+    EXPECT_EQ( sizeof( CloudGpuPayload ), 508u );
     EXPECT_EQ( kCloudPayloadBytes, 512u );
     EXPECT_GE( kCloudPayloadBytes, sizeof( CloudGpuPayload ) );
     EXPECT_EQ( kCloudPayloadBytes % 16u, 0u );

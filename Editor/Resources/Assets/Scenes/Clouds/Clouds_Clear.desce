@@ -105,7 +105,7 @@
     "LayerThickness": 200000.0,
     "HorizonFadeStart": 6000000.0,
     "HorizonFadeEnd": 14000000.0,
-    "Coverage": 0.06,
+    "Coverage": 0.28,
     "CoverageContrast": 2.2,
     "WeatherTileSize": 6000000.0,
     "WeatherSeed": 1337,

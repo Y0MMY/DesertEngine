@@ -242,19 +242,19 @@ TEST( SkyAtmosphereReflection, BothSunPairsExplainTheSplit )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 97 fields in eight groups
+// VolumetricCloudData — 99 fields in eight groups
 // ---------------------------------------------------------------------------------------------------
 
-TEST( VolumetricCloudReflection, ExposesNinetySevenFieldsInTheSpecifiedGroups )
+TEST( VolumetricCloudReflection, ExposesNinetyNineFieldsInTheSpecifiedGroups )
 {
     const TypeInfo& clouds = Type( "VolumetricCloudData" );
-    EXPECT_EQ( clouds.Fields.size(), 97u );
+    EXPECT_EQ( clouds.Fields.size(), 99u );
 
     EXPECT_EQ( CountInCategory( clouds, "Cloud Layer" ), 6u );
     EXPECT_EQ( CountInCategory( clouds, "Weather" ), 10u );
     EXPECT_EQ( CountInCategory( clouds, "Shape" ), 11u );
     EXPECT_EQ( CountInCategory( clouds, "Detail" ), 22u );
-    EXPECT_EQ( CountInCategory( clouds, "Lighting" ), 23u );
+    EXPECT_EQ( CountInCategory( clouds, "Lighting" ), 25u );
     EXPECT_EQ( CountInCategory( clouds, "Animation" ), 8u );
     // 16 since the shadow map landed: Cloud Shadow Map and Cloud Shadow Extent.
     EXPECT_EQ( CountInCategory( clouds, "Quality" ), 16u );
