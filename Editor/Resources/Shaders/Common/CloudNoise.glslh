@@ -237,12 +237,27 @@ float CloudPerlinWorley(vec3 p, int period, uint seed)
 
 // Shape volume, 128^3. R = Perlin-Worley base shape; G/B/A = Worley FBM at rising frequencies, the
 // erosion octaves the raymarch subtracts from the base (REF F.2, `lowResCloudShape`).
+//
+// THE BASE PERIOD IS WHAT SETS CLOUD SIZE, and it used to be 4. Over the authored 35 km tile that made one
+// base cell 8.75 km across — the size of a mountain range, not of a cumulus, which is 0.5 to 2 km. Worse,
+// the layer is 3.5 km thick, so a cell did not complete half a period vertically and the base shape was a
+// two-dimensional pattern extruded upward: every cloud got the same flat top and flat bottom, and looking
+// straight up at a Coverage of 0.5 showed EMPTY SKY, because the whole visible zenith fell inside one cell.
+//
+// Twelve puts a cell at 2.9 km. The alternative — shrinking the tile — was tried and is worse: at 3 km the
+// field repeats forty times between the camera and the horizon and the cloudscape reads as a radial moire
+// fan. Raising the frequency inside the tile buys cloud-sized features while the tile stays large enough
+// that it repeats four times over 138 km, which the weather map's own variation then hides.
+//
+// The erosion octaves rise with it, but not proportionally: 128 texels over 32 cells is four texels per
+// cell, and past that a Worley lattice is noise rather than structure (the same limit the detail volume's
+// comment below describes).
 vec4 CloudShapeTexel(vec3 p, uint seed)
 {
-    float r = CloudPerlinWorley(p, 4, seed);
-    float g = CloudWorleyFbm(p, 6, seed + 211u);
-    float b = CloudWorleyFbm(p, 12, seed + 307u);
-    float a = CloudWorleyFbm(p, 24, seed + 401u);
+    float r = CloudPerlinWorley(p, 12, seed);
+    float g = CloudWorleyFbm(p, 18, seed + 211u);
+    float b = CloudWorleyFbm(p, 24, seed + 307u);
+    float a = CloudWorleyFbm(p, 32, seed + 401u);
     return vec4(r, g, b, a);
 }
 

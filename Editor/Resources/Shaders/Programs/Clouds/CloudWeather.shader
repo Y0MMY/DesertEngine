@@ -73,7 +73,15 @@ Shader "CloudWeather"
                              CloudPerlin(vec3(uv.x, uv.y, 0.83f), 3, seed + 9209u));
             vec2 p    = uv + warp * (u_WeatherWarpStrength * 0.35f);
 
-            float field = WeatherFbm(p, u_WeatherOctaves, 2, seed);
+            // BASE PERIOD 8, not 2. Doubling from 2 over the authored 60 km tile put the dominant coverage
+            // feature at 30 km and the second at 15, with everything cloud-sized carrying a sixteenth of the
+            // amplitude. A camera on the ground sees the layer across a few kilometres of sky, so the whole
+            // visible dome fell inside ONE feature: at Coverage 0.5 the zenith was either solid or — as it
+            // was — completely empty, and no amount of shape detail could put a cloud where the coverage
+            // field said there was none. Eight puts the dominant feature at 7.5 km, the size of a cumulus
+            // cluster, and the tile stays 60 km so the field still does not repeat visibly toward the
+            // horizon.
+            float field = WeatherFbm(p, u_WeatherOctaves, 8, seed);
 
             // Coverage cuts the field from above: Coverage = 0 removes everything, Coverage = 1 keeps
             // the whole range. Contrast then shapes what survives — high gives hard-edged islands, low a
