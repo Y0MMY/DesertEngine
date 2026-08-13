@@ -4,6 +4,7 @@
 #include <Engine/EntryPoint.hpp>
 
 #include <Editor/Core/ProjectContext.hpp>
+#include <Editor/Core/ShotOptions.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -39,6 +40,37 @@ Desert::Engine::Application* CreateApplication( int argc, char** argv )
                 std::exit( 1 );
             }
         }
+
+    // Screenshot mode (see Editor/Core/ShotOptions.hpp). Parsed here rather than in the layer because
+    // --scene has to be known before the layer decides what to load, and because a headful editor and a
+    // one-shot capture differ in nothing else: same renderer, same passes, same frame.
+    {
+        auto& shot = Desert::Editor::ShotOptions::Get();
+
+        auto readVec3 = []( const char* text, glm::vec3& out )
+        {
+            float x = 0.0f, y = 0.0f, z = 0.0f;
+            if ( std::sscanf( text, "%f,%f,%f", &x, &y, &z ) != 3 )
+                return false;
+            out = glm::vec3( x, y, z );
+            return true;
+        };
+
+        for ( int i = 1; i < argc; ++i )
+        {
+            const bool hasNext = i + 1 < argc;
+            if ( hasNext && std::strcmp( argv[i], "--scene" ) == 0 )
+                shot.Scene = argv[++i];
+            else if ( hasNext && std::strcmp( argv[i], "--shot" ) == 0 )
+                shot.Output = argv[++i];
+            else if ( hasNext && std::strcmp( argv[i], "--shot-frames" ) == 0 )
+                shot.Frames = std::atoi( argv[++i] );
+            else if ( hasNext && std::strcmp( argv[i], "--camera" ) == 0 )
+                shot.HasCamera = readVec3( argv[++i], shot.Position ) || shot.HasCamera;
+            else if ( hasNext && std::strcmp( argv[i], "--look" ) == 0 )
+                shot.HasCamera = readVec3( argv[++i], shot.Forward ) || shot.HasCamera;
+        }
+    }
 
     if ( !Desert::Editor::ProjectContext::HasProject() )
     {

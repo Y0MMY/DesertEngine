@@ -23,6 +23,7 @@
 #include "Editor/Core/LayoutManager.hpp"
 #include "Editor/Core/PanelRequests.hpp"
 #include "Editor/Core/SceneOpenRequest.hpp"
+#include "Editor/Core/ShotOptions.hpp"
 #include "Editor/Core/MaterialAssetUtils.hpp"
 #include <Engine/Assets/Prefab/PrefabAsset.hpp>
 #include <Common/Utilities/FileSystem.hpp>
@@ -288,7 +289,12 @@ namespace Desert::Editor
         // (loaded through the normal deferred path on the first frame, when the renderer is ready).
         // A DefaultScene that does not exist yet (a FRESH project, sandbox included) is GENERATED: the
         // Starter playground built once and saved into the project — startup content is data, not code.
-        if ( ProjectContext::HasProject() )
+        // Screenshot mode names its own scene; it is the whole point of the flag.
+        if ( const auto& shot = ShotOptions::Get(); !shot.Scene.empty() )
+        {
+            LoadScene( Common::Filepath( shot.Scene ) );
+        }
+        else if ( ProjectContext::HasProject() )
         {
             m_MainScene->SetSceneName( ProjectContext::Current().Name );
             if ( const auto scenePath = ProjectContext::DefaultScenePath(); !scenePath.empty() )
@@ -607,6 +613,48 @@ namespace Desert::Editor
         // removes the StaticMeshComponent the Details panel is drawing, so it must not happen mid-render.
         if ( m_MainScene && m_AssetManager )
             RigBuilder::ProcessPending( *m_MainScene, *m_AssetManager );
+
+        // Screenshot mode: point the camera once the scene is up, let the temporal stage settle, then write
+        // the viewport out and leave. The frame count is not decoration — the clouds accumulate over about
+        // ten frames, so an early shot is a picture of the dither rather than of the sky.
+        if ( auto& shot = ShotOptions::Get(); shot.Active() && !m_SceneLoadRequested && !StartupLoading() )
+        {
+            if ( shot.HasCamera && !m_ShotCameraPlaced )
+            {
+                if ( auto* cam =
+                          dynamic_cast<::Desert::Core::EditorCamera*>( m_MainScene->GetActiveCamera().get() ) )
+                {
+                    const glm::vec3 forward = glm::normalize( shot.Forward );
+                    cam->SnapToDirection( forward );
+                    // Focus keeps the orientation and re-frames, so aiming at a point one framing distance
+                    // ahead lands the camera exactly on the position asked for.
+                    cam->Focus( shot.Position + forward * 500.0f, 500.0f );
+                    cam->SetInputEnabled( false ); // nothing may nudge it between here and the capture
+                }
+                m_ShotCameraPlaced = true;
+            }
+
+            if ( ++m_ShotFrame >= shot.Frames )
+            {
+                Graphic::Renderer::GetInstance().WaitDeviceIdle();
+                bool written = false;
+                if ( auto img = m_MainScene->GetFinalImage() )
+                {
+                    const std::vector<uint8_t> px = img->ReadPixelsRGBA8();
+                    const uint32_t             w = img->GetWidth(), h = img->GetHeight();
+                    if ( px.size() == static_cast<size_t>( w ) * h * 4 )
+                    {
+                        stbi_flip_vertically_on_write( 0 );
+                        written = stbi_write_png( shot.Output.c_str(), w, h, 4, px.data(), w * 4 ) != 0;
+                        LOG_INFO( "[Shot] {} -> {} ({}x{})", written ? "wrote" : "FAILED to write", shot.Output, w,
+                                  h );
+                    }
+                }
+                if ( !written )
+                    LOG_ERROR( "[Shot] no final image to capture" );
+                const_cast<Engine::Application*>( m_Application )->Close();
+            }
+        }
 
         // DEBUG: press F9 to dump the final rendered viewport image to F:/DesertEngine/frame_dump.png. Useful
         // because external GDI/PrintWindow capture returns white for the Vulkan surface — this reads the actual

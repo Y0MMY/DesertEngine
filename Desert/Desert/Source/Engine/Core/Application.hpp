@@ -58,6 +58,14 @@ namespace Desert::Engine
 
         void Run();
 
+    public:
+        // Ends the run loop after the current frame. Used by the editor's screenshot mode, which renders a
+        // fixed number of frames and leaves.
+        void Close()
+        {
+            m_IsRunningApplication = false;
+        }
+
     private:
         void Init();
         void Destroy();

@@ -215,6 +215,10 @@ namespace Desert::Editor
         {
             return m_StartupNext < m_StartupStages.size();
         }
+        // Screenshot mode counters (see Editor/Core/ShotOptions.hpp).
+        int  m_ShotFrame        = 0;
+        bool m_ShotCameraPlaced = false;
+
         std::optional<Common::Filepath> m_SceneLoadRequested;
         // Stop tears down + recreates GPU render resources (framebuffers / render graph). It must run
         // BETWEEN frames (like a scene load), never inline in the ImGui Stop-button handler — otherwise the
