@@ -75,21 +75,24 @@ Shader "CloudShadowMap"
             float bottomKm       = CloudKmFromWorld(u_LayerBottomAltitude);
             float thicknessKm    = CloudKmFromWorld(u_LayerThickness);
 
-            // Marched DOWNWARD, away from the sun: the running total is then exactly "cloud between here
-            // and the sun", which is what a sample at this point sees, and it only ever grows.
-            vec3 marchDir = -sunDir;
+            // The layer segment of THIS TEXEL'S SUN RAY, in signed distances along +sunDir from the plane
+            // point. Signed because the plane the map is built on runs through the camera, which is
+            // normally below the layer: the segment sits ahead of some texels and behind others, and a
+            // clamped entry would throw the latter away — see CloudShadowColumn.
             vec3 originKm = planePoint * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
 
-            CloudShellHit shell = CloudShellBounds(originKm, marchDir, planetRadiusKm, bottomKm, thicknessKm);
-            if (!shell.Hit)
+            CloudShellHit column = CloudShadowColumn(originKm, sunDir, planetRadiusKm, bottomKm, thicknessKm);
+            if (!column.Hit)
             {
                 imageStore(u_CloudShadowOut, coord, result);
                 return;
             }
 
-            float tEnter = CloudWorldFromKm(shell.TEnter);
-            float tExit  = CloudWorldFromKm(shell.TExit);
-            float span   = tExit - tEnter;
+            // Walked from the TOP down: heights fall monotonically, which is what lets the slices be
+            // recorded in one pass with a single comparison and no search.
+            float tTop    = CloudWorldFromKm(column.TExit);
+            float tBottom = CloudWorldFromKm(column.TEnter);
+            float span    = tTop - tBottom;
             if (span <= 0.0f)
             {
                 imageStore(u_CloudShadowOut, coord, result);
@@ -105,8 +108,8 @@ Shader "CloudShadowMap"
 
             for (int i = 0; i < CLOUD_SHADOW_STEPS; ++i)
             {
-                float t        = tEnter + ( float(i) + 0.5f ) * dt;
-                vec3  worldPos = planePoint + marchDir * t;
+                float t        = tTop - ( float(i) + 0.5f ) * dt;
+                vec3  worldPos = planePoint + sunDir * t;
                 vec3  posKm    = worldPos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
                 float height   = CloudHeightFraction(posKm, planetRadiusKm, bottomKm, thicknessKm);
 

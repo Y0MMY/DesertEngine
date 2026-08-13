@@ -105,6 +105,50 @@ vec3 CloudShadowPlanePoint(vec2 uv, vec3 centre, vec3 sunDir, float extent)
     return centre + CloudShadowRight(sunDir) * x + CloudShadowUp(sunDir) * y;
 }
 
+// The stretch of this texel's sun ray that lies inside the layer, as SIGNED distances along +sunDir from
+// the plane point. TExit is the crossing nearest the sun (the layer TOP), TEnter the far one (the base),
+// so marching from TExit down to TEnter walks the column downward — the order the slices are recorded in.
+//
+// SIGNED, and not CloudShellBounds. That function clamps its entry to zero, because a VIEW ray has
+// nothing to say about the part of the shell behind the camera. A sun ray is not a view ray: the plane
+// the map is built on passes through the CAMERA, which normally sits BELOW the layer, so the segment
+// this needs is at a positive distance for some texels and a negative one for others, and clamping it
+// away is how the shadow pass ended up marching -sunDir from under the layer, missing it entirely, and
+// being handed the shell on the ANTIPODAL SIDE OF THE PLANET instead — a ray/sphere test knows nothing
+// about the planet body in between. Twenty-four samples of cloud density from nine thousand kilometres
+// away, which is what every self-shadow inside the map's extent was made of.
+CloudShellHit CloudShadowColumn(vec3 planePointKm, vec3 sunDir, float planetRadiusKm, float bottomKm,
+                                float thicknessKm)
+{
+    CloudShellHit column;
+    column.Hit    = false;
+    column.TEnter = 0.0f;
+    column.TExit  = 0.0f;
+
+    CloudSphereHit outer =
+         CloudIntersectAltitudeSphere(planePointKm, sunDir, planetRadiusKm, bottomKm + thicknessKm);
+    if (!outer.Hit)
+        return column;
+
+    // The top of the layer is the outer crossing furthest TOWARD the sun; everything below it is the
+    // column, down to wherever the ray leaves the layer — through the inner sphere if the line dips
+    // under the base, through the outer one otherwise.
+    float top    = outer.T1;
+    float bottom = outer.T0;
+
+    CloudSphereHit inner = CloudIntersectAltitudeSphere(planePointKm, sunDir, planetRadiusKm, bottomKm);
+    if (inner.Hit && inner.T1 > bottom)
+        bottom = inner.T1;
+
+    if (top <= bottom)
+        return column;
+
+    column.Hit    = true;
+    column.TEnter = bottom;
+    column.TExit  = top;
+    return column;
+}
+
 // The density-length between a sample at @p heightFraction and the top of the layer, read out of the four
 // slices this texel stores.
 //
