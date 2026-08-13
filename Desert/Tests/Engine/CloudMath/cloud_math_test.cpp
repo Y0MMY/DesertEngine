@@ -817,11 +817,14 @@ TEST( CloudPowderView, FadesOutInsideTheForwardConeAndMatchesPowderBehindTheCame
     const float strength = 1.0f;
     const float scale    = 2.0f;
 
+    // The exempt cone is [0.85, 0.99] — the ~15 degrees where the silver lining lives. The first ramp
+    // started at 0.5 (a 60-degree cone) and deleted powder from the whole backlit face: every
+    // inter-lobe crease in front of the sun lost its darkening (deck pp.128-130 keep them dark).
     EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, -1.0f ),
                      R::CloudPowder( density, strength, scale ) );
-    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 0.5f ),
+    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 0.85f ),
                      R::CloudPowder( density, strength, scale ) );
-    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 0.95f ), 1.0f );
+    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 0.99f ), 1.0f );
     EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 1.0f ), 1.0f );
 
     // Monotone in between: turning toward the sun never brings the darkening back.

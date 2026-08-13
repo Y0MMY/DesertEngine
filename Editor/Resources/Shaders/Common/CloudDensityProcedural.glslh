@@ -138,15 +138,28 @@ float CloudDensityCheapFrom(vec4 weather, vec3 worldPos, float heightFraction)
     if (gradient <= 0.0f)
         return 0.0f;
 
-    vec4  shape = texture(u_ShapeNoise, CloudShapeSamplePos(worldPos, heightFraction) / u_ShapeTileSize);
-    float fbm   = shape.g * 0.625f + shape.b * 0.25f + shape.a * 0.125f;
+    // The deck's Vertical Profile Method, composed the way p.19 writes it:
+    //
+    //     dimensional_profile = vertical_profile * cloud_coverage;
+    //
+    // MULTIPLIED, not thresholded. The profile is deliberately SMOOTH (p.18 renders it bare: featureless
+    // slabs) — the weather map owns where a cloud is and the envelope owns its silhouette, and ALL the
+    // billow and wisp character comes from the detail erosion on top. This replaced the Schneider-lineage
+    // construction that carved an isosurface out of 3D Perlin-Worley with a second Worley erosion: an
+    // isosurface of low-frequency 3D noise has no reason to look like convection, and it didn't — every
+    // cloud rendered as a melted amoeba whose shape traced the lattice, not the envelope.
+    // The map's coverage channel arrives ALREADY cut and contrast-shaped by the Coverage sliders
+    // (CloudWeather.shader:89-90) — applying them again here is how coverage became "a threshold, not a
+    // sky fraction" (RESEARCH_REFERENCE §M.4).
+    float dimensional = gradient * coverage;
 
-    // Erode the Perlin-Worley base by its own Worley octaves, then cut the result by coverage. Two
-    // remaps rather than one: the first decides the SHAPE of a cloud, the second decides how much sky is
-    // filled, and folding them together makes Coverage change the shape as well as the amount.
-    float base = CloudRemapRange(shape.r, fbm * u_ShapeErosionStrength + u_BaseShapeRemapMin, 1.0f, 0.0f, 1.0f);
-    float dimensional = base * gradient;
-    return CloudRemapRange(dimensional, 1.0f - coverage, 1.0f, 0.0f, 1.0f);
+    // The 3D base volume stays as a MODULATION of the body, not its source: a mild large-scale variation
+    // that keeps two clouds at the same map coordinate from being the same cloud, exactly the role the
+    // deck's per-voxel Density Scale channel plays for its baked NVDFs. Base Shape Remap Min sets where
+    // the volume reads as empty; Shape Erosion Strength is how much of the modulation is let through.
+    vec4  shape = texture(u_ShapeNoise, CloudShapeSamplePos(worldPos, heightFraction) / u_ShapeTileSize);
+    float body  = CloudRemapRange(shape.r, u_BaseShapeRemapMin, 1.0f, 0.0f, 1.0f);
+    return clamp(dimensional * mix(1.0f, body, clamp(u_ShapeErosionStrength, 0.0f, 1.0f)), 0.0f, 1.0f);
 }
 
 float CloudDensityCheap(vec3 worldPos, float heightFraction)
@@ -179,13 +192,20 @@ float CloudDensityFull(vec3 worldPos, float heightFraction, float distanceFromCa
     float wispy          = mix(detail.r, detail.g, density);
     float billowGradient = pow(clamp(density, 0.0f, 1.0f), u_BillowGradientPower);
     float billowy        = mix(detail.b, detail.a, billowGradient) * u_BillowNoiseScale;
-    float noiseComposite = mix(wispy, billowy, u_DetailTypeBias);
+
+    // The deck authors Detail Type per voxel with a physical rule (p.92): "Increasing Density = Layered
+    // Billows, Decreasing Density = Curly Layered Wisps" — condensation billows on the growing tops,
+    // evaporation shreds the bases and edges into curls. The procedural proxy for "where is density
+    // increasing" is HEIGHT: convection grows upward, entrainment eats the base. A constant bias gave
+    // every altitude the same 50/50 blend, which is why the whole cloud rendered as uniform fibre.
+    float detailType     = clamp(u_DetailTypeBias + (heightFraction - 0.35f) * 0.9f, 0.0f, 1.0f);
+    float noiseComposite = mix(wispy, billowy, detailType);
 
     // The extra close-range layer: ridged versions of the same two channels, faded out with distance
     // because past a few kilometres it is smaller than a pixel and turns into noise.
     float hfWisps   = 1.0f - pow(abs(abs(detail.g * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqWispSharpness);
     float hfBillows = pow(abs(abs(detail.a * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqBillowSharpness);
-    float highFreq  = clamp(mix(hfWisps, hfBillows, u_DetailTypeBias), 0.0f, 1.0f);
+    float highFreq  = clamp(mix(hfWisps, hfBillows, detailType), 0.0f, 1.0f);
     float hfFade    = CloudRemapRange(distanceFromCamera, u_HighFreqFadeStart, u_HighFreqFadeEnd, 0.0f, 1.0f);
     noiseComposite  = mix(mix(noiseComposite, highFreq, u_HighFreqStrength), noiseComposite, hfFade);
 

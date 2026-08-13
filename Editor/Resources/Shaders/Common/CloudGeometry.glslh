@@ -322,11 +322,17 @@ float CloudPowder(float density, float strength, float scale)
 // a reflection-side phenomenon — light that scattered away before it could come BACK — and the forward
 // direction is where that lost light was going. Applying it there dimmed the one thing it cannot
 // physically dim: the silver lining, which the in-scatter probability was already crushing from the
-// other side. The ramp is linear over cosTheta in [0.5, 0.95]; inside the forward cone powder is gone.
+// other side.
+//
+// The ramp covers cosTheta in [0.85, 0.99] — the ~15-degree cone where the silver lining actually
+// lives. The first version faded from 0.5 (a 60-degree cone), which protected the rim by also deleting
+// powder from the whole backlit face: every inter-lobe crease on a cloud in front of the sun lost its
+// darkening and the face rendered as flat white. The deck's own references (pp. 128-130) keep darker
+// billow boundaries even fully backlit; only the rim itself is exempt.
 float CloudPowderView(float density, float strength, float scale, float cosTheta)
 {
     float powder = CloudPowder(density, strength, scale);
-    return mix(powder, 1.0f, CloudRemapRange(cosTheta, 0.5f, 0.95f, 0.0f, 1.0f));
+    return mix(powder, 1.0f, CloudRemapRange(cosTheta, 0.85f, 0.99f, 0.0f, 1.0f));
 }
 
 // Henyey-Greenstein, the published form. g = 0 is isotropic and returns 1/(4pi) for every angle.

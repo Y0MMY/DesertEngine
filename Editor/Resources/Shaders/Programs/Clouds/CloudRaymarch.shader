@@ -70,12 +70,23 @@ Shader "CloudRaymarch"
 
         LocalSize(8, 8, 1);
 
-        // Interleaved gradient noise (Jimenez 2014), offset per frame. A per-pixel fraction of one step
-        // is what turns the march's banding into noise the temporal stage can average away; without it a
-        // 128-step march through a soft field draws visible shells.
+        // Interleaved gradient noise (Jimenez 2014), translated per frame. A per-pixel fraction of one
+        // step is what turns the march's banding into noise the temporal stage can average away; without
+        // it a 128-step march through a soft field draws visible shells.
+        //
+        // The per-frame translation is a HASH of the frame index, not a constant drift. IGN's isolines
+        // are nearly vertical (the x coefficient is eleven times the y one), so shifting the pattern the
+        // same way every frame leaves those isolines standing in the temporal average — a comb of faint
+        // vertical streaks on every converged cloud edge, which is exactly what this replaces. Random
+        // per-frame translations average the pattern over its own period and the comb goes; a single
+        // frame (Temporal Off) still sees pure IGN, whose spatial quality is the reason it is used.
         float CloudJitter(vec2 pixel, float frame)
         {
-            vec2 p = pixel + vec2(5.588238f, 5.588238f) * frame;
+            uint h = uint(frame) * 0x9E3779B1u;
+            h ^= h >> 16;
+            h *= 0x85EBCA6Bu;
+            h ^= h >> 13;
+            vec2 p = pixel + vec2(float(h & 0xFFu), float((h >> 8) & 0xFFu));
             return fract(52.9829189f * fract(0.06711056f * p.x + 0.00583715f * p.y));
         }
 
