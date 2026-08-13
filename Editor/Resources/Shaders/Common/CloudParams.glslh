@@ -143,6 +143,8 @@ layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
 
     // Cloud shadow map: half-width in world units, and whether the march reads it instead of marching a
     // cone. Appended to match CloudGpuPayload, whose offsets are static_asserted against this order.
+    float u_AmbientOcclusion;
+    int   u_AutoDistanceFade;
     float u_CloudShadowExtent;
     int   u_CloudShadowEnabled;
 };

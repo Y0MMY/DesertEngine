@@ -133,6 +133,11 @@ namespace Desert::Graphic
         int32_t LightMarchSamples;
         int32_t MultiScatterOctaves;
 
+        // How much the ambient term is occluded by the cloud around and above a sample (Nubis3 pp. 141/144).
+        float AmbientOcclusion;
+        // 1 = derive the distance/horizon fade range from the layer geometry instead of the authored one.
+        int32_t AutoDistanceFade;
+
         // ---- Cloud shadow map ----
         // Half-width of the sun-space shadow map in world units, and whether the march reads it at all.
         // Appended, not inserted: every offset asserted below is a promise to the shaders.
@@ -166,9 +171,11 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, TemporalBlendFactor ) == 460 );
     static_assert( offsetof( CloudGpuPayload, WeatherSeed ) == 468 );
     static_assert( offsetof( CloudGpuPayload, MultiScatterOctaves ) == 488 );
-    static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 492 );
-    static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 496 );
-    static_assert( sizeof( CloudGpuPayload ) == 500,
+    static_assert( offsetof( CloudGpuPayload, AmbientOcclusion ) == 492 );
+    static_assert( offsetof( CloudGpuPayload, AutoDistanceFade ) == 496 );
+    static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 500 );
+    static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 504 );
+    static_assert( sizeof( CloudGpuPayload ) == 508,
                    "The block ends at the last int. glm's vec4 has a 4-byte alignment (no SIMD gentypes "
                    "in this build), so C++ adds no tail padding — std430 does, which is why the buffer "
                    "below is created at the rounded-up size and not at sizeof." );
@@ -548,6 +555,8 @@ namespace Desert::Graphic
         p.LightMarchSamples        = glm::max( data.LightMarchSamples, 1 );
         p.MultiScatterOctaves      = glm::clamp( data.MultiScatterOctaves, 1, 8 );
 
+        p.AmbientOcclusion   = glm::clamp( data.AmbientOcclusion, 0.0f, 1.0f );
+        p.AutoDistanceFade   = data.AutoDistanceFade ? 1 : 0;
         p.CloudShadowExtent  = CloudShadowExtentOf( data );
         p.CloudShadowEnabled = data.CloudShadowMap ? 1 : 0;
 

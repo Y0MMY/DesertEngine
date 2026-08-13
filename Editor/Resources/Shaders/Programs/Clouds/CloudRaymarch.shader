@@ -193,6 +193,13 @@ Shader "CloudRaymarch"
             float transmittance = 1.0f;
             vec3  scattered     = vec3(0.0f, 0.0f, 0.0f);
 
+            // Where the cloud this ray sees actually IS, weighted by how much each sample contributed.
+            // The fades below used tEnter — the distance at which the RAY meets the shell — which is a
+            // function of view elevation and not of the cloud: on a grazing ray a cloud a hundred
+            // kilometres further on was treated as being at the shell's near edge.
+            float visibleWeight   = 0.0f;
+            float visibleDistance = 0.0f;
+
             // The march starts at the DITHERED position; tEnter stays the ray's true entry and is what
             // the horizon and distance fades below are measured against, so those keep a value that does
             // not carry a per-pixel dither.
@@ -202,10 +209,20 @@ Shader "CloudRaymarch"
             // unbounded loop is how one bad parameter combination becomes a GPU hang instead of a bad
             // picture. The early-out on transmittance is a separate condition on a genuine
             // transmittance, which is the whole reason it fires at all.
+            // Whether the loop ended because the ray left the shell (or went opaque) or because it simply
+            // ran out of budget. The two are not the same picture and the difference is visible: a ray that
+            // exhausts MaxSteps mid-cloud stops accumulating and writes whatever partial transmittance it
+            // had, which draws a hard edge wherever the budget happens to run out. Near-vertical views hit
+            // it first, and it reads as a comb of streaks hanging off cloud bases.
+            bool finished = false;
+
             for (int marchStep = 0; marchStep < u_MaxSteps; ++marchStep)
             {
                 if (state.T >= tExit || transmittance < 0.005f)
+                {
+                    finished = true;
                     break;
+                }
 
                 vec3  worldPos = cameraPos + dir * state.T;
                 vec3  posKm    = worldPos * (1.0f / CLOUD_WORLD_UNITS_PER_KM);
@@ -239,8 +256,25 @@ Shader "CloudRaymarch"
                         bool shadowed = u_CloudShadowEnabled != 0 && CloudShadowInside(shadowUv);
                         if (shadowed)
                         {
-                            sunDensityLength = CloudShadowDensityLength(
-                                 textureLod(u_CloudShadowMap, shadowUv, 0.0f), height);
+                            // Read over the SAME reach the cone marches, not the whole column to the
+                            // layer top. The two have to measure the same thing or the map's boundary is
+                            // a brightness cliff in the sky: the column is the full optical depth to the
+                            // sun and the cone is Light March Distance of it, which for a thick cloud is
+                            // exp(-8.75) against exp(-2.5) — a few hundred times, on one texel's width.
+                            // Truncating the map is the direction that keeps the presets meaning what
+                            // they meant when they were authored, and keeps Light March Distance a knob
+                            // that does something inside the extent instead of one that lies.
+                            //
+                            // Travelling LightMarchDistance along the sun lifts a sample by that distance
+                            // times the sun's own height, which in layer fractions is the step below.
+                            vec4  slices = textureLod(u_CloudShadowMap, shadowUv, 0.0f);
+                            float reach  = u_LightMarchDistance * max(sunDir.y, 0.0f) /
+                                           max(u_LayerThickness, 1.0f);
+                            float above  = min(height + reach, 1.0f);
+
+                            sunDensityLength = max(CloudShadowDensityLength(slices, height) -
+                                                        CloudShadowDensityLength(slices, above),
+                                                   0.0f);
                         }
 
                         for (int s = 0; !shadowed && s < coneCount; ++s)
@@ -277,9 +311,26 @@ Shader "CloudRaymarch"
                         float inScatter = CloudInScatterProbability(height, density, tauSun);
                         float powder    = CloudPowder(density, u_PowderStrength, u_PowderScale);
 
+                        // The sky a sample can SEE, not the sky there is. Unoccluded ambient lights a
+                        // cloud's core as brightly as its rim, which is exactly how a volume renders as a
+                        // slab — see CloudAmbientOcclusion and Nubis3 pp. 141/144.
+                        //
+                        // The column term reads the FULL stack above the sample out of the shadow map,
+                        // untruncated: the direct term is capped at Light March Distance because it has to
+                        // agree with the cone that answers outside the map, but ambient occlusion is about
+                        // everything overhead and has no second implementation to agree with. Outside the
+                        // map only the local term applies, which is the honest answer — nothing there has
+                        // measured the column.
+                        float columnAbove = 0.0f;
+                        if (shadowed)
+                            columnAbove = CloudShadowDensityLength(
+                                 textureLod(u_CloudShadowMap, shadowUv, 0.0f), height);
+
                         vec3 ambient = CloudAmbient(u_ZenithRadiance.xyz, u_GroundRadiance.xyz,
                                                     u_ZenithRadiance.w, u_GroundRadiance.w,
-                                                    u_ScatteringAlbedo.w, height) * u_ShadowTint.xyz;
+                                                    u_ScatteringAlbedo.w, height) *
+                                       u_ShadowTint.xyz *
+                                       CloudAmbientOcclusion(density, columnAbove, sigmaScale, u_AmbientOcclusion);
 
                         // Rain darkens a cloud from the base up, and only where the weather map says it
                         // is raining — a uniform darkening would just be a brightness slider.
@@ -300,6 +351,13 @@ Shader "CloudRaymarch"
                         vec3  integrated = CloudIntegrateInScatter(scattering, sigma, dt);
 
                         scattered += transmittance * integrated;
+
+                        // Weighted by what this sample actually adds to the pixel, so a faint haze in
+                        // front does not outvote the cloud the eye is looking at.
+                        float contribution = transmittance * (1.0f - stepTrans);
+                        visibleWeight += contribution;
+                        visibleDistance += contribution * state.T;
+
                         transmittance *= stepTrans;
                     }
                 }
@@ -309,9 +367,34 @@ Shader "CloudRaymarch"
                                           u_EmptySamplesBeforeCoarse);
             }
 
+            // Budget exhausted mid-shell: close the ray out rather than leaving it half-integrated. Every
+            // step still owed would have added SOMETHING, so the honest cheap stand-in is to let the
+            // remaining transmittance decay by what the traversed fraction suggests, which turns a hard cut
+            // into a fade. The alternative — leaving it — is the comb of streaks this replaces.
+            if (!finished)
+            {
+                float travelled = clamp((state.T - tStart) / max(tExit - tStart, 1e-3f), 0.0f, 1.0f);
+                float owed      = 1.0f - travelled;
+                transmittance   = mix(transmittance, 1.0f, owed * owed);
+                scattered       = scattered * (1.0f - owed * owed);
+            }
+
             // Horizon dissolve: the far edge of the layer fades into the sky instead of ending on the
             // hard circle where the shell meets the horizon.
-            float horizon = 1.0f - CloudRemapRange(tEnter, u_HorizonFadeStart, u_HorizonFadeEnd, 0.0f, 1.0f);
+            // The distance the fades are measured at: where the cloud is, falling back to the shell entry
+            // for a ray that met nothing (there is no cloud whose distance to use).
+            float cloudDistance = visibleWeight > 1e-6f ? visibleDistance / visibleWeight : tEnter;
+
+            // Auto ranges are derived from the layer's own geometry; see CloudAutoFadeStart/End.
+            float fadeStart    = u_AutoDistanceFade != 0 ? CloudAutoFadeStart(u_LayerBottomAltitude)
+                                                         : u_DistanceFadeStart;
+            float fadeEnd      = u_AutoDistanceFade != 0
+                                      ? CloudAutoFadeEnd(u_PlanetRadius, u_LayerBottomAltitude, u_LayerThickness)
+                                      : u_DistanceFadeEnd;
+            float horizonStart = u_AutoDistanceFade != 0 ? fadeStart * 4.0f : u_HorizonFadeStart;
+            float horizonEnd   = u_AutoDistanceFade != 0 ? fadeEnd : u_HorizonFadeEnd;
+
+            float horizon = 1.0f - CloudRemapRange(cloudDistance, horizonStart, horizonEnd, 0.0f, 1.0f);
             scattered *= horizon;
             transmittance = mix(1.0f, transmittance, horizon);
 
@@ -331,7 +414,7 @@ Shader "CloudRaymarch"
             vec3 skyColour = EvaluateSky(dir, UnpackSunDirection(sky), 0.0f, UnpackSunAngularRadius(sky),
                                          UnpackSkyConfig(sky));
 
-            float aerial = CloudRemapRange(tEnter, u_DistanceFadeStart, u_DistanceFadeEnd, 0.0f, 1.0f) *
+            float aerial = CloudRemapRange(cloudDistance, fadeStart, fadeEnd, 0.0f, 1.0f) *
                            clamp(u_ShadowTint.w, 0.0f, 1.0f);
             scattered = mix(scattered, skyColour * (1.0f - transmittance), aerial);
 

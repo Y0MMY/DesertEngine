@@ -455,6 +455,65 @@ vec3 CloudAmbient(vec3 skyRadiance, vec3 groundRadiance, float skyMultiplier, fl
     return mix(groundRadiance * groundMultiplier, skyRadiance * skyMultiplier, blend);
 }
 
+// How much of the sky a sample can actually SEE — the occlusion of the ambient term.
+//
+// Nubis3 (SIGGRAPH 2023, pp. 141 and 144) writes it as
+//     ambient_scattering = pow(1 - dimensional_profile, 0.5) * exp(-summed_ambient_density)
+// and the two halves do different jobs. The first is LOCAL: a sample in dense material has cloud pressed
+// against it on every side and sees almost no sky, while a wisp on the rim sees all of it. The second is
+// the COLUMN: everything stacked overhead, which is what makes a cloud base dark while its top stays
+// bright.
+//
+// Without them every sample in a cloud receives the full sky and ground radiance no matter how deep it
+// sits, and a three-kilometre core is lit exactly as brightly as a rim wisp. That is the difference
+// between a volume and a slab, and it is what the paper's own ablation (pp. 133-136) is about: it is not
+// a subtlety, it is most of why a cloud reads as three-dimensional at all.
+//
+// @p density is the sample's own [0,1] density; @p columnDensityLength is the density-length stacked
+// above it, in the same units the sun march accumulates, or zero where nothing has measured it.
+// SKY LIGHT IS NOT A COLLIMATED BEAM, and the extinction it sees is not the sun's. Nubis3 makes the same
+// point from the other side (p. 136): its multiple-scattering term drives the effective extinction down to
+// between a quarter and a twentieth of the direct one, precisely because light that has already bounced
+// penetrates far deeper than light that has not. Applying the full sun extinction to the column here is
+// what turns cloud cores black instead of luminous — the paper's own ablation, pp. 135 vs 136.
+//
+// @p strength blends the whole thing back toward unoccluded, because we do NOT yet have the paper's
+// depth-modulated multiple scattering to put the light back into the core. Until we do, full occlusion
+// over-darkens; this is the knob that says by how much.
+const float CLOUD_AMBIENT_COLUMN_EXTINCTION = 0.25f;
+
+float CloudAmbientOcclusion(float density, float columnDensityLength, float sigmaScale, float strength)
+{
+    float local  = sqrt(max(1.0f - clamp(density, 0.0f, 1.0f), 0.0f));
+    float column = exp(-max(columnDensityLength, 0.0f) * max(sigmaScale, 0.0f) *
+                       CLOUD_AMBIENT_COLUMN_EXTINCTION);
+    return mix(1.0f, local * column, clamp(strength, 0.0f, 1.0f));
+}
+
+// Where the aerial-perspective and horizon fades should START and END when nobody has authored them.
+//
+// Authoring them in kilometres does not survive contact with the geometry. Both fades are measured along
+// the ray, and a ray's distance to the layer grows as 1/sin(elevation) — so a range of 50 to 140 km, which
+// sounds like "the far half of the sky", is in fact the band between 1.9 and 0.6 degrees above the
+// horizon. Every cloud higher than two degrees got no aerial perspective at all, which is why a cloud
+// forty kilometres away was as white and as crisp as one four kilometres away.
+//
+// Tied to the layer instead: the fade begins a couple of layer-heights out, where a ray has travelled
+// enough air for it to matter, and ends at the layer's own geometric horizon, sqrt(2*R*h) — the distance
+// at which the layer meets the ground plane and there is nothing further to fade. For a 1.5 km base that
+// is 3 km to 138 km, which spreads the effect from about thirty degrees down to the horizon instead of
+// compressing it into the last degree.
+float CloudAutoFadeStart(float layerBottomAltitude)
+{
+    return max(2.0f * layerBottomAltitude, 1.0f);
+}
+
+float CloudAutoFadeEnd(float planetRadius, float layerBottomAltitude, float layerThickness)
+{
+    float top = max(layerBottomAltitude + layerThickness, 1.0f);
+    return sqrt(2.0f * max(planetRadius, 1.0f) * top);
+}
+
 // ---- Scene depth -----------------------------------------------------------------------------------
 
 // Distance from the camera to the geometry the depth buffer recorded, in WORLD UNITS.

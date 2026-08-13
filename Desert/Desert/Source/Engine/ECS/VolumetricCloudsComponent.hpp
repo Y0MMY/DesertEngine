@@ -104,7 +104,7 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Coverage" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ),
                   Tooltip( "Fraction of the sky filled. The single biggest look knob." ) )
-        float Coverage = 0.50f;
+        float Coverage = 0.80f;
 
         PROPERTY( DisplayName( "Coverage Contrast" ), Category( "Weather" ), Range( 0.2f, 4.0f ),
                   EditCondition( "Enabled" ),
@@ -498,6 +498,21 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Light March Samples" ), Category( "Quality" ), Range( 1, 16 ),
                   Tooltip( "Shadow-ray samples per shaded sample." ) )
         int LightMarchSamples = 4;
+
+        PROPERTY( DisplayName( "Auto Distance Fade" ), Category( "Lighting" ), EditCondition( "Enabled" ),
+                  Tooltip( "Derive the aerial-perspective and horizon fade ranges from the layer's own "
+                           "geometry instead of the authored kilometres. Distances along a ray grow as "
+                           "1/sin(elevation), so a hand-authored 50-140 km range covers only the last "
+                           "degree above the horizon; the derived one spans about thirty degrees down to "
+                           "the layer's geometric horizon." ) )
+        bool AutoDistanceFade = true;
+
+        PROPERTY( DisplayName( "Ambient Occlusion" ), Category( "Lighting" ), Range( 0.0f, 1.0f ),
+                  EditCondition( "Enabled" ),
+                  Tooltip( "How much the sky's light is blocked by the cloud around and above a sample. At "
+                           "0 every point in a cloud is lit by the full sky however deep it sits, which is "
+                           "what renders a volume as a flat slab. Nubis3 pp. 141/144." ) )
+        float AmbientOcclusion = 0.55f;
 
         PROPERTY( DisplayName( "Cloud Shadow Map" ), Category( "Quality" ),
                   Tooltip( "Precompute the sun's optical depth into a 2D map once per frame instead of "

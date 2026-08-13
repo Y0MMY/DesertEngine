@@ -40,14 +40,32 @@ vec4 CloudSampleWeather(vec3 worldPos)
     return texture(u_WeatherMap, CloudWeatherUV(worldPos));
 }
 
-// The shape lookup drifts with the wind and SHEARS with height: the top of a layer moves faster than its
-// base, which is what leans a cumulus over instead of sliding it sideways as a rigid block.
+// The lean a sheared wind gives a cloud: a FIXED horizontal displacement proportional to height, in
+// fractions of the layer's own thickness. Wind Height Shear = 0.3 leans the top of the layer three tenths
+// of a layer-thickness downwind of its base, and it stays there.
+//
+// It used to multiply the SCROLL — `wind * t * (1 + shear * height)` — which made the displacement between
+// base and top grow without bound with elapsed time. A minute into a scene the top and bottom of a layer
+// were sampling the detail volume hundreds of metres apart, which drew the cloud out into a comb of
+// vertical streaks; ten minutes in they were kilometres apart. A lean is a shape, not a rate.
+vec3 CloudWindLean(vec3 wind, float heightFraction)
+{
+    vec2 horizontal = vec2(wind.x, wind.z);
+    if (dot(horizontal, horizontal) < 1e-8f)
+        return vec3(0.0f, 0.0f, 0.0f);
+
+    vec2 dir = normalize(horizontal);
+    float d  = u_WindHeightShear * clamp(heightFraction, 0.0f, 1.0f) * u_LayerThickness;
+    return vec3(dir.x * d, 0.0f, dir.y * d);
+}
+
+// The shape lookup drifts with the wind and LEANS with height: the top of a layer sits downwind of its
+// base, which tilts a cumulus over instead of sliding it sideways as a rigid block.
 vec3 CloudShapeSamplePos(vec3 worldPos, float heightFraction)
 {
     vec3  wind = CloudWindVelocity();
     float t    = CloudTime();
-    float shear = 1.0f + u_WindHeightShear * heightFraction;
-    return worldPos + wind * (t * u_ShapeScrollMultiplier * shear);
+    return worldPos + wind * (t * u_ShapeScrollMultiplier) + CloudWindLean(wind, heightFraction);
 }
 
 // Detail drifts faster than shape (the classic "boiling" look) and also rises: convection carries the
@@ -56,8 +74,8 @@ vec3 CloudDetailSamplePos(vec3 worldPos, float heightFraction)
 {
     vec3  wind = CloudWindVelocity();
     float t    = CloudTime();
-    float shear = 1.0f + u_WindHeightShear * heightFraction;
-    return worldPos + wind * (t * u_DetailScrollMultiplier * shear) + vec3(0.0f, t * u_WindUpliftSpeed, 0.0f);
+    return worldPos + wind * (t * u_DetailScrollMultiplier) + CloudWindLean(wind, heightFraction) +
+           vec3(0.0f, t * u_WindUpliftSpeed, 0.0f);
 }
 
 // ---- The vertical envelope -------------------------------------------------------------------------
@@ -173,11 +191,22 @@ float CloudDensityFull(vec3 worldPos, float heightFraction, float distanceFromCa
 
     density = CloudRemapRange(density, noiseComposite * u_DetailStrength, 1.0f, 0.0f, 1.0f);
 
-    // The weather map's density-scale channel, shaped by its own contrast, then a sharpening whose
-    // exponent runs from the thin-region value to the dense-region one with that same scale.
-    float poweredScale = pow(clamp(weather.a, 0.0f, 1.0f), u_DensityScalePower);
-    density *= poweredScale;
-    density = pow(density, mix(u_DensitySharpenLow, u_DensitySharpenHigh, max(poweredScale, 1e-4f)));
+    // The weather map's density-scale channel. Nubis3 p. 118 applies it LINEARLY and puts the power only
+    // inside the sharpening lerp:
+    //
+    //     uprezzed_density *= inDensityScale;
+    //     uprezzed_density  = pow(uprezzed_density, lerp(0.3, 0.6, max(EPS, pow(saturate(inDensityScale), 4))));
+    //
+    // This site multiplied by scale^4 instead, which is a transcription error inherited from the reference
+    // project rather than from the paper. It compressed the channel's effect eightfold at the low end and
+    // is the reason CloudWeather.shader writes this channel into [0.5, 1] instead of [0, 1] — a workaround
+    // whose own comment explains that the full range "would thin every cloud in the sky by a factor of
+    // sixteen". With the paper's form the channel can use its range and Density Scale Power is once again
+    // the exponent it is named after.
+    float scale = clamp(weather.a, 0.0f, 1.0f);
+    density *= scale;
+    density = pow(density, mix(u_DensitySharpenLow, u_DensitySharpenHigh,
+                               max(pow(scale, u_DensityScalePower), 1e-4f)));
 
     // Distance softening: the explicit answer to distance aliasing. There is no mip chain on the noise
     // volumes in v1 and no runtime LOD selection — the reference computed a mip level and then sampled
