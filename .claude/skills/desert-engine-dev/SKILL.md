@@ -249,3 +249,6 @@ changed, confirm it round-trips through both `DShaderTool` and the engine.
 render a frame and look at it. The editor runs here and can shoot a scene to a PNG unattended; see
 the `desert-engine-verify` skill for the command, the full test sweep, and why the defects that
 have cost this project the most were all invisible to unit tests.
+
+For what may not ship at all — TODOs, stubs, sliders that move nothing, an old path left alive
+beside its replacement — and the definition of done, see the `desert-engine-contract` skill.

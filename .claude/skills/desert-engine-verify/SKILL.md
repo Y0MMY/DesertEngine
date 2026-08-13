@@ -137,3 +137,5 @@ Two properties worth reaching for, because they catch whole classes rather than 
 - `Docs/Clouds/RESEARCH_REFERENCE.md` §M — what rendering showed that reading the code did not.
 - The `desert-engine-dev` skill — how the engine is built (architecture, conventions, footguns).
   This skill is about proving a change works; that one is about writing it.
+- The `desert-engine-contract` skill — what may not ship at all (TODOs, stubs, dead settings,
+  legacy paths), and the definition of done this verification is one clause of.
