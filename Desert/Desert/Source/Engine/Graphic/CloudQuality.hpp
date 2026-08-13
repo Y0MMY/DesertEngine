@@ -95,8 +95,10 @@ namespace Desert::Graphic
                 // 4, not 6. The cone march is 12 of the 18 texture fetches a shaded sample costs — two
                 // per cone sample — so this one number is two thirds of the raymarch. Four keeps the
                 // shadow terminator readable; Ultra below still authors 8 for stills and captures.
-                .LightMarchSamples   = 4,
-                .MultiScatterOctaves = 2,
+                .LightMarchSamples = 4,
+                // 3 octaves since CLD-108: at tauSun >~ 3 two octaves both vanish and a storm interior
+                // collapses onto ambient alone. The third costs arithmetic, not fetches.
+                .MultiScatterOctaves = 3,
                 .TemporalMode        = ECS::CloudTemporalMode::Reprojection,
                 .TemporalBlendFactor = 0.10f,
                 .TemporalClampScale  = 1.50f,
