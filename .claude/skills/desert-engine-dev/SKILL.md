@@ -244,3 +244,8 @@ without a rebuild.
 State plainly what you changed, how you verified it (which build config, tests, the actual
 DShaderTool/engine output or Perf HUD numbers), and anything skipped. If a shader/material path
 changed, confirm it round-trips through both `DShaderTool` and the engine.
+
+**If the change alters what appears on screen, "builds and tests pass" is not verification** —
+render a frame and look at it. The editor runs here and can shoot a scene to a PNG unattended; see
+the `desert-engine-verify` skill for the command, the full test sweep, and why the defects that
+have cost this project the most were all invisible to unit tests.
