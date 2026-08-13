@@ -88,7 +88,10 @@ namespace Desert::Editor
         // this route and the ECS route cannot describe two different skies. The eight literals above used
         // to be typed a second time here, which is how a field added to the component reached the viewport
         // and not the thumbnails.
-        m_Renderer->SetProceduralSky( true, sunDir, /*bakeNow=*/true, Graphic::MakeSkySettings( skyC.Data ) );
+        // Default SunLightFx: a thumbnail has no sun light entity to read shafts from, and streaks in a
+        // 128px preview would be noise anyway.
+        m_Renderer->SetProceduralSky( true, sunDir, /*bakeNow=*/true, Graphic::MakeSkySettings( skyC.Data ),
+                                      Graphic::SunLightFx{} );
 
         // Resize ONCE here (after the camera exists) so the camera projection becomes square. We render at
         // kRenderSize (2x the output) and downscale on write = supersampled anti-aliasing. Resize recreates

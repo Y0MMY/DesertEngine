@@ -6,14 +6,16 @@ namespace Desert::Graphic
 {
     MaterialTonemap::MaterialTonemap() : Material( "MaterialTonemap", "SceneComposite" )
     {
-        m_GeometryTexture = m_MaterialExecutor->GetTexture2DProperty( "u_GeometryTexture" ).get();
-        m_BloomTexture    = m_MaterialExecutor->GetTexture2DProperty( "u_BloomTexture" ).get();
-        m_AvgLuminance    = m_MaterialExecutor->GetTexture2DProperty( "u_AvgLuminance" ).get();
+        m_GeometryTexture   = m_MaterialExecutor->GetTexture2DProperty( "u_GeometryTexture" ).get();
+        m_BloomTexture      = m_MaterialExecutor->GetTexture2DProperty( "u_BloomTexture" ).get();
+        m_AvgLuminance      = m_MaterialExecutor->GetTexture2DProperty( "u_AvgLuminance" ).get();
+        m_LightShaftTexture = m_MaterialExecutor->GetTexture2DProperty( "u_LightShaftTexture" ).get();
     }
 
     void MaterialTonemap::Bind( const std::shared_ptr<Image2D>& targetImage,
                                 const std::shared_ptr<Image2D>& bloomImage,
-                                const std::shared_ptr<Image2D>& avgLuminance, const Params& params )
+                                const std::shared_ptr<Image2D>& avgLuminance,
+                                const std::shared_ptr<Image2D>& lightShaftImage, const Params& params )
     {
         if ( m_GeometryTexture && targetImage )
             m_GeometryTexture->SetImage( targetImage.get() );
@@ -24,6 +26,9 @@ namespace Desert::Graphic
         if ( m_AvgLuminance && avgLuminance )
             m_AvgLuminance->SetImage( avgLuminance.get() );
 
+        if ( m_LightShaftTexture && lightShaftImage )
+            m_LightShaftTexture->SetImage( lightShaftImage.get() );
+
         SetExposure( params.Exposure );
         SetGamma( params.Gamma );
         SetBloomIntensity( params.BloomIntensity );
@@ -31,6 +36,7 @@ namespace Desert::Graphic
         SetAutoExposureEnabled( params.AutoExposure ? 1.0f : 0.0f );
         SetChromaticBloom( params.ChromaticBloom );
         SetWhitePoint( params.WhitePoint );
+        SetLightShaftTintIntensity( glm::vec4( params.LightShaftTint, params.LightShaftIntensity ) );
 
         std::unordered_set<UniformBufferProperty*> dirtyUBs;
         UploadRegisteredProperties( dirtyUBs );

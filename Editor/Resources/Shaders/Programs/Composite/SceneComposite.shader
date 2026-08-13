@@ -5,7 +5,8 @@ Shader "SceneComposite"
         In(0) vec2 v_TexCoord;
         Uniform(2) sampler2D u_GeometryTexture;
         Uniform(3) sampler2D u_BloomTexture;
-        Uniform(4) sampler2D u_AvgLuminance; // 1x1 adapted luminance (eye adaptation)
+        Uniform(4) sampler2D u_AvgLuminance;      // 1x1 adapted luminance (eye adaptation)
+        Uniform(5) sampler2D u_LightShaftTexture; // radial sun streaks (LightShaftRenderer), half res
         Out(0) vec4 oColor;
 
         Uniform(0) TonemapUB
@@ -17,6 +18,7 @@ Shader "SceneComposite"
             float u_AutoExposureEnabled;  // > 0.5 -> use measured luminance instead of manual exposure
             float u_ChromaticBloom;       // lens dispersion strength on the bloom halo (0 = off)
             float u_WhitePoint;           // the luminance that maps to pure white (see the operator below)
+            vec4  u_LightShaftTintIntensity; // rgb = the sun light's Bloom Tint, a = Bloom Scale x screen fade
         };
 
         void main()
@@ -59,7 +61,14 @@ Shader "SceneComposite"
             }
             bloom *= u_BloomIntensity;
 
-            vec3 color = (scene + bloom) * exposure;
+            // Light shafts: additive HDR streaks toward the sun, BEFORE the tonemap so a strong shaft
+            // rolls off through the same operator everything else does instead of clipping. The
+            // intensity carries the screen-edge fade, so a sun leaving the view takes its streaks with
+            // it; when the effect is off the intensity is exactly zero and the (stale) texture is inert.
+            vec3 shafts = texture(u_LightShaftTexture, v_TexCoord).rgb *
+                          (u_LightShaftTintIntensity.rgb * u_LightShaftTintIntensity.a);
+
+            vec3 color = (scene + bloom + shafts) * exposure;
 
             // Reinhard tonemapping operator.
         	// see: "Photographic Tone Reproduction for Digital Images", eq. 4

@@ -1,6 +1,7 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/RenderPhaseRegistry.hpp>
 #include <Engine/Graphic/RenderConfig.hpp>
+#include <Engine/Graphic/PostProcessing/LightShaftRules.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
 #include <Common/Core/Units.hpp>
@@ -153,6 +154,15 @@ namespace Desert::Graphic
         if ( !bloomSystem->Initialize() )
             DESERT_VERIFY( false );
 
+        // Light shafts: the atmosphere sun's screen-space streaks, masked and radially blurred from the
+        // HDR scene colour; tonemap adds them in the way it adds bloom. Non-fatal: a sky without streaks
+        // must never take a scene down.
+        RegisterSystem<System::LightShaftRenderer>( "LightShaftSystem", this, m_TargetFramebuffer,
+                                                    m_RenderGraphBuilder );
+        const auto& lightShaftSystem = SP_CAST( System::LightShaftRenderer, m_RenderSystems["LightShaftSystem"] );
+        if ( !lightShaftSystem->Initialize() )
+            LOG_WARN( "[SceneRenderer] Light shaft system unavailable." );
+
         // SSAO (fullscreen G-buffer -> AO factor). Its target is the dedicated SSAO buffer; deferred lighting
         // reads the result. Runs in the manual chain only when Deferred. Non-fatal.
         RegisterSystem<System::SSAORenderer>( "SSAOSystem", this, m_SSAOBuffer, m_RenderGraphBuilder );
@@ -190,6 +200,7 @@ namespace Desert::Graphic
                    ->Initialize() )
             LOG_WARN( "[SceneRenderer] Deferred lighting system unavailable." );
         tonemapSystem->SetBloomImage( bloomSystem->GetBloomImage() );
+        tonemapSystem->SetLightShaftImage( lightShaftSystem->GetShaftImage() );
 
         // Auto-exposure measures the HDR scene luminance into a 1x1 buffer that tonemap reads.
         RegisterSystem<System::AutoExposureRenderer>( "AutoExposureSystem", this, m_TargetFramebuffer,
@@ -633,6 +644,39 @@ namespace Desert::Graphic
             UNIQUE_GET_AS( System::BloomRenderer, m_RenderSystems["BloomSystem"] )->Execute();
         }
 
+        // Light shafts: the sun light's streaks, masked and radially blurred from the same HDR scene
+        // colour bloom reads. The intensity handed to tonemap carries the sun's screen-edge fade, and it
+        // is derived HERE, from the same numbers that decide whether the dispatches run — a zero
+        // intensity therefore always means the (possibly stale) shaft image is inert, the exact contract
+        // the bloom image has.
+        {
+            DESERT_PROFILE_SCOPE( "PostFX: LightShafts" );
+            const auto& shafts  = UNIQUE_GET_AS( System::LightShaftRenderer, m_RenderSystems["LightShaftSystem"] );
+            const auto& tonemap = UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
+
+            SunScreen            sun{ glm::vec2( 0.5f ), 0.0f };
+            const AtmosphereEnv& atmosphere = GetAtmosphere();
+            if ( m_SceneInfo.ActiveCamera && atmosphere.Valid )
+            {
+                const glm::mat4 viewProjection =
+                     m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
+                sun = ComputeSunScreen( viewProjection, atmosphere.SunDirection );
+            }
+
+            shafts->SetParams( System::LightShaftRenderer::Params{
+                 .Enabled       = m_SunLightFx.LightShaftBloom,
+                 .BloomScale    = m_SunLightFx.BloomScale,
+                 .Threshold     = m_SunLightFx.BloomThreshold,
+                 .MaxBrightness = m_SunLightFx.BloomMaxBrightness,
+                 .BloomTint     = m_SunLightFx.BloomTint,
+            } );
+            shafts->Execute( sun.Uv, sun.Fade );
+
+            const float intensity = m_SunLightFx.LightShaftBloom ? m_SunLightFx.BloomScale * sun.Fade : 0.0f;
+            tonemap->SetLightShaftImage( shafts->GetShaftImage() );
+            tonemap->SetLightShafts( intensity, m_SunLightFx.BloomTint );
+        }
+
         {
             DESERT_PROFILE_SCOPE( "PostFX: Tonemap" );
             UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )->Execute();
@@ -828,6 +872,12 @@ namespace Desert::Graphic
         bloomSystem->Resize( width, height );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetBloomImage( bloomSystem->GetBloomImage() );
+
+        // Same contract for the light shafts: the ping-pong pair is recreated, so re-point tonemap.
+        const auto& shaftSystem = UNIQUE_GET_AS( System::LightShaftRenderer, m_RenderSystems["LightShaftSystem"] );
+        shaftSystem->Resize( width, height );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetLightShaftImage( shaftSystem->GetShaftImage() );
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting
@@ -938,10 +988,11 @@ namespace Desert::Graphic
     }
 
     void SceneRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow,
-                                          const SkySettings& sky )
+                                          const SkySettings& sky, const SunLightFx& fx )
     {
+        m_SunLightFx = fx;
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
-             ->SetProceduralSky( enabled, sunDir, bakeNow, sky );
+             ->SetProceduralSky( enabled, sunDir, bakeNow, sky, fx.CloudScatteredLuminanceScale );
     }
 
     const AtmosphereEnv& SceneRenderer::GetAtmosphere() const

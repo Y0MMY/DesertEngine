@@ -365,9 +365,21 @@ TEST( SkyboxReflection, KeepsOnlyTheHdrCubemapPath )
 
 TEST( DirectionalLightReflection, GainsTheAtmosphereSunFields )
 {
+    // The UE-parity slice added 2026-08-14: Cloud Scattered Luminance Scale (the clouds' per-light sun
+    // multiplier — UE reserves Volumetric Scattering Intensity for fog) and the Light Shafts category,
+    // UE's names and defaults verbatim. Consumers: SkyboxRenderer (cloud scale) and LightShaftRenderer
+    // via the SunLightFx slice of the ProceduralSkyCommand.
     const TypeInfo& light = Type( "DirectionalLightData" );
-    EXPECT_EQ( FieldNames( light ), ( std::vector<std::string>{ "Color", "Intensity", "AtmosphereSunLight",
-                                                                "AtmosphereSunLightIndex" } ) );
+    EXPECT_EQ( FieldNames( light ),
+               ( std::vector<std::string>{ "Color", "Intensity", "AtmosphereSunLight", "AtmosphereSunLightIndex",
+                                           "CloudScatteredLuminanceScale", "LightShaftBloom", "BloomScale",
+                                           "BloomThreshold", "BloomMaxBrightness", "BloomTint" } ) );
+
+    // The Light Shafts group ships with UE's own defaults: OFF, and harmless when switched on.
+    EXPECT_FALSE( DefaultOf<bool>( light, "LightShaftBloom" ) );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( light, "BloomScale" ), 0.2f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( light, "BloomThreshold" ), 0.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( light, "BloomMaxBrightness" ), 100.0f );
 
     const FieldInfo* marked = Find( light, "AtmosphereSunLight" );
     ASSERT_NE( marked, nullptr );

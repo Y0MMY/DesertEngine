@@ -11,6 +11,7 @@
 
 #include <Engine/Graphic/Render/Commands/SkyboxCommand.hpp>
 #include <Engine/Graphic/Render/Commands/ProceduralSkyCommand.hpp>
+#include <Engine/Graphic/SunLightFx.hpp>
 
 #include <Common/Core/Logger.hpp>
 
@@ -70,7 +71,8 @@ namespace Desert::ECS
                 // leave the last one it saw on screen — and would keep publishing an AtmosphereEnv marked
                 // valid for a sky that no longer exists.
                 renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
-                     false, Rules::FallbackAtmosphereSunDirection(), /*bakeNow=*/false, Graphic::SkySettings{} );
+                     false, Rules::FallbackAtmosphereSunDirection(), /*bakeNow=*/false, Graphic::SkySettings{},
+                     Graphic::SunLightFx{} );
             }
             else
             {
@@ -85,7 +87,7 @@ namespace Desert::ECS
                 // ONE conversion from the authored component to the renderer's transport struct — the
                 // degrees-to-radians, diameter-to-radius and kilometres-to-world-units steps all live in it.
                 renderCommandBuffer.Emplace<Graphic::Render::ProceduralSkyCommand>(
-                     atmosphere.Data.Enabled, sun, bakeNow, Graphic::MakeSkySettings( atmosphere.Data ) );
+                     atmosphere.Data.Enabled, sun, bakeNow, Graphic::MakeSkySettings( atmosphere.Data ), m_SunFx );
             }
 
             // The HDR cubemap is the other Sky-pass mode: only when no atmosphere is driving the sky, and
@@ -142,6 +144,10 @@ namespace Desert::ECS
         // (Rules::SelectAtmosphereSun); this function only fetches its arguments and reports what it said.
         glm::vec3 ResolveAtmosphereSun( entt::registry& registry )
         {
+            // Reset to defaults FIRST: the fallback paths below return without choosing a light, and a
+            // stale FX slice from a light deleted last frame would keep its shafts in the sky.
+            m_SunFx = Graphic::SunLightFx{};
+
             std::vector<Rules::SunCandidate> candidates;
             std::vector<entt::entity>        entities;
 
@@ -189,9 +195,24 @@ namespace Desert::ECS
             if ( !selection.Chosen )
                 return Rules::FallbackAtmosphereSunDirection();
 
+            // The chosen light's render effects travel WITH its direction: shafts and the cloud
+            // luminance scale are properties of the sun, and reading them from any other light would
+            // let an unmarked light in the corner of the scene tint the sky's own sun.
+            const auto& light          = registry.get<ECS::DirectionLightComponent>( entities[*selection.Chosen] );
+            m_SunFx.LightShaftBloom    = light.Data.LightShaftBloom;
+            m_SunFx.BloomScale         = light.Data.BloomScale;
+            m_SunFx.BloomThreshold     = light.Data.BloomThreshold;
+            m_SunFx.BloomMaxBrightness = light.Data.BloomMaxBrightness;
+            m_SunFx.BloomTint          = light.Data.BloomTint;
+            m_SunFx.CloudScatteredLuminanceScale = light.Data.CloudScatteredLuminanceScale;
+
             const auto& transform = registry.get<ECS::TransformComponent>( entities[*selection.Chosen] );
             return Rules::AtmosphereSunDirection( transform.Translation );
         }
+
+        // The evaluated FX slice of the chosen sun light, refreshed by ResolveAtmosphereSun each frame
+        // and defaulted (shafts off, scale white) when no light is chosen.
+        Graphic::SunLightFx m_SunFx;
 
         // Both of these describe the SCENE, not the frame, so they are said once. A per-frame LOG_WARN is
         // how a real message becomes invisible.

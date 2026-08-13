@@ -161,7 +161,8 @@ namespace Desert::Editor
         // proved insufficient in a minimal scene — see AssetThumbnailRenderer). One packing helper, one
         // negation: the palette is read off the component and the sun comes from the light's travel vector.
         m_Renderer->SetProceduralSky( true, ECS::Rules::AtmosphereSunDirection( kLightTravel ),
-                                      /*bakeNow=*/true, Graphic::MakeSkySettings( skyC.Data ) );
+                                      /*bakeNow=*/true, Graphic::MakeSkySettings( skyC.Data ),
+                                      Graphic::SunLightFx{} );
 
         m_Inited = true;
     }

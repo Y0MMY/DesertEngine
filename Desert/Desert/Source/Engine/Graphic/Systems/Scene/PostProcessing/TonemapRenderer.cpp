@@ -80,12 +80,15 @@ namespace Desert::Graphic::System
 
         std::shared_ptr<Image2D> avgLuminance = m_AutoExposureImage.lock();
 
+        std::shared_ptr<Image2D> lightShafts = m_LightShaftImage.lock();
+
         MaterialTonemap::Params params{
-             m_Exposure,       m_Gamma,     m_BloomIntensity, m_ExposureKey, m_AutoExposureEnabled,
-             m_ChromaticBloom, m_WhitePoint };
+             m_Exposure,       m_Gamma,      m_BloomIntensity,      m_ExposureKey,   m_AutoExposureEnabled,
+             m_ChromaticBloom, m_WhitePoint, m_LightShaftIntensity, m_LightShaftTint };
 
         auto& renderer = Renderer::GetInstance();
-        m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage(), bloomImage, avgLuminance, params );
+        m_MaterialTonemap->Bind( framebuffer->GetColorAttachmentImage(), bloomImage, avgLuminance, lightShafts,
+                                 params );
         renderer.SubmitFullscreenQuad( m_Pipeline.get(), m_MaterialTonemap->GetMaterialExecutor() );
     }
 } // namespace Desert::Graphic::System

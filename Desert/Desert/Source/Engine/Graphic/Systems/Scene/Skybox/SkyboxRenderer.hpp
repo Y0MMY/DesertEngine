@@ -31,7 +31,10 @@ namespace Desert::Graphic::System
         // @p sunDir is the direction TOWARD the sun, normalized. @p bakeNow is the editor's one-shot
         // request. Everything else the sky needs — palette, sun radiance, planet radius, bake knobs — is
         // in @p sky, which MakeSkySettings produced from the component.
-        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky );
+        // @p cloudLuminanceScale is the sun light's Cloud Scattered Luminance Scale — it lands on the
+        // SunIrradiance the clouds consume, inside the same evaluation everything else reads.
+        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky,
+                               const glm::vec3& cloudLuminanceScale );
 
         // Bakes / rebakes the procedural-sky IBL when the rule says so (see ShouldRebakeSkyEnvironment
         // for WHETHER, SkyEnvironmentRebakeMayRun for WHEN). Call once per frame from a

@@ -30,3 +30,10 @@ taken on frame one is a picture of the dither rather than of the sky.
 | `v3-storm.png` | Storm: deck interiors stay readable (CLD-104 depth-modulated ambient extinction, 3 MS octaves). |
 | `v3-sunset.png` | Sunset: warm direct light survives to the horizon (CLD-102), mauve-grey ambient tracks the sky. |
 | `v3-default-scene.png` | The default sandbox scene after the field migration. |
+
+## UE-parity pass (light shafts + showcase scene)
+
+| file | what it shows |
+|---|---|
+| `ue-showcase-sun.png` | `Clouds_UEShowcase.desce`: sun disc + bloom glow, Ultra (full-res) clouds, deeper zenith. |
+| `ue-showcase-sunset-shafts.png` | The same scene with the sun on the horizon: the new Light Shaft Bloom (DirectionalLight, UE params) — crepuscular rays through the deck, clouds lit from below. |

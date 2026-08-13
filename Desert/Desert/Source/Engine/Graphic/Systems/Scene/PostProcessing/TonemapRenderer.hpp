@@ -71,6 +71,19 @@ namespace Desert::Graphic::System
             m_ExposureKey         = key;
         }
 
+        // The sun light's radial streaks (LightShaftRenderer) and their strength — the intensity is
+        // Bloom Scale x the sun's screen-edge fade, computed by SceneRenderer from the SAME params that
+        // decided whether the shaft dispatches ran, so a zero here always means the image is inert.
+        void SetLightShaftImage( const std::shared_ptr<Image2D>& shafts )
+        {
+            m_LightShaftImage = shafts;
+        }
+        void SetLightShafts( float intensity, const glm::vec3& tint )
+        {
+            m_LightShaftIntensity = intensity;
+            m_LightShaftTint      = tint;
+        }
+
     private:
         void Render();
     private:
@@ -90,5 +103,9 @@ namespace Desert::Graphic::System
         std::weak_ptr<Image2D> m_AutoExposureImage;
         bool                   m_AutoExposureEnabled = false;
         float                      m_ExposureKey         = 0.18f;
+
+        std::weak_ptr<Image2D> m_LightShaftImage;
+        float                  m_LightShaftIntensity = 0.0f;
+        glm::vec3              m_LightShaftTint      = glm::vec3( 1.0f );
     };
 } // namespace Desert::Graphic::System

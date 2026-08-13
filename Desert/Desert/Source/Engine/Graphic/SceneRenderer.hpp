@@ -9,6 +9,7 @@
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
+#include <Engine/Graphic/SunLightFx.hpp>
 #include <Engine/Graphic/WindEnv.hpp>
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
@@ -28,6 +29,7 @@
 #include "Systems/Scene/PostProcessing/SMAARenderer.hpp"
 #include "Systems/Scene/PostProcessing/BackdropBlurRenderer.hpp"
 #include "Systems/Scene/PostProcessing/BloomRenderer.hpp"
+#include "Systems/Scene/PostProcessing/LightShaftRenderer.hpp"
 #include "Systems/Scene/PostProcessing/AutoExposureRenderer.hpp"
 #include "Systems/Scene/Deferred/DeferredLightingRenderer.hpp"
 #include "Systems/Scene/Deferred/SSAORenderer.hpp"
@@ -126,7 +128,8 @@ namespace Desert::Graphic
         // Procedural sky configuration (from the SkyAtmosphereComponent + the atmosphere sun, via the ECS).
         // sunDir is the direction TOWARD the sun, already normalized; bakeNow is the one-shot request from
         // the editor's Bake button.
-        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky );
+        void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky,
+                               const SunLightFx& fx );
 
         // This frame's volumetric-cloud settings (from VolumetricCloudsComponent, via the ECS).
         // `present` is false when the scene has no cloud component at all — said explicitly, because the
@@ -276,6 +279,10 @@ namespace Desert::Graphic
         {
             Core::Camera* ActiveCamera;
         } m_SceneInfo;
+
+        // The atmosphere sun light's render-effect slice, refreshed by SetProceduralSky each frame; the
+        // post chain reads it to run (or zero out) the light shafts.
+        SunLightFx m_SunLightFx;
 
         ShaderProtocols::DirectionLight m_DirectionLights;
         ShaderProtocols::PointLight     m_PointLight;

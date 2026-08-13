@@ -87,7 +87,7 @@ namespace Desert::Graphic::System
     }
 
     void SkyboxRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow,
-                                           const SkySettings& sky )
+                                           const SkySettings& sky, const glm::vec3& cloudLuminanceScale )
     {
         m_UseProceduralSky = enabled;
         m_SunDir           = glm::normalize( sunDir );
@@ -104,6 +104,12 @@ namespace Desert::Graphic::System
         if ( enabled && m_SkyParams )
         {
             m_Atmosphere = EvaluateAtmosphere( m_Sky, m_SunDir, m_SkyParams.get() );
+
+            // The sun light's Cloud Scattered Luminance Scale (UE semantics): scales what the CLOUDS
+            // receive from this sun, and nothing else — SunIrradiance's only consumer is the cloud
+            // march (see AtmosphereEnv), which is what makes this a per-light volumetrics control
+            // rather than a second sun intensity.
+            m_Atmosphere.SunIrradiance *= cloudLuminanceScale;
 
             // A sun below the horizon is a legal authored state (it is night), but it is also what an
             // inverted Translation looks like — and that mistake shipped in four scenes. Say it once, with

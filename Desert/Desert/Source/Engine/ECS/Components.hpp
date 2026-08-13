@@ -417,6 +417,47 @@ namespace Desert::ECS
                   Tooltip( "The engine renders exactly one directional light; index 1 is reserved for a "
                            "future second sun." ) )
         int AtmosphereSunLightIndex = 0;
+
+        // UE's Cloud Scattered Luminance Scale, same name, same meaning (UE reserves Volumetric
+        // Scattering Intensity for volumetric FOG, which we do not have — the CLOUD multiplier is this
+        // one). Scales this light's contribution scattered in the cloud medium: it multiplies the sun
+        // irradiance the cloud march receives (AtmosphereEnv::SunIrradiance) and touches nothing else.
+        PROPERTY( DisplayName( "Cloud Scattered Luminance Scale" ), Category( "Atmosphere" ), Color,
+                  EditCondition( "AtmosphereSunLight" ),
+                  Tooltip( "Scales this light's contribution to the volumetric clouds. White = exactly "
+                           "the sun the sky model computes; useful to counterbalance the approximate "
+                           "multiple scattering, per-channel." ) )
+        glm::vec3 CloudScatteredLuminanceScale = glm::vec3( 1.0f );
+
+        // ---- Light Shafts (UE's category, UE's names, UE's defaults) ----------------------------------
+        // The screen-space sun streaks: a bright-pass of the HDR scene around the sun's position on
+        // screen, radially blurred toward it and added back before tonemapping. Occlusion is inherited
+        // from the scene colour itself — clouds composite with their real transmittance, so the shafts
+        // exist exactly where the sun breaks through. Consumed by System::LightShaftRenderer via the
+        // SunLightFx slice of the ProceduralSkyCommand; only the atmosphere sun's values are read.
+        PROPERTY( DisplayName( "Light Shaft Bloom" ), Category( "Light Shafts" ),
+                  Tooltip( "Radial streaks of the sun's light through gaps in the clouds, added to the "
+                           "scene before tonemapping." ) )
+        bool LightShaftBloom = false;
+
+        PROPERTY( DisplayName( "Bloom Scale" ), Category( "Light Shafts" ), Range( 0.0f, 10.0f ),
+                  EditCondition( "LightShaftBloom" ), Tooltip( "Overall strength of the light-shaft bloom." ) )
+        float BloomScale = 0.2f;
+
+        PROPERTY( DisplayName( "Bloom Threshold" ), Category( "Light Shafts" ), Range( 0.0f, 4.0f ),
+                  EditCondition( "LightShaftBloom" ),
+                  Tooltip( "Scene luminance below this contributes nothing to the shafts." ) )
+        float BloomThreshold = 0.0f;
+
+        PROPERTY( DisplayName( "Bloom Max Brightness" ), Category( "Light Shafts" ), Range( 0.0f, 100.0f ),
+                  EditCondition( "LightShaftBloom" ),
+                  Tooltip( "Cap on the energy a single pixel may contribute — stops one blown-out pixel "
+                           "from owning the whole streak." ) )
+        float BloomMaxBrightness = 100.0f;
+
+        PROPERTY( DisplayName( "Bloom Tint" ), Category( "Light Shafts" ), Color,
+                  EditCondition( "LightShaftBloom" ), Tooltip( "Tint of the light-shaft streaks." ) )
+        glm::vec3 BloomTint = glm::vec3( 1.0f );
     };
 
     struct DirectionLightComponent
