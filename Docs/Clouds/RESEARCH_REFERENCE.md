@@ -1200,3 +1200,30 @@ ever authored the colour. Three levers, in the order worth trying:
 * **Then, and only then, the tints.** `ShadowTint` toward the reference's cool blue and `SunTint` toward
   its warm cream reproduce its look through knobs we already have — as art direction, on top of a model
   that is right, rather than in place of one.
+
+## M. Addendum, 2026-08-13 — what rendering it actually showed
+
+Section L was written by reading code. This one was written by looking at frames, which the editor can
+now produce on its own (`--scene ... --shot out.png`). Every item below was found by rendering, and three
+of them contradict what reading the code suggested.
+
+1. **Looking straight up at Coverage 0.50 rendered EMPTY SKY.** Both fields that decide where a cloud is
+   were built an order of magnitude too coarse for what a ground camera sees: the weather FBM's dominant
+   feature was 30 km and the shape lattice's cell was 8.75 km, against a visible dome a few kilometres
+   across. L.2.1 blamed the colour; the colour was never the problem here.
+2. **Shrinking the noise tiles — the obvious fix — is worse.** It fills the zenith and turns the horizon
+   into a radial moire fan, because a 3 km field repeats forty times over the 138 km to the horizon. The
+   answer is to raise the frequency INSIDE the tile. Both states are in `Shots/`.
+3. **The wind shear multiplied the scroll**, so the displacement between the base and the top of a layer
+   grew without bound with elapsed time and drew every cloud into a comb of vertical streaks after a
+   minute of running. Nothing in a static reading of that line looks wrong.
+4. **Coverage is a threshold, not a sky fraction.** 0.80 is what "Partly Cloudy" looks like. The whole
+   preset column was authored against a scale that does not survive the chain above it.
+5. **The shadow map added the day before was marching the far side of the planet** — the plane it builds
+   its rays on runs through the camera, which sits below the layer. Twenty-four density samples nine
+   thousand kilometres away, on by default, and the projection tests all passed because the defect was in
+   the ray construction, which lived outside the shared header.
+
+The pattern in all five, and in most of section L: **two things that must agree, and nothing that checks
+they do.** Unit tests of individual functions cannot see it. What can is rendering the frame — which is
+why the shot mode exists and why `Shots/` is committed.
