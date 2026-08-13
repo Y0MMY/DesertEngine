@@ -230,6 +230,94 @@ float CloudPerlinWorley(vec3 p, int period, uint seed)
     return CloudRemap01(perlin, worley - 1.0f, 1.0f);
 }
 
+// ---- Alligator (cellular) noise, periodic ----------------------------------------------------------
+//
+// The Nubis3 detail bases (deck pp.93-94): billows moved from Worley to ALLIGATOR, wisps from
+// Perlin-Worley to CURLY-ALLIGATOR. Alligator (SideFX's name; the HDK ships the reference
+// implementation) is a cellular noise where every feature point radiates a randomly-weighted falloff and
+// the value is the LARGEST contribution MINUS THE SECOND largest: bright cell interiors, and a sharp
+// dark crease exactly where two cells' influence balances — the crevice network between cauliflower
+// lobes, which is precisely what a plain Worley blob field does not have. The formulas here are built
+// from the published description on the same lattice machinery as everything above; no third-party
+// source is copied.
+
+float CloudAlligator(vec3 p, int period, uint seed)
+{
+    vec3  scaled = p * float(period);
+    vec3  base   = floor(scaled);
+    vec3  f      = scaled - base;
+    ivec3 cell   = ivec3(int(base.x), int(base.y), int(base.z));
+
+    float best   = 0.0f;
+    float second = 0.0f;
+    for (int dz = -1; dz <= 1; ++dz)
+    {
+        for (int dy = -1; dy <= 1; ++dy)
+        {
+            for (int dx = -1; dx <= 1; ++dx)
+            {
+                uvec3 c = CloudWrapCell(ivec3(cell.x + dx, cell.y + dy, cell.z + dz), period);
+                uint  h = CloudHashCell(c, seed);
+                float px = CloudHashUnit(h);
+                h        = CloudHashMix(h);
+                float py = CloudHashUnit(h);
+                h        = CloudHashMix(h);
+                float pz = CloudHashUnit(h);
+                h        = CloudHashMix(h);
+                // Amplitude in [0.5, 1]: fully random amplitudes let a weak point's cell collapse to
+                // nothing and the field goes patchy; half-range keeps every cell present but varied.
+                float amp = 0.5f + 0.5f * CloudHashUnit(h);
+
+                vec3  point = vec3(float(dx) + px, float(dy) + py, float(dz) + pz);
+                vec3  diff  = vec3(point.x - f.x, point.y - f.y, point.z - f.z);
+                float d     = sqrt(dot(diff, diff));
+
+                // Quadratic falloff over one cell width: C1 at its zero, so the creases where two
+                // contributions meet are lines, not plateaus.
+                float fall = max(1.0f - d, 0.0f);
+                float contribution = amp * fall * fall;
+
+                if (contribution > best)
+                {
+                    second = best;
+                    best   = contribution;
+                }
+                else if (contribution > second)
+                {
+                    second = contribution;
+                }
+            }
+        }
+    }
+    return clamp(best - second, 0.0f, 1.0f);
+}
+
+// Curly-Alligator: alligator evaluated at a curl-style warped position. The warp is a periodic Perlin
+// vector field, so the composition tiles for the same structural reason everything else here does
+// (both factors have period 1 in p). The warp is what stretches the cells into the feathery swirled
+// filaments the deck's wispy channels show (p.205: "feathery swirled filaments").
+float CloudCurlyAlligator(vec3 p, int period, uint seed)
+{
+    vec3 warp = vec3(CloudPerlin(p, 4, seed + 9001u), CloudPerlin(p, 4, seed + 9103u),
+                     CloudPerlin(p, 4, seed + 9203u));
+    return CloudAlligator(p + warp * 0.45f, period, seed);
+}
+
+// FBM stacks with the same 0.625/0.25/0.125 weights as the Worley FBM, for the same seamlessness reason:
+// each octave doubles the cell count, an integer multiple of the base period.
+float CloudAlligatorFbm(vec3 p, int period, uint seed)
+{
+    return CloudAlligator(p, period, seed) * 0.625f + CloudAlligator(p, period * 2, seed + 1u) * 0.25f +
+           CloudAlligator(p, period * 4, seed + 2u) * 0.125f;
+}
+
+float CloudCurlyAlligatorFbm(vec3 p, int period, uint seed)
+{
+    return CloudCurlyAlligator(p, period, seed) * 0.625f +
+           CloudCurlyAlligator(p, period * 2, seed + 1u) * 0.25f +
+           CloudCurlyAlligator(p, period * 4, seed + 2u) * 0.125f;
+}
+
 // ---- The three volumes' texel functions ------------------------------------------------------------
 //
 // Each returns the finished RGBA texel for a normalized coordinate in [0,1)^n, so the shader is a
@@ -261,15 +349,21 @@ vec4 CloudShapeTexel(vec3 p, uint seed)
     return vec4(r, g, b, a);
 }
 
-// Detail volume, 32^3. Four Worley FBMs at rising frequencies: the low pair erodes wisps, the high pair
-// billows. 32^3 is small, so the base cell counts stay low — a 24-cell lattice in a 32-texel volume is
-// noise, not structure.
+// Detail volume, 128^3 — the Nubis3 spec exactly (deck p.94: "4 Channel, 128 x 128 x 128 Voxels"), with
+// the deck's channel semantics: R/G = low/high-frequency CURLY-ALLIGATOR (the wispy erosion pair),
+// B/A = low/high-frequency ALLIGATOR (the billowy pair). CLD-110.
+//
+// It was 32^3 of Worley FBM, and that is most of what "putty clouds" was made of: at the authored 4 km
+// tile one texel was 125 metres, so the finest carving the erosion could do was a football field, and a
+// Worley blob field erodes round dents — no crevice network, no filaments. 128^3 puts a texel at ~16 m
+// at the v3 default 2 km tile, and the top FBM octave (period 8 x 4 = 32 cells) keeps the four-texels-
+// per-cell floor the shape volume's comment derives.
 vec4 CloudDetailTexel(vec3 p, uint seed)
 {
-    float r = CloudWorleyFbm(p, 2, seed + 503u);
-    float g = CloudWorleyFbm(p, 3, seed + 601u);
-    float b = CloudWorleyFbm(p, 4, seed + 701u);
-    float a = CloudWorleyFbm(p, 6, seed + 809u);
+    float r = CloudCurlyAlligatorFbm(p, 4, seed + 503u);
+    float g = CloudCurlyAlligatorFbm(p, 8, seed + 601u);
+    float b = CloudAlligatorFbm(p, 4, seed + 701u);
+    float a = CloudAlligatorFbm(p, 8, seed + 809u);
     return vec4(r, g, b, a);
 }
 

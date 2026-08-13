@@ -50,7 +50,7 @@
 // number that disagrees does not fail, it samples somebody else's image.
 //
 //   3  sampler3D  the 128^3 shape volume   (Graphic::kCloudShapeNoiseBinding)
-//   4  sampler3D  the 32^3 detail volume   (Graphic::kCloudDetailNoiseBinding)
+//   4  sampler3D  the 128^3 detail volume  (Graphic::kCloudDetailNoiseBinding)
 //   5  sampler2D  the 128^2 curl map       (Graphic::kCloudCurlNoiseBinding)
 //   6  sampler2D  the 512^2 weather map    (Graphic::kCloudWeatherMapBinding)
 

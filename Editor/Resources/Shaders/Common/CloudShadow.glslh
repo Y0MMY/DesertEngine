@@ -94,6 +94,18 @@ bool CloudShadowInside(vec2 uv)
     return uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
 }
 
+// How much of the map's answer to TRUST at this UV (CLD-103): 1 over the interior, falling linearly to 0
+// across the outer tenth. A term that exists inside the map and vanishes outside it draws its own
+// boundary in the sky — one cloud straddling the edge got a column-occluded base on the near side and an
+// unoccluded one on the far side, a step in brightness along a line no cloud defined. Fading the trust
+// out before the edge turns the step into a gradient the eye does not find.
+float CloudShadowEdgeFade(vec2 uv)
+{
+    float dx = min(uv.x, 1.0f - uv.x);
+    float dy = min(uv.y, 1.0f - uv.y);
+    return clamp(min(dx, dy) * 10.0f, 0.0f, 1.0f);
+}
+
 // The inverse of CloudShadowUv, for the pass that fills the map: the point on the plane through @p centre
 // that this texel's sun ray passes through. The ray itself is then that point plus any multiple of the
 // sun direction, which is what the shell intersection turns into an entry and an exit.

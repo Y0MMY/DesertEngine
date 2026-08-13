@@ -38,6 +38,7 @@ namespace Desert::Tests::CloudNoiseRef
         using glm::clamp;
         using glm::dot;
         using glm::floor;
+        using glm::max;
         using glm::min;
         using glm::sqrt;
 

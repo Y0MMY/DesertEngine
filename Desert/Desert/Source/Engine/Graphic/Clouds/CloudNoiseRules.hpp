@@ -21,7 +21,7 @@ namespace Desert::Graphic
     // every tile-size and frequency in the raymarch.
 
     inline constexpr uint32_t kCloudShapeNoiseSize  = 128; // 128^3 RGBA8F = 8 MiB
-    inline constexpr uint32_t kCloudDetailNoiseSize = 32;  // 32^3  RGBA8F = 128 KiB
+    inline constexpr uint32_t kCloudDetailNoiseSize = 128; // 128^3 RGBA8F = 8 MiB — the Nubis3 spec (CLD-110)
     inline constexpr uint32_t kCloudCurlNoiseSize   = 128; // 128^2 RGBA8F = 64 KiB
 
     inline constexpr Core::Formats::ImageFormat kCloudNoiseFormat = Core::Formats::ImageFormat::RGBA8F;

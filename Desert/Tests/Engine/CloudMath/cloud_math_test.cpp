@@ -770,6 +770,96 @@ TEST( CloudAmbient, TheSkyMultiplierZeroesOnlyTheSkyTerm )
     EXPECT_EQ( R::CloudAmbient( sky, ground, 0.0f, 1.0f, 1.0f, 0.0f ), ground );
 }
 
+// ---- CLD-103/104/105/107: the v3 ambient and powder corrections -------------------------------------
+
+TEST( CloudAmbientOcclusion, ColumnExtinctionRelaxesWithDepthIntoTheProfile )
+{
+    // CLD-104, Nubis3 p.136: light that has already scattered penetrates deeper, so the extinction the
+    // ambient column applies must FALL as the sample sits deeper in the modelled cloud. Same column,
+    // same strength — the deep sample must keep MORE of its column term than a naive Beer would say.
+    const float column = 4000.0f;
+    const float sigma  = 0.0005f;
+
+    const float shallowColumn = glm::exp( -column * sigma * R::CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE );
+    const float deepColumn    = glm::exp( -column * sigma * R::CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE );
+    EXPECT_GT( deepColumn, shallowColumn );
+
+    // And the constants themselves are the paper's range.
+    EXPECT_FLOAT_EQ( R::CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE, 0.25f );
+    EXPECT_FLOAT_EQ( R::CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE, 0.05f );
+
+    // Full strength, zero column: pure local term, pow(1 - profile, 0.5) — the p.141 form.
+    EXPECT_NEAR( R::CloudAmbientOcclusion( 0.36f, 0.0f, sigma, 1.0f ), glm::sqrt( 1.0f - 0.36f ), 1e-5f );
+
+    // Strength 0 turns the whole model off.
+    EXPECT_FLOAT_EQ( R::CloudAmbientOcclusion( 0.9f, 50000.0f, sigma, 0.0f ), 1.0f );
+}
+
+TEST( CloudAmbientColumnVertical, ProjectsTheSlantColumnAndRefusesToVanishAtSunrise )
+{
+    // CLD-103: the shadow map integrates along the SUN; sky occlusion wants the stack OVERHEAD. At noon
+    // the two agree; at low sun the slant is longer by 1/sin(elevation) and must be projected back.
+    EXPECT_FLOAT_EQ( R::CloudAmbientColumnVertical( 1000.0f, 1.0f ), 1000.0f );
+    EXPECT_FLOAT_EQ( R::CloudAmbientColumnVertical( 1000.0f, 0.5f ), 500.0f );
+
+    // The clamp floor: a horizon sun must not let the column term claim the sky is unoccluded.
+    EXPECT_FLOAT_EQ( R::CloudAmbientColumnVertical( 1000.0f, 0.0f ), 150.0f );
+    EXPECT_FLOAT_EQ( R::CloudAmbientColumnVertical( 1000.0f, -0.4f ), 150.0f );
+
+    EXPECT_FLOAT_EQ( R::CloudAmbientColumnVertical( -5.0f, 1.0f ), 0.0f ) << "a negative column is no column";
+}
+
+TEST( CloudPowderView, FadesOutInsideTheForwardConeAndMatchesPowderBehindTheCamera )
+{
+    // CLD-107: the dark edge is a reflection-side effect. Looking away from the sun the classic powder
+    // applies in full; inside the forward cone — where the silver lining lives — it must be gone.
+    const float density  = 0.05f;
+    const float strength = 1.0f;
+    const float scale    = 2.0f;
+
+    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, -1.0f ),
+                     R::CloudPowder( density, strength, scale ) );
+    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 0.5f ),
+                     R::CloudPowder( density, strength, scale ) );
+    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 0.95f ), 1.0f );
+    EXPECT_FLOAT_EQ( R::CloudPowderView( density, strength, scale, 1.0f ), 1.0f );
+
+    // Monotone in between: turning toward the sun never brings the darkening back.
+    float previous = 0.0f;
+    for ( float c = -1.0f; c <= 1.0f; c += 0.05f )
+    {
+        const float value = R::CloudPowderView( density, strength, scale, c );
+        EXPECT_GE( value, previous - 1e-6f ) << "cosTheta = " << c;
+        previous = value;
+    }
+}
+
+TEST( CloudShadowTintWeight, IsIdentityOnALitFaceAndTheAuthoredTintDeepInShadow )
+{
+    // CLD-105: the tint must have NO effect where the sun is unoccluded — that is the difference
+    // between a shadow tint and a global colour cast.
+    const glm::vec3 tint( 0.86f, 0.89f, 0.98f );
+
+    EXPECT_EQ( R::CloudShadowTintWeight( tint, 0.0f ), glm::vec3( 1.0f ) );
+    EXPECT_NEAR( R::CloudShadowTintWeight( tint, 50.0f ).r, tint.r, 1e-5f );
+    EXPECT_NEAR( R::CloudShadowTintWeight( tint, 50.0f ).b, tint.b, 1e-5f );
+
+    // Halfway: strictly between identity and the tint, monotone in tau.
+    const glm::vec3 mid = R::CloudShadowTintWeight( tint, 0.7f );
+    EXPECT_LT( mid.r, 1.0f );
+    EXPECT_GT( mid.r, tint.r );
+}
+
+TEST( CloudShadowEdgeFade, TrustsTheInteriorAndFadesOverTheOuterTenth )
+{
+    // CLD-103: a column term that stops at the map's edge draws that edge in the sky.
+    EXPECT_FLOAT_EQ( R::CloudShadowEdgeFade( glm::vec2( 0.5f, 0.5f ) ), 1.0f );
+    EXPECT_FLOAT_EQ( R::CloudShadowEdgeFade( glm::vec2( 0.2f, 0.8f ) ), 1.0f );
+    EXPECT_FLOAT_EQ( R::CloudShadowEdgeFade( glm::vec2( 0.0f, 0.5f ) ), 0.0f );
+    EXPECT_FLOAT_EQ( R::CloudShadowEdgeFade( glm::vec2( 0.5f, 1.0f ) ), 0.0f );
+    EXPECT_NEAR( R::CloudShadowEdgeFade( glm::vec2( 0.05f, 0.5f ) ), 0.5f, 1e-5f );
+}
+
 // ---- CLD-29: the depth reconstruction ---------------------------------------------------------------
 
 TEST( CloudDepth, ReconstructionIsTheInverseOfTheEnginesOwnProjection )

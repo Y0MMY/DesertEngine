@@ -1251,3 +1251,117 @@ whether the DSL passes `sampler3D`/`image3D` through unchanged (CLD-15), and whe
 `Common/Atmosphere.glslh` compiles as a compute stage (CLD-70a). The renderer-slot dimension of
 non-persistent storage buffers is no longer among them — it is verified at
 `ShaderResources/API/Vulkan/VulkanStorageBuffer.hpp:36` and `.cpp:123,130` (CLD-35).*
+
+---
+
+## 10. v3 — Nubis-Cubed source-deck parity pass (2026-08-13)
+
+**Trigger.** The default loading scene renders clouds as uniform slate-blue putty: lit faces barely
+brighter than shadowed ones, no billow hierarchy, no wispy edges. Diagnosed against a **complete
+per-page analysis of the SIGGRAPH Advances 2023 deck** (`Docs/Clouds/PdfAnalysis/pages-*.md`, all 208
+pages, cited below as *PDF p.N*) plus a code audit of the ambient/lighting path. §L/§M of
+`RESEARCH_REFERENCE.md` remain valid; this section supersedes their open items.
+
+### 10.1 Reference facts the implementation must match
+
+| # | Fact | Source |
+|---|---|---|
+| F1 | Ambient base form: `ambient_scattering = pow(1.0 - dimensional_profile, 0.5)` — a function of the **unerroded profile**, not the eroded density. | PDF p.141 |
+| F2 | Ambient occlusion column: `* exp(-summed_ambient_density)`, where the sum is taken **vertically** (along up), amortised in a coarse buffer. | PDF p.144 |
+| F3 | Depth-modulated multiple scattering keeps cores luminous: effective extinction falls from **0.25 at the surface to 0.05 deep inside** the cloud. | PDF p.136 |
+| F4 | Ambient colour tracks the **whole sky dome the cloud hangs against** — blue-grey but *luminous* at midday, mauve/taupe at sunset, warm beige inside a deck. Shadows are never near-black and never pure zenith-blue. | PDF pp.17, 83, 127, 142-146, 180, 202, 205 |
+| F5 | Detail noise: **4-channel 128×128×128** — Low/High-freq **Curly-Alligator** (wispy pair), Low/High-freq **Alligator** (billowy pair). Alligator = bright cells with sharp dark crevice networks; Curly-Alligator = feathery swirled filaments. | PDF pp.93-94, 205 |
+| F6 | Detail composite formulas: `wispy = lerp(n.r, n.g, profile)`; `billowy_gradient = pow(profile, 0.25)`; `billowy = lerp(n.b*0.3, n.a*0.3, gradient)`; `composite = lerp(wispy, billowy, type)`; HHF ridged folds with exponents 4 (wisps) / 2 (billows); `ValueErosion(profile, composite)`; density-scale sharpening `pow(d, lerp(0.3, 0.6, pow(scale,4)))`. | PDF pp.99, 104-118 |
+| F7 | Billows are **self-similar across scales** (fractal cauliflower); billow frequency selection is driven by the profile. | PDF p.103-104 |
+| F8 | Lit/shadow separation is carried by **luminance**, not only hue: lit tops white/cream, shadow sides mid-grey tinted by the sky. | PDF pp.17, 83, 180, 205 |
+
+### 10.2 Audit defects → v3 requirements
+
+Each requirement keeps the v2 form: statement — rationale — acceptance.
+
+**CLD-100 (ambient sky radiance is hemispheric).** `AtmosphereEnv::ZenithRadiance` for clouds becomes a
+solid-angle-weighted blend of the zenith and horizon palette colours (weight toward horizon), not the
+zenith texel alone. *Rationale:* audit — with `ZenithColor (0.08,0.26,0.70)` alone the ambient R:B ratio
+is 0.11 and every shadow is deep blue; F4 says shadows take the dome's hue, and the dome is mostly
+horizon by solid angle. *Acceptance:* `sky_rules_test` asserts the blend; a rendered midday shot shows
+shadowed cloud faces as luminous blue-grey, not navy.
+
+**CLD-101 (ground bounce is sunlit-ground bounce).** `GroundRadiance` becomes
+`GroundColor × (sun irradiance × max(sunDir.y,0) / π + hemispheric sky)` day-blended — an order of
+magnitude brighter at noon than the palette tone it replaces. *Rationale:* audit — cloud bases were lit
+by a 0.1-luminance constant; F4 undersides are mid-grey, never black. *Acceptance:* unit test on the
+formula; bases in the midday shot read grey, not black.
+
+**CLD-102 (sun ramp tracks the disc, not the sky blend).** The `(1-NightFactor)` factor on
+`SunIrradiance` is replaced by a disc-visibility ramp (`smoothstep(-0.06, 0.06, sunDir.y)`), while the
+sky's own day blend keeps `smoothstep(-0.10, 0.20, y)`. *Rationale:* audit — direct light lost 34% at
+5.7° elevation, killing golden hour. *Acceptance:* `sky_rules_test` updated; sunset shot keeps warm
+direct light on cloud sides.
+
+**CLD-103 (vertical ambient column).** The ambient-occlusion column read from the sun-space shadow map
+is projected to the vertical by `× clamp(sunDir.y, 0.15, 1.0)`, and the column term fades out over the
+outer 10% of the shadow-map UV before the map boundary. *Rationale:* F2 wants the vertical stack; the
+slant path is 1/sin(elevation) longer at low sun exactly when direct light is scarce; the hard map edge
+is a brightness seam (audit). *Acceptance:* CloudMath test for the projection factor; no visible seam in
+a horizon shot.
+
+**CLD-104 (depth-modulated ambient extinction).** `CLOUD_AMBIENT_COLUMN_EXTINCTION` becomes a range:
+the effective extinction on the ambient column falls from 0.25 at the cloud surface to 0.05 deep inside,
+driven by the profile (F3's `ms_volume` idea through the field we have). *Rationale:* F3 — this is what
+keeps cores luminous instead of black. *Acceptance:* CloudMath test asserts monotonic behaviour;
+overcast shot keeps deck interiors readable.
+
+**CLD-105 (ShadowTint means shadow).** `ShadowTint` weights the ambient by sun occlusion —
+`mix(white, ShadowTint, 1 - exp(-tauSun))` — instead of multiplying all ambient. *Rationale:* audit —
+a "shadow" tint that tints lit tops is a global colour cast; presets tinted the whole sky blue.
+*Acceptance:* CloudMath test: tint has no effect at tauSun = 0.
+
+**CLD-106 (in-scatter probability takes the profile).** The Nubis2 in-scatter probability receives the
+**cheap (unerroded) density** as its density argument, not the fully eroded one; the density seam gains
+`CloudDensityProfileAt`-style access so the raymarch can ask. *Rationale:* the shader comment already
+concedes this; erosion makes edge densities tiny and the probability crushes exactly the thin lit rims
+the silver lining needs (audit). *Acceptance:* march uses the cheap value; silver lining visible in an
+into-sun shot.
+
+**CLD-107 (powder fades toward the sun).** The powder term blends to 1 as `cosTheta → 1`
+(`mix(powder, 1, smoothstep(0.5, 0.95, cosTheta))`): the dark-edge effect is a reflection-side
+phenomenon and must not dim the forward-scattered rim. *Rationale:* audit defect "powder × in-scatter
+crush the silver lining". *Acceptance:* CloudMath test: powder factor is 1 within the forward cone.
+
+**CLD-108 (multi-scatter octaves).** Default `MultiScatterOctaves` rises 2 → 3 (component default and
+every preset that does not override). *Rationale:* audit — at tauSun ≳ 3 both octaves vanish and
+interiors collapse onto ambient alone; published implementations run ≥ 3. *Acceptance:* payload test
+updated; storm shot keeps interior luminance.
+
+**CLD-109 (ambient height bias).** Default `AmbientHeightBias` rises 0.5 → 0.75. *Rationale:* audit —
+at 0.5 the blend spans only [0.25, 0.75] and the top/base ambient gradient is halved; F8 wants the
+separation legible. *Acceptance:* defaults/presets updated together; visible top-vs-base gradient in
+the fair-weather shot.
+
+**CLD-110 (Alligator detail volume).** The detail volume becomes **128³** and its four channels become
+LF/HF Curly-Alligator (wispy) and LF/HF Alligator (billowy), generated by new periodic
+`CloudAlligator` / curl-warped variants in `CloudNoise.glslh`; `CloudDensity.glslh`'s binding comment,
+`CloudNoiseVolumes` and the consuming composite keep their existing contracts (F6 formulas already
+match ours). *Rationale:* F5 — a 32³ Worley FBM has neither the crevice networks nor the filaments;
+at the authored 4 km tile one detail texel was 125 m, which is the putty look. *Acceptance:* CloudNoise
+tests cover periodicity, determinism and range of the new functions; detail texel ≤ ~16 m at the
+default tile; fair-weather shot shows cauliflower lobes and wispy fringes.
+
+**CLD-111 (detail tile rescale).** Default `DetailTileSize` 4 km → 2 km across component and presets
+(Cirrus keeps its larger tile ratio). *Rationale:* with 128³ texels this puts detail features at
+~15 m — the scale F7's self-similar billows need; at 4 km/32³ the smallest feature was 125 m.
+*Acceptance:* presets updated in the same change; no visible tiling at the horizon in the shots.
+
+**CLD-112 (ambient contribution rebalance).** With CLD-100/101 the raw ambient magnitudes rise;
+`AmbientSkyContribution` defaults are re-authored (1.8 → 1.0 baseline, presets rescaled in proportion)
+so the final lit:shadow luminance ratio lands near F8's 2.5-4:1 at midday. *Rationale:* audit note —
+contrast was carried by hue instead of luminance. *Acceptance:* measured pixel ratio between a lit top
+and a shadowed base in the midday shot falls in [2, 5].
+
+### 10.3 Explicitly rejected in v3
+
+* A vertical summed-density buffer (F2's literal 256×256×32) — CLD-103's projection of the existing
+  sun-space map approximates it with zero new passes; the buffer is a named v1.2 option.
+* Any change to the march loop structure, the temporal stage, or the composite — the defects are in
+  lighting composition and noise character, not in the integrator.
+* Porting reference code verbatim — unchanged from §K; formulas above are from the published deck.

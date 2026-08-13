@@ -303,13 +303,20 @@ Shader "CloudRaymarch"
                                                         u_PhaseBackwardG, u_PhaseBlend,
                                                         u_SilverLiningIntensity);
 
-                        // The published form takes a LOW-LOD density here — the unerroded profile. This
-                        // passes the full one instead: a second CloudDensityCheap call at every shaded
-                        // sample is two more texture fetches for a term that only shapes how quickly the
-                        // in-scatter saturates. The property that matters, and the one the reference
-                        // lost, is that the FIRST argument is the height fraction and not a constant.
-                        float inScatter = CloudInScatterProbability(height, density, tauSun);
-                        float powder    = CloudPowder(density, u_PowderStrength, u_PowderScale);
+                        // The published form takes a LOW-LOD density here — the UNERRODED profile — and
+                        // v3 pays the two fetches to honour it (CLD-106). Passing the full density was
+                        // the economy the previous comment defended, and the audit found its price: on a
+                        // thin lit rim erosion drives the full density toward zero, the depth probability
+                        // collapses to its 0.05 floor, and the in-scatter term crushed exactly the
+                        // silver-lining rim the phase function was building. The profile is also what
+                        // the ambient occlusion below is defined on (Nubis3 p.141), so one fetch serves
+                        // both.
+                        float profile   = CloudDensityCheap(worldPos, height);
+                        float inScatter = CloudInScatterProbability(height, profile, tauSun);
+
+                        // Powder fades out toward the sun (CLD-107) — the dark edge is a reflection-side
+                        // effect and must not dim the forward-scattered rim; see CloudPowderView.
+                        float powder    = CloudPowderView(density, u_PowderStrength, u_PowderScale, cosTheta);
 
                         // The sky a sample can SEE, not the sky there is. Unoccluded ambient lights a
                         // cloud's core as brightly as its rim, which is exactly how a volume renders as a
@@ -318,19 +325,32 @@ Shader "CloudRaymarch"
                         // The column term reads the FULL stack above the sample out of the shadow map,
                         // untruncated: the direct term is capped at Light March Distance because it has to
                         // agree with the cone that answers outside the map, but ambient occlusion is about
-                        // everything overhead and has no second implementation to agree with. Outside the
-                        // map only the local term applies, which is the honest answer — nothing there has
-                        // measured the column.
+                        // everything overhead and has no second implementation to agree with.
+                        //
+                        // The map accumulates along the SUN; sky occlusion is about the stack OVERHEAD, so
+                        // the slant length is projected onto the vertical (CLD-103, CloudAmbientColumnVertical)
+                        // — without it a sunset sun reported a column 1/sin(elevation) too long and ambient
+                        // died exactly when it was the only light left. The trust in the map's answer also
+                        // fades over the outer tenth of its extent (CloudShadowEdgeFade): a term that
+                        // stops at the map's edge draws that edge in the sky as a brightness step.
                         float columnAbove = 0.0f;
                         if (shadowed)
-                            columnAbove = CloudShadowDensityLength(
-                                 textureLod(u_CloudShadowMap, shadowUv, 0.0f), height);
+                            columnAbove = CloudAmbientColumnVertical(
+                                 CloudShadowDensityLength(
+                                      textureLod(u_CloudShadowMap, shadowUv, 0.0f), height),
+                                 sunDir.y) *
+                                 CloudShadowEdgeFade(shadowUv);
+
+                        // ShadowTint means SHADOW (CLD-105): weighted by sun occlusion, so a lit top
+                        // keeps the sky's own colour and only the shaded side takes the authored tint —
+                        // see CloudShadowTintWeight, which the CloudMath tests drive as C++.
+                        vec3 shadowTint = CloudShadowTintWeight(u_ShadowTint.xyz, tauSun);
 
                         vec3 ambient = CloudAmbient(u_ZenithRadiance.xyz, u_GroundRadiance.xyz,
                                                     u_ZenithRadiance.w, u_GroundRadiance.w,
                                                     u_ScatteringAlbedo.w, height) *
-                                       u_ShadowTint.xyz *
-                                       CloudAmbientOcclusion(density, columnAbove, sigmaScale, u_AmbientOcclusion);
+                                       shadowTint *
+                                       CloudAmbientOcclusion(profile, columnAbove, sigmaScale, u_AmbientOcclusion);
 
                         // Rain darkens a cloud from the base up, and only where the weather map says it
                         // is raining — a uniform darkening would just be a brightness slider.

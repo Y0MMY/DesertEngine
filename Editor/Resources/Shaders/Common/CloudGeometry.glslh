@@ -318,6 +318,17 @@ float CloudPowder(float density, float strength, float scale)
     return 1.0f - clamp(strength, 0.0f, 1.0f) * exp(-max(scale, 0.0f) * max(density, 0.0f));
 }
 
+// Powder as the MARCH applies it: faded out as the view turns toward the sun (CLD-107). The dark edge is
+// a reflection-side phenomenon — light that scattered away before it could come BACK — and the forward
+// direction is where that lost light was going. Applying it there dimmed the one thing it cannot
+// physically dim: the silver lining, which the in-scatter probability was already crushing from the
+// other side. The ramp is linear over cosTheta in [0.5, 0.95]; inside the forward cone powder is gone.
+float CloudPowderView(float density, float strength, float scale, float cosTheta)
+{
+    float powder = CloudPowder(density, strength, scale);
+    return mix(powder, 1.0f, CloudRemapRange(cosTheta, 0.5f, 0.95f, 0.0f, 1.0f));
+}
+
 // Henyey-Greenstein, the published form. g = 0 is isotropic and returns 1/(4pi) for every angle.
 //
 // The reference passed g = 1.0 for its forward lobe, which makes the numerator (1 - g^2) exactly zero:
@@ -477,17 +488,51 @@ vec3 CloudAmbient(vec3 skyRadiance, vec3 groundRadiance, float skyMultiplier, fl
 // penetrates far deeper than light that has not. Applying the full sun extinction to the column here is
 // what turns cloud cores black instead of luminous — the paper's own ablation, pp. 135 vs 136.
 //
-// @p strength blends the whole thing back toward unoccluded, because we do NOT yet have the paper's
-// depth-modulated multiple scattering to put the light back into the core. Until we do, full occlusion
-// over-darkens; this is the knob that says by how much.
-const float CLOUD_AMBIENT_COLUMN_EXTINCTION = 0.25f;
+// @p strength blends the whole thing back toward unoccluded — the knob that says how literally to take
+// the occlusion model.
+//
+// The column's extinction is DEPTH-MODULATED (CLD-104), which is the paper's own answer to "why are the
+// cores not black": Nubis3 p.136 drives the effective extinction of its multiple-scattering estimate
+// from 0.25 at the cloud surface down to 0.05 deep inside, because light that has already scattered
+// once penetrates far deeper than a collimated beam. The paper indexes that by SDF depth; the deepest
+// field we have is the PROFILE — the same quantity the paper's own ambient formula (p.141) is built on:
+// a sample with profile near 1 is deep inside the modelled cloud by construction. A constant 0.25 was
+// the previous stand-in, and it darkened exactly the thick interiors the modulation exists to keep lit.
+const float CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE = 0.25f;
+const float CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE    = 0.05f;
 
-float CloudAmbientOcclusion(float density, float columnDensityLength, float sigmaScale, float strength)
+// @p profile is the UNERRODED dimensional profile (the cheap density), per Nubis3 p.141 — the eroded
+// density goes to zero on every wisp the erosion carved, and ambient occlusion driven by it lit the
+// carved faces of a dense cloud as if they were rim wisps.
+float CloudAmbientOcclusion(float profile, float columnDensityLength, float sigmaScale, float strength)
 {
-    float local  = sqrt(max(1.0f - clamp(density, 0.0f, 1.0f), 0.0f));
-    float column = exp(-max(columnDensityLength, 0.0f) * max(sigmaScale, 0.0f) *
-                       CLOUD_AMBIENT_COLUMN_EXTINCTION);
+    float p      = clamp(profile, 0.0f, 1.0f);
+    float local  = sqrt(max(1.0f - p, 0.0f));
+    float k      = mix(CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE, CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE, p);
+    float column = exp(-max(columnDensityLength, 0.0f) * max(sigmaScale, 0.0f) * k);
     return mix(1.0f, local * column, clamp(strength, 0.0f, 1.0f));
+}
+
+// The shadow tint a sample actually receives (CLD-105): the authored tint weighted by how OCCLUDED the
+// sample is from the sun, so it means what its name says. At tauSun = 0 — a fully lit face — the tint
+// is identity; deep in shadow it is the authored colour in full. Multiplying ALL ambient by the tint,
+// which is what the march used to do, was a global colour cast wearing a shadow control's name.
+vec3 CloudShadowTintWeight(vec3 tint, float tauSun)
+{
+    float occlusion = 1.0f - exp(-max(tauSun, 0.0f));
+    return mix(vec3(1.0f, 1.0f, 1.0f), tint, occlusion);
+}
+
+// Projects a density-length accumulated along the SUN ray onto the VERTICAL (CLD-103). Sky-visibility
+// occlusion is about the stack OVERHEAD (Nubis3 p.144 sums it along up), but the only column we have
+// pre-integrated is the shadow map's, which runs along the sun. For a layer-shaped cloud field the slant
+// path exceeds the vertical one by 1/sin(elevation), so multiplying by sin projects it back — clamped
+// below so a sunrise sun cannot claim the vertical column is nearly zero. Without this, ambient
+// darkened by the SLANT depth: over-darkened at exactly the low sun angles where the direct light has
+// already gone, and asymmetrically on the sun-far side — an anisotropy sky light does not have.
+float CloudAmbientColumnVertical(float sunColumnLength, float sunDirY)
+{
+    return max(sunColumnLength, 0.0f) * clamp(sunDirY, 0.15f, 1.0f);
 }
 
 // Where the aerial-perspective and horizon fades should START and END when nobody has authored them.

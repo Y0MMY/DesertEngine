@@ -19,3 +19,14 @@ Editor --project Desert.deproj --scene <s>.desce --shot out.png \
 
 The frame count matters: the clouds accumulate over about ten frames, so a shot
 taken on frame one is a picture of the dither rather than of the sky.
+
+## v3 — the Nubis-Cubed parity pass (REQUIREMENTS_CLOUDS.md §10)
+
+| file | what it shows |
+|---|---|
+| `v3-partlycloudy-mid.png` | Same camera as `after-partlycloudy.png`: the hemispheric ambient (CLD-100/101) — lit faces white, bases luminous grey, no slate-blue cast. Lit:shadow ≈ 2.3:1 in linear (CLD-112). |
+| `v3-partlycloudy-zenith.png` | Zenith: alligator detail erosion (CLD-110) — wispy fringes, no empty sky. |
+| `v3-partlycloudy-horizon.png` | Horizon: aerial perspective intact, no moire, no shadow-map seam (CLD-103). |
+| `v3-storm.png` | Storm: deck interiors stay readable (CLD-104 depth-modulated ambient extinction, 3 MS octaves). |
+| `v3-sunset.png` | Sunset: warm direct light survives to the horizon (CLD-102), mauve-grey ambient tracks the sky. |
+| `v3-default-scene.png` | The default sandbox scene after the field migration. |

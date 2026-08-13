@@ -380,22 +380,39 @@ TEST( AtmosphereEnvRule, NightFactorMatchesTheShadersDayBlend )
     }
 }
 
-TEST( AtmosphereEnvRule, AmbientFollowsTheSameGradientTheShaderDraws )
+TEST( AtmosphereEnvRule, AmbientIsTheDomeNotTheZenithTexel )
 {
+    // CLD-100/101. The sky ambient a cloud receives is the hemisphere it hangs against, blended toward
+    // the horizon colour by solid angle — the zenith texel alone is the dome's darkest, bluest corner
+    // and feeding it to the clouds painted every shadowed face navy. The ground term is what the ground
+    // REFLECTS (sun + dome, times albedo over pi), not the tone the ground is painted with.
     SkySettings sky;
     sky.ZenithColor   = { 0.08f, 0.26f, 0.70f };
+    sky.HorizonColor  = { 0.50f, 0.66f, 0.92f };
     sky.NightColor    = { 0.01f, 0.02f, 0.05f };
     sky.GroundColor   = { 0.16f, 0.19f, 0.24f };
     sky.SkyBrightness = 2.0f;
 
     const auto day = EvaluateAtmosphere( sky, glm::vec3( 0.0f, 1.0f, 0.0f ), nullptr );
-    EXPECT_NEAR( day.ZenithRadiance.b, 0.70f * 2.0f, 1e-5f ) << "zenith is scaled by Sky Brightness";
-    EXPECT_NEAR( day.GroundRadiance.b, 0.24f, 1e-5f )
-         << "the shader mixes the ground in AFTER the brightness multiply, so it must not be scaled";
+
+    const glm::vec3 dome = glm::mix( sky.ZenithColor, sky.HorizonColor, 0.65f ) * sky.SkyBrightness;
+    EXPECT_NEAR( day.ZenithRadiance.r, dome.r, 1e-5f ) << "dome blend, scaled by Sky Brightness";
+    EXPECT_NEAR( day.ZenithRadiance.b, dome.b, 1e-5f );
+    EXPECT_GT( day.ZenithRadiance.r / day.ZenithRadiance.b, 0.08f / 0.70f )
+         << "the dome must be less blue than the zenith texel alone";
+
+    const glm::vec3 expectedGround =
+         sky.GroundColor * ( day.SunIrradiance * 1.0f + day.ZenithRadiance ) * 0.3183099f;
+    EXPECT_NEAR( day.GroundRadiance.r, expectedGround.r, 1e-4f )
+         << "ground bounce reflects sun + dome, Lambertian";
+    EXPECT_NEAR( day.GroundRadiance.b, expectedGround.b, 1e-4f );
 
     const auto night = EvaluateAtmosphere( sky, glm::vec3( 0.0f, -1.0f, 0.0f ), nullptr );
-    EXPECT_NEAR( night.ZenithRadiance.b, 0.05f * 2.0f, 1e-5f ) << "night tint at the zenith";
-    EXPECT_NEAR( night.GroundRadiance.b, 0.24f * 0.30f, 1e-5f );
+    EXPECT_NEAR( night.ZenithRadiance.b, 0.05f * 2.0f, 1e-5f ) << "night: the dome resolves to the night colour";
+
+    const glm::vec3 expectedNightGround = 0.30f * sky.GroundColor * night.ZenithRadiance * 0.3183099f;
+    EXPECT_NEAR( night.GroundRadiance.b, expectedNightGround.b, 1e-5f )
+         << "at night the ground reflects only the night sky";
 }
 
 TEST( AtmosphereEnvRule, TheSunTakesTheSunsetColourAsItGoesDown )

@@ -233,6 +233,52 @@ TEST( CloudNoiseTiling, DetailVolumeTilesOnEveryAxis )
         }
 }
 
+TEST( CloudNoiseValues, AlligatorStaysInRangeTilesAndCarvesCreases )
+{
+    // CLD-110. Alligator is the Nubis3 billow base: bright cell interiors, sharp dark creases where two
+    // cells' influence balances. Range and tiling are the same contracts every other field here signs;
+    // the crease property is asserted as dynamic range — a field that never leaves the middle has no
+    // creases to erode with.
+    float lo = 1.0f;
+    float hi = 0.0f;
+    for ( int x = 0; x < kGridSteps; ++x )
+    {
+        for ( int y = 0; y < kGridSteps; ++y )
+        {
+            for ( int z = 0; z < kGridSteps; ++z )
+            {
+                const glm::vec3 p( TexelCentre( x, kGridSteps ), TexelCentre( y, kGridSteps ),
+                                   TexelCentre( z, kGridSteps ) );
+                const float     a = Ref::CloudAlligator( p, 4, kSeedA );
+                const float     c = Ref::CloudCurlyAlligator( p, 4, kSeedA );
+                EXPECT_TRUE( InUnitRange( a ) ) << "alligator out of range at " << x << "," << y << "," << z;
+                EXPECT_TRUE( InUnitRange( c ) ) << "curly out of range at " << x << "," << y << "," << z;
+                lo = glm::min( lo, a );
+                hi = glm::max( hi, a );
+            }
+        }
+    }
+    EXPECT_LT( lo, 0.05f ) << "no creases: the field never gets dark";
+    EXPECT_GT( hi, 0.4f ) << "no cells: the field never gets bright";
+
+    for ( int i = 0; i <= 8; ++i )
+    {
+        const float u = static_cast<float>( i ) / 8.0f;
+        for ( int j = 0; j <= 8; ++j )
+        {
+            const float v = static_cast<float>( j ) / 8.0f;
+            EXPECT_NEAR( Ref::CloudAlligator( glm::vec3( 0.0f, u, v ), 4, kSeedA ),
+                         Ref::CloudAlligator( glm::vec3( 1.0f, u, v ), 4, kSeedA ), kSeamTolerance );
+            EXPECT_NEAR( Ref::CloudCurlyAlligator( glm::vec3( u, 0.0f, v ), 4, kSeedA ),
+                         Ref::CloudCurlyAlligator( glm::vec3( u, 1.0f, v ), 4, kSeedA ), kSeamTolerance );
+            EXPECT_NEAR( Ref::CloudAlligatorFbm( glm::vec3( u, v, 0.0f ), 4, kSeedA ),
+                         Ref::CloudAlligatorFbm( glm::vec3( u, v, 1.0f ), 4, kSeedA ), kSeamTolerance );
+            EXPECT_NEAR( Ref::CloudCurlyAlligatorFbm( glm::vec3( 0.0f, u, v ), 4, kSeedA ),
+                         Ref::CloudCurlyAlligatorFbm( glm::vec3( 1.0f, u, v ), 4, kSeedA ), kSeamTolerance );
+        }
+    }
+}
+
 TEST( CloudNoiseTiling, CurlMapTilesOnBothAxes )
 {
     // The curl is a derivative taken by central differences. Periodicity here is a statement about the
@@ -489,17 +535,19 @@ TEST( CloudNoiseRules, TheTransientRequestRegenerates )
 
 TEST( CloudNoiseRules, TheAdvertisedMemoryCostIsWhatTheVolumesActuallyCost )
 {
-    // 128^3 * 4 = 8 MiB + 32^3 * 4 = 128 KiB + 128^2 * 4 = 64 KiB. The number goes in the log when a set
-    // is generated, so it has to be the real one.
+    // 128^3 * 4 = 8 MiB + 128^3 * 4 = 8 MiB + 128^2 * 4 = 64 KiB. The number goes in the log when a set
+    // is generated, so it has to be the real one. Detail moved 32^3 -> 128^3 with CLD-110 (the Nubis3
+    // deck's own spec, p.94) — at 32^3 the finest carving the erosion could do was 125 m at the authored
+    // tile, which is what rendered every cloud edge as putty.
     constexpr std::uint64_t shape  = 128ull * 128ull * 128ull * 4ull;
-    constexpr std::uint64_t detail = 32ull * 32ull * 32ull * 4ull;
+    constexpr std::uint64_t detail = 128ull * 128ull * 128ull * 4ull;
     constexpr std::uint64_t curl   = 128ull * 128ull * 4ull;
 
     EXPECT_EQ( kCloudShapeNoiseSize, 128u );
-    EXPECT_EQ( kCloudDetailNoiseSize, 32u );
+    EXPECT_EQ( kCloudDetailNoiseSize, 128u );
     EXPECT_EQ( kCloudCurlNoiseSize, 128u );
     EXPECT_EQ( CloudNoiseSetBytes(), shape + detail + curl );
-    EXPECT_EQ( CloudNoiseSetBytes(), 8'585'216ull );
+    EXPECT_EQ( CloudNoiseSetBytes(), 16'842'752ull );
 }
 
 TEST( CloudNoiseRules, EveryVolumeEdgeDividesTheWorkGroup )

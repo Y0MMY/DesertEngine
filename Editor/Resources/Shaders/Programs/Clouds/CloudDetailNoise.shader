@@ -2,9 +2,9 @@ Shader "CloudDetailNoise"
 {
     Compute
     {
-        // Fills the 32^3 RGBA8F cloud DETAIL volume — the high-frequency field the raymarch erodes the
-        // base shape with. Four Worley FBMs at rising frequencies: R/G are the low pair (wispy erosion),
-        // B/A the high pair (billowy erosion).
+        // Fills the 128^3 RGBA8F cloud DETAIL volume — the high-frequency field the raymarch erodes the
+        // base shape with. The Nubis3 channel set (deck p.94): R/G = low/high-frequency curly-alligator
+        // (wispy erosion), B/A = low/high-frequency alligator (billowy erosion).
         //
         // Same generator, same file, same tiling guarantee as the shape volume; only the channel
         // frequencies and the seed differ. See Common/CloudNoise.glslh.

@@ -14,7 +14,7 @@ namespace Desert::Graphic
     struct CloudNoiseSet
     {
         Image3DRef ShapeNoise;  // 128^3 RGBA8F — R = Perlin-Worley base, GBA = Worley erosion octaves
-        Image3DRef DetailNoise; // 32^3  RGBA8F — four Worley FBMs, low pair wispy, high pair billowy
+        Image3DRef DetailNoise; // 128^3 RGBA8F — R/G = curly-alligator (wispy), B/A = alligator (billowy)
         Image2DRef CurlNoise;   // 128^2 RGBA8F — RGB = encoded curl vector (see CloudNoise.glslh)
 
         [[nodiscard]] bool IsComplete() const

@@ -46,14 +46,14 @@ namespace Desert::Graphic
     };
 
     // The C++ half of "share the computation": the quantities below are read off the same gradient the
-    // shader evaluates, at the two directions that matter for ambient lighting.
+    // shader evaluates, integrated over the directions that matter for ambient lighting.
     //
-    // Straight up, Atmosphere.glslh reduces to `mix(night, zenith, day) * skyBrightness` — the horizon
-    // gradient has fully resolved to the zenith colour, and the sunset band (a Gaussian in elevation,
-    // exp(-8) up there) and the star field (a sparse hash) are not ambient light. Straight down it reduces
-    // to `mix(ground * 0.30, ground, day)`, which the shader mixes in AFTER the brightness multiply — so
-    // the ground term is deliberately not scaled by it here either. Getting that ordering wrong is a
-    // ground ambient that brightens when the artist raises Sky Brightness and a sky that does not.
+    // ZenithRadiance is, despite the historical name, the whole upper DOME: the shader's gradient blended
+    // toward the horizon colour by solid angle, because a cloud's shadowed side is lit by the entire sky
+    // it hangs against and the zenith texel alone is its darkest, bluest corner. The sunset band (a
+    // Gaussian in elevation) and the star field (a sparse hash) are not ambient light and stay out.
+    // GroundRadiance is what the ground REFLECTS — sun plus dome, times albedo over pi — not the palette
+    // tone the ground is painted with; the two differ by an order of magnitude at noon.
     inline AtmosphereEnv EvaluateAtmosphere( const SkySettings& sky, const glm::vec3& towardSun,
                                              ShaderResources::StorageBuffer* paramsBuffer )
     {
@@ -76,14 +76,33 @@ namespace Desert::Graphic
 
         env.NightFactor = 1.0f - day;
 
-        // ...and it goes out at night. NightFactor was computed here and read by nothing in the engine,
-        // so a cloud at midnight was still receiving the full noon irradiance while the sky around it had
-        // long since gone dark. What lights a cloud after sunset is the night sky, which arrives through
-        // ZenithRadiance below.
-        env.SunIrradiance = sunTint * sky.SunIntensity * ( 1.0f - env.NightFactor );
+        // The irradiance ramp follows the DISC, not the sky's day blend (CLD-102). The day blend spans
+        // elevations up to 11.5 degrees because the sky's colour turns long before the sun sets; the
+        // sun's own light does not — at 5.7 degrees it is dimmed and reddened, not one-third gone. Using
+        // `day` here removed a third of the direct light from every golden-hour cloud, which is exactly
+        // the hour clouds are judged in. The reddening is sunTint's job, above; this ramp only has to
+        // take the light out once the disc is genuinely below the horizon.
+        const float discVisibility = glm::smoothstep( -0.06f, 0.06f, dir.y );
+        env.SunIrradiance          = sunTint * sky.SunIntensity * discVisibility;
 
-        env.ZenithRadiance = glm::mix( sky.NightColor, sky.ZenithColor, day ) * sky.SkyBrightness;
-        env.GroundRadiance = glm::mix( sky.GroundColor * 0.30f, sky.GroundColor, day );
+        // The sky ambient a cloud receives is the DOME, not the zenith texel (CLD-100). Weighted toward
+        // the horizon colour because that is where the solid angle is: for the shader's own gradient the
+        // band below 45 degrees of elevation holds ~71% of the hemisphere (1 - sin 45), and the horizon
+        // colour dominates it. Feeding the zenith colour alone gave the ambient an R:B ratio of 0.11 and
+        // painted every shadowed cloud face navy — the deck's references (PDF pp.127/180/205) show
+        // midday cloud shadows as LUMINOUS blue-grey, i.e. lit by the whole sky they hang against.
+        const glm::vec3 dayDome = glm::mix( sky.ZenithColor, sky.HorizonColor, 0.65f );
+        env.ZenithRadiance      = glm::mix( sky.NightColor, dayDome, day ) * sky.SkyBrightness;
+
+        // Ground bounce is SUNLIT-ground bounce (CLD-101): the ground reflects the sun and the sky dome,
+        // Lambertian, so its radiance is (sun * cos(elevation) + dome) * albedo / pi — with GroundColor
+        // playing the albedo it has always visually been. The palette tone alone (~0.1 luminance) lit
+        // every cloud base with a tenth of what the scene's own ground actually reflects at noon, which
+        // is why undersides rendered near-black the moment the sun march gave up (PDF p.83: bases are
+        // warmer AND darker than tops, but still mid-grey, never black).
+        const float     invPi       = 0.3183099f;
+        const glm::vec3 groundLight = env.SunIrradiance * glm::max( dir.y, 0.0f ) + env.ZenithRadiance;
+        env.GroundRadiance          = glm::mix( 0.30f, 1.0f, day ) * sky.GroundColor * groundLight * invPi;
 
         env.SunAngularRadius = sky.SunAngularRadius;
         env.PlanetRadius     = sky.PlanetRadius;

@@ -213,7 +213,7 @@ namespace Desert::ECS
                   Range( Common::Units::Metres( 200.0f ), Common::Units::Metres( 30000.0f ) ),
                   EditCondition( "Enabled" ),
                   Tooltip( "World size of one detail tile, i.e. the size of a lobe." ) )
-        float DetailTileSize = Common::Units::Metres( 4000.0f );
+        float DetailTileSize = Common::Units::Metres( 2000.0f );
 
         PROPERTY( DisplayName( "Detail Seed" ), Category( "Detail" ), Range( 0, 65535 ),
                   EditCondition( "Enabled" ),
@@ -372,7 +372,7 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Ambient Sky Contribution" ), Category( "Lighting" ), Range( 0.0f, 3.0f ),
                   EditCondition( "Enabled" ),
                   Tooltip( "Multiplier on the sky ambient term taken from the atmosphere." ) )
-        float AmbientSkyContribution = 1.80f;
+        float AmbientSkyContribution = 1.20f;
 
         PROPERTY( DisplayName( "Ambient Ground Contribution" ), Category( "Lighting" ), Range( 0.0f, 3.0f ),
                   EditCondition( "Enabled" ), Tooltip( "Multiplier on the ground-bounce ambient term." ) )
@@ -380,7 +380,7 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Ambient Height Bias" ), Category( "Lighting" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ), Tooltip( "How much ambient favours cloud tops over cloud bases." ) )
-        float AmbientHeightBias = 0.50f;
+        float AmbientHeightBias = 0.75f;
 
         PROPERTY( DisplayName( "Sun Light Intensity Scale" ), Category( "Lighting" ), Range( 0.0f, 4.0f ),
                   EditCondition( "Enabled" ),
@@ -531,7 +531,7 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Multi Scatter Octaves" ), Category( "Quality" ), Range( 1, 4 ),
                   Tooltip( "Multiple-scattering octaves. Arithmetic only - no extra rays are traced." ) )
-        int MultiScatterOctaves = 2;
+        int MultiScatterOctaves = 3;
 
         PROPERTY( DisplayName( "Temporal Mode" ), Category( "Quality" ),
                   Tooltip( "Temporal accumulation on or off. Off marches every frame in full." ) )
