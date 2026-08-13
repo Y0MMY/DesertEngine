@@ -82,7 +82,7 @@ fi
 # ---------------------------------------------------------------------------
 # 4. reflect-cpp compiled sources. The vendored include/ headers are reflect-cpp
 #    v0.19.0 and need rfl::Generic / rfl::json / yyjson built from the matching
-#    sources (Windows uses the prebuilt reflectcpp.lib instead).
+#    sources (all platforms compile them via BuildScripts/ThirdParty/ReflectCpp.lua).
 # ---------------------------------------------------------------------------
 RCPP_SRC="$ROOT/ThirdParty/reflect-cpp/src"
 if [ ! -f "$RCPP_SRC/reflectcpp.cpp" ]; then

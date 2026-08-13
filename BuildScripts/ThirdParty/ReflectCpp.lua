@@ -1,10 +1,11 @@
--- reflect-cpp support library for non-Windows platforms.
+-- reflect-cpp support library, every platform.
 --
 -- The vendored ThirdParty/reflect-cpp/include headers are reflect-cpp v0.19.0
 -- (repacked under rflcpp/); they are NOT header-only — rfl::Generic, the JSON
--- reader/writer and yyjson live in compiled sources. On Windows those come
--- prebuilt as reflectcpp.lib; here we build them from the matching v0.19.0
--- sources, fetched into ThirdParty/reflect-cpp/src by scripts/MacOS/Setup.sh.
+-- reader/writer and yyjson live in compiled sources, committed under
+-- ThirdParty/reflect-cpp/src. Windows used to link a prebuilt reflectcpp.lib
+-- instead, of which only the Debug flavour was ever committed — the Release
+-- job died on LNK1181 from the day it existed. One project, all platforms.
 
 local root = _MAIN_SCRIPT_DIR .. "/ThirdParty/reflect-cpp"
 

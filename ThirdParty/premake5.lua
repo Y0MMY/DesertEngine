@@ -14,8 +14,13 @@ include( buildScripts .. "/Optick.lua" )
 include( buildScripts .. "/MeshOptimizer.lua" )
 include( buildScripts .. "/Dlib.lua" ) -- optional; no-op when ThirdParty/dlib is absent
 
--- Windows links the prebuilt reflectcpp.lib; other platforms compile the
--- yyjson backend from source (see the file for details).
-if os.target() ~= "windows" then
-    include( buildScripts .. "/ReflectCpp.lua" )
+-- reflect-cpp is compiled from the vendored v0.19.0 sources on EVERY platform. Windows
+-- used to link a prebuilt reflectcpp.lib instead, of which only the Debug flavour was
+-- ever committed — the Release job died on LNK1181 from the day it existed.
+include( buildScripts .. "/ReflectCpp.lua" )
+
+-- gtest, from the vendored v1.17.0 sources — Windows only; the unix-likes link the
+-- package manager's build by name (see the file for why).
+if os.target() == "windows" then
+    include( buildScripts .. "/GoogleTest.lua" )
 end

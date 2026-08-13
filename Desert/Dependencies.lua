@@ -113,20 +113,22 @@ local function getVulkanLibs(config)
     return libs
 end
 
--- reflect-cpp: prebuilt .lib on Windows, compiled-from-source project elsewhere
--- (see BuildScripts/ThirdParty/ReflectCpp.lua).
+-- reflect-cpp: the compiled-from-source project on EVERY platform (see
+-- BuildScripts/ThirdParty/ReflectCpp.lua). Windows used to link a prebuilt
+-- reflectcpp.lib of which only the Debug flavour was ever committed, so the
+-- Release configuration could not link at all. Linking the project by name
+-- also gives MSBuild the dependency edge the bare .lib path never carried.
 local function getReflectCppLib(config)
-    if os.target() == "windows" then
-        return baseDir .. "/reflect-cpp/bin/" .. config .. "/reflectcpp.lib"
-    end
     return "ReflectCpp"
 end
 
--- GoogleTest: prebuilt .lib on Windows; elsewhere linked by name from the
--- package-manager lib dirs (set workspace-wide in PlatformMacOS.lua).
+-- GoogleTest: the compiled-from-source project on Windows (see
+-- BuildScripts/ThirdParty/GoogleTest.lua — same story as reflect-cpp above);
+-- elsewhere linked by name from the package-manager lib dirs (set
+-- workspace-wide in PlatformMacOS.lua).
 local function getGTestLib(config)
     if os.target() == "windows" then
-        return baseDir .. "/google-test/bin/" .. (config:find("Debug") and "gtestd.lib" or "gtest.lib")
+        return "GoogleTest"
     end
     return "gtest"
 end
