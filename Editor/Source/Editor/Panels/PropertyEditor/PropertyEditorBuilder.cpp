@@ -3,6 +3,7 @@
 #include <Editor/Core/MultiEdit.hpp>
 
 #include <Engine/Reflection/ReflectionRegistry.hpp>
+#include <Engine/Graphic/ColorTemperature.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -138,28 +139,13 @@ namespace Desert::Editor
             return ImGui::SliderScalarN( id, ImGuiDataType_Float, v, n, &mn, &mx, "%.3f" );
         }
 
-        // Blackbody colour for the temperature slider (Tanner Helland's approximation), normalised so the
-        // brightest channel is 1: Kelvin sets the HUE, the light's own Intensity owns brightness.
+        // Blackbody colour for the temperature slider — the engine's UE-exact Krystek conversion
+        // (Graphic::ColorFromTemperature, linear BT.709), normalised so the brightest channel is 1:
+        // Kelvin sets the HUE, the light's own Intensity owns brightness. The previous Helland curve-fit
+        // produced GAMMA-encoded values, and every colour field here is linear.
         glm::vec3 KelvinToRGB( float kelvin )
         {
-            const float t = std::clamp( kelvin, 1000.0f, 40000.0f ) / 100.0f;
-            float       r = 255.0f;
-            float       g = 255.0f;
-            float       b = 255.0f;
-
-            if ( t <= 66.0f )
-            {
-                g = 99.4708025861f * std::log( t ) - 161.1195681661f;
-                b = t <= 19.0f ? 0.0f : 138.5177312231f * std::log( t - 10.0f ) - 305.0447927307f;
-            }
-            else
-            {
-                r = 329.698727446f * std::pow( t - 60.0f, -0.1332047592f );
-                g = 288.1221695283f * std::pow( t - 60.0f, -0.0755148492f );
-            }
-
-            const glm::vec3 c( std::clamp( r, 0.0f, 255.0f ), std::clamp( g, 0.0f, 255.0f ),
-                               std::clamp( b, 0.0f, 255.0f ) );
+            const glm::vec3 c    = Graphic::ColorFromTemperature( kelvin );
             const float     peak = glm::max( c.r, glm::max( c.g, c.b ) );
             return peak > 0.0f ? c / peak : glm::vec3( 1.0f );
         }
@@ -968,7 +954,8 @@ namespace Desert::Editor
             static std::unordered_map<const void*, float> s_Kelvin;
 
             float& kelvin = s_Kelvin.try_emplace( p, 6500.0f ).first->second;
-            if ( ImGui::SliderFloat( "##kelvin", &kelvin, 1500.0f, 12000.0f, "%.0f K" ) )
+            // UE's own slider range (1700-12000 K); the conversion clamps at 1000-15000.
+            if ( ImGui::SliderFloat( "##kelvin", &kelvin, 1700.0f, 12000.0f, "%.0f K" ) )
             {
                 const glm::vec3 rgb = KelvinToRGB( kelvin );
                 std::memcpy( p, &rgb, sizeof( glm::vec3 ) ); // alpha (Vec4) is deliberately untouched

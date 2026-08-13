@@ -6,6 +6,7 @@
 // Engine/Graphic/SkyRules.hpp, SkyPayload.hpp, AtmosphereEnv.hpp, SkySettings.hpp.
 
 #include <Engine/Graphic/AtmosphereEnv.hpp>
+#include <Engine/Graphic/ColorTemperature.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 #include <Engine/Graphic/SkyRules.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
@@ -502,6 +503,39 @@ TEST( AtmosphereEnvRule, DefaultConstructedStateIsInvalidAndCarriesNoBuffer )
     const Desert::Graphic::AtmosphereEnv env;
     EXPECT_FALSE( env.Valid );
     EXPECT_EQ( env.ParamsBuffer, nullptr );
+}
+
+TEST( ColorTemperature, MatchesUnrealsConversionAndBehavesPhysically )
+{
+    using Desert::Graphic::ColorFromTemperature;
+
+    // 6500 K is the D65-adjacent illuminant: every channel lands near 1 (within ten percent) without
+    // being exactly white — the property that matters, pinned instead of a secondhand sample value.
+    // The formula itself is transcribed verbatim from FLinearColor::MakeFromColorTemperature (Krystek
+    // 1985 -> xyY -> XYZ -> linear BT.709), constants and all.
+    const glm::vec3 d65 = ColorFromTemperature( 6500.0f );
+    EXPECT_NEAR( d65.r, 1.0f, 0.1f );
+    EXPECT_NEAR( d65.g, 1.0f, 0.1f );
+    EXPECT_NEAR( d65.b, 1.0f, 0.1f );
+    EXPECT_GT( d65.r, d65.g ) << "slightly warm of pure white, as the locus is at 6500 K";
+
+    // A candle is red-dominant, a clear-sky blue is blue-dominant, and the red:blue ratio falls
+    // MONOTONICALLY with temperature — the property a hue slider is trusted for.
+    EXPECT_GT( ColorFromTemperature( 1800.0f ).r, ColorFromTemperature( 1800.0f ).b * 3.0f );
+    EXPECT_GT( ColorFromTemperature( 12000.0f ).b, ColorFromTemperature( 12000.0f ).r );
+
+    float previous = 1e9f;
+    for ( float k = 1000.0f; k <= 15000.0f; k += 250.0f )
+    {
+        const glm::vec3 c     = ColorFromTemperature( k );
+        const float     ratio = c.r / glm::max( c.b, 1e-4f );
+        EXPECT_LE( ratio, previous + 1e-4f ) << "kelvin = " << k;
+        previous = ratio;
+    }
+
+    // The conversion clamps to its published domain rather than extrapolating the fit.
+    EXPECT_EQ( ColorFromTemperature( 100.0f ), ColorFromTemperature( 1000.0f ) );
+    EXPECT_EQ( ColorFromTemperature( 50000.0f ), ColorFromTemperature( 15000.0f ) );
 }
 
 int main( int argc, char** argv )
