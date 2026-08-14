@@ -468,6 +468,26 @@ group names now so scenes don't migrate twice.
 
 ## 5. Open questions for the teamlead
 
+> **DECIDED (teamlead, 2026-08-14).** The compatibility boundary is `SkyModel` — `PhysicalAtmosphere`
+> means full UE semantics, `ArtisticGradient` means today's behaviour frozen. Concretely:
+> **Q1** implement from Hillaire 2020 (+ sebh's reference only if its licence is verified MIT); never
+> copy Epic text. **Q2** keep the gradient as a mode; old scenes migrate to it. **Q3** option (a)
+> scoped to the mode: in `PhysicalAtmosphere` the directional light's colour is auto-multiplied by
+> ground transmittance, with a per-light "Affected By Atmosphere Transmittance" checkbox (default on,
+> as UE); in `ArtisticGradient` the coupling does not exist and the documented independence stands.
+> **Q4** clouds' ambient reads Distant-Sky-Light in `PhysicalAtmosphere` (one implementation of one
+> quantity — the project's costliest bug class is two that drift); the CLD-100/101/102 dome stays as
+> the `ArtisticGradient` implementation. Recalibration is its own reviewed step when Phase 4 lands:
+> render every cloud scene in both modes, compare lit:shadow against the measured ~2.3:1 v3 reference,
+> adjust only the two contribution multipliers. **Q5** depth via `ComputeImageBeginRead` — one fog
+> path for Forward and Deferred. **Q6** offscreen/thumbnail renderers fall back to the gradient.
+> **Q7** shader-side kilometres, converted once inside, per the cloud pattern.
+> **Addendum — sun disc**: Phase 2's disc is outer-space luminance × transmittance LUT + limb
+> darkening (reddens/dims by the same law as the sky around it, gone below the horizon). The
+> *perceptual* stack when looking at the sun — lens flare (new), bloom-on-by-default in cloud
+> scenes, auto-exposure response with the disc in frame — is a separate task ordered after Phase 2,
+> so the flare is tuned once against the physical disc luminance. Light shafts already exist.
+
 1. **Licence**: UE source is under the Epic Games EULA — we cannot copy shader/C++ text into DesertEngine.
    Implementation must be written from the **Hillaire 2020 paper** (and its MIT-licensed reference
    implementation, github.com/sebh/UnrealEngineSkyAtmosphere — verify licence header before use) with UE
