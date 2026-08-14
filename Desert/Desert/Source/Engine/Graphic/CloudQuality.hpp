@@ -85,16 +85,24 @@ namespace Desert::Graphic
            } },
          { ECS::CloudQuality::High, "High",
            CloudQualityValues{
-                .ResolutionScale          = ECS::CloudResolutionScale::Half,
-                .MaxSteps                 = 128,
+                .ResolutionScale = ECS::CloudResolutionScale::Half,
+                // 176, up from 128: the sqrt-type near schedule (CloudStepLength) samples the first
+                // 10 km at <= 2x MinStepSize, ~1.8x the steps the old linear schedule spent there — and
+                // full-strength erosion thins the media, so the transmittance early-out fires later. At
+                // 144 the showcase's near tower ran out of budget mid-cloud and the exhaustion fade
+                // dissolved it; 176 keeps it. Coarse 4, up from 3, pays for part of it: the coarse
+                // stride follows the fine one, so the near schedule had tripled the cost of skipping
+                // EMPTY sky; 4 x 30 m at 10 km is still finer than the old 3 x 95 m. Both measured by
+                // frame-count slope against the pre-schedule baseline, inside the 1.5x gate.
+                .MaxSteps                 = 176,
                 .MinStepSize              = Common::Units::Metres( 15.0f ),
                 .MaxStepSize              = Common::Units::Metres( 700.0f ),
                 .StepGrowthRate           = 0.008f,
-                .CoarseStepMultiplier     = 3.0f,
+                .CoarseStepMultiplier     = 4.0f,
                 .EmptySamplesBeforeCoarse = 8,
                 // 4, not 6. The cone march is 12 of the 18 texture fetches a shaded sample costs — two
                 // per cone sample — so this one number is two thirds of the raymarch. Four keeps the
-                // shadow terminator readable; Ultra below still authors 8 for stills and captures.
+                // shadow terminator readable; Ultra below still authors 5 for stills and captures.
                 .LightMarchSamples = 4,
                 // 3 octaves since CLD-108: at tauSun >~ 3 two octaves both vanish and a storm interior
                 // collapses onto ambient alone. The third costs arithmetic, not fetches.
@@ -107,21 +115,32 @@ namespace Desert::Graphic
          { ECS::CloudQuality::Ultra, "Ultra",
            CloudQualityValues{
                 .ResolutionScale = ECS::CloudResolutionScale::Full,
-                // 192/12 m/6, down from 256/8 m/8: measured by frame-count slope, the full-res march is
-                // ~10x the High tier and these three knobs are most of it; the visual delta at full res
-                // is inside what the temporal accumulation resolves anyway.
+                // 192/15 m/3, from 192/12 m/2, retuned for the sqrt-type near schedule. On a cloudy
+                // horizon most full-res rays are budget-capped, so Ultra's slope tracks
+                // MaxSteps x (shaded fraction) — and the near schedule raises the shaded fraction. At
+                // 12 m the fine tier alone blew the 1.25x slope gate (measured 1.3-1.6x across
+                // windows); 15 m authors the same <= 30 m bound out to 10 km that High does, and Ultra
+                // keeps its edge where it actually shows at full resolution: the pixel count, the 6
+                // cone samples, the finer far growth and the calmer temporal. MaxSteps stays the old
+                // row's 192 — the sqrt schedule REDISTRIBUTES that budget toward the near field rather
+                // than growing it; coarse 3 keeps the empty-sky skip at 3 x 30 m = 90 m out to 10 km,
+                // finer than the old 2 x (12 m + 0.006 t) everywhere beyond ~3 km.
                 .MaxSteps                 = 192,
-                .MinStepSize              = Common::Units::Metres( 12.0f ),
+                .MinStepSize              = Common::Units::Metres( 15.0f ),
                 .MaxStepSize              = Common::Units::Metres( 500.0f ),
                 .StepGrowthRate           = 0.006f,
-                .CoarseStepMultiplier     = 2.0f,
+                .CoarseStepMultiplier     = 3.0f,
                 .EmptySamplesBeforeCoarse = 8,
-                .LightMarchSamples        = 6,
-                .MultiScatterOctaves      = 3,
-                .TemporalMode             = ECS::CloudTemporalMode::Reprojection,
-                .TemporalBlendFactor      = 0.08f,
-                .TemporalClampScale       = 1.75f,
-                .JitterStrength           = 0.50f,
+                // 5, down from 6: two fetches per cone sample, paid on every shaded sample beyond the
+                // shadow map's extent — the far half of the shell on this scene. The near schedule
+                // multiplies shaded samples, so the sixth cone sample is what pushed Ultra past its
+                // 1.25x slope gate after the MaxSteps and MinStepSize trades; still one more than High.
+                .LightMarchSamples   = 5,
+                .MultiScatterOctaves = 3,
+                .TemporalMode        = ECS::CloudTemporalMode::Reprojection,
+                .TemporalBlendFactor = 0.08f,
+                .TemporalClampScale  = 1.75f,
+                .JitterStrength      = 0.50f,
            } },
     };
 

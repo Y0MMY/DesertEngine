@@ -75,6 +75,25 @@ namespace Desert::Graphic::API::Vulkan
 
         ImGui_ImplGlfw_InitForVulkan( static_cast<GLFWwindow*>( engineContext.GetNativeWindowHandle() ), true );
 
+        // A closed lid with no external display leaves glfwGetMonitors empty, the GLFW backend then
+        // publishes an empty Monitors list, and ImGui's first NewFrame asserts on it (it needs a monitor
+        // rect to place viewport windows). The headless --shot path still has to run in that state, so
+        // publish the main window's own rectangle as the one "monitor" — every viewport lands on the
+        // window, which is where the offscreen frame is rendered anyway.
+        ImGuiPlatformIO& platformIO = ::ImGui::GetPlatformIO();
+        if ( platformIO.Monitors.Size == 0 )
+        {
+            LOG_ERROR( "No monitor is online (lid closed?): ImGui gets the window rect as its monitor" );
+            int windowW = 0, windowH = 0;
+            glfwGetWindowSize( static_cast<GLFWwindow*>( engineContext.GetNativeWindowHandle() ), &windowW,
+                               &windowH );
+            ImGuiPlatformMonitor synthetic;
+            synthetic.MainPos = synthetic.WorkPos = ImVec2( 0.0f, 0.0f );
+            synthetic.MainSize = synthetic.WorkSize = ImVec2( static_cast<float>( windowW > 0 ? windowW : 1280 ),
+                                                              static_cast<float>( windowH > 0 ? windowH : 720 ) );
+            platformIO.Monitors.push_back( synthetic );
+        }
+
         ImGui_ImplVulkan_InitInfo init_info = {};
         init_info.Instance                  = SP_CAST( VulkanContext, engineContext.GetRendererContext() )->GetVulkanInstance();
         init_info.PhysicalDevice            = SP_CAST( VulkanLogicalDevice, engineContext.GetDevice() )

@@ -141,7 +141,7 @@
     "BaseGradientPower": 1.6,
     "TopGradientPower": 1.1,
     "DensityHeightBias": 1.1,
-    "DetailStrength": 0.5,
+    "DetailStrength": 0.8,
     "DetailTileSize": 300000.0,
     "DetailSeed": 13,
     "DetailTypeBias": 0.7,

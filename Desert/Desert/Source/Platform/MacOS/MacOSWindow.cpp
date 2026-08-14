@@ -39,13 +39,20 @@ namespace Desert::Platform::MacOS
         auto width  = m_Data.Specification.Width;
         auto height = m_Data.Specification.Height;
 
-        GLFWmonitor*       monitor      = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode         = glfwGetVideoMode( monitor );
-        int                posX         = 0, posY = 0;
-        bool               setPos       = false;
-        const bool         coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
+        // A closed lid with no external display leaves CGGetOnlineDisplayList empty: glfwGetPrimaryMonitor
+        // returns NULL and glfwGetVideoMode asserts on it. The window itself is still creatable (the
+        // headless --shot path renders offscreen through it), so fall back to the authored size instead of
+        // the video mode — but say so, because a fullscreen request cannot be honoured without a monitor.
+        GLFWmonitor*       monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode    = monitor ? glfwGetVideoMode( monitor ) : nullptr;
+        if ( !monitor )
+            LOG_ERROR( "No monitor is online (lid closed?): window falls back to {}x{}, fullscreen ignored", width,
+                       height );
+        int        posX = 0, posY = 0;
+        bool       setPos       = false;
+        const bool coverTaskbar = m_Data.Specification.Fullscreen && m_Data.Specification.FullscreenCoverTaskbar;
 
-        if ( m_Data.Specification.Fullscreen )
+        if ( m_Data.Specification.Fullscreen && monitor && mode )
         {
             if ( coverTaskbar )
             {
