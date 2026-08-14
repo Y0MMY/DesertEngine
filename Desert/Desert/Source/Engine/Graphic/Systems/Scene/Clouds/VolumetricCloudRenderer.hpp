@@ -25,12 +25,16 @@ namespace Desert::Graphic::System
      *                    dispatch would be a per-frame dispatch producing identical bytes.
      *   S2  RAYMARCH     compute, RGBA16F at ResolutionScale. One ray per pixel through a spherical
      *                    shell, clamped to the scene depth. Premultiplied radiance + transmittance, plus
-     *                    an RGBA8 guide recording how far each ray was allowed to run.
+     *                    an RGBA8 guide recording how far each ray was allowed to run. At Full resolution
+     *                    with the temporal stage running, the march is CHECKERBOARDED: half the pixels
+     *                    each frame, the other half reconstructed by S3 (CloudCheckerboardActive) — a
+     *                    documented property of the tier, not a quality knob.
      *   S3  TEMPORAL     compute, RGBA16F at ResolutionScale, ONLY when TemporalMode is Reprojection.
      *                    Reprojects a two-image history by the camera's motion, clamps it to the current
-     *                    3x3 neighbourhood and blends. With TemporalMode = Off this stage does not run,
-     *                    holds no memory, and the composite reads S2's output directly — which is what
-     *                    makes "Off is the marched image, bit for bit" true by construction.
+     *                    3x3 neighbourhood and blends; checkerboard-stale pixels take the clamped history
+     *                    outright. With TemporalMode = Off this stage does not run, holds no memory, and
+     *                    the composite reads S2's output directly — which is what makes "Off is the
+     *                    marched image, bit for bit" true by construction.
      *   S4  COMPOSITE    a fullscreen quad registered in RenderPhase::Transparency at
      *                    RenderPassOrder::FarField, so it lands under the particle billboards. It
      *                    magnifies whichever image the temporal mode selected, weighting its taps by the
@@ -110,8 +114,10 @@ namespace Desert::Graphic::System
         // Fills the sun-space shadow map from the weather map and the shape noise. Runs before the
         // raymarch, which reads it in one fetch where it used to march a cone.
         void DispatchShadowMap( const CloudNoiseSet& noise );
-        void DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage );
-        void DispatchTemporalResolve();
+        // @p checkerboard: both stages are handed the SAME answer from CloudCheckerboardActive — the
+        // march skips the stale half only when the resolve that reconstructs it is going to run.
+        void DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage, bool checkerboard );
+        void DispatchTemporalResolve( bool checkerboard );
 
         std::shared_ptr<ComputePipeline>  m_WeatherPipeline;
         std::shared_ptr<ComputePipeline>  m_ShadowPipeline;

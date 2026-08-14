@@ -24,9 +24,11 @@ namespace Desert::Graphic::System
         // maximum, and both dispatches bounds-check, so a target that is not a multiple of 8 is fine.
         constexpr uint32_t kWorkGroupSize = 8;
 
-        // Length of the per-frame jitter sequence. Any small number does: the dither only has to differ
-        // from frame to frame for the temporal stage to average it away.
+        // Length of the per-frame jitter sequence. Any small EVEN number does: the dither only has to
+        // differ from frame to frame for the temporal stage to average it away, and the checkerboard is
+        // phased by the index's parity, which an odd wrap would break once per cycle.
         constexpr uint32_t kJitterSequenceLength = 64;
+        static_assert( kJitterSequenceLength % 2 == 0 );
 
         // The shadow map's resolution. 512 over the default 30 km extent is ~117 m a texel, which is
         // about what the cone march it replaces resolved anyway (its own radius was 400 m).
@@ -430,7 +432,8 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_CloudShadowMap.get() );
     }
 
-    void VolumetricCloudRenderer::DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage )
+    void VolumetricCloudRenderer::DispatchRaymarch( const CloudNoiseSet& noise, Image2D* depthImage,
+                                                    bool checkerboard )
     {
         DESERT_PROFILE_SCOPE( "Clouds: Raymarch" );
 
@@ -441,6 +444,7 @@ namespace Desert::Graphic::System
         CloudRaymarchPush push{};
         push.InverseViewProjection = glm::inverse( viewProjection );
         push.CameraPosition        = glm::vec4( camera->GetPosition(), static_cast<float>( m_FrameIndex ) );
+        push.Flags                 = glm::vec4( checkerboard ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f );
 
         auto& renderer = Renderer::GetInstance();
 
@@ -474,7 +478,7 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndRead( depthImage );
     }
 
-    void VolumetricCloudRenderer::DispatchTemporalResolve()
+    void VolumetricCloudRenderer::DispatchTemporalResolve( bool checkerboard )
     {
         DESERT_PROFILE_SCOPE( "Clouds: TemporalResolve" );
 
@@ -492,8 +496,11 @@ namespace Desert::Graphic::System
         Image2D* write = m_HistoryImages[m_HistoryWrite].get();
         Image2D* read  = m_HistoryImages[m_HistoryWrite ^ 1u].get();
 
-        const CloudTemporalPush push = MakeCloudTemporalPush( projection, view, m_PreviousViewProjection,
-                                                              camera->GetPosition(), m_HistoryFilled );
+        // The SAME m_FrameIndex the raymarch pushed this frame — it is incremented after both stages,
+        // so the two cannot disagree about which checkerboard half is fresh.
+        const CloudTemporalPush push =
+             MakeCloudTemporalPush( projection, view, m_PreviousViewProjection, camera->GetPosition(),
+                                    m_HistoryFilled, checkerboard, m_FrameIndex );
 
         auto& renderer = Renderer::GetInstance();
 
@@ -592,30 +599,33 @@ namespace Desert::Graphic::System
         if ( m_CloudShadowMap && m_ShadowPipeline && m_Data.CloudShadowMap )
             DispatchShadowMap( *noise );
 
+        // S3's history is decided BEFORE S2 runs: at Full resolution the march visits only half the
+        // pixels each frame (the checkerboard), and it may do that only when the resolve that fills in
+        // the other half is actually going to run — which is known here and nowhere later.
+        bool historyReady = false;
+        if ( CloudTemporalUsesHistory( m_Data.TemporalMode ) )
+            historyReady = EnsureHistory();
+        else
+            ReleaseHistory();
+
+        const bool checkerboard =
+             CloudCheckerboardActive( m_Data.ResolutionScale, m_Data.TemporalMode, historyReady );
+
         // S2.
-        DispatchRaymarch( *noise, target->GetDepthAttachmentImage().get() );
+        DispatchRaymarch( *noise, target->GetDepthAttachmentImage().get(), checkerboard );
 
         // S3. Not a branch inside the resolve shader — a stage that either happens or does not. With
         // Temporal Mode = Off nothing is dispatched, no history is held, and the composite is pointed at
         // the image the march just wrote, so what reaches the screen is the marched frame bit for bit.
-        bool historyReady = false;
-        if ( CloudTemporalUsesHistory( m_Data.TemporalMode ) )
-        {
-            if ( EnsureHistory() )
-            {
-                DispatchTemporalResolve();
-                historyReady = true;
-            }
-        }
-        else
-        {
-            ReleaseHistory();
-        }
+        if ( historyReady )
+            DispatchTemporalResolve( checkerboard );
 
         m_CompositeSource = CloudSelectCompositeSource( m_Data.TemporalMode, historyReady );
 
         // Wrapped, not free-running: the index rides in a float push constant, and past 2^24 the
-        // increment stops changing it — the jitter pattern would then freeze into a fixed dither.
+        // increment stops changing it — the jitter pattern would then freeze into a fixed dither. The
+        // length must stay EVEN: the checkerboard is phased by this index's parity, and an odd wrap
+        // would hand the same half of the pixels to the march two frames in a row once per cycle.
         m_FrameIndex     = ( m_FrameIndex + 1 ) % kJitterSequenceLength;
         m_HasFrameResult = true;
     }

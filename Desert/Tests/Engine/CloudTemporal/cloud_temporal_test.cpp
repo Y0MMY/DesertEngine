@@ -107,7 +107,8 @@ namespace
     CloudTemporalPush PushFor( const TestCamera& current, const TestCamera& previous, bool historyValid )
     {
         return MakeCloudTemporalPush( current.Projection, current.View, previous.ViewProjection(),
-                                      current.Position, historyValid );
+                                      current.Position, historyValid, /*checkerboard=*/false,
+                                      /*frameIndex=*/0u );
     }
 
     R::CloudReprojection Reproject( const glm::vec2& uv, const CloudTemporalPush& push )
@@ -776,6 +777,100 @@ TEST( CloudTemporalMode, TheModeHasExactlyOneInterpretation )
     EXPECT_TRUE( CloudTemporalUsesHistory( Desert::ECS::CloudTemporalMode::Reprojection ) );
 }
 
+// ---- The checkerboard: half the pixels marched per frame, the resolve reconstructs the rest ---------
+
+TEST( CloudCheckerboard, ExactlyHalfThePixelsAreFreshEachFrame )
+{
+    // The whole point of the scheme is that the march does half the work per frame. If the pattern ever
+    // drifted from an exact half — an off-by-one in the parity — the saving would drift with it and the
+    // reconstruction would starve one diagonal of the screen.
+    for ( uint32_t frame : { 0u, 1u, 2u, 63u } )
+    {
+        int freshCount = 0;
+        for ( int y = 0; y < 16; ++y )
+            for ( int x = 0; x < 16; ++x )
+                if ( R::CloudCheckerboardFresh( glm::ivec2( x, y ), frame ) )
+                    ++freshCount;
+        EXPECT_EQ( freshCount, 16 * 16 / 2 );
+    }
+}
+
+TEST( CloudCheckerboard, EveryPixelIsFreshExactlyOncePerTwoFrames )
+{
+    // The reconstruction's staleness bound: a pixel the march skips this frame MUST be marched the next,
+    // or some pixel would coast on reprojected history forever.
+    for ( int y = 0; y < 8; ++y )
+        for ( int x = 0; x < 8; ++x )
+            for ( uint32_t frame = 0; frame < 4; ++frame )
+            {
+                const bool now  = R::CloudCheckerboardFresh( glm::ivec2( x, y ), frame );
+                const bool next = R::CloudCheckerboardFresh( glm::ivec2( x, y ), frame + 1 );
+                EXPECT_NE( now, next );
+            }
+}
+
+TEST( CloudCheckerboard, AdjacentPixelsAreNeverBothStale )
+{
+    // What makes the fresh-neighbour mean a real fallback: every stale pixel's 4-neighbourhood is
+    // entirely fresh, so a pixel with no usable history always has same-frame data touching it.
+    for ( int y = 0; y < 8; ++y )
+        for ( int x = 0; x < 8; ++x )
+            for ( uint32_t frame : { 0u, 1u } )
+            {
+                const bool here  = R::CloudCheckerboardFresh( glm::ivec2( x, y ), frame );
+                const bool right = R::CloudCheckerboardFresh( glm::ivec2( x + 1, y ), frame );
+                const bool below = R::CloudCheckerboardFresh( glm::ivec2( x, y + 1 ), frame );
+                EXPECT_NE( here, right );
+                EXPECT_NE( here, below );
+            }
+}
+
+TEST( CloudCheckerboard, AWeightOfZeroReturnsTheClampedHistoryAndNeverTouchesTheCurrentTexel )
+{
+    // A stale pixel resolves at weight 0, and its `current` is the one texel the march deliberately did
+    // not write this frame — the last place uninitialised image memory can still be standing. The
+    // symmetric twin of "a weight of one returns the current frame bit for bit": current * 0 is a NaN
+    // the moment that texel holds an inf, so the resolve must return the clamped history WITHOUT the
+    // multiply.
+    const R::CloudTemporalBox box = BoxOf( glm::vec4( 0.0f ), glm::vec4( 1.0f ), 1.0f );
+
+    const glm::vec4 hostileCurrents[] = {
+         glm::vec4( std::numeric_limits<float>::infinity() ),
+         glm::vec4( std::numeric_limits<float>::quiet_NaN() ),
+         glm::vec4( 1e38f ),
+    };
+
+    const glm::vec4 history( 0.25f, 0.5f, 0.75f, 1.0f ); // inside the box: the clamp is the identity
+
+    for ( const glm::vec4& current : hostileCurrents )
+        EXPECT_TRUE( SameBits( R::CloudTemporalResolve( current, current, history, true, 0.0f, box ), history ) );
+
+    // Outside the box the answer is the BOUNDARY, exactly as any other clamped history.
+    const glm::vec4 wild( 40.0f );
+    EXPECT_TRUE(
+         SameBits( R::CloudTemporalResolve( hostileCurrents[0], hostileCurrents[0], wild, true, 0.0f, box ),
+                   glm::vec4( 1.0f ) ) );
+}
+
+TEST( CloudCheckerboard, RunsOnlyAtFullResolutionWithAUsableHistory )
+{
+    using Desert::ECS::CloudResolutionScale;
+    using Desert::ECS::CloudTemporalMode;
+    using Desert::Graphic::CloudCheckerboardActive;
+
+    // The one configuration that checkerboards: Full resolution, a temporal mode that accumulates, and
+    // a history that actually allocated. Everything else marches every pixel — in particular a Custom
+    // Full + Temporal Off, where a checkerboarded march would put a half-stale checkerboard on screen
+    // with no stage to repair it.
+    EXPECT_TRUE( CloudCheckerboardActive( CloudResolutionScale::Full, CloudTemporalMode::Reprojection, true ) );
+
+    EXPECT_FALSE( CloudCheckerboardActive( CloudResolutionScale::Full, CloudTemporalMode::Reprojection, false ) );
+    EXPECT_FALSE( CloudCheckerboardActive( CloudResolutionScale::Full, CloudTemporalMode::Off, true ) );
+    EXPECT_FALSE( CloudCheckerboardActive( CloudResolutionScale::Half, CloudTemporalMode::Reprojection, true ) );
+    EXPECT_FALSE(
+         CloudCheckerboardActive( CloudResolutionScale::Quarter, CloudTemporalMode::Reprojection, true ) );
+}
+
 // ---- CLD-35: the push constant, and CLD-34: the memory --------------------------------------------
 
 TEST( CloudTemporalPushConstant, FillsTheGuaranteedRangeExactly )
@@ -796,6 +891,28 @@ TEST( CloudTemporalPushConstant, TheHistoryFlagIsCarriedInTheCameraPositionW )
     EXPECT_FLOAT_EQ( push.CameraPosition.x, position.x );
     EXPECT_FLOAT_EQ( push.CameraPosition.y, position.y );
     EXPECT_FLOAT_EQ( push.CameraPosition.z, position.z );
+}
+
+TEST( CloudTemporalPushConstant, TheFlagWordRoundTripsThroughTheShaderDecoderForEveryCombination )
+{
+    // CloudTemporalPackFlags (C++) and CloudTemporalDecodeFlags (the GLSL the resolve compiles) are the
+    // two halves of one encoding; if they ever disagreed, the resolve would blend stale data as fresh or
+    // read a history that is not there — with no validation error anywhere. Frame indices beyond the
+    // parity must land on their parity's representative: the pattern has period two and packing more
+    // would spend bits the 128-byte budget does not have.
+    using Desert::Graphic::CloudTemporalPackFlags;
+
+    for ( bool history : { false, true } )
+        for ( bool checkerboard : { false, true } )
+            for ( uint32_t frame : { 0u, 1u, 2u, 3u, 62u, 63u } )
+            {
+                const float                 packed = CloudTemporalPackFlags( history, checkerboard, frame );
+                const R::CloudTemporalFlags flags  = R::CloudTemporalDecodeFlags( packed );
+
+                EXPECT_EQ( flags.HistoryValid, history );
+                EXPECT_EQ( flags.Checkerboard, checkerboard );
+                EXPECT_EQ( flags.Frame, frame & 1u );
+            }
 }
 
 TEST( CloudTemporalPushConstant, TheThreeRowsAreTheRowsOfThePremultipliedPreviousMatrix )

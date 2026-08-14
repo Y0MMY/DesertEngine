@@ -149,6 +149,57 @@ CloudUpsampleWeights CloudBilateralUpsampleWeights(vec2 fraction, float d00, flo
     return weights;
 }
 
+// ---- The checkerboard ------------------------------------------------------------------------------
+//
+// At Resolution Scale = Full the march is the frame budget: every pixel of the viewport walks up to
+// 192 steps. The deck's own answer (Nubis3 pp. 49-50) is to march a fraction of the pixels each frame
+// and let the temporal stage reconstruct the rest — Guerrilla runs the far march at 960x540 with a
+// checkerboard on top. Here the checkerboard is the whole scheme: each frame HALF the pixels march
+// (the "fresh" half) and the resolve fills the other half from the reprojected, clamped history it
+// already maintains. The pattern alternates every frame, so every pixel is marched at least once per
+// two frames.
+//
+// This function is the ONE definition of which half is which. The raymarch consults it to decide
+// whether to march at all, and the resolve consults it to decide whether this texel holds a frame that
+// was just marched or a value the march deliberately left alone. If the two ever disagreed, half the
+// image would blend stale data as if it were fresh — which is why the pattern lives here, in the header
+// both shaders include, and not as a copy in each.
+//
+// Only the PARITY of the frame index matters: the pattern has period two.
+bool CloudCheckerboardFresh(ivec2 coord, uint frame)
+{
+    return ((coord.x + coord.y + int(frame)) & 1) == 0;
+}
+
+// ---- The per-dispatch flag word --------------------------------------------------------------------
+//
+// The temporal resolve's push constant fills the guaranteed 128 bytes EXACTLY (see CloudPayload.hpp),
+// so the three per-dispatch facts it needs ride together in the one float that used to carry only the
+// history flag: CameraPosition.w. Small integers survive a float bit for bit, so the packing is exact.
+// The C++ encoder is Graphic::CloudTemporalPackFlags; the test pins that the pair invert each other
+// for every combination.
+const int CLOUD_TEMPORAL_FLAG_HISTORY      = 1;
+const int CLOUD_TEMPORAL_FLAG_CHECKERBOARD = 2;
+const int CLOUD_TEMPORAL_FLAG_ODD_FRAME    = 4;
+
+struct CloudTemporalFlags
+{
+    bool HistoryValid; // the history image holds a resolved frame (not first-dispatch memory)
+    bool Checkerboard; // the march visited only the fresh half of the pixels this frame
+    uint Frame;        // 0 or 1 — the frame parity, which is all CloudCheckerboardFresh reads
+};
+
+CloudTemporalFlags CloudTemporalDecodeFlags(float packed)
+{
+    int bits = int(packed + 0.5f);
+
+    CloudTemporalFlags flags;
+    flags.HistoryValid = (bits & CLOUD_TEMPORAL_FLAG_HISTORY) != 0;
+    flags.Checkerboard = (bits & CLOUD_TEMPORAL_FLAG_CHECKERBOARD) != 0;
+    flags.Frame        = (bits & CLOUD_TEMPORAL_FLAG_ODD_FRAME) != 0 ? 1u : 0u;
+    return flags;
+}
+
 // ---- Reprojection through the shell ----------------------------------------------------------------
 
 // Where this pixel's cloud was on the screen of the PREVIOUS frame, and whether that answer is usable.
@@ -289,6 +340,14 @@ vec4 CloudTemporalResolve(vec4 current, vec4 currentMean, vec4 history, bool his
         return currentMean;
 
     vec4 clamped = CloudClampToNeighbourhood(history, box);
+
+    // A WEIGHT OF EXACTLY 0 returns the clamped history BIT FOR BIT, symmetric with the w = 1 early
+    // return above and for the same reason: current * 0 is a NaN the moment `current` holds an inf,
+    // and with the checkerboard a stale pixel's `current` is a texel the march deliberately did not
+    // write this frame — the one place uninitialised image memory can still be standing.
+    if (weight <= 0.0f)
+        return clamped;
+
     return current * weight + clamped * (1.0f - weight);
 }
 

@@ -234,9 +234,14 @@ namespace Desert::Graphic
     {
         glm::mat4 InverseViewProjection;
         glm::vec4 CameraPosition; // xyz = world units, w = frame index (drives the jitter sequence)
+        // x = 1 when the checkerboard is active (see CloudCheckerboardActive below): the march then
+        // visits only the pixels CloudCheckerboardFresh names for this frame and leaves the rest to the
+        // temporal resolve. y, z, w are unused. A vec4 and not a float because the block is std430-laid
+        // out on the GLSL side and a lone float after a vec4 would disagree about the block's size.
+        glm::vec4 Flags;
     };
 
-    static_assert( sizeof( CloudRaymarchPush ) == 80 );
+    static_assert( sizeof( CloudRaymarchPush ) == 96 );
 
     static_assert( sizeof( CloudRaymarchPush ) <= 128,
                    "Vulkan guarantees only 128 bytes of push-constant space, and the engine emits a "
@@ -275,9 +280,12 @@ namespace Desert::Graphic
         glm::vec4 PrevReprojectionRow1;
         glm::vec4 PrevReprojectionRow3;
 
-        // xyz = camera position in world units; w = 1 when the history image already holds a resolved
-        // frame, 0 on the first dispatch after allocation. The flag rides here rather than in the
-        // parameter block because it describes the RESOURCE's state this frame, not the artist's settings.
+        // xyz = camera position in world units; w = the flag word CloudTemporalPackFlags packs: whether
+        // the history image already holds a resolved frame, whether the march ran checkerboarded, and
+        // the frame parity the checkerboard pattern is phased by. The flags ride here rather than in the
+        // parameter block because they describe the RESOURCES' state this frame, not the artist's
+        // settings — and because this block fills the guaranteed 128 bytes exactly, there is nowhere
+        // else for them to ride. The GLSL decoder is CloudTemporalDecodeFlags in Common/CloudTemporal.glslh.
         glm::vec4 CameraPosition;
     };
 
@@ -290,6 +298,19 @@ namespace Desert::Graphic
                    "rows — there is no cheaper form of a projection." );
 
     /**
+     * The flag word CameraPosition.w carries to the temporal resolve, and the C++ half of the pair whose
+     * GLSL half is CloudTemporalDecodeFlags in Common/CloudTemporal.glslh. Small integers survive a
+     * float exactly, so the packing is lossless; the test pins that the two invert each other for every
+     * combination. Only the PARITY of the frame index is packed — the checkerboard pattern has period
+     * two, and parity is all the shader reads.
+     */
+    inline constexpr float CloudTemporalPackFlags( bool historyValid, bool checkerboard, uint32_t frameIndex )
+    {
+        return static_cast<float>( ( historyValid ? 1 : 0 ) | ( checkerboard ? 2 : 0 ) |
+                                   ( ( frameIndex & 1u ) != 0u ? 4 : 0 ) );
+    }
+
+    /**
      * Fill the temporal push constant. Pure, and separate from the dispatch so the reprojection can be
      * driven end to end by a test: this function is where the previous view-projection becomes three
      * rows, and an error here is a cloudscape that lags or smears with no message anywhere.
@@ -299,10 +320,15 @@ namespace Desert::Graphic
      *                               the product, because the eye translation has to be dropped before the
      *                               inversion — see the note on InverseViewProjection above.
      * @param previousViewProjection the product, from the frame that filled the history image.
+     * @param checkerboard           true when the march visited only half the pixels this frame; the
+     *                               resolve then fills the stale half from the clamped history.
+     * @param frameIndex             the SAME index the raymarch push carried this frame — the two stages
+     *                               must agree about which half is fresh, and this is how they do.
      */
     inline CloudTemporalPush MakeCloudTemporalPush( const glm::mat4& projection, const glm::mat4& view,
                                                     const glm::mat4& previousViewProjection,
-                                                    const glm::vec3& cameraPosition, bool historyValid )
+                                                    const glm::vec3& cameraPosition, bool historyValid,
+                                                    bool checkerboard, uint32_t frameIndex )
     {
         // A view matrix is rotation x translate( -eye ), so its fourth column is the entire translation.
         // Replacing it with the identity's leaves the rotation exactly — no subtraction, no cancellation.
@@ -321,7 +347,8 @@ namespace Desert::Graphic
         push.PrevReprojectionRow0  = glm::vec4( relative[0][0], relative[1][0], relative[2][0], relative[3][0] );
         push.PrevReprojectionRow1  = glm::vec4( relative[0][1], relative[1][1], relative[2][1], relative[3][1] );
         push.PrevReprojectionRow3  = glm::vec4( relative[0][3], relative[1][3], relative[2][3], relative[3][3] );
-        push.CameraPosition        = glm::vec4( cameraPosition, historyValid ? 1.0f : 0.0f );
+        push.CameraPosition =
+             glm::vec4( cameraPosition, CloudTemporalPackFlags( historyValid, checkerboard, frameIndex ) );
         return push;
     }
 
@@ -338,6 +365,26 @@ namespace Desert::Graphic
     inline constexpr bool CloudTemporalUsesHistory( ECS::CloudTemporalMode mode )
     {
         return mode == ECS::CloudTemporalMode::Reprojection;
+    }
+
+    /**
+     * Whether the raymarch runs CHECKERBOARDED this frame: half the pixels marched, the other half
+     * reconstructed by the temporal resolve from the reprojected, clamped history.
+     *
+     * Full resolution only — a documented property of the tier, not a fourteenth quality knob: at Full
+     * the march is the frame budget (measured ~10x the High tier), and halving the pixels per frame is
+     * the deck's own answer to that cost (Nubis3 pp. 49-50). At Half and Quarter the march is already
+     * cheap and the checkerboard would double the temporal lag for nothing.
+     *
+     * And only when the resolve actually runs: the stale half of the target holds data the march
+     * deliberately skipped, and the resolve is the stage that replaces it. Without a usable history —
+     * Temporal Mode = Off, or the pair failed to allocate — the composite reads the marched image
+     * directly, and a checkerboarded march would put a half-stale checkerboard on screen.
+     */
+    inline constexpr bool CloudCheckerboardActive( ECS::CloudResolutionScale scale, ECS::CloudTemporalMode mode,
+                                                   bool historyAvailable )
+    {
+        return scale == ECS::CloudResolutionScale::Full && CloudTemporalUsesHistory( mode ) && historyAvailable;
     }
 
     /** Which low-resolution image the composite magnifies. */

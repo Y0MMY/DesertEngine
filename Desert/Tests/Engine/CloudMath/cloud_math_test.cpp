@@ -1103,7 +1103,8 @@ TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 TEST( CloudPayload, ThePushConstantFitsTheGuaranteedRange )
 {
     EXPECT_LE( sizeof( CloudRaymarchPush ), 128u );
-    EXPECT_EQ( sizeof( CloudRaymarchPush ), 80u );
+    // mat4 + camera/frame vec4 + the checkerboard flag vec4.
+    EXPECT_EQ( sizeof( CloudRaymarchPush ), 96u );
 }
 
 TEST( CloudPayload, EveryFieldReachesADistinctOffset )

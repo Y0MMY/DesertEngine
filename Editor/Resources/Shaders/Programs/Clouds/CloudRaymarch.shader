@@ -66,6 +66,7 @@ Shader "CloudRaymarch"
         {
             mat4 u_InverseViewProjection;
             vec4 u_CameraPosition; // xyz = camera position in world units, w = frame index
+            vec4 u_Flags;          // x = 1 when the checkerboard is active (Full resolution + temporal)
         };
 
         LocalSize(8, 8, 1);
@@ -147,6 +148,14 @@ Shader "CloudRaymarch"
             float geometryLimit = CloudGeometryLimit(u_InverseViewProjection, cameraPos, ndc,
                                                      NearestSceneDepth(coord, size), u_MaxViewDistance);
             imageStore(u_CloudDepthGuide, coord, CloudEncodeGuideDistance(geometryLimit));
+
+            // THE CHECKERBOARD (Full resolution + temporal only — see CloudCheckerboardActive on the
+            // CPU side). A stale pixel does not march and does NOT write the scatter target: its texel
+            // keeps the value marched last frame, and the temporal resolve replaces it on screen with
+            // the reprojected, clamped history. The guide above IS still written — it describes where
+            // the GEOMETRY is, which is a fact about this frame's depth buffer, not about the cloud.
+            if (u_Flags.x > 0.5f && !CloudCheckerboardFresh(coord, uint(u_CameraPosition.w)))
+                return;
 
             CloudShellHit shell = CloudShellBounds(originKm, dir, planetRadiusKm, bottomKm, thicknessKm);
             if (!shell.Hit)

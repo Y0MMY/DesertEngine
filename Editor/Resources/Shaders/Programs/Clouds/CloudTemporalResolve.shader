@@ -95,8 +95,8 @@ Shader "CloudTemporalResolve"
             vec4 u_PreviousRow0;
             vec4 u_PreviousRow1;
             vec4 u_PreviousRow3;
-            // xyz = camera position in world units; w = 1 when the history image already holds a resolved
-            // frame, 0 on the first dispatch after the images are allocated.
+            // xyz = camera position in world units; w = the packed flag word (history present /
+            // checkerboard active / frame parity) — CloudTemporalDecodeFlags takes it apart.
             vec4 u_CameraPosition;
         };
 
@@ -109,6 +109,12 @@ Shader "CloudTemporalResolve"
             if (coord.x >= size.x || coord.y >= size.y)
                 return;
 
+            CloudTemporalFlags flags = CloudTemporalDecodeFlags(u_CameraPosition.w);
+
+            // Whether THIS texel was marched this frame. Without the checkerboard every pixel is fresh
+            // and everything below reduces to what it always was.
+            bool fresh = !flags.Checkerboard || CloudCheckerboardFresh(coord, flags.Frame);
+
             ivec2 last    = size - ivec2(1, 1);
             vec4  current = texelFetch(u_CloudCurrent, coord, 0);
 
@@ -118,8 +124,14 @@ Shader "CloudTemporalResolve"
             vec4 neighbourhoodMin = current;
             vec4 neighbourhoodMax = current;
             // Summed in the same loop: the mean is what a pixel with no history resolves to, and taking
-            // it here means the nine taps are fetched once and used twice.
-            vec4 neighbourhoodSum = vec4(0.0f, 0.0f, 0.0f, 0.0f);
+            // it here means the nine taps are fetched once and used twice. Under the checkerboard the
+            // mean counts FRESH taps only — a stale tap is a texel the march skipped, marched from last
+            // frame's camera, and averaging it into a fallback for a pixel with no history would smear
+            // exactly the data the missing history could not vouch for. Freshness is judged on the
+            // CLAMPED coordinate, because that is the texel actually fetched; a 3x3 always spans both
+            // parities even in a corner, so the count is never zero.
+            vec4  freshSum   = vec4(0.0f, 0.0f, 0.0f, 0.0f);
+            float freshCount = 0.0f;
             for (int dy = -1; dy <= 1; ++dy)
             {
                 for (int dx = -1; dx <= 1; ++dx)
@@ -128,13 +140,15 @@ Shader "CloudTemporalResolve"
                     vec4  c   = texelFetch(u_CloudCurrent, tap, 0);
                     neighbourhoodMin = min(neighbourhoodMin, c);
                     neighbourhoodMax = max(neighbourhoodMax, c);
-                    neighbourhoodSum = neighbourhoodSum + c;
+                    if (!flags.Checkerboard || CloudCheckerboardFresh(tap, flags.Frame))
+                    {
+                        freshSum   = freshSum + c;
+                        freshCount = freshCount + 1.0f;
+                    }
                 }
             }
 
-            // Nine taps always, because the border ones are CLAMPED into range rather than skipped — the
-            // divisor is a constant and there is no edge case to get wrong.
-            vec4 neighbourhoodMean = neighbourhoodSum * (1.0f / 9.0f);
+            vec4 neighbourhoodMean = freshSum * (1.0f / max(freshCount, 1.0f));
 
             CloudTemporalBox box = CloudNeighbourhoodBox(neighbourhoodMin, neighbourhoodMax,
                                                          u_TemporalClampScale);
@@ -151,14 +165,21 @@ Shader "CloudTemporalResolve"
                                             CloudKmFromWorld(u_LayerThickness), u_PreviousRow0,
                                             u_PreviousRow1, u_PreviousRow3);
 
-            bool historyUsable = u_CameraPosition.w > 0.5f && reprojection.Valid;
+            bool historyUsable = flags.HistoryValid && reprojection.Valid;
 
             // textureLod, not texture(): a compute shader has no derivatives, so an implicit level of
             // detail is undefined there. The image has one mip, and this says so.
             vec4 history = textureLod(u_CloudHistory, reprojection.Uv, 0.0f);
 
+            // A stale pixel blends with weight 0: pure reprojected history, clamped to what the current
+            // neighbourhood can vouch for — its `current` is the texel the march deliberately skipped
+            // and must contribute nothing (CloudTemporalResolve returns the clamped history bit for bit
+            // at weight 0, so a stale inf in that texel cannot reach the output). A stale pixel with no
+            // usable history falls to the fresh-neighbour mean above, same as any disocclusion.
+            float weight = fresh ? u_TemporalBlendFactor : 0.0f;
+
             vec4 resolved = CloudTemporalResolve(current, neighbourhoodMean, history, historyUsable,
-                                                  u_TemporalBlendFactor, box);
+                                                  weight, box);
 
             imageStore(u_CloudResolved, coord, resolved);
         }
