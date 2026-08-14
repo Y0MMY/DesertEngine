@@ -12,6 +12,8 @@
 #include <Engine/Reflection/ReflectionRegistry.hpp>
 #include <Engine/Reflection/ReflectionTypes.hpp>
 
+#include <glm/glm.hpp>
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -78,7 +80,9 @@ namespace
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------
-// SkyAtmosphereData — 23 fields, exactly the ones the specification lists, in its order
+// SkyAtmosphereData — 46 fields: the 24 artistic-gradient fields in their original order, then the 22
+// physical-atmosphere fields (UE parameter names and grouping, Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md
+// section 1.7), appended so the migration counters and the Details order both stay stable
 // ---------------------------------------------------------------------------------------------------
 
 TEST( SkyAtmosphereReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
@@ -108,10 +112,32 @@ TEST( SkyAtmosphereReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "EnvironmentResolution",
          "ActivePreset",
          "PlanetRadius",
+         "Model",
+         "AtmosphereHeight",
+         "MultiScatteringFactor",
+         "GroundAlbedo",
+         "RayleighScatteringScale",
+         "RayleighScattering",
+         "RayleighExponentialDistribution",
+         "MieScatteringScale",
+         "MieScattering",
+         "MieAbsorptionScale",
+         "MieAbsorption",
+         "MieAnisotropy",
+         "MieExponentialDistribution",
+         "OtherAbsorptionScale",
+         "OtherAbsorption",
+         "AbsorptionTipAltitude",
+         "AbsorptionTipValue",
+         "AbsorptionTentWidth",
+         "SkyLuminanceFactor",
+         "SkyAndAerialPerspectiveLuminanceFactor",
+         "AerialPerspectiveViewDistanceScale",
+         "AerialPerspectiveStartDepth",
     };
 
     const TypeInfo& sky = Type( "SkyAtmosphereData" );
-    EXPECT_EQ( sky.Fields.size(), 24u );
+    EXPECT_EQ( sky.Fields.size(), 46u );
     EXPECT_EQ( FieldNames( sky ), expected );
 }
 
@@ -131,15 +157,25 @@ TEST( SkyAtmosphereReflection, CategoriesAndTypesMatchTheSpecification )
 {
     const TypeInfo& sky = Type( "SkyAtmosphereData" );
 
-    EXPECT_EQ( CountInCategory( sky, "Atmosphere" ), 5u ); // enabled, brightness, falloff, preset, radius
-    EXPECT_EQ( CountInCategory( sky, "Sky Color" ), 4u );  // the four palette colours
+    // enabled, brightness, falloff, preset, radius + the Sky Model switch
+    EXPECT_EQ( CountInCategory( sky, "Atmosphere" ), 6u );
+    EXPECT_EQ( CountInCategory( sky, "Sky Color" ), 4u ); // the four palette colours
     EXPECT_EQ( CountInCategory( sky, "Sun" ), 6u );
     EXPECT_EQ( CountInCategory( sky, "Night Sky" ), 1u );
     EXPECT_EQ( CountInCategory( sky, "Time Of Day" ), 5u );
     EXPECT_EQ( CountInCategory( sky, "Environment Lighting" ), 3u );
 
+    // The physical-atmosphere groups, mirroring UE's Details panel grouping.
+    EXPECT_EQ( CountInCategory( sky, "Physical Atmosphere" ), 3u ); // height, multi-scatter, albedo
+    EXPECT_EQ( CountInCategory( sky, "Rayleigh" ), 3u );
+    EXPECT_EQ( CountInCategory( sky, "Mie" ), 6u );
+    EXPECT_EQ( CountInCategory( sky, "Absorption" ), 5u );
+    EXPECT_EQ( CountInCategory( sky, "Art Direction" ), 4u );
+
     for ( const char* name :
-          { "ZenithColor", "HorizonColor", "GroundColor", "NightColor", "SunColor", "SunsetColor" } )
+          { "ZenithColor", "HorizonColor", "GroundColor", "NightColor", "SunColor", "SunsetColor", "GroundAlbedo",
+            "RayleighScattering", "MieScattering", "MieAbsorption", "OtherAbsorption", "SkyLuminanceFactor",
+            "SkyAndAerialPerspectiveLuminanceFactor" } )
     {
         const FieldInfo* f = Find( sky, name );
         ASSERT_NE( f, nullptr ) << name;
@@ -151,6 +187,47 @@ TEST( SkyAtmosphereReflection, CategoriesAndTypesMatchTheSpecification )
     EXPECT_EQ( std::count_if( sky.Fields.begin(), sky.Fields.end(),
                               []( const FieldInfo& f ) { return f.Meta.Advanced; } ),
                3 );
+}
+
+// UE's authored defaults for Earth (SkyAtmosphereComponent.cpp constructor, via the research doc):
+// a UE-calibrated atmosphere must transplant number for number, so the defaults are pinned here rather
+// than trusted to survive refactors. Scale x colour must multiply out to the physical coefficients.
+TEST( SkyAtmosphereReflection, PhysicalDefaultsAreUEsEarth )
+{
+    const TypeInfo& sky = Type( "SkyAtmosphereData" );
+
+    EXPECT_EQ( DefaultOf<uint8_t>( sky, "Model" ), 0u ) << "old scenes must load as ArtisticGradient";
+
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "AtmosphereHeight" ), 60.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "MultiScatteringFactor" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "RayleighExponentialDistribution" ), 8.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "MieExponentialDistribution" ), 1.2f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "MieAnisotropy" ), 0.8f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "AbsorptionTipAltitude" ), 25.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "AbsorptionTentWidth" ), 15.0f );
+
+    // Rayleigh beta = (0.005802, 0.013558, 0.033100) / km — stored as colour x scale, as UE stores it.
+    const float     rayleighScale  = DefaultOf<float>( sky, "RayleighScatteringScale" );
+    const glm::vec3 rayleighColour = DefaultOf<glm::vec3>( sky, "RayleighScattering" );
+    EXPECT_NEAR( rayleighScale * rayleighColour.x, 0.005802f, 1e-5f );
+    EXPECT_NEAR( rayleighScale * rayleighColour.y, 0.013558f, 1e-5f );
+    EXPECT_NEAR( rayleighScale * rayleighColour.z, 0.033100f, 1e-5f );
+
+    EXPECT_NEAR( DefaultOf<float>( sky, "MieScatteringScale" ), 0.003996f, 1e-6f );
+    EXPECT_NEAR( DefaultOf<float>( sky, "MieAbsorptionScale" ), 0.000444f, 1e-6f );
+
+    // Ozone absorption = (0.000650, 0.001881, 0.000085) / km.
+    const float     ozoneScale  = DefaultOf<float>( sky, "OtherAbsorptionScale" );
+    const glm::vec3 ozoneColour = DefaultOf<glm::vec3>( sky, "OtherAbsorption" );
+    EXPECT_NEAR( ozoneScale * ozoneColour.x, 0.000650f, 1e-6f );
+    EXPECT_NEAR( ozoneScale * ozoneColour.y, 0.001881f, 1e-6f );
+    EXPECT_NEAR( ozoneScale * ozoneColour.z, 0.000085f, 1e-6f );
+
+    // The art-direction factors default to "physical": white and one.
+    EXPECT_EQ( DefaultOf<glm::vec3>( sky, "SkyLuminanceFactor" ), glm::vec3( 1.0f ) );
+    EXPECT_EQ( DefaultOf<glm::vec3>( sky, "SkyAndAerialPerspectiveLuminanceFactor" ), glm::vec3( 1.0f ) );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "AerialPerspectiveViewDistanceScale" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( sky, "AerialPerspectiveStartDepth" ), 0.1f );
 }
 
 TEST( SkyAtmosphereReflection, SunAngularDiameterIsDegreesAndMatchesTheRadiusItReplaces )
@@ -208,6 +285,13 @@ TEST( SkyAtmosphereReflection, PresetAndResolutionAreEnumsWithEveryEnumerator )
     ASSERT_NE( res, nullptr );
     EXPECT_EQ( res->Type, FieldType::Enum );
     EXPECT_EQ( res->EnumValues.size(), 3u );
+
+    // The model switch: exactly the two models that exist, gradient first so 0 is the compatible default.
+    const FieldInfo* model = Find( sky, "Model" );
+    ASSERT_NE( model, nullptr );
+    EXPECT_EQ( model->Type, FieldType::Enum );
+    EXPECT_EQ( model->EnumValues.size(), 2u );
+    EXPECT_EQ( model->EnumValues.front().Name, "ArtisticGradient" );
 }
 
 TEST( SkyAtmosphereReflection, TimeOfDayRowsAreGatedByTheirOwnSwitch )

@@ -1,0 +1,346 @@
+// The physical atmosphere's participating medium, phase functions and LUT parameterisations — the ONE
+// source of truth, implemented from Sébastien Hillaire, "A Scalable and Production Ready Sky and
+// Atmosphere Rendering Technique" (EGSR 2020) and its MIT-licensed reference implementation
+// (github.com/sebh/UnrealEngineSkyAtmosphere). Parameter names and defaults follow UE's
+// USkyAtmosphereComponent as a behavioural reference only; no Epic source text appears here.
+//
+// This file is compiled TWICE, from the same text:
+//   * as GLSL, by Programs/Sky/SkyTransmittanceLut.shader and SkyMultiScatterLut.shader;
+//   * as C++, by Desert/Tests/Engine/SkyMedium/SkyMediumReference.hpp, which the SkyMedium tests drive.
+// Sharing the text means a passing test is a statement about the code the GPU runs — the arrangement
+// Common/CloudGeometry.glslh established, and its restricted dialect applies verbatim:
+//   * no swizzles (glm's are proxies), no `out` parameters, no arrays, no `inline`, no namespaces;
+//   * float literals carry the `f` suffix so C++ does not silently widen;
+//   * a struct is returned by value through a NAMED LOCAL whose fields are assigned one at a time;
+//   * functions are defined before use, C-style, because GLSL has no forward declarations.
+//
+// SCALE. All sky maths runs in KILOMETRES with radii measured from the planet CENTRE — at Earth scale
+// (r ~ 6360) r^2 is 4.0e7 with a float ulp of 4, which is workable, where world units (centimetres,
+// r^2 ~ 4.0e17) are not; the full argument is CloudGeometry.glslh's header. Two guards on top of it:
+//   * H = sqrt(top^2 - bottom^2) and rho = sqrt(r^2 - bottom^2) are computed from the FACTORED form
+//     (a-b)*(a+b), so the near-total cancellation of two ~4e7 squares never happens numerically;
+//   * the ray/top-sphere discriminant r^2*(mu^2-1) + top^2 is formed as (top-r)*(top+r) + (r*mu)^2 —
+//     the same expression algebraically, but every term is either small or positive.
+
+#ifndef SKY_MEDIUM_GLSLH
+#define SKY_MEDIUM_GLSLH
+
+const float SKY_PI = 3.141592653589793f;
+
+// One world unit is one centimetre (Common::Units), so a kilometre is 100 000 of them. The planet
+// radius is the ONLY world-unit quantity in the sky payload, and this file is the one place it becomes
+// kilometres — the CloudPayload.hpp rule ("converts to kilometres once, inside the shader").
+const float SKY_WORLD_UNITS_PER_KM = 100000.0f;
+
+// The multi-scattering LUT never evaluates exactly ON the planet surface: at altitude zero the ground
+// intersection distance is 0 and the march degenerates. Ten metres of lift, the reference
+// implementation's own PLANET_RADIUS_OFFSET.
+const float SKY_PLANET_RADIUS_OFFSET_KM = 0.01f;
+
+// ---- The atmosphere, unpacked ----------------------------------------------------------------------
+
+struct SkyAtmParams
+{
+    float BottomRadiusKm; // planet surface, from the planet centre
+    float TopRadiusKm;    // top of the atmosphere shell, from the planet centre
+
+    vec3  RayleighScattering; // /km at sea level
+    float RayleighScaleKm;    // density = exp(-altitude / this)
+
+    vec3  MieScattering; // /km at sea level
+    vec3  MieAbsorption; // /km at sea level
+    float MieScaleKm;    // density = exp(-altitude / this)
+    float MiePhaseG;     // anisotropy of the Mie phase function
+
+    vec3  OzoneAbsorption;    // /km at the tent's peak
+    float OzoneTipAltitudeKm; // altitude of the tent's peak
+    float OzoneTipValue;      // density at the peak
+    float OzoneTentWidthKm;   // one-sided base: density is zero at tip +/- width
+
+    vec3  GroundAlbedo;
+    float MultiScatteringFactor;
+};
+
+// The six vec4s are the medium block of the sky payload, in the order Atmosphere.glslh's
+// UnpackMedium* accessors hand them over; the lane meanings are the layout comment there. The clamps
+// are divide-by-zero guards, not authoring limits — the component's Range() already bounds authoring.
+SkyAtmParams SkyMakeAtmParams(vec4 rayleigh, vec4 mie, vec4 mieAbsorption, vec4 ozone, vec4 ground,
+                              vec4 tentPlanet)
+{
+    SkyAtmParams p;
+    p.BottomRadiusKm = tentPlanet.w / SKY_WORLD_UNITS_PER_KM;
+    p.TopRadiusKm    = p.BottomRadiusKm + max(ozone.w, 0.1f);
+
+    p.RayleighScattering = vec3(rayleigh.x, rayleigh.y, rayleigh.z);
+    p.RayleighScaleKm    = max(rayleigh.w, 0.001f);
+
+    p.MieScattering = vec3(mie.x, mie.y, mie.z);
+    p.MieAbsorption = vec3(mieAbsorption.x, mieAbsorption.y, mieAbsorption.z);
+    p.MieScaleKm    = max(mie.w, 0.001f);
+    p.MiePhaseG     = clamp(mieAbsorption.w, 0.0f, 0.999f);
+
+    p.OzoneAbsorption    = vec3(ozone.x, ozone.y, ozone.z);
+    p.OzoneTipAltitudeKm = tentPlanet.x;
+    p.OzoneTipValue      = tentPlanet.y;
+    p.OzoneTentWidthKm   = max(tentPlanet.z, 0.001f);
+
+    p.GroundAlbedo          = vec3(ground.x, ground.y, ground.z);
+    p.MultiScatteringFactor = ground.w;
+    return p;
+}
+
+// ---- Densities and the medium sample ---------------------------------------------------------------
+
+float SkyDensityRayleigh(SkyAtmParams p, float altitudeKm)
+{
+    return exp(-altitudeKm / p.RayleighScaleKm);
+}
+
+float SkyDensityMie(SkyAtmParams p, float altitudeKm)
+{
+    return exp(-altitudeKm / p.MieScaleKm);
+}
+
+// The ozone tent: peak OzoneTipValue at the tip altitude, falling linearly to zero one tent-width above
+// and below it — UE's two clamped linear segments (tip 25 km, width 15 km on Earth) written as the one
+// expression they are.
+float SkyDensityOzone(SkyAtmParams p, float altitudeKm)
+{
+    return p.OzoneTipValue *
+           clamp(1.0f - abs(altitudeKm - p.OzoneTipAltitudeKm) / p.OzoneTentWidthKm, 0.0f, 1.0f);
+}
+
+struct SkyMediumSample
+{
+    vec3 Scattering; // what redirects light toward the eye: Rayleigh + Mie scattering
+    vec3 Extinction; // what removes light from the ray: all scattering plus all absorption
+};
+
+SkyMediumSample SkySampleMedium(SkyAtmParams p, float altitudeKm)
+{
+    float dRayleigh = SkyDensityRayleigh(p, altitudeKm);
+    float dMie      = SkyDensityMie(p, altitudeKm);
+    float dOzone    = SkyDensityOzone(p, altitudeKm);
+
+    SkyMediumSample m;
+    m.Scattering = p.RayleighScattering * dRayleigh + p.MieScattering * dMie;
+    m.Extinction = m.Scattering + p.MieAbsorption * dMie + p.OzoneAbsorption * dOzone;
+    return m;
+}
+
+// ---- Phase functions -------------------------------------------------------------------------------
+// Convention: cosTheta is the cosine of the angle between the LIGHT'S travel direction and the
+// scattered direction, so cosTheta = +1 is forward scattering and g > 0 peaks there. Each integrates
+// to 1 over the sphere — the property the tests pin, because a spurious 4pi here is invisible in a
+// picture that is merely "too bright".
+
+float SkyPhaseUniform()
+{
+    return 1.0f / (4.0f * SKY_PI);
+}
+
+float SkyPhaseRayleigh(float cosTheta)
+{
+    return 3.0f / (16.0f * SKY_PI) * (1.0f + cosTheta * cosTheta);
+}
+
+float SkyPhaseHenyeyGreenstein(float g, float cosTheta)
+{
+    float g2    = g * g;
+    float denom = 1.0f + g2 - 2.0f * g * cosTheta;
+    return (1.0f - g2) / (4.0f * SKY_PI * denom * sqrt(max(denom, 1e-7f)));
+}
+
+// Cornette-Shanks: the Mie phase the paper uses — HG's lobe with Rayleigh's (1 + cos^2) modulation,
+// which better matches measured aerosol scattering near 90 degrees.
+float SkyPhaseCornetteShanks(float g, float cosTheta)
+{
+    float g2    = g * g;
+    float k     = 3.0f / (8.0f * SKY_PI) * (1.0f - g2) / (2.0f + g2);
+    float denom = 1.0f + g2 - 2.0f * g * cosTheta;
+    return k * (1.0f + cosTheta * cosTheta) / (denom * sqrt(max(denom, 1e-7f)));
+}
+
+// ---- Ray vs the two concentric spheres -------------------------------------------------------------
+// Planet-centred scalar geometry: a point is (r, mu) — distance from the planet centre and the cosine
+// of the angle between the ray and the local zenith. That pair is all the spherically symmetric
+// atmosphere ever needs, which is exactly why the transmittance LUT can be two-dimensional.
+
+// Distance to the TOP sphere. Defined for every r inside the shell and every mu — a ray from inside a
+// sphere always exits it. See the header for why the discriminant is written factored.
+float SkyDistanceToTop(float r, float mu, float topRadiusKm)
+{
+    float disc = (topRadiusKm - r) * (topRadiusKm + r) + (r * mu) * (r * mu);
+    return max(0.0f, -r * mu + sqrt(max(disc, 0.0f)));
+}
+
+// Distance to the BOTTOM sphere (the planet), negative when the ray never hits it forward. The near
+// root is the one that matters: the far root is the far side of the planet.
+float SkyDistanceToBottom(float r, float mu, float bottomRadiusKm)
+{
+    float disc = (bottomRadiusKm - r) * (bottomRadiusKm + r) + (r * mu) * (r * mu);
+    if (disc < 0.0f)
+        return -1.0f;
+    float d = -r * mu - sqrt(disc);
+    return d >= 0.0f ? d : -1.0f;
+}
+
+bool SkyIntersectsGround(float r, float mu, float bottomRadiusKm)
+{
+    return SkyDistanceToBottom(r, mu, bottomRadiusKm) >= 0.0f;
+}
+
+// Radius at parameter t along a ray from radius r with zenith cosine mu — the law of cosines. t^2 and
+// 2*r*t*mu are ~1e4 against r^2 ~ 4e7: within float's grasp, per the header.
+float SkyRadiusAlongRay(float r, float mu, float t)
+{
+    return sqrt(max(r * r + t * t + 2.0f * r * t * mu, 0.0f));
+}
+
+// ---- The transmittance LUT parameterisation --------------------------------------------------------
+// Bruneton's mapping, as the paper adopts it: uv.y spends its precision near the ground (where the
+// camera lives) through rho/H, and uv.x is the normalised distance-to-top, which stretches resolution
+// around the horizon where transmittance changes fastest. The two functions below are EXACT inverses
+// of each other over the whole (r, mu) domain — the property the tests round-trip, because a mismatch
+// between write-side and read-side mapping is a sky that is subtly wrong everywhere and provably
+// wrong nowhere.
+
+struct SkyTransmittanceLutCoord
+{
+    float ViewHeightKm;  // r: distance from the planet centre, in [bottom, top]
+    float ViewZenithCos; // mu: cosine of the view angle against the local zenith
+};
+
+vec2 SkyTransmittanceLutUvFromParams(float bottomRadiusKm, float topRadiusKm, float viewHeightKm,
+                                     float viewZenithCos)
+{
+    float H   = sqrt(max((topRadiusKm - bottomRadiusKm) * (topRadiusKm + bottomRadiusKm), 1e-6f));
+    float rho = sqrt(max((viewHeightKm - bottomRadiusKm) * (viewHeightKm + bottomRadiusKm), 0.0f));
+
+    float d    = SkyDistanceToTop(viewHeightKm, viewZenithCos, topRadiusKm);
+    float dMin = topRadiusKm - viewHeightKm;
+    float dMax = rho + H;
+
+    vec2 uv;
+    uv.x = clamp((d - dMin) / max(dMax - dMin, 1e-6f), 0.0f, 1.0f);
+    uv.y = clamp(rho / H, 0.0f, 1.0f);
+    return uv;
+}
+
+SkyTransmittanceLutCoord SkyTransmittanceLutParamsFromUv(float bottomRadiusKm, float topRadiusKm, vec2 uv)
+{
+    float H   = sqrt(max((topRadiusKm - bottomRadiusKm) * (topRadiusKm + bottomRadiusKm), 1e-6f));
+    float rho = H * clamp(uv.y, 0.0f, 1.0f);
+
+    float viewHeight = sqrt(rho * rho + bottomRadiusKm * bottomRadiusKm);
+
+    float dMin = topRadiusKm - viewHeight;
+    float dMax = rho + H;
+    float d    = dMin + clamp(uv.x, 0.0f, 1.0f) * (dMax - dMin);
+
+    SkyTransmittanceLutCoord c;
+    c.ViewHeightKm = viewHeight;
+    // From the law of cosines at the exit point: d^2 = H^2 - rho^2 + ... solved for mu. d == 0 only at
+    // uv = (0, 1)'s degenerate corner (standing at the top looking straight up), where mu is 1.
+    c.ViewZenithCos =
+         d <= 0.0f ? 1.0f
+                   : clamp((H * H - rho * rho - d * d) / (2.0f * viewHeight * d), -1.0f, 1.0f);
+    return c;
+}
+
+// ---- The multi-scattering LUT parameterisation -----------------------------------------------------
+// Simpler than the transmittance mapping on purpose: 32x32 is too coarse for horizon warping to pay,
+// so x is the sun zenith cosine linearly and y is the altitude linearly (lifted off the exact surface,
+// see SKY_PLANET_RADIUS_OFFSET_KM). Also an exact inverse pair.
+
+struct SkyMultiScatterLutCoord
+{
+    float ViewHeightKm; // r
+    float SunZenithCos; // cosine of the sun's angle against the local zenith
+};
+
+SkyMultiScatterLutCoord SkyMultiScatterParamsFromUnit(float bottomRadiusKm, float topRadiusKm, float unitX,
+                                                      float unitY)
+{
+    SkyMultiScatterLutCoord c;
+    c.SunZenithCos = clamp(unitX * 2.0f - 1.0f, -1.0f, 1.0f);
+    c.ViewHeightKm = bottomRadiusKm + SKY_PLANET_RADIUS_OFFSET_KM +
+                     clamp(unitY, 0.0f, 1.0f) *
+                          (topRadiusKm - bottomRadiusKm - SKY_PLANET_RADIUS_OFFSET_KM);
+    return c;
+}
+
+vec2 SkyMultiScatterUnitFromParams(float bottomRadiusKm, float topRadiusKm, float viewHeightKm,
+                                   float sunZenithCos)
+{
+    vec2 unit;
+    unit.x = clamp(sunZenithCos * 0.5f + 0.5f, 0.0f, 1.0f);
+    unit.y = clamp((viewHeightKm - bottomRadiusKm - SKY_PLANET_RADIUS_OFFSET_KM) /
+                        max(topRadiusKm - bottomRadiusKm - SKY_PLANET_RADIUS_OFFSET_KM, 1e-6f),
+                   0.0f, 1.0f);
+    return unit;
+}
+
+// The texel-centre remap for LUTs whose edge texels must land exactly on the ends of the value domain:
+// unit value 0 reads/writes the CENTRE of texel 0, value 1 the centre of the last texel. Exact inverse
+// pair; a linear sampler then interpolates between value samples instead of clamping half a texel of
+// the domain away.
+float SkyUnitToTexelUv(float unitValue, float resolution)
+{
+    return (unitValue * (resolution - 1.0f) + 0.5f) / resolution;
+}
+
+float SkyTexelUvToUnit(float uv, float resolution)
+{
+    return (uv * resolution - 0.5f) / (resolution - 1.0f);
+}
+
+// ---- The transmittance integrator ------------------------------------------------------------------
+// Optical depth from (r, mu) to the top of the atmosphere, midpoint rule over sampleCount uniform
+// steps. This is the whole transmittance LUT: its shader is one call to exp(-this). Lives here so the
+// C++ tests march the exact text the GPU marches and compare it against a brute-force reference and
+// the closed form the exponential profiles admit.
+
+vec3 SkyOpticalDepthToTop(SkyAtmParams p, float viewHeightKm, float viewZenithCos, int sampleCount)
+{
+    float tMax = SkyDistanceToTop(viewHeightKm, viewZenithCos, p.TopRadiusKm);
+    float dt   = tMax / float(sampleCount);
+
+    vec3 opticalDepth = vec3(0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        float t        = (float(i) + 0.5f) * dt;
+        float radius   = SkyRadiusAlongRay(viewHeightKm, viewZenithCos, t);
+        float altitude = radius - p.BottomRadiusKm;
+
+        SkyMediumSample m = SkySampleMedium(p, altitude);
+        opticalDepth += m.Extinction * dt;
+    }
+    return opticalDepth;
+}
+
+vec3 SkyTransmittanceToTop(SkyAtmParams p, float viewHeightKm, float viewZenithCos, int sampleCount)
+{
+    vec3 od = SkyOpticalDepthToTop(p, viewHeightKm, viewZenithCos, sampleCount);
+    return exp(-od);
+}
+
+// ---- Uniform sphere sampling -----------------------------------------------------------------------
+// Direction (i + 0.5)/n x (j + 0.5)/n on the unit sphere, area-uniform: the azimuth is linear in u and
+// the zenith COSINE is linear in v, which is what makes equal (u, v) cells equal solid angles. The 64
+// directions of the multi-scattering LUT are the 8x8 grid of these.
+
+vec3 SkyUniformSphereDirection(float u, float v)
+{
+    float azimuth   = 2.0f * SKY_PI * u;
+    float cosZenith = clamp(1.0f - 2.0f * v, -1.0f, 1.0f);
+    float sinZenith = sqrt(max(1.0f - cosZenith * cosZenith, 0.0f));
+
+    vec3 dir;
+    dir.x = cos(azimuth) * sinZenith;
+    dir.y = cosZenith;
+    dir.z = sin(azimuth) * sinZenith;
+    return dir;
+}
+
+#endif // SKY_MEDIUM_GLSLH

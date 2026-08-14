@@ -43,6 +43,19 @@ struct SkyConfig
 //   v[5]  rgb = ground colour,  w = star intensity
 //   v[6]  rgb = night colour,   w = sun angular RADIUS in RADIANS
 //
+// The physical-atmosphere medium (SkyModel::PhysicalAtmosphere), appended and never inserted —
+// every offset above is a promise to every shader that reads the block. Coefficients are PER
+// KILOMETRE, scale heights and altitudes in kilometres; the planet radius alone is WORLD UNITS and
+// is converted to km inside SkyMedium.glslh (the one conversion):
+//
+//   v[7]  rgb = Rayleigh scattering /km, w = Rayleigh scale height (km)
+//   v[8]  rgb = Mie scattering /km,      w = Mie scale height (km)
+//   v[9]  rgb = Mie absorption /km,      w = Mie anisotropy g
+//   v[10] rgb = ozone absorption /km,    w = atmosphere height (km)
+//   v[11] rgb = ground albedo,           w = multi-scattering factor
+//   v[12] x = ozone tip altitude (km), y = ozone tip value, z = ozone tent width (km),
+//         w = planet radius (WORLD UNITS)
+//
 // A pass declares its own buffer at its own binding, copies it into a SkyPacked, and calls the loaders:
 //
 //   ReadBuffer(1) SkyBuffer { vec4 u_SkyPacked[SKY_PACKED_VEC4_COUNT]; };
@@ -51,7 +64,7 @@ struct SkyConfig
 //                             UnpackSunAngularRadius(s), UnpackSkyConfig(s) );
 //
 // Adding a palette field is then one edit here plus one to the C++ mirror; no consumer changes a line.
-#define SKY_PACKED_VEC4_COUNT 7
+#define SKY_PACKED_VEC4_COUNT 13
 
 struct SkyPacked
 {
@@ -93,6 +106,41 @@ float UnpackSunIntensity( SkyPacked s )
 float UnpackSunAngularRadius( SkyPacked s )
 {
     return s.v[6].w;
+}
+
+// ---- The physical-atmosphere medium block, one accessor per vec4 -----------------------------------
+// The INDICES live here, next to the layout comment they implement; the MEANING of each lane is
+// SkyMedium.glslh's SkyMakeAtmParams, which takes these six in this order. A LUT pass therefore never
+// spells an index, and reordering the block is one edit here plus one to the C++ mirror.
+
+vec4 UnpackMediumRayleigh( SkyPacked s )
+{
+    return s.v[7];
+}
+
+vec4 UnpackMediumMie( SkyPacked s )
+{
+    return s.v[8];
+}
+
+vec4 UnpackMediumMieAbsorption( SkyPacked s )
+{
+    return s.v[9];
+}
+
+vec4 UnpackMediumOzone( SkyPacked s )
+{
+    return s.v[10];
+}
+
+vec4 UnpackMediumGround( SkyPacked s )
+{
+    return s.v[11];
+}
+
+vec4 UnpackMediumTentPlanet( SkyPacked s )
+{
+    return s.v[12];
 }
 
 float atm_hash13( vec3 p )

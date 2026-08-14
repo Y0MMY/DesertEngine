@@ -3,12 +3,35 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 #include <Common/Core/Logger.hpp>
+#include <Common/Core/Profiler.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 namespace Desert::Graphic::System
 {
+    namespace
+    {
+        // LUT extents from the paper (and UE's defaults): transmittance 256x64, multi-scattering 32x32.
+        // Not authorable — the sizes are part of the parameterisation the shaders and the SkyMedium
+        // tests share, and 136 KiB total leaves nothing worth a quality dial.
+        constexpr uint32_t kTransmittanceLutWidth  = 256;
+        constexpr uint32_t kTransmittanceLutHeight = 64;
+        constexpr uint32_t kMultiScatterLutSize    = 32;
+
+        constexpr uint32_t kLutWorkGroupSize = 8; // LocalSize(8, 8, 1) in both LUT shaders
+
+        constexpr uint32_t LutGroupCount( uint32_t extent )
+        {
+            return ( extent + kLutWorkGroupSize - 1 ) / kLutWorkGroupSize;
+        }
+
+        double LutBytesToMiB( uint64_t bytes )
+        {
+            return static_cast<double>( bytes ) / ( 1024.0 * 1024.0 );
+        }
+    } // namespace
+
     Common::BoolResultStr SkyboxRenderer::Initialize()
     {
         const auto& compositeFramebuffer = m_TargetFramebuffer.lock();
@@ -62,9 +85,165 @@ namespace Desert::Graphic::System
             // mesh preview, a thumbnail, another scene view) from overwriting this one's sky.
             m_SkyParams = ShaderResources::StorageBuffer::Create( "SkyBuffer", kSkyPayloadBytes,
                                                                   kSkyPayloadBinding, /*persistent=*/false );
+
+            // The physical atmosphere's LUT pipelines. Built up front (they are two small compute
+            // pipelines, the same price the clouds pay for five); the IMAGES stay lazy, so a scene on
+            // the artistic gradient allocates nothing.
+            const auto makeCompute = [shaderService = Runtime::ResourceRegistry::GetShaderService()](
+                                          const char* name ) -> std::shared_ptr<ComputePipeline>
+            {
+                const auto shader = shaderService->GetByName( name );
+                if ( !shader )
+                {
+                    LOG_ERROR( "[SkyAtmosphere] Compute shader '{}' is not registered — expected "
+                               "Editor/Resources/Shaders/Programs/Sky/{}.shader. The physical "
+                               "atmosphere's LUTs will not be built for this view.",
+                               name, name );
+                    return nullptr;
+                }
+                auto pipeline = ComputePipeline::Create( { .Shader = shader, .DebugName = name } );
+                if ( !pipeline )
+                    return nullptr;
+                // Create() allocates the object, Invalidate() builds the Vulkan pipeline — the same
+                // two-line idiom as every other compute call site in the engine.
+                pipeline->Invalidate();
+                return pipeline;
+            };
+
+            m_TransmittanceLutPipeline = makeCompute( "SkyTransmittanceLut" );
+            m_MultiScatterLutPipeline  = makeCompute( "SkyMultiScatterLut" );
         }
 
         return BOOLSUCCESS;
+    }
+
+    SkyboxRenderer::AtmosphereLutFingerprint SkyboxRenderer::LutFingerprintOf( const SkySettings& sky )
+    {
+        return AtmosphereLutFingerprint{ .RayleighScattering        = sky.RayleighScattering,
+                                         .RayleighExpDistributionKm = sky.RayleighExpDistributionKm,
+                                         .MieScattering             = sky.MieScattering,
+                                         .MieAbsorption             = sky.MieAbsorption,
+                                         .MieExpDistributionKm      = sky.MieExpDistributionKm,
+                                         .OzoneAbsorption           = sky.OzoneAbsorption,
+                                         .OzoneTipAltitudeKm        = sky.OzoneTipAltitudeKm,
+                                         .OzoneTipValue             = sky.OzoneTipValue,
+                                         .OzoneTentWidthKm          = sky.OzoneTentWidthKm,
+                                         .GroundAlbedo              = sky.GroundAlbedo,
+                                         .AtmosphereHeightKm        = sky.AtmosphereHeightKm,
+                                         .MultiScatteringFactor     = sky.MultiScatteringFactor,
+                                         .PlanetRadius              = sky.PlanetRadius };
+    }
+
+    bool SkyboxRenderer::EnsureAtmosphereLutResources()
+    {
+        if ( m_LutResourcesFailed )
+            return false;
+        if ( m_TransmittanceLut && m_MultiScatterLut )
+            return true;
+
+        const Core::Formats::Image2DSpecification transmittanceSpec{
+             .Tag        = "SkyTransmittanceLut",
+             .Width      = kTransmittanceLutWidth,
+             .Height     = kTransmittanceLutHeight,
+             .Format     = Core::Formats::ImageFormat::RGBA16F,
+             .Mips       = 1u,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+        m_TransmittanceLut = Image2D::Create( transmittanceSpec, nullptr );
+
+        const Core::Formats::Image2DSpecification multiScatterSpec{
+             .Tag        = "SkyMultiScatterLut",
+             .Width      = kMultiScatterLutSize,
+             .Height     = kMultiScatterLutSize,
+             .Format     = Core::Formats::ImageFormat::RGBA16F,
+             .Mips       = 1u,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+        m_MultiScatterLut = Image2D::Create( multiScatterSpec, nullptr );
+
+        if ( !m_TransmittanceLut || !m_MultiScatterLut )
+        {
+            LOG_ERROR( "[SkyAtmosphere] The atmosphere LUTs could not be created (transmittance "
+                       "{}x{}: {}, multi-scattering {}x{}: {}); the physical atmosphere will not be "
+                       "built for this view.",
+                       kTransmittanceLutWidth, kTransmittanceLutHeight, m_TransmittanceLut ? "ok" : "FAILED",
+                       kMultiScatterLutSize, kMultiScatterLutSize, m_MultiScatterLut ? "ok" : "FAILED" );
+            m_TransmittanceLut.reset();
+            m_MultiScatterLut.reset();
+            m_LutResourcesFailed = true;
+            return false;
+        }
+
+        LOG_INFO(
+             "[SkyAtmosphere] Transmittance LUT {}x{} + multi-scattering LUT {}x{} RGBA16F "
+             "({:.2f} MiB) allocated for the physical atmosphere.",
+             kTransmittanceLutWidth, kTransmittanceLutHeight, kMultiScatterLutSize, kMultiScatterLutSize,
+             LutBytesToMiB( Core::Formats::CalculateImageSize( kTransmittanceLutWidth, kTransmittanceLutHeight,
+                                                               Core::Formats::ImageFormat::RGBA16F ) +
+                            Core::Formats::CalculateImageSize( kMultiScatterLutSize, kMultiScatterLutSize,
+                                                               Core::Formats::ImageFormat::RGBA16F ) ) );
+        return true;
+    }
+
+    void SkyboxRenderer::DispatchTransmittanceLut()
+    {
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.ComputeImageBeginWrite( m_TransmittanceLut.get() );
+        m_TransmittanceLutPipeline->SetOutput( kSkyTransmittanceLutOutputBinding, m_TransmittanceLut.get(), 0 );
+        m_TransmittanceLutPipeline->SetStorageBuffer( kSkyPayloadBinding, m_SkyParams.get() );
+        renderer.DispatchComputeInFrame( m_TransmittanceLutPipeline.get(), LutGroupCount( kTransmittanceLutWidth ),
+                                         LutGroupCount( kTransmittanceLutHeight ), 1 );
+        renderer.ComputeImageEndWrite( m_TransmittanceLut.get() );
+    }
+
+    void SkyboxRenderer::DispatchMultiScatterLut()
+    {
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.ComputeImageBeginWrite( m_MultiScatterLut.get() );
+        m_MultiScatterLutPipeline->SetOutput( kSkyMultiScatterLutOutputBinding, m_MultiScatterLut.get(), 0 );
+        m_MultiScatterLutPipeline->SetStorageBuffer( kSkyPayloadBinding, m_SkyParams.get() );
+        // Written by DispatchTransmittanceLut a moment ago; EndWrite left it sampleable, exactly as the
+        // cloud weather map is sampleable by the raymarch that follows it.
+        m_MultiScatterLutPipeline->SetInput( kSkyTransmittanceLutBinding, m_TransmittanceLut.get() );
+        renderer.DispatchComputeInFrame( m_MultiScatterLutPipeline.get(), LutGroupCount( kMultiScatterLutSize ),
+                                         LutGroupCount( kMultiScatterLutSize ), 1 );
+        renderer.ComputeImageEndWrite( m_MultiScatterLut.get() );
+    }
+
+    void SkyboxRenderer::ExecuteAtmosphereLuts()
+    {
+        // The gradient model never reaches past this line: no allocation, no dispatch, no fingerprint —
+        // an existing scene pays literally nothing for the physical atmosphere's machinery.
+        if ( !m_UseProceduralSky || m_Sky.Model != ECS::SkyModel::PhysicalAtmosphere )
+            return;
+
+        // A missing shader was already reported by Initialize with the path it expected.
+        if ( !m_TransmittanceLutPipeline || !m_MultiScatterLutPipeline || !m_SkyParams )
+            return;
+
+        if ( !EnsureAtmosphereLutResources() )
+            return;
+
+        const AtmosphereLutFingerprint wanted = LutFingerprintOf( m_Sky );
+        if ( m_LutsValid && wanted == m_LutBaked )
+            return;
+
+        DESERT_PROFILE_SCOPE( "Sky: AtmosphereLuts" );
+
+        // Transmittance strictly first: the multi-scattering march samples it per step.
+        DispatchTransmittanceLut();
+        DispatchMultiScatterLut();
+
+        m_LutBaked  = wanted;
+        m_LutsValid = true;
+
+        LOG_INFO( "[SkyAtmosphere] Atmosphere LUTs dispatched (transmittance {}x{}, multi-scattering "
+                  "{}x{}) — the atmosphere parameter fingerprint changed.",
+                  kTransmittanceLutWidth, kTransmittanceLutHeight, kMultiScatterLutSize, kMultiScatterLutSize );
     }
 
     void SkyboxRenderer::PrepareCamera( Core::Camera* camera )

@@ -20,7 +20,11 @@ namespace Desert::Graphic
     //
     // std430 vs std140 does not matter for this block: it is an array of vec4, and both layouts agree on a
     // 16-byte stride for that.
-    inline constexpr uint32_t kSkyPackedVec4Count = 7;
+    //
+    // The block GREW from 7 to 13 vec4s when the physical-atmosphere medium landed (vec4s 7-12, read by
+    // the transmittance / multi-scattering LUT passes). Extension is APPEND-ONLY: every existing offset is
+    // a promise to every shader that reads the block.
+    inline constexpr uint32_t kSkyPackedVec4Count = 13;
 
     struct SkyGpuPayload
     {
@@ -31,6 +35,18 @@ namespace Desert::Graphic
         glm::vec4 Sunset;       // 64  rgb = sunset colour,  w = sunset intensity
         glm::vec4 Ground;       // 80  rgb = ground colour,  w = star intensity
         glm::vec4 Night;        // 96  rgb = night colour,   w = sun angular RADIUS in RADIANS
+
+        // ---- Physical atmosphere medium (SkyModel::PhysicalAtmosphere). Coefficients are PER
+        // KILOMETRE (the authored unit), altitudes and scale heights in kilometres; the one world-unit
+        // quantity (the planet radius) is converted to km once, inside the shader — the same rule the
+        // cloud payload states at CloudPayload.hpp. ----
+        glm::vec4 MediumRayleigh;      // 112  rgb = Rayleigh scattering /km, w = Rayleigh scale height (km)
+        glm::vec4 MediumMie;           // 128  rgb = Mie scattering /km,      w = Mie scale height (km)
+        glm::vec4 MediumMieAbsorption; // 144  rgb = Mie absorption /km,      w = Mie anisotropy g
+        glm::vec4 MediumOzone;         // 160  rgb = ozone absorption /km,    w = atmosphere height (km)
+        glm::vec4 MediumGround;        // 176  rgb = ground albedo,           w = multi-scattering factor
+        glm::vec4 MediumTentPlanet;    // 192  x = ozone tip altitude (km), y = ozone tip value,
+                                       //      z = ozone tent width (km),  w = planet radius (WORLD UNITS)
     };
 
     static_assert( sizeof( SkyGpuPayload ) == kSkyPackedVec4Count * sizeof( glm::vec4 ),
@@ -42,6 +58,12 @@ namespace Desert::Graphic
     static_assert( offsetof( SkyGpuPayload, Sunset ) == 64 );
     static_assert( offsetof( SkyGpuPayload, Ground ) == 80 );
     static_assert( offsetof( SkyGpuPayload, Night ) == 96 );
+    static_assert( offsetof( SkyGpuPayload, MediumRayleigh ) == 112 );
+    static_assert( offsetof( SkyGpuPayload, MediumMie ) == 128 );
+    static_assert( offsetof( SkyGpuPayload, MediumMieAbsorption ) == 144 );
+    static_assert( offsetof( SkyGpuPayload, MediumOzone ) == 160 );
+    static_assert( offsetof( SkyGpuPayload, MediumGround ) == 176 );
+    static_assert( offsetof( SkyGpuPayload, MediumTentPlanet ) == 192 );
 
     // Size the buffer is created with, and the size every writer must hand to SetData.
     inline constexpr uint32_t kSkyPayloadBytes =
@@ -57,6 +79,12 @@ namespace Desert::Graphic
     // is created with this number, both shaders declare this number, and the compute dispatch passes it.
     inline constexpr uint32_t kSkyPayloadBinding = 1;
 
+    // The bindings the atmosphere-LUT compute passes agree on with their shaders — same explicit-argument
+    // trap as kSkyPayloadBinding, same cure: one constant, both sides.
+    inline constexpr uint32_t kSkyTransmittanceLutOutputBinding = 0; // SkyTransmittanceLut: the image it fills
+    inline constexpr uint32_t kSkyMultiScatterLutOutputBinding  = 0; // SkyMultiScatterLut: the image it fills
+    inline constexpr uint32_t kSkyTransmittanceLutBinding       = 2; // SkyMultiScatterLut: transmittance input
+
     // @p towardSun must be normalized — the single normalization lives in ECS::Rules::AtmosphereSunDirection.
     inline SkyGpuPayload PackSky( const glm::vec3& towardSun, const SkySettings& sky )
     {
@@ -68,6 +96,14 @@ namespace Desert::Graphic
         payload.Sunset       = glm::vec4( sky.SunsetColor, sky.SunsetIntensity );
         payload.Ground       = glm::vec4( sky.GroundColor, sky.StarIntensity );
         payload.Night        = glm::vec4( sky.NightColor, sky.SunAngularRadius );
+
+        payload.MediumRayleigh      = glm::vec4( sky.RayleighScattering, sky.RayleighExpDistributionKm );
+        payload.MediumMie           = glm::vec4( sky.MieScattering, sky.MieExpDistributionKm );
+        payload.MediumMieAbsorption = glm::vec4( sky.MieAbsorption, sky.MieAnisotropy );
+        payload.MediumOzone         = glm::vec4( sky.OzoneAbsorption, sky.AtmosphereHeightKm );
+        payload.MediumGround        = glm::vec4( sky.GroundAlbedo, sky.MultiScatteringFactor );
+        payload.MediumTentPlanet =
+             glm::vec4( sky.OzoneTipAltitudeKm, sky.OzoneTipValue, sky.OzoneTentWidthKm, sky.PlanetRadius );
         return payload;
     }
 } // namespace Desert::Graphic

@@ -311,8 +311,9 @@ TEST( SkyPayloadLayout, EveryAuthoredValueLandsWhereTheShaderReadsIt )
     // The shader reads this block through Common/Atmosphere.glslh's unpack helpers, so the assertions
     // below ARE the shader's view of it: v[0].w is the sun intensity, v[6].w is the angular radius, and
     // so on. A member inserted in the middle fails here instead of corrupting the frame.
+    // 13 lanes since the physical-atmosphere medium block (v[7]-v[12]) was APPENDED for the LUT passes.
     EXPECT_EQ( sizeof( SkyGpuPayload ), kSkyPackedVec4Count * sizeof( glm::vec4 ) );
-    EXPECT_EQ( kSkyPayloadBytes, 7u * 16u );
+    EXPECT_EQ( kSkyPayloadBytes, 13u * 16u );
 
     SkyAtmosphereData data;
     data.ZenithColor        = { 0.1f, 0.2f, 0.3f };
@@ -349,6 +350,25 @@ TEST( SkyPayloadLayout, EveryAuthoredValueLandsWhereTheShaderReadsIt )
     EXPECT_FLOAT_EQ( lanes[5].w, 3.25f );
     EXPECT_EQ( glm::vec3( lanes[6] ), data.NightColor );
     EXPECT_NEAR( lanes[6].w, glm::radians( 4.0f ) * 0.5f, 1e-7f ) << "RADIANS, and a radius";
+
+    // The medium block, exactly where SkyMedium.glslh's SkyMakeAtmParams expects each lane. The
+    // coefficients arrive as MakeSkySettings' scale x colour PRODUCTS (per kilometre), and the planet
+    // radius arrives in WORLD UNITS — the km conversion belongs to the shader, and only to it.
+    EXPECT_EQ( glm::vec3( lanes[7] ),
+               data.RayleighScatteringScale * data.RayleighScattering ); // 0.0331 x colour, /km
+    EXPECT_FLOAT_EQ( lanes[7].w, data.RayleighExponentialDistribution );
+    EXPECT_EQ( glm::vec3( lanes[8] ), data.MieScatteringScale * data.MieScattering );
+    EXPECT_FLOAT_EQ( lanes[8].w, data.MieExponentialDistribution );
+    EXPECT_EQ( glm::vec3( lanes[9] ), data.MieAbsorptionScale * data.MieAbsorption );
+    EXPECT_FLOAT_EQ( lanes[9].w, data.MieAnisotropy );
+    EXPECT_EQ( glm::vec3( lanes[10] ), data.OtherAbsorptionScale * data.OtherAbsorption );
+    EXPECT_FLOAT_EQ( lanes[10].w, data.AtmosphereHeight );
+    EXPECT_EQ( glm::vec3( lanes[11] ), data.GroundAlbedo );
+    EXPECT_FLOAT_EQ( lanes[11].w, data.MultiScatteringFactor );
+    EXPECT_FLOAT_EQ( lanes[12].x, data.AbsorptionTipAltitude );
+    EXPECT_FLOAT_EQ( lanes[12].y, data.AbsorptionTipValue );
+    EXPECT_FLOAT_EQ( lanes[12].z, data.AbsorptionTentWidth );
+    EXPECT_FLOAT_EQ( lanes[12].w, PlanetRadiusToWorldUnits( data.PlanetRadius ) );
 }
 
 // ---------------------------------------------------------------------------------------------------

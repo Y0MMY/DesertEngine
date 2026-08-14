@@ -561,6 +561,16 @@ namespace Desert::Graphic
             meshRenderer->RenderGlassManual( sceneCopy );
         }
 
+        // The physical atmosphere's cached LUTs (transmittance + multi-scattering). Same in-frame
+        // compute slot as the clouds below — outside any open render pass — and BEFORE them, because the
+        // cloud march is a future consumer of the multi-scattering LUT. Almost every frame this is a
+        // fingerprint compare and an immediate return; the dispatches happen only when an atmosphere
+        // parameter was edited, and never at all for SkyModel::ArtisticGradient.
+        {
+            DESERT_PROFILE_SCOPE( "SkyAtmosphereLuts" );
+            UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->ExecuteAtmosphereLuts();
+        }
+
         // Volumetric clouds: the weather-map and raymarch dispatches. HERE and not earlier — the march
         // reads the scene depth, which only exists after the graph in Forward and after the G-buffer
         // depth copy in Deferred, and an in-frame compute dispatch has to be issued outside an open

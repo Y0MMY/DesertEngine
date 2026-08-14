@@ -47,7 +47,8 @@ namespace
     };
 
     // ------------------------------------------------------------------------------------------------
-    // Sky: every field is wired today.
+    // Sky: every artistic-gradient field is wired; the physical-atmosphere group is wired through the
+    // LUT passes except the five fields the Phase 2/3 integrations will read (each names its phase).
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kSkySettings = "Desert/Desert/Source/Engine/Graphic/SkySettings.hpp";
@@ -93,6 +94,42 @@ namespace
 
          // Shared by the sky and the cloud shell; converted to world units on the C++ side.
          { "PlanetRadius", kSkySettings },
+
+         // ---- The physical atmosphere (Phase 0/1 of the Sky Atmosphere programme) ------------------
+         // The medium group funnels through MakeSkySettings into the sky payload's medium block, where
+         // the SkyTransmittanceLut / SkyMultiScatterLut compute passes read it — a fingerprint change
+         // re-dispatches both, so each of these fields moves real GPU texels today.
+         { "Model", kSkySettings }, // gates the LUT dispatch (SkyboxRenderer::ExecuteAtmosphereLuts)
+         { "AtmosphereHeight", kSkySettings },
+         { "MultiScatteringFactor", kSkySettings },
+         { "GroundAlbedo", kSkySettings },
+         { "RayleighScatteringScale", kSkySettings },
+         { "RayleighScattering", kSkySettings },
+         { "RayleighExponentialDistribution", kSkySettings },
+         { "MieScatteringScale", kSkySettings },
+         { "MieScattering", kSkySettings },
+         { "MieAbsorptionScale", kSkySettings },
+         { "MieAbsorption", kSkySettings },
+         { "MieExponentialDistribution", kSkySettings },
+         { "OtherAbsorptionScale", kSkySettings },
+         { "OtherAbsorption", kSkySettings },
+         { "AbsorptionTipAltitude", kSkySettings },
+         { "AbsorptionTipValue", kSkySettings },
+         { "AbsorptionTentWidth", kSkySettings },
+
+         // Authored and carried in the payload for the passes the next phases add. PENDING, exactly like
+         // the cloud fields were while their passes were being written: each names the phase that owes
+         // it a reader (the phasing is Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4).
+         { "MieAnisotropy", nullptr,
+           "Sky Phase 2 - Sky-View LUT: the Cornette-Shanks Mie phase of the scattering integrator" },
+         { "SkyLuminanceFactor", nullptr,
+           "Sky Phase 2 - physical sky pass: art-direction tint on sky pixels only" },
+         { "SkyAndAerialPerspectiveLuminanceFactor", nullptr,
+           "Sky Phase 2 - Sky-View LUT: art-direction tint inside every scattering integration" },
+         { "AerialPerspectiveViewDistanceScale", nullptr,
+           "Sky Phase 3 - camera aerial-perspective volume: scales the froxel march distance" },
+         { "AerialPerspectiveStartDepth", nullptr,
+           "Sky Phase 3 - aerial perspective on opaque: distance where the haze starts" },
     };
 
     // ------------------------------------------------------------------------------------------------
@@ -349,12 +386,17 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
     CheckWiredRowsReadTheirField( root, kCloudRows, std::size( kCloudRows ) );
 }
 
-// The sky half of the programme is finished, so it is not allowed to owe anything. Stating it as a test
-// means the day someone adds a sky field without wiring it, this is the failure they see.
-TEST( SettingConsumers, TheSkyComponentOwesNothingToAFutureTask )
+// The artistic-gradient sky is finished and owes nothing; the PHYSICAL atmosphere is being built in
+// phases (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4), and after Phase 0/1 exactly five of its
+// fields await their reader: the Mie phase g and the four art-direction factors, all consumed by the
+// Phase 2/3 integrations. A count, like the cloud one below, so the debt cannot quietly grow — when a
+// sky phase lands, this number drops and the drop is a reviewable edit.
+TEST( SettingConsumers, TheSkyComponentOwesExactlyThePhase2And3Fields )
 {
-    for ( const Row& r : kSkyRows )
-        EXPECT_EQ( r.Task, nullptr ) << r.Field << " is a sky field with no consumer: " << r.Task;
+    const std::ptrdiff_t pending = std::count_if( std::begin( kSkyRows ), std::end( kSkyRows ),
+                                                  []( const Row& r ) { return r.Task != nullptr; } );
+
+    EXPECT_EQ( pending, 5 );
 }
 
 // A count, so that "the clouds are not wired yet" cannot quietly grow to cover a field nobody meant to

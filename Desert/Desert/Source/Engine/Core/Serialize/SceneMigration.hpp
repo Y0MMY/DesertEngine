@@ -20,7 +20,9 @@ namespace Desert::Core
     // (that is a global, and this function is pure). So the number is stated here and a test asserts it
     // against the registry - which turns "a field was added to the component" into a failing test instead
     // of a silently wrong counter.
-    inline constexpr int kSkyAtmosphereFieldCount = 24;
+    // 46 = the 24 fields of the artistic-gradient era + the 22 physical-atmosphere fields (SkyModel and
+    // the Physical Atmosphere / Rayleigh / Mie / Absorption / Art Direction groups) added 2026-08-14.
+    inline constexpr int kSkyAtmosphereFieldCount = 46;
 
     // What MigrateSkyV0ToV1 actually did, returned rather than logged, so the pure function stays pure and
     // the LOADER is the one that speaks (the counters are meaningless unless someone names the scene).

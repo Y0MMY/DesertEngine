@@ -6,6 +6,8 @@
 #include <Engine/Graphic/Environment/SceneEnvironment.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialSkybox.hpp>
 #include <Engine/Graphic/Materials/Skybox/MaterialProceduralSky.hpp>
+#include <Engine/Graphic/Image.hpp>
+#include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/SkyRules.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
 #include <Engine/ShaderResources/StorageBuffer.hpp>
@@ -43,6 +45,15 @@ namespace Desert::Graphic::System
         // frame it crosses the angular threshold.
         void EnsureProceduralEnvironment( float deltaSeconds );
 
+        // The physical atmosphere's cached LUTs (Hillaire 2020): transmittance 256x64 + multi-scattering
+        // 32x32, both RGBA16F. Call once per frame from the in-frame compute point (outside any open
+        // render pass — the slot ExecuteVolumetricClouds dispatches from). Does NOTHING unless
+        // SkyModel::PhysicalAtmosphere is active: gradient scenes never allocate the images and never
+        // dispatch, so the old sky pays zero. When active, the two passes re-run only when the
+        // atmosphere parameter fingerprint moves — a texel depends on the medium alone, not on the
+        // camera, the sun or time.
+        void ExecuteAtmosphereLuts();
+
         const std::optional<Environment> GetEnvironment() const
         {
             // While the procedural sky is active, the baked atmosphere IBL drives ambient/reflections.
@@ -72,6 +83,38 @@ namespace Desert::Graphic::System
         // bake's compute dispatch, so both are guaranteed to describe the same sky.
         void UploadSkyParams();
 
+        // Everything the two LUT passes read. When any of it moves, both LUTs are re-dispatched; while
+        // it holds still they are not touched at all — the WeatherFingerprint arrangement the cloud
+        // weather map uses, for the same reason. Deliberately NOT the whole SkySettings: the palette,
+        // the sun and the bake knobs change constantly and none of them is a LUT input. MieAnisotropy
+        // is also absent — it rides in the payload for the Phase 2 integrator, but no LUT texel depends
+        // on it, so a g-drag must not re-march 1024 texels for nothing.
+        struct AtmosphereLutFingerprint
+        {
+            glm::vec3 RayleighScattering{ 0.0f };
+            float     RayleighExpDistributionKm = 0.0f;
+            glm::vec3 MieScattering{ 0.0f };
+            glm::vec3 MieAbsorption{ 0.0f };
+            float     MieExpDistributionKm = 0.0f;
+            glm::vec3 OzoneAbsorption{ 0.0f };
+            float     OzoneTipAltitudeKm = 0.0f;
+            float     OzoneTipValue      = 0.0f;
+            float     OzoneTentWidthKm   = 0.0f;
+            glm::vec3 GroundAlbedo{ 0.0f };
+            float     AtmosphereHeightKm    = 0.0f;
+            float     MultiScatteringFactor = 0.0f;
+            float     PlanetRadius          = 0.0f; // world units, as the payload carries it
+
+            bool operator==( const AtmosphereLutFingerprint& ) const = default;
+        };
+
+        static AtmosphereLutFingerprint LutFingerprintOf( const SkySettings& sky );
+
+        // Lazily creates the two LUT images (latched on failure, one MiB log line on success).
+        bool EnsureAtmosphereLutResources();
+        void DispatchTransmittanceLut();
+        void DispatchMultiScatterLut();
+
     private:
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
 
@@ -89,6 +132,17 @@ namespace Desert::Graphic::System
         // (frame in flight x renderer slot). A persistent buffer would be shared by every live
         // SceneRenderer by design, and the mesh preview would overwrite the viewport's sky.
         std::shared_ptr<ShaderResources::StorageBuffer> m_SkyParams;
+
+        // Physical-atmosphere LUTs (SkyModel::PhysicalAtmosphere only; see ExecuteAtmosphereLuts).
+        // Per renderer, not per frame in flight: they are rewritten only on a parameter edit, and
+        // 256x64 + 32x32 RGBA16F is ~136 KiB — not worth cross-renderer sharing complexity.
+        std::shared_ptr<ComputePipeline> m_TransmittanceLutPipeline;
+        std::shared_ptr<ComputePipeline> m_MultiScatterLutPipeline;
+        std::shared_ptr<Image2D>         m_TransmittanceLut;
+        std::shared_ptr<Image2D>         m_MultiScatterLut;
+        AtmosphereLutFingerprint         m_LutBaked;
+        bool                             m_LutsValid          = false;
+        bool                             m_LutResourcesFailed = false;
 
         bool          m_UseProceduralSky = false;
         glm::vec3     m_SunDir           = glm::vec3( 0.0f, 1.0f, 0.0f ); // TOWARD the sun, normalized

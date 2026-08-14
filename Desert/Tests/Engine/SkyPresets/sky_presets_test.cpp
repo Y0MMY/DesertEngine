@@ -287,10 +287,12 @@ TEST( SkyPresets, EveryPaletteFieldChangesTheDiscriminatorAndNoOtherFieldDoes )
         }
     }
 
-    // 13 palette + 11 authored/quality (the master switch, the five time-of-day rows, the three
-    // environment-bake rows, the preset label and the planet radius) = the component's 24 fields.
+    // 13 palette + 33 authored/quality (the master switch, the five time-of-day rows, the three
+    // environment-bake rows, the preset label, the planet radius, and the 22 physical-atmosphere
+    // fields — a preset is a palette of the GRADIENT model and must leave the physical medium alone)
+    // = the component's 46 fields.
     EXPECT_EQ( palette, 13u );
-    EXPECT_EQ( authored, 11u ) << "the component gained or lost a field without this test being revisited";
+    EXPECT_EQ( authored, 33u ) << "the component gained or lost a field without this test being revisited";
 }
 
 // Dialling the values back by hand restores the name rather than leaving "Custom" behind. This is why the
