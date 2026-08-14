@@ -3,8 +3,12 @@
 // The march loop, the light march and the compositor reach the density field through exactly two
 // functions, and through nothing else:
 //
-//     float CloudDensityCheap( vec3 worldPos, float heightFraction );
-//     float CloudDensityFull ( vec3 worldPos, float heightFraction, float distanceFromCamera );
+//     float CloudDensityCheap ( vec3 worldPos, float heightFraction );
+//     vec2  CloudDensitySample( vec3 worldPos, float heightFraction, float distanceFromCamera );
+//
+// SAMPLE returns x = the full (eroded) density and y = the unerroded profile in ONE evaluation: the
+// march needs both at every shaded sample (in-scatter probability and ambient occlusion are functions
+// of the profile), and two separate calls paid two extra texture fetches per sample.
 //
 //   worldPos            ABSOLUTE world position of the sample, in world units (centimetres). Absolute,
 //                       not camera-relative: the noise lookup is what anchors a cloud to the world, and

@@ -249,8 +249,12 @@ Shader "CloudRaymarch"
                 }
                 else
                 {
-                    float density = CloudDensityFull(worldPos, height, state.T);
-                    occupied      = density > 0.0f;
+                    // One evaluation returns the eroded density AND the unerroded profile: the profile
+                    // feeds the in-scatter probability and the ambient occlusion below (CLD-106), and a
+                    // separate CloudDensityCheap call here was two texture fetches per shaded sample.
+                    vec2  densitySample = CloudDensitySample(worldPos, height, state.T);
+                    float density       = densitySample.x;
+                    occupied            = density > 0.0f;
 
                     if (occupied)
                     {
@@ -322,7 +326,7 @@ Shader "CloudRaymarch"
                         // silver-lining rim the phase function was building. The profile is also what
                         // the ambient occlusion below is defined on (Nubis3 p.141), so one fetch serves
                         // both.
-                        float profile   = CloudDensityCheap(worldPos, height);
+                        float profile   = densitySample.y;
                         float inScatter = CloudInScatterProbability(height, profile, tauSun);
 
                         // Powder fades out toward the sun (CLD-107) — the dark edge is a reflection-side

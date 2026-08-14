@@ -125,7 +125,7 @@ float CloudPrecipitationAt(vec3 worldPos)
 // Coarse tier and shadow ray: weather x envelope x base shape. One 2D fetch and one 3D fetch, no detail,
 // no lighting. This is what makes the empty-space skip pay for itself — see CloudMarchAdvance.
 // The body of CloudDensityCheap, given a weather sample the caller already has. Split out so that
-// CloudDensityFull — which needs the same texel again for its density-scale channel — pays for one 2D
+// CloudDensitySample — which needs the same texel again for its density-scale channel — pays for one 2D
 // fetch instead of two. The fetch is not free at the rate this runs: once per fine sample plus once per
 // cone sample, so up to seven per shaded step.
 float CloudDensityCheapFrom(vec4 weather, vec3 worldPos, float heightFraction)
@@ -168,13 +168,17 @@ float CloudDensityCheap(vec3 worldPos, float heightFraction)
 }
 
 // Fine tier: everything above, plus the detail erosion, the curl warp, the high-frequency layer and the
-// three distance terms.
-float CloudDensityFull(vec3 worldPos, float heightFraction, float distanceFromCamera)
+// three distance terms. Returns x = the eroded (full) density, y = the unerroded profile — the march
+// needs BOTH at every shaded sample (the profile drives the in-scatter probability and the ambient
+// occlusion, CLD-106), and computing them in one evaluation is two texture fetches cheaper per sample
+// than the CloudDensityCheap call this replaces.
+vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromCamera)
 {
     vec4  weather = CloudSampleWeather(worldPos);
-    float density = CloudDensityCheapFrom(weather, worldPos, heightFraction);
+    float profile = CloudDensityCheapFrom(weather, worldPos, heightFraction);
+    float density = profile;
     if (density <= 0.0f)
-        return 0.0f;
+        return vec2(0.0f, 0.0f);
 
     // Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
     // without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
@@ -244,7 +248,7 @@ float CloudDensityFull(vec3 worldPos, float heightFraction, float distanceFromCa
     // scaling the whole cloud, and clamped because the range reaches 2.
     density *= max(1.0f + u_DensityHeightBias * (heightFraction - 0.5f), 0.0f);
 
-    return clamp(density, 0.0f, 1.0f);
+    return vec2(clamp(density, 0.0f, 1.0f), profile);
 }
 
 #endif // CLOUD_DENSITY_PROCEDURAL_GLSLH

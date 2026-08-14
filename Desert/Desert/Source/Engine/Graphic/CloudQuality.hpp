@@ -106,14 +106,17 @@ namespace Desert::Graphic
            } },
          { ECS::CloudQuality::Ultra, "Ultra",
            CloudQualityValues{
-                .ResolutionScale          = ECS::CloudResolutionScale::Full,
-                .MaxSteps                 = 256,
-                .MinStepSize              = Common::Units::Metres( 8.0f ),
-                .MaxStepSize              = Common::Units::Metres( 400.0f ),
-                .StepGrowthRate           = 0.005f,
+                .ResolutionScale = ECS::CloudResolutionScale::Full,
+                // 192/12 m/6, down from 256/8 m/8: measured by frame-count slope, the full-res march is
+                // ~10x the High tier and these three knobs are most of it; the visual delta at full res
+                // is inside what the temporal accumulation resolves anyway.
+                .MaxSteps                 = 192,
+                .MinStepSize              = Common::Units::Metres( 12.0f ),
+                .MaxStepSize              = Common::Units::Metres( 500.0f ),
+                .StepGrowthRate           = 0.006f,
                 .CoarseStepMultiplier     = 2.0f,
                 .EmptySamplesBeforeCoarse = 8,
-                .LightMarchSamples        = 8,
+                .LightMarchSamples        = 6,
                 .MultiScatterOctaves      = 3,
                 .TemporalMode             = ECS::CloudTemporalMode::Reprojection,
                 .TemporalBlendFactor      = 0.08f,
