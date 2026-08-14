@@ -75,6 +75,10 @@ project "Editor"
 
     filter "system:windows"
         defines { "DESERT_PLATFORM_WINDOWS" }
+        -- EditorLayer.cpp aggregates the Details rendering for every reflected component; the sky's
+        -- physical-atmosphere fields pushed its Debug object file past COFF's 65k-section limit
+        -- (error C1128). /bigobj lifts the format cap and costs nothing at runtime.
+        buildoptions { "/bigobj" }
 
     filter "system:macosx"
         defines { "DESERT_PLATFORM_MACOS" }

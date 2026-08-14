@@ -42,7 +42,7 @@ group "Tests"
             "echo set TEST_DIR=%{wks.location}\\build\\Bin\\Tests\\%{cfg.buildcfg}>> \"%{wks.location}\\run_tests.bat\"",
             "echo set REPORT_DIR=%{wks.location}\\build\\TestReports>> \"%{wks.location}\\run_tests.bat\"",
             "echo if not exist \"!REPORT_DIR!\" mkdir \"!REPORT_DIR!\">> \"%{wks.location}\\run_tests.bat\"",
-            "echo set ERROR=0>> \"%{wks.location}\\run_tests.bat\"",
+            "echo set \"ERROR=0\">> \"%{wks.location}\\run_tests.bat\"",
             "echo echo ===== Starting Tests =====>> \"%{wks.location}\\run_tests.bat\"",
         }
 
@@ -55,11 +55,11 @@ group "Tests"
                 "echo   \"!TEST_DIR!\\"..test_name..".exe\" --gtest_output=xml:\"!REPORT_DIR!\\"..test_name..".xml\">> \"%{wks.location}\\run_tests.bat\"",
                 "echo   if !ERRORLEVEL! NEQ 0 (>> \"%{wks.location}\\run_tests.bat\"",
                 "echo     echo [FAIL] "..test_name..">> \"%{wks.location}\\run_tests.bat\"",
-                "echo     set ERROR=1>> \"%{wks.location}\\run_tests.bat\"",
+                "echo     set \"ERROR=1\">> \"%{wks.location}\\run_tests.bat\"",
                 "echo   )>> \"%{wks.location}\\run_tests.bat\"",
                 "echo ) else (>> \"%{wks.location}\\run_tests.bat\"",
                 "echo   echo [ERROR] "..test_name..".exe not found>> \"%{wks.location}\\run_tests.bat\"",
-                "echo   set ERROR=1>> \"%{wks.location}\\run_tests.bat\"",
+                "echo   set \"ERROR=1\">> \"%{wks.location}\\run_tests.bat\"",
                 "echo )>> \"%{wks.location}\\run_tests.bat\"",
             }
         end
