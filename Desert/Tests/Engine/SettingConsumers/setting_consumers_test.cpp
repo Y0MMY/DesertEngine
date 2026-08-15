@@ -47,9 +47,9 @@ namespace
     };
 
     // ------------------------------------------------------------------------------------------------
-    // Sky: every artistic-gradient field is wired; the physical-atmosphere group is wired through the
-    // LUT passes and the Phase 2 sky pass, except the two aerial-perspective fields Phase 3 will read
-    // (each names its phase).
+    // Sky: every field is wired. The artistic-gradient group through the sky pass and the IBL bake, the
+    // physical-atmosphere group through the LUT passes and the Phase 2 sky pass, and the
+    // aerial-perspective group through the Phase 3 froxel volume and the atmospheric-fog pass.
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kSkySettings = "Desert/Desert/Source/Engine/Graphic/SkySettings.hpp";
@@ -127,13 +127,13 @@ namespace
          { "SkyLuminanceFactor", kSkySettings },
          { "SkyAndAerialPerspectiveLuminanceFactor", kSkySettings },
 
-         // Authored and carried for the passes the next phase adds. PENDING, exactly like the cloud
-         // fields were while their passes were being written: each names the phase that owes it a
-         // reader (the phasing is Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4).
-         { "AerialPerspectiveViewDistanceScale", nullptr,
-           "Sky Phase 3 - camera aerial-perspective volume: scales the froxel march distance" },
-         { "AerialPerspectiveStartDepth", nullptr,
-           "Sky Phase 3 - aerial perspective on opaque: distance where the haze starts" },
+         // Wired by Phase 3: all three funnel through MakeSkySettings into SkySettings, from where
+         // SkyboxRenderer fills the 32x32x16 aerial-perspective volume (start depth and distance, on
+         // the fill's push block) and the atmospheric-fog pass reads it (distance and view-distance
+         // scale, published on AtmosphereEnv). Every one of them moves real froxels today.
+         { "AerialPerspectiveViewDistanceScale", kSkySettings },
+         { "AerialPerspectiveStartDepth", kSkySettings },
+         { "AerialPerspectiveDistance", kSkySettings },
     };
 
     // ------------------------------------------------------------------------------------------------
@@ -437,18 +437,21 @@ TEST( SettingConsumers, TheFogComponentOwesNothing )
     EXPECT_EQ( pending, 0 );
 }
 
-// The artistic-gradient sky is finished and owes nothing; the PHYSICAL atmosphere is being built in
-// phases (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4). Phase 2 (the Sky-View LUT and the
-// physical sky pass) consumed the Mie phase g and both luminance tints; exactly the two
-// aerial-perspective controls still await their Phase 3 reader. A count, like the cloud one below, so
-// the debt cannot quietly grow — when a sky phase lands, this number drops and the drop is a
-// reviewable edit.
-TEST( SettingConsumers, TheSkyComponentOwesExactlyThePhase3Fields )
+// The sky component now owes NOTHING. The artistic gradient was always finished; the physical
+// atmosphere was built in phases (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4) and Phase 3 — the
+// camera aerial-perspective volume and its apply on opaque — consumed the last two fields that were
+// carried without a reader, plus the Aerial Perspective Distance it added.
+//
+// The count stays as a count rather than becoming "no PENDING rows exist", because the remaining
+// phases (4: the distant sky-light value; the cloud march sampling this volume) may well add a field
+// before they add its reader. When that happens the number rises in a reviewable edit instead of a
+// field quietly joining the component with nobody accountable for it.
+TEST( SettingConsumers, TheSkyComponentOwesNothing )
 {
     const std::ptrdiff_t pending = std::count_if( std::begin( kSkyRows ), std::end( kSkyRows ),
                                                   []( const Row& r ) { return r.Task != nullptr; } );
 
-    EXPECT_EQ( pending, 2 );
+    EXPECT_EQ( pending, 0 );
 }
 
 // A count, so that "the clouds are not wired yet" cannot quietly grow to cover a field nobody meant to

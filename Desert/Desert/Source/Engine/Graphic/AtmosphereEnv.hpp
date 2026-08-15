@@ -11,6 +11,8 @@ namespace Desert::ShaderResources
 
 namespace Desert::Graphic
 {
+    class Image3D;
+
     // Per-frame, EVALUATED state of the sky — the runtime form other renderers consume via
     // SceneRenderer::GetAtmosphere(), mirroring WindEnv / GetWind(). The volumetric cloud pass is its
     // reason for existing: cloud lighting and sky lighting must come from one sun and one sky, or they
@@ -43,6 +45,21 @@ namespace Desert::Graphic
         // OPAQUE handle to the packed sky-parameter SSBO. Non-owning: the SkyboxRenderer of this
         // SceneRenderer owns the buffer, and it is null exactly when Valid is false.
         ShaderResources::StorageBuffer* ParamsBuffer = nullptr;
+
+        // OPAQUE handle to this view's camera aerial-perspective volume (32x32x16 RGBA16F), and the two
+        // numbers a consumer needs to address it. Non-owning, same contract as ParamsBuffer: the
+        // SkyboxRenderer of this SceneRenderer owns it, and it is NULL EXACTLY WHEN THERE IS NO AERIAL
+        // PERSPECTIVE THIS FRAME — the artistic-gradient model, a sky that is switched off, or a fill
+        // that could not allocate. A consumer treats null as "compose the identity", never as "sample
+        // anyway and hope".
+        //
+        // The two scalars live here rather than in the sky payload because the volume's READER (the
+        // atmospheric-fog pass) does not bind the sky buffer: this struct is then the single runtime
+        // source both the fill and the read take them from, which is what stops the slice mapping's two
+        // ends from drifting apart.
+        Image3D* AerialPerspectiveVolume            = nullptr;
+        float    AerialPerspectiveDepthKm           = 0.0f; // the volume's far extent, kilometres
+        float    AerialPerspectiveViewDistanceScale = 1.0f; // read-side multiplier on a pixel's distance
     };
 
     // The C++ half of "share the computation": the quantities below are read off the same gradient the

@@ -195,9 +195,10 @@ namespace Desert::Graphic
              !cloudInit )
             LOG_WARN( "[SceneRenderer] Volumetric cloud system unavailable: {}", cloudInit.GetError() );
 
-        // Exponential height fog: one compute evaluation issued outside the graph (ExecuteAtmosphericFog)
-        // and one apply pass in the Transparency phase, self-ordered below the clouds' FarField by
-        // RenderPassOrder::AtmosphericFog. Non-fatal: fog must never take a scene down.
+        // Atmosphere and fog: aerial perspective on opaque with exponential height fog over it — one
+        // compute evaluation issued outside the graph (ExecuteAtmosphericFog) and one apply pass in the
+        // Transparency phase, self-ordered below the clouds' FarField by RenderPassOrder::AtmosphericFog.
+        // Non-fatal: neither must ever take a scene down.
         RegisterSystem<System::HeightFogRenderer>( "HeightFogSystem", this, m_TargetFramebuffer,
                                                    m_RenderGraphBuilder );
         if ( const auto fogInit =
@@ -601,20 +602,23 @@ namespace Desert::Graphic
             meshRenderer->RenderGlassManual( sceneCopy );
         }
 
-        // The physical atmosphere's cached LUTs (transmittance + multi-scattering). Same in-frame
-        // compute slot as the clouds below — outside any open render pass — and BEFORE them, because the
-        // cloud march is a future consumer of the multi-scattering LUT. Almost every frame this is a
-        // fingerprint compare and an immediate return; the dispatches happen only when an atmosphere
-        // parameter was edited, and never at all for SkyModel::ArtisticGradient.
+        // The physical atmosphere's LUTs: the cached pair (transmittance + multi-scattering), the
+        // per-view Sky-View LUT and the per-view aerial-perspective volume. Same in-frame compute slot as
+        // the clouds below — outside any open render pass — and BEFORE both the atmospheric-fog pass,
+        // which samples the AP volume this very frame, and the cloud march, a future consumer of the
+        // multi-scattering LUT. The cached pair is almost always a fingerprint compare and an immediate
+        // return; nothing here runs at all for SkyModel::ArtisticGradient.
         {
             DESERT_PROFILE_SCOPE( "SkyAtmosphereLuts" );
             UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->ExecuteAtmosphereLuts();
         }
 
-        // Exponential height fog: the closed-form compute evaluation. HERE for the same reason as the
-        // clouds below — it reads the finished scene depth and must be dispatched outside an open render
-        // pass. Its apply is replayed by ExecuteTransparency at RenderPassOrder::AtmosphericFog, under
-        // the cloud composite, so the clouds are drawn OVER the fogged scene.
+        // Atmosphere and fog: aerial perspective on opaque, with the closed-form height fog over it.
+        // HERE for the same reason as the clouds below — it reads the finished scene depth and must be
+        // dispatched outside an open render pass — and immediately after the LUT slot above, which just
+        // filled the AP volume it samples. Its apply is replayed by ExecuteTransparency at
+        // RenderPassOrder::AtmosphericFog, under the cloud composite, so the clouds are drawn OVER the
+        // fogged scene.
         {
             DESERT_PROFILE_SCOPE( "AtmosphericFog" );
             ExecuteAtmosphericFog();

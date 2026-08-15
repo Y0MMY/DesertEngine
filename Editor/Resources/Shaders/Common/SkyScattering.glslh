@@ -1,12 +1,14 @@
-// The physical atmosphere's scattering integrator, the Sky-View LUT parameterisation and the sun
-// disc — Phase 2 of the Sky Atmosphere programme, implemented from Sébastien Hillaire, "A Scalable
-// and Production Ready Sky and Atmosphere Rendering Technique" (EGSR 2020) and its MIT-licensed
-// reference implementation (github.com/sebh/UnrealEngineSkyAtmosphere). UE is a behavioural
-// reference for names and composition order only; no Epic source text appears here.
+// The physical atmosphere's scattering integrator, the Sky-View LUT parameterisation, the sun disc and
+// the camera aerial-perspective volume's slice mapping and froxel walk — Phases 2 and 3 of the Sky
+// Atmosphere programme, implemented from Sébastien Hillaire, "A Scalable and Production Ready Sky and
+// Atmosphere Rendering Technique" (EGSR 2020) and its MIT-licensed reference implementation
+// (github.com/sebh/UnrealEngineSkyAtmosphere). UE is a behavioural reference for names and composition
+// order only; no Epic source text appears here.
 //
 // This file is compiled TWICE, from the same text:
-//   * as GLSL, by Programs/Sky/SkyViewLut.shader, Programs/Compute/BakeProceduralSky.shader and
-//     Programs/ProceduralSky/ProceduralSky.shader;
+//   * as GLSL, by Programs/Sky/SkyViewLut.shader, Programs/Sky/SkyAerialPerspectiveLut.shader,
+//     Programs/Fog/HeightFog.shader (the slice mapping only — it reads the volume, it does not fill
+//     it), Programs/Compute/BakeProceduralSky.shader and Programs/ProceduralSky/ProceduralSky.shader;
 //   * as C++, by Desert/Tests/Engine/SkyScattering/SkyScatteringReference.hpp, which the
 //     SkyScattering tests drive.
 // SkyMedium.glslh's restricted dialect applies verbatim: no swizzles, no `out` parameters, no
@@ -231,6 +233,52 @@ float SkyPlanetShadow(float radiusKm, float sunZenithCos, float bottomRadiusKm)
     return x * x * (3.0f - 2.0f * x);
 }
 
+// ---- The camera aerial-perspective volume's parameterisation (Hillaire section 5.4) ----------------
+// A froxel volume in the camera's frustum: x and y are the screen, z is DISTANCE ALONG THE RAY, and each
+// texel holds the atmosphere between the camera and that distance. The two mappings below are the whole
+// z parameterisation and are EXACT inverses — the fill writes a slice through one and the apply pass
+// reads a pixel's distance through the other, and a mismatch is haze at the wrong distance everywhere
+// and provably wrong nowhere.
+//
+// The distribution is SQUARED (UE's, and the paper's reason): a froxel at normalised slice u covers
+// camera distance D*u^2, so half the slices land in the nearest quarter of the range, where the air the
+// camera is standing in dominates the picture and where the eye can still tell two distances apart.
+//
+// The volume's extent is part of the parameterisation, not a quality dial — SkyboxRenderer's
+// kAerialPerspectiveWidth/Height/Depth mirror these three, and the sub-texel remap (SkyUnitToTexelUv,
+// SkyMedium.glslh) bakes them into every write and every read.
+const float SKY_AP_VOLUME_WIDTH  = 32.0f;
+const float SKY_AP_VOLUME_HEIGHT = 32.0f;
+const float SKY_AP_VOLUME_DEPTH  = 16.0f;
+
+// Camera distance of the slice at normalised depth @p sliceUnit, for a volume that reaches @p apDepthKm.
+float SkyApDistanceFromSliceUnit(float sliceUnit, float apDepthKm)
+{
+    float u = clamp(sliceUnit, 0.0f, 1.0f);
+    return apDepthKm * u * u;
+}
+
+// Its exact inverse: the normalised slice a surface at @p distanceKm belongs to. Saturating past the
+// volume's far end is deliberate — beyond apDepthKm the haze has long since stopped changing, and the
+// alternative (wrapping, or a black froxel) is a hard ring at the volume's edge.
+float SkyApSliceUnitFromDistance(float distanceKm, float apDepthKm)
+{
+    return sqrt(clamp(distanceKm / max(apDepthKm, 1e-4f), 0.0f, 1.0f));
+}
+
+// How many march sub-steps one froxel segment earns. With the squared distribution the segments grow
+// linearly with the slice index — at the 96 km default the first is 0.4 km and the last is over 12 —
+// so a fixed count per slice either wastes work near the camera or puts a twelve-kilometre slab at one
+// density. One sample per SKY_AP_STEP_TARGET_KM, capped, spends the samples where the length is.
+const float SKY_AP_STEP_TARGET_KM      = 1.0f;
+const int   SKY_AP_MAX_SEGMENT_SAMPLES = 8;
+
+int SkyApSegmentSampleCount(float segmentLengthKm)
+{
+    int steps = int(clamp(segmentLengthKm, 0.0f, 1.0e6f) / SKY_AP_STEP_TARGET_KM) + 1;
+    return steps < SKY_AP_MAX_SEGMENT_SAMPLES ? steps : SKY_AP_MAX_SEGMENT_SAMPLES;
+}
+
 // ---- The single-scattering integrator (Hillaire section 4, with the multi-scattering LUT) ----------
 
 #ifdef SKY_SCATTERING_SUN_TRANSMITTANCE
@@ -241,6 +289,58 @@ struct SkyScatterResult
     vec3 Transmittance; // what survives the same trip — the sky pass's alpha lane
 };
 
+// ONE marched step of the atmosphere, and the only place the source function is written. Both consumers
+// go through it — the distant-sky march below and the aerial-perspective volume's froxel walk — because
+// two spellings of one integrand is this project's most expensive defect class, and here it would show
+// as terrain haze that disagrees with the sky it fades into.
+//
+// Frostbite's analytic arrangement: the source is constant over the segment, so source x transmittance
+// integrates in closed form and the step is exact for any dt the medium is smooth over.
+//
+// Returns the segment's own contribution in .Luminance — NOT yet multiplied by the throughput the caller
+// has accumulated — and the segment's transmittance in .Transmittance.
+//
+// @p position is PLANET-CENTRED. The radius is clamped to the planet surface, so a ray that has walked
+// below the ground (a flat scene on a spherical atmosphere does that past the horizon distance) sees
+// sea-level density rather than an exponential that runs away.
+SkyScatterResult SkyIntegrateStep(SkyAtmParams p, vec3 position, vec3 sunDir, vec3 sunIlluminance,
+                                  float phaseRayleigh, float phaseMie, float dt)
+{
+    float radius   = max(length(position), p.BottomRadiusKm);
+    vec3  zenith   = position / radius;
+    float altitude = radius - p.BottomRadiusKm;
+
+    // One density evaluation per sample; scattering split per species because each carries its own
+    // phase, extinction assembled from the same densities.
+    float dRayleigh = SkyDensityRayleigh(p, altitude);
+    float dMie      = SkyDensityMie(p, altitude);
+    float dOzone    = SkyDensityOzone(p, altitude);
+
+    vec3 scatterRayleigh = p.RayleighScattering * dRayleigh;
+    vec3 scatterMie      = p.MieScattering * dMie;
+    vec3 extinction =
+         scatterRayleigh + scatterMie + p.MieAbsorption * dMie + p.OzoneAbsorption * dOzone;
+
+    vec3 stepTransmittance = exp(-extinction * dt);
+    vec3 safeExtinction    = max(extinction, vec3(1e-6f, 1e-6f, 1e-6f));
+
+    float sunZenithCos = dot(zenith, sunDir);
+    float planetShadow = SkyPlanetShadow(radius, sunZenithCos, p.BottomRadiusKm);
+
+    vec3 sunTransmittance = SKY_SCATTERING_SUN_TRANSMITTANCE(p, radius, sunZenithCos);
+    vec3 psiMs            = SKY_SCATTERING_MULTI_SCATTER(p, radius, sunZenithCos);
+
+    vec3 source =
+         sunIlluminance *
+         (planetShadow * sunTransmittance * (phaseRayleigh * scatterRayleigh + phaseMie * scatterMie) +
+          psiMs * (scatterRayleigh + scatterMie));
+
+    SkyScatterResult step;
+    step.Luminance     = (source - source * stepTransmittance) / safeExtinction;
+    step.Transmittance = stepTransmittance;
+    return step;
+}
+
 // March a view ray through the atmosphere. @p originKm is PLANET-CENTRED (|originKm| = the view
 // height r); @p rayDir and @p sunDir are unit directions in the same frame; @p sunIlluminance is the
 // outer-space sun illuminance the whole result is linear in.
@@ -248,8 +348,8 @@ struct SkyScatterResult
 // Per step, Frostbite's analytic form integrates source x transmittance exactly over the segment
 // (the arrangement the multi-scattering LUT already uses), with:
 //   * sun transmittance from the transmittance LUT via SKY_SCATTERING_SUN_TRANSMITTANCE;
-//   * the analytic planet shadow above, faded across the terminator (the LUT knows geometry's
-//     shadows in Phase 3, not here);
+//   * the analytic planet shadow above, faded across the terminator (no geometry shadow map and no
+//     cloud shadow map enter the sky's own march, in this phase or the last);
 //   * the multi-scattering LUT's Psi_ms via SKY_SCATTERING_MULTI_SCATTER, deliberately NOT attenuated
 //     by the planet shadow or the sun transmittance — Psi already represents light diffused through
 //     the whole sky, which is exactly why twilight is not pitch black.
@@ -284,43 +384,69 @@ SkyScatterResult SkyIntegrateScatteredLuminance(SkyAtmParams p, vec3 originKm, v
         float t     = tPrev + dt * 0.5f;
         tPrev       = tNext;
 
-        vec3  position = originKm + rayDir * t;
-        float radius   = max(length(position), p.BottomRadiusKm);
-        vec3  zenith   = position / radius;
-        float altitude = radius - p.BottomRadiusKm;
+        vec3 position = originKm + rayDir * t;
 
-        // One density evaluation per sample; scattering split per species because each carries its
-        // own phase, extinction assembled from the same densities.
-        float dRayleigh = SkyDensityRayleigh(p, altitude);
-        float dMie      = SkyDensityMie(p, altitude);
-        float dOzone    = SkyDensityOzone(p, altitude);
+        SkyScatterResult step =
+             SkyIntegrateStep(p, position, sunDir, sunIlluminance, phaseRayleigh, phaseMie, dt);
 
-        vec3 scatterRayleigh = p.RayleighScattering * dRayleigh;
-        vec3 scatterMie      = p.MieScattering * dMie;
-        vec3 extinction      = scatterRayleigh + scatterMie + p.MieAbsorption * dMie +
-                               p.OzoneAbsorption * dOzone;
-
-        vec3 stepTransmittance = exp(-extinction * dt);
-        vec3 safeExtinction    = max(extinction, vec3(1e-6f, 1e-6f, 1e-6f));
-
-        float sunZenithCos = dot(zenith, sunDir);
-        float planetShadow = SkyPlanetShadow(radius, sunZenithCos, p.BottomRadiusKm);
-
-        vec3 sunTransmittance = SKY_SCATTERING_SUN_TRANSMITTANCE(p, radius, sunZenithCos);
-        vec3 psiMs            = SKY_SCATTERING_MULTI_SCATTER(p, radius, sunZenithCos);
-
-        vec3 source =
-             sunIlluminance *
-             (planetShadow * sunTransmittance * (phaseRayleigh * scatterRayleigh + phaseMie * scatterMie) +
-              psiMs * (scatterRayleigh + scatterMie));
-
-        luminance += throughput * (source - source * stepTransmittance) / safeExtinction;
-        throughput = throughput * stepTransmittance;
+        luminance += throughput * step.Luminance;
+        throughput = throughput * step.Transmittance;
     }
 
     SkyScatterResult result;
     result.Luminance     = luminance;
     result.Transmittance = throughput;
+    return result;
+}
+
+// ---- The aerial-perspective volume's froxel walk ---------------------------------------------------
+// Integrate ONE froxel's segment [tStartKm, tEndKm] of the camera ray and hand back the RUNNING
+// accumulators, so the fill walks a single ray outward slice by slice and each slice's stored value is
+// the integral from the camera to that slice — never an independent march.
+//
+// That distinction is the whole reason this function exists rather than N calls to the integrator above.
+// Re-marching from the camera for every slice (the obvious implementation) gives consecutive slices
+// slightly different quadrature, and the difference is not noise: it is a step at each slice boundary
+// that trilinear filtering cannot hide, and it is exactly the banding a 16-slice volume over 96 km is
+// notorious for. Carried accumulators make slice k's value equal slice k-1's plus one segment BY
+// CONSTRUCTION, so the sequence is monotone in luminance and in optical depth whatever the sampling is.
+//
+// @p originKm is PLANET-CENTRED (|originKm| = the camera's distance from the planet centre); @p rayDir
+// and @p sunDir are unit directions in the same frame. An empty or inverted segment returns the
+// accumulators untouched, which is what makes the froxel at zero distance the identity of the composite
+// (no in-scatter, full transmittance) instead of a colour shift on a surface touching the lens.
+SkyScatterResult SkyApIntegrateSegment(SkyAtmParams p, vec3 originKm, vec3 rayDir, vec3 sunDir,
+                                       vec3 sunIlluminance, float tStartKm, float tEndKm,
+                                       vec3 luminanceIn, vec3 transmittanceIn)
+{
+    SkyScatterResult result;
+    result.Luminance     = luminanceIn;
+    result.Transmittance = transmittanceIn;
+
+    float spanKm = tEndKm - tStartKm;
+    if (spanKm <= 0.0f)
+        return result;
+
+    int   sampleCount = SkyApSegmentSampleCount(spanKm);
+    float dt          = spanKm / float(sampleCount);
+
+    // Constant along a straight ray, so they are hoisted out of the sub-steps exactly as the distant-sky
+    // march hoists them.
+    float cosTheta      = dot(rayDir, sunDir);
+    float phaseRayleigh = SkyPhaseRayleigh(cosTheta);
+    float phaseMie      = SkyPhaseCornetteShanks(p.MiePhaseG, cosTheta);
+
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        float t        = tStartKm + (float(i) + 0.5f) * dt;
+        vec3  position = originKm + rayDir * t;
+
+        SkyScatterResult step =
+             SkyIntegrateStep(p, position, sunDir, sunIlluminance, phaseRayleigh, phaseMie, dt);
+
+        result.Luminance     = result.Luminance + result.Transmittance * step.Luminance;
+        result.Transmittance = result.Transmittance * step.Transmittance;
+    }
     return result;
 }
 

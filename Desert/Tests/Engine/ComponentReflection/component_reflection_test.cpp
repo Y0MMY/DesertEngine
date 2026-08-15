@@ -80,9 +80,11 @@ namespace
 } // namespace
 
 // ---------------------------------------------------------------------------------------------------
-// SkyAtmosphereData — 46 fields: the 24 artistic-gradient fields in their original order, then the 22
+// SkyAtmosphereData — 47 fields: the 24 artistic-gradient fields in their original order, then the 23
 // physical-atmosphere fields (UE parameter names and grouping, Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md
-// section 1.7), appended so the migration counters and the Details order both stay stable
+// section 1.7, plus Aerial Perspective Distance, which UE keeps as an engine cvar and this engine has
+// to author per scene — see the field's own comment), appended so the migration counters and the
+// Details order both stay stable
 // ---------------------------------------------------------------------------------------------------
 
 TEST( SkyAtmosphereReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
@@ -134,10 +136,11 @@ TEST( SkyAtmosphereReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
          "SkyAndAerialPerspectiveLuminanceFactor",
          "AerialPerspectiveViewDistanceScale",
          "AerialPerspectiveStartDepth",
+         "AerialPerspectiveDistance",
     };
 
     const TypeInfo& sky = Type( "SkyAtmosphereData" );
-    EXPECT_EQ( sky.Fields.size(), 46u );
+    EXPECT_EQ( sky.Fields.size(), 47u );
     EXPECT_EQ( FieldNames( sky ), expected );
 }
 
@@ -170,7 +173,7 @@ TEST( SkyAtmosphereReflection, CategoriesAndTypesMatchTheSpecification )
     EXPECT_EQ( CountInCategory( sky, "Rayleigh" ), 3u );
     EXPECT_EQ( CountInCategory( sky, "Mie" ), 6u );
     EXPECT_EQ( CountInCategory( sky, "Absorption" ), 5u );
-    EXPECT_EQ( CountInCategory( sky, "Art Direction" ), 4u );
+    EXPECT_EQ( CountInCategory( sky, "Art Direction" ), 5u );
 
     for ( const char* name :
           { "ZenithColor", "HorizonColor", "GroundColor", "NightColor", "SunColor", "SunsetColor", "GroundAlbedo",
