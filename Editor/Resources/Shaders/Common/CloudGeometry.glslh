@@ -396,6 +396,57 @@ float CloudInScatterProbability(float heightFraction, float densityLowLod, float
     return clamp(depthProbability * verticalProbability, 0.0f, 1.0f);
 }
 
+// The effective extinction a MULTIPLY-SCATTERED estimate integrates with, which is not the medium's own.
+//
+// Nubis3 p.136 is the ablation that names this: p.135 renders a dense backlit cumulus with the direct
+// extinction alone and the core comes out charcoal-black; p.136 is the same cloud, luminous, and the only
+// difference is the line
+//
+//     ms_volume *= exp(-inSunLightSummedDensitySamples *
+//                      Remap(sun_dot, 0.0, 0.9, 0.25, ValueRemap(cloud_distance, -128.0, 0.0, 0.05, 0.25)));
+//
+// Two modulations in one expression. The inner one is DEPTH: at the cloud's surface (cloud_distance 0)
+// the coefficient is 0.25, and at the far end of the reference's -128..0 distance range it is 0.05 — a
+// fifth — because light that has already bounced several times arrives from every direction and no longer
+// cares about the beam's own path. The outer one is VIEW ANGLE:
+// the reduction is handed out in full only when the eye looks along the sun's direction (sun_dot -> 0.9),
+// which is exactly the backlit case the ablation is about, and is absent when the eye looks away from the
+// sun (sun_dot -> 0), where the lit face is already the brightest thing in the frame and any further
+// reduction would only blow it out.
+//
+// The reference indexes depth by an SDF into a voxelised cloud, which a procedural field 150 km across does
+// not have. The deepest field we do have is the unerroded PROFILE — a sample with profile near 1 is deep
+// inside the modelled cloud by construction, and it is what the paper's own ambient formula is already
+// built on (p. 141). Its range maps onto the reference's -128..0 with the sign flipped: profile 0 IS the
+// surface, profile 1 IS the core.
+//
+// The same pair of constants drives the ambient column below (CLD-104) — one number, one place, because
+// they are the same physical claim measured on the same page.
+const float CLOUD_MS_EXTINCTION_SURFACE = 0.25f;
+const float CLOUD_MS_EXTINCTION_CORE    = 0.05f;
+
+// @p profile is the UNERRODED dimensional profile in [0,1]; @p cosTheta is the view/sun angle cosine, 1
+// when the eye looks straight at the sun.
+float CloudMultiScatterExtinction(float profile, float cosTheta)
+{
+    float deep = mix(CLOUD_MS_EXTINCTION_SURFACE, CLOUD_MS_EXTINCTION_CORE, clamp(profile, 0.0f, 1.0f));
+    return CloudRemapRange(cosTheta, 0.0f, 0.9f, CLOUD_MS_EXTINCTION_SURFACE, deep);
+}
+
+// The optical depth the multiple-scattering octaves should actually see, given what the sun march measured.
+//
+// Expressed as the RATIO to the surface coefficient rather than as the coefficient itself, and that is the
+// whole of why this can land without re-authoring every preset: our tauSun already carries whatever
+// calibration ExtinctionScale and the cone march were tuned to, and the reference's 0.25 is what that
+// tuning corresponds to — a cloud edge. So the multiplier is exactly 1 at profile 0 and exactly 1 for any
+// view that does not face the sun, and the deepest backlit sample gets 0.05/0.25 = one fifth of the optical
+// depth, which is the reference's own ratio and nothing else.
+float CloudMultiScatterOpticalDepth(float opticalDepthToSun, float profile, float cosTheta)
+{
+    return max(opticalDepthToSun, 0.0f) *
+           (CloudMultiScatterExtinction(profile, cosTheta) / CLOUD_MS_EXTINCTION_SURFACE);
+}
+
 // Multiple scattering, approximated by N octaves with geometric falloff (Wrenninge et al. / Schneider).
 // Octave i attenuates with extinction^(a^i), contributes scatter^(b^i) and flattens its phase by c^i.
 // It costs arithmetic, not samples: the optical depth is the one already marched toward the sun, so a
@@ -520,15 +571,15 @@ vec3 CloudAmbient(vec3 skyRadiance, vec3 groundRadiance, float skyMultiplier, fl
 // @p strength blends the whole thing back toward unoccluded — the knob that says how literally to take
 // the occlusion model.
 //
-// The column's extinction is DEPTH-MODULATED (CLD-104), which is the paper's own answer to "why are the
-// cores not black": Nubis3 p.136 drives the effective extinction of its multiple-scattering estimate
-// from 0.25 at the cloud surface down to 0.05 deep inside, because light that has already scattered
-// once penetrates far deeper than a collimated beam. The paper indexes that by SDF depth; the deepest
-// field we have is the PROFILE — the same quantity the paper's own ambient formula (p.141) is built on:
-// a sample with profile near 1 is deep inside the modelled cloud by construction. A constant 0.25 was
-// the previous stand-in, and it darkened exactly the thick interiors the modulation exists to keep lit.
-const float CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE = 0.25f;
-const float CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE    = 0.05f;
+// The column's extinction is DEPTH-MODULATED (CLD-104) by the same p.136 pair the direct term uses —
+// CLOUD_MS_EXTINCTION_SURFACE / _CORE, defined once above with the reasoning. Sky light is the term the
+// argument applies to most obviously: it has bounced by definition, so it penetrates a core the sun's own
+// beam cannot reach. A constant 0.25 was the previous stand-in, and it darkened exactly the thick
+// interiors the modulation exists to keep lit.
+//
+// There is NO view-angle factor here, and that is deliberate rather than an omission: p.136's outer
+// Remap(sun_dot, ...) exists because the direct term is a beam from one direction. Ambient arrives from
+// the whole sky, so it has no angle to be modulated by.
 
 // @p profile is the UNERRODED dimensional profile (the cheap density), per Nubis3 p.141 — the eroded
 // density goes to zero on every wisp the erosion carved, and ambient occlusion driven by it lit the
@@ -537,7 +588,7 @@ float CloudAmbientOcclusion(float profile, float columnDensityLength, float sigm
 {
     float p      = clamp(profile, 0.0f, 1.0f);
     float local  = sqrt(max(1.0f - p, 0.0f));
-    float k      = mix(CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE, CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE, p);
+    float k      = mix(CLOUD_MS_EXTINCTION_SURFACE, CLOUD_MS_EXTINCTION_CORE, p);
     float column = exp(-max(columnDensityLength, 0.0f) * max(sigmaScale, 0.0f) * k);
     return mix(1.0f, local * column, clamp(strength, 0.0f, 1.0f));
 }

@@ -1358,6 +1358,24 @@ so the final lit:shadow luminance ratio lands near F8's 2.5-4:1 at midday. *Rati
 contrast was carried by hue instead of luminance. *Acceptance:* measured pixel ratio between a lit top
 and a shadowed base in the midday shot falls in [2, 5].
 
+**CLD-113 (depth-modulated multiple scattering on the DIRECT term).** The optical depth the
+multi-scatter octaves integrate is modulated by the same p.136 pair CLD-104 gave the ambient column,
+expressed as a ratio to the surface coefficient so the calibrated case is untouched:
+`tau_ms = tauSun * (Remap(cosTheta, 0, 0.9, 0.25, mix(0.25, 0.05, profile)) / 0.25)`, seeded by the
+unerroded profile the density sample already returns (CLD-106 — no extra fetch). At profile 0, or for
+any view that does not face the sun, the multiplier is exactly 1 and the march is bit-identical to
+before. *Rationale:* p.135→136 — light that has already scattered penetrates a core a collimated beam
+cannot reach, and CLD-104 applied that insight to the smaller of the two terms it governs.
+*Acceptance:* CloudMath asserts the bounds, both monotonicities, the unchanged rim/front-lit cases and
+a strict brightening of deep backlit samples against the pre-CLD-113 formula kept as a local reference.
+*Measured:* the port is faithful and free, but worth only +0.1 to +0.3 luma (8-bit) in the Storm,
+Sunset and UEShowcase backlit shots, with a ceiling of +2.5 measured by forcing the core coefficient
+everywhere. The reason is structural and belongs in the record: at `CLOUD_EXTINCTION_PER_WORLD_UNIT`
+a dense cloud is opaque within ~40 m, so the samples the modulation acts on sit behind a skin the eye
+never sees through, while the samples the eye does see have a small tauSun the modulation is designed
+not to touch. Reaching pp. 136/137 therefore needs the ambient side of the audit's §4 division of
+labour (AmbientOcclusion 0.55 → 0.85-1.0) as well, which is a separate item.
+
 ### 10.3 Explicitly rejected in v3
 
 * A vertical summed-density buffer (F2's literal 256×256×32) — CLD-103's projection of the existing

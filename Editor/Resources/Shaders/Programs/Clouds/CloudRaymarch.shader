@@ -263,6 +263,7 @@ Shader "CloudRaymarch"
                     // separate CloudDensityCheap call here was two texture fetches per shaded sample.
                     vec2  densitySample = CloudDensitySample(worldPos, height, state.T);
                     float density       = densitySample.x;
+                    float profile       = densitySample.y;
                     occupied            = density > 0.0f;
 
                     if (occupied)
@@ -319,7 +320,17 @@ Shader "CloudRaymarch"
                         float tauSun = sunDensityLength * sigmaScale;
 
                         // --- direct light: multi-scattered Beer x dual-lobe phase, powder, height ---
-                        vec3 energy = CloudMultiScatter(tauSun, u_ExtinctionTint.xyz, cosTheta,
+                        //
+                        // The octaves march an optical depth that is DEPTH-MODULATED (CLD-113): Nubis3
+                        // p.136 makes the effective extinction of the multiple-scattering estimate fall
+                        // from 0.25 at the surface to 0.05 in the core, and hands the reduction out only
+                        // toward the sun. Passing the raw tauSun — the collimated beam's own optical depth
+                        // — to a term that is by definition NOT collimated is what rendered p.135's
+                        // charcoal cores instead of p.136's luminous ones. The profile costs nothing here:
+                        // CLD-106 already pays for it in the one density evaluation above.
+                        vec3 energy = CloudMultiScatter(CloudMultiScatterOpticalDepth(tauSun, profile,
+                                                                                      cosTheta),
+                                                        u_ExtinctionTint.xyz, cosTheta,
                                                         u_MultiScatterOctaves,
                                                         u_MultiScatterExtinctionFalloff,
                                                         u_MultiScatterScatterFalloff,
@@ -334,8 +345,7 @@ Shader "CloudRaymarch"
                         // collapses to its 0.05 floor, and the in-scatter term crushed exactly the
                         // silver-lining rim the phase function was building. The profile is also what
                         // the ambient occlusion below is defined on (Nubis3 p.141), so one fetch serves
-                        // both.
-                        float profile   = densitySample.y;
+                        // both — and, since CLD-113, the depth modulation of the direct term too.
                         float inScatter = CloudInScatterProbability(height, profile, tauSun);
 
                         // Powder fades out toward the sun (CLD-107) — the dark edge is a reflection-side
