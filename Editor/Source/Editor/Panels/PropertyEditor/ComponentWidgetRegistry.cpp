@@ -56,7 +56,7 @@ namespace Desert::Editor
             if ( has( "Atmosphere" ) || has( "Light" ) )
                 return "Lighting";
             if ( has( "Mesh" ) || has( "Text" ) || has( "Particle" ) || has( "Skybox" ) || has( "Terrain" ) ||
-                 has( "Sprite" ) || has( "Decal" ) || has( "Foliage" ) || has( "Cloud" ) )
+                 has( "Sprite" ) || has( "Decal" ) || has( "Foliage" ) || has( "Cloud" ) || has( "Fog" ) )
                 return "Rendering";
             if ( has( "Collider" ) || has( "Rigid" ) || has( "Character" ) || has( "Physics" ) ||
                  has( "Projectile" ) )

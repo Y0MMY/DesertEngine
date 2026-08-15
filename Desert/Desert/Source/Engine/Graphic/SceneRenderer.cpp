@@ -186,6 +186,16 @@ namespace Desert::Graphic
              !cloudInit )
             LOG_WARN( "[SceneRenderer] Volumetric cloud system unavailable: {}", cloudInit.GetError() );
 
+        // Exponential height fog: one compute evaluation issued outside the graph (ExecuteAtmosphericFog)
+        // and one apply pass in the Transparency phase, self-ordered below the clouds' FarField by
+        // RenderPassOrder::AtmosphericFog. Non-fatal: fog must never take a scene down.
+        RegisterSystem<System::HeightFogRenderer>( "HeightFogSystem", this, m_TargetFramebuffer,
+                                                   m_RenderGraphBuilder );
+        if ( const auto fogInit =
+                  SP_CAST( System::HeightFogRenderer, m_RenderSystems["HeightFogSystem"] )->Initialize();
+             !fogInit )
+            LOG_WARN( "[SceneRenderer] Height fog system unavailable: {}", fogInit.GetError() );
+
         // GPU particles: compute-simulated billboards drawn in the Transparency phase. Non-fatal.
         RegisterSystem<System::ParticleRenderer>( "ParticleSystem", this, m_TargetFramebuffer,
                                                   m_RenderGraphBuilder );
@@ -569,6 +579,15 @@ namespace Desert::Graphic
         {
             DESERT_PROFILE_SCOPE( "SkyAtmosphereLuts" );
             UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )->ExecuteAtmosphereLuts();
+        }
+
+        // Exponential height fog: the closed-form compute evaluation. HERE for the same reason as the
+        // clouds below — it reads the finished scene depth and must be dispatched outside an open render
+        // pass. Its apply is replayed by ExecuteTransparency at RenderPassOrder::AtmosphericFog, under
+        // the cloud composite, so the clouds are drawn OVER the fogged scene.
+        {
+            DESERT_PROFILE_SCOPE( "AtmosphericFog" );
+            ExecuteAtmosphericFog();
         }
 
         // Volumetric clouds: the weather-map and raymarch dispatches. HERE and not earlier — the march
@@ -1269,6 +1288,17 @@ namespace Desert::Graphic
     {
         UNIQUE_GET_AS( System::VolumetricCloudRenderer, m_RenderSystems["VolumetricCloudSystem"] )
              ->ExecuteInFrame();
+    }
+
+    void SceneRenderer::SetHeightFog( bool present, const ECS::ExponentialHeightFogData& data, float fogHeightY )
+    {
+        UNIQUE_GET_AS( System::HeightFogRenderer, m_RenderSystems["HeightFogSystem"] )
+             ->SetFogSettings( present, data, fogHeightY );
+    }
+
+    void SceneRenderer::ExecuteAtmosphericFog()
+    {
+        UNIQUE_GET_AS( System::HeightFogRenderer, m_RenderSystems["HeightFogSystem"] )->ExecuteInFrame();
     }
 
     void SceneRenderer::ExecuteTransparency()

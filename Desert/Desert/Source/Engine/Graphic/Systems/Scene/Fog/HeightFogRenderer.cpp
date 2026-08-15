@@ -1,0 +1,261 @@
+#include "HeightFogRenderer.hpp"
+
+#include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/RenderGraphSort.hpp>
+#include <Engine/Graphic/RenderPhase.hpp>
+#include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Runtime/ResourceRegistry.hpp>
+
+#include <Common/Core/Logger.hpp>
+#include <Common/Core/Profiler.hpp>
+
+namespace Desert::Graphic::System
+{
+    namespace
+    {
+        // 8x8, like every compute pass in the engine: 64 invocations is inside every implementation's
+        // guaranteed maximum, and the dispatch bounds-checks, so any target size is fine.
+        constexpr uint32_t kWorkGroupSize = 8;
+
+        constexpr const char* kFogShaderName   = "HeightFog";
+        constexpr const char* kApplyShaderName = "HeightFogApply";
+
+        constexpr uint32_t GroupCount( uint32_t extent )
+        {
+            return ( extent + kWorkGroupSize - 1 ) / kWorkGroupSize;
+        }
+
+        double BytesToMiB( uint64_t bytes )
+        {
+            return static_cast<double>( bytes ) / ( 1024.0 * 1024.0 );
+        }
+    } // namespace
+
+    HeightFogRenderer::~HeightFogRenderer() = default;
+
+    Common::BoolResultStr HeightFogRenderer::Initialize()
+    {
+        if ( !CreatePipelines() )
+            return Common::MakeError( "HeightFogRenderer: the fog shaders could not be resolved "
+                                      "(HeightFog / HeightFogApply)" );
+
+        // Non-persistent, so the driver keeps one copy per (frame x recording renderer slot) — the
+        // Docs/RENDERER_FRAME_STATE.md rule; a shared buffer would let a preview renderer overwrite the
+        // viewport's fog mid-frame.
+        m_ParamsBuffer = ShaderResources::StorageBuffer::Create( "FogParams", kFogPayloadBytes, kFogParamsBinding,
+                                                                 /*persistent=*/false );
+        if ( !m_ParamsBuffer )
+            return Common::MakeError( "HeightFogRenderer: could not create the fog parameter buffer" );
+
+        m_ApplyMaterial = std::make_unique<MaterialHeightFog>();
+        return BOOLSUCCESS;
+    }
+
+    void HeightFogRenderer::Shutdown()
+    {
+        m_FogPipeline.reset();
+        m_ApplyPipeline.reset();
+        m_ApplyMaterial.reset();
+        m_FogImage.reset();
+        m_ParamsBuffer.reset();
+    }
+
+    bool HeightFogRenderer::CreatePipelines()
+    {
+        const auto shaderService = Runtime::ResourceRegistry::GetShaderService();
+        if ( !shaderService )
+            return false;
+
+        const auto fogShader = shaderService->GetByName( kFogShaderName );
+        if ( !fogShader )
+        {
+            LOG_ERROR( "[HeightFog] Compute shader '{}' is not registered. Expected "
+                       "Editor/Resources/Shaders/Programs/Fog/{}.shader.",
+                       kFogShaderName, kFogShaderName );
+            return false;
+        }
+        m_FogPipeline = ComputePipeline::Create( { .Shader = fogShader, .DebugName = kFogShaderName } );
+        if ( !m_FogPipeline )
+            return false;
+        m_FogPipeline->Invalidate();
+
+        const auto target = m_TargetFramebuffer.lock();
+        if ( !target )
+            return false;
+
+        const auto applyShader = shaderService->GetByName( kApplyShaderName );
+        if ( !applyShader )
+        {
+            LOG_ERROR( "[HeightFog] Graphics shader '{}' is not registered.", kApplyShaderName );
+            return false;
+        }
+
+        GraphicsPipelineSpecification spec;
+        spec.DebugName   = kApplyShaderName;
+        spec.Shader      = applyShader;
+        spec.Framebuffer = target;
+
+        // A fullscreen quad has no meaningful depth of its own; occlusion was resolved inside the
+        // compute pass, which evaluated every pixel at the distance the depth attachment reported.
+        spec.DepthTestEnabled  = false;
+        spec.DepthWriteEnabled = false;
+        spec.CullMode          = CullMode::None;
+        spec.Topology          = PrimitiveTopology::Triangles;
+
+        // scene = fog.rgb * One + scene * fog.a — the premultiplied over-operator; the compute pass
+        // emits exactly that pair.
+        spec.BlendEnable         = true;
+        spec.SrcColorBlendFactor = BlendFactor::One;
+        spec.DstColorBlendFactor = BlendFactor::SrcAlpha;
+
+        // Replayed by ExecuteTransparency with a LOAD begin, so the pipeline is built against the
+        // framebuffer's LOAD render pass.
+        spec.UseLoadRenderPass = true;
+
+        m_ApplyPipeline = GraphicsPipeline::Create( spec );
+        if ( m_ApplyPipeline )
+            m_ApplyPipeline->Invalidate();
+
+        return m_FogPipeline && m_ApplyPipeline;
+    }
+
+    void HeightFogRenderer::SetFogSettings( bool present, const ECS::ExponentialHeightFogData& data,
+                                            float fogHeightY )
+    {
+        m_Present    = present;
+        m_Data       = data;
+        m_FogHeightY = fogHeightY;
+    }
+
+    bool HeightFogRenderer::EnsureResources( uint32_t width, uint32_t height )
+    {
+        if ( m_ResourcesFailed )
+            return false;
+
+        if ( m_FogImage && width == m_FogWidth && height == m_FogHeight )
+            return true;
+
+        // The old image may still be referenced by descriptors of frames in flight — the same rule the
+        // cloud scatter target follows on resize.
+        if ( m_FogImage )
+            Renderer::GetInstance().WaitDeviceIdle();
+
+        const Core::Formats::Image2DSpecification spec{
+             .Tag        = "HeightFogApply",
+             .Width      = width,
+             .Height     = height,
+             .Format     = Core::Formats::ImageFormat::RGBA16F,
+             .Mips       = 1u,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+
+        m_FogImage = Image2D::Create( spec, nullptr );
+        if ( !m_FogImage )
+        {
+            LOG_ERROR( "[HeightFog] The {}x{} RGBA16F fog target ({:.2f} MiB) could not be created; the "
+                       "height fog will not render for this view.",
+                       width, height,
+                       BytesToMiB( Core::Formats::CalculateImageSize( width, height,
+                                                                      Core::Formats::ImageFormat::RGBA16F ) ) );
+            m_ResourcesFailed = true;
+            return false;
+        }
+
+        m_FogWidth  = width;
+        m_FogHeight = height;
+
+        // The cost is announced once, on the allocation, not discovered in a memory graph later.
+        LOG_INFO(
+             "[HeightFog] Fog target {}x{} RGBA16F ({:.2f} MiB) for a {}x{} view.", width, height,
+             BytesToMiB( Core::Formats::CalculateImageSize( width, height, Core::Formats::ImageFormat::RGBA16F ) ),
+             width, height );
+        return true;
+    }
+
+    void HeightFogRenderer::ExecuteInFrame()
+    {
+        DESERT_PROFILE_SCOPE( "HeightFog: ExecuteInFrame" );
+
+        m_HasFrameResult = false;
+
+        // The zero-cost contract: a scene without the component (or with the fog disabled) leaves this
+        // function here, before any allocation, upload or dispatch.
+        if ( !m_Present || !m_Data.Enabled || !m_FogPipeline || !m_ApplyPipeline || !m_ParamsBuffer )
+            return;
+
+        const auto* camera = m_SceneRenderer->GetMainCamera();
+        if ( !camera )
+            return;
+
+        const auto target = m_TargetFramebuffer.lock();
+        if ( !target || target->GetDepthAttachmentCount() == 0 )
+            return;
+
+        if ( !EnsureResources( target->GetFramebufferWidth(), target->GetFramebufferHeight() ) )
+            return;
+
+        // The atmosphere is a coupling, not a dependency: without one the fog keeps its authored colour
+        // and drops the sun lobe and the sky ambient (PackFogParams says so per term). Fog on a
+        // sky-less scene is legitimate; a cloud without a sun is not — hence no cloud-style bail-out.
+        const FogGpuPayload payload = PackFogParams( m_Data, m_SceneRenderer->GetAtmosphere(), m_FogHeightY );
+        m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
+
+        FogPush push{};
+        push.InverseViewProjection = glm::inverse( camera->GetProjectionMatrix() * camera->GetViewMatrix() );
+        push.CameraPosition        = glm::vec4( camera->GetPosition(), 0.0f );
+
+        auto& renderer = Renderer::GetInstance();
+
+        Image2D* depthImage = target->GetDepthAttachmentImage().get();
+
+        // Present the DEPTH attachment to a compute sampler and hand it back afterwards — its tracked
+        // layout is not legal for a combined image sampler, and SetInput binds the tracked layout
+        // verbatim. Same round-trip as the cloud raymarch.
+        renderer.ComputeImageBeginRead( depthImage );
+        renderer.ComputeImageBeginWrite( m_FogImage.get() );
+
+        m_FogPipeline->SetOutput( kFogOutputBinding, m_FogImage.get(), 0 );
+        m_FogPipeline->SetStorageBuffer( kFogParamsBinding, m_ParamsBuffer.get() );
+        m_FogPipeline->SetInput( kFogSceneDepthBinding, depthImage );
+        m_FogPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
+
+        renderer.DispatchComputeInFrame( m_FogPipeline.get(), GroupCount( m_FogWidth ), GroupCount( m_FogHeight ),
+                                         1 );
+
+        renderer.ComputeImageEndWrite( m_FogImage.get() );
+        renderer.ComputeImageEndRead( depthImage );
+
+        m_HasFrameResult = true;
+    }
+
+    void HeightFogRenderer::RegisterPasses( RenderGraphBuilder& builder )
+    {
+        const auto target = m_TargetFramebuffer.lock();
+        if ( !target || !m_ApplyPipeline )
+            return;
+
+        RenderGraphBuilder::PassConfig config;
+        config.Name        = "HeightFogApply";
+        config.Phase       = RenderPhase::Transparency;
+        config.ExecuteFunc = [this]()
+        {
+            if ( !m_HasFrameResult || !m_FogImage || !m_ApplyMaterial )
+                return;
+
+            m_ApplyMaterial->Bind( m_FogImage.get() );
+            Renderer::GetInstance().SubmitFullscreenQuad( m_ApplyPipeline.get(),
+                                                          m_ApplyMaterial->GetMaterialExecutor() );
+        };
+        config.PipelineSpec      = m_ApplyPipeline->GetSpecification();
+        config.TargetFramebuffer = target;
+        config.Dependencies      = { RenderPassDependency( RenderPhase::Geometry ) };
+
+        // The fog is the FLOOR of the Transparency phase: it must land on the opaque scene before the
+        // cloud composite (FarField) and every particle draw over it, so all of them are composited
+        // OVER the fogged world. Stated here, on the pass itself, not implied by registration order.
+        config.OrderInPhase = RenderPassOrder::AtmosphericFog;
+
+        builder.AddPass( config );
+    }
+} // namespace Desert::Graphic::System

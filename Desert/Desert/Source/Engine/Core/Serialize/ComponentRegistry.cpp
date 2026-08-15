@@ -1019,6 +1019,8 @@ namespace Desert::Core::Serialize
              "SkyAtmosphere", "SkyAtmosphereData", &ECS::SkyAtmosphereComponent::Data ) );
         Register( MakeReflected<ECS::VolumetricCloudsComponent, ECS::VolumetricCloudData>(
              "VolumetricClouds", "VolumetricCloudData", &ECS::VolumetricCloudsComponent::Data ) );
+        Register( MakeReflected<ECS::ExponentialHeightFogComponent, ECS::ExponentialHeightFogData>(
+             "ExponentialHeightFog", "ExponentialHeightFogData", &ECS::ExponentialHeightFogComponent::Data ) );
 
         // ---- Script (manual: .lua path + exposed-property values) ----
         Register( MakeScript() );

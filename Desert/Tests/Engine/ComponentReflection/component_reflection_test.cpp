@@ -429,6 +429,100 @@ TEST( VolumetricCloudReflection, QualityAndPresetSelectorsAreEnums )
 }
 
 // ---------------------------------------------------------------------------------------------------
+// ExponentialHeightFogData — 14 fields in three groups, UE's UExponentialHeightFogComponent parameter
+// for parameter (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 3.2). The fog HEIGHT is deliberately
+// absent: it is the entity's TransformComponent Y, as UE takes it from the component transform.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( HeightFogReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
+{
+    const std::vector<std::string> expected = {
+         "Enabled",
+         "FogDensity",
+         "FogHeightFalloff",
+         "FogInscatteringLuminance",
+         "SkyAtmosphereAmbientContributionColorScale",
+         "FogMaxOpacity",
+         "StartDistance",
+         "FogCutoffDistance",
+         "SecondFogDensity",
+         "SecondFogHeightFalloff",
+         "SecondFogHeightOffset",
+         "DirectionalInscatteringExponent",
+         "DirectionalInscatteringStartDistance",
+         "DirectionalInscatteringLuminance",
+    };
+
+    const TypeInfo& fog = Type( "ExponentialHeightFogData" );
+    EXPECT_EQ( fog.Fields.size(), 14u );
+    EXPECT_EQ( FieldNames( fog ), expected );
+
+    EXPECT_EQ( CountInCategory( fog, "Exponential Height Fog" ), 8u );
+    EXPECT_EQ( CountInCategory( fog, "Second Fog Layer" ), 3u );
+    EXPECT_EQ( CountInCategory( fog, "Directional Inscattering" ), 3u );
+
+    // The fog height is NOT a field — one owner, the transform, or the fog floor and the entity that
+    // owns it can disagree.
+    EXPECT_EQ( Find( fog, "FogHeight" ), nullptr );
+    EXPECT_EQ( Find( fog, "FogHeightOffset" ), nullptr );
+}
+
+// UE's authored defaults, pinned so a UE-calibrated fog transplants number for number: FogDensity 0.02,
+// FogHeightFalloff 0.2, second layer off (density 0), MaxOpacity 1, StartDistance 0, cutoff off,
+// exponent 4 with a 10000-unit (100 m) start, directional colour black (the sun supplies it).
+TEST( HeightFogReflection, DefaultsAreUEs )
+{
+    const TypeInfo& fog = Type( "ExponentialHeightFogData" );
+
+    EXPECT_TRUE( DefaultOf<bool>( fog, "Enabled" ) );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "FogDensity" ), 0.02f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "FogHeightFalloff" ), 0.2f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "FogMaxOpacity" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "StartDistance" ), 0.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "FogCutoffDistance" ), 0.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "SecondFogDensity" ), 0.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "SecondFogHeightFalloff" ), 0.2f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "SecondFogHeightOffset" ), 0.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "DirectionalInscatteringExponent" ), 4.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( fog, "DirectionalInscatteringStartDistance" ), 10000.0f );
+    EXPECT_EQ( DefaultOf<glm::vec3>( fog, "DirectionalInscatteringLuminance" ), glm::vec3( 0.0f ) );
+    EXPECT_EQ( DefaultOf<glm::vec3>( fog, "SkyAtmosphereAmbientContributionColorScale" ), glm::vec3( 1.0f ) );
+
+    for ( const char* name : { "FogInscatteringLuminance", "SkyAtmosphereAmbientContributionColorScale",
+                               "DirectionalInscatteringLuminance" } )
+    {
+        const FieldInfo* f = Find( fog, name );
+        ASSERT_NE( f, nullptr ) << name;
+        EXPECT_EQ( f->Type, FieldType::Vec3 ) << name;
+        EXPECT_TRUE( f->Meta.IsColor ) << name << " must draw as a colour picker";
+    }
+}
+
+// One world unit is one centimetre: every fog distance says so with Length, while the density and the
+// falloffs deliberately do NOT — they keep UE's own "per 1000 cm" semantics (converted once, in
+// PackFogParams) so UE numbers transplant unchanged, and marking them as lengths would be a lie.
+TEST( HeightFogReflection, DistancesAreLengthsAndEveryFieldIsAnnotatedWellEnoughToAuthor )
+{
+    const TypeInfo& fog = Type( "ExponentialHeightFogData" );
+
+    for ( const char* name : { "StartDistance", "FogCutoffDistance", "SecondFogHeightOffset",
+                               "DirectionalInscatteringStartDistance" } )
+        EXPECT_TRUE( Find( fog, name )->Meta.IsLength ) << name;
+
+    for ( const char* name : { "FogDensity", "FogHeightFalloff", "SecondFogDensity", "SecondFogHeightFalloff",
+                               "FogMaxOpacity", "DirectionalInscatteringExponent" } )
+        EXPECT_FALSE( Find( fog, name )->Meta.IsLength ) << name;
+
+    for ( const auto& f : fog.Fields )
+    {
+        EXPECT_FALSE( f.Meta.Tooltip.empty() ) << f.Name << " has no tooltip";
+        EXPECT_FALSE( f.Meta.DisplayName.empty() ) << f.Name << " has no display name";
+        if ( f.Type == FieldType::Float || f.Type == FieldType::Int )
+            EXPECT_TRUE( f.Meta.HasRange ) << f.Name << " has no Range, so it draws as a bare drag field";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
 // What moved OUT of SkyboxComponent, and the two fields the directional light gained
 // ---------------------------------------------------------------------------------------------------
 

@@ -38,6 +38,7 @@
 #include "Systems/Scene/Deferred/GIResolveRenderer.hpp"
 #include "Systems/Scene/Particles/ParticleRenderer.hpp"
 #include "Systems/Scene/Clouds/VolumetricCloudRenderer.hpp"
+#include "Systems/Scene/Fog/HeightFogRenderer.hpp"
 
 #include <Engine/Core/SceneSettings.hpp>
 
@@ -135,6 +136,11 @@ namespace Desert::Graphic
         // `present` is false when the scene has no cloud component at all — said explicitly, because the
         // renderer keeps its settings across frames and would otherwise keep marching a deleted one.
         void SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data );
+
+        // This frame's exponential height fog (from ExponentialHeightFogComponent, via the ECS).
+        // `present` follows the cloud rule above; `fogHeightY` is the fog entity's transform Y — the fog
+        // floor, owned by the transform and never authored twice.
+        void SetHeightFog( bool present, const ECS::ExponentialHeightFogData& data, float fogHeightY );
 
         // The evaluated per-frame sky: sun direction and radiance, ambient above/below, night factor, the
         // planet radius, and an OPAQUE handle to the packed sky-parameter buffer. This is the whole surface
@@ -268,6 +274,12 @@ namespace Desert::Graphic
         // illegal). The composite itself is a graph pass in Transparency and is replayed by
         // ExecuteTransparency, ordered ahead of the particles by RenderPassOrder::FarField.
         void ExecuteVolumetricClouds();
+        // Exponential height fog: the closed-form COMPUTE evaluation, called in the same slot as the
+        // clouds above (scene depth finished in both paths, no render pass open) and for the same
+        // reasons. Its apply is a graph pass in Transparency at RenderPassOrder::AtmosphericFog —
+        // BEFORE the clouds' FarField, so clouds and particles composite over the fogged scene. When
+        // Sky Phase 3 lands, this pass composes fog OVER the aerial perspective (UE's order).
+        void ExecuteAtmosphericFog();
         // UI-phase passes (the Render2D canvas) drawn as a LOAD overlay AFTER the deferred lighting
         // composite — same reason as ExecuteTransparency/ExecuteDebugOverlay: recorded inside the graph
         // they land on the target BEFORE the composite (painted over) AND a CLEAR begin would wipe the

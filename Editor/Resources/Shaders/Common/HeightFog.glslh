@@ -1,0 +1,155 @@
+// The exponential height fog's closed-form line integral — the ONE evaluation of the fog medium,
+// implemented from the formulas in Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 3.2 (UE's behaviour as
+// the reference; no Epic shader text appears here).
+//
+// This file is compiled TWICE, from the same text:
+//   * as GLSL, by Programs/Fog/HeightFog.shader (the fullscreen fog compute pass);
+//   * as C++, by Desert/Tests/Engine/HeightFog/HeightFogReference.hpp, which the HeightFog tests drive
+//     against a brute-force numeric integration of the same medium.
+// Sharing the text means a passing test is a statement about the code the GPU runs — the arrangement
+// Common/CloudGeometry.glslh established, and its restricted dialect applies verbatim:
+//   * no swizzles (glm's are proxies), no `out` parameters, no arrays, no `inline`, no namespaces;
+//   * float literals carry the `f` suffix so C++ does not silently widen;
+//   * a struct is returned by value through a NAMED LOCAL whose fields are assigned one at a time;
+//   * functions are defined before use, C-style, because GLSL has no forward declarations.
+//
+// THE MEDIUM. One fog layer is d(y) = Density * 2^(-Falloff * (y - FogHeight)) — exponential in height,
+// in exp2 form because that is the transcendental GPUs implement natively and the base is absorbed by
+// the authored Density/Falloff anyway. Its optical depth along a camera-to-point segment has a CLOSED
+// FORM: with the origin's density collapsed into one number R = d(origin.y), and a = Falloff * deltaY
+// the total height change over the segment,
+//
+//     OpticalDepth = R * (1 - 2^-a) / a * SegmentLength
+//
+// (the average density along the segment times its length; as a -> 0 the average tends to R * ln2, the
+// uniform-medium limit, taken through a Taylor branch so the division never meets zero). Transmittance
+// is exp2(-OpticalDepth). Two layers sum their optical depths — light does not care which layer
+// extinguished it.
+//
+// SCALE. All fog maths runs in KILOMETRES (heights, distances, per-km coefficients): the closed form
+// subtracts heights and multiplies by distances, and at world-unit (centimetre) magnitudes those
+// products leave float precision long before the horizon. The conversion happens exactly once, in
+// Graphic::PackFogParams and in the pass's own position reconstruction — the CloudPayload.hpp rule.
+
+#ifndef HEIGHT_FOG_GLSLH
+#define HEIGHT_FOG_GLSLH
+
+const float HEIGHT_FOG_LN2        = 0.6931471805599453f;
+const float HEIGHT_FOG_INV_4PI    = 0.07957747154594767f;
+
+// One world unit is one centimetre (Common::Units), so a kilometre is 100 000 of them.
+const float HEIGHT_FOG_WORLD_UNITS_PER_KM = 100000.0f;
+
+// ---- The parameters, unpacked --------------------------------------------------------------------
+
+struct HeightFogParams
+{
+    // Layer 0. Density is the coefficient at the fog height (per km, exp2 form); Falloff is per km of
+    // altitude; Height is the layer's own floor in km.
+    float Density0;
+    float Falloff0;
+    float Height0Km;
+
+    // Layer 1 (UE's SecondFogData). Density 0 makes every one of its terms exactly zero.
+    float Density1;
+    float Falloff1;
+    float Height1Km;
+
+    float StartDistanceKm;  // the near segment excluded from the integral
+    float CutoffDistanceKm; // beyond it the fog is removed entirely; 0 = no cutoff
+    float MinTransmittance; // 1 - FogMaxOpacity: the transmittance floor
+
+    vec3 Inscattering;      // fog colour, sky ambient already folded in
+    vec3 DirectionalColour; // sun-lobe colour: authored + the sun's illuminance
+    float DirectionalExponent;
+    float DirectionalStartKm;
+    vec3 SunDirection; // normalized, TOWARD the sun
+};
+
+struct HeightFogResult
+{
+    vec3  Inscattering;  // premultiplied radiance: scene = Inscattering + scene * Transmittance
+    float Transmittance;
+};
+
+// ---- The closed form ------------------------------------------------------------------------------
+
+// The layer's density at a ray origin: Density * 2^(-Falloff * (originY - fogHeight)). The exponent is
+// clamped to exp2's finite domain — a camera a hundred kilometres under the fog floor must saturate,
+// not produce an infinity that the line integral then multiplies into every pixel.
+float HeightFogCollapsedDensity(float density, float falloff, float originYKm, float fogHeightKm)
+{
+    return density * exp2(clamp(-falloff * (originYKm - fogHeightKm), -125.0f, 126.0f));
+}
+
+// Average density of one layer along a segment whose total height change is deltaYKm, given the
+// collapsed density at the segment's own origin. Multiply by the segment length for optical depth.
+//
+// The exact form (1 - 2^-a) / a degenerates as a -> 0 — a horizontal ray, or a falloff of zero — so
+// below |a| = 0.01 it is replaced by its Taylor expansion ln2 - a * ln2^2 / 2, whose error at the
+// switch point is below 1e-6 relative (the test pins the two branches against each other there). The
+// lower clamp keeps 2^-a finite for a ray plunging far below the fog floor.
+float HeightFogLineIntegral(float collapsedDensity, float falloff, float deltaYKm)
+{
+    float a = max(-127.0f, falloff * deltaYKm);
+    if (abs(a) > 0.01f)
+        return collapsedDensity * (1.0f - exp2(-a)) / a;
+    return collapsedDensity * (HEIGHT_FOG_LN2 - 0.5f * HEIGHT_FOG_LN2 * HEIGHT_FOG_LN2 * a);
+}
+
+// Fog between the camera and a world point, both in kilometres. Pure: every input is a number, so the
+// unit tests drive this exact text across heights, angles and falloffs.
+HeightFogResult HeightFogEvaluate(HeightFogParams p, vec3 cameraKm, vec3 worldKm)
+{
+    HeightFogResult result;
+    result.Inscattering  = vec3(0.0f, 0.0f, 0.0f);
+    result.Transmittance = 1.0f;
+
+    vec3  ray       = worldKm - cameraKm;
+    float rayLength = length(ray);
+
+    // Beyond the cutoff the fog is REMOVED, not saturated (UE's FogCutoffDistance); inside the start
+    // distance there is no fogged segment at all.
+    if (p.CutoffDistanceKm > 0.0f && rayLength > p.CutoffDistanceKm)
+        return result;
+    float excluded = max(p.StartDistanceKm, 0.0f);
+    if (rayLength <= excluded)
+        return result;
+
+    // The integral runs over [StartDistance, rayLength]: the origin moves to the exclusion boundary and
+    // both layers collapse their density THERE — an excluded segment contributes nothing, rather than
+    // being faded out. With StartDistance = 0 this is exactly the camera.
+    float segmentKm = rayLength - excluded;
+    float originYKm = cameraKm.y + ray.y * (excluded / rayLength);
+    float deltaYKm  = ray.y * (segmentKm / rayLength);
+
+    float collapsed0 = HeightFogCollapsedDensity(p.Density0, p.Falloff0, originYKm, p.Height0Km);
+    float collapsed1 = HeightFogCollapsedDensity(p.Density1, p.Falloff1, originYKm, p.Height1Km);
+
+    // Density per unit length averaged over the segment, both layers summed — shared between the
+    // extinction and the directional lobe below, exactly as the research doc's formulas share it.
+    float sharedIntegral = HeightFogLineIntegral(collapsed0, p.Falloff0, deltaYKm) +
+                           HeightFogLineIntegral(collapsed1, p.Falloff1, deltaYKm);
+
+    float opticalDepth = sharedIntegral * segmentKm;
+
+    // Transmittance, floored by 1 - FogMaxOpacity: however thick the medium, the scene keeps at least
+    // that fraction of its own light, and the inscattering below scales by the SAME clamped factor so
+    // the fog colour cannot exceed the opacity it was allowed.
+    float fogFactor = max(clamp(exp2(-opticalDepth), 0.0f, 1.0f), p.MinTransmittance);
+
+    // Directional inscattering: a pow-lobe around the sun, building up with the SAME per-length
+    // integral over the ray beyond its own start distance — near geometry has too little fog between
+    // itself and the camera to catch the glow.
+    vec3  viewDir   = ray * (1.0f / max(rayLength, 1e-6f));
+    float cosSun    = clamp(dot(viewDir, p.SunDirection), 0.0f, 1.0f);
+    float lobe      = pow(cosSun, p.DirectionalExponent) * HEIGHT_FOG_INV_4PI;
+    float dirLength = max(rayLength - p.DirectionalStartKm, 0.0f);
+    float dirAmount = 1.0f - clamp(exp2(-sharedIntegral * dirLength), 0.0f, 1.0f);
+
+    result.Inscattering  = p.Inscattering * (1.0f - fogFactor) + p.DirectionalColour * (lobe * dirAmount);
+    result.Transmittance = fogFactor;
+    return result;
+}
+
+#endif // HEIGHT_FOG_GLSLH

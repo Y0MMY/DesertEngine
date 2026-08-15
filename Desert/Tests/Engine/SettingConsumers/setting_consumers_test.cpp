@@ -274,6 +274,36 @@ namespace
          { "Preset", kCloudWidget },
     };
 
+    // ------------------------------------------------------------------------------------------------
+    // Height fog: the component and its pass shipped together (Sky plan Phase 5), so every field is
+    // WIRED - nothing pending. One funnel consumes them: PackFogParams in FogPayload.hpp turns each
+    // field into the GPU block the fog pass evaluates; Enabled is the renderer's own dispatch gate.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kFogPayload = "Desert/Desert/Source/Engine/Graphic/Fog/FogPayload.hpp";
+    constexpr const char* kFogRenderer =
+         "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Fog/HeightFogRenderer.cpp";
+
+    constexpr Row kFogRows[] = {
+         { "Enabled", kFogRenderer }, // the zero-cost gate: off means no allocation and no dispatch
+
+         { "FogDensity", kFogPayload },
+         { "FogHeightFalloff", kFogPayload },
+         { "FogInscatteringLuminance", kFogPayload },
+         { "SkyAtmosphereAmbientContributionColorScale", kFogPayload },
+         { "FogMaxOpacity", kFogPayload },
+         { "StartDistance", kFogPayload },
+         { "FogCutoffDistance", kFogPayload },
+
+         { "SecondFogDensity", kFogPayload },
+         { "SecondFogHeightFalloff", kFogPayload },
+         { "SecondFogHeightOffset", kFogPayload },
+
+         { "DirectionalInscatteringExponent", kFogPayload },
+         { "DirectionalInscatteringStartDistance", kFogPayload },
+         { "DirectionalInscatteringLuminance", kFogPayload },
+    };
+
     // The repository root, found by walking up from wherever the test binary was started - the same
     // approach the font-baker test uses, so neither has to be run from one exact directory.
     std::string RepoRoot()
@@ -377,6 +407,11 @@ TEST( SettingConsumers, EveryCloudFieldNamesItsConsumerOrTheTaskThatOwesOne )
     CheckTableCoversTypeExactly( Type( "VolumetricCloudData" ), kCloudRows, std::size( kCloudRows ) );
 }
 
+TEST( SettingConsumers, EveryFogFieldNamesItsConsumer )
+{
+    CheckTableCoversTypeExactly( Type( "ExponentialHeightFogData" ), kFogRows, std::size( kFogRows ) );
+}
+
 TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 {
     const std::string root = RepoRoot();
@@ -384,6 +419,18 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 
     CheckWiredRowsReadTheirField( root, kSkyRows, std::size( kSkyRows ) );
     CheckWiredRowsReadTheirField( root, kCloudRows, std::size( kCloudRows ) );
+    CheckWiredRowsReadTheirField( root, kFogRows, std::size( kFogRows ) );
+}
+
+// The fog shipped WHOLE - component, pass and couplings in one task (Sky plan Phase 5) - so it owes
+// nothing. This pin is what keeps that true: a field added without its reader turns this zero into a
+// reviewable edit.
+TEST( SettingConsumers, TheFogComponentOwesNothing )
+{
+    const std::ptrdiff_t pending = std::count_if( std::begin( kFogRows ), std::end( kFogRows ),
+                                                  []( const Row& r ) { return r.Task != nullptr; } );
+
+    EXPECT_EQ( pending, 0 );
 }
 
 // The artistic-gradient sky is finished and owes nothing; the PHYSICAL atmosphere is being built in

@@ -255,6 +255,30 @@ TEST( PassOrder, CloudsCompositeBeforeParticlesInTransparency )
     EXPECT_EQ( SortNames( registeredParticlesFirst, phaseOrder ), expected );
 }
 
+// The height-fog apply is the FLOOR of the Transparency phase: it modifies the opaque scene itself, so
+// everything the phase composites over that scene — the cloud far field and every particle — must land
+// on top of it. Two constants that must agree (AtmosphericFog below FarField below Default); each is
+// individually plausible, which is exactly why the agreement is asserted rather than assumed.
+TEST( PassOrder, HeightFogAppliesUnderTheCloudsAndTheParticles )
+{
+    const std::vector<RenderPhaseID> phaseOrder = OrderRenderPhases(
+         { RenderPhase::Geometry, RenderPhase::Transparency }, EnginePhaseEdges(), BuiltinDeclarationOrder() );
+
+    // Registered in the worst possible order — the fog last, after everything that must draw over it.
+    const std::vector<Pass> passes = {
+         { "ParticlePass", RenderPhase::Transparency, RenderPassOrder::Default },
+         { "CloudCompositePass", RenderPhase::Transparency, RenderPassOrder::FarField },
+         { "HeightFogApply", RenderPhase::Transparency, RenderPassOrder::AtmosphericFog },
+    };
+
+    const std::vector<std::string> expected = { "HeightFogApply", "CloudCompositePass", "ParticlePass" };
+    EXPECT_EQ( SortNames( passes, phaseOrder ), expected );
+
+    // Said as the relation itself, so a future pass inserted between them cannot quietly reorder these.
+    EXPECT_LT( RenderPassOrder::AtmosphericFog, RenderPassOrder::FarField );
+    EXPECT_LT( RenderPassOrder::FarField, RenderPassOrder::Default );
+}
+
 TEST( PassOrder, ShuffledRegistrationAcrossPhasesSortsByPhaseThenRegistration )
 {
     const std::vector<RenderPhaseID> phaseOrder =

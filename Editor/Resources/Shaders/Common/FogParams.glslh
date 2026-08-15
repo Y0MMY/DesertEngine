@@ -1,0 +1,51 @@
+// THE height-fog parameter block, byte for byte. The C++ side of this layout is Graphic::FogGpuPayload
+// (Engine/Graphic/Fog/FogPayload.hpp); the two are kept in step by static_asserts on every offset there.
+// A layout declared twice diverges the first time somebody inserts a field in the middle of one of them,
+// and the failure is a corrupted frame with no error message — the asserts turn it into a build error.
+//
+// Raw `layout(std430, ...)` rather than the ReadBuffer(n) sugar, for the same reason CloudParams.glslh
+// gives: this header must also compile under plain glslc, and raw layout is the sanctioned escape for
+// structural GLSL.
+//
+// UNITS: everything here is already in KILOMETRES and per-kilometre coefficients — PackFogParams
+// converted once, on the C++ side. Nothing in this block is in world units.
+
+#ifndef FOG_PARAMS_GLSLH
+#define FOG_PARAMS_GLSLH
+
+// The binding the fog parameter buffer is bound at. ComputePipeline::SetStorageBuffer takes the binding
+// as an explicit argument and does not consult reflection, so this number and Graphic::kFogParamsBinding
+// must be the same one — a mismatch lands the buffer on another descriptor, not on an error.
+#define FOG_PARAMS_BINDING 1
+
+layout(std430, binding = FOG_PARAMS_BINDING) readonly buffer FogParamsBuffer
+{
+    vec4 u_FogSun;          // xyz = TOWARD the sun (normalized), w = DirectionalInscatteringExponent
+    vec4 u_FogDirectional;  // rgb = directional lobe colour,     w = directional start distance (km)
+    vec4 u_FogInscattering; // rgb = fog inscattering colour,     w = 1 - FogMaxOpacity
+    vec4 u_FogLayer0;       // x = density /km, y = height falloff /km, z = fog height (km), w = start distance (km)
+    vec4 u_FogLayer1;       // x = density /km, y = height falloff /km, z = fog height (km), w = cutoff distance (km; 0 = off)
+};
+
+// Unpacks the block into the struct Common/HeightFog.glslh evaluates (include that first).
+HeightFogParams FogUnpackParams()
+{
+    HeightFogParams p;
+    p.Density0            = u_FogLayer0.x;
+    p.Falloff0            = u_FogLayer0.y;
+    p.Height0Km           = u_FogLayer0.z;
+    p.Density1            = u_FogLayer1.x;
+    p.Falloff1            = u_FogLayer1.y;
+    p.Height1Km           = u_FogLayer1.z;
+    p.StartDistanceKm     = u_FogLayer0.w;
+    p.CutoffDistanceKm    = u_FogLayer1.w;
+    p.MinTransmittance    = u_FogInscattering.w;
+    p.Inscattering        = u_FogInscattering.rgb;
+    p.DirectionalColour   = u_FogDirectional.rgb;
+    p.DirectionalExponent = u_FogSun.w;
+    p.DirectionalStartKm  = u_FogDirectional.w;
+    p.SunDirection        = u_FogSun.xyz;
+    return p;
+}
+
+#endif // FOG_PARAMS_GLSLH
