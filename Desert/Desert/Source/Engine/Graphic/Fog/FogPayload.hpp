@@ -29,6 +29,17 @@ namespace Desert::Graphic
         glm::vec4 Inscattering; // rgb fog colour (sky ambient folded in), w = 1 - FogMaxOpacity
         glm::vec4 Layer0;       // x density /km, y falloff /km, z fog height (km), w start distance (km)
         glm::vec4 Layer1;       // x density /km, y falloff /km, z fog height (km), w cutoff distance (km)
+
+        // The SKY AMBIENT the fog adds to its in-scattering colour, in the form the GPU needs it:
+        //   rgb = SkyAtmosphereAmbientContributionColorScale, the artist's per-channel scale;
+        //   w   = 1 when the distant-sky-light texel is bound and must be sampled, 0 otherwise.
+        //
+        // The VALUE it scales is not here because it does not exist on the CPU: the physical average sky
+        // is one texel produced by Programs/Sky/SkyDistantLight.shader and read by the fog pass in the
+        // same frame, exactly as UE's height fog reads its Distant Sky Light LUT. With w = 0 the shader
+        // adds nothing and Inscattering below carries whatever ambient the model does have — see
+        // PackFogParams.
+        glm::vec4 Ambient;
     };
 
     static_assert( offsetof( FogGpuPayload, SunDirection ) == 0 );
@@ -36,7 +47,8 @@ namespace Desert::Graphic
     static_assert( offsetof( FogGpuPayload, Inscattering ) == 32 );
     static_assert( offsetof( FogGpuPayload, Layer0 ) == 48 );
     static_assert( offsetof( FogGpuPayload, Layer1 ) == 64 );
-    static_assert( sizeof( FogGpuPayload ) == 80, "Five vec4s, nothing else — the shader reads exactly this." );
+    static_assert( offsetof( FogGpuPayload, Ambient ) == 80 );
+    static_assert( sizeof( FogGpuPayload ) == 96, "Six vec4s, nothing else — the shader reads exactly this." );
 
     // Already a multiple of std430's 16-byte block alignment, so the buffer size IS the struct size.
     inline constexpr uint32_t kFogPayloadBytes = sizeof( FogGpuPayload );
@@ -53,6 +65,10 @@ namespace Desert::Graphic
     // is FogPush::AerialPerspective.z, which is 0 when there is no volume — and then the shader never
     // reads the binding and composes the exact identity instead.
     inline constexpr uint32_t kFogAerialPerspectiveBinding = 3;
+    // The sky's DISTANT SKY LIGHT — the one texel holding the average sky radiance. Bound on the same
+    // terms as the volume above (always bound, gated by FogGpuPayload::Ambient.w) and for the same
+    // reason: a declared sampler with no image is an invalid descriptor set, not an unused one.
+    inline constexpr uint32_t kFogDistantSkyLightBinding = 4;
 
     /**
      * Per-dispatch data: everything that changes with the CAMERA rather than with the fog settings.
@@ -92,14 +108,23 @@ namespace Desert::Graphic
      * @param fogHeightWorldY the fog entity's TransformComponent Y, world units — the layer's floor,
      *                        never a field of the component (one owner, like UE's component transform).
      *
-     * The two atmosphere couplings, and their honest status:
+     * The two atmosphere couplings:
      *   * DIRECTIONAL: UE feeds the lobe the sun's POST-TRANSMITTANCE illuminance
      *     (AtmosphereLightIlluminanceOnGroundPostTransmittance) scaled by the sky's
-     *     HeightFogContribution. Until sky Phase 4 lands, AtmosphereEnv::SunIrradiance — the same
-     *     elevation-tinted sun the clouds are lit by — is that quantity's stand-in, at contribution 1.
-     *   * AMBIENT: UE adds the Distant-Sky-Light LUT's average sky. Our stand-in until Phase 4 is the
-     *     mean of AtmosphereEnv's dome and ground-bounce radiance — the same pair the clouds' ambient
-     *     reads, so fog and clouds disagree about the sky by construction of neither.
+     *     HeightFogContribution. Ours is AtmosphereEnv::SunIrradiance — the same elevation-tinted sun
+     *     the clouds are lit by, at contribution 1. That is a DELIBERATE divergence, not a gap: UE's
+     *     quantity is the directional LIGHT's illuminance, and publishing that here would make the
+     *     fog's sun lobe follow the light rather than the sky, which is a calibration event of its own
+     *     (named for the follow-up that moves the clouds onto the distant sky light).
+     *   * AMBIENT: the average sky, and WHERE it comes from follows the sky model, because the two
+     *     models have different ambients and neither is a stand-in for the other:
+     *       - SkyModel::PhysicalAtmosphere — the DISTANT SKY LIGHT texel, marched every frame
+     *         (AtmosphereEnv::DistantSkyLight, UE's Distant Sky Light LUT). It cannot be folded in
+     *         here: it lives on the GPU, so what this packer carries is the artist's scale and a gate,
+     *         and the shader does the multiply.
+     *       - SkyModel::ArtisticGradient — the mean of the dome and ground-bounce radiance, the
+     *         gradient's own ambient and the same pair the clouds read, so a gradient scene's fog is
+     *         bit for bit what it was.
      */
     inline FogGpuPayload PackFogParams( const ECS::ExponentialHeightFogData& data, const AtmosphereEnv& atmosphere,
                                         float fogHeightWorldY )
@@ -115,13 +140,21 @@ namespace Desert::Graphic
 
         const float maxOpacity = glm::clamp( data.FogMaxOpacity, 0.0f, 1.0f );
 
+        // The physical average sky is a GPU texel, so the ambient reaches the shader as two halves: the
+        // scale here, the value there. The handle being non-null is the model switch — AtmosphereEnv
+        // publishes it in PhysicalAtmosphere and only there.
+        const bool physicalAmbient = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
+
         glm::vec3 ambient{ 0.0f };
         glm::vec3 sunLobe = data.DirectionalInscatteringLuminance;
         glm::vec3 sunDir{ 0.0f, 1.0f, 0.0f };
         if ( atmosphere.Valid )
         {
-            ambient = data.SkyAtmosphereAmbientContributionColorScale * 0.5f *
-                      ( atmosphere.ZenithRadiance + atmosphere.GroundRadiance );
+            if ( !physicalAmbient )
+            {
+                ambient = data.SkyAtmosphereAmbientContributionColorScale * 0.5f *
+                          ( atmosphere.ZenithRadiance + atmosphere.GroundRadiance );
+            }
             sunLobe += atmosphere.SunIrradiance;
             sunDir = atmosphere.SunDirection;
         }
@@ -142,6 +175,7 @@ namespace Desert::Graphic
              glm::vec4( density0, falloff0, heightKm, glm::max( data.StartDistance, 0.0f ) / kFogWorldUnitsPerKm );
         p.Layer1 = glm::vec4( density1, falloff1, heightKm + data.SecondFogHeightOffset / kFogWorldUnitsPerKm,
                               glm::max( data.FogCutoffDistance, 0.0f ) / kFogWorldUnitsPerKm );
+        p.Ambient = glm::vec4( data.SkyAtmosphereAmbientContributionColorScale, physicalAmbient ? 1.0f : 0.0f );
         return p;
     }
 } // namespace Desert::Graphic

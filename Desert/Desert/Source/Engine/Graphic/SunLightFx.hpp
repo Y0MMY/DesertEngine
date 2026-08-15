@@ -24,5 +24,14 @@ namespace Desert::Graphic
         // UE's Cloud Scattered Luminance Scale: scales this light's contribution scattered in the cloud
         // medium. Multiplies AtmosphereEnv::SunIrradiance, which the clouds alone consume.
         glm::vec3 CloudScatteredLuminanceScale = glm::vec3( 1.0f );
+
+        // UE's "Affected By Atmosphere Transmittance": whether this sun's colour is multiplied by the
+        // atmosphere's transmittance at ground level (physical model only — see the component).
+        //
+        // FALSE HERE, TRUE ON THE COMPONENT, and the difference is the point: this struct is reset to
+        // its defaults whenever no directional light was chosen as the atmosphere sun, and "no sun was
+        // chosen" must not silently redden a light that the sky is not driving. A chosen sun overwrites
+        // this with its own authored value, which defaults to on as UE ships it.
+        bool AffectedByAtmosphereTransmittance = false;
     };
 } // namespace Desert::Graphic

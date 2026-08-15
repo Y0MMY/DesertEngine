@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdint>
 
 using namespace Desert::Tests::HeightFogRef;
 
@@ -388,12 +389,14 @@ TEST( FogPayload, PackerConvertsUEUnitsAndWorldUnitsToKilometresOnce )
     EXPECT_EQ( glm::vec3( p.Inscattering ), data.FogInscatteringLuminance );
 }
 
-TEST( FogPayload, PackerFoldsTheAtmosphereIntoSunLobeAndAmbient )
+TEST( FogPayload, PackerFoldsTheAtmosphereIntoSunLobeAndTheGradientsAmbient )
 {
     Desert::ECS::ExponentialHeightFogData data;
     data.DirectionalInscatteringLuminance           = { 0.1f, 0.2f, 0.3f };
     data.SkyAtmosphereAmbientContributionColorScale = { 0.5f, 0.5f, 0.5f };
 
+    // No DistantSkyLight handle: this is a SkyModel::ArtisticGradient frame, where the sky's ambient is
+    // the dome the gradient itself defines.
     Desert::Graphic::AtmosphereEnv atmosphere;
     atmosphere.Valid          = true;
     atmosphere.SunDirection   = glm::normalize( glm::vec3( 0.3f, 0.8f, 0.5f ) );
@@ -403,16 +406,51 @@ TEST( FogPayload, PackerFoldsTheAtmosphereIntoSunLobeAndAmbient )
 
     const auto p = Desert::Graphic::PackFogParams( data, atmosphere, 0.0f );
 
-    // The lobe: authored colour + the sun's illuminance (AtmosphereEnv::SunIrradiance stands in for
-    // UE's post-transmittance value until sky Phase 4, at contribution 1 — FogPayload.hpp says so).
+    // The lobe: authored colour + the sun's illuminance (AtmosphereEnv::SunIrradiance, at contribution
+    // 1 — FogPayload.hpp says why that and not UE's post-transmittance light illuminance).
     EXPECT_EQ( glm::vec3( p.Directional ), data.DirectionalInscatteringLuminance + atmosphere.SunIrradiance );
     EXPECT_EQ( glm::vec3( p.SunDirection ), atmosphere.SunDirection );
 
-    // The ambient: the authored colour plus the scaled mean of dome and ground bounce — the Distant
-    // Sky Light stand-in.
+    // The ambient: the authored colour plus the scaled mean of dome and ground bounce, folded in on the
+    // CPU because on this model the value exists there.
     const glm::vec3 expectedAmbient =
          glm::vec3( 0.5f ) * 0.5f * ( atmosphere.ZenithRadiance + atmosphere.GroundRadiance );
     EXPECT_EQ( glm::vec3( p.Inscattering ), data.FogInscatteringLuminance + expectedAmbient );
+
+    // ... and the shader is told NOT to add a distant sky light on top of it. This gate is the whole
+    // reason the two ambients cannot be counted twice.
+    EXPECT_FLOAT_EQ( p.Ambient.w, 0.0f );
+}
+
+TEST( FogPayload, PhysicalAtmosphereMovesTheAmbientOntoTheDistantSkyLight )
+{
+    // The physical model's ambient is a GPU texel (AtmosphereEnv::DistantSkyLight), so the packer's job
+    // changes: it must hand the shader the artist's SCALE and a gate, and it must NOT fold the
+    // gradient's dome in as well — that would be two ambients on one fog.
+    Desert::ECS::ExponentialHeightFogData data;
+    data.SkyAtmosphereAmbientContributionColorScale = { 0.25f, 0.5f, 0.75f };
+
+    // A non-null handle is the model switch; its target is never dereferenced on the CPU, which is why
+    // a stand-in address is a legitimate test fixture here.
+    Desert::Graphic::Image2D* const distantSkyLight =
+         reinterpret_cast<Desert::Graphic::Image2D*>( static_cast<std::uintptr_t>( 0xF0 ) );
+
+    Desert::Graphic::AtmosphereEnv atmosphere;
+    atmosphere.Valid           = true;
+    atmosphere.SunDirection    = glm::normalize( glm::vec3( 0.0f, 1.0f, 0.0f ) );
+    atmosphere.SunIrradiance   = { 10.0f, 9.0f, 8.0f };
+    atmosphere.ZenithRadiance  = { 0.2f, 0.4f, 0.8f };
+    atmosphere.GroundRadiance  = { 0.4f, 0.2f, 0.0f };
+    atmosphere.DistantSkyLight = distantSkyLight;
+
+    const auto p = Desert::Graphic::PackFogParams( data, atmosphere, 0.0f );
+
+    // The authored fog colour ALONE — the dome is not folded in.
+    EXPECT_EQ( glm::vec3( p.Inscattering ), data.FogInscatteringLuminance );
+
+    // The scale travels, and the gate says the texel is real.
+    EXPECT_EQ( glm::vec3( p.Ambient ), data.SkyAtmosphereAmbientContributionColorScale );
+    EXPECT_FLOAT_EQ( p.Ambient.w, 1.0f );
 }
 
 int main( int argc, char** argv )

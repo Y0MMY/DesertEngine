@@ -430,6 +430,24 @@ namespace Desert::ECS
                            "multiple scattering, per-channel." ) )
         glm::vec3 CloudScatteredLuminanceScale = glm::vec3( 1.0f );
 
+        // UE's "Affected By Atmosphere Transmittance", same name, same default (ON): in
+        // SkyModel::PhysicalAtmosphere the colour above is multiplied by the atmosphere's transmittance
+        // toward the sun at ground level, so a sunset reddens and dims the light on geometry by the same
+        // law that reddens the sky behind it. Consumed by SceneRenderer::OnUpdate through the
+        // AtmosphereEnv::SunTransmittanceAtGround the SkyboxRenderer publishes.
+        //
+        // Switching it off returns the light to exactly its authored colour — the artist's escape from a
+        // physical sun, and the ONLY way to keep an authored colour in the physical model.
+        // SkyModel::ArtisticGradient ignores this field entirely: there the sky's radiance and the
+        // surface illuminance are independent by documented design (SkyAtmosphereComponent.hpp), and
+        // this coupling does not exist to be switched off.
+        PROPERTY( DisplayName( "Affected By Atmosphere Transmittance" ), Category( "Atmosphere" ),
+                  EditCondition( "AtmosphereSunLight" ),
+                  Tooltip( "Multiply this light's colour by the atmosphere's transmittance toward the "
+                           "sun at ground level, so it reddens and dims at sunset. Physical Atmosphere "
+                           "only." ) )
+        bool AffectedByAtmosphereTransmittance = true;
+
         // ---- Light Shafts (UE's category, UE's names, UE's defaults) ----------------------------------
         // The screen-space sun streaks: a bright-pass of the HDR scene around the sun's position on
         // screen, radially blurred toward it and added back before tonemapping. Occlusion is inherited

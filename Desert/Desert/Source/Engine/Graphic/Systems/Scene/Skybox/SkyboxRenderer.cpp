@@ -1,6 +1,7 @@
 #include "SkyboxRenderer.hpp"
 #include <Engine/Graphic/Renderer.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
+#include <Engine/Graphic/SkyGroundTransmittance.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 #include <Common/Core/Logger.hpp>
 #include <Common/Core/Profiler.hpp>
@@ -115,6 +116,7 @@ namespace Desert::Graphic::System
             m_MultiScatterLutPipeline   = makeCompute( "SkyMultiScatterLut" );
             m_SkyViewLutPipeline        = makeCompute( "SkyViewLut" );
             m_AerialPerspectivePipeline = makeCompute( "SkyAerialPerspectiveLut" );
+            m_DistantLightPipeline      = makeCompute( "SkyDistantLight" );
         }
 
         return BOOLSUCCESS;
@@ -348,6 +350,58 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_AerialPerspectiveLut.get() );
     }
 
+    bool SkyboxRenderer::EnsureDistantLightResources()
+    {
+        if ( m_DistantLightResourcesFailed )
+            return false;
+        if ( m_DistantLight )
+            return true;
+
+        // ONE TEXEL. RGBA32F rather than the RGBA16F every other LUT uses: at 16 bytes total the exact
+        // format is free, and this value is added to a fog colour at night radiances where a half's
+        // three decimal digits would quantise into visible steps as the sun sets.
+        const Core::Formats::Image2DSpecification distantSpec{
+             .Tag        = "SkyDistantLight",
+             .Width      = 1,
+             .Height     = 1,
+             .Format     = Core::Formats::ImageFormat::RGBA32F,
+             .Mips       = 1u,
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+        m_DistantLight = Image2D::Create( distantSpec, nullptr );
+
+        if ( !m_DistantLight )
+        {
+            LOG_ERROR( "[SkyAtmosphere] The distant sky light (1x1 RGBA32F) could not be created; the "
+                       "atmospheric fog in this view will fall back to its authored colour with no sky "
+                       "ambient." );
+            m_DistantLightResourcesFailed = true;
+            return false;
+        }
+
+        LOG_INFO( "[SkyAtmosphere] Distant sky light 1x1 RGBA32F allocated — {} directions marched at "
+                  "{} km every frame, reduced to one texel.",
+                  64, 6 );
+        return true;
+    }
+
+    void SkyboxRenderer::DispatchDistantLight()
+    {
+        auto& renderer = Renderer::GetInstance();
+
+        renderer.ComputeImageBeginWrite( m_DistantLight.get() );
+        m_DistantLightPipeline->SetOutput( kSkyDistantLightOutputBinding, m_DistantLight.get(), 0 );
+        m_DistantLightPipeline->SetStorageBuffer( kSkyPayloadBinding, m_SkyParams.get() );
+        m_DistantLightPipeline->SetInput( kSkyTransmittanceLutBinding, m_TransmittanceLut.get() );
+        m_DistantLightPipeline->SetInput( kSkyMultiScatterLutBinding, m_MultiScatterLut.get() );
+
+        // ONE WORKGROUP, and it must stay one: the 64 directions are reduced in groupshared memory,
+        // which no second group can see. The shader's LocalSize is 64 for the same reason.
+        renderer.DispatchComputeInFrame( m_DistantLightPipeline.get(), 1, 1, 1 );
+        renderer.ComputeImageEndWrite( m_DistantLight.get() );
+    }
+
     void SkyboxRenderer::ExecuteAtmosphereLuts()
     {
         // The gradient model never reaches past this line: no allocation, no dispatch, no fingerprint —
@@ -401,6 +455,19 @@ namespace Desert::Graphic::System
             m_Atmosphere.AerialPerspectiveDepthKm           = m_Sky.AerialPerspectiveDistanceKm;
             m_Atmosphere.AerialPerspectiveViewDistanceScale = m_Sky.AerialPerspectiveViewDistanceScale;
         }
+
+        // The distant sky light, every frame: it is a function of the sun, which moves. Published on
+        // the AtmosphereEnv only once the fill has happened, on the same contract as the volume above —
+        // a non-null handle IS the statement "there is a physical average sky this frame", and the
+        // atmospheric-fog pass keeps its authored colour when it is null rather than sampling a texel
+        // nobody wrote.
+        if ( m_DistantLightPipeline && EnsureDistantLightResources() )
+        {
+            DESERT_PROFILE_SCOPE( "Sky: DistantSkyLight" );
+            DispatchDistantLight();
+
+            m_Atmosphere.DistantSkyLight = m_DistantLight.get();
+        }
     }
 
     bool SkyboxRenderer::EnsureCachedLutsForBake()
@@ -446,7 +513,7 @@ namespace Desert::Graphic::System
     }
 
     void SkyboxRenderer::SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow,
-                                           const SkySettings& sky, const glm::vec3& cloudLuminanceScale )
+                                           const SkySettings& sky, const SunLightFx& fx )
     {
         m_UseProceduralSky = enabled;
         m_SunDir           = glm::normalize( sunDir );
@@ -468,7 +535,21 @@ namespace Desert::Graphic::System
             // receive from this sun, and nothing else — SunIrradiance's only consumer is the cloud
             // march (see AtmosphereEnv), which is what makes this a per-light volumetrics control
             // rather than a second sun intensity.
-            m_Atmosphere.SunIrradiance *= cloudLuminanceScale;
+            m_Atmosphere.SunIrradiance *= fx.CloudScatteredLuminanceScale;
+
+            // UE's PrepareSunLightProxy, scoped to the model by the teamlead's decision (research doc
+            // section 5, Q3): in PhysicalAtmosphere the sun light's colour is multiplied by the
+            // atmosphere's transmittance toward the sun at ground level; in ArtisticGradient the
+            // coupling does not exist, and the documented independence of sky radiance and surface
+            // illuminance stands. The per-light opt-out is the second gate.
+            //
+            // Evaluated HERE rather than by the consumer because this is where the sun and the medium
+            // are both in hand, and because it must be one value per frame: two consumers each
+            // marching it would be the same quantity computed twice.
+            const bool couple =
+                 m_Sky.Model == ECS::SkyModel::PhysicalAtmosphere && fx.AffectedByAtmosphereTransmittance;
+            m_Atmosphere.SunTransmittanceAtGround =
+                 couple ? SunTransmittanceAtGround( m_Sky, m_Atmosphere.SunDirection ) : glm::vec3( 1.0f );
 
             // A sun below the horizon is a legal authored state (it is night), but it is also what an
             // inverted Translation looks like — and that mistake shipped in four scenes. Say it once, with

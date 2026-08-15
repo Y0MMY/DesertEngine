@@ -25,9 +25,10 @@ Shader "SkyTransmittanceLut"
             vec4 u_SkyPacked[SKY_PACKED_VEC4_COUNT];
         };
 
-        // ~40 steps: the paper's quality setting. The LUT is cached, so the march cost is paid on a
-        // parameter EDIT, not per frame — which is why this does not need to be authorable.
-        const int kTransmittanceSampleCount = 40;
+        // The step budget is SKY_TRANSMITTANCE_SAMPLE_COUNT, declared in Common/SkyMedium.glslh next to
+        // the march it drives: the CPU evaluation that reddens the directional light
+        // (Graphic::SunTransmittanceAtGround) marches the same text and must march the same number of
+        // steps, or the light and this LUT answer one question twice.
 
         LocalSize(8, 8, 1);
         void main()
@@ -53,7 +54,7 @@ Shader "SkyTransmittanceLut"
                  SkyTransmittanceLutParamsFromUv(atm.BottomRadiusKm, atm.TopRadiusKm, uv);
 
             vec3 transmittance =
-                 SkyTransmittanceToTop(atm, c.ViewHeightKm, c.ViewZenithCos, kTransmittanceSampleCount);
+                 SkyTransmittanceToTop(atm, c.ViewHeightKm, c.ViewZenithCos, SKY_TRANSMITTANCE_SAMPLE_COUNT);
 
             imageStore(u_TransmittanceLut, coord, vec4(transmittance, 1.0f));
         }

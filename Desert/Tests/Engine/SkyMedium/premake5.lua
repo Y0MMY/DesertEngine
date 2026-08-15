@@ -18,6 +18,12 @@ project(test_name)
     -- Nothing to link — no renderer, no Vulkan.
     files {
         test_files,
+        -- The ENGINE's own CPU evaluation of the ground transmittance, compiled INTO this test rather
+        -- than mirrored by it: SkyGroundTransmittance.cpp is what reddens the directional light, it
+        -- compiles the same SkyMedium.glslh, and it depends on nothing but glm and header-only payload
+        -- structs — so the suite that owns the maths can assert on the function that ships, not on a
+        -- listing that looks like it.
+        "%{wks.location}/Desert/Desert/Source/Engine/Graphic/SkyGroundTransmittance.cpp",
     }
 
     includedirs {

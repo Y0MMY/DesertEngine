@@ -95,6 +95,7 @@ namespace Desert::Graphic
     inline constexpr uint32_t kSkyMultiScatterLutOutputBinding  = 0; // SkyMultiScatterLut: the image it fills
     inline constexpr uint32_t kSkyViewLutOutputBinding          = 0; // SkyViewLut: the image it fills
     inline constexpr uint32_t kSkyAerialPerspectiveOutputBinding = 0; // SkyAerialPerspectiveLut: the volume
+    inline constexpr uint32_t kSkyDistantLightOutputBinding      = 0; // SkyDistantLight: the one texel
     // LUT INPUT bindings, shared by every compute consumer (SkyMultiScatterLut reads the transmittance
     // at 2; SkyViewLut and BakeProceduralSky read the transmittance at 2 and the multi-scatter at 3).
     inline constexpr uint32_t kSkyTransmittanceLutBinding = 2;

@@ -11,6 +11,7 @@ namespace Desert::ShaderResources
 
 namespace Desert::Graphic
 {
+    class Image2D;
     class Image3D;
 
     // Per-frame, EVALUATED state of the sky — the runtime form other renderers consume via
@@ -38,6 +39,20 @@ namespace Desert::Graphic
         float NightFactor      = 0.0f; // 1 at night, 0 in daylight — matches Atmosphere.glslh's day blend
         float PlanetRadius     = 0.0f; // WORLD UNITS (centimetres)
 
+        // What survives the trip from the ground to the top of the atmosphere along the sun's own
+        // direction — UE's GetTransmittanceAtGroundLevel, evaluated on the CPU from the same medium the
+        // transmittance LUT marches (Graphic::SunTransmittanceAtGround, which compiles SkyMedium.glslh).
+        //
+        // EXACTLY (1,1,1) when the coupling does not apply: the artistic-gradient model, where sky
+        // radiance and surface illuminance are documented as independent, or an atmosphere sun whose
+        // "Affected By Atmosphere Transmittance" is off. A consumer therefore multiplies by it
+        // unconditionally and never asks which model is running.
+        //
+        // Its consumer is the directional light's colour (SceneRenderer::OnUpdate): in
+        // SkyModel::PhysicalAtmosphere the sun that lights geometry reddens and dims by the same law
+        // that reddens the sky behind it, which is the whole point of the physical model.
+        glm::vec3 SunTransmittanceAtGround{ 1.0f };
+
         // false when there is no enabled sky component, or no atmosphere sun to drive it. A consumer that
         // draws anyway is drawing against last frame's sun.
         bool Valid = false;
@@ -60,6 +75,23 @@ namespace Desert::Graphic
         Image3D* AerialPerspectiveVolume            = nullptr;
         float    AerialPerspectiveDepthKm           = 0.0f; // the volume's far extent, kilometres
         float    AerialPerspectiveViewDistanceScale = 1.0f; // read-side multiplier on a pixel's distance
+
+        // OPAQUE handle to this frame's DISTANT SKY LIGHT — one RGBA32F texel holding the average
+        // radiance of the sky seen from 6 km (UE's Distant Sky Light LUT; the fill is
+        // Programs/Sky/SkyDistantLight.shader). Non-owning, same contract as the two handles above: the
+        // SkyboxRenderer of this SceneRenderer owns it, and it is NULL EXACTLY WHEN THERE IS NO
+        // PHYSICAL AVERAGE SKY THIS FRAME — the artistic-gradient model, a sky that is switched off, or
+        // a fill that could not allocate.
+        //
+        // THE PHYSICAL SOURCE OF AMBIENT, and the reason it is a handle and not three floats: the value
+        // is produced on the GPU and consumed on the GPU (the atmospheric-fog pass adds it to the fog's
+        // in-scattering colour), so reading it into C++ would mean a readback stall for a number nobody
+        // on the CPU needs.
+        //
+        // The dome fields above (ZenithRadiance / GroundRadiance) are the ARTISTIC-GRADIENT model's
+        // ambient and are untouched by this: the clouds are calibrated against them (CLD-100/101/102),
+        // and moving them onto this value is its own reviewed step (research doc section 5, Q4).
+        Image2D* DistantSkyLight = nullptr;
     };
 
     // The C++ half of "share the computation": the quantities below are read off the same gradient the
@@ -71,6 +103,13 @@ namespace Desert::Graphic
     // Gaussian in elevation) and the star field (a sparse hash) are not ambient light and stay out.
     // GroundRadiance is what the ground REFLECTS — sun plus dome, times albedo over pi — not the palette
     // tone the ground is painted with; the two differ by an order of magnitude at noon.
+    //
+    // THESE TWO ARE THE ARTISTIC GRADIENT'S OWN AMBIENT, and that is now a scope, not a shortage: the
+    // physical model's ambient is DistantSkyLight above — the real average sky, marched every frame.
+    // Both live here on purpose, one per SkyModel, and the numbers below are deliberately left exactly
+    // as the cloud calibration (CLD-100/101/102) measured them. Moving the clouds onto the physical
+    // value is a calibration event with its own reviewed step (research doc section 5, Q4), not a side
+    // effect of the value arriving.
     inline AtmosphereEnv EvaluateAtmosphere( const SkySettings& sky, const glm::vec3& towardSun,
                                              ShaderResources::StorageBuffer* paramsBuffer )
     {

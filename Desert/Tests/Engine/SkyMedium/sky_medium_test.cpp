@@ -16,11 +16,14 @@
 
 #include "SkyMediumReference.hpp"
 
+#include <Engine/Graphic/SkyGroundTransmittance.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace Ref = Desert::Tests::SkyMediumRef;
 
@@ -320,6 +323,169 @@ TEST( SkyMedium, TransmittanceIsBoundedAndGrowsWithAltitude )
     const glm::vec3 horizon = Ref::SkyTransmittanceToTop( p, p.BottomRadiusKm + 0.2f, 0.0f, 40 );
     EXPECT_GT( horizon.x, horizon.y );
     EXPECT_GT( horizon.y, horizon.z );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The sun-light coupling: transmittance from the ground toward the sun (UE's PrepareSunLightProxy)
+//
+// This is the quantity the directional light's colour is multiplied by in SkyModel::PhysicalAtmosphere,
+// so the relations below are the relations a viewer sees on lit geometry: a neutral, barely dimmed sun
+// overhead, a red and much darker one at the horizon, and a smooth walk between the two.
+//
+// Graphic::SunTransmittanceAtGround is the ENGINE's function, compiled into this suite (premake5.lua
+// says why). It is tested here rather than mirrored because the whole point of the arrangement is that
+// there is one implementation: it packs the SkySettings exactly as the GPU reads them and marches the
+// same text as the LUT.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    glm::vec3 SunDirectionAtElevation( float degrees )
+    {
+        const float rad = degrees * 3.14159265358979323846f / 180.0f;
+        return glm::vec3( std::cos( rad ), std::sin( rad ), 0.0f );
+    }
+} // namespace
+
+TEST( SkyGroundTransmittance, IsBoundedAndDimsAsTheSunDescends )
+{
+    const Desert::Graphic::SkySettings sky{};
+
+    glm::vec3 previous( 2.0f );
+    for ( const float elevation : { 90.0f, 60.0f, 45.0f, 30.0f, 20.0f, 10.0f, 5.0f, 2.0f, 1.0f, 0.0f } )
+    {
+        const glm::vec3 t = Desert::Graphic::SunTransmittanceAtGround( sky, SunDirectionAtElevation( elevation ) );
+
+        // A transmittance is a probability of survival — never negative, never amplifying. An
+        // amplifying one here would BRIGHTEN the sun at sunset, which is the exact opposite of the
+        // effect this coupling exists for.
+        for ( int c = 0; c < 3; ++c )
+        {
+            EXPECT_GT( t[c], 0.0f ) << "elevation " << elevation << " channel " << c;
+            EXPECT_LE( t[c], 1.0f ) << "elevation " << elevation << " channel " << c;
+        }
+
+        // More air on a slanted path than on a vertical one: strictly monotone in elevation. A flipped
+        // sign somewhere in the mapping still produces "a tint", just the wrong one at the wrong hour.
+        EXPECT_LT( t.x, previous.x ) << "elevation " << elevation;
+        EXPECT_LT( t.y, previous.y ) << "elevation " << elevation;
+        EXPECT_LT( t.z, previous.z ) << "elevation " << elevation;
+        previous = t;
+    }
+
+    // The zenith sun is barely touched and the horizon sun is nearly gone — the two ends the shots are
+    // judged at (noon stays neutral, golden hour reddens).
+    const glm::vec3 zenith = Desert::Graphic::SunTransmittanceAtGround( sky, SunDirectionAtElevation( 90.0f ) );
+    EXPECT_GT( zenith.x, 0.9f );
+    EXPECT_GT( zenith.z, 0.7f );
+
+    const glm::vec3 horizon = Desert::Graphic::SunTransmittanceAtGround( sky, SunDirectionAtElevation( 0.0f ) );
+    EXPECT_LT( horizon.x, zenith.x );
+    EXPECT_LT( horizon.z, 0.01f );
+}
+
+TEST( SkyGroundTransmittance, RedensMonotonicallyAsTheSunDescends )
+{
+    const Desert::Graphic::SkySettings sky{};
+
+    // R/B is the reddening, in one number. It must GROW without exception as the sun goes down: red
+    // survives the long path that blue does not, which is the whole reason a sunset is a sunset.
+    float previousRatio = 0.0f;
+    for ( const float elevation : { 90.0f, 60.0f, 40.0f, 25.0f, 15.0f, 10.0f, 6.0f, 3.0f, 1.0f } )
+    {
+        const glm::vec3 t = Desert::Graphic::SunTransmittanceAtGround( sky, SunDirectionAtElevation( elevation ) );
+
+        const float ratio = t.x / t.z;
+        EXPECT_GT( ratio, previousRatio ) << "elevation " << elevation << " ratio " << ratio;
+        previousRatio = ratio;
+
+        // Red always outlives green, which always outlives blue: the ordering Rayleigh's 1/lambda^4
+        // imposes, and the one that decides WHICH way the light shifts.
+        EXPECT_GT( t.x, t.y ) << "elevation " << elevation;
+        EXPECT_GT( t.y, t.z ) << "elevation " << elevation;
+    }
+
+    // Overhead the sun is close to neutral (a few per cent of warm cast), at golden hour it is
+    // unmistakably warm. Numbers, not adjectives, so "noon must stay neutral" is a pinned claim.
+    const glm::vec3 noon = Desert::Graphic::SunTransmittanceAtGround( sky, SunDirectionAtElevation( 90.0f ) );
+    EXPECT_LT( noon.x / noon.z, 1.35f );
+
+    const glm::vec3 golden = Desert::Graphic::SunTransmittanceAtGround( sky, SunDirectionAtElevation( 5.0f ) );
+    EXPECT_GT( golden.x / golden.z, 3.0f );
+}
+
+TEST( SkyGroundTransmittance, AgreesWithTheTransmittanceLutItShares )
+{
+    // THE TWO-IMPLEMENTATIONS PROPERTY. The same quantity reaches a frame twice: through this CPU
+    // evaluation (the light's colour) and through the 256x64 LUT the GPU samples (the sky's own
+    // scattering, the sun disc, the aerial perspective). They are the same text, but not the same path:
+    // one marches (r, mu) directly, the other marches Bruneton's uv grid and then interpolates. If those
+    // disagree, the sun on the geometry and the sun in the sky part ways — and neither is provably
+    // wrong on its own.
+    const Desert::Graphic::SkySettings sky{};
+
+    const Ref::SkyAtmParams p = EarthParams();
+
+    // The LUT exactly as SkyTransmittanceLut.shader writes it: one texel per (uv) centre, the shared
+    // sample budget, no texel-centre remap (Bruneton's mapping already puts the domain ends on the
+    // edge texels).
+    constexpr int kWidth  = 256;
+    constexpr int kHeight = 64;
+
+    std::vector<glm::vec3> lut( static_cast<size_t>( kWidth * kHeight ) );
+    for ( int y = 0; y < kHeight; ++y )
+    {
+        for ( int x = 0; x < kWidth; ++x )
+        {
+            const glm::vec2 uv( ( static_cast<float>( x ) + 0.5f ) / kWidth,
+                                ( static_cast<float>( y ) + 0.5f ) / kHeight );
+
+            const Ref::SkyTransmittanceLutCoord c =
+                 Ref::SkyTransmittanceLutParamsFromUv( p.BottomRadiusKm, p.TopRadiusKm, uv );
+            lut[static_cast<size_t>( y * kWidth + x )] = Ref::SkyTransmittanceToTop(
+                 p, c.ViewHeightKm, c.ViewZenithCos, Ref::SKY_TRANSMITTANCE_SAMPLE_COUNT );
+        }
+    }
+
+    // ... and read exactly as a linear sampler would: bilinear on the texel grid, clamped at the edges.
+    const auto sample = [&lut]( glm::vec2 uv ) -> glm::vec3
+    {
+        const float fx = glm::clamp( uv.x * kWidth - 0.5f, 0.0f, static_cast<float>( kWidth - 1 ) );
+        const float fy = glm::clamp( uv.y * kHeight - 0.5f, 0.0f, static_cast<float>( kHeight - 1 ) );
+
+        const int x0 = static_cast<int>( fx );
+        const int y0 = static_cast<int>( fy );
+        const int x1 = std::min( x0 + 1, kWidth - 1 );
+        const int y1 = std::min( y0 + 1, kHeight - 1 );
+
+        const float tx = fx - static_cast<float>( x0 );
+        const float ty = fy - static_cast<float>( y0 );
+
+        const glm::vec3 a = lut[static_cast<size_t>( y0 * kWidth + x0 )];
+        const glm::vec3 b = lut[static_cast<size_t>( y0 * kWidth + x1 )];
+        const glm::vec3 c = lut[static_cast<size_t>( y1 * kWidth + x0 )];
+        const glm::vec3 d = lut[static_cast<size_t>( y1 * kWidth + x1 )];
+
+        return glm::mix( glm::mix( a, b, tx ), glm::mix( c, d, tx ), ty );
+    };
+
+    for ( const float elevation : { 90.0f, 60.0f, 45.0f, 30.0f, 20.0f, 12.0f, 8.0f, 5.0f, 3.0f, 1.0f } )
+    {
+        const glm::vec3 towardSun = SunDirectionAtElevation( elevation );
+
+        const glm::vec3 cpu = Desert::Graphic::SunTransmittanceAtGround( sky, towardSun );
+
+        const glm::vec2 uv = Ref::SkyTransmittanceLutUvFromParams(
+             p.BottomRadiusKm, p.TopRadiusKm, p.BottomRadiusKm + Ref::SKY_PLANET_RADIUS_OFFSET_KM, towardSun.y );
+        const glm::vec3 gpu = sample( uv );
+
+        // 0.01 of a transmittance is well under one display level on an 8-bit output, and it is the
+        // honest bound: the LUT is 256x64 texels of a function that falls off a cliff at the horizon,
+        // so the interpolation error IS the disagreement, and it must stay smaller than the effect.
+        EXPECT_NEAR( cpu.x, gpu.x, 0.01f ) << "elevation " << elevation;
+        EXPECT_NEAR( cpu.y, gpu.y, 0.01f ) << "elevation " << elevation;
+        EXPECT_NEAR( cpu.z, gpu.z, 0.01f ) << "elevation " << elevation;
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------
