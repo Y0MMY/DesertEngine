@@ -22,9 +22,11 @@ namespace Desert::Graphic
     // 16-byte stride for that.
     //
     // The block GREW from 7 to 13 vec4s when the physical-atmosphere medium landed (vec4s 7-12, read by
-    // the transmittance / multi-scattering LUT passes). Extension is APPEND-ONLY: every existing offset is
-    // a promise to every shader that reads the block.
-    inline constexpr uint32_t kSkyPackedVec4Count = 13;
+    // the transmittance / multi-scattering LUT passes), and to 15 when Phase 2 appended the model switch
+    // and the two art-direction tints (vec4s 13-14, read by the physical sky pass, the Sky-View LUT fill
+    // and the IBL bake). Extension is APPEND-ONLY: every existing offset is a promise to every shader
+    // that reads the block.
+    inline constexpr uint32_t kSkyPackedVec4Count = 15;
 
     struct SkyGpuPayload
     {
@@ -47,6 +49,12 @@ namespace Desert::Graphic
         glm::vec4 MediumGround;        // 176  rgb = ground albedo,           w = multi-scattering factor
         glm::vec4 MediumTentPlanet;    // 192  x = ozone tip altitude (km), y = ozone tip value,
                                        //      z = ozone tent width (km),  w = planet radius (WORLD UNITS)
+
+        // ---- Phase 2: the model switch and the art-direction tints (appended, like the medium). ----
+        glm::vec4 SkyLuminance;   // 208  rgb = Sky Luminance Factor (physical sky pixels only),
+                                  //      w = sky model: 0 = ArtisticGradient, 1 = PhysicalAtmosphere
+        glm::vec4 SkyApLuminance; // 224  rgb = Sky And Aerial Perspective Luminance Factor (inside
+                                  //      every scattering integration), w = reserved (0)
     };
 
     static_assert( sizeof( SkyGpuPayload ) == kSkyPackedVec4Count * sizeof( glm::vec4 ),
@@ -64,6 +72,8 @@ namespace Desert::Graphic
     static_assert( offsetof( SkyGpuPayload, MediumOzone ) == 160 );
     static_assert( offsetof( SkyGpuPayload, MediumGround ) == 176 );
     static_assert( offsetof( SkyGpuPayload, MediumTentPlanet ) == 192 );
+    static_assert( offsetof( SkyGpuPayload, SkyLuminance ) == 208 );
+    static_assert( offsetof( SkyGpuPayload, SkyApLuminance ) == 224 );
 
     // Size the buffer is created with, and the size every writer must hand to SetData.
     inline constexpr uint32_t kSkyPayloadBytes =
@@ -83,7 +93,26 @@ namespace Desert::Graphic
     // trap as kSkyPayloadBinding, same cure: one constant, both sides.
     inline constexpr uint32_t kSkyTransmittanceLutOutputBinding = 0; // SkyTransmittanceLut: the image it fills
     inline constexpr uint32_t kSkyMultiScatterLutOutputBinding  = 0; // SkyMultiScatterLut: the image it fills
-    inline constexpr uint32_t kSkyTransmittanceLutBinding       = 2; // SkyMultiScatterLut: transmittance input
+    inline constexpr uint32_t kSkyViewLutOutputBinding          = 0; // SkyViewLut: the image it fills
+    // LUT INPUT bindings, shared by every compute consumer (SkyMultiScatterLut reads the transmittance
+    // at 2; SkyViewLut and BakeProceduralSky read the transmittance at 2 and the multi-scatter at 3).
+    inline constexpr uint32_t kSkyTransmittanceLutBinding = 2;
+    inline constexpr uint32_t kSkyMultiScatterLutBinding  = 3;
+
+    // The Sky-View LUT extent — Hillaire's 192x104, mirrored by SKY_VIEW_LUT_WIDTH/HEIGHT in
+    // Common/SkyScattering.glslh (the sub-texel remap bakes the numbers into every read and write, so
+    // the two sides must state the same extent; the SkyScattering tests pin the shader-side pair).
+    inline constexpr uint32_t kSkyViewLutWidth  = 192;
+    inline constexpr uint32_t kSkyViewLutHeight = 104;
+
+    // Push block of the SkyViewLut pass — mirrored by `PushConstant SkyViewPush` in SkyViewLut.shader.
+    // The LUT depends on the camera (its altitude picks the horizon warp), and the camera is the one
+    // per-frame quantity the shared payload deliberately does not carry.
+    struct SkyViewLutPush
+    {
+        glm::vec4 CameraPosWorld; // xyz = camera position in WORLD UNITS (centimetres), w unused
+    };
+    static_assert( sizeof( SkyViewLutPush ) == 16 );
 
     // @p towardSun must be normalized — the single normalization lives in ECS::Rules::AtmosphereSunDirection.
     inline SkyGpuPayload PackSky( const glm::vec3& towardSun, const SkySettings& sky )
@@ -104,6 +133,10 @@ namespace Desert::Graphic
         payload.MediumGround        = glm::vec4( sky.GroundAlbedo, sky.MultiScatteringFactor );
         payload.MediumTentPlanet =
              glm::vec4( sky.OzoneTipAltitudeKm, sky.OzoneTipValue, sky.OzoneTentWidthKm, sky.PlanetRadius );
+
+        payload.SkyLuminance =
+             glm::vec4( sky.SkyLuminanceFactor, sky.Model == ECS::SkyModel::PhysicalAtmosphere ? 1.0f : 0.0f );
+        payload.SkyApLuminance = glm::vec4( sky.SkyAndAerialPerspectiveLuminanceFactor, 0.0f );
         return payload;
     }
 } // namespace Desert::Graphic

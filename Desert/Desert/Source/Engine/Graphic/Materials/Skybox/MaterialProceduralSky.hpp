@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Materials/Material.hpp>
 #include <Engine/Graphic/Materials/Properties/StorageBufferProperty.hpp>
+#include <Engine/Graphic/Materials/Properties/Texture2DProperty.hpp>
 #include <Engine/Graphic/Materials/Properties/UniformBufferProperty.hpp>
 #include <Engine/Core/Camera.hpp>
 #include <Engine/Graphic/ShaderProtocols/Camera.hpp>
@@ -27,7 +28,11 @@ namespace Desert::Graphic
         {
         }
 
-        void Update( const Core::Camera* camera, const std::shared_ptr<ShaderResources::StorageBuffer>& skyParams )
+        // @p transmittanceLut / @p skyViewLut back the PhysicalAtmosphere branch and are owned by
+        // SkyboxRenderer; on the gradient model they are null and the shader's samplers keep the
+        // fallback descriptors the material was initialized with — the branch never samples them.
+        void Update( const Core::Camera* camera, const std::shared_ptr<ShaderResources::StorageBuffer>& skyParams,
+                     const Image2D* transmittanceLut, const Image2D* skyViewLut )
         {
             if ( camera )
             {
@@ -41,6 +46,13 @@ namespace Desert::Graphic
 
             if ( auto* sb = Get<StorageBufferProperty>( "SkyBuffer" ) )
                 sb->SetBuffer( skyParams );
+
+            if ( transmittanceLut )
+                if ( auto* tex = Get<Texture2DProperty>( "u_TransmittanceLut" ) )
+                    tex->SetImage( transmittanceLut );
+            if ( skyViewLut )
+                if ( auto* tex = Get<Texture2DProperty>( "u_SkyViewLut" ) )
+                    tex->SetImage( skyViewLut );
         }
     };
 } // namespace Desert::Graphic

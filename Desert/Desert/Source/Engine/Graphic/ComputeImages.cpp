@@ -4,6 +4,7 @@
 #include "Renderer.hpp"
 
 #include <Engine/Runtime/ResourceRegistry.hpp>
+#include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/Image.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 #include <Engine/ShaderResources/StorageBuffer.hpp>
@@ -34,7 +35,9 @@ namespace Desert::Graphic
     }
 
     std::shared_ptr<Image2D> ComputeImages::BakeProceduralPanorama( uint32_t width, uint32_t height,
-                                                                    ShaderResources::StorageBuffer* skyParams )
+                                                                    ShaderResources::StorageBuffer* skyParams,
+                                                                    Image2D* transmittanceLut,
+                                                                    Image2D* multiScatterLut )
     {
         const auto shader = GetComputeShader( "BakeProceduralSky" );
         if ( !shader || !skyParams )
@@ -62,6 +65,28 @@ namespace Desert::Graphic
         // buffer's own binding number, so the two must be the same constant or the descriptor aliases
         // something else entirely (that failure is a validation error, not a wrong picture).
         pipeline->SetStorageBuffer( kSkyPayloadBinding, skyParams );
+
+        // The physical model's march reads the cached atmosphere LUTs; the gradient model never
+        // samples these bindings, but a compute binding nobody writes gets NO descriptor write at all
+        // (VulkanPipelineCompute only writes m_BoundInputs) — bind the fallbacks so both branches of
+        // the shader are always backed by SOMETHING valid.
+        //
+        // RGBA32F because the fallback TABLE only holds RGBA8F and RGBA32F (VulkanFallbackTextures.cpp),
+        // and RGBA32F is what VulkanMaterialBackend already substitutes for a declared-but-unbound
+        // Sampled2D — the identical situation. Asking for the LUTs' own RGBA16F threw std::out_of_range
+        // out of that table and killed every gradient scene at the bake. The format is irrelevant here
+        // anyway: a sampled descriptor only needs a valid 2D view, and the branch that would read it is
+        // not taken.
+        auto& fallbacks = FallbackTextures::Get();
+        pipeline->SetInput( kSkyTransmittanceLutBinding,
+                            transmittanceLut
+                                 ? transmittanceLut
+                                 : fallbacks.GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get() );
+        pipeline->SetInput( kSkyMultiScatterLutBinding,
+                            multiScatterLut
+                                 ? multiScatterLut
+                                 : fallbacks.GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA32F ).get() );
+
         pipeline->Dispatch( std::max( 1u, width / kWorkGroupSize ), std::max( 1u, height / kWorkGroupSize ),
                             1u );
 

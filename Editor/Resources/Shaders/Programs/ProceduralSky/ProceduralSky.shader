@@ -2,16 +2,28 @@ Shader "ProceduralSky"
 {
     Fragment
     {
-        // The engine-generated sky: an artistic gradient evaluated from the view ray and the sun direction
-        // (no HDR texture). Output is LINEAR HDR — the post-process tonemap pass applies exposure/gamma
-        // downstream, exactly like the old skybox did.
+        // The engine-generated sky. Two models behind one switch (the payload's SkyModel lane):
         //
-        // The model lives in Common/Atmosphere.glslh and is shared with the IBL bake
+        //   * ArtisticGradient — the authored palette evaluated from the view ray and the sun
+        //     direction (Common/Atmosphere.glslh's EvaluateSky), bit-for-bit the sky this pass has
+        //     always drawn;
+        //   * PhysicalAtmosphere — the Hillaire 2020 model: the per-view Sky-View LUT sampled through
+        //     its horizon-warped mapping, plus the analytic sun disc (outer-space luminance times the
+        //     transmittance LUT, limb-darkened), plus the lit ground below the horizon.
+        //
+        // Output is LINEAR HDR — the post-process tonemap pass applies exposure/gamma downstream.
+        // The models live in the shared headers and are shared with the IBL bake
         // (Compute/BakeProceduralSky) so the visible sky and the light it casts are identical.
 
         #include <Common/Atmosphere.glslh>
+        #include <Common/SkyMedium.glslh>
+        #include <Common/SkyScattering.glslh>
 
         In(0) vec3 v_RayDir;
+        // The camera position, forwarded from the vertex stage the way every mesh shader forwards it —
+        // this engine keeps CameraUB a vertex-stage block. Constant across the quad, so interpolation
+        // returns it exactly.
+        In(1) vec3 v_CameraPos;
         Out(0) vec4 oColor;
 
         // The sky parameter block. A std430 STORAGE buffer rather than a uniform block, because the
@@ -27,14 +39,106 @@ Shader "ProceduralSky"
             vec4 u_SkyPacked[SKY_PACKED_VEC4_COUNT];
         };
 
+        // PhysicalAtmosphere only. When the gradient renders, both stay on their fallback descriptors
+        // and the branch below never samples them.
+        Uniform(2) sampler2D u_TransmittanceLut; // cached 256x64 (SkyboxRenderer)
+        Uniform(3) sampler2D u_SkyViewLut;       // per-view 192x104, refilled every frame
+
+        // Luminance ceiling of the physical path's ON-SCREEN pixels. The disc's true outer-space
+        // luminance (illuminance over its half-degree solid angle) is ~10^4 x the tonemapper's white
+        // point; unclamped it saturates every bloom box it touches (the Karis average only suppresses
+        // ISOLATED fireflies) and the frame gains a 25-degree white blob for a halo. 1000 keeps the
+        // disc two orders over white — still the brightest thing in any frame, still driving a
+        // visible glow — while the bloom chain stays proportionate. Raising this belongs to the
+        // deferred sun-perceptual-stack task (auto-exposure + lens flare tuned against the disc),
+        // not to the sky. The IBL bake is untouched: it excludes the disc entirely.
+        const float kSkyLuminanceClamp = 1000.0f;
+
+        vec3 EvaluatePhysicalSky(SkyPacked s, vec3 dir)
+        {
+            SkyAtmParams atm = SkyMakeAtmParams(UnpackMediumRayleigh(s), UnpackMediumMie(s),
+                                                UnpackMediumMieAbsorption(s), UnpackMediumOzone(s),
+                                                UnpackMediumGround(s), UnpackMediumTentPlanet(s));
+
+            // The same camera-to-(r, zenith) reduction the Sky-View fill ran this frame — the mapping
+            // only agrees with the texels if both sides start from the same viewHeight.
+            vec3  cameraKm   = v_CameraPos / SKY_WORLD_UNITS_PER_KM;
+            float viewHeight = clamp(SkyViewHeightKm(cameraKm, atm.BottomRadiusKm),
+                                     atm.BottomRadiusKm + SKY_PLANET_RADIUS_OFFSET_KM,
+                                     atm.TopRadiusKm - 0.01f);
+            vec3  zenith     = SkyViewZenith(cameraKm, atm.BottomRadiusKm);
+
+            vec3  sunDir        = UnpackSunDirection(s);
+            float viewZenithCos = clamp(dot(zenith, dir), -1.0f, 1.0f);
+            float lightViewCos  = SkyViewLightViewCos(zenith, dir, sunDir);
+
+            vec2 unit = SkyViewUnitFromParams(atm.BottomRadiusKm, viewHeight, viewZenithCos, lightViewCos);
+            vec2 uv   = vec2(SkyUnitToTexelUv(unit.x, SKY_VIEW_LUT_WIDTH),
+                             SkyUnitToTexelUv(unit.y, SKY_VIEW_LUT_HEIGHT));
+
+            // rgb = in-scattered luminance (the SkyAndAP tint is already inside), a = the view path's
+            // mean transmittance.
+            vec4 lut = texture(u_SkyViewLut, uv);
+            vec3 sky = lut.rgb;
+
+            vec3 sunIlluminance = UnpackSkyConfig(s).sunColor * UnpackSunIntensity(s);
+
+            if (SkyViewHitsGround(atm.BottomRadiusKm, viewHeight, viewZenithCos))
+            {
+                // v1 below-horizon: the ground as a Lambertian sphere under the transmitted sun, seen
+                // through the marched air (the LUT's alpha). NdotL and the sun transmittance are taken
+                // at the camera's footprint rather than the exact hit point — the difference is a
+                // fraction of a degree at ground-level view distances.
+                float sunZenithCos = clamp(dot(zenith, sunDir), -1.0f, 1.0f);
+                vec3  sunT         = texture(u_TransmittanceLut,
+                                             SkyTransmittanceLutUvFromParams(
+                                                  atm.BottomRadiusKm, atm.TopRadiusKm,
+                                                  atm.BottomRadiusKm + SKY_PLANET_RADIUS_OFFSET_KM,
+                                                  sunZenithCos)).rgb;
+                sky += SkyGroundLuminance(atm, sunIlluminance, sunT, sunZenithCos) * lut.a;
+            }
+            else
+            {
+                // The analytic sun disc: outer-space luminance (illuminance over the disc's solid
+                // angle) times the transmittance toward the view, limb-darkened, soft-edged. Not in
+                // the LUT — 192x104 texels would alias a half-degree disc into a smear.
+                float cosApex = cos(UnpackSunAngularRadius(s));
+                float vDotSun = dot(dir, sunDir);
+                float edge    = SkySunDiscSoftEdge(vDotSun, cosApex);
+                if (edge > 0.0f)
+                {
+                    float apex         = max(UnpackSunAngularRadius(s), 1e-4f);
+                    float centerToEdge = clamp(acos(clamp(vDotSun, -1.0f, 1.0f)) / apex, 0.0f, 1.0f);
+                    float solidAngle   = 2.0f * SKY_PI * (1.0f - cosApex);
+
+                    vec3 viewT = texture(u_TransmittanceLut,
+                                         SkyTransmittanceLutUvFromParams(atm.BottomRadiusKm,
+                                                                         atm.TopRadiusKm, viewHeight,
+                                                                         viewZenithCos)).rgb;
+
+                    sky += sunIlluminance / max(solidAngle, 1e-7f) * viewT *
+                           SkySunLimbDarkening(centerToEdge) * edge;
+                }
+            }
+
+            // The on-screen-only art tint (UE's SkyLuminanceFactor), then the fp16 headroom clamp.
+            return min(sky * UnpackSkyLuminanceFactor(s), vec3(kSkyLuminanceClamp));
+        }
+
         void main()
         {
             SkyPacked s;
             for (int i = 0; i < SKY_PACKED_VEC4_COUNT; ++i)
                 s.v[i] = u_SkyPacked[i];
 
-            vec3 color = EvaluateSky(normalize(v_RayDir), UnpackSunDirection(s), UnpackSunIntensity(s),
-                                     UnpackSunAngularRadius(s), UnpackSkyConfig(s));
+            vec3 dir = normalize(v_RayDir);
+
+            vec3 color;
+            if (UnpackSkyModelIsPhysical(s))
+                color = EvaluatePhysicalSky(s, dir);
+            else
+                color = EvaluateSky(dir, UnpackSunDirection(s), UnpackSunIntensity(s),
+                                    UnpackSunAngularRadius(s), UnpackSkyConfig(s));
 
             // (Dithering is done at the FINAL 8-bit output in the composite/tonemap pass — doing it here in linear
             // HDR is lost through Reinhard+gamma. See SceneComposite.glsl.frag.)
@@ -49,6 +153,8 @@ Shader "ProceduralSky"
 
         // World-space view ray for this fullscreen pixel (un-normalized; normalized in the fragment).
         Out(0) vec3 v_RayDir;
+        // Camera position for the physical model's altitude (constant across the quad).
+        Out(1) vec3 v_CameraPos;
 
         void main()
         {
@@ -62,6 +168,7 @@ Shader "ProceduralSky"
             vec4 viewH   = inverse(cameraUB.Projection) * position;
             vec3 viewRay = viewH.xyz / viewH.w;
             v_RayDir     = mat3(inverse(cameraUB.View)) * viewRay;
+            v_CameraPos  = cameraUB.CameraPos;
         }
     }
 }

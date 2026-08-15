@@ -311,9 +311,10 @@ TEST( SkyPayloadLayout, EveryAuthoredValueLandsWhereTheShaderReadsIt )
     // The shader reads this block through Common/Atmosphere.glslh's unpack helpers, so the assertions
     // below ARE the shader's view of it: v[0].w is the sun intensity, v[6].w is the angular radius, and
     // so on. A member inserted in the middle fails here instead of corrupting the frame.
-    // 13 lanes since the physical-atmosphere medium block (v[7]-v[12]) was APPENDED for the LUT passes.
+    // 13 lanes since the physical-atmosphere medium block (v[7]-v[12]) was APPENDED for the LUT passes;
+    // 15 since Phase 2 appended the model switch and the art-direction tints (v[13]-v[14]).
     EXPECT_EQ( sizeof( SkyGpuPayload ), kSkyPackedVec4Count * sizeof( glm::vec4 ) );
-    EXPECT_EQ( kSkyPayloadBytes, 13u * 16u );
+    EXPECT_EQ( kSkyPayloadBytes, 15u * 16u );
 
     SkyAtmosphereData data;
     data.ZenithColor        = { 0.1f, 0.2f, 0.3f };
@@ -329,6 +330,9 @@ TEST( SkyPayloadLayout, EveryAuthoredValueLandsWhereTheShaderReadsIt )
     data.StarIntensity      = 3.25f;
     data.SunIntensity       = 17.0f;
     data.SunAngularDiameter = 4.0f;
+
+    data.SkyLuminanceFactor                     = { 0.21f, 0.22f, 0.23f };
+    data.SkyAndAerialPerspectiveLuminanceFactor = { 0.24f, 0.25f, 0.26f };
 
     const glm::vec3     toward = glm::normalize( glm::vec3( 0.3f, 0.9f, 0.3f ) );
     const SkyGpuPayload p      = PackSky( toward, MakeSkySettings( data ) );
@@ -369,6 +373,18 @@ TEST( SkyPayloadLayout, EveryAuthoredValueLandsWhereTheShaderReadsIt )
     EXPECT_FLOAT_EQ( lanes[12].y, data.AbsorptionTipValue );
     EXPECT_FLOAT_EQ( lanes[12].z, data.AbsorptionTentWidth );
     EXPECT_FLOAT_EQ( lanes[12].w, PlanetRadiusToWorldUnits( data.PlanetRadius ) );
+
+    // The Phase 2 lanes: the art-direction tints, and the model switch packed as EXACTLY 0 or 1 so
+    // the shader's `> 0.5` branch is never a float hazard.
+    EXPECT_EQ( glm::vec3( lanes[13] ), data.SkyLuminanceFactor );
+    EXPECT_FLOAT_EQ( lanes[13].w, 0.0f ) << "ArtisticGradient packs 0";
+    EXPECT_EQ( glm::vec3( lanes[14] ), data.SkyAndAerialPerspectiveLuminanceFactor );
+    EXPECT_FLOAT_EQ( lanes[14].w, 0.0f ) << "reserved lane";
+
+    data.Model                        = Desert::ECS::SkyModel::PhysicalAtmosphere;
+    const SkyGpuPayload physical      = PackSky( toward, MakeSkySettings( data ) );
+    const auto*         physicalLanes = reinterpret_cast<const glm::vec4*>( &physical );
+    EXPECT_FLOAT_EQ( physicalLanes[13].w, 1.0f ) << "PhysicalAtmosphere packs 1";
 }
 
 // ---------------------------------------------------------------------------------------------------
