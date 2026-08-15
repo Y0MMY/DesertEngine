@@ -7,6 +7,7 @@ Shader "SceneComposite"
         Uniform(3) sampler2D u_BloomTexture;
         Uniform(4) sampler2D u_AvgLuminance;      // 1x1 adapted luminance (eye adaptation)
         Uniform(5) sampler2D u_LightShaftTexture; // radial sun streaks (LightShaftRenderer), half res
+        Uniform(6) sampler2D u_LensFlareTexture;  // ghosts/halo/streak (LensFlareRenderer), quarter res
         Out(0) vec4 oColor;
 
         Uniform(0) TonemapUB
@@ -19,6 +20,7 @@ Shader "SceneComposite"
             float u_ChromaticBloom;       // lens dispersion strength on the bloom halo (0 = off)
             float u_WhitePoint;           // the luminance that maps to pure white (see the operator below)
             vec4  u_LightShaftTintIntensity; // rgb = the sun light's Bloom Tint, a = Bloom Scale x screen fade
+            vec4  u_LensFlareTintIntensity;  // rgb = the lens's Tint, a = Intensity x screen fade
         };
 
         void main()
@@ -68,7 +70,14 @@ Shader "SceneComposite"
             vec3 shafts = texture(u_LightShaftTexture, v_TexCoord).rgb *
                           (u_LightShaftTintIntensity.rgb * u_LightShaftTintIntensity.a);
 
-            vec3 color = (scene + bloom + shafts) * exposure;
+            // Lens flare: added in HDR alongside bloom and the shafts, before the tonemap, so a bright
+            // ghost rolls off through the same operator instead of clipping to a flat disc. The intensity
+            // carries the sun's screen-edge fade and is exactly zero whenever the flare pass did not run,
+            // which is what makes the (stale) texture inert — the bloom image's contract.
+            vec3 flare = texture(u_LensFlareTexture, v_TexCoord).rgb *
+                         (u_LensFlareTintIntensity.rgb * u_LensFlareTintIntensity.a);
+
+            vec3 color = (scene + bloom + shafts + flare) * exposure;
 
             // Reinhard tonemapping operator.
         	// see: "Photographic Tone Reproduction for Digital Images", eq. 4

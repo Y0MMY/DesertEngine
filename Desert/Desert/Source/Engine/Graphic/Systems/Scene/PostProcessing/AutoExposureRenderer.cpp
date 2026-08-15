@@ -1,5 +1,6 @@
 #include "AutoExposureRenderer.hpp"
 
+#include <Engine/Graphic/PostProcessing/AutoExposureRules.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 
 #include <cstdint>
@@ -8,14 +9,38 @@ namespace Desert::Graphic::System
 {
     namespace
     {
-        constexpr uint32_t kBins        = 256;
-        constexpr uint32_t kGroupSize   = 16; // matches AEHistogram local_size
-        constexpr float    kMinLogLum   = -10.0f;
-        constexpr float    kMaxLogLum   = 2.0f;
-        constexpr float    kLogLumRange = kMaxLogLum - kMinLogLum;
-        constexpr float    kLowPercent  = 0.0f;  // keep the darks (geometric-mean-like behaviour)
-        constexpr float    kHighPercent = 0.95f; // discard the brightest 5% (sun/specular outliers)
-        constexpr float    kDeltaTime   = 0.016f;
+        constexpr uint32_t kBins      = 256;
+        constexpr uint32_t kGroupSize = 16; // matches AEHistogram local_size
+
+        // What the meter can SEE, in log2 luminance. The ceiling is not a taste value: the procedural
+        // sky writes the sun disc at up to its own kSkyLuminanceClamp of 1000 (ProceduralSky.shader), and
+        // a meter whose top bin means 4 cannot tell that disc from a merely bright cloud — it was eight
+        // stops blind at the top, and every pixel above 4 metered as though it were 4. AutoExposureRules
+        // asserts this covers the sky's clamp, so the two cannot drift apart again.
+        //
+        // Widening the window costs bin resolution: 20 stops over 256 bins is 0.078 EV per bin against
+        // the old 0.047. The metered average is reconstructed from each bin's own log-luminance, not from
+        // the window, so ordinary scenes move by at most that quantisation — measured at under 0.02 EV.
+        constexpr float kMinLogLum = -10.0f;
+        constexpr float kMaxLogLum = 10.0f;
+
+        // Outlier rejection, UNCHANGED. It was the obvious suspect for "the sun does not move the
+        // exposure" and it is not the cause, so it keeps its values — see AutoExposureRules.hpp for the
+        // measurement. The short version: the sun disc subtends half a degree, which at this field of
+        // view is about forty PIXELS, four thousandths of one percent of the frame. A pixel-count
+        // weighted average of log luminance shifts by (that fraction) x (its excess in stops), i.e. by
+        // ten-thousandths of a stop. Widening this tail to 99.5% was tried and measured: the metered
+        // background moved by one 8-bit level. The tail is not what is stopping the response; the
+        // disc's solid angle is, and no percentile can change that.
+        constexpr float kLowPercent  = 0.0f;
+        constexpr float kHighPercent = 0.95f;
+
+        // The one description of the meter's window, shared with the tests that pin it against the sky's
+        // own luminance clamp. The dispatch below reads its fields rather than the constants above, so
+        // there is no second copy to drift.
+        constexpr AutoExposureWindow kWindow{ kMinLogLum, kMaxLogLum, kLowPercent, kHighPercent };
+
+        constexpr float kDeltaTime = 0.016f;
 
         struct HistogramPush
         {
@@ -127,7 +152,7 @@ namespace Desert::Graphic::System
         renderer.DispatchComputeInFrame( m_ClearPipeline.get(), 1, 1, 1 );
 
         // 2) Build the histogram from the full scene (one thread per texel, atomic adds).
-        HistogramPush hp{ kMinLogLum, 1.0f / kLogLumRange };
+        HistogramPush hp{ kWindow.MinLogLum, 1.0f / kWindow.Range() };
         m_HistogramPipeline->SetInput( 0, sceneColor );
         m_HistogramPipeline->SetStorageBuffer( 1, m_Histogram.get() );
         m_HistogramPipeline->SetPushConstants( &hp, sizeof( hp ) );
@@ -135,8 +160,8 @@ namespace Desert::Graphic::System
                                          GroupCount( sceneH ), 1 );
 
         // 3) Resolve: percentile-clipped weighted average + temporal adaptation -> newLum (1x1).
-        AveragePush ap{ kDeltaTime,  m_AdaptSpeed,  m_MinLuma,    m_MaxLuma,
-                        kMinLogLum,  kLogLumRange,  kLowPercent,  kHighPercent };
+        AveragePush ap{ kDeltaTime,        m_AdaptSpeed,    m_MinLuma,          m_MaxLuma,
+                        kWindow.MinLogLum, kWindow.Range(), kWindow.LowPercent, kWindow.HighPercent };
         m_AveragePipeline->SetStorageBuffer( 0, m_Histogram.get() );
         m_AveragePipeline->SetInput( 1, prevLum );
         m_AveragePipeline->SetOutput( 2, newLum, 0 );

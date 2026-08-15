@@ -1,0 +1,145 @@
+// Lens flare placement — where every feature of the flare sits on screen, and how strongly.
+//
+// Compiled TWICE from this one text: as GLSL by Programs/LensFlare/LensFlareFeatures.shader, and as C++
+// by Desert/Tests/Engine/LensFlare/LensFlareReference.hpp. A rendered frame says the flare LOOKS placed;
+// only the tests say the ghosts walk the sun->centre axis in order, that the axis is the one the sun is
+// actually on, and that every feature dies when the sun leaves the frame.
+//
+// Nothing here decides what a flare LOOKS like — no colours, no ghost count, no spacing. Those are
+// authored on Core::SceneSettings ("Lens Flare" category) and arrive as push constants. This file is the
+// mechanism: given the authored numbers and the sun's screen position, where does feature N land.
+//
+// UV convention: [0,1] screen UV with y DOWN, matching SunScreen::Uv (Graphic/PostProcessing/
+// LightShaftRules.hpp) and every other screen pass here. Distances are measured in ASPECT-CORRECTED uv
+// (x scaled by width/height) so a ring is a ring on a 16:9 screen and not an ellipse.
+
+#ifndef LENS_FLARE_GLSLH
+#define LENS_FLARE_GLSLH
+
+// The screen centre — the optical axis every ghost is a reflection about. A constant of the mechanism
+// (where the lens points), not a look.
+#define LENS_FLARE_SCREEN_CENTER vec2( 0.5f, 0.5f )
+
+// Aspect-corrected distance between two screen UVs. @p aspect is width/height.
+float LensFlareDistance( vec2 a, vec2 b, float aspect )
+{
+    vec2 d = ( a - b ) * vec2( aspect, 1.0f );
+    return length( d );
+}
+
+// --- Ghosts -----------------------------------------------------------------------------------------
+//
+// A ghost is an internal reflection between two lens elements, so it appears on the line through the
+// source and the optical axis, mirrored about that axis. Ghost i therefore sits at a fixed fraction
+// further along the sun->centre ray: at spacing*(i+1) of the way. Fractions past 1 land on the far side
+// of the centre, which is where the second half of a real ghost train lives.
+
+vec2 LensFlareGhostCenter( vec2 sunUv, float index, float spacing )
+{
+    return mix( sunUv, LENS_FLARE_SCREEN_CENTER, spacing * ( index + 1.0f ) );
+}
+
+// The authored near->far ramp, evaluated for ghost @p index of @p count. Shared by size and tint so the
+// two can never disagree about which end of the train a ghost is on.
+float LensFlareGhostRamp( float index, float count )
+{
+    return ( count > 1.0f ) ? clamp( index / ( count - 1.0f ), 0.0f, 1.0f ) : 0.0f;
+}
+
+float LensFlareGhostScale( float index, float count, float sizeNear, float sizeFar )
+{
+    return mix( sizeNear, sizeFar, LensFlareGhostRamp( index, count ) );
+}
+
+vec3 LensFlareGhostTint( float index, float count, vec3 tintInner, vec3 tintOuter )
+{
+    return mix( tintInner, tintOuter, LensFlareGhostRamp( index, count ) );
+}
+
+// Where a ghost reads the flare source. A ghost is an IMAGE of the source, scaled about its own centre —
+// so screen point @p uv maps back to the point of the source that is the same offset from the sun,
+// divided by the ghost's scale. This is why a ghost is never a drawn circle: its shape is whatever was
+// bright around the sun that frame, and it deforms with the scene.
+vec2 LensFlareGhostSourceUv( vec2 uv, vec2 ghostCenter, float scale, vec2 sunUv )
+{
+    return sunUv + ( uv - ghostCenter ) / max( scale, 1e-3f );
+}
+
+// How much of a ghost survives at @p uv. Two things kill it: leaving the source image (the sampler is
+// REPEAT engine-wide, so a source uv outside [0,1] would wrap BRIGHT CONTENT back in from the far edge),
+// and the aperture's own soft rim. Returned as one weight so a caller cannot apply one and forget the
+// other.
+float LensFlareGhostWeight( vec2 sourceUv, vec2 uv, vec2 ghostCenter, float scale, float aspect )
+{
+    // Outside the source frame there is nothing to reflect.
+    vec2  inside = step( vec2( 0.0f, 0.0f ), sourceUv ) * step( sourceUv, vec2( 1.0f, 1.0f ) );
+    float bounds = inside.x * inside.y;
+
+    // Soft aperture rim: 1 at the ghost's centre, 0 at its edge. Without it a ghost ends on the hard
+    // rectangle of the source frame, which reads as a cut-off square rather than an out-of-focus disc.
+    float radius = LensFlareDistance( uv, ghostCenter, aspect ) / max( scale, 1e-3f );
+    float rim    = 1.0f - smoothstep( 0.25f, 0.75f, radius );
+
+    return bounds * rim;
+}
+
+// --- Halo -------------------------------------------------------------------------------------------
+//
+// The halo is the ring of light scattered by the front element: the source swept once around the sun at
+// a fixed radius. So the pixel at radius r on bearing b reads the source PULLED BACK toward the sun by
+// the halo radius — at r == radius that is the sun itself, which is what puts the sun's own image on the
+// ring, and either side of it the ring reads the source just off the sun. A bright arc beside the sun
+// therefore brightens that arc of the ring and nothing else.
+//
+// The tempting alternative — reading the source AT the sun for every pixel of the ring — gives every
+// pixel the same colour, i.e. a painted circle. Reading it at sunUv + bearing*radius (the far side) is
+// worse still: that is the black sky outside the source, and the halo simply never appears.
+
+vec2 LensFlareHaloSourceUv( vec2 uv, vec2 sunUv, float radius, float aspect )
+{
+    vec2  toPixel = ( uv - sunUv ) * vec2( aspect, 1.0f );
+    float len     = length( toPixel );
+    if ( len < 1e-5f )
+        return sunUv;
+
+    vec2 bearing = toPixel / len;
+    return sunUv + ( bearing * ( len - radius ) ) / vec2( aspect, 1.0f );
+}
+
+// The ring's own profile: a soft band centred on @p radius, zero at the sun and zero well outside.
+float LensFlareHaloWeight( vec2 uv, vec2 sunUv, float radius, float aspect )
+{
+    float d    = LensFlareDistance( uv, sunUv, aspect );
+    float band = max( radius, 1e-3f );
+    return 1.0f - smoothstep( 0.0f, band, abs( d - band ) );
+}
+
+// --- Anamorphic streak ------------------------------------------------------------------------------
+//
+// A cylindrical element smears a point source along one axis. This is a GATHER along that axis, not a
+// drawn bar: tap k reads the source displaced along the axis, so the streak's brightness profile is the
+// source's own profile convolved with the axis — a bright sun gives a long streak, a sun behind cloud
+// gives a short weak one, for free.
+
+// Tap @p k of @p tapCount, in [-1,1] along the axis. Symmetric about the pixel, so the streak is centred.
+float LensFlareStreakTapOffset( float k, float tapCount )
+{
+    return ( tapCount > 1.0f ) ? ( ( k / ( tapCount - 1.0f ) ) * 2.0f - 1.0f ) : 0.0f;
+}
+
+// The tap's weight: a triangular kernel, brightest at the pixel itself. Normalised by the caller.
+float LensFlareStreakTapWeight( float offset )
+{
+    return 1.0f - abs( offset );
+}
+
+vec2 LensFlareStreakTapUv( vec2 uv, vec2 axis, float offset, float length_, float aspect )
+{
+    return uv + ( axis * ( offset * length_ ) ) / vec2( aspect, 1.0f );
+}
+
+// The whole-effect gate — the flare's strength for a given sun fade and authored intensity — is NOT
+// here: it is applied by the tonemap, on the CPU side, and lives in
+// Engine/Graphic/PostProcessing/LensFlareRules.hpp next to the sun's screen projection it depends on.
+
+#endif // LENS_FLARE_GLSLH

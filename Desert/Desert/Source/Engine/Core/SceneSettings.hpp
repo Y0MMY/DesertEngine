@@ -162,6 +162,73 @@ namespace Desert::Core
         PROPERTY( DisplayName( "Lens Dispersion" ), Category( "Post Processing" ), Range( 0.0f, 3.0f ) )
         float LensDispersion = 0.0f; // chromatic rainbow fringe on the bloom halo (glare); 0 = off
 
+        // Lens flare — the camera's response to a very bright source in frame (the sun disc above all).
+        // Its own category rather than more entries in Post Processing, which is already the longest
+        // section in the panel; UE groups these the same way, under Bloom on the post-process volume.
+        //
+        // These are the LENS's properties, not the sun's: the same glass flares whatever is bright, which
+        // is why they sit here beside Bloom and not on the directional light (where the light SHAFTS
+        // live, because a shaft is scattering in the world rather than in the optics).
+        //
+        // Every one of them is content. The pass hardcodes no colour, no ghost count and no spacing —
+        // authoring a different flare is a scene edit. Off by default, so no existing scene changes.
+        PROPERTY( DisplayName( "Enable Lens Flare" ), Category( "Lens Flare" ) )
+        bool EnableLensFlare = false;
+        PROPERTY( DisplayName( "Intensity" ), Category( "Lens Flare" ), Range( 0.0f, 5.0f ) )
+        float LensFlareIntensity = 0.35f;
+        PROPERTY( DisplayName( "Tint" ), Category( "Lens Flare" ), Color )
+        glm::vec3 LensFlareTint = glm::vec3( 1.0f );
+        // HDR luminance a pixel must exceed to flare at all. Authored high enough that in a physical sky
+        // only the sun disc qualifies — this, not a radial mask, is what makes it a SUN flare.
+        PROPERTY( DisplayName( "Threshold" ), Category( "Lens Flare" ), Range( 0.0f, 50.0f ) )
+        float LensFlareThreshold = 4.0f;
+
+        // Ghosts: internal reflections, spaced along the sun->screen-centre axis. Spacing is the fraction
+        // of that axis between one ghost and the next, so counts past 1/Spacing land beyond the centre —
+        // which is where the second half of a real ghost train sits.
+        PROPERTY( DisplayName( "Ghost Count" ), Category( "Lens Flare" ), Range( 0.0f, 8.0f ) )
+        int LensFlareGhostCount = 4;
+        PROPERTY( DisplayName( "Ghost Spacing" ), Category( "Lens Flare" ), Range( 0.05f, 1.5f ) )
+        float LensFlareGhostSpacing = 0.35f;
+        // Magnification, not a screen size: a ghost is an IMAGE of the source, so 1.0 draws it the size
+        // the sun already is (a few pixels) and the useful range is well above that. Near/far are the two
+        // ends of the train's ramp.
+        PROPERTY( DisplayName( "Ghost Size Near" ), Category( "Lens Flare" ), Range( 0.05f, 16.0f ) )
+        float LensFlareGhostSizeNear = 1.0f;
+        PROPERTY( DisplayName( "Ghost Size Far" ), Category( "Lens Flare" ), Range( 0.05f, 16.0f ) )
+        float LensFlareGhostSizeFar = 3.0f;
+        // The ghost train's authored tint ramp: ghost i takes mix(Inner, Outer, i/(count-1)), so any
+        // count gets a full ramp and no palette lives in the shader.
+        PROPERTY( DisplayName( "Ghost Tint Inner" ), Category( "Lens Flare" ), Color )
+        glm::vec3 LensFlareGhostTintInner = glm::vec3( 1.0f, 0.86f, 0.62f );
+        PROPERTY( DisplayName( "Ghost Tint Outer" ), Category( "Lens Flare" ), Color )
+        glm::vec3 LensFlareGhostTintOuter = glm::vec3( 0.45f, 0.68f, 1.0f );
+
+        // Halo: the ring the front element scatters, centred on the sun. Radius is in aspect-corrected
+        // screen UV, so it stays a circle at any window shape.
+        PROPERTY( DisplayName( "Halo Intensity" ), Category( "Lens Flare" ), Range( 0.0f, 3.0f ) )
+        float LensFlareHaloIntensity = 0.25f;
+        PROPERTY( DisplayName( "Halo Radius" ), Category( "Lens Flare" ), Range( 0.02f, 1.0f ) )
+        float LensFlareHaloRadius = 0.18f;
+
+        // Anamorphic streak: a cylindrical element smearing the source along one axis. Angle in degrees,
+        // 0 = horizontal (the blue horizontal streak anamorphic lenses are known for).
+        //
+        // Its intensity range is an order above the others on purpose: the streak is an AVERAGE over its
+        // taps, so a source covering a few of 64 taps arrives ~20x weaker than a ghost, which is a direct
+        // sample. Both are honest; they just meet the authored number at different scales.
+        PROPERTY( DisplayName( "Streak Intensity" ), Category( "Lens Flare" ), Range( 0.0f, 30.0f ) )
+        float LensFlareStreakIntensity = 8.0f;
+        PROPERTY( DisplayName( "Streak Length" ), Category( "Lens Flare" ), Range( 0.0f, 1.0f ) )
+        float LensFlareStreakLength = 0.35f;
+        PROPERTY( DisplayName( "Streak Angle" ), Category( "Lens Flare" ), Range( -180.0f, 180.0f ) )
+        float LensFlareStreakAngle = 0.0f;
+
+        // Chromatic shift: how far apart the three channels are read within each feature. The fringe is
+        // the SCENE dispersed, not a colour painted on, so 0 gives a perfectly neutral flare.
+        PROPERTY( DisplayName( "Chromatic Shift" ), Category( "Lens Flare" ), Range( 0.0f, 1.0f ) )
+        float LensFlareChromaShift = 0.15f;
+
         // Textures
         PROPERTY( DisplayName( "Texture Filter" ), Category( "Textures" ) )
         TextureFilter TextureFilterMode = TextureFilter::Trilinear;

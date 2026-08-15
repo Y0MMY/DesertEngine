@@ -84,6 +84,18 @@ namespace Desert::Graphic::System
             m_LightShaftTint      = tint;
         }
 
+        // The lens flare (LensFlareRenderer) and its strength — Intensity x the sun's screen-edge fade,
+        // on the same contract as the shafts above: zero here always means the image contributes nothing.
+        void SetLensFlareImage( const std::shared_ptr<Image2D>& flare )
+        {
+            m_LensFlareImage = flare;
+        }
+        void SetLensFlare( float intensity, const glm::vec3& tint )
+        {
+            m_LensFlareIntensity = intensity;
+            m_LensFlareTint      = tint;
+        }
+
     private:
         void Render();
     private:
@@ -107,5 +119,9 @@ namespace Desert::Graphic::System
         std::weak_ptr<Image2D> m_LightShaftImage;
         float                  m_LightShaftIntensity = 0.0f;
         glm::vec3              m_LightShaftTint      = glm::vec3( 1.0f );
+
+        std::weak_ptr<Image2D> m_LensFlareImage;
+        float                  m_LensFlareIntensity = 0.0f;
+        glm::vec3              m_LensFlareTint      = glm::vec3( 1.0f );
     };
 } // namespace Desert::Graphic::System

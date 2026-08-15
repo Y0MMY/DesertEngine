@@ -20,11 +20,13 @@ namespace Desert::Graphic
             float     WhitePoint;          // luminance that maps to pure white (1 = no rolloff at all)
             float     LightShaftIntensity; // Bloom Scale x screen fade of the sun light's shafts (0 = off)
             glm::vec3 LightShaftTint;      // the sun light's Bloom Tint
+            float     LensFlareIntensity;  // Lens Flare Intensity x screen fade (0 = off)
+            glm::vec3 LensFlareTint;       // the lens's Tint
         };
 
         void Bind( const std::shared_ptr<Image2D>& targetImage, const std::shared_ptr<Image2D>& bloomImage,
                    const std::shared_ptr<Image2D>& avgLuminance, const std::shared_ptr<Image2D>& lightShaftImage,
-                   const Params& params );
+                   const std::shared_ptr<Image2D>& lensFlareImage, const Params& params );
 
         MPROPERTY( float, Exposure,            "u_Exposure",            1.0f )
         MPROPERTY( float, Gamma,               "u_Gamma",               2.2f )
@@ -36,11 +38,16 @@ namespace Desert::Graphic
         // rgb = tint, a = intensity: one vec4 slot, and the two cannot disagree about being on.
         MPROPERTY( glm::vec4, LightShaftTintIntensity, "u_LightShaftTintIntensity",
                    ( glm::vec4( 1.0f, 1.0f, 1.0f, 0.0f ) ) )
+        // Same packing as the shafts above, for the same reason: tint and intensity travel together so
+        // they cannot disagree about whether the effect is on.
+        MPROPERTY( glm::vec4, LensFlareTintIntensity, "u_LensFlareTintIntensity",
+                   ( glm::vec4( 1.0f, 1.0f, 1.0f, 0.0f ) ) )
 
     private:
         Texture2DProperty* m_GeometryTexture   = nullptr;
         Texture2DProperty* m_BloomTexture      = nullptr;
         Texture2DProperty* m_AvgLuminance      = nullptr;
         Texture2DProperty* m_LightShaftTexture = nullptr;
+        Texture2DProperty* m_LensFlareTexture  = nullptr;
     };
 } // namespace Desert::Graphic
