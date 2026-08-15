@@ -205,12 +205,35 @@ float CloudHeightFraction(vec3 positionKm, float planetRadiusKm, float bottomKm,
 
 // ---- Step scheduling -------------------------------------------------------------------------------
 
+// The near/far split of the step schedule, in WORLD UNITS (centimetres). Nubis3 grows its step as
+// sqrt(distance) (p. 163: `adaptive_step = max(1, sqrt(d) * 0.08)` metres) because a cauliflower lobe is
+// 100-200 m across wherever it is, while a linear schedule crosses that size a few kilometres out and
+// renders everything beyond as step-sized mush. The deck can afford sqrt everywhere because its voxel
+// domain is 4 km; ours is a 150 km shell, so the sqrt regime is bounded: inside FINE_RANGE the step obeys
+// the sqrt law, beyond FAR_RANGE it is exactly the old linear schedule (the deck's own near/far logic,
+// p. 171 — past that range the layer is a texture and finer sampling buys nothing), and between the two
+// it blends monotonically. 10 km is where a ground camera actually looks at clouds; 25 km is past the
+// distance-softening midpoint, where detail is deliberately attenuated anyway.
+const float CLOUD_STEP_FINE_RANGE = 1000000.0f; // 10 km: sqrt regime, step <= 2 * minStep
+const float CLOUD_STEP_FAR_RANGE  = 2500000.0f; // 25 km: pure linear schedule resumes
+
 // Distance-adaptive step length, in WORLD UNITS. Steps grow with distance because a cloud a hundred
 // kilometres away covers fewer pixels than one overhead, so the same angular error costs a longer step.
 // The clamp is what makes MinStepSize and MaxStepSize mean what the Details panel says they mean.
+//
+// The sqrt term is scaled by minStep rather than by an absolute constant so the quality tiers keep their
+// meaning: the fine step is minStep at the camera and exactly 2 * minStep at FINE_RANGE, for every tier.
+// The min() against the linear schedule keeps the near tier from ever being COARSER than the old
+// schedule (near the camera the linear term is the finer of the two), which is also what makes the blend
+// below monotone for any growth >= 0: it interpolates from the smaller function to the larger one with a
+// nondecreasing weight.
 float CloudStepLength(float t, float minStep, float maxStep, float growth)
 {
-    return clamp(minStep + growth * t, min(minStep, maxStep), max(minStep, maxStep));
+    float linear = minStep + growth * t;
+    float fine   = min(minStep * (1.0f + sqrt(max(t, 0.0f) * (1.0f / CLOUD_STEP_FINE_RANGE))), linear);
+    float w      = clamp((t - CLOUD_STEP_FINE_RANGE) * (1.0f / (CLOUD_STEP_FAR_RANGE - CLOUD_STEP_FINE_RANGE)),
+                         0.0f, 1.0f);
+    return clamp(mix(fine, linear, w), min(minStep, maxStep), max(minStep, maxStep));
 }
 
 // The empty-space skip, as a state machine over scalars.

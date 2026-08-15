@@ -101,14 +101,15 @@ Shader "CloudWeather"
             // The density-scale field is deliberately independent of coverage: a sky can be evenly
             // covered and still have a few much denser cells in it.
             //
-            // Written into the UPPER HALF of the range, not the whole of it. The raymarch raises this
-            // channel to Density Scale Power (4 by default) before it multiplies the density by it, so a
-            // field centred on 0.5 would arrive as 0.06 and thin every cloud in the sky by a factor of
-            // sixteen. [0.5, 1] keeps the knob's operating range on the part of the curve where moving
-            // it does something an artist can predict.
-            float densityNoise  = clamp(CloudPerlin(vec3(p.x, p.y, 0.73f), 4, seed + 7717u) * 1.5f + 0.5f,
+            // The FULL [0, 1] range. The raymarch applies this channel LINEARLY and keeps Density Scale
+            // Power inside the sharpening lerp only (the Nubis3 p. 118 form — see the comment at
+            // CloudDensityProcedural.glslh's density-scale site). The [0.5, 1] compression that used to
+            // be written here was a workaround for the days when the raymarch multiplied by scale^4,
+            // which arrived as 0.06 for a mid-range cell; with the linear form fixed, the compression
+            // only halved the per-cell density variety this channel exists to provide (the deck's third
+            // NVDF channel, p. 85) and pinned the sharpen exponent near its 0.6 end.
+            float densityScale  = clamp(CloudPerlin(vec3(p.x, p.y, 0.73f), 4, seed + 7717u) * 1.5f + 0.5f,
                                         0.0f, 1.0f);
-            float densityScale  = 0.5f + 0.5f * densityNoise;
 
             imageStore(u_WeatherOut, coord, vec4(coverage, type, wetness, densityScale));
         }

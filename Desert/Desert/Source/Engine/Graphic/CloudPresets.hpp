@@ -19,6 +19,14 @@ namespace Desert::Graphic
     // Presets are NEVER re-applied on load: the serialized field values are the truth and
     // VolumetricCloudData::Preset is only a label. Editing this table therefore cannot change how an
     // already-authored scene looks.
+    //
+    // DetailStrength runs at 0.70-0.85 on the convective presets (0.30-0.40 on the blanket ones), not
+    // the old 0.30-0.55: Nubis3 erodes the profile with the FULL noise composite (p. 118), and at a
+    // third of that strength every silhouette stayed envelope-shaped with shallow dents (the audit's
+    // p. 81 left image). Carving at this strength only became visible once the sqrt-type step schedule
+    // (CloudGeometry.glslh) could sample what it carves. WeatherOctaves 6 on the cumulus presets puts
+    // the smallest coverage feature at ~234 m on a 60 km tile — the ~256 m plan-view features the deck's
+    // 31 m/texel NDF carries — while staying above the 512^2 map's own texel (2 texels per feature).
 
     // The preset-driven field set, written ONCE. The value struct, the copy out of a component and the
     // copy back into one are all generated from this list, so they cannot drift apart - a field present
@@ -135,7 +143,7 @@ namespace Desert::Graphic
                 .CoverageContrast              = 2.20f,
                 .WeatherTileSize               = Common::Units::Metres( 60000.0f ),
                 .WeatherSeed                   = 1337,
-                .WeatherOctaves                = 5,
+                .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.35f,
                 .CloudType                     = 0.75f,
                 .CloudTypeVariance             = 0.25f,
@@ -152,7 +160,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 1.50f,
                 .DensityHeightBias             = 0.50f,
-                .DetailStrength                = 0.30f,
+                .DetailStrength                = 0.70f,
                 .DetailTileSize                = Common::Units::Metres( 2000.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.60f,
@@ -216,7 +224,7 @@ namespace Desert::Graphic
                 .CoverageContrast              = 1.60f,
                 .WeatherTileSize               = Common::Units::Metres( 50000.0f ),
                 .WeatherSeed                   = 1337,
-                .WeatherOctaves                = 5,
+                .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.40f,
                 .CloudType                     = 0.70f,
                 .CloudTypeVariance             = 0.35f,
@@ -233,7 +241,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 1.50f,
                 .DensityHeightBias             = 0.60f,
-                .DetailStrength                = 0.34f,
+                .DetailStrength                = 0.72f,
                 .DetailTileSize                = Common::Units::Metres( 2000.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.55f,
@@ -297,7 +305,7 @@ namespace Desert::Graphic
                 .CoverageContrast              = 1.20f,
                 .WeatherTileSize               = Common::Units::Metres( 60000.0f ),
                 .WeatherSeed                   = 1337,
-                .WeatherOctaves                = 5,
+                .WeatherOctaves                = 6,
                 .WeatherWarpStrength           = 0.45f,
                 .CloudType                     = 0.60f,
                 .CloudTypeVariance             = 0.45f,
@@ -314,7 +322,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 1.50f,
                 .DensityHeightBias             = 0.70f,
-                .DetailStrength                = 0.38f,
+                .DetailStrength                = 0.75f,
                 .DetailTileSize                = Common::Units::Metres( 2000.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.50f,
@@ -395,7 +403,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 3.20f,
                 .TopGradientPower              = 1.20f,
                 .DensityHeightBias             = 0.85f,
-                .DetailStrength                = 0.52f,
+                .DetailStrength                = 0.85f,
                 .DetailTileSize                = Common::Units::Metres( 2000.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.72f,
@@ -476,7 +484,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 2.60f,
                 .TopGradientPower              = 1.80f,
                 .DensityHeightBias             = 0.20f,
-                .DetailStrength                = 0.18f,
+                .DetailStrength                = 0.30f,
                 .DetailTileSize                = Common::Units::Metres( 3000.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.15f,
@@ -557,7 +565,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 2.30f,
                 .TopGradientPower              = 1.60f,
                 .DensityHeightBias             = 0.35f,
-                .DetailStrength                = 0.24f,
+                .DetailStrength                = 0.40f,
                 .DetailTileSize                = Common::Units::Metres( 2500.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.30f,
@@ -638,7 +646,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 1.60f,
                 .TopGradientPower              = 1.10f,
                 .DensityHeightBias             = 1.10f,
-                .DetailStrength                = 0.50f,
+                .DetailStrength                = 0.80f,
                 .DetailTileSize                = Common::Units::Metres( 1500.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.70f,
@@ -719,7 +727,7 @@ namespace Desert::Graphic
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 2.20f,
                 .DensityHeightBias             = 0.20f,
-                .DetailStrength                = 0.55f,
+                .DetailStrength                = 0.80f,
                 .DetailTileSize                = Common::Units::Metres( 1250.0f ),
                 .DetailSeed                    = 13,
                 .DetailTypeBias                = 0.05f,

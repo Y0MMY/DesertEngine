@@ -18,6 +18,7 @@
 #include "CloudGeometryReference.hpp"
 
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
+#include <Engine/Graphic/CloudQuality.hpp>
 
 #include <gtest/gtest.h>
 
@@ -408,6 +409,95 @@ TEST( CloudSteps, TheScheduleCoversTheWholeIntervalWhenMaxStepsIsNotBinding )
     EXPECT_GE( steps.front().Distance, 1000.0f );
     EXPECT_LT( steps.back().Distance, 200000.0f );
     EXPECT_GE( steps.back().Distance + steps.back().Length, 200000.0f );
+}
+
+// ---- Wave 1: the sqrt-type near schedule (Nubis3 pp. 163/171) --------------------------------------
+//
+// The deck steps at max(1, sqrt(d) * 0.08) metres because a cauliflower lobe is 100-200 m across at any
+// distance, and a linear schedule crosses that size a few kilometres out. Our version bounds the sqrt
+// regime: <= 2 * MinStepSize out to CLOUD_STEP_FINE_RANGE (10 km), exactly the old linear schedule
+// beyond CLOUD_STEP_FAR_RANGE (25 km), monotone blend between. These tests pin all three properties for
+// every shipped quality tier, so a tier retune cannot silently break the schedule's contract.
+
+TEST( CloudSteps, EveryQualityTierScheduleIsMonotoneNondecreasing )
+{
+    for ( const Desert::Graphic::CloudQualityEntry& tier : Desert::Graphic::kCloudQualityTiers )
+    {
+        const auto& q        = tier.Values;
+        float       previous = 0.0f;
+        for ( float t = 0.0f; t <= 15000000.0f; t += 5000.0f ) // 0..150 km in 50 m increments
+        {
+            const float step = R::CloudStepLength( t, q.MinStepSize, q.MaxStepSize, q.StepGrowthRate );
+            EXPECT_GE( step, previous - 1e-3f ) << tier.Name << " at t = " << t;
+            EXPECT_GE( step, q.MinStepSize ) << tier.Name;
+            EXPECT_LE( step, q.MaxStepSize ) << tier.Name;
+            previous = step;
+        }
+    }
+}
+
+TEST( CloudSteps, TheFineRegimeResolvesThirtyMetresOutToTenKilometres )
+{
+    // The audit's bound (NUBIS3_FULL_AUDIT §3 item 1): a 100-200 m billow lobe must stay above Nyquist
+    // for the march out to 10 km — where a ground camera actually looks at the layer — which needs a
+    // step of at most ~30 m there. Inside CLOUD_STEP_FINE_RANGE the schedule is bounded by
+    // 2 * MinStepSize, so the High tier's 15 m authors exactly the 30 m bound and Ultra's 12 m is finer.
+    EXPECT_FLOAT_EQ( R::CLOUD_STEP_FINE_RANGE, 1000000.0f ); // 10 km in world units
+
+    for ( const Desert::Graphic::CloudQualityEntry& tier : Desert::Graphic::kCloudQualityTiers )
+    {
+        const auto& q = tier.Values;
+        for ( float t = 0.0f; t <= R::CLOUD_STEP_FINE_RANGE; t += 2500.0f )
+        {
+            const float step = R::CloudStepLength( t, q.MinStepSize, q.MaxStepSize, q.StepGrowthRate );
+            EXPECT_LE( step, 2.0f * q.MinStepSize + 1e-2f ) << tier.Name << " at t = " << t;
+        }
+    }
+
+    const Desert::Graphic::CloudQualityEntry* high =
+         Desert::Graphic::FindCloudQuality( Desert::ECS::CloudQuality::High );
+    ASSERT_NE( high, nullptr );
+    EXPECT_LE( 2.0f * high->Values.MinStepSize, Common::Units::Metres( 30.0f ) + 1e-2f )
+         << "the High tier's MinStepSize must keep the fine regime at <= 30 m";
+}
+
+TEST( CloudSteps, BeyondTheFarRangeTheScheduleIsExactlyTheLinearOne )
+{
+    // The far fallback (deck's own near/far split, p. 171): past CLOUD_STEP_FAR_RANGE the layer is a
+    // texture and finer sampling buys nothing, so the schedule must be EXACTLY the old linear one — two
+    // implementations of one quantity, asserted equal rather than trusted.
+    EXPECT_FLOAT_EQ( R::CLOUD_STEP_FAR_RANGE, 2500000.0f ); // 25 km in world units
+
+    for ( const Desert::Graphic::CloudQualityEntry& tier : Desert::Graphic::kCloudQualityTiers )
+    {
+        const auto& q = tier.Values;
+        for ( float t = R::CLOUD_STEP_FAR_RANGE; t <= 15000000.0f; t += 250000.0f )
+        {
+            const float linear =
+                 glm::clamp( q.MinStepSize + q.StepGrowthRate * t, glm::min( q.MinStepSize, q.MaxStepSize ),
+                             glm::max( q.MinStepSize, q.MaxStepSize ) );
+            EXPECT_FLOAT_EQ( R::CloudStepLength( t, q.MinStepSize, q.MaxStepSize, q.StepGrowthRate ), linear )
+                 << tier.Name << " at t = " << t;
+        }
+    }
+}
+
+TEST( CloudSteps, TheNearScheduleIsNeverCoarserThanTheLinearOne )
+{
+    // The min() in the fine branch: near the camera the linear term is the finer of the two, and taking
+    // the sqrt term there would make the new schedule COARSER than the one it replaces.
+    for ( const Desert::Graphic::CloudQualityEntry& tier : Desert::Graphic::kCloudQualityTiers )
+    {
+        const auto& q = tier.Values;
+        for ( float t = 0.0f; t <= 15000000.0f; t += 10000.0f )
+        {
+            const float linear =
+                 glm::clamp( q.MinStepSize + q.StepGrowthRate * t, glm::min( q.MinStepSize, q.MaxStepSize ),
+                             glm::max( q.MinStepSize, q.MaxStepSize ) );
+            EXPECT_LE( R::CloudStepLength( t, q.MinStepSize, q.MaxStepSize, q.StepGrowthRate ), linear + 1e-3f )
+                 << tier.Name << " at t = " << t;
+        }
+    }
 }
 
 // CLD-62: MaxSteps is a hard bound the loop honours, not a hint. The adversarial case is the finest

@@ -123,7 +123,7 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Weather Octaves" ), Category( "Weather" ), Range( 1, 8 ),
                   EditCondition( "Enabled" ), Tooltip( "Detail richness of the coverage field." ) )
-        int WeatherOctaves = 5;
+        int WeatherOctaves = 6;
 
         PROPERTY( DisplayName( "Weather Warp Strength" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ),
@@ -207,7 +207,7 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Detail Strength" ), Category( "Detail" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ),
                   Tooltip( "Overall erosion by the detail volume: cauliflower versus smooth." ) )
-        float DetailStrength = 0.38f;
+        float DetailStrength = 0.75f;
 
         PROPERTY( DisplayName( "Detail Tile Size" ), Category( "Detail" ), Length,
                   Range( Common::Units::Metres( 200.0f ), Common::Units::Metres( 30000.0f ) ),
@@ -471,7 +471,7 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Max Steps" ), Category( "Quality" ), Range( 8, 512 ),
                   Tooltip( "Hard iteration cap of the view march." ) )
-        int MaxSteps = 128;
+        int MaxSteps = 176;
 
         PROPERTY( DisplayName( "Min Step Size" ), Category( "Quality" ), Length,
                   Range( Common::Units::Metres( 1.0f ), Common::Units::Metres( 500.0f ) ),
@@ -489,7 +489,7 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Coarse Step Multiplier" ), Category( "Quality" ), Range( 1.0f, 8.0f ),
                   Tooltip( "Stride multiplier used while skipping empty space." ) )
-        float CoarseStepMultiplier = 3.00f;
+        float CoarseStepMultiplier = 4.00f;
 
         PROPERTY( DisplayName( "Empty Samples Before Coarse" ), Category( "Quality" ), Range( 1, 32 ),
                   Tooltip( "Consecutive empty fine samples before returning to the coarse stride." ) )

@@ -223,10 +223,10 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     //
     // This site multiplied by scale^4 instead, which is a transcription error inherited from the reference
     // project rather than from the paper. It compressed the channel's effect eightfold at the low end and
-    // is the reason CloudWeather.shader writes this channel into [0.5, 1] instead of [0, 1] — a workaround
-    // whose own comment explains that the full range "would thin every cloud in the sky by a factor of
-    // sixteen". With the paper's form the channel can use its range and Density Scale Power is once again
-    // the exponent it is named after.
+    // forced CloudWeather.shader to write the channel into [0.5, 1] as a workaround. With the paper's form
+    // the weather pass emits the full [0, 1] range again, the channel provides the per-cell density
+    // variety the deck's third NVDF channel exists for, and Density Scale Power is once again the
+    // exponent it is named after.
     float scale = clamp(weather.a, 0.0f, 1.0f);
     density *= scale;
     density = pow(density, mix(u_DensitySharpenLow, u_DensitySharpenHigh,
