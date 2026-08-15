@@ -1,6 +1,7 @@
 #include <Engine/Graphic/SceneRenderer.hpp>
 #include <Engine/Graphic/RenderPhaseRegistry.hpp>
 #include <Engine/Graphic/RenderConfig.hpp>
+#include <Engine/Graphic/PostProcessing/LensFlareRules.hpp>
 #include <Engine/Graphic/PostProcessing/LightShaftRules.hpp>
 #include <Engine/Core/Application.hpp>
 #include <Engine/Core/EngineContext.hpp>
@@ -163,6 +164,14 @@ namespace Desert::Graphic
         if ( !lightShaftSystem->Initialize() )
             LOG_WARN( "[SceneRenderer] Light shaft system unavailable." );
 
+        // Lens flare: the camera's own response to the sun disc — ghosts, halo and streak gathered from
+        // the same HDR scene colour, added in by the tonemap the way bloom is. Non-fatal, like the shafts.
+        RegisterSystem<System::LensFlareRenderer>( "LensFlareSystem", this, m_TargetFramebuffer,
+                                                   m_RenderGraphBuilder );
+        const auto& lensFlareSystem = SP_CAST( System::LensFlareRenderer, m_RenderSystems["LensFlareSystem"] );
+        if ( const auto flareInit = lensFlareSystem->Initialize(); !flareInit )
+            LOG_WARN( "[SceneRenderer] Lens flare system unavailable: {}", flareInit.GetError() );
+
         // SSAO (fullscreen G-buffer -> AO factor). Its target is the dedicated SSAO buffer; deferred lighting
         // reads the result. Runs in the manual chain only when Deferred. Non-fatal.
         RegisterSystem<System::SSAORenderer>( "SSAOSystem", this, m_SSAOBuffer, m_RenderGraphBuilder );
@@ -211,6 +220,7 @@ namespace Desert::Graphic
             LOG_WARN( "[SceneRenderer] Deferred lighting system unavailable." );
         tonemapSystem->SetBloomImage( bloomSystem->GetBloomImage() );
         tonemapSystem->SetLightShaftImage( lightShaftSystem->GetShaftImage() );
+        tonemapSystem->SetLensFlareImage( lensFlareSystem->GetFlareImage() );
 
         // Auto-exposure measures the HDR scene luminance into a 1x1 buffer that tonemap reads.
         RegisterSystem<System::AutoExposureRenderer>( "AutoExposureSystem", this, m_TargetFramebuffer,
@@ -387,6 +397,26 @@ namespace Desert::Graphic
              ->SetBloomIntensity( sceneSettings.EnableBloom ? sceneSettings.BloomIntensity : 0.0f );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetChromaticBloom( sceneSettings.EnableBloom ? sceneSettings.LensDispersion : 0.0f );
+
+        // Lens flare: the authored "Lens Flare" group, copied whole. Intensity and Tint are held out of
+        // the pass's own params because the pass never applies them — the tonemap does, so that a flare
+        // whose sun has left the screen fades through ONE number instead of two that could disagree.
+        m_LensFlare.Enabled         = sceneSettings.EnableLensFlare;
+        m_LensFlare.Intensity       = sceneSettings.LensFlareIntensity;
+        m_LensFlare.Threshold       = sceneSettings.LensFlareThreshold;
+        m_LensFlare.GhostCount      = sceneSettings.LensFlareGhostCount;
+        m_LensFlare.GhostSpacing    = sceneSettings.LensFlareGhostSpacing;
+        m_LensFlare.GhostSizeNear   = sceneSettings.LensFlareGhostSizeNear;
+        m_LensFlare.GhostSizeFar    = sceneSettings.LensFlareGhostSizeFar;
+        m_LensFlare.GhostTintInner  = sceneSettings.LensFlareGhostTintInner;
+        m_LensFlare.GhostTintOuter  = sceneSettings.LensFlareGhostTintOuter;
+        m_LensFlare.HaloIntensity   = sceneSettings.LensFlareHaloIntensity;
+        m_LensFlare.HaloRadius      = sceneSettings.LensFlareHaloRadius;
+        m_LensFlare.StreakIntensity = sceneSettings.LensFlareStreakIntensity;
+        m_LensFlare.StreakLength    = sceneSettings.LensFlareStreakLength;
+        m_LensFlare.StreakAngle     = sceneSettings.LensFlareStreakAngle;
+        m_LensFlare.ChromaShift     = sceneSettings.LensFlareChromaShift;
+        m_LensFlareTint             = sceneSettings.LensFlareTint;
 
         UNIQUE_GET_AS( System::AutoExposureRenderer, m_RenderSystems["AutoExposureSystem"] )
              ->SetParams( sceneSettings.AutoExposureSpeed, sceneSettings.AutoExposureMin,
@@ -678,19 +708,24 @@ namespace Desert::Graphic
         // is derived HERE, from the same numbers that decide whether the dispatches run — a zero
         // intensity therefore always means the (possibly stale) shaft image is inert, the exact contract
         // the bloom image has.
+        // Where the sun lands on screen, computed ONCE: the shafts stream from it and the flare is
+        // reflected about it, and two evaluations of one quantity is the defect class that has cost this
+        // project the most. Fade is 0 when the sun is behind the camera or far past the screen edge, and
+        // both effects multiply it — that, not a branch, is what stops either painting from a sun behind
+        // the viewer.
+        SunScreen            sun{ glm::vec2( 0.5f ), 0.0f };
+        const AtmosphereEnv& atmosphere = GetAtmosphere();
+        if ( m_SceneInfo.ActiveCamera && atmosphere.Valid )
+        {
+            const glm::mat4 viewProjection =
+                 m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
+            sun = ComputeSunScreen( viewProjection, atmosphere.SunDirection );
+        }
+
         {
             DESERT_PROFILE_SCOPE( "PostFX: LightShafts" );
             const auto& shafts  = UNIQUE_GET_AS( System::LightShaftRenderer, m_RenderSystems["LightShaftSystem"] );
             const auto& tonemap = UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
-
-            SunScreen            sun{ glm::vec2( 0.5f ), 0.0f };
-            const AtmosphereEnv& atmosphere = GetAtmosphere();
-            if ( m_SceneInfo.ActiveCamera && atmosphere.Valid )
-            {
-                const glm::mat4 viewProjection =
-                     m_SceneInfo.ActiveCamera->GetProjectionMatrix() * m_SceneInfo.ActiveCamera->GetViewMatrix();
-                sun = ComputeSunScreen( viewProjection, atmosphere.SunDirection );
-            }
 
             shafts->SetParams( System::LightShaftRenderer::Params{
                  .Enabled       = m_SunLightFx.LightShaftBloom,
@@ -704,6 +739,22 @@ namespace Desert::Graphic
             const float intensity = m_SunLightFx.LightShaftBloom ? m_SunLightFx.BloomScale * sun.Fade : 0.0f;
             tonemap->SetLightShaftImage( shafts->GetShaftImage() );
             tonemap->SetLightShafts( intensity, m_SunLightFx.BloomTint );
+        }
+
+        {
+            DESERT_PROFILE_SCOPE( "PostFX: LensFlare" );
+            const auto& flare   = UNIQUE_GET_AS( System::LensFlareRenderer, m_RenderSystems["LensFlareSystem"] );
+            const auto& tonemap = UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] );
+
+            flare->SetParams( m_LensFlare );
+            flare->Execute( sun.Uv, sun.Fade );
+
+            // Derived HERE, from the same two numbers that decided whether the dispatches ran, so a zero
+            // intensity and a skipped dispatch can never disagree — the bloom image's contract.
+            const float intensity =
+                 m_LensFlare.Enabled ? LensFlareStrength( sun.Fade, m_LensFlare.Intensity ) : 0.0f;
+            tonemap->SetLensFlareImage( flare->GetFlareImage() );
+            tonemap->SetLensFlare( intensity, m_LensFlareTint );
         }
 
         {
@@ -907,6 +958,12 @@ namespace Desert::Graphic
         shaftSystem->Resize( width, height );
         UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
              ->SetLightShaftImage( shaftSystem->GetShaftImage() );
+
+        // And for the lens flare, whose source/feature pair is recreated at the new quarter resolution.
+        const auto& flareSystem = UNIQUE_GET_AS( System::LensFlareRenderer, m_RenderSystems["LensFlareSystem"] );
+        flareSystem->Resize( width, height );
+        UNIQUE_GET_AS( System::TonemapRenderer, m_RenderSystems["TonemapSystem"] )
+             ->SetLensFlareImage( flareSystem->GetFlareImage() );
     }
 
     // NOTE: if you use rendering without imgui, you may get a black screen! you should start by setting

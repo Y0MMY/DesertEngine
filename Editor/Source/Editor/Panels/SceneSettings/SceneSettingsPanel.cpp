@@ -129,6 +129,55 @@ namespace Desert::Editor
                 ImGui::SetTooltip( "Chromatic rainbow fringe around bright sources (glare). Needs Bloom on." );
         }
 
+        if ( Utils::ImGuiUtilities::SectionHeader( "Lens Flare" ) )
+        {
+            ImGui::Checkbox( "Lens Flare", &s.EnableLensFlare );
+            Utils::ImGuiUtilities::Tooltip(
+                 "Ghosts, halo and anamorphic streak from the sun disc. Every feature is an image of "
+                 "what is actually bright on screen, so a sun behind cloud dims its own flare." );
+
+            ImGui::BeginDisabled( !s.EnableLensFlare );
+            ImGui::SliderFloat( "Flare Intensity", &s.LensFlareIntensity, 0.0f, 5.0f );
+            ImGui::ColorEdit3( "Flare Tint", &s.LensFlareTint.x );
+            ImGui::SliderFloat( "Flare Threshold", &s.LensFlareThreshold, 0.0f, 50.0f );
+            Utils::ImGuiUtilities::Tooltip(
+                 "HDR luminance a pixel must exceed to flare. Keep it above the brightest cloud so only "
+                 "the sun qualifies." );
+
+            ImGui::Spacing();
+            ImGui::SliderInt( "Ghost Count", &s.LensFlareGhostCount, 0, 8 );
+            ImGui::SliderFloat( "Ghost Spacing", &s.LensFlareGhostSpacing, 0.05f, 1.5f );
+            Utils::ImGuiUtilities::Tooltip(
+                 "Fraction of the sun-to-centre axis between one ghost and the next. Past 1.0 of the way "
+                 "the train continues on the far side of the screen centre." );
+            ImGui::SliderFloat( "Ghost Size Near", &s.LensFlareGhostSizeNear, 0.05f, 16.0f );
+            Utils::ImGuiUtilities::Tooltip(
+                 "Magnification of the source, not a screen size: 1.0 draws a ghost the size the sun "
+                 "already is." );
+            ImGui::SliderFloat( "Ghost Size Far", &s.LensFlareGhostSizeFar, 0.05f, 16.0f );
+            ImGui::ColorEdit3( "Ghost Tint Inner", &s.LensFlareGhostTintInner.x );
+            ImGui::ColorEdit3( "Ghost Tint Outer", &s.LensFlareGhostTintOuter.x );
+
+            ImGui::Spacing();
+            ImGui::SliderFloat( "Halo Intensity", &s.LensFlareHaloIntensity, 0.0f, 3.0f );
+            ImGui::SliderFloat( "Halo Radius", &s.LensFlareHaloRadius, 0.02f, 1.0f );
+
+            ImGui::Spacing();
+            ImGui::SliderFloat( "Streak Intensity", &s.LensFlareStreakIntensity, 0.0f, 30.0f );
+            Utils::ImGuiUtilities::Tooltip(
+                 "Ranges an order above the other intensities because the streak is an average over its "
+                 "taps, so it meets the authored number at a different scale than a ghost does." );
+            ImGui::SliderFloat( "Streak Length", &s.LensFlareStreakLength, 0.0f, 1.0f );
+            ImGui::SliderFloat( "Streak Angle", &s.LensFlareStreakAngle, -180.0f, 180.0f );
+
+            ImGui::Spacing();
+            ImGui::SliderFloat( "Chromatic Shift", &s.LensFlareChromaShift, 0.0f, 1.0f );
+            Utils::ImGuiUtilities::Tooltip(
+                 "How far apart the three channels are read within each feature. The fringe is the scene "
+                 "dispersed, not a colour painted on — 0 gives a neutral flare." );
+            ImGui::EndDisabled();
+        }
+
         if ( Utils::ImGuiUtilities::SectionHeader( "Textures" ) )
         {
             // Global sampler filter — applies live (samplers are recreated when this changes).

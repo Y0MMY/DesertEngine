@@ -29,6 +29,7 @@
 #include "Systems/Scene/PostProcessing/SMAARenderer.hpp"
 #include "Systems/Scene/PostProcessing/BackdropBlurRenderer.hpp"
 #include "Systems/Scene/PostProcessing/BloomRenderer.hpp"
+#include "Systems/Scene/PostProcessing/LensFlareRenderer.hpp"
 #include "Systems/Scene/PostProcessing/LightShaftRenderer.hpp"
 #include "Systems/Scene/PostProcessing/AutoExposureRenderer.hpp"
 #include "Systems/Scene/Deferred/DeferredLightingRenderer.hpp"
@@ -308,6 +309,11 @@ namespace Desert::Graphic
         // Selected post-process anti-aliasing technique, refreshed from SceneSettings each BeginScene.
         Core::AntiAliasingMode m_AAMode       = Core::AntiAliasingMode::FXAA;
         bool                   m_BloomEnabled = false;
+
+        // Lens flare, refreshed from SceneSettings each BeginScene. The tint is held apart from the rest
+        // because the pass never sees it — the tonemap applies it, the way the shafts' tint works.
+        System::LensFlareRenderer::Params m_LensFlare;
+        glm::vec3                         m_LensFlareTint = glm::vec3( 1.0f );
         // Raised by the UI canvas when it drew glass; consumed at the top of the next frame's UI phase.
         bool                   m_BackdropBlurNeeded = false;
         bool                   m_ScenePlaying = false; // set per frame in BeginScene (hides authoring aids)

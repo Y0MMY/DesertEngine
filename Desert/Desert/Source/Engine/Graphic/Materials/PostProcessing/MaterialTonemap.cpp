@@ -10,12 +10,14 @@ namespace Desert::Graphic
         m_BloomTexture      = m_MaterialExecutor->GetTexture2DProperty( "u_BloomTexture" ).get();
         m_AvgLuminance      = m_MaterialExecutor->GetTexture2DProperty( "u_AvgLuminance" ).get();
         m_LightShaftTexture = m_MaterialExecutor->GetTexture2DProperty( "u_LightShaftTexture" ).get();
+        m_LensFlareTexture  = m_MaterialExecutor->GetTexture2DProperty( "u_LensFlareTexture" ).get();
     }
 
     void MaterialTonemap::Bind( const std::shared_ptr<Image2D>& targetImage,
                                 const std::shared_ptr<Image2D>& bloomImage,
                                 const std::shared_ptr<Image2D>& avgLuminance,
-                                const std::shared_ptr<Image2D>& lightShaftImage, const Params& params )
+                                const std::shared_ptr<Image2D>& lightShaftImage,
+                                const std::shared_ptr<Image2D>& lensFlareImage, const Params& params )
     {
         if ( m_GeometryTexture && targetImage )
             m_GeometryTexture->SetImage( targetImage.get() );
@@ -29,6 +31,9 @@ namespace Desert::Graphic
         if ( m_LightShaftTexture && lightShaftImage )
             m_LightShaftTexture->SetImage( lightShaftImage.get() );
 
+        if ( m_LensFlareTexture && lensFlareImage )
+            m_LensFlareTexture->SetImage( lensFlareImage.get() );
+
         SetExposure( params.Exposure );
         SetGamma( params.Gamma );
         SetBloomIntensity( params.BloomIntensity );
@@ -37,6 +42,7 @@ namespace Desert::Graphic
         SetChromaticBloom( params.ChromaticBloom );
         SetWhitePoint( params.WhitePoint );
         SetLightShaftTintIntensity( glm::vec4( params.LightShaftTint, params.LightShaftIntensity ) );
+        SetLensFlareTintIntensity( glm::vec4( params.LensFlareTint, params.LensFlareIntensity ) );
 
         std::unordered_set<UniformBufferProperty*> dirtyUBs;
         UploadRegisteredProperties( dirtyUBs );
