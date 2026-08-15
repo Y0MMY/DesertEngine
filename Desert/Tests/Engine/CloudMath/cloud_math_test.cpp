@@ -165,6 +165,23 @@ namespace
         }
         return samples;
     }
+
+    // The direct-light energy as the march computed it BEFORE CLD-113: the same octaves, handed the raw
+    // optical depth toward the sun. Kept as a local reference so the depth-modulation tests compare
+    // against the formula they replaced rather than against a number somebody wrote down once. The
+    // arguments after the optical depth are the component's defaults (3 octaves, 0.5 falloffs).
+    glm::vec3 MultiScatterBeforeDepthModulation( float opticalDepthToSun, float cosTheta )
+    {
+        return R::CloudMultiScatter( opticalDepthToSun, glm::vec3( 1.0f ), cosTheta, 3, 0.5f, 0.5f, 0.5f, 0.8f,
+                                     -0.15f, 0.5f, 1.2f );
+    }
+
+    // The same call the march makes now: the octaves see the depth-modulated optical depth.
+    glm::vec3 MultiScatterWithDepthModulation( float opticalDepthToSun, float profile, float cosTheta )
+    {
+        return MultiScatterBeforeDepthModulation(
+             R::CloudMultiScatterOpticalDepth( opticalDepthToSun, profile, cosTheta ), cosTheta );
+    }
 } // namespace
 
 // ---- CLD-23 / CLD-24: the shell -------------------------------------------------------------------
@@ -774,6 +791,105 @@ TEST( CloudMultiScatter, TheExtinctionTintActsPerChannel )
     EXPECT_LT( ms.y, ms.z ); // less extinction survives more light
 }
 
+// ---- CLD-113: the multiple-scattering extinction is depth-modulated -------------------------------
+//
+// Nubis3 p.136. Every assertion below is a RELATION — a bound, a monotonicity, or a comparison against
+// the formula this replaced — because the numbers themselves are a tuning question and the relations are
+// not: the ablation on pp. 135/136 is entirely about the direction these move in.
+
+TEST( CloudMultiScatterExtinction, FallsWithDepthAndStaysInsideThePapersRange )
+{
+    // The paper's own bounds, asserted as bounds rather than as the two endpoint values, so no
+    // combination of profile and view angle can leave the range the ablation was measured in.
+    for ( int pi = 0; pi <= 20; ++pi )
+        for ( int ci = -10; ci <= 10; ++ci )
+        {
+            // The tolerance is float rounding in the two nested mixes, not slack in the claim: at
+            // profile 1 the lerp lands on 0.049999997 rather than on 0.05.
+            const float k = R::CloudMultiScatterExtinction( float( pi ) / 20.0f, float( ci ) / 10.0f );
+            EXPECT_GE( k, R::CLOUD_MS_EXTINCTION_CORE - 1e-6f );
+            EXPECT_LE( k, R::CLOUD_MS_EXTINCTION_SURFACE + 1e-6f );
+        }
+
+    // Monotone in DEPTH: deeper into the modelled cloud is strictly more transparent to already-scattered
+    // light. This is the property the whole item exists for.
+    float previous = R::CLOUD_MS_EXTINCTION_SURFACE + 1.0f;
+    for ( int pi = 0; pi <= 20; ++pi )
+    {
+        const float k = R::CloudMultiScatterExtinction( float( pi ) / 20.0f, 1.0f );
+        EXPECT_LT( k, previous );
+        previous = k;
+    }
+
+    // Monotone in VIEW ANGLE too: the reduction is handed out as the eye turns toward the sun, which is
+    // the case the reference's outer Remap(sun_dot, 0, 0.9, ...) selects.
+    previous = R::CLOUD_MS_EXTINCTION_SURFACE + 1.0f;
+    for ( int ci = 0; ci <= 9; ++ci )
+    {
+        const float k = R::CloudMultiScatterExtinction( 1.0f, float( ci ) / 10.0f );
+        EXPECT_LT( k, previous );
+        previous = k;
+    }
+
+    // The deepest backlit sample is the reference's own ratio away from the surface one, and nothing else.
+    EXPECT_NEAR( R::CloudMultiScatterExtinction( 1.0f, 0.9f ) / R::CloudMultiScatterExtinction( 0.0f, 0.9f ),
+                 R::CLOUD_MS_EXTINCTION_CORE / R::CLOUD_MS_EXTINCTION_SURFACE, 1e-6f );
+}
+
+TEST( CloudMultiScatterOpticalDepth, LeavesEveryRimAndEveryFrontLitViewExactlyAsItWas )
+{
+    // A rim sample has profile 0 — it IS the surface — and must come out of the modulation untouched,
+    // whatever the view angle. Rims are where the silver lining lives; a change here would be a
+    // regression dressed up as a fix.
+    for ( int ci = -10; ci <= 10; ++ci )
+        EXPECT_FLOAT_EQ( R::CloudMultiScatterOpticalDepth( 3.5f, 0.0f, float( ci ) / 10.0f ), 3.5f );
+
+    // And a view that does not face the sun is untouched at any depth: the modulation's outer factor is
+    // zero there. This is what makes the change a no-op on lit tops seen from the sun's side.
+    for ( int pi = 0; pi <= 10; ++pi )
+        EXPECT_FLOAT_EQ( R::CloudMultiScatterOpticalDepth( 3.5f, float( pi ) / 10.0f, 0.0f ), 3.5f );
+
+    EXPECT_FLOAT_EQ( R::CloudMultiScatterOpticalDepth( 3.5f, 1.0f, -0.7f ), 3.5f );
+
+    // A negative optical depth is not a negative one — the march never produces it, and the octaves must
+    // not be handed one if it ever did.
+    EXPECT_FLOAT_EQ( R::CloudMultiScatterOpticalDepth( -2.0f, 1.0f, 1.0f ), 0.0f );
+}
+
+TEST( CloudMultiScatterOpticalDepth, DeepBacklitSamplesGetStrictlyMoreEnergyThanTheOldFormulaGave )
+{
+    // The relation this item is judged by. `MultiScatterBefore...` below is the call the march made
+    // before CLD-113 — the same octaves, handed the raw tauSun — kept here so the comparison is against
+    // the formula that produced pp. 135's charcoal cores rather than against a remembered number.
+    for ( float tau : { 2.0f, 6.0f, 12.0f } )
+    {
+        const float before = MultiScatterBeforeDepthModulation( tau, 0.95f ).x;
+        const float after  = MultiScatterWithDepthModulation( tau, 1.0f, 0.95f ).x;
+        EXPECT_GT( after, before ) << "tau = " << tau;
+
+        // And the deeper the sample, the more of the gap it closes: monotone in the profile, so a core is
+        // never darker than the shoulder that surrounds it.
+        float previous = 0.0f;
+        for ( int pi = 0; pi <= 10; ++pi )
+        {
+            const float lit = MultiScatterWithDepthModulation( tau, float( pi ) / 10.0f, 0.95f ).x;
+            EXPECT_GT( lit, previous );
+            previous = lit;
+        }
+    }
+
+    // A thick core is the case the ablation shows, so state what it is worth: at an optical depth of 6 the
+    // old form left the first octave at exp(-6), the new one leaves it at exp(-6/5). The bound is stated
+    // as a factor rather than as two values because the factor is the paper's, 0.05 against 0.25.
+    const float before = MultiScatterBeforeDepthModulation( 6.0f, 0.95f ).x;
+    const float after  = MultiScatterWithDepthModulation( 6.0f, 1.0f, 0.95f ).x;
+    EXPECT_GT( after, 3.0f * before );
+
+    // The silhouette does not move: this multiplies the light a sample scatters, never the transmittance
+    // the march accumulates, so however much brighter the core is it cannot be MORE than unoccluded.
+    EXPECT_LT( after, MultiScatterWithDepthModulation( 0.0f, 1.0f, 0.95f ).x );
+}
+
 // ---- CLD-27: the cone march -----------------------------------------------------------------------
 //
 // RESEARCH_REFERENCE J.3 #2: the reference's light grid marched AWAY from the sun, so its self-shadowing
@@ -870,13 +986,26 @@ TEST( CloudAmbientOcclusion, ColumnExtinctionRelaxesWithDepthIntoTheProfile )
     const float column = 4000.0f;
     const float sigma  = 0.0005f;
 
-    const float shallowColumn = glm::exp( -column * sigma * R::CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE );
-    const float deepColumn    = glm::exp( -column * sigma * R::CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE );
+    const float shallowColumn = glm::exp( -column * sigma * R::CLOUD_MS_EXTINCTION_SURFACE );
+    const float deepColumn    = glm::exp( -column * sigma * R::CLOUD_MS_EXTINCTION_CORE );
     EXPECT_GT( deepColumn, shallowColumn );
 
-    // And the constants themselves are the paper's range.
-    EXPECT_FLOAT_EQ( R::CLOUD_AMBIENT_COLUMN_EXTINCTION_SURFACE, 0.25f );
-    EXPECT_FLOAT_EQ( R::CLOUD_AMBIENT_COLUMN_EXTINCTION_CORE, 0.05f );
+    // And the constants themselves are the paper's range. Since CLD-113 they are ONE pair, shared with the
+    // direct term: p.136 states them once, and two copies would be two things to drift apart.
+    EXPECT_FLOAT_EQ( R::CLOUD_MS_EXTINCTION_SURFACE, 0.25f );
+    EXPECT_FLOAT_EQ( R::CLOUD_MS_EXTINCTION_CORE, 0.05f );
+
+    // The ambient column takes the depth modulation and NOT the view-angle one — sky light has no
+    // direction to be modulated by. Asserting it here keeps the two callers of the shared constants
+    // honestly different: the ambient term's coefficient at profile 1 is the core value outright, where
+    // the direct term only reaches it looking toward the sun.
+    EXPECT_FLOAT_EQ( R::CloudAmbientOcclusion( 1.0f, column, sigma, 1.0f ),
+                     0.0f ); // local term is sqrt(1-1) at a full profile: no sky reaches a solid core
+    EXPECT_NEAR( R::CloudAmbientOcclusion( 0.99f, column, sigma, 1.0f ),
+                 glm::sqrt( 0.01f ) *
+                      glm::exp( -column * sigma *
+                                glm::mix( R::CLOUD_MS_EXTINCTION_SURFACE, R::CLOUD_MS_EXTINCTION_CORE, 0.99f ) ),
+                 1e-6f );
 
     // Full strength, zero column: pure local term, pow(1 - profile, 0.5) — the p.141 form.
     EXPECT_NEAR( R::CloudAmbientOcclusion( 0.36f, 0.0f, sigma, 1.0f ), glm::sqrt( 1.0f - 0.36f ), 1e-5f );
