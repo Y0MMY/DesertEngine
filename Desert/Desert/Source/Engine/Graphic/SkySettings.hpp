@@ -65,6 +65,12 @@ namespace Desert::Graphic
         float     AtmosphereHeightKm        = 60.0f;
         float     MultiScatteringFactor     = 1.0f;
 
+        // Art direction of the physical model (UE semantics). The first tints only the sky pixels the
+        // screen pass draws; the second is applied inside every scattering integration (Sky-View LUT,
+        // IBL bake, and Phase 3's aerial-perspective volume). White is physical.
+        glm::vec3 SkyLuminanceFactor                     = { 1.0f, 1.0f, 1.0f };
+        glm::vec3 SkyAndAerialPerspectiveLuminanceFactor = { 1.0f, 1.0f, 1.0f };
+
         // Environment-bake knobs. Quality/performance, never preset-driven.
         bool                          AutoRebakeEnvironment   = true;
         float                         RebakeSunAngleThreshold = 5.0f; // degrees
@@ -120,6 +126,9 @@ namespace Desert::Graphic
         sky.GroundAlbedo              = data.GroundAlbedo;
         sky.AtmosphereHeightKm        = data.AtmosphereHeight;
         sky.MultiScatteringFactor     = data.MultiScatteringFactor;
+
+        sky.SkyLuminanceFactor                     = data.SkyLuminanceFactor;
+        sky.SkyAndAerialPerspectiveLuminanceFactor = data.SkyAndAerialPerspectiveLuminanceFactor;
         return sky;
     }
 } // namespace Desert::Graphic

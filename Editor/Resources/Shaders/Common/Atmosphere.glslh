@@ -56,6 +56,13 @@ struct SkyConfig
 //   v[12] x = ozone tip altitude (km), y = ozone tip value, z = ozone tent width (km),
 //         w = planet radius (WORLD UNITS)
 //
+// The Phase 2 lanes — the model switch and the art-direction tints the physical sky pass and the
+// Sky-View LUT read (appended, like the medium before them):
+//
+//   v[13] rgb = Sky Luminance Factor (sky pixels only), w = sky model (0 gradient, 1 physical)
+//   v[14] rgb = Sky And Aerial Perspective Luminance Factor (inside every scattering integration),
+//         w = reserved (0)
+//
 // A pass declares its own buffer at its own binding, copies it into a SkyPacked, and calls the loaders:
 //
 //   ReadBuffer(1) SkyBuffer { vec4 u_SkyPacked[SKY_PACKED_VEC4_COUNT]; };
@@ -64,7 +71,7 @@ struct SkyConfig
 //                             UnpackSunAngularRadius(s), UnpackSkyConfig(s) );
 //
 // Adding a palette field is then one edit here plus one to the C++ mirror; no consumer changes a line.
-#define SKY_PACKED_VEC4_COUNT 13
+#define SKY_PACKED_VEC4_COUNT 15
 
 struct SkyPacked
 {
@@ -141,6 +148,30 @@ vec4 UnpackMediumGround( SkyPacked s )
 vec4 UnpackMediumTentPlanet( SkyPacked s )
 {
     return s.v[12];
+}
+
+// ---- The Phase 2 lanes ------------------------------------------------------------------------------
+
+// True when the authored SkyModel is PhysicalAtmosphere. The one branch point every sky consumer
+// shares: the C++ side packs 1.0 exactly, so the comparison is not a float hazard.
+bool UnpackSkyModelIsPhysical( SkyPacked s )
+{
+    return s.v[13].w > 0.5;
+}
+
+// Art-direction tint on the PHYSICAL sky's on-screen pixels only (UE's SkyLuminanceFactor). Never
+// touches the aerial perspective over geometry, and never the gradient model.
+vec3 UnpackSkyLuminanceFactor( SkyPacked s )
+{
+    return s.v[13].rgb;
+}
+
+// Art-direction tint applied INSIDE every scattering integration of the physical model (UE's
+// SkyAndAerialPerspectiveLuminanceFactor) — the Sky-View LUT fill and the IBL bake march, and the
+// Phase 3 aerial-perspective volume after them.
+vec3 UnpackSkyAndAerialPerspectiveLuminanceFactor( SkyPacked s )
+{
+    return s.v[14].rgb;
 }
 
 float atm_hash13( vec3 p )

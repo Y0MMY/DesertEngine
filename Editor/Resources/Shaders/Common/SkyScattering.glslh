@@ -1,0 +1,329 @@
+// The physical atmosphere's scattering integrator, the Sky-View LUT parameterisation and the sun
+// disc — Phase 2 of the Sky Atmosphere programme, implemented from Sébastien Hillaire, "A Scalable
+// and Production Ready Sky and Atmosphere Rendering Technique" (EGSR 2020) and its MIT-licensed
+// reference implementation (github.com/sebh/UnrealEngineSkyAtmosphere). UE is a behavioural
+// reference for names and composition order only; no Epic source text appears here.
+//
+// This file is compiled TWICE, from the same text:
+//   * as GLSL, by Programs/Sky/SkyViewLut.shader, Programs/Compute/BakeProceduralSky.shader and
+//     Programs/ProceduralSky/ProceduralSky.shader;
+//   * as C++, by Desert/Tests/Engine/SkyScattering/SkyScatteringReference.hpp, which the
+//     SkyScattering tests drive.
+// SkyMedium.glslh's restricted dialect applies verbatim: no swizzles, no `out` parameters, no
+// arrays, `f` suffixes, structs returned through a named local, functions defined before use.
+//
+// THE LUT CALLBACKS. The integrator reads the transmittance and multi-scattering LUTs per step, but
+// a sampler cannot appear in text that must also compile as C++. The includer therefore provides the
+// two lookups as MACROS before including this file:
+//
+//   #define SKY_SCATTERING_SUN_TRANSMITTANCE(atm, radiusKm, sunZenithCos)  ...vec3...
+//   #define SKY_SCATTERING_MULTI_SCATTER(atm, radiusKm, sunZenithCos)      ...vec3...
+//
+// A shader expands them to texture() lookups; the test reference expands them to the SkyMedium march
+// itself. The integrator block is #ifdef-guarded on the first macro, so an includer that only wants
+// the mapping and the sun disc (the screen sky pass) simply does not define them.
+//
+// Requires: Common/SkyMedium.glslh included first (medium, phases, sphere geometry, texel remap).
+
+#ifndef SKY_SCATTERING_GLSLH
+#define SKY_SCATTERING_GLSLH
+
+// The Sky-View LUT extent. Part of the parameterisation, not a quality knob: the sub-texel remap
+// below bakes these numbers into every write and every read, and the C++ side allocates the image at
+// the same extent (SkyboxRenderer's kSkyViewLutWidth/Height mirror these — the SkyScattering tests
+// pin the remap at exactly this resolution).
+const float SKY_VIEW_LUT_WIDTH  = 192.0f;
+const float SKY_VIEW_LUT_HEIGHT = 104.0f;
+
+// ---- The camera in the planet's frame --------------------------------------------------------------
+// World convention (CloudGeometry.glslh): the world origin lies ON the planet surface with +Y up, so
+// the planet centre is (0, -bottomRadius, 0). Both helpers below avoid ever FORMING a planet-scale
+// coordinate: r is recovered from r^2 - Rb^2 = |c|^2 + 2*Rb*c.y, which is small near the surface.
+
+float SkyViewHeightKm(vec3 cameraKm, float bottomRadiusKm)
+{
+    float q = dot(cameraKm, cameraKm) + 2.0f * bottomRadiusKm * cameraKm.y; // r^2 - Rb^2, exactly
+    return bottomRadiusKm + q / (sqrt(max(q + bottomRadiusKm * bottomRadiusKm, 1.0f)) + bottomRadiusKm);
+}
+
+vec3 SkyViewZenith(vec3 cameraKm, float bottomRadiusKm)
+{
+    vec3 fromCentre = vec3(cameraKm.x, cameraKm.y + bottomRadiusKm, cameraKm.z);
+    return fromCentre / max(length(fromCentre), 1.0f);
+}
+
+// Cosine of the AZIMUTH angle between the view and the sun as seen around the zenith — the third
+// coordinate of the Sky-View LUT (the first two are r and the view zenith cosine). The atmosphere is
+// symmetric around the sun's azimuth, which is what lets a 2D LUT hold the whole sky. Degenerate
+// projections (looking straight up, sun at the zenith) return 1: every azimuth is the sun's there.
+float SkyViewLightViewCos(vec3 zenith, vec3 viewDir, vec3 sunDir)
+{
+    vec3  viewAzimuthal = viewDir - zenith * dot(viewDir, zenith);
+    vec3  sunAzimuthal  = sunDir - zenith * dot(sunDir, zenith);
+    float lengths       = length(viewAzimuthal) * length(sunAzimuthal);
+    if (lengths < 1e-6f)
+        return 1.0f;
+    return clamp(dot(viewAzimuthal, sunAzimuthal) / lengths, -1.0f, 1.0f);
+}
+
+// ---- The Sky-View LUT parameterisation (Hillaire section 5.3) --------------------------------------
+// unit.y splits at the EXACT horizon angle for the given view height and spends its precision there
+// through a sqrt warp on both sides — the horizon is where the sky changes fastest, and a linear
+// lat-long mapping visibly bands it at 104 rows. unit.x is the light-view azimuth cosine, sqrt-warped
+// toward the sun where the Mie forward lobe lives. The two functions are EXACT inverses over the
+// whole domain for a fixed view height — the property the tests round-trip.
+
+// Cosine of the view zenith angle at which the ray grazes the planet: mu_h = -rho/r. Everything at
+// or below it hits the ground.
+float SkyViewHorizonCos(float bottomRadiusKm, float viewHeightKm)
+{
+    float rho =
+         sqrt(max((viewHeightKm - bottomRadiusKm) * (viewHeightKm + bottomRadiusKm), 0.0f));
+    return -rho / max(viewHeightKm, 1.0f);
+}
+
+bool SkyViewHitsGround(float bottomRadiusKm, float viewHeightKm, float viewZenithCos)
+{
+    return viewZenithCos < SkyViewHorizonCos(bottomRadiusKm, viewHeightKm);
+}
+
+struct SkyViewLutCoord
+{
+    float ViewZenithCos; // cosine of the view angle against the zenith at the camera
+    float LightViewCos;  // cosine of the azimuth angle between view and sun around the zenith
+};
+
+vec2 SkyViewUnitFromParams(float bottomRadiusKm, float viewHeightKm, float viewZenithCos,
+                           float lightViewCos)
+{
+    float horizonCos   = SkyViewHorizonCos(bottomRadiusKm, viewHeightKm);
+    float horizonAngle = acos(clamp(horizonCos, -1.0f, 1.0f)); // zenith->horizon, in (pi/2, pi]
+    float beta         = max(SKY_PI - horizonAngle, 1e-4f);    // horizon->nadir remainder
+
+    float viewZenith = acos(clamp(viewZenithCos, -1.0f, 1.0f));
+
+    vec2 unit;
+    if (viewZenith <= horizonAngle)
+    {
+        // Sky half: [0, horizonAngle] onto [0, 0.5), warped so unit.y ~ 0.5 dwells at the horizon.
+        float coord = viewZenith / horizonAngle;
+        unit.y      = (1.0f - sqrt(max(1.0f - coord, 0.0f))) * 0.5f;
+    }
+    else
+    {
+        // Ground half: (horizonAngle, pi] onto [0.5, 1], the same warp mirrored.
+        float coord = (viewZenith - horizonAngle) / beta;
+        unit.y      = sqrt(max(coord, 0.0f)) * 0.5f + 0.5f;
+    }
+    unit.x = sqrt(clamp((1.0f - lightViewCos) * 0.5f, 0.0f, 1.0f));
+    return unit;
+}
+
+SkyViewLutCoord SkyViewParamsFromUnit(float bottomRadiusKm, float viewHeightKm, vec2 unit)
+{
+    float horizonCos   = SkyViewHorizonCos(bottomRadiusKm, viewHeightKm);
+    float horizonAngle = acos(clamp(horizonCos, -1.0f, 1.0f));
+    float beta         = max(SKY_PI - horizonAngle, 1e-4f);
+
+    float viewZenith;
+    if (unit.y < 0.5f)
+    {
+        float c    = 1.0f - 2.0f * unit.y;
+        viewZenith = horizonAngle * (1.0f - c * c);
+    }
+    else
+    {
+        float c    = 2.0f * unit.y - 1.0f;
+        viewZenith = horizonAngle + beta * (c * c);
+    }
+
+    SkyViewLutCoord coord;
+    coord.ViewZenithCos = cos(viewZenith);
+    coord.LightViewCos  = clamp(1.0f - 2.0f * unit.x * unit.x, -1.0f, 1.0f);
+    return coord;
+}
+
+// The ray for a LUT texel, in the LUT's local frame: +Y is the zenith at the camera and the sun lies
+// in the XY plane toward +X. sin(azimuth) takes the positive branch — legitimate because the
+// atmosphere is mirror-symmetric across the sun's azimuthal plane.
+vec3 SkyViewRayDirection(float viewZenithCos, float lightViewCos)
+{
+    float sinZenith  = sqrt(max(1.0f - viewZenithCos * viewZenithCos, 0.0f));
+    float sinAzimuth = sqrt(max(1.0f - lightViewCos * lightViewCos, 0.0f));
+
+    vec3 dir;
+    dir.x = sinZenith * lightViewCos;
+    dir.y = viewZenithCos;
+    dir.z = sinZenith * sinAzimuth;
+    return dir;
+}
+
+// ---- The sun disc ----------------------------------------------------------------------------------
+// The disc is NOT in the Sky-View LUT (it would alias at 192x104); the sky pass adds it analytically:
+// outer-space luminance x transmittance-LUT toward the view, shaped by the two factors below.
+
+// 1 inside the disc fading to 0 at the rim over the outer half of the apex angle — the soft edge that
+// keeps a ~half-degree disc from shimmering under camera rotation without TAA.
+float SkySunDiscSoftEdge(float viewDotSun, float cosApexAngle)
+{
+    float denom = max(1.0f - cosApexAngle, 1e-7f);
+    return clamp(2.0f * (viewDotSun - cosApexAngle) / denom, 0.0f, 1.0f);
+}
+
+// Limb darkening: the disc's rim is dimmer and redder than its centre because the slanted line of
+// sight leaves the photosphere through higher, cooler gas. The classic one-parameter-per-channel
+// power law I(mu)/I(centre) = mu^a with the astronomical fit a = (0.397, 0.503, 0.652) — blue darkens
+// fastest, which is what makes the rim warm. @p centerToEdge is 0 at the disc centre, 1 at the rim.
+vec3 SkySunLimbDarkening(float centerToEdge)
+{
+    float d  = clamp(centerToEdge, 0.0f, 1.0f);
+    float mu = sqrt(max(1.0f - d * d, 0.0f));
+
+    vec3 darkening;
+    darkening.x = pow(mu, 0.397f);
+    darkening.y = pow(mu, 0.503f);
+    darkening.z = pow(mu, 0.652f);
+    return darkening;
+}
+
+// The lit ground where a view ray lands: Lambertian albedo under the transmitted sun. The caller
+// multiplies by the VIEW path's transmittance (the integrator's Transmittance lane, or the Sky-View
+// LUT's alpha) — split so the screen pass and the IBL bake can share the formula while sourcing the
+// view transmittance differently.
+vec3 SkyGroundLuminance(SkyAtmParams p, vec3 sunIlluminance, vec3 sunTransmittanceAtGround,
+                        float sunZenithCosAtGround)
+{
+    return p.GroundAlbedo * (1.0f / SKY_PI) * sunIlluminance *
+           clamp(sunZenithCosAtGround, 0.0f, 1.0f) * sunTransmittanceAtGround;
+}
+
+// ---- The planet's shadow on the air --------------------------------------------------------------
+// A sample sees the sun only while the sun stands above ITS OWN horizon, mu_h = -rho/r. Written as a
+// hard step that is a defect, not a simplification, and the twilight sky is where it shows: the
+// march's far segments are tens of kilometres long at the Sky-View budget (the squared distribution
+// spends its resolution near the camera), so the step lands inside one enormous slab and the whole
+// slab flips lit or unlit at once. On screen that quantisation is a pair of bright bands standing
+// symmetrically about the sun's azimuth — measured at 20% over the surrounding sky, and it MOVES with
+// the sample count instead of converging away (32 and 128 samples are clean at one sun elevation, 96
+// is not, because the artefact is a resonance between the sample positions and the terminator, not a
+// convergence error).
+//
+// The terminator is not a step in reality either: the sun is a disc ~0.27 degrees in radius, so the
+// umbra fades over a penumbra of at least that width, and refraction near the horizon widens it
+// further. Fading the shadow over a band is therefore the more physical description AND it removes
+// the resonance, because no segment can now flip by more than the fraction of the band it crosses.
+//
+// The width is deliberately NARROWER than the sun's own disc (0.0047 in cosine at the horizon): a
+// wider band admits more light and lifts the whole twilight sky, and this term is here to remove an
+// artefact, not to re-open the twilight brightness. At this width the 64-sample fill reproduces the
+// 128- and 256-sample answers to within a display level.
+const float SKY_TERMINATOR_HALF_WIDTH_COS = 0.002f; // ~0.11 deg of sun-zenith angle at the horizon
+
+// 0 in full shadow, 1 in full sun, smooth across the terminator band. @p radiusKm is the sample's
+// distance from the planet centre, @p sunZenithCos the cosine of the sun against the sample's zenith.
+float SkyPlanetShadow(float radiusKm, float sunZenithCos, float bottomRadiusKm)
+{
+    float rho = sqrt(max((radiusKm - bottomRadiusKm) * (radiusKm + bottomRadiusKm), 0.0f));
+    float horizonCos = -rho / max(radiusKm, 1.0f);
+
+    float x = clamp((sunZenithCos - horizonCos) / (2.0f * SKY_TERMINATOR_HALF_WIDTH_COS) + 0.5f, 0.0f,
+                    1.0f);
+    return x * x * (3.0f - 2.0f * x);
+}
+
+// ---- The single-scattering integrator (Hillaire section 4, with the multi-scattering LUT) ----------
+
+#ifdef SKY_SCATTERING_SUN_TRANSMITTANCE
+
+struct SkyScatterResult
+{
+    vec3 Luminance;     // in-scattered light along the ray, camera to the shell exit (or the ground)
+    vec3 Transmittance; // what survives the same trip — the sky pass's alpha lane
+};
+
+// March a view ray through the atmosphere. @p originKm is PLANET-CENTRED (|originKm| = the view
+// height r); @p rayDir and @p sunDir are unit directions in the same frame; @p sunIlluminance is the
+// outer-space sun illuminance the whole result is linear in.
+//
+// Per step, Frostbite's analytic form integrates source x transmittance exactly over the segment
+// (the arrangement the multi-scattering LUT already uses), with:
+//   * sun transmittance from the transmittance LUT via SKY_SCATTERING_SUN_TRANSMITTANCE;
+//   * the analytic planet shadow above, faded across the terminator (the LUT knows geometry's
+//     shadows in Phase 3, not here);
+//   * the multi-scattering LUT's Psi_ms via SKY_SCATTERING_MULTI_SCATTER, deliberately NOT attenuated
+//     by the planet shadow or the sun transmittance — Psi already represents light diffused through
+//     the whole sky, which is exactly why twilight is not pitch black.
+//
+// Samples follow the paper's squared distribution, t = tMax * (i/N)^2: half the samples land in the
+// nearest quarter of the ray, where the camera-adjacent air dominates the picture.
+SkyScatterResult SkyIntegrateScatteredLuminance(SkyAtmParams p, vec3 originKm, vec3 rayDir, vec3 sunDir,
+                                                vec3 sunIlluminance, int sampleCount)
+{
+    float r0 = max(length(originKm), p.BottomRadiusKm + SKY_PLANET_RADIUS_OFFSET_KM);
+    float mu = dot(originKm, rayDir) / max(length(originKm), 1.0f);
+
+    bool  hitsGround = SkyIntersectsGround(r0, mu, p.BottomRadiusKm);
+    float tMax       = hitsGround ? SkyDistanceToBottom(r0, mu, p.BottomRadiusKm)
+                                  : SkyDistanceToTop(r0, mu, p.TopRadiusKm);
+
+    // Phase angles are constant along a straight ray: cosTheta = +1 when looking INTO the sun (the
+    // light travels -sunDir, the scattered direction toward the eye is -rayDir).
+    float cosTheta      = dot(rayDir, sunDir);
+    float phaseRayleigh = SkyPhaseRayleigh(cosTheta);
+    float phaseMie      = SkyPhaseCornetteShanks(p.MiePhaseG, cosTheta);
+
+    vec3 luminance  = vec3(0.0f, 0.0f, 0.0f);
+    vec3 throughput = vec3(1.0f, 1.0f, 1.0f);
+
+    float tPrev = 0.0f;
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        float u     = (float(i) + 1.0f) / float(sampleCount);
+        float tNext = tMax * u * u;
+        float dt    = max(tNext - tPrev, 0.0f);
+        float t     = tPrev + dt * 0.5f;
+        tPrev       = tNext;
+
+        vec3  position = originKm + rayDir * t;
+        float radius   = max(length(position), p.BottomRadiusKm);
+        vec3  zenith   = position / radius;
+        float altitude = radius - p.BottomRadiusKm;
+
+        // One density evaluation per sample; scattering split per species because each carries its
+        // own phase, extinction assembled from the same densities.
+        float dRayleigh = SkyDensityRayleigh(p, altitude);
+        float dMie      = SkyDensityMie(p, altitude);
+        float dOzone    = SkyDensityOzone(p, altitude);
+
+        vec3 scatterRayleigh = p.RayleighScattering * dRayleigh;
+        vec3 scatterMie      = p.MieScattering * dMie;
+        vec3 extinction      = scatterRayleigh + scatterMie + p.MieAbsorption * dMie +
+                               p.OzoneAbsorption * dOzone;
+
+        vec3 stepTransmittance = exp(-extinction * dt);
+        vec3 safeExtinction    = max(extinction, vec3(1e-6f, 1e-6f, 1e-6f));
+
+        float sunZenithCos = dot(zenith, sunDir);
+        float planetShadow = SkyPlanetShadow(radius, sunZenithCos, p.BottomRadiusKm);
+
+        vec3 sunTransmittance = SKY_SCATTERING_SUN_TRANSMITTANCE(p, radius, sunZenithCos);
+        vec3 psiMs            = SKY_SCATTERING_MULTI_SCATTER(p, radius, sunZenithCos);
+
+        vec3 source =
+             sunIlluminance *
+             (planetShadow * sunTransmittance * (phaseRayleigh * scatterRayleigh + phaseMie * scatterMie) +
+              psiMs * (scatterRayleigh + scatterMie));
+
+        luminance += throughput * (source - source * stepTransmittance) / safeExtinction;
+        throughput = throughput * stepTransmittance;
+    }
+
+    SkyScatterResult result;
+    result.Luminance     = luminance;
+    result.Transmittance = throughput;
+    return result;
+}
+
+#endif // SKY_SCATTERING_SUN_TRANSMITTANCE
+
+#endif // SKY_SCATTERING_GLSLH

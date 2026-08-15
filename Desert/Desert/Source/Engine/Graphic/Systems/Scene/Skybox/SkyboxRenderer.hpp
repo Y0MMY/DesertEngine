@@ -45,13 +45,17 @@ namespace Desert::Graphic::System
         // frame it crosses the angular threshold.
         void EnsureProceduralEnvironment( float deltaSeconds );
 
-        // The physical atmosphere's cached LUTs (Hillaire 2020): transmittance 256x64 + multi-scattering
-        // 32x32, both RGBA16F. Call once per frame from the in-frame compute point (outside any open
-        // render pass — the slot ExecuteVolumetricClouds dispatches from). Does NOTHING unless
-        // SkyModel::PhysicalAtmosphere is active: gradient scenes never allocate the images and never
-        // dispatch, so the old sky pays zero. When active, the two passes re-run only when the
-        // atmosphere parameter fingerprint moves — a texel depends on the medium alone, not on the
-        // camera, the sun or time.
+        // The physical atmosphere's LUTs (Hillaire 2020): the cached pair — transmittance 256x64 +
+        // multi-scattering 32x32 — and the per-view Sky-View LUT, 192x104, all RGBA16F. Call once per
+        // frame from the in-frame compute point (outside any open render pass — the slot
+        // ExecuteVolumetricClouds dispatches from). Does NOTHING unless SkyModel::PhysicalAtmosphere
+        // is active: gradient scenes never allocate the images and never dispatch, so the old sky pays
+        // zero. When active, the cached pair re-runs only when the atmosphere parameter fingerprint
+        // moves (a texel depends on the medium alone), while the Sky-View LUT is refilled EVERY frame —
+        // it depends on the camera's altitude and the sun. The sky pass samples the fill of the
+        // PREVIOUS frame (this slot runs after the graph recorded the Sky pass); at 192x104 of
+        // slowly-varying sky that one-frame latency is invisible, and the first physical frame renders
+        // black sky for exactly one frame.
         void ExecuteAtmosphereLuts();
 
         const std::optional<Environment> GetEnvironment() const
@@ -110,10 +114,21 @@ namespace Desert::Graphic::System
 
         static AtmosphereLutFingerprint LutFingerprintOf( const SkySettings& sky );
 
-        // Lazily creates the two LUT images (latched on failure, one MiB log line on success).
+        // Lazily creates the two cached LUT images (latched on failure, one MiB log line on success).
         bool EnsureAtmosphereLutResources();
-        void DispatchTransmittanceLut();
-        void DispatchMultiScatterLut();
+        // Same arrangement for the per-view Sky-View LUT image.
+        bool EnsureSkyViewLutResources();
+
+        // The cached pair, in dependency order (the multi-scattering march samples the transmittance).
+        // @p inFrame picks the recording path: true records into the current frame's command buffer
+        // (ExecuteAtmosphereLuts' slot), false submits immediate dispatches — the bake path, which runs
+        // OUTSIDE a frame and cannot wait for the in-frame slot that only comes later.
+        void DispatchCachedAtmosphereLuts( bool inFrame );
+        void DispatchSkyViewLut();
+
+        // The bake path's guarantee: when the physical model is active, the cached LUTs hold valid
+        // texels BEFORE CreateProcedural marches them. Returns false when the LUTs cannot exist.
+        bool EnsureCachedLutsForBake();
 
     private:
         std::weak_ptr<MaterialSkybox> m_MaterialSkybox;
@@ -134,15 +149,21 @@ namespace Desert::Graphic::System
         std::shared_ptr<ShaderResources::StorageBuffer> m_SkyParams;
 
         // Physical-atmosphere LUTs (SkyModel::PhysicalAtmosphere only; see ExecuteAtmosphereLuts).
-        // Per renderer, not per frame in flight: they are rewritten only on a parameter edit, and
-        // 256x64 + 32x32 RGBA16F is ~136 KiB — not worth cross-renderer sharing complexity.
+        // Per renderer, not per frame in flight: the cached pair is rewritten only on a parameter
+        // edit, and the Sky-View LUT is written and read on the same renderer's timeline (write in the
+        // in-frame compute slot, read by the next frame's Sky pass — never two frames in flight
+        // writing it at once). 256x64 + 32x32 + 192x104 RGBA16F is ~292 KiB — not worth cross-renderer
+        // sharing complexity.
         std::shared_ptr<ComputePipeline> m_TransmittanceLutPipeline;
         std::shared_ptr<ComputePipeline> m_MultiScatterLutPipeline;
+        std::shared_ptr<ComputePipeline> m_SkyViewLutPipeline;
         std::shared_ptr<Image2D>         m_TransmittanceLut;
         std::shared_ptr<Image2D>         m_MultiScatterLut;
+        std::shared_ptr<Image2D>         m_SkyViewLut;
         AtmosphereLutFingerprint         m_LutBaked;
-        bool                             m_LutsValid          = false;
-        bool                             m_LutResourcesFailed = false;
+        bool                             m_LutsValid              = false;
+        bool                             m_LutResourcesFailed     = false;
+        bool                             m_SkyViewResourcesFailed = false;
 
         bool          m_UseProceduralSky = false;
         glm::vec3     m_SunDir           = glm::vec3( 0.0f, 1.0f, 0.0f ); // TOWARD the sun, normalized

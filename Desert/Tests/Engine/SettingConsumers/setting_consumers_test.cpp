@@ -48,7 +48,8 @@ namespace
 
     // ------------------------------------------------------------------------------------------------
     // Sky: every artistic-gradient field is wired; the physical-atmosphere group is wired through the
-    // LUT passes except the five fields the Phase 2/3 integrations will read (each names its phase).
+    // LUT passes and the Phase 2 sky pass, except the two aerial-perspective fields Phase 3 will read
+    // (each names its phase).
     // ------------------------------------------------------------------------------------------------
 
     constexpr const char* kSkySettings = "Desert/Desert/Source/Engine/Graphic/SkySettings.hpp";
@@ -117,15 +118,18 @@ namespace
          { "AbsorptionTipValue", kSkySettings },
          { "AbsorptionTentWidth", kSkySettings },
 
-         // Authored and carried in the payload for the passes the next phases add. PENDING, exactly like
-         // the cloud fields were while their passes were being written: each names the phase that owes
-         // it a reader (the phasing is Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4).
-         { "MieAnisotropy", nullptr,
-           "Sky Phase 2 - Sky-View LUT: the Cornette-Shanks Mie phase of the scattering integrator" },
-         { "SkyLuminanceFactor", nullptr,
-           "Sky Phase 2 - physical sky pass: art-direction tint on sky pixels only" },
-         { "SkyAndAerialPerspectiveLuminanceFactor", nullptr,
-           "Sky Phase 2 - Sky-View LUT: art-direction tint inside every scattering integration" },
+         // Wired by Phase 2: MieAnisotropy is the Cornette-Shanks g of the scattering integrator
+         // (Common/SkyScattering.glslh via the SkyViewLut / BakeProceduralSky marches); the two
+         // art-direction tints funnel through MakeSkySettings into the payload's Phase 2 lanes, read
+         // by the physical sky pass (SkyLuminanceFactor, on-screen pixels only) and inside every
+         // scattering integration (SkyAndAerialPerspectiveLuminanceFactor).
+         { "MieAnisotropy", kSkySettings },
+         { "SkyLuminanceFactor", kSkySettings },
+         { "SkyAndAerialPerspectiveLuminanceFactor", kSkySettings },
+
+         // Authored and carried for the passes the next phase adds. PENDING, exactly like the cloud
+         // fields were while their passes were being written: each names the phase that owes it a
+         // reader (the phasing is Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4).
          { "AerialPerspectiveViewDistanceScale", nullptr,
            "Sky Phase 3 - camera aerial-perspective volume: scales the froxel march distance" },
          { "AerialPerspectiveStartDepth", nullptr,
@@ -387,16 +391,17 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 }
 
 // The artistic-gradient sky is finished and owes nothing; the PHYSICAL atmosphere is being built in
-// phases (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4), and after Phase 0/1 exactly five of its
-// fields await their reader: the Mie phase g and the four art-direction factors, all consumed by the
-// Phase 2/3 integrations. A count, like the cloud one below, so the debt cannot quietly grow — when a
-// sky phase lands, this number drops and the drop is a reviewable edit.
-TEST( SettingConsumers, TheSkyComponentOwesExactlyThePhase2And3Fields )
+// phases (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 4). Phase 2 (the Sky-View LUT and the
+// physical sky pass) consumed the Mie phase g and both luminance tints; exactly the two
+// aerial-perspective controls still await their Phase 3 reader. A count, like the cloud one below, so
+// the debt cannot quietly grow — when a sky phase lands, this number drops and the drop is a
+// reviewable edit.
+TEST( SettingConsumers, TheSkyComponentOwesExactlyThePhase3Fields )
 {
     const std::ptrdiff_t pending = std::count_if( std::begin( kSkyRows ), std::end( kSkyRows ),
                                                   []( const Row& r ) { return r.Task != nullptr; } );
 
-    EXPECT_EQ( pending, 5 );
+    EXPECT_EQ( pending, 2 );
 }
 
 // A count, so that "the clouds are not wired yet" cannot quietly grow to cover a field nobody meant to

@@ -36,10 +36,16 @@ namespace Desert::Graphic
         // same radiance/irradiance/prefilter pipeline. @p skyParams is the caller's sky parameter buffer —
         // the same one the screen sky pass reads.
         //
+        // @p transmittanceLut / @p multiScatterLut are the cached atmosphere LUTs the bake's physical
+        // branch (SkyModel::PhysicalAtmosphere) marches with; the caller guarantees they hold valid
+        // texels when the payload's model lane says physical. Pass nullptr on the gradient model — the
+        // bake then binds fallbacks and the physical branch is never taken.
+        //
         // The panorama size is authored (SkyAtmosphereData::EnvironmentResolution) rather than a constant
         // because this cost is paid PER LIVE SceneRenderer, and the editor keeps several of those.
         static Environment CreateProcedural( uint32_t panoramaWidth, uint32_t panoramaHeight,
-                                             ShaderResources::StorageBuffer* skyParams );
+                                             ShaderResources::StorageBuffer* skyParams, Image2D* transmittanceLut,
+                                             Image2D* multiScatterLut );
 
     private:
         static std::shared_ptr<ImageCube>

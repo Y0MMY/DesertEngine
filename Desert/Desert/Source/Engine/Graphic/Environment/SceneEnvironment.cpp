@@ -83,12 +83,14 @@ namespace Desert::Graphic
     }
 
     Environment EnvironmentManager::CreateProcedural( uint32_t panoramaWidth, uint32_t panoramaHeight,
-                                                      ShaderResources::StorageBuffer* skyParams )
+                                                      ShaderResources::StorageBuffer* skyParams,
+                                                      Image2D* transmittanceLut, Image2D* multiScatterLut )
     {
         auto* imageService = Runtime::ResourceRegistry::GetImageService();
 
         // Bake the atmosphere into an equirect HDR panorama, then run the standard IBL pipeline on it.
-        auto panorama = ComputeImages::BakeProceduralPanorama( panoramaWidth, panoramaHeight, skyParams );
+        auto panorama = ComputeImages::BakeProceduralPanorama( panoramaWidth, panoramaHeight, skyParams,
+                                                               transmittanceLut, multiScatterLut );
         if ( !panorama )
             return {};
         const auto panoramaHandle =
