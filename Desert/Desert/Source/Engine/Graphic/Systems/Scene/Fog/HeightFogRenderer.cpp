@@ -1,6 +1,7 @@
 #include "HeightFogRenderer.hpp"
 
 #include <Engine/Core/Camera.hpp>
+#include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/RenderGraphSort.hpp>
 #include <Engine/Graphic/RenderPhase.hpp>
 #include <Engine/Graphic/SceneRenderer.hpp>
@@ -179,9 +180,21 @@ namespace Desert::Graphic::System
 
         m_HasFrameResult = false;
 
-        // The zero-cost contract: a scene without the component (or with the fog disabled) leaves this
-        // function here, before any allocation, upload or dispatch.
-        if ( !m_Present || !m_Data.Enabled || !m_FogPipeline || !m_ApplyPipeline || !m_ParamsBuffer )
+        if ( !m_FogPipeline || !m_ApplyPipeline || !m_ParamsBuffer )
+            return;
+
+        // What this dispatch has to evaluate. The two halves are independent: a scene can have fog and no
+        // atmosphere, a physical atmosphere and no fog component, or both. The volume handle is null
+        // exactly when there is no aerial perspective this frame (AtmosphereEnv's own contract), which
+        // includes every SkyModel::ArtisticGradient scene.
+        const AtmosphereEnv& atmosphere = m_SceneRenderer->GetAtmosphere();
+
+        const bool fogActive = m_Present && m_Data.Enabled;
+        const bool apActive  = atmosphere.AerialPerspectiveVolume != nullptr;
+
+        // The zero-cost contract, now stated over both halves: a scene with neither leaves here, before
+        // any allocation, upload or dispatch, and the frame is what it was before this system existed.
+        if ( !fogActive && !apActive )
             return;
 
         const auto* camera = m_SceneRenderer->GetMainCamera();
@@ -198,12 +211,15 @@ namespace Desert::Graphic::System
         // The atmosphere is a coupling, not a dependency: without one the fog keeps its authored colour
         // and drops the sun lobe and the sky ambient (PackFogParams says so per term). Fog on a
         // sky-less scene is legitimate; a cloud without a sun is not — hence no cloud-style bail-out.
-        const FogGpuPayload payload = PackFogParams( m_Data, m_SceneRenderer->GetAtmosphere(), m_FogHeightY );
+        const FogGpuPayload payload = PackFogParams( m_Data, atmosphere, m_FogHeightY );
         m_ParamsBuffer->SetData( &payload, static_cast<uint32_t>( sizeof( payload ) ) );
 
         FogPush push{};
         push.InverseViewProjection = glm::inverse( camera->GetProjectionMatrix() * camera->GetViewMatrix() );
         push.CameraPosition        = glm::vec4( camera->GetPosition(), 0.0f );
+        push.AerialPerspective =
+             glm::vec4( atmosphere.AerialPerspectiveDepthKm, atmosphere.AerialPerspectiveViewDistanceScale,
+                        apActive ? 1.0f : 0.0f, fogActive ? 1.0f : 0.0f );
 
         auto& renderer = Renderer::GetInstance();
 
@@ -218,6 +234,15 @@ namespace Desert::Graphic::System
         m_FogPipeline->SetOutput( kFogOutputBinding, m_FogImage.get(), 0 );
         m_FogPipeline->SetStorageBuffer( kFogParamsBinding, m_ParamsBuffer.get() );
         m_FogPipeline->SetInput( kFogSceneDepthBinding, depthImage );
+
+        // ALWAYS bound, even when the shader will not read it: a `sampler3D` with no image is an invalid
+        // descriptor set, not an unused one, and ComputePipeline refuses to dispatch at all when a volume
+        // input has no view — so a fog-only scene would silently lose its fog. The engine's 1x1x1 volume
+        // fallback is what stands in; push.AerialPerspective.z is 0, so it is never sampled.
+        m_FogPipeline->SetInput(
+             kFogAerialPerspectiveBinding,
+             apActive ? atmosphere.AerialPerspectiveVolume
+                      : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
         m_FogPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_FogPipeline.get(), GroupCount( m_FogWidth ), GroupCount( m_FogHeight ),

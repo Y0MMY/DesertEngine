@@ -586,6 +586,253 @@ TEST( SkyScattering, LimbDarkeningFallsToARedderRim )
     EXPECT_GT( nearRim.y, nearRim.z );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The camera aerial-perspective volume: the slice mapping, the froxel walk, and the one value the
+// whole thing has to get exactly right — nothing at zero distance
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // The froxel-centre distance of slice @p index, exactly as SkyAerialPerspectiveLut.shader computes
+    // it: unit = index / (depth - 1), so slice 0 sits at distance 0 and the last at the volume's far
+    // extent. Mirrored here rather than exported because the shader's loop is the definition.
+    float SliceDistanceKm( int index, float apDepthKm )
+    {
+        const float unit = static_cast<float>( index ) / ( Ref::SKY_AP_VOLUME_DEPTH - 1.0f );
+        return Ref::SkyApDistanceFromSliceUnit( unit, apDepthKm );
+    }
+
+    // Transmittance over [0, tKm] of the camera ray, by brute force: a fine uniform march of the
+    // medium's extinction. Independent of the froxel walk under test — it calls neither the walk nor
+    // the integrator, only the medium — which is what makes it a reference rather than a tautology.
+    glm::vec3 BruteForceTransmittance( const Ref::SkyAtmParams& p, const glm::vec3& originKm,
+                                       const glm::vec3& rayDir, float tKm, int steps )
+    {
+        const float dt = tKm / static_cast<float>( steps );
+
+        glm::vec3 opticalDepth( 0.0f );
+        for ( int i = 0; i < steps; ++i )
+        {
+            const float     t        = ( static_cast<float>( i ) + 0.5f ) * dt;
+            const glm::vec3 position = originKm + rayDir * t;
+            const float     radius   = glm::max( glm::length( position ), p.BottomRadiusKm );
+
+            opticalDepth += Ref::SkySampleMedium( p, radius - p.BottomRadiusKm ).Extinction * dt;
+        }
+        return glm::exp( -opticalDepth );
+    }
+} // namespace
+
+TEST( SkyScattering, AerialPerspectiveSliceMappingRoundTrips )
+{
+    // The extents are part of the parameterisation, not a quality dial — Graphic::kAerialPerspective*
+    // states the same three numbers, and the remap below bakes them into every read.
+    EXPECT_FLOAT_EQ( Ref::SKY_AP_VOLUME_WIDTH, 32.0f );
+    EXPECT_FLOAT_EQ( Ref::SKY_AP_VOLUME_HEIGHT, 32.0f );
+    EXPECT_FLOAT_EQ( Ref::SKY_AP_VOLUME_DEPTH, 16.0f );
+
+    for ( const float depthKm : { 1.0f, 8.0f, 96.0f, 200.0f } )
+    {
+        // unit -> distance -> unit, over the whole domain including both ends.
+        for ( int i = 0; i <= 64; ++i )
+        {
+            const float unit = static_cast<float>( i ) / 64.0f;
+            const float back =
+                 Ref::SkyApSliceUnitFromDistance( Ref::SkyApDistanceFromSliceUnit( unit, depthKm ), depthKm );
+            EXPECT_NEAR( back, unit, 1e-6f ) << "depth " << depthKm << " unit " << unit;
+        }
+
+        // distance -> unit -> distance, at distances a scene actually produces.
+        for ( int i = 0; i <= 64; ++i )
+        {
+            const float distanceKm = depthKm * static_cast<float>( i ) / 64.0f;
+            const float back       = Ref::SkyApDistanceFromSliceUnit(
+                 Ref::SkyApSliceUnitFromDistance( distanceKm, depthKm ), depthKm );
+            EXPECT_NEAR( back, distanceKm, depthKm * 1e-5f );
+        }
+
+        // The ends are exact, and beyond the volume the mapping SATURATES rather than wrapping — the
+        // read-side clamp that keeps a pixel past the far extent from sampling froxel 0.
+        EXPECT_FLOAT_EQ( Ref::SkyApSliceUnitFromDistance( 0.0f, depthKm ), 0.0f );
+        EXPECT_FLOAT_EQ( Ref::SkyApSliceUnitFromDistance( depthKm, depthKm ), 1.0f );
+        EXPECT_FLOAT_EQ( Ref::SkyApSliceUnitFromDistance( depthKm * 10.0f, depthKm ), 1.0f );
+        EXPECT_FLOAT_EQ( Ref::SkyApSliceUnitFromDistance( -5.0f, depthKm ), 0.0f );
+    }
+
+    // Slice 0 IS the camera, and the distribution is squared: the first half of the slices covers the
+    // first quarter of the range. Both are what the fill relies on.
+    EXPECT_FLOAT_EQ( SliceDistanceKm( 0, 96.0f ), 0.0f );
+    EXPECT_FLOAT_EQ( SliceDistanceKm( 15, 96.0f ), 96.0f );
+    EXPECT_LT( SliceDistanceKm( 8, 96.0f ), 96.0f * 0.3f );
+
+    // Strictly increasing, so the froxel walk's segments are never inverted.
+    for ( int i = 1; i < 16; ++i )
+        EXPECT_GT( SliceDistanceKm( i, 96.0f ), SliceDistanceKm( i - 1, 96.0f ) );
+
+    // Every slice's read coordinate lands on its own texel centre: the fill writes slice i, the apply
+    // pass reads back through SkyUnitToTexelUv, and the two must be the same texel to a float.
+    for ( int i = 0; i < 16; ++i )
+    {
+        const float unit = Ref::SkyApSliceUnitFromDistance( SliceDistanceKm( i, 96.0f ), 96.0f );
+        EXPECT_NEAR( Ref::SkyUnitToTexelUv( unit, Ref::SKY_AP_VOLUME_DEPTH ),
+                     ( static_cast<float>( i ) + 0.5f ) / 16.0f, 1e-6f );
+    }
+}
+
+TEST( SkyScattering, AerialPerspectiveSegmentSampleCountFollowsTheSegmentLength )
+{
+    // One sample per target step, at least one however short the segment, capped however long it is —
+    // the property that keeps the near slices cheap and the far ones resolved.
+    EXPECT_EQ( Ref::SkyApSegmentSampleCount( 0.0f ), 1 );
+    EXPECT_EQ( Ref::SkyApSegmentSampleCount( -1.0f ), 1 );
+    EXPECT_EQ( Ref::SkyApSegmentSampleCount( 0.4f ), 1 );
+    EXPECT_EQ( Ref::SkyApSegmentSampleCount( 1.5f ), 2 );
+    EXPECT_EQ( Ref::SkyApSegmentSampleCount( 1000.0f ), Ref::SKY_AP_MAX_SEGMENT_SAMPLES );
+
+    // Monotone, so a longer segment never gets fewer samples than a shorter one.
+    int previous = 0;
+    for ( int i = 0; i <= 40; ++i )
+    {
+        const int n = Ref::SkyApSegmentSampleCount( static_cast<float>( i ) * 0.5f );
+        EXPECT_GE( n, previous );
+        previous = n;
+    }
+}
+
+TEST( SkyScattering, AerialPerspectiveIsTheIdentityAtZeroDistance )
+{
+    ResetLutCallbacks();
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 origin( 0.0f, p.BottomRadiusKm + 0.002f, 0.0f );
+    const glm::vec3 rayDir = glm::normalize( glm::vec3( 0.6f, 0.05f, -0.8f ) );
+    const glm::vec3 sunDir = glm::normalize( glm::vec3( 0.3f, 0.5f, 0.8f ) );
+    const glm::vec3 sun( 22.0f );
+
+    // A surface touching the camera must take NO colour shift at all: slice 0 of the volume is an empty
+    // segment, and an empty segment returns the accumulators it was given. `Fog.rgb + 0 * Fog.a` and
+    // `Fog.a * 1` are then exactly the pixel that was there — the whole reason the fill starts at 0.
+    const Ref::SkyScatterResult zero = Ref::SkyApIntegrateSegment( p, origin, rayDir, sunDir, sun, 0.0f, 0.0f,
+                                                                   glm::vec3( 0.0f ), glm::vec3( 1.0f ) );
+    EXPECT_FLOAT_EQ( zero.Luminance.r, 0.0f );
+    EXPECT_FLOAT_EQ( zero.Luminance.g, 0.0f );
+    EXPECT_FLOAT_EQ( zero.Luminance.b, 0.0f );
+    EXPECT_FLOAT_EQ( zero.Transmittance.r, 1.0f );
+    EXPECT_FLOAT_EQ( zero.Transmittance.g, 1.0f );
+    EXPECT_FLOAT_EQ( zero.Transmittance.b, 1.0f );
+
+    // An INVERTED segment is the identity too, not a negative one — the start-depth clamp produces
+    // exactly that for every froxel nearer than the authored start.
+    const Ref::SkyScatterResult inverted = Ref::SkyApIntegrateSegment( p, origin, rayDir, sunDir, sun, 4.0f, 1.0f,
+                                                                       glm::vec3( 0.25f ), glm::vec3( 0.5f ) );
+    EXPECT_FLOAT_EQ( inverted.Luminance.r, 0.25f );
+    EXPECT_FLOAT_EQ( inverted.Transmittance.r, 0.5f );
+
+    // And the whole volume's first slice, walked as the fill walks it, is the identity for any start
+    // depth: distance 0 lifted to the start depth is still an empty segment.
+    for ( const float startKm : { 0.0f, 0.1f, 5.0f } )
+    {
+        const float                 tEnd = SliceDistanceKm( 0, 96.0f );
+        const Ref::SkyScatterResult slice0 =
+             Ref::SkyApIntegrateSegment( p, origin, rayDir, sunDir, sun, glm::max( 0.0f, startKm ),
+                                         glm::max( tEnd, startKm ), glm::vec3( 0.0f ), glm::vec3( 1.0f ) );
+        EXPECT_FLOAT_EQ( slice0.Luminance.b, 0.0f ) << "start " << startKm;
+        EXPECT_FLOAT_EQ( slice0.Transmittance.b, 1.0f ) << "start " << startKm;
+    }
+}
+
+TEST( SkyScattering, AerialPerspectiveWalkAgreesWithADirectMarchToTheSameDistance )
+{
+    ResetLutCallbacks();
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 origin( 0.0f, p.BottomRadiusKm + 0.002f, 0.0f );
+    const glm::vec3 sunDir = glm::normalize( glm::vec3( 0.4f, 0.35f, -0.85f ) );
+    const glm::vec3 sun( 22.0f );
+
+    for ( const glm::vec3 rayDir :
+          { glm::normalize( glm::vec3( 0.0f, 0.02f, -1.0f ) ), glm::normalize( glm::vec3( 0.7f, 0.30f, -0.65f ) ),
+            glm::normalize( glm::vec3( -0.5f, 0.10f, 0.85f ) ) } )
+    {
+        // The fill's walk: 16 slices, accumulators carried, exactly the shader's loop.
+        glm::vec3 luminance( 0.0f );
+        glm::vec3 transmittance( 1.0f );
+        float     tPrev = 0.0f;
+
+        for ( int slice = 0; slice < 16; ++slice )
+        {
+            const float                 tNext = SliceDistanceKm( slice, 96.0f );
+            const Ref::SkyScatterResult step  = Ref::SkyApIntegrateSegment( p, origin, rayDir, sunDir, sun, tPrev,
+                                                                            tNext, luminance, transmittance );
+            luminance                         = step.Luminance;
+            transmittance                     = step.Transmittance;
+            tPrev                             = tNext;
+
+            // THE relation the volume's whole arrangement depends on: what slice N holds must be the
+            // atmosphere between the CAMERA and slice N, not an accumulation artefact. Compared against
+            // a 4000-step brute-force march of the same medium over [0, tNext] — an independent
+            // statement of the same physics, so a carried-accumulator bug, a dropped segment or an
+            // off-by-one in the slice distances shows here rather than as a shell in a screenshot.
+            const glm::vec3 reference = BruteForceTransmittance( p, origin, rayDir, tNext, 4000 );
+
+            EXPECT_NEAR( transmittance.r, reference.r, 4e-3f ) << "slice " << slice;
+            EXPECT_NEAR( transmittance.g, reference.g, 4e-3f ) << "slice " << slice;
+            EXPECT_NEAR( transmittance.b, reference.b, 4e-3f ) << "slice " << slice;
+
+            // Transmittance is a survival probability and it only ever falls with distance.
+            EXPECT_LE( transmittance.b, 1.0f );
+            EXPECT_GE( transmittance.b, 0.0f );
+
+            // In-scatter only ever accumulates: no segment may remove light already gathered.
+            EXPECT_GE( luminance.r, 0.0f );
+            EXPECT_GE( luminance.b, 0.0f );
+        }
+
+        // The walk's own final transmittance, against the same brute force over the whole 96 km.
+        const glm::vec3 reference = BruteForceTransmittance( p, origin, rayDir, 96.0f, 4000 );
+        EXPECT_NEAR( transmittance.r, reference.r, 4e-3f );
+        EXPECT_NEAR( transmittance.b, reference.b, 4e-3f );
+    }
+}
+
+TEST( SkyScattering, AerialPerspectiveGrowsWithDistanceAndAgreesWithTheDistantSky )
+{
+    ResetLutCallbacks();
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 origin( 0.0f, p.BottomRadiusKm + 0.002f, 0.0f );
+    const glm::vec3 rayDir = glm::normalize( glm::vec3( 0.0f, 0.02f, -1.0f ) );
+    const glm::vec3 sunDir = glm::normalize( glm::vec3( 0.0f, 0.35f, -0.94f ) );
+    const glm::vec3 sun( 22.0f );
+
+    // Monotone in distance, in BOTH lanes: more air between the eye and a surface can only add light
+    // and only remove background.
+    glm::vec3 previousLuminance( 0.0f );
+    glm::vec3 previousTransmittance( 1.0f );
+    for ( int slice = 1; slice < 16; ++slice )
+    {
+        const Ref::SkyScatterResult r =
+             Ref::SkyApIntegrateSegment( p, origin, rayDir, sunDir, sun, 0.0f, SliceDistanceKm( slice, 96.0f ),
+                                         glm::vec3( 0.0f ), glm::vec3( 1.0f ) );
+
+        EXPECT_GT( r.Luminance.b, previousLuminance.b );
+        EXPECT_LT( r.Transmittance.b, previousTransmittance.b );
+        previousLuminance     = r.Luminance;
+        previousTransmittance = r.Transmittance;
+    }
+
+    // THE POINT OF THE WHOLE PASS: the haze on a distant surface and the sky above the horizon are ONE
+    // quantity. March the same ray to the shell exit with the distant-sky integrator and the volume's
+    // 96 km must already be most of the way there — the same medium, the same LUT callbacks, the same
+    // sun. A factor between them (a missing phase, a doubled tint, kilometres against centimetres)
+    // shows here as a ratio nowhere near 1.
+    const Ref::SkyScatterResult distant =
+         Ref::SkyIntegrateScatteredLuminance( p, origin, rayDir, sunDir, sun, 64 );
+
+    EXPECT_GT( previousLuminance.b, distant.Luminance.b * 0.5f );
+    EXPECT_LT( previousLuminance.b, distant.Luminance.b * 1.05f );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

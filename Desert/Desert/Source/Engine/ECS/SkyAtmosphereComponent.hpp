@@ -287,6 +287,18 @@ namespace Desert::ECS
                   Tooltip( "Distance from the camera at which aerial perspective starts being applied. "
                            "UE default: 0.1 km." ) )
         float AerialPerspectiveStartDepth = 0.1f;
+
+        // Where UE keeps this as an engine cvar (r.SkyAtmosphere.AerialPerspectiveLUT.Depth), it is a
+        // component field here for one reason: the froxel volume has 16 slices whatever the scene, and
+        // 96 km of them in a level whose whole world is 800 m across spends 14 of the 16 on air nobody
+        // will ever look through. Authoring the range is what lets a small level keep its resolution.
+        PROPERTY( DisplayName( "Aerial Perspective Distance" ), Category( "Art Direction" ), Range( 1.0f, 200.0f ),
+                  Units( "km" ),
+                  Tooltip( "How far the aerial-perspective froxel volume reaches. Its 16 slices are "
+                           "distributed over this range, so set it near the scene's own view distance "
+                           "for the most resolution where geometry actually is. Beyond it the haze "
+                           "holds at the value it had at this distance. UE default: 96 km." ) )
+        float AerialPerspectiveDistance = 96.0f;
     };
 
     struct SkyAtmosphereComponent

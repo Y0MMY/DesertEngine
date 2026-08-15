@@ -67,9 +67,21 @@ namespace Desert::Graphic
 
         // Art direction of the physical model (UE semantics). The first tints only the sky pixels the
         // screen pass draws; the second is applied inside every scattering integration (Sky-View LUT,
-        // IBL bake, and Phase 3's aerial-perspective volume). White is physical.
+        // IBL bake, and the aerial-perspective volume). White is physical.
         glm::vec3 SkyLuminanceFactor                     = { 1.0f, 1.0f, 1.0f };
         glm::vec3 SkyAndAerialPerspectiveLuminanceFactor = { 1.0f, 1.0f, 1.0f };
+
+        // The camera aerial-perspective volume. KILOMETRES, the authored unit — the volume's own maths
+        // never leaves kilometres, so unlike PlanetRadius these three need no conversion at all.
+        //
+        // They are three independent quantities and not one dressed up as three:
+        //   * DistanceKm places the volume's 16 slices (how far the froxels reach);
+        //   * StartDepthKm is where the haze is allowed to begin (the fill skips everything nearer);
+        //   * ViewDistanceScale is applied on the READ, multiplying a pixel's own distance before the
+        //     slice lookup — so it changes how fast the world hazes up without re-filling anything.
+        float AerialPerspectiveDistanceKm        = 96.0f;
+        float AerialPerspectiveStartDepthKm      = 0.1f;
+        float AerialPerspectiveViewDistanceScale = 1.0f;
 
         // Environment-bake knobs. Quality/performance, never preset-driven.
         bool                          AutoRebakeEnvironment   = true;
@@ -129,6 +141,10 @@ namespace Desert::Graphic
 
         sky.SkyLuminanceFactor                     = data.SkyLuminanceFactor;
         sky.SkyAndAerialPerspectiveLuminanceFactor = data.SkyAndAerialPerspectiveLuminanceFactor;
+
+        sky.AerialPerspectiveDistanceKm        = data.AerialPerspectiveDistance;
+        sky.AerialPerspectiveStartDepthKm      = data.AerialPerspectiveStartDepth;
+        sky.AerialPerspectiveViewDistanceScale = data.AerialPerspectiveViewDistanceScale;
         return sky;
     }
 } // namespace Desert::Graphic

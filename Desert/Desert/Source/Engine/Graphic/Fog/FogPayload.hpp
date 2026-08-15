@@ -47,6 +47,12 @@ namespace Desert::Graphic
     inline constexpr uint32_t kFogOutputBinding     = 0; // the RGBA16F fog image the pass writes
     inline constexpr uint32_t kFogParamsBinding     = 1;
     inline constexpr uint32_t kFogSceneDepthBinding = 2;
+    // The sky's camera aerial-perspective volume, which this pass composes ITSELF OVER. ALWAYS bound,
+    // even in a scene with no atmosphere at all: a declared sampler with no image is an invalid
+    // descriptor set, not an unused one (the cloud raymarch's shadow-map slot, same rule). What varies
+    // is FogPush::AerialPerspective.z, which is 0 when there is no volume — and then the shader never
+    // reads the binding and composes the exact identity instead.
+    inline constexpr uint32_t kFogAerialPerspectiveBinding = 3;
 
     /**
      * Per-dispatch data: everything that changes with the CAMERA rather than with the fog settings.
@@ -57,9 +63,20 @@ namespace Desert::Graphic
     {
         glm::mat4 InverseViewProjection;
         glm::vec4 CameraPosition; // xyz = world units, w unused (vec4 keeps the std430 block unambiguous)
+
+        // The aerial perspective this pass composes itself over, and the two switches that decide what
+        // the dispatch actually evaluates. Both gates are here rather than in the fog parameter block
+        // because both are per-VIEW facts about this frame, not authored fog:
+        //   x = the AP volume's far extent, kilometres  (AtmosphereEnv::AerialPerspectiveDepthKm)
+        //   y = the read-side view-distance scale       (AtmosphereEnv::AerialPerspectiveViewDistanceScale)
+        //   z = 1 when there is an AP volume to sample, 0 otherwise
+        //   w = 1 when the height fog itself is enabled, 0 otherwise
+        // Either gate at 0 makes its half of the composite the exact arithmetic identity, which is what
+        // lets one pass serve fog-without-sky, sky-without-fog and both, with no permutation.
+        glm::vec4 AerialPerspective;
     };
 
-    static_assert( sizeof( FogPush ) == 80 );
+    static_assert( sizeof( FogPush ) == 96 );
 
     // One world unit is one centimetre (Common::Units), so a kilometre is 100 000 of them.
     inline constexpr float kFogWorldUnitsPerKm = 100000.0f;

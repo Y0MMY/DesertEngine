@@ -2,11 +2,29 @@ Shader "HeightFog"
 {
     Compute
     {
-        // The exponential height fog's evaluation pass: one closed-form integral per pixel, no march.
+        // The ATMOSPHERE-AND-FOG evaluation pass: the sky's aerial perspective on opaque geometry, with
+        // the exponential height fog composed over it. One closed-form integral and one volume fetch per
+        // pixel, no march — the march that produced the aerial perspective happened once for the whole
+        // frame, into a 32x32x16 froxel volume (Programs/Sky/SkyAerialPerspectiveLut.shader).
         //
-        // Writes RGBA16F: .rgb = the fog's in-scattered radiance, PREMULTIPLIED, linear HDR;
-        // .a = the transmittance of the fog between the camera and that pixel's geometry. The apply
-        // pass (HeightFogApply.shader) then needs no more than `scene = fog.rgb + scene * fog.a`.
+        // Writes RGBA16F: .rgb = in-scattered radiance, PREMULTIPLIED, linear HDR; .a = the transmittance
+        // of everything between the camera and that pixel's geometry. The apply pass
+        // (HeightFogApply.shader) then needs no more than `scene = rgb + scene * a`.
+        //
+        // COMPOSITION ORDER — fog OVER aerial perspective, which is UE's and is not arbitrary: the fog is
+        // the optically thicker medium and sits between the camera and everything the atmosphere did,
+        //
+        //     rgb = Fog.rgb + AP.rgb * Fog.a
+        //     a   = Fog.a   * AP.a
+        //
+        // (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 1.6). Composing the other way round would let a
+        // dense fog be tinted by 90 km of air in front of it.
+        //
+        // BOTH HALVES ARE OPTIONAL, and each absent half is the exact arithmetic identity of that
+        // formula — not an approximation of it. A scene on SkyModel::ArtisticGradient has no volume, so
+        // AP is (0,0,0,1) and the result is `Fog.rgb + 0*Fog.a`, `Fog.a * 1`: the same bits this pass
+        // wrote before the atmosphere existed. A scene with a physical sky and no fog component is the
+        // mirror image. That is why there is one shader here and no permutation.
         //
         // LINEAR HDR ONLY — no tonemap, no gamma, no exposure; the engine's tonemap owns the curve and
         // runs later in the frame.
@@ -22,7 +40,9 @@ Shader "HeightFog"
         // below turns that into the far-plane point — a kilometre of fog toward the horizon, thinning
         // toward the zenith as the closed form's height term says, attenuated by StartDistance and
         // MaxOpacity. That is UE's behaviour (fog applies to skybox pixels through their far-plane
-        // depth), and it is what produces the horizon veil.
+        // depth), and it is what produces the horizon veil. AERIAL PERSPECTIVE IS NOT applied to them —
+        // the sky pass already drew the same medium integrated to the top of the atmosphere, and adding
+        // the volume on top would be that integral counted twice.
         //
         // WHAT IS WHERE. The maths is Common/HeightFog.glslh, compiled as C++ by the HeightFog unit
         // tests from this same text; the parameter block is Common/FogParams.glslh, mirrored offset for
@@ -30,6 +50,13 @@ Shader "HeightFog"
 
         #include <Common/HeightFog.glslh>
         #include <Common/FogParams.glslh>
+
+        // The aerial-perspective volume's SLICE MAPPING only. SkyScattering.glslh's integrator block is
+        // guarded on the two LUT-callback macros, which this pass deliberately does not define: it reads
+        // the volume, it never fills it, so the only thing it needs from the sky's maths is the exact
+        // inverse of the mapping the fill wrote through.
+        #include <Common/SkyMedium.glslh>
+        #include <Common/SkyScattering.glslh>
 
         // rgba16f: radiance is pre-tonemap HDR and transmittance is in [0,1]; half precision carries
         // three decimal digits, an order more than an over-operator needs.
@@ -40,10 +67,18 @@ Shader "HeightFog"
         // silhouette averages foreground and background into a distance where nothing is.
         Uniform(2) sampler2D u_SceneDepth;
 
+        // The sky's camera aerial-perspective volume (Graphic::kFogAerialPerspectiveBinding). Sampled
+        // TRILINEARLY — across x and y so the 32x32 froxel grid does not show as blocks over a
+        // silhouette, and across z because that interpolation is what turns 16 slices into a smooth
+        // distance ramp instead of 16 visible shells.
+        Uniform(3) sampler3D u_AerialPerspective;
+
         PushConstant FogPush
         {
             mat4 u_InverseViewProjection;
-            vec4 u_CameraPosition; // xyz = camera position in world units, w unused
+            vec4 u_CameraPosition;   // xyz = camera position in world units, w unused
+            vec4 u_ApParams;         // x = volume depth (km), y = view distance scale,
+                                     // z = 1 when the volume exists, w = 1 when height fog is enabled
         };
 
         LocalSize(8, 8, 1);
@@ -69,9 +104,41 @@ Shader "HeightFog"
             vec3 cameraKm = u_CameraPosition.xyz * (1.0f / HEIGHT_FOG_WORLD_UNITS_PER_KM);
             vec3 worldKm  = worldPos * (1.0f / HEIGHT_FOG_WORLD_UNITS_PER_KM);
 
-            HeightFogResult fog = HeightFogEvaluate(FogUnpackParams(), cameraKm, worldKm);
+            HeightFogResult fog;
+            fog.Inscattering = vec3(0.0f, 0.0f, 0.0f);
+            fog.Transmittance = 1.0f;
+            if (u_ApParams.w > 0.5f)
+                fog = HeightFogEvaluate(FogUnpackParams(), cameraKm, worldKm);
 
-            imageStore(u_FogApply, coord, vec4(fog.Inscattering, fog.Transmittance));
+            // Aerial perspective, on OPAQUE PIXELS ONLY. A sky pixel (depth at the far plane) already
+            // carries the atmosphere's full radiance — the sky pass drew it from the Sky-View LUT, which
+            // integrates the same medium out to the shell — so adding the volume's 96 km on top would be
+            // the atmosphere counted twice, as a bright band exactly where the sky is thickest.
+            vec4 ap = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            if (u_ApParams.z > 0.5f && deviceDepth < 1.0f)
+            {
+                // Distance ALONG THE RAY, which is what the volume's slices measure — not the linear
+                // view-space z, which would put a pixel at the corner of the frame in the wrong slice.
+                float distanceKm =
+                     length(worldKm - cameraKm) * max(u_ApParams.y, 0.0f);
+
+                float sliceUnit = SkyApSliceUnitFromDistance(distanceKm, u_ApParams.x);
+
+                // Read through the exact inverse of the fill's texel-centre remap on all three axes:
+                // unit 0 is the centre of froxel 0 and unit 1 the centre of the last, so the frame's
+                // edges and the volume's near plane land exactly on written texels.
+                vec3 uvw = vec3(SkyUnitToTexelUv(uv.x, SKY_AP_VOLUME_WIDTH),
+                                SkyUnitToTexelUv(uv.y, SKY_AP_VOLUME_HEIGHT),
+                                SkyUnitToTexelUv(sliceUnit, SKY_AP_VOLUME_DEPTH));
+                ap = texture(u_AerialPerspective, uvw);
+            }
+
+            // Fog OVER aerial perspective — see the header. Premultiplied throughout, so this is one
+            // over-operator and nothing has to be un-premultiplied to apply it.
+            vec3  inscattering = fog.Inscattering + ap.rgb * fog.Transmittance;
+            float transmittance = fog.Transmittance * clamp(ap.a, 0.0f, 1.0f);
+
+            imageStore(u_FogApply, coord, vec4(inscattering, transmittance));
         }
     }
 }

@@ -46,7 +46,8 @@ namespace Desert::Graphic::System
         void EnsureProceduralEnvironment( float deltaSeconds );
 
         // The physical atmosphere's LUTs (Hillaire 2020): the cached pair — transmittance 256x64 +
-        // multi-scattering 32x32 — and the per-view Sky-View LUT, 192x104, all RGBA16F. Call once per
+        // multi-scattering 32x32 — the per-view Sky-View LUT, 192x104, and the per-view camera
+        // aerial-perspective volume, 32x32x16, all RGBA16F. Call once per
         // frame from the in-frame compute point (outside any open render pass — the slot
         // ExecuteVolumetricClouds dispatches from). Does NOTHING unless SkyModel::PhysicalAtmosphere
         // is active: gradient scenes never allocate the images and never dispatch, so the old sky pays
@@ -56,6 +57,11 @@ namespace Desert::Graphic::System
         // PREVIOUS frame (this slot runs after the graph recorded the Sky pass); at 192x104 of
         // slowly-varying sky that one-frame latency is invisible, and the first physical frame renders
         // black sky for exactly one frame.
+        //
+        // The AERIAL-PERSPECTIVE volume is refilled every frame for the same reason and has NO such
+        // latency: its consumer, the atmospheric-fog pass, is dispatched later in this very frame
+        // (SceneRenderer runs this slot immediately before ExecuteAtmosphericFog), so the froxels a
+        // pixel reads were marched for the camera that pixel was drawn with.
         void ExecuteAtmosphereLuts();
 
         const std::optional<Environment> GetEnvironment() const
@@ -92,7 +98,9 @@ namespace Desert::Graphic::System
         // weather map uses, for the same reason. Deliberately NOT the whole SkySettings: the palette,
         // the sun and the bake knobs change constantly and none of them is a LUT input. MieAnisotropy
         // is also absent — it rides in the payload for the Phase 2 integrator, but no LUT texel depends
-        // on it, so a g-drag must not re-march 1024 texels for nothing.
+        // on it, so a g-drag must not re-march 1024 texels for nothing. The three aerial-perspective
+        // knobs are absent for a stronger reason still: the volume they steer is refilled EVERY frame
+        // (it follows the camera), so caching them would be caching nothing.
         struct AtmosphereLutFingerprint
         {
             glm::vec3 RayleighScattering{ 0.0f };
@@ -118,6 +126,8 @@ namespace Desert::Graphic::System
         bool EnsureAtmosphereLutResources();
         // Same arrangement for the per-view Sky-View LUT image.
         bool EnsureSkyViewLutResources();
+        // Same arrangement for the per-view aerial-perspective volume.
+        bool EnsureAerialPerspectiveResources();
 
         // The cached pair, in dependency order (the multi-scattering march samples the transmittance).
         // @p inFrame picks the recording path: true records into the current frame's command buffer
@@ -125,6 +135,7 @@ namespace Desert::Graphic::System
         // OUTSIDE a frame and cannot wait for the in-frame slot that only comes later.
         void DispatchCachedAtmosphereLuts( bool inFrame );
         void DispatchSkyViewLut();
+        void DispatchAerialPerspectiveLut();
 
         // The bake path's guarantee: when the physical model is active, the cached LUTs hold valid
         // texels BEFORE CreateProcedural marches them. Returns false when the LUTs cannot exist.
@@ -154,16 +165,23 @@ namespace Desert::Graphic::System
         // in-frame compute slot, read by the next frame's Sky pass — never two frames in flight
         // writing it at once). 256x64 + 32x32 + 192x104 RGBA16F is ~292 KiB — not worth cross-renderer
         // sharing complexity.
+        //
+        // The aerial-perspective volume sits with them for the same reasons: 32x32x16 RGBA16F is 64 KiB,
+        // it is written and read on THIS renderer's timeline inside one frame, and its froxels are the
+        // camera's own frustum, so sharing it across renderers would be sharing a camera.
         std::shared_ptr<ComputePipeline> m_TransmittanceLutPipeline;
         std::shared_ptr<ComputePipeline> m_MultiScatterLutPipeline;
         std::shared_ptr<ComputePipeline> m_SkyViewLutPipeline;
+        std::shared_ptr<ComputePipeline> m_AerialPerspectivePipeline;
         std::shared_ptr<Image2D>         m_TransmittanceLut;
         std::shared_ptr<Image2D>         m_MultiScatterLut;
         std::shared_ptr<Image2D>         m_SkyViewLut;
+        std::shared_ptr<Image3D>         m_AerialPerspectiveLut;
         AtmosphereLutFingerprint         m_LutBaked;
-        bool                             m_LutsValid              = false;
-        bool                             m_LutResourcesFailed     = false;
-        bool                             m_SkyViewResourcesFailed = false;
+        bool                             m_LutsValid                        = false;
+        bool                             m_LutResourcesFailed               = false;
+        bool                             m_SkyViewResourcesFailed           = false;
+        bool                             m_AerialPerspectiveResourcesFailed = false;
 
         bool          m_UseProceduralSky = false;
         glm::vec3     m_SunDir           = glm::vec3( 0.0f, 1.0f, 0.0f ); // TOWARD the sun, normalized

@@ -111,9 +111,10 @@ namespace Desert::Graphic::System
                 return pipeline;
             };
 
-            m_TransmittanceLutPipeline = makeCompute( "SkyTransmittanceLut" );
-            m_MultiScatterLutPipeline  = makeCompute( "SkyMultiScatterLut" );
-            m_SkyViewLutPipeline       = makeCompute( "SkyViewLut" );
+            m_TransmittanceLutPipeline  = makeCompute( "SkyTransmittanceLut" );
+            m_MultiScatterLutPipeline   = makeCompute( "SkyMultiScatterLut" );
+            m_SkyViewLutPipeline        = makeCompute( "SkyViewLut" );
+            m_AerialPerspectivePipeline = makeCompute( "SkyAerialPerspectiveLut" );
         }
 
         return BOOLSUCCESS;
@@ -285,6 +286,68 @@ namespace Desert::Graphic::System
         renderer.ComputeImageEndWrite( m_SkyViewLut.get() );
     }
 
+    bool SkyboxRenderer::EnsureAerialPerspectiveResources()
+    {
+        if ( m_AerialPerspectiveResourcesFailed )
+            return false;
+        if ( m_AerialPerspectiveLut )
+            return true;
+
+        const Core::Formats::Image3DSpecification apSpec{
+             .Tag        = "SkyAerialPerspectiveLut",
+             .Width      = kAerialPerspectiveWidth,
+             .Height     = kAerialPerspectiveHeight,
+             .Depth      = kAerialPerspectiveDepth,
+             .Format     = Core::Formats::ImageFormat::RGBA16F,
+             .Properties = Core::Formats::Storage | Core::Formats::Sample,
+        };
+        m_AerialPerspectiveLut = Image3D::Create( apSpec );
+
+        if ( !m_AerialPerspectiveLut )
+        {
+            LOG_ERROR( "[SkyAtmosphere] The camera aerial-perspective volume ({}x{}x{} RGBA16F) could not "
+                       "be created; geometry in this view will receive no distance haze.",
+                       kAerialPerspectiveWidth, kAerialPerspectiveHeight, kAerialPerspectiveDepth );
+            m_AerialPerspectiveResourcesFailed = true;
+            return false;
+        }
+
+        LOG_INFO( "[SkyAtmosphere] Aerial-perspective volume {}x{}x{} RGBA16F ({:.2f} MiB) allocated for "
+                  "the physical atmosphere — refilled every frame while the model is active.",
+                  kAerialPerspectiveWidth, kAerialPerspectiveHeight, kAerialPerspectiveDepth,
+                  LutBytesToMiB( Core::Formats::CalculateImageSize(
+                       kAerialPerspectiveWidth, kAerialPerspectiveHeight, kAerialPerspectiveDepth,
+                       Core::Formats::ImageFormat::RGBA16F ) ) );
+        return true;
+    }
+
+    void SkyboxRenderer::DispatchAerialPerspectiveLut()
+    {
+        auto& renderer = Renderer::GetInstance();
+
+        SkyAerialPerspectivePush push{};
+        push.InverseViewProjection =
+             glm::inverse( m_ActiveCamera->GetProjectionMatrix() * m_ActiveCamera->GetViewMatrix() );
+        push.CameraPosWorld = glm::vec4( m_ActiveCamera->GetPosition(), 0.0f );
+        push.VolumeParams =
+             glm::vec4( m_Sky.AerialPerspectiveDistanceKm, m_Sky.AerialPerspectiveStartDepthKm, 0.0f, 0.0f );
+
+        renderer.ComputeImageBeginWrite( m_AerialPerspectiveLut.get() );
+        m_AerialPerspectivePipeline->SetOutput( kSkyAerialPerspectiveOutputBinding, m_AerialPerspectiveLut.get(),
+                                                0 );
+        m_AerialPerspectivePipeline->SetStorageBuffer( kSkyPayloadBinding, m_SkyParams.get() );
+        m_AerialPerspectivePipeline->SetInput( kSkyTransmittanceLutBinding, m_TransmittanceLut.get() );
+        m_AerialPerspectivePipeline->SetInput( kSkyMultiScatterLutBinding, m_MultiScatterLut.get() );
+        m_AerialPerspectivePipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
+
+        // ONE INVOCATION PER FROXEL COLUMN — the z extent is walked inside the shader so consecutive
+        // slices share one quadrature, so the dispatch is 2D over the volume's x/y and never over z.
+        renderer.DispatchComputeInFrame( m_AerialPerspectivePipeline.get(),
+                                         LutGroupCount( kAerialPerspectiveWidth ),
+                                         LutGroupCount( kAerialPerspectiveHeight ), 1 );
+        renderer.ComputeImageEndWrite( m_AerialPerspectiveLut.get() );
+    }
+
     void SkyboxRenderer::ExecuteAtmosphereLuts()
     {
         // The gradient model never reaches past this line: no allocation, no dispatch, no fingerprint —
@@ -322,6 +385,21 @@ namespace Desert::Graphic::System
         {
             DESERT_PROFILE_SCOPE( "Sky: SkyViewLut" );
             DispatchSkyViewLut();
+        }
+
+        // The camera aerial-perspective volume, every frame and for the same reason — it is the camera's
+        // own frustum. Published on the AtmosphereEnv only once the fill has actually happened: the
+        // handle being non-null is the contract that says "there is aerial perspective this frame", and
+        // the atmospheric-fog pass (dispatched immediately after this slot) composes the identity when
+        // it is null rather than sampling a volume nobody wrote.
+        if ( m_AerialPerspectivePipeline && m_ActiveCamera && EnsureAerialPerspectiveResources() )
+        {
+            DESERT_PROFILE_SCOPE( "Sky: AerialPerspectiveLut" );
+            DispatchAerialPerspectiveLut();
+
+            m_Atmosphere.AerialPerspectiveVolume            = m_AerialPerspectiveLut.get();
+            m_Atmosphere.AerialPerspectiveDepthKm           = m_Sky.AerialPerspectiveDistanceKm;
+            m_Atmosphere.AerialPerspectiveViewDistanceScale = m_Sky.AerialPerspectiveViewDistanceScale;
         }
     }
 

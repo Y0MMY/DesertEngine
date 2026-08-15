@@ -15,33 +15,42 @@
 namespace Desert::Graphic::System
 {
     /**
-     * @brief UE's Exponential Height Fog: one closed-form evaluation per pixel, then an over-composite.
+     * @brief The atmospheric-fog pass: the sky's AERIAL PERSPECTIVE on opaque geometry, with UE's
+     *        Exponential Height Fog composed over it. One closed-form evaluation and one froxel fetch
+     *        per pixel, then a single over-composite.
+     *
+     * The class keeps the fog's name because the fog is what it evaluates; the aerial perspective it
+     * also carries was marched elsewhere (SkyboxRenderer's 32x32x16 volume) and is only SAMPLED here.
+     * That is UE's own arrangement — its height-fog pixel shader is where the CameraAP volume lands on
+     * opaque (research doc section 1.6) — and it is why the two are one pass and not two: they share a
+     * depth read, a full-screen dispatch and a composite, and only their order matters.
      *
      * Two stages, both the volumetric-cloud subsystem's idioms one size smaller:
      *
      *   S1  EVALUATE  compute, RGBA16F at the target's own size. Reconstructs each pixel's world
      *                 position from the scene depth (presented by ComputeImageBeginRead — the ONE path
-     *                 that works in Forward and Deferred, teamlead decision Q5) and evaluates the
-     *                 closed-form fog integral of Common/HeightFog.glslh. Premultiplied inscattering in
-     *                 .rgb, transmittance in .a.
+     *                 that works in Forward and Deferred, teamlead decision Q5), evaluates the
+     *                 closed-form fog integral of Common/HeightFog.glslh, samples the aerial-perspective
+     *                 volume at that pixel's distance, and composes `Fog over AP`. Premultiplied
+     *                 inscattering in .rgb, transmittance in .a.
      *   S2  APPLY     a fullscreen quad registered in RenderPhase::Transparency at
      *                 RenderPassOrder::AtmosphericFog — BEFORE the cloud composite's FarField, so the
      *                 clouds and every particle land OVER the fogged scene rather than under it.
      *
      * WHERE IT RUNS. S1 is an in-frame compute dispatch and must be issued OUTSIDE an open render pass,
      * after the scene depth is finished. SceneRenderer::ExecuteAtmosphericFog() calls ExecuteInFrame()
-     * between the deferred block and ExecuteTransparency() — the same point the clouds hold.
+     * between the deferred block and ExecuteTransparency() — the same point the clouds hold, and
+     * immediately AFTER SkyboxRenderer::ExecuteAtmosphereLuts filled this frame's AP volume, so the
+     * froxels a pixel reads were marched for the camera that pixel was drawn with.
      *
-     * WHEN SKY PHASE 3 LANDS (the camera aerial-perspective volume), this pass gains the AP sample and
-     * composes fog OVER it — UE's exact composition order; the slot was chosen so that change is an
-     * edit to this pass, not a rearrangement of the frame.
-     *
-     * ZERO COST WHEN ABSENT. A scene without the component (or with the fog disabled) dispatches
-     * nothing, allocates no fog target, and the apply pass draws nothing — the frame is what it was
-     * before this system existed. What Initialize does build regardless is the two pipelines and the
-     * 80-byte parameter buffer, the cloud renderer's arrangement exactly; the per-view RGBA16F target
-     * is the only real memory, and it is allocated lazily on the first fogged frame with the failure
-     * latched — previews and thumbnails build a SceneRenderer each and never carry fog.
+     * ZERO COST WHEN NEITHER IS PRESENT. A scene with no fog component (or the fog disabled) AND no
+     * aerial perspective — every SkyModel::ArtisticGradient scene — dispatches nothing, allocates no
+     * target, and the apply pass draws nothing: the frame is what it was before this system existed.
+     * Either half alone is enough to run the pass, and the absent half composes as the exact arithmetic
+     * identity, so a gradient scene's pixels are unchanged bit for bit. What Initialize does build
+     * regardless is the two pipelines and the 80-byte parameter buffer, the cloud renderer's arrangement
+     * exactly; the per-view RGBA16F target is the only real memory, and it is allocated lazily on the
+     * first fogged frame with the failure latched.
      */
     class HeightFogRenderer final : public RenderSystem
     {
@@ -64,7 +73,10 @@ namespace Desert::Graphic::System
          */
         void SetFogSettings( bool present, const ECS::ExponentialHeightFogData& data, float fogHeightY );
 
-        /** @brief Stage S1. Must be called outside any render pass, after the scene depth is final. */
+        /**
+         * @brief Stage S1. Must be called outside any render pass, after the scene depth is final and
+         *        after this frame's aerial-perspective volume has been filled.
+         */
         void ExecuteInFrame();
 
     private:
