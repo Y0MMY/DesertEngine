@@ -797,6 +797,54 @@ TEST( CloudMultiScatter, TheExtinctionTintActsPerChannel )
 // the formula this replaced — because the numbers themselves are a tuning question and the relations are
 // not: the ablation on pp. 135/136 is entirely about the direction these move in.
 
+TEST( CloudProfileDepth, ReachesTheReferencesInteriorAtTheProfileValuesThisRendererActuallyProduces )
+{
+    // The conversion exists because our dimensional profile and Nubis3's are different quantities: theirs
+    // is an authored field that is 1 throughout a cloud's interior, ours is a product of three smooth
+    // [0,1] factors that measures 0.06-0.20 at the samples the eye integrates. The relations, not the
+    // number:
+
+    // A rim IS the surface, at either end of the definition.
+    EXPECT_FLOAT_EQ( R::CloudProfileDepth( 0.0f ), 0.0f );
+
+    // Monotone and bounded — a depth cannot leave [0,1] however the density model is tuned.
+    float previous = -1.0f;
+    for ( int i = 0; i <= 40; ++i )
+    {
+        const float d = R::CloudProfileDepth( float( i ) / 20.0f );
+        EXPECT_GE( d, 0.0f );
+        EXPECT_LE( d, 1.0f );
+        EXPECT_GE( d, previous );
+        previous = d;
+    }
+
+    // The measured band. A sample at the low end of what the eye sees must still read as mostly surface,
+    // and one at the high end must read as mostly interior — that separation is the whole point, and it
+    // is exactly what the raw profile could not provide: sqrt(1 - 0.06) and sqrt(1 - 0.20) differ by 8%,
+    // where these differ by more than a factor of two.
+    EXPECT_LT( R::CloudProfileDepth( 0.06f ), 0.5f );
+    EXPECT_GT( R::CloudProfileDepth( 0.20f ), 0.9f );
+
+    // And the interior saturates rather than overshooting, so the two formulas below stay inside the
+    // paper's own ranges no matter how dense a preset makes the field.
+    EXPECT_FLOAT_EQ( R::CloudProfileDepth( 10.0f ), 1.0f );
+}
+
+TEST( CloudProfileDepth, DarkensAnInteriorAndLeavesARimWispAlone )
+{
+    // The pair of relations the change is judged by, on the ambient term (Nubis3 p.141). A wisp on the
+    // rim keeps its sky; a sample in the body of a cloud loses most of it. Before the conversion the two
+    // were within a few percent of each other, which is what rendered clouds as flat lumps.
+    const float sigma = 0.0005f;
+
+    const float wisp     = R::CloudAmbientOcclusion( 0.02f, 0.0f, sigma, 0.95f );
+    const float interior = R::CloudAmbientOcclusion( 0.18f, 0.0f, sigma, 0.95f );
+
+    EXPECT_GT( wisp, 0.8f );
+    EXPECT_LT( interior, 0.5f );
+    EXPECT_GT( wisp, 2.0f * interior );
+}
+
 TEST( CloudMultiScatterExtinction, FallsWithDepthAndStaysInsideThePapersRange )
 {
     // The paper's own bounds, asserted as bounds rather than as the two endpoint values, so no
@@ -812,14 +860,20 @@ TEST( CloudMultiScatterExtinction, FallsWithDepthAndStaysInsideThePapersRange )
         }
 
     // Monotone in DEPTH: deeper into the modelled cloud is strictly more transparent to already-scattered
-    // light. This is the property the whole item exists for.
+    // light. This is the property the whole item exists for. Strict below CLOUD_PROFILE_INTERIOR, where
+    // our profile still carries depth information, and flat at the core value above it — a sample deeper
+    // than "inside" is not deeper still.
     float previous = R::CLOUD_MS_EXTINCTION_SURFACE + 1.0f;
     for ( int pi = 0; pi <= 20; ++pi )
     {
-        const float k = R::CloudMultiScatterExtinction( float( pi ) / 20.0f, 1.0f );
+        const float profile = R::CLOUD_PROFILE_INTERIOR * float( pi ) / 20.0f;
+        const float k       = R::CloudMultiScatterExtinction( profile, 1.0f );
         EXPECT_LT( k, previous );
         previous = k;
     }
+    for ( int pi = 0; pi <= 10; ++pi )
+        EXPECT_NEAR( R::CloudMultiScatterExtinction( R::CLOUD_PROFILE_INTERIOR + float( pi ) / 10.0f, 1.0f ),
+                     R::CLOUD_MS_EXTINCTION_CORE, 1e-6f );
 
     // Monotone in VIEW ANGLE too: the reduction is handed out as the eye turns toward the sun, which is
     // the case the reference's outer Remap(sun_dot, 0, 0.9, ...) selects.
@@ -867,15 +921,21 @@ TEST( CloudMultiScatterOpticalDepth, DeepBacklitSamplesGetStrictlyMoreEnergyThan
         const float after  = MultiScatterWithDepthModulation( tau, 1.0f, 0.95f ).x;
         EXPECT_GT( after, before ) << "tau = " << tau;
 
-        // And the deeper the sample, the more of the gap it closes: monotone in the profile, so a core is
-        // never darker than the shoulder that surrounds it.
+        // And the deeper the sample, the more of the gap it closes: monotone in the profile over the range
+        // the profile still carries depth in, so a core is never darker than the shoulder that surrounds
+        // it. Beyond CLOUD_PROFILE_INTERIOR the sample is already "inside" and the curve is flat.
         float previous = 0.0f;
         for ( int pi = 0; pi <= 10; ++pi )
         {
-            const float lit = MultiScatterWithDepthModulation( tau, float( pi ) / 10.0f, 0.95f ).x;
+            const float profile = R::CLOUD_PROFILE_INTERIOR * float( pi ) / 10.0f;
+            const float lit     = MultiScatterWithDepthModulation( tau, profile, 0.95f ).x;
             EXPECT_GT( lit, previous );
             previous = lit;
         }
+        for ( int pi = 0; pi <= 10; ++pi )
+            EXPECT_NEAR(
+                 MultiScatterWithDepthModulation( tau, R::CLOUD_PROFILE_INTERIOR + float( pi ) / 10.0f, 0.95f ).x,
+                 previous, previous * 1e-4f );
     }
 
     // A thick core is the case the ablation shows, so state what it is worth: at an optical depth of 6 the
@@ -999,16 +1059,21 @@ TEST( CloudAmbientOcclusion, ColumnExtinctionRelaxesWithDepthIntoTheProfile )
     // direction to be modulated by. Asserting it here keeps the two callers of the shared constants
     // honestly different: the ambient term's coefficient at profile 1 is the core value outright, where
     // the direct term only reaches it looking toward the sun.
-    EXPECT_FLOAT_EQ( R::CloudAmbientOcclusion( 1.0f, column, sigma, 1.0f ),
-                     0.0f ); // local term is sqrt(1-1) at a full profile: no sky reaches a solid core
-    EXPECT_NEAR( R::CloudAmbientOcclusion( 0.99f, column, sigma, 1.0f ),
+    // Both halves read the profile through CloudProfileDepth, so the endpoints are stated at the profile
+    // values that MEAN surface and interior in this renderer, not at 0 and 1 of a field that never gets
+    // there.
+    EXPECT_FLOAT_EQ( R::CloudAmbientOcclusion( R::CLOUD_PROFILE_INTERIOR, column, sigma, 1.0f ),
+                     0.0f ); // local term is sqrt(1-1) at a full interior: no sky reaches a solid core
+    const float almost = 0.99f * R::CLOUD_PROFILE_INTERIOR;
+    EXPECT_NEAR( R::CloudAmbientOcclusion( almost, column, sigma, 1.0f ),
                  glm::sqrt( 0.01f ) *
                       glm::exp( -column * sigma *
                                 glm::mix( R::CLOUD_MS_EXTINCTION_SURFACE, R::CLOUD_MS_EXTINCTION_CORE, 0.99f ) ),
                  1e-6f );
 
-    // Full strength, zero column: pure local term, pow(1 - profile, 0.5) — the p.141 form.
-    EXPECT_NEAR( R::CloudAmbientOcclusion( 0.36f, 0.0f, sigma, 1.0f ), glm::sqrt( 1.0f - 0.36f ), 1e-5f );
+    // Full strength, zero column: pure local term, pow(1 - depth, 0.5) — the p.141 form.
+    const float mid = 0.36f * R::CLOUD_PROFILE_INTERIOR;
+    EXPECT_NEAR( R::CloudAmbientOcclusion( mid, 0.0f, sigma, 1.0f ), glm::sqrt( 1.0f - 0.36f ), 1e-5f );
 
     // Strength 0 turns the whole model off.
     EXPECT_FLOAT_EQ( R::CloudAmbientOcclusion( 0.9f, 50000.0f, sigma, 0.0f ), 1.0f );

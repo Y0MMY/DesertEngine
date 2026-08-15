@@ -865,7 +865,7 @@ The client asked for "all possible settings", so this list is short and each ent
 **CLD-50 — mechanism.** A single `constexpr` table in one header, `Graphic/CloudPresets.hpp`:
 
 ```cpp
-struct CloudPresetValues { /* exactly the 78 preset-driven fields, same names, same types */ };
+struct CloudPresetValues { /* exactly the 79 preset-driven fields, same names, same types */ };
 struct CloudPresetEntry  { ECS::CloudPreset Id; const char* Name; CloudPresetValues Values; };
 inline constexpr CloudPresetEntry kCloudPresets[] = { … };          // one entry per preset
 
@@ -1005,7 +1005,7 @@ same tests as §5, in `Graphic/CloudQuality.hpp`.
 *Rationale:* architect decision 9. The reference conflates the two — its "cloud type" preset selector and its
 step-size constants live in the same UI block (REF §H.1), which is why its own summary has to say "quality
 should be a separate tier, not a preset" (REF §H.12).
-*Acceptance:* unit test — for each of the 4 non-`Custom` tiers, apply and assert the 78 preset-driven fields
+*Acceptance:* unit test — for each of the 4 non-`Custom` tiers, apply and assert the 79 preset-driven fields
 are byte-identical before and after.
 
 **CLD-61 — tier values.**
@@ -1375,6 +1375,38 @@ a dense cloud is opaque within ~40 m, so the samples the modulation acts on sit 
 never sees through, while the samples the eye does see have a small tauSun the modulation is designed
 not to touch. Reaching pp. 136/137 therefore needs the ambient side of the audit's §4 division of
 labour (AmbientOcclusion 0.55 → 0.85-1.0) as well, which is a separate item.
+*Superseded by CLD-114*, which found the structural reason to be one level deeper than the extinction:
+not the skin, but the fact that our profile never reaches the values the formula is written against.
+
+**CLD-114 (the dimensional profile is normalised onto the reference's meaning).**
+`CloudProfileDepth(profile) = saturate(profile / CLOUD_PROFILE_INTERIOR)` in `CloudGeometry.glslh`,
+applied in the two places the deck keys on "profile" — `CloudMultiScatterExtinction` (p.136) and
+`CloudAmbientOcclusion` (p.141) — and `AmbientOcclusion` moves 0.55 → 0.95 on the convective presets,
+1.00 on Storm, 0.70/0.65 on Stratus/Overcast, becoming a preset-driven field (79, not 78).
+*Rationale, measured rather than argued:* Nubis³'s dimensional profile is an authored voxel field that
+is **1 throughout a cloud's interior** with a soft falloff over the last voxel or two of its surface
+(pp. 82-86). Ours is the VP method's product of three smooth [0,1] factors, and it is small exactly
+where the eye looks. The raymarch was instrumented to write the contribution-weighted mean profile of
+each ray into the frame and threshold it: over Clouds_UEShowcase and Clouds_Sunset the samples the eye
+integrates sit at **0.06-0.20**, isolated cores pass 0.20, essentially nothing reaches 0.30. Both
+depth-keyed formulas were therefore evaluated in the bottom fifth of their domain: at profile 0.1,
+p.136 gives an effective extinction of 0.23 against its core value of 0.05 (an 8% reduction of the sun
+optical depth instead of 80%), and p.141 gives sqrt(1 - 0.1) = 0.95, i.e. **5% occlusion where the
+reference's interior gets 100%**. A second instrumented frame confirmed the composite occlusion factor
+`local × column` running at 0.6-0.9 over most cloud volume, which is why the strength knob could be
+raised without darkening anything. *The extinction itself is NOT the fault:*
+`CLOUD_EXTINCTION_PER_WORLD_UNIT` is 0.05 m⁻¹ at density 1 — mid-range for cumulus (0.01-0.1 m⁻¹) —
+and view transmittance reaches 0.5/0.1/0.01 at 13.9/46.1/92.1 m, which is what a real cloud does.
+*Acceptance:* CloudMath asserts the conversion's bounds, its monotonicity, that a rim wisp keeps >0.8
+of its sky while a body sample keeps <0.5, and that the two deck formulas stay inside the paper's own
+ranges; the existing CLD-104/113 relations restated at the profile values that mean surface and
+interior here. *Measured on 90-frame shots:* lit:shadow (linear, 95th/5th percentile over cloud pixels)
+1.89 → 2.74 on Clouds_UEShowcase at 20°, 1.48 → 4.41 on Clouds_PartlyCloudy, 2.17 → 3.87 on the backlit
+Storm; the backlit Sunset rim brightens (p95 0.921 → 0.927) instead of darkening. Blankets darken and
+had to be retuned below the audit's 0.85 floor — at 0.85 a daylight Overcast base rendered as a black
+ceiling (frame mean 0.104 → 0.040), because a blanket's base is lit almost entirely by light
+transmitted from above and the octave chain under-carries exactly that; at 0.65 it is 0.104 → 0.087
+with the deck's structure now visible in it.
 
 ### 10.3 Explicitly rejected in v3
 
