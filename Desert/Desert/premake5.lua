@@ -32,6 +32,12 @@ project "Desert"
         "Source/",
         "%{wks.location}/Desert/Common/Source",
         "%{wks.location}/ThirdParty/pl_mpeg/include",
+        -- The SHADER ROOT, for the one engine translation unit that compiles a shared `.glslh` AS C++:
+        -- Graphic/SkyGroundTransmittance.cpp includes Common/SkyMedium.glslh so the sun light's colour
+        -- and the transmittance LUT's texels come from one text (the arrangement the test references
+        -- established). Nothing else in the engine may include a `.glslh` — the rest of the shader
+        -- contract travels as payload structs with static_asserted offsets.
+        "%{wks.location}/Editor/Resources/Shaders",
     }
     
     for name, path in pairs(deps.Common.IncludeDir) do

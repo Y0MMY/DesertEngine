@@ -10,6 +10,7 @@
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/SkyRules.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
+#include <Engine/Graphic/SunLightFx.hpp>
 #include <Engine/ShaderResources/StorageBuffer.hpp>
 
 #include <glm/glm.hpp>
@@ -33,10 +34,12 @@ namespace Desert::Graphic::System
         // @p sunDir is the direction TOWARD the sun, normalized. @p bakeNow is the editor's one-shot
         // request. Everything else the sky needs — palette, sun radiance, planet radius, bake knobs — is
         // in @p sky, which MakeSkySettings produced from the component.
-        // @p cloudLuminanceScale is the sun light's Cloud Scattered Luminance Scale — it lands on the
-        // SunIrradiance the clouds consume, inside the same evaluation everything else reads.
+        // @p fx is the chosen sun light's evaluated slice: its Cloud Scattered Luminance Scale lands on
+        // the SunIrradiance the clouds consume, and its "Affected By Atmosphere Transmittance" decides
+        // whether this frame's AtmosphereEnv publishes a ground transmittance or the identity — both
+        // inside the same evaluation everything else reads.
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky,
-                               const glm::vec3& cloudLuminanceScale );
+                               const SunLightFx& fx );
 
         // Bakes / rebakes the procedural-sky IBL when the rule says so (see ShouldRebakeSkyEnvironment
         // for WHETHER, SkyEnvironmentRebakeMayRun for WHEN). Call once per frame from a
@@ -46,8 +49,9 @@ namespace Desert::Graphic::System
         void EnsureProceduralEnvironment( float deltaSeconds );
 
         // The physical atmosphere's LUTs (Hillaire 2020): the cached pair — transmittance 256x64 +
-        // multi-scattering 32x32 — the per-view Sky-View LUT, 192x104, and the per-view camera
-        // aerial-perspective volume, 32x32x16, all RGBA16F. Call once per
+        // multi-scattering 32x32 — the per-view Sky-View LUT, 192x104, the per-view camera
+        // aerial-perspective volume, 32x32x16, all RGBA16F, and the one-texel distant sky light. Call
+        // once per
         // frame from the in-frame compute point (outside any open render pass — the slot
         // ExecuteVolumetricClouds dispatches from). Does NOTHING unless SkyModel::PhysicalAtmosphere
         // is active: gradient scenes never allocate the images and never dispatch, so the old sky pays
@@ -61,7 +65,8 @@ namespace Desert::Graphic::System
         // The AERIAL-PERSPECTIVE volume is refilled every frame for the same reason and has NO such
         // latency: its consumer, the atmospheric-fog pass, is dispatched later in this very frame
         // (SceneRenderer runs this slot immediately before ExecuteAtmosphericFog), so the froxels a
-        // pixel reads were marched for the camera that pixel was drawn with.
+        // pixel reads were marched for the camera that pixel was drawn with. The DISTANT SKY LIGHT is
+        // refilled here for the third time on the same grounds — same frame, same consumer, no latency.
         void ExecuteAtmosphereLuts();
 
         const std::optional<Environment> GetEnvironment() const
@@ -128,6 +133,8 @@ namespace Desert::Graphic::System
         bool EnsureSkyViewLutResources();
         // Same arrangement for the per-view aerial-perspective volume.
         bool EnsureAerialPerspectiveResources();
+        // Same arrangement for the one-texel distant sky light.
+        bool EnsureDistantLightResources();
 
         // The cached pair, in dependency order (the multi-scattering march samples the transmittance).
         // @p inFrame picks the recording path: true records into the current frame's command buffer
@@ -136,6 +143,7 @@ namespace Desert::Graphic::System
         void DispatchCachedAtmosphereLuts( bool inFrame );
         void DispatchSkyViewLut();
         void DispatchAerialPerspectiveLut();
+        void DispatchDistantLight();
 
         // The bake path's guarantee: when the physical model is active, the cached LUTs hold valid
         // texels BEFORE CreateProcedural marches them. Returns false when the LUTs cannot exist.
@@ -173,15 +181,23 @@ namespace Desert::Graphic::System
         std::shared_ptr<ComputePipeline> m_MultiScatterLutPipeline;
         std::shared_ptr<ComputePipeline> m_SkyViewLutPipeline;
         std::shared_ptr<ComputePipeline> m_AerialPerspectivePipeline;
+        // The distant sky light — ONE RGBA32F texel, refilled every frame because it follows the sun.
+        // It sits with the per-view resources rather than with the cached pair even though its value
+        // depends on nothing about this view: an image is written by a dispatch on this renderer's
+        // timeline, and sharing one texel across renderers would buy nothing and cost a synchronisation
+        // rule.
+        std::shared_ptr<ComputePipeline> m_DistantLightPipeline;
         std::shared_ptr<Image2D>         m_TransmittanceLut;
         std::shared_ptr<Image2D>         m_MultiScatterLut;
         std::shared_ptr<Image2D>         m_SkyViewLut;
         std::shared_ptr<Image3D>         m_AerialPerspectiveLut;
+        std::shared_ptr<Image2D>         m_DistantLight;
         AtmosphereLutFingerprint         m_LutBaked;
         bool                             m_LutsValid                        = false;
         bool                             m_LutResourcesFailed               = false;
         bool                             m_SkyViewResourcesFailed           = false;
         bool                             m_AerialPerspectiveResourcesFailed = false;
+        bool                             m_DistantLightResourcesFailed      = false;
 
         bool          m_UseProceduralSky = false;
         glm::vec3     m_SunDir           = glm::vec3( 0.0f, 1.0f, 0.0f ); // TOWARD the sun, normalized

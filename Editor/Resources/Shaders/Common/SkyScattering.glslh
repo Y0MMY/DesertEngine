@@ -450,6 +450,77 @@ SkyScatterResult SkyApIntegrateSegment(SkyAtmParams p, vec3 originKm, vec3 rayDi
     return result;
 }
 
+// ---- The distant sky light (UE's Distant Sky Light LUT) --------------------------------------------
+// ONE value for the whole frame: the average radiance of the sky as seen from near the ground. UE
+// evaluates the sky in a fixed set of directions at a fixed altitude and averages them into a single
+// float4, and its height fog reads that value as its ambient in-scattering. Ours does the same.
+//
+// WHY AN AVERAGE OVER A FIXED DIRECTION SET, and not "the zenith colour" or "the dome, weighted": the
+// quantity a fog pixel wants is the mean radiance arriving from every direction, which is exactly the
+// integral of L over the sphere divided by 4pi. The 8x8 grid of SkyUniformSphereDirection cells is
+// area-uniform, so the plain mean of its 64 samples IS that integral's midpoint estimate — no solid
+// angle weights, no normalisation constant that can go missing.
+//
+// The altitude is 6 km (UE's r.SkyAtmosphere.DistantSkyLightLUT.Altitude). It is deliberately NOT the
+// camera's: this is the light of the DISTANT sky, the value a fog kilometres away is lit by, and
+// anchoring it at the camera would make the fog's colour change as the camera climbs a hill.
+
+const float SKY_DISTANT_LIGHT_ALTITUDE_KM = 6.0f;
+const int   SKY_DISTANT_LIGHT_DIRECTIONS  = 64; // the 8x8 area-uniform grid
+const int   SKY_DISTANT_LIGHT_SAMPLES     = 32; // per-direction march budget, the bake's
+
+// Direction @p index of the fixed set, 0 .. SKY_DISTANT_LIGHT_DIRECTIONS-1, in the frame whose +Y is
+// the zenith. Integer division and modulo agree between GLSL and C++ for non-negative operands, which
+// is what lets one workgroup thread take index gl_LocalInvocationIndex and the C++ reference take the
+// same index in a loop and get the same direction.
+vec3 SkyDistantLightDirection(int index)
+{
+    int row = index / 8;
+    int col = index - row * 8;
+    return SkyUniformSphereDirection((float(row) + 0.5f) / 8.0f, (float(col) + 0.5f) / 8.0f);
+}
+
+// The radiance along ONE of those directions. Composed exactly as the IBL bake composes a panorama
+// texel — the marched air, plus the lit ground under it where the ray reaches the surface — because
+// the two are the same quantity sampled at different resolutions, and a fog lit by one while the
+// reflections are lit by the other is this project's most expensive defect class wearing a new hat.
+vec3 SkyDistantLightRadiance(SkyAtmParams p, vec3 rayDir, vec3 sunDir, vec3 sunIlluminance,
+                             float altitudeKm, int sampleCount)
+{
+    vec3 originKm = vec3(0.0f, p.BottomRadiusKm + altitudeKm, 0.0f);
+
+    SkyScatterResult result =
+         SkyIntegrateScatteredLuminance(p, originKm, rayDir, sunDir, sunIlluminance, sampleCount);
+
+    vec3 radiance = result.Luminance;
+
+    if (SkyIntersectsGround(originKm.y, rayDir.y, p.BottomRadiusKm))
+    {
+        float sunZenithCos = clamp(sunDir.y, -1.0f, 1.0f);
+        vec3  sunT         = SKY_SCATTERING_SUN_TRANSMITTANCE(
+             p, p.BottomRadiusKm + SKY_PLANET_RADIUS_OFFSET_KM, sunZenithCos);
+        float viewT =
+             (result.Transmittance.x + result.Transmittance.y + result.Transmittance.z) / 3.0f;
+        radiance = radiance + SkyGroundLuminance(p, sunIlluminance, sunT, sunZenithCos) * viewT;
+    }
+    return radiance;
+}
+
+// The whole value, spelled sequentially. The GPU pass evaluates the 64 directions in parallel and sums
+// them in groupshared memory; this loop is the same sum with the same per-direction function and the
+// same divisor, which is what the tests drive and what makes "the shader agrees with the reference" a
+// statement about arithmetic rather than about two similar-looking listings.
+vec3 SkyDistantLight(SkyAtmParams p, vec3 sunDir, vec3 sunIlluminance)
+{
+    vec3 sum = vec3(0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < SKY_DISTANT_LIGHT_DIRECTIONS; ++i)
+    {
+        sum = sum + SkyDistantLightRadiance(p, SkyDistantLightDirection(i), sunDir, sunIlluminance,
+                                            SKY_DISTANT_LIGHT_ALTITUDE_KM, SKY_DISTANT_LIGHT_SAMPLES);
+    }
+    return sum / float(SKY_DISTANT_LIGHT_DIRECTIONS);
+}
+
 #endif // SKY_SCATTERING_SUN_TRANSMITTANCE
 
 #endif // SKY_SCATTERING_GLSLH

@@ -205,6 +205,7 @@ namespace Desert::ECS
             m_SunFx.BloomMaxBrightness = light.Data.BloomMaxBrightness;
             m_SunFx.BloomTint          = light.Data.BloomTint;
             m_SunFx.CloudScatteredLuminanceScale = light.Data.CloudScatteredLuminanceScale;
+            m_SunFx.AffectedByAtmosphereTransmittance = light.Data.AffectedByAtmosphereTransmittance;
 
             const auto& transform = registry.get<ECS::TransformComponent>( entities[*selection.Chosen] );
             return Rules::AtmosphereSunDirection( transform.Translation );

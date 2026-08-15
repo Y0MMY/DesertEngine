@@ -553,8 +553,19 @@ TEST( DirectionalLightReflection, GainsTheAtmosphereSunFields )
     const TypeInfo& light = Type( "DirectionalLightData" );
     EXPECT_EQ( FieldNames( light ),
                ( std::vector<std::string>{ "Color", "Intensity", "AtmosphereSunLight", "AtmosphereSunLightIndex",
-                                           "CloudScatteredLuminanceScale", "LightShaftBloom", "BloomScale",
-                                           "BloomThreshold", "BloomMaxBrightness", "BloomTint" } ) );
+                                           "CloudScatteredLuminanceScale", "AffectedByAtmosphereTransmittance",
+                                           "LightShaftBloom", "BloomScale", "BloomThreshold", "BloomMaxBrightness",
+                                           "BloomTint" } ) );
+
+    // Sky Phase 4's coupling, UE's name and UE's default: ON. The light's colour is multiplied by the
+    // atmosphere's transmittance toward the sun at ground level in SkyModel::PhysicalAtmosphere, so
+    // sunsets redden the light on geometry; switching it off returns the authored colour. Consumer:
+    // SceneRenderer::OnUpdate through AtmosphereEnv::SunTransmittanceAtGround.
+    //
+    // Default TRUE also means a scene saved before this field existed gains the coupling on load — which
+    // is correct for the physical model (there is no such thing as an atmosphere that does not absorb)
+    // and invisible on the artistic gradient, where the coupling does not exist at all.
+    EXPECT_TRUE( DefaultOf<bool>( light, "AffectedByAtmosphereTransmittance" ) );
 
     // The Light Shafts group ships with UE's own defaults: OFF, and harmless when switched on.
     EXPECT_FALSE( DefaultOf<bool>( light, "LightShaftBloom" ) );

@@ -73,6 +73,13 @@ Shader "HeightFog"
         // distance ramp instead of 16 visible shells.
         Uniform(3) sampler3D u_AerialPerspective;
 
+        // The sky's DISTANT SKY LIGHT (Graphic::kFogDistantSkyLightBinding): one texel holding the
+        // average radiance of the sky, marched this frame from 64 directions at 6 km
+        // (Programs/Sky/SkyDistantLight.shader). This is UE's arrangement verbatim — its height fog
+        // reads the same one-value LUT for the same term. Bound on the same terms as the volume above:
+        // always bound, read only when u_FogAmbient.w says the value is real.
+        Uniform(4) sampler2D u_DistantSkyLight;
+
         PushConstant FogPush
         {
             mat4 u_InverseViewProjection;
@@ -108,7 +115,22 @@ Shader "HeightFog"
             fog.Inscattering = vec3(0.0f, 0.0f, 0.0f);
             fog.Transmittance = 1.0f;
             if (u_ApParams.w > 0.5f)
-                fog = HeightFogEvaluate(FogUnpackParams(), cameraKm, worldKm);
+            {
+                HeightFogParams params = FogUnpackParams();
+
+                // THE SKY'S OWN AMBIENT, added to the fog's in-scattering colour before the closed form
+                // integrates it — which is what makes it an ambient and not an overlay: the same
+                // transmittance that hides distant geometry is what fades this in. In the physical
+                // model it is the marched average sky (UE's Distant Sky Light); in the artistic
+                // gradient the packer already folded the dome's mean into Inscattering and w is 0 here.
+                if (u_FogAmbient.w > 0.5f)
+                {
+                    vec3 distantSky = texelFetch(u_DistantSkyLight, ivec2(0, 0), 0).rgb;
+                    params.Inscattering = params.Inscattering + u_FogAmbient.rgb * distantSky;
+                }
+
+                fog = HeightFogEvaluate(params, cameraKm, worldKm);
+            }
 
             // Aerial perspective, on OPAQUE PIXELS ONLY. A sky pixel (depth at the far plane) already
             // carries the atmosphere's full radiance — the sky pass drew it from the Sky-View LUT, which

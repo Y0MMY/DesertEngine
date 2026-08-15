@@ -243,6 +243,14 @@ namespace Desert::Graphic::System
              kFogAerialPerspectiveBinding,
              apActive ? atmosphere.AerialPerspectiveVolume
                       : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+        // The distant sky light, on exactly the same terms as the volume above — always bound, read only
+        // when the payload's Ambient.w says the texel is real (PackFogParams sets that from this same
+        // handle, so the two cannot disagree).
+        m_FogPipeline->SetInput(
+             kFogDistantSkyLightBinding,
+             atmosphere.DistantSkyLight
+                  ? atmosphere.DistantSkyLight
+                  : FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA8F ).get() );
         m_FogPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_FogPipeline.get(), GroupCount( m_FogWidth ), GroupCount( m_FogHeight ),

@@ -833,6 +833,126 @@ TEST( SkyScattering, AerialPerspectiveGrowsWithDistanceAndAgreesWithTheDistantSk
     EXPECT_LT( previousLuminance.b, distant.Luminance.b * 1.05f );
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The distant sky light — the average sky the fog is lit by (UE's Distant Sky Light LUT)
+//
+// One value per frame, produced on the GPU by 64 threads and a groupshared sum. What is pinned here is
+// the ARITHMETIC that sum performs, because the reduction itself is the one part a unit test cannot
+// reach: if the mean of the 64 directions is right, a wrong reduction shows up as a fog that is 64x or
+// 2x off, which is exactly what "bounded by the brightest direction" catches on a frame.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( SkyDistantLight, DirectionSetIsTheUniformSphereGridExactlyOnce )
+{
+    // The 64 directions must be the 8x8 area-uniform grid, each exactly once: the mean of the sample
+    // set IS the sphere integral only because the cells are equal solid angles, and the GPU takes
+    // index gl_LocalInvocationIndex where this loop takes i.
+    glm::vec3 mean( 0.0f );
+    for ( int i = 0; i < Ref::SKY_DISTANT_LIGHT_DIRECTIONS; ++i )
+    {
+        const glm::vec3 dir = Ref::SkyDistantLightDirection( i );
+        EXPECT_NEAR( glm::length( dir ), 1.0f, 1e-5f ) << "direction " << i;
+
+        const int row = i / 8;
+        const int col = i - row * 8;
+
+        const glm::vec3 expected = Ref::SkyUniformSphereDirection( ( static_cast<float>( row ) + 0.5f ) / 8.0f,
+                                                                   ( static_cast<float>( col ) + 0.5f ) / 8.0f );
+        EXPECT_NEAR( dir.x, expected.x, 1e-6f ) << "direction " << i;
+        EXPECT_NEAR( dir.y, expected.y, 1e-6f ) << "direction " << i;
+        EXPECT_NEAR( dir.z, expected.z, 1e-6f ) << "direction " << i;
+
+        mean += dir;
+    }
+
+    // A balanced set sums to the origin — the property that makes the plain average unbiased.
+    mean /= static_cast<float>( Ref::SKY_DISTANT_LIGHT_DIRECTIONS );
+    EXPECT_NEAR( mean.x, 0.0f, 1e-5f );
+    EXPECT_NEAR( mean.y, 0.0f, 1e-5f );
+    EXPECT_NEAR( mean.z, 0.0f, 1e-5f );
+}
+
+TEST( SkyDistantLight, IsPositiveAndBoundedByTheBrightestDirectionItSampled )
+{
+    ResetLutCallbacks();
+
+    const Ref::SkyAtmParams p = EarthParams();
+
+    const glm::vec3 sunDir         = glm::normalize( glm::vec3( 0.6f, 0.8f, 0.0f ) );
+    const glm::vec3 sunIlluminance = glm::vec3( 22.0f );
+
+    // The 64 samples the reduction averages, evaluated one at a time.
+    glm::vec3 brightest( 0.0f );
+    glm::vec3 dimmest( 1e9f );
+    glm::vec3 sum( 0.0f );
+    for ( int i = 0; i < Ref::SKY_DISTANT_LIGHT_DIRECTIONS; ++i )
+    {
+        const glm::vec3 radiance =
+             Ref::SkyDistantLightRadiance( p, Ref::SkyDistantLightDirection( i ), sunDir, sunIlluminance,
+                                           Ref::SKY_DISTANT_LIGHT_ALTITUDE_KM, Ref::SKY_DISTANT_LIGHT_SAMPLES );
+
+        // Radiance is never negative — a sky that removes light from the fog is not a sky.
+        EXPECT_GE( radiance.x, 0.0f ) << "direction " << i;
+        EXPECT_GE( radiance.y, 0.0f ) << "direction " << i;
+        EXPECT_GE( radiance.z, 0.0f ) << "direction " << i;
+
+        brightest = glm::max( brightest, radiance );
+        dimmest   = glm::min( dimmest, radiance );
+        sum += radiance;
+    }
+
+    const glm::vec3 average = Ref::SkyDistantLight( p, sunDir, sunIlluminance );
+
+    // THE BOUND. An average lies between the dimmest and the brightest of what it averaged — and this
+    // one catches the whole class of reduction mistakes at once: a missing division, a 4pi that should
+    // not be there, a stride that adds a direction twice.
+    for ( int c = 0; c < 3; ++c )
+    {
+        EXPECT_GT( average[c], 0.0f ) << "channel " << c;
+        EXPECT_LE( average[c], brightest[c] + 1e-5f ) << "channel " << c;
+        EXPECT_GE( average[c], dimmest[c] - 1e-5f ) << "channel " << c;
+    }
+
+    // And it is exactly the mean of those same 64 samples — the GPU's groupshared sum divided by 64,
+    // spelled out.
+    const glm::vec3 expected = sum / static_cast<float>( Ref::SKY_DISTANT_LIGHT_DIRECTIONS );
+    EXPECT_NEAR( average.x, expected.x, 1e-5f );
+    EXPECT_NEAR( average.y, expected.y, 1e-5f );
+    EXPECT_NEAR( average.z, expected.z, 1e-5f );
+
+    // The daylit sky is BLUE: more short-wavelength light reaches the eye from every direction than
+    // long. A distant sky light that came out neutral or warm at noon would tint every fogged frame.
+    EXPECT_GT( average.z, average.x );
+}
+
+TEST( SkyDistantLight, FallsAsTheSunSets )
+{
+    ResetLutCallbacks();
+
+    const Ref::SkyAtmParams p = EarthParams();
+
+    // The ambient a fog receives must follow the sun down. It is a MONOTONE fall, not a spot value:
+    // an ambient that brightened anywhere on the way to sunset would light the fog from a sky that
+    // is not there.
+    float previousLuminance = 1e9f;
+    for ( const float elevationDeg : { 90.0f, 60.0f, 40.0f, 25.0f, 15.0f, 8.0f, 3.0f, 0.0f, -5.0f } )
+    {
+        const float     rad    = elevationDeg * 3.14159265358979323846f / 180.0f;
+        const glm::vec3 sunDir = glm::vec3( std::cos( rad ), std::sin( rad ), 0.0f );
+
+        const glm::vec3 average = Ref::SkyDistantLight( p, sunDir, glm::vec3( 22.0f ) );
+
+        const float luminance = 0.2126f * average.x + 0.7152f * average.y + 0.0722f * average.z;
+        EXPECT_GE( luminance, 0.0f ) << "elevation " << elevationDeg;
+        EXPECT_LT( luminance, previousLuminance ) << "elevation " << elevationDeg;
+        previousLuminance = luminance;
+    }
+
+    // Five degrees under the horizon the sky is all but out — with no multi-scattering term in this
+    // configuration, what is left is the thin twilight the single-scattering march can still see.
+    EXPECT_LT( previousLuminance, 0.05f );
+}
+
 int main( int argc, char** argv )
 {
     testing::InitGoogleTest( &argc, argv );

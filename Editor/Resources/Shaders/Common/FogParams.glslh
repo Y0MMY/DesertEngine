@@ -25,9 +25,16 @@ layout(std430, binding = FOG_PARAMS_BINDING) readonly buffer FogParamsBuffer
     vec4 u_FogInscattering; // rgb = fog inscattering colour,     w = 1 - FogMaxOpacity
     vec4 u_FogLayer0;       // x = density /km, y = height falloff /km, z = fog height (km), w = start distance (km)
     vec4 u_FogLayer1;       // x = density /km, y = height falloff /km, z = fog height (km), w = cutoff distance (km; 0 = off)
+    vec4 u_FogAmbient;      // rgb = sky-ambient contribution scale, w = 1 when the distant sky light must be sampled
 };
 
 // Unpacks the block into the struct Common/HeightFog.glslh evaluates (include that first).
+//
+// The SKY AMBIENT is deliberately NOT unpacked here: in the physical model its value is a texel of the
+// distant-sky-light image, and a sampler must not appear in this header — Inscattering below therefore
+// carries only what the CPU could fold in, and the pass adds the sampled ambient to it (see
+// Programs/Fog/HeightFog.shader). The alternative, passing the sampler into this function, would put a
+// texture fetch in a header whose whole purpose is to describe a buffer.
 HeightFogParams FogUnpackParams()
 {
     HeightFogParams p;

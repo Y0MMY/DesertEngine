@@ -435,6 +435,29 @@ namespace Desert::Graphic
         const auto& skyboxSystem = UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] );
         m_DirectionLights        = sceneRenderInfo.DirLights;
 
+        // THE SUN THE ATMOSPHERE LETS THROUGH (UE's PrepareSunLightProxy). The light's authored colour
+        // is its OUTER-SPACE illuminance in the physical model; what reaches the ground has crossed the
+        // whole atmosphere, so it is multiplied by that path's transmittance — and a sunset reddens and
+        // dims every lit surface by the same law that reddens the sky behind it, for free.
+        //
+        // The factor is exactly (1,1,1) unless the physical model is running AND this sun opted in, so
+        // there is no branch here and no second behaviour to test: SkyModel::ArtisticGradient keeps the
+        // documented independence of sky radiance and surface illuminance, bit for bit.
+        //
+        // Index 0 is the atmosphere sun because the engine renders exactly one directional light and
+        // Scene::OnUpdate says so with an error when a scene holds more. This runs AFTER the frame's
+        // ProceduralSkyCommand (Scene::OnUpdate executes the command buffers before calling us), so the
+        // transmittance is this frame's sun, not last frame's.
+        if ( !m_DirectionLights.DirectionLights.empty() )
+        {
+            const glm::vec3 transmittance = skyboxSystem->GetAtmosphere().SunTransmittanceAtGround;
+
+            glm::vec4& colorIntensity = m_DirectionLights.DirectionLights[0].ColorIntensity;
+            colorIntensity.x *= transmittance.x;
+            colorIntensity.y *= transmittance.y;
+            colorIntensity.z *= transmittance.z;
+        }
+
         // Bake/rebake the procedural-sky IBL if the sun moved (throttled). Done here — before the render
         // graph records its command buffer — so the heavy compute + device idle stays at a safe boundary.
         {
@@ -1082,7 +1105,7 @@ namespace Desert::Graphic
     {
         m_SunLightFx = fx;
         UNIQUE_GET_AS( System::SkyboxRenderer, m_RenderSystems["SkyboxSystem"] )
-             ->SetProceduralSky( enabled, sunDir, bakeNow, sky, fx.CloudScatteredLuminanceScale );
+             ->SetProceduralSky( enabled, sunDir, bakeNow, sky, fx );
     }
 
     const AtmosphereEnv& SceneRenderer::GetAtmosphere() const

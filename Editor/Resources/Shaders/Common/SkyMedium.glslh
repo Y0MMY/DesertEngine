@@ -301,6 +301,14 @@ float SkyTexelUvToUnit(float uv, float resolution)
 // C++ tests march the exact text the GPU marches and compare it against a brute-force reference and
 // the closed form the exponential profiles admit.
 
+// The march's step budget — the paper's quality setting for a LUT that is cached, so the cost is paid
+// on a parameter EDIT and not per frame. It lives HERE, not in the LUT shader, because the same
+// transmittance is now evaluated in two places: the 256x64 LUT fill on the GPU, and the CPU evaluation
+// that reddens the directional light (Graphic::SunTransmittanceAtGround). Two budgets would be two
+// answers to one question, and the SkyMedium tests assert the two paths agree to within a tolerance
+// that only holds while they march the same number of steps.
+const int SKY_TRANSMITTANCE_SAMPLE_COUNT = 40;
+
 vec3 SkyOpticalDepthToTop(SkyAtmParams p, float viewHeightKm, float viewZenithCos, int sampleCount)
 {
     float tMax = SkyDistanceToTop(viewHeightKm, viewZenithCos, p.TopRadiusKm);
@@ -323,6 +331,22 @@ vec3 SkyTransmittanceToTop(SkyAtmParams p, float viewHeightKm, float viewZenithC
 {
     vec3 od = SkyOpticalDepthToTop(p, viewHeightKm, viewZenithCos, sampleCount);
     return exp(-od);
+}
+
+// What survives the trip from the GROUND to the top of the atmosphere along the sun's direction — UE's
+// GetTransmittanceAtGroundLevel, the quantity its PrepareSunLightProxy multiplies the sun light's
+// colour by so that sunsets redden the light on geometry by the same law that reddens the sky behind
+// it. @p sunZenithCos is the cosine of the sun against the ground's zenith, i.e. the y component of the
+// direction TOWARD the sun in the engine's +Y-up world.
+//
+// A sun BELOW the horizon returns essentially zero: the path leaves the ground downward, so it crosses
+// the planet, and the exponential density profile below sea level makes the optical depth enormous.
+// That is the correct answer — there is no sunlight at night — and it is why the coupling needs no
+// separate night test.
+vec3 SkyTransmittanceAtGroundToSun(SkyAtmParams p, float sunZenithCos)
+{
+    return SkyTransmittanceToTop(p, p.BottomRadiusKm + SKY_PLANET_RADIUS_OFFSET_KM, sunZenithCos,
+                                 SKY_TRANSMITTANCE_SAMPLE_COUNT);
 }
 
 // ---- Uniform sphere sampling -----------------------------------------------------------------------
