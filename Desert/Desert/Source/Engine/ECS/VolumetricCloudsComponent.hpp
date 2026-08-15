@@ -512,7 +512,15 @@ namespace Desert::ECS
                   Tooltip( "How much the sky's light is blocked by the cloud around and above a sample. At "
                            "0 every point in a cloud is lit by the full sky however deep it sits, which is "
                            "what renders a volume as a flat slab. Nubis3 pp. 141/144." ) )
-        float AmbientOcclusion = 0.55f;
+        // 0.95, not the 0.55 this shipped with. An ablation on Clouds_UEShowcase — the same frame with
+        // the ambient term forced to zero — showed the cloud radiance running about 2:1 ambient to
+        // direct, and the clouds recovering deep shaded bellies and real form the moment the ambient
+        // wash was removed. That wash is the whole of the "flat opaque lump" reading. The occlusion the
+        // paper defines is what is supposed to prevent it, and taking it at barely half strength was the
+        // audit's own finding (Nubis3 pp. 141/144: at 0.55 nearly half the unoccluded sky still reaches
+        // a three-kilometre core). This is the Partly Cloudy row and the presets author it per weather;
+        // the blankets sit lower, see CloudPresets.hpp.
+        float AmbientOcclusion = 0.95f;
 
         PROPERTY( DisplayName( "Cloud Shadow Map" ), Category( "Quality" ),
                   Tooltip( "Precompute the sun's optical depth into a 2D map once per frame instead of "

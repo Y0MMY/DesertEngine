@@ -12,7 +12,7 @@ namespace Desert::Graphic
     //
     // The table holds values rather than the apply-functions the particle presets use
     // (ParticleEditorPanel.cpp) for one reason worth the extra type: CloudPresetValues carries EXACTLY
-    // the 78 look fields and none of the 13 quality knobs, so a preset cannot reach a performance
+    // the 79 look fields and none of the 13 quality knobs, so a preset cannot reach a performance
     // setting - not by convention, by type. That is what stops "Storm" from silently halving the frame
     // rate the way the reference implementation's combined preset/quality block did.
     //
@@ -96,6 +96,7 @@ namespace Desert::Graphic
     X( float, AmbientSkyContribution )                                                                            \
     X( float, AmbientGroundContribution )                                                                         \
     X( float, AmbientHeightBias )                                                                                 \
+    X( float, AmbientOcclusion )                                                                                  \
     X( float, SunLightIntensityScale )                                                                            \
     X( glm::vec3, SunTint )                                                                                       \
     X( glm::vec3, ShadowTint )                                                                                    \
@@ -198,6 +199,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.20f,
                 .AmbientGroundContribution     = 0.55f,
                 .AmbientHeightBias             = 0.75f,
+                .AmbientOcclusion              = 0.95f,
                 .SunLightIntensityScale        = 1.00f,
                 .SunTint                       = { 1.00f, 0.98f, 0.94f },
                 .ShadowTint                    = { 1.00f, 0.97f, 0.93f },
@@ -279,6 +281,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.20f,
                 .AmbientGroundContribution     = 0.55f,
                 .AmbientHeightBias             = 0.75f,
+                .AmbientOcclusion              = 0.95f,
                 .SunLightIntensityScale        = 1.00f,
                 .SunTint                       = { 1.00f, 0.98f, 0.94f },
                 .ShadowTint                    = { 1.00f, 0.97f, 0.93f },
@@ -360,6 +363,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.20f,
                 .AmbientGroundContribution     = 0.55f,
                 .AmbientHeightBias             = 0.75f,
+                .AmbientOcclusion              = 0.95f,
                 .SunLightIntensityScale        = 1.00f,
                 .SunTint                       = { 1.00f, 0.98f, 0.94f },
                 .ShadowTint                    = { 1.00f, 0.97f, 0.93f },
@@ -441,6 +445,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.07f,
                 .AmbientGroundContribution     = 0.45f,
                 .AmbientHeightBias             = 0.75f,
+                .AmbientOcclusion              = 0.95f,
                 .SunLightIntensityScale        = 1.00f,
                 .SunTint                       = { 1.00f, 0.98f, 0.94f },
                 .ShadowTint                    = { 1.00f, 0.97f, 0.93f },
@@ -522,6 +527,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.33f,
                 .AmbientGroundContribution     = 0.60f,
                 .AmbientHeightBias             = 0.65f,
+                .AmbientOcclusion              = 0.70f,
                 .SunLightIntensityScale        = 0.90f,
                 .SunTint                       = { 1.0f, 1.0f, 1.0f },
                 .ShadowTint                    = { 0.95f, 0.96f, 1.0f },
@@ -603,6 +609,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.47f,
                 .AmbientGroundContribution     = 0.65f,
                 .AmbientHeightBias             = 0.70f,
+                .AmbientOcclusion              = 0.65f,
                 .SunLightIntensityScale        = 0.85f,
                 .SunTint                       = { 1.0f, 1.0f, 1.0f },
                 .ShadowTint                    = { 0.92f, 0.94f, 1.0f },
@@ -684,6 +691,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.60f,
                 .AmbientGroundContribution     = 0.70f,
                 .AmbientHeightBias             = 0.85f,
+                .AmbientOcclusion              = 1.00f,
                 .SunLightIntensityScale        = 0.75f,
                 .SunTint                       = { 1.0f, 1.0f, 1.0f },
                 .ShadowTint                    = { 0.86f, 0.89f, 0.98f },
@@ -765,6 +773,7 @@ namespace Desert::Graphic
                 .AmbientSkyContribution        = 1.13f,
                 .AmbientGroundContribution     = 0.50f,
                 .AmbientHeightBias             = 0.75f,
+                .AmbientOcclusion              = 0.95f,
                 .SunLightIntensityScale        = 1.10f,
                 .SunTint                       = { 1.00f, 0.98f, 0.94f },
                 .ShadowTint                    = { 1.00f, 0.97f, 0.93f },
@@ -805,7 +814,7 @@ namespace Desert::Graphic
         return values;
     }
 
-    // Overwrites the 78 look fields of @p data with the preset's. Pure: no logging, no GPU, no globals.
+    // Overwrites the 79 look fields of @p data with the preset's. Pure: no logging, no GPU, no globals.
     //
     // It deliberately does NOT write data.Preset. The caller records which preset it applied, which is
     // what keeps the contract "values in, values out" and keeps "applying a preset leaves everything

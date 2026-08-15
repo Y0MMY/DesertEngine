@@ -177,6 +177,7 @@
     "AmbientSkyContribution": 1.8,
     "AmbientGroundContribution": 0.55,
     "AmbientHeightBias": 0.5,
+    "AmbientOcclusion": 0.95,
     "SunLightIntensityScale": 1.0,
     "PrecipitationDarkening": 0.5,
     "AtmosphericPerspective": 0.8,

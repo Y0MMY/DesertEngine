@@ -188,7 +188,7 @@ TEST( CloudPresets, MovingAnySinglePresetDrivenFieldFallsBackToCustom )
         VolumetricCloudData d{};
         Graphic::ApplyPreset( CloudPreset::Stratus, d );
 
-        // Is this field one of the 78? Ask the extractor rather than a list: write a marker into the
+        // Is this field one of the 79? Ask the extractor rather than a list: write a marker into the
         // component, and see whether the extracted look values notice.
         const Graphic::CloudPresetValues before = Graphic::ExtractPresetValues( d );
 
@@ -231,7 +231,7 @@ TEST( CloudPresets, MovingAnySinglePresetDrivenFieldFallsBackToCustom )
              << f.Name << " was edited and the preset name survived it";
     }
 
-    EXPECT_EQ( perturbed, 78u ) << "the preset drives a different number of fields than specified";
+    EXPECT_EQ( perturbed, 79u ) << "the preset drives a different number of fields than specified";
 }
 
 // The other half of the same claim: a QUALITY edit must not cost the weather name. This is why the

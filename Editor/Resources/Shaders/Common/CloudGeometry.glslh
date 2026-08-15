@@ -425,11 +425,46 @@ float CloudInScatterProbability(float heightFraction, float densityLowLod, float
 const float CLOUD_MS_EXTINCTION_SURFACE = 0.25f;
 const float CLOUD_MS_EXTINCTION_CORE    = 0.05f;
 
+// OUR DIMENSIONAL PROFILE IS NOT THE REFERENCE'S, and both formulas the deck keys on "profile" were
+// written for the reference's meaning. Nubis3's dimensional profile is an AUTHORED voxel field (pp.
+// 82-86): 1 throughout a cloud's interior, with a soft falloff over the last voxel or two of its
+// surface. Ours is the Vertical Profile Method's product of three smooth [0,1] factors — envelope x
+// coverage x base shape (CloudDensityProcedural.glslh:154-162) — and it is SMALL exactly where the eye
+// looks, because the eye's own transmittance dies within a few hundred metres of the surface, long
+// before the envelope has climbed anywhere near its peak.
+//
+// Measured on this renderer rather than argued: the raymarch was made to write the contribution-weighted
+// mean profile of each ray into the frame and threshold it. Over Clouds_UEShowcase and Clouds_Sunset the
+// samples the eye actually integrates sit at 0.06-0.20, only isolated cores pass 0.20, and essentially
+// nothing reaches 0.30.
+//
+// So both depth-keyed formulas were being evaluated in the bottom fifth of their domain and came out as
+// near-identity. At profile 0.1, p.136 yields an effective extinction of 0.23 where its core case is
+// 0.05 — an 8% reduction of the sun optical depth instead of 80% — and p.141 yields sqrt(1 - 0.1) =
+// 0.95, i.e. 5% occlusion where the reference's interior gets 100%. That is the whole reason CLD-113
+// measured +0.1 luma, and the reason Ambient Occlusion could be raised without darkening anything: the
+// strength was scaling a factor that was already 1.
+//
+// This is the ONE place that conversion is made, and both formulas below go through it.
+// CLOUD_PROFILE_INTERIOR is the profile value at which our field reads as cloud INTERIOR rather than as
+// surface skin — the measured core threshold above. It belongs to the density model, not to a preset:
+// coverage and erosion move the realised values somewhat, and being off by a factor here softens or
+// strengthens the two formulas rather than breaking either. It is deliberately NOT a slider; a knob
+// here would be a second calibration of a quantity that already has one.
+const float CLOUD_PROFILE_INTERIOR = 0.20f;
+
+// The reference's dimensional profile, given ours. 0 IS the surface and 1 IS the interior, which is the
+// domain p.136's ValueRemap and p.141's pow(1 - profile, 0.5) are both written against.
+float CloudProfileDepth(float profile)
+{
+    return clamp(profile * (1.0f / CLOUD_PROFILE_INTERIOR), 0.0f, 1.0f);
+}
+
 // @p profile is the UNERRODED dimensional profile in [0,1]; @p cosTheta is the view/sun angle cosine, 1
 // when the eye looks straight at the sun.
 float CloudMultiScatterExtinction(float profile, float cosTheta)
 {
-    float deep = mix(CLOUD_MS_EXTINCTION_SURFACE, CLOUD_MS_EXTINCTION_CORE, clamp(profile, 0.0f, 1.0f));
+    float deep = mix(CLOUD_MS_EXTINCTION_SURFACE, CLOUD_MS_EXTINCTION_CORE, CloudProfileDepth(profile));
     return CloudRemapRange(cosTheta, 0.0f, 0.9f, CLOUD_MS_EXTINCTION_SURFACE, deep);
 }
 
@@ -586,7 +621,9 @@ vec3 CloudAmbient(vec3 skyRadiance, vec3 groundRadiance, float skyMultiplier, fl
 // carved faces of a dense cloud as if they were rim wisps.
 float CloudAmbientOcclusion(float profile, float columnDensityLength, float sigmaScale, float strength)
 {
-    float p      = clamp(profile, 0.0f, 1.0f);
+    // Through CloudProfileDepth, for the reason spelled out where it is defined: p.141's curve is written
+    // against a field that saturates at 1 inside a cloud, and ours reaches 0.06-0.20 there.
+    float p      = CloudProfileDepth(profile);
     float local  = sqrt(max(1.0f - p, 0.0f));
     float k      = mix(CLOUD_MS_EXTINCTION_SURFACE, CLOUD_MS_EXTINCTION_CORE, p);
     float column = exp(-max(columnDensityLength, 0.0f) * max(sigmaScale, 0.0f) * k);
