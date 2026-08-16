@@ -40,15 +40,24 @@
 // weather map x height gradient x base shape, with no detail fetch and no lighting. FULL adds the detail
 // volume, the curl warp, the high-frequency layer and every distance term.
 //
-// WHY THE SEAM EXISTS. A second density source is a named follow-up: baked "hero cloud" volumes
-// (Nubis3 NVDFs) are out of v1 only because the shapes they need are not ours to ship. Adding them later
-// must be a second implementation of these two functions and a second C++ function that binds the images
-// they read — not an edit to the march loop, the light march, the compositor or the component. That is
-// the whole contract; there is nothing else to implement.
+// WHY THE SEAM EXISTS, and what came through it. A second density source was a named follow-up: baked
+// "hero cloud" volumes (Nubis3 NVDFs), out of v1 only because the shapes they needed were not ours to
+// ship. The requirement was that adding them be a second implementation of these functions plus a second
+// C++ function binding the images they read — not an edit to the march loop, the light march, the
+// compositor or the component. That is what happened, and the seam held: voxel phase 1b changed no line
+// of CloudRaymarch.shader's loop, of CloudShadowMap.shader's column, or of any lighting term.
 //
-// The v1 implementation is Common/CloudDensityProcedural.glslh. A shader includes THAT, not this file;
-// this file is the statement of what an implementation has to provide, and it is where a second one
-// starts reading.
+// THE THREE FILES BEHIND THIS ONE:
+//   Common/CloudDensityProcedural.glslh  the weather-map / envelope / erosion cloudscape. Its functions
+//                                        carry a `Procedural` suffix and it owns CloudDensityErode — the
+//                                        detail composite BOTH implementations run.
+//   Common/CloudDensityVoxel.glslh       N baked `.dvol` volumes out of one atlas. It substitutes three
+//                                        inputs to that same composite and nothing else.
+//   Common/CloudDensityCompose.glslh     the UNION, `max(procedural, voxel)` (teamlead Q1), and the only
+//                                        file that publishes the three names above.
+//
+// A shader includes the COMPOSER, not this file and not either implementation; this file is the statement
+// of what an implementation has to provide.
 
 #ifndef CLOUD_DENSITY_GLSLH
 #define CLOUD_DENSITY_GLSLH
@@ -64,5 +73,7 @@
 //   6  sampler2D  the 512^2 weather map    (Graphic::kCloudWeatherMapBinding)
 //  10  sampler2D  the 512^2 profile map    (Graphic::kCloudProfileMapBinding) — per-cell Min/Max Height
 //  11  sampler2D  the profile-curve table  (Graphic::kCloudProfileLutBinding) — height x cloud type
+//  14  buffer     the hero-cloud instances (Graphic::kCloudVolumeInstanceBinding)
+//  15  sampler3D  the 512x256x64 hero atlas(Graphic::kCloudVolumeAtlasBinding)
 
 #endif // CLOUD_DENSITY_GLSLH

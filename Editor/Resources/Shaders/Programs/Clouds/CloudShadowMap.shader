@@ -29,7 +29,13 @@ Shader "CloudShadowMap"
         #include <Common/CloudGeometry.glslh>
         #include <Common/CloudParams.glslh>
         #include <Common/CloudShadow.glslh>
-        #include <Common/CloudDensityProcedural.glslh>
+
+        // ONLY the hero clouds whose Casts Cloud Shadow is on. The renderer sorts the instance buffer so
+        // those are a leading run, which turns a per-sample flag test into a shorter loop — and makes the
+        // component's Casts Cloud Shadow the thing that decides whether an instance is marched here at
+        // all, rather than a branch inside a march that already paid for it.
+        #define CLOUD_VOXEL_INSTANCE_COUNT u_VoxelShadowCount
+        #include <Common/CloudDensityCompose.glslh>
 
         // rgba16f: density-length is unbounded in principle and a half carries three decimal digits,
         // which is far more than a term that saturates the Beer curve above ~10 will ever need.

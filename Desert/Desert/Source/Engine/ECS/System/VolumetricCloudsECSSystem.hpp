@@ -3,12 +3,17 @@
 #include "System.hpp"
 
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/Entity.hpp>
+#include <Engine/Graphic/Clouds/CloudVolumeInstance.hpp>
+#include <Engine/Graphic/Clouds/CloudVolumePlacement.hpp>
 #include <Engine/Graphic/Render/Commands/VolumetricCloudsCommand.hpp>
 
 #include <Common/Core/Logger.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Desert::ECS
@@ -37,6 +42,8 @@ namespace Desert::ECS
         void Update( entt::registry& registry, Graphic::Render::RenderCommandBuffer& renderCommandBuffer,
                      const Common::Timestep& /*ts*/ ) override
         {
+            Graphic::CloudVolumePlacements volumes = CollectVolumes( registry );
+
             std::vector<entt::entity> entities;
             auto                      view = registry.view<ECS::VolumetricCloudsComponent>();
             for ( const auto entity : view )
@@ -45,7 +52,7 @@ namespace Desert::ECS
             if ( entities.empty() )
             {
                 renderCommandBuffer.Emplace<Graphic::Render::VolumetricCloudsCommand>(
-                     false, ECS::VolumetricCloudData{} );
+                     false, ECS::VolumetricCloudData{}, std::move( volumes ) );
                 return;
             }
 
@@ -69,10 +76,63 @@ namespace Desert::ECS
             }
 
             const auto& clouds = registry.get<ECS::VolumetricCloudsComponent>( entities[chosen] );
-            renderCommandBuffer.Emplace<Graphic::Render::VolumetricCloudsCommand>( true, clouds.Data );
+            renderCommandBuffer.Emplace<Graphic::Render::VolumetricCloudsCommand>( true, clouds.Data,
+                                                                                   std::move( volumes ) );
         }
 
     private:
+        /**
+         * Every enabled hero cloud in the scene, with the world matrix that places it.
+         *
+         * SORTED SHADOW CASTERS FIRST, and that ordering is a contract with the shaders: the shadow pass
+         * marches the first u_VoxelShadowCount records and the view marches all of them, so Casts Cloud
+         * Shadow becomes a shorter loop instead of a per-sample flag test. std::stable_partition and not
+         * a sort, because within each group the registry's own order must not shuffle from frame to frame
+         * — the atlas leases the tiles in this order, and a cloudscape that reshuffles for no visible
+         * reason is a hard bug to even describe.
+         *
+         * The cap is reported ONCE per scene, with the numbers: overflowing it silently is how a scene
+         * ends up with a hero cloud that exists in the outliner and nowhere in the sky.
+         */
+        Graphic::CloudVolumePlacements CollectVolumes( entt::registry& registry )
+        {
+            Graphic::CloudVolumePlacements volumes;
+
+            auto view = registry.view<ECS::CloudVolumeComponent, ECS::TransformComponent>();
+            for ( const auto entity : view )
+            {
+                const auto& volume = registry.get<ECS::CloudVolumeComponent>( entity );
+
+                // Enabled is the zero-cost gate: a disabled hero cloud is not gathered, so it takes no
+                // atlas tile, no instance slot and no sample.
+                if ( !volume.Data.Enabled || static_cast<uint64_t>( volume.Data.Volume ) == 0 )
+                    continue;
+
+                if ( volumes.size() >= Graphic::kMaxCloudVolumeInstances )
+                {
+                    if ( !m_CapLogged )
+                    {
+                        LOG_WARN( "[CloudVolumes] More than {} enabled Cloud Volume entities in the scene; "
+                                  "the rest are not rendered. The atlas holds {} tiles — point several "
+                                  "entities at the same .dvol to share one.",
+                                  Graphic::kMaxCloudVolumeInstances, Graphic::kMaxCloudVolumeInstances );
+                        m_CapLogged = true;
+                    }
+                    break;
+                }
+
+                volumes.push_back( Graphic::CloudVolumePlacement{
+                     .WorldTransform = ECS::Entity( entity, registry ).GetWorldTransform(),
+                     .Data           = volume.Data } );
+            }
+
+            std::stable_partition( volumes.begin(), volumes.end(),
+                                   []( const Graphic::CloudVolumePlacement& placement )
+                                   { return placement.Data.CastsCloudShadow; } );
+
+            return volumes;
+        }
+
         static uint64_t EntityId( entt::registry& registry, entt::entity entity )
         {
             if ( auto* id = registry.try_get<ECS::UUIDComponent>( entity ) )
@@ -89,5 +149,6 @@ namespace Desert::ECS
 
         // Describes the SCENE, not the frame, so it is said once.
         bool m_DuplicateLogged = false;
+        bool m_CapLogged       = false;
     };
 } // namespace Desert::ECS

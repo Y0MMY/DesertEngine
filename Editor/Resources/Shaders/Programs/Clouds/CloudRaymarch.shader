@@ -16,8 +16,10 @@ Shader "CloudRaymarch"
         // Common/CloudGeometry.glslh, which the CloudMath unit tests compile as C++ from this same text:
         // the shell intersection, the step schedule, the empty-space state machine, Beer, powder, the
         // phase functions, the in-scatter height term, the multi-scatter octaves, the cone offsets and
-        // the depth reconstruction. Everything that reads an image is behind
-        // Common/CloudDensityProcedural.glslh. What is left here is the loop that puts them together.
+        // the depth reconstruction. Everything that reads an image is behind the density seam,
+        // Common/CloudDensityCompose.glslh — which unions the procedural cloudscape with whatever baked
+        // hero clouds the scene placed. What is left here is the loop that puts them together, and it did
+        // not have to change to gain the second density model.
         //
         // OCCLUSION is resolved INSIDE this march, by clamping the ray to the distance the scene depth
         // attachment reports. One path for Forward and Deferred: both write that attachment, only
@@ -29,7 +31,11 @@ Shader "CloudRaymarch"
         #include <Common/CloudParams.glslh>
         #include <Common/CloudTemporal.glslh>
         #include <Common/CloudShadow.glslh>
-        #include <Common/CloudDensityProcedural.glslh>
+
+        // THE VIEW marches every hero cloud the scene placed. (The shadow pass marches only the prefix
+        // that casts cloud shadows — see CloudShadowMap.shader.)
+        #define CLOUD_VOXEL_INSTANCE_COUNT u_VoxelInstanceCount
+        #include <Common/CloudDensityCompose.glslh>
 
         // The aerial-perspective volume's SLICE MAPPING only — the same include, for the same reason, as
         // Programs/Fog/HeightFog.shader: SkyScattering.glslh's integrator block is guarded on the two LUT

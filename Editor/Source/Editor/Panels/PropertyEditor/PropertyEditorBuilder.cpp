@@ -803,6 +803,15 @@ namespace Desert::Editor
                                 }
                                 if ( volume )
                                 {
+                                    // The renderer resolves the handle through the service, not through
+                                    // the AssetManager it cannot reach — so a drop that does not register
+                                    // is a cloud that never appears, with nothing on screen to say why.
+                                    if ( const auto registered =
+                                              Runtime::ResourceRegistry::GetCloudVolumeService()->Register(
+                                                   volume );
+                                         !registered.IsSuccess() )
+                                        LOG_ERROR( "[CloudVolume] {}", registered.GetError() );
+
                                     *handle = static_cast<uint64_t>( volume->GetMetadata().Handle );
                                     changed = true;
                                 }

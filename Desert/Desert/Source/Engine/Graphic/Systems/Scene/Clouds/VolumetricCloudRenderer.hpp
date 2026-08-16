@@ -5,6 +5,9 @@
 #include <Engine/Graphic/Clouds/CloudNoiseVolumes.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
+#include <Engine/Graphic/Clouds/CloudVolumeAtlas.hpp>
+#include <Engine/Graphic/Clouds/CloudVolumeInstance.hpp>
+#include <Engine/Graphic/Clouds/CloudVolumePlacement.hpp>
 #include <Engine/Graphic/Materials/Clouds/MaterialVolumetricClouds.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/Renderer.hpp>
@@ -13,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace Desert::Graphic::System
 {
@@ -77,7 +81,14 @@ namespace Desert::Graphic::System
          *                so a component deleted mid-session would otherwise leave the last cloudscape it
          *                saw hanging in the sky.
          */
-        void SetCloudSettings( bool present, const ECS::VolumetricCloudData& data );
+        /**
+         * @param volumes this frame's placed hero clouds, already sorted shadow-casters-first by
+         *                ECS::VolumetricCloudsECSSystem — the shadow pass marches a prefix of the buffer
+         *                and the ordering is what makes that prefix mean "casts a cloud shadow".
+         *                Passed even when empty: an empty list releases every atlas tile.
+         */
+        void SetCloudSettings( bool present, const ECS::VolumetricCloudData& data,
+                               const CloudVolumePlacements& volumes );
 
         /** @brief Stages S1 and S2. Must be called outside any render pass. */
         void ExecuteInFrame();
@@ -172,10 +183,45 @@ namespace Desert::Graphic::System
         bool m_HistoryFilled = false;
         bool m_HistoryFailed = false;
 
+        /**
+         * Turn this frame's placements into atlas leases and instance records.
+         *
+         * Runs on the render thread, from ExecuteInFrame, because it resolves asset handles through the
+         * CloudVolumeService and can create a 32 MiB GPU image. Diffs against the leases held last frame:
+         * a placement whose `.dvol` is already resident costs nothing, a new one takes a lease, and a
+         * handle nobody references any more gives its tile back. The atlas rebuilds its image only when
+         * the resident SET changes, so moving a hero cloud around is free.
+         */
+        void UpdateVolumeInstances();
+
+        // Binds the hero-cloud atlas and instance buffer on @p pipeline. Called by BOTH the march and the
+        // shadow pass, from one place, because the two declare the same two bindings through the same
+        // density header and a binding number written twice is a binding number free to disagree.
+        void BindHeroVolumes( ComputePipeline* pipeline );
+
         std::shared_ptr<ShaderResources::StorageBuffer> m_ParamsBuffer;
+        // Always allocated at kMaxCloudVolumeInstances records and always bound, whatever the scene
+        // holds: a declared descriptor with nothing bound is an invalid set, and 640 bytes is not a
+        // number worth making conditional.
+        std::shared_ptr<ShaderResources::StorageBuffer> m_VolumeInstanceBuffer;
+
+        // The GPU home of the hero clouds. A plain member and NOT a singleton, unlike CloudNoiseVolumes:
+        // the noise set is genuinely process-wide (several scenes share one, keyed by seed), while an
+        // atlas belongs to the renderer that marches it.
+        CloudVolumeAtlas m_VolumeAtlas;
+
+        // The `.dvol` handles this renderer currently holds a lease on, in instance order. The diff
+        // against next frame's placements is what decides which tiles are acquired and released.
+        std::vector<uint64_t> m_VolumeLeases;
 
         ECS::VolumetricCloudData m_Data{};
+        CloudVolumePlacements    m_VolumePlacements;
+        CloudVoxelCounts         m_VolumeCounts{};
         bool                     m_Present = false;
+
+        // A handle whose asset could not be resolved or leased is reported ONCE per handle. Without this
+        // a missing `.dvol` is a log line at 60 Hz, which is the same as no log line at all.
+        std::vector<uint64_t> m_VolumeFailures;
 
         // The size and tier m_ScatterImage was built for. A change in either rebuilds it.
         uint32_t                  m_ScatterWidth  = 0;

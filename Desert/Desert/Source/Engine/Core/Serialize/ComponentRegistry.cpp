@@ -47,6 +47,11 @@ namespace Desert::Core::Serialize
             return std::nullopt;
         }
 
+        // Defined below, beside the table of asset types it dispatches on. Declared here because the two
+        // template helpers above it call it with a non-dependent argument, so the name has to be visible
+        // at their point of definition rather than at instantiation.
+        Reflection::AssetResolver MakeAssetResolver( const Assets::AssetManager& mgr );
+
         // Builds a handler for a component whose serializable payload is a reflected data block. Adding a
         // PROPERTY field to that block automatically extends serialization — no code change here.
         template <class TComponent, class TData>
@@ -56,16 +61,24 @@ namespace Desert::Core::Serialize
             s.Key = std::move( key );
             s.Has = []( ECS::Entity e ) { return e.HasComponent<TComponent>(); };
 
-            s.Serialize = [member, typeName]( ECS::Entity e, const Assets::AssetManager& ) -> rfl::Generic
+            // The AssetResolver is passed on BOTH directions, exactly as MakeReflectedSelf passes it. It is
+            // a no-op for a component with no PROPERTY(Asset<...>) field — which every component this
+            // helper served was, until CloudVolumeData arrived with one. Without it an AssetHandle field
+            // is written as a raw 64-bit id and read back as one: the id is minted at load time from the
+            // file path, so it does not survive a restart, and the component comes back pointing at
+            // nothing with no error anywhere. That is what a placed hero cloud did before this line.
+            s.Serialize = [member, typeName]( ECS::Entity e, const Assets::AssetManager& mgr ) -> rfl::Generic
             {
                 const auto* type = Reflection::ReflectionRegistry::Get().Find( typeName );
                 if ( !type )
                     return rfl::Generic( rfl::Generic::Object{} );
-                const auto& comp = e.GetComponent<TComponent>();
-                return Reflection::SerializeReflected( *type, &( comp.*member ) );
+                const auto& comp     = e.GetComponent<TComponent>();
+                auto        resolver = MakeAssetResolver( mgr );
+                return Reflection::SerializeReflected( *type, &( comp.*member ), &resolver );
             };
 
-            s.Deserialize = [member, typeName]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& )
+            s.Deserialize =
+                 [member, typeName]( ECS::Entity e, const rfl::Generic& g, const Assets::AssetManager& mgr )
             {
                 const auto* type = Reflection::ReflectionRegistry::Get().Find( typeName );
                 if ( !type )
@@ -75,7 +88,8 @@ namespace Desert::Core::Serialize
                     return;
                 auto& comp =
                      e.HasComponent<TComponent>() ? e.GetComponent<TComponent>() : e.AddComponent<TComponent>();
-                Reflection::DeserializeReflected( *type, &( comp.*member ), obj.value() );
+                auto resolver = MakeAssetResolver( mgr );
+                Reflection::DeserializeReflected( *type, &( comp.*member ), obj.value(), &resolver );
             };
 
             return s;
@@ -297,7 +311,18 @@ namespace Desert::Core::Serialize
                         if ( a )
                             a->Load();
                     }
-                    return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+                    if ( !a )
+                        return 0;
+
+                    // The renderer cannot reach the AssetManager (it is a layer object), so the handle the
+                    // component carries has to resolve through a service — the same crossing the skybox
+                    // makes above. Registered here, at the one place a scene reference turns into an
+                    // asset, so a hero cloud placed in a saved scene is marchable the frame it loads.
+                    if ( const auto registered = Runtime::ResourceRegistry::GetCloudVolumeService()->Register( a );
+                         !registered.IsSuccess() )
+                        LOG_ERROR( "[CloudVolume] {}", registered.GetError() );
+
+                    return static_cast<uint64_t>( a->GetMetadata().Handle );
                 }
                 if ( type == "FontAsset" )
                 {

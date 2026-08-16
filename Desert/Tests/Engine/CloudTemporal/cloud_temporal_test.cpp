@@ -1013,7 +1013,8 @@ TEST( CloudTemporalPayload, TheTwoTemporalFieldsAreCarriedThroughToTheBlock )
     data.TemporalClampScale  = 2.25f;
 
     const Desert::Graphic::CloudGpuPayload payload =
-         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f );
+         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
+                          Desert::Graphic::CloudVoxelCounts{} );
 
     EXPECT_FLOAT_EQ( payload.TemporalBlendFactor, 0.37f );
     EXPECT_FLOAT_EQ( payload.TemporalClampScale, 2.25f );
@@ -1029,14 +1030,16 @@ TEST( CloudTemporalPayload, UnauthorableTemporalValuesAreRepairedAtTheBoundary )
     data.TemporalClampScale  = -1.0f;
 
     const Desert::Graphic::CloudGpuPayload payload =
-         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f );
+         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
+                          Desert::Graphic::CloudVoxelCounts{} );
 
     EXPECT_FLOAT_EQ( payload.TemporalBlendFactor, 0.02f );
     EXPECT_GE( payload.TemporalClampScale, 0.0f );
 
     data.TemporalBlendFactor = 4.0f;
     const Desert::Graphic::CloudGpuPayload clamped =
-         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f );
+         PackCloudParams( data, Desert::Graphic::AtmosphereEnv{}, Desert::Graphic::WindEnv{}, 0.0f,
+                          Desert::Graphic::CloudVoxelCounts{} );
     EXPECT_FLOAT_EQ( clamped.TemporalBlendFactor, 1.0f );
 }
 

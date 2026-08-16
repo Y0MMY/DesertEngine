@@ -39,6 +39,7 @@ using Desert::Graphic::CloudGpuPayload;
 using Desert::Graphic::CloudRaymarchPush;
 using Desert::Graphic::CloudResolutionDivisor;
 using Desert::Graphic::CloudScaledExtent;
+using Desert::Graphic::CloudVoxelCounts;
 using Desert::Graphic::kCloudPayloadBytes;
 using Desert::Graphic::PackCloudParams;
 
@@ -1760,14 +1761,44 @@ TEST( CloudShadowReadout, AnEmptyColumnShadowsNothingAtAnyHeight )
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
     // std430 rounds the block up to its 16-byte alignment; the buffer must cover that, not sizeof.
-    // 508 since High Frequency Fade Start / End became the single High Frequency Feature Size: the band
-    // no longer takes two authored distances, because the distance it survives to is derived from the
-    // size and the march's own step (CloudBandWeight). The block therefore stops four bytes short of its
-    // alignment again, which is the ordinary case; the >= and %16 assertions below are what has to hold.
-    EXPECT_EQ( sizeof( CloudGpuPayload ), 508u );
-    EXPECT_EQ( kCloudPayloadBytes, 512u );
+    // 516 since voxel phase 1b appended the two hero-cloud counts (how many instance records are live,
+    // and how many of that leading run cast a cloud shadow). The block therefore stops twelve bytes short
+    // of its alignment; the >= and %16 assertions below are what has to hold.
+    EXPECT_EQ( sizeof( CloudGpuPayload ), 516u );
+    EXPECT_EQ( kCloudPayloadBytes, 528u );
     EXPECT_GE( kCloudPayloadBytes, sizeof( CloudGpuPayload ) );
     EXPECT_EQ( kCloudPayloadBytes % 16u, 0u );
+}
+
+TEST( CloudPayload, TheHeroCloudCountsAreRepairedRatherThanTrusted )
+{
+    // The shadow pass loops to VoxelShadowCount and the march to VoxelInstanceCount, so a shadow count
+    // above the total marches records the gather never wrote — a read past the live prefix of a buffer
+    // that is always allocated at full size, which is the quietest kind of wrong. Both are clamped at the
+    // boundary, once, exactly as the fade pairs above are.
+    const Desert::ECS::VolumetricCloudData data;
+    const Desert::Graphic::AtmosphereEnv   atmosphere;
+    const Desert::Graphic::WindEnv         wind;
+
+    const CloudGpuPayload none =
+         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 0, .Shadow = 0 } );
+    EXPECT_EQ( none.VoxelInstanceCount, 0 );
+    EXPECT_EQ( none.VoxelShadowCount, 0 );
+
+    const CloudGpuPayload some =
+         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 5, .Shadow = 3 } );
+    EXPECT_EQ( some.VoxelInstanceCount, 5 );
+    EXPECT_EQ( some.VoxelShadowCount, 3 );
+
+    const CloudGpuPayload overshoot =
+         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = 2, .Shadow = 9 } );
+    EXPECT_EQ( overshoot.VoxelInstanceCount, 2 );
+    EXPECT_LE( overshoot.VoxelShadowCount, overshoot.VoxelInstanceCount );
+
+    const CloudGpuPayload negative =
+         PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{ .Total = -4, .Shadow = -1 } );
+    EXPECT_EQ( negative.VoxelInstanceCount, 0 );
+    EXPECT_EQ( negative.VoxelShadowCount, 0 );
 }
 
 TEST( CloudPayload, ThePushConstantFitsTheGuaranteedRange )
@@ -1787,11 +1818,11 @@ TEST( CloudPayload, EveryBindingOfTheRaymarchIsDistinct )
     namespace G = Desert::Graphic;
 
     const std::vector<uint32_t> bindings{
-         G::kCloudScatterOutputBinding,  G::kCloudParamsBinding,     G::kCloudShapeNoiseBinding,
-         G::kCloudDetailNoiseBinding,    G::kCloudCurlNoiseBinding,  G::kCloudWeatherMapBinding,
-         G::kCloudSceneDepthBinding,     G::kCloudDepthGuideBinding, G::kCloudShadowMapBinding,
-         G::kCloudProfileMapBinding,     G::kCloudProfileLutBinding, G::kCloudAerialPerspectiveBinding,
-         G::kCloudDistantSkyLightBinding };
+         G::kCloudScatterOutputBinding,   G::kCloudParamsBinding,         G::kCloudShapeNoiseBinding,
+         G::kCloudDetailNoiseBinding,     G::kCloudCurlNoiseBinding,      G::kCloudWeatherMapBinding,
+         G::kCloudSceneDepthBinding,      G::kCloudDepthGuideBinding,     G::kCloudShadowMapBinding,
+         G::kCloudProfileMapBinding,      G::kCloudProfileLutBinding,     G::kCloudAerialPerspectiveBinding,
+         G::kCloudDistantSkyLightBinding, G::kCloudVolumeInstanceBinding, G::kCloudVolumeAtlasBinding };
 
     const std::set<uint32_t> unique( bindings.begin(), bindings.end() );
     EXPECT_EQ( unique.size(), bindings.size() );
@@ -1832,7 +1863,7 @@ TEST( CloudPayload, PackingCarriesTheComponentAndTheAtmosphereThrough )
     wind.Direction = glm::vec2( 1.0f, 0.0f );
     wind.Strength  = 0.15f;
 
-    const CloudGpuPayload p = PackCloudParams( data, atmosphere, wind, 12.5f );
+    const CloudGpuPayload p = PackCloudParams( data, atmosphere, wind, 12.5f, CloudVoxelCounts{} );
 
     // The planet radius comes from the atmosphere and from nowhere else — the cloud subsystem is
     // forbidden a radius of its own.
@@ -1876,7 +1907,7 @@ TEST( CloudPayload, InvertedRangesAreRepairedAtTheBoundary )
     data.MinStepSize            = 5000.0f;
     data.MaxStepSize            = 100.0f;
 
-    const CloudGpuPayload p = PackCloudParams( data, atmosphere, wind, 0.0f );
+    const CloudGpuPayload p = PackCloudParams( data, atmosphere, wind, 0.0f, CloudVoxelCounts{} );
 
     EXPECT_GE( p.HorizonFadeEnd, p.HorizonFadeStart );
     EXPECT_GE( p.NearFadeEnd, p.NearFadeStart );
@@ -1893,7 +1924,7 @@ TEST( CloudPayload, EveryPackedValueIsFinite )
     Desert::Graphic::WindEnv         wind{};
     atmosphere.PlanetRadius = kPlanetRadiusWorld;
 
-    const CloudGpuPayload p     = PackCloudParams( data, atmosphere, wind, 3.0f );
+    const CloudGpuPayload p     = PackCloudParams( data, atmosphere, wind, 3.0f, CloudVoxelCounts{} );
     const float*          words = reinterpret_cast<const float*>( &p );
 
     // The trailing six members are ints; everything before them is a float and must be finite.

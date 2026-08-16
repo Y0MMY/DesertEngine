@@ -151,6 +151,14 @@ namespace Desert::Graphic
         // (Graphic::BuildCloudProfileLut), so authoring a new form costs a re-upload of 3 KiB rather
         // than sixty floats crossing the bus every frame.
         float CloudHeightVariance;
+
+        // ---- Hero clouds ----
+        // How many records of the instance buffer (kCloudVolumeInstanceBinding) are live, and how many of
+        // that leading run cast a cloud shadow. The renderer sorts the shadow casters to the front, so
+        // the shadow pass marches a prefix rather than testing a per-instance flag on every sample.
+        // Appended, like everything before it.
+        int32_t VoxelInstanceCount;
+        int32_t VoxelShadowCount;
     };
 
     // Offsets of the vec4 run, and of the first and last scalar. Spot-checking three of them would not
@@ -184,7 +192,9 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 496 );
     static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 500 );
     static_assert( offsetof( CloudGpuPayload, CloudHeightVariance ) == 504 );
-    static_assert( sizeof( CloudGpuPayload ) == 508,
+    static_assert( offsetof( CloudGpuPayload, VoxelInstanceCount ) == 508 );
+    static_assert( offsetof( CloudGpuPayload, VoxelShadowCount ) == 512 );
+    static_assert( sizeof( CloudGpuPayload ) == 516,
                    "The block ends at the last float. glm's vec4 has a 4-byte alignment (no SIMD "
                    "gentypes in this build), so C++ adds no tail padding — std430 does, which is why "
                    "the buffer below is created at the rounded-up size and not at sizeof." );
@@ -222,6 +232,15 @@ namespace Desert::Graphic
     // one, exactly like the shadow-map slot above. What varies is the gate in CloudRaymarchPush.
     inline constexpr uint32_t kCloudAerialPerspectiveBinding = 12; // the 32x32x16 camera AP froxel volume
     inline constexpr uint32_t kCloudDistantSkyLightBinding   = 13; // the 1x1 average-sky texel
+
+    // THE HERO CLOUDS. Both are declared by Common/CloudDensityVoxel.glslh and are therefore bound by
+    // BOTH the march and the shadow pass — a declared descriptor with nothing bound is an invalid set,
+    // not an unused one, which is the same rule the shadow-map and AP slots above live under. The atlas
+    // falls back to the engine's 1x1x1 volume when no scene has placed a Cloud Volume, and the instance
+    // buffer is always allocated at its full kMaxCloudVolumeInstances size: what varies is the count in
+    // the parameter block, never the descriptor.
+    inline constexpr uint32_t kCloudVolumeInstanceBinding = 14; // the per-instance transforms
+    inline constexpr uint32_t kCloudVolumeAtlasBinding    = 15; // the 512x256x64 tiled `.dvol` atlas
 
     // The shadow pass's own output binding. Its inputs are the same weather map and noise volumes the
     // raymarch binds, at the same numbers — one density field, one set of bindings.
@@ -526,8 +545,23 @@ namespace Desert::Graphic
         return glm::clamp( data.CloudShadowExtent, data.LayerThickness, glm::max( data.HorizonFadeEnd, 1.0f ) );
     }
 
+    /**
+     * How many hero-cloud instances this frame's buffer holds, and how many of that leading run cast a
+     * cloud shadow. A parameter of the packing rather than a field of the component: it describes the
+     * SCENE's placed Cloud Volume entities, which the cloud layer component knows nothing about.
+     *
+     * @p Shadow is clamped to @p Total in PackCloudParams rather than trusted — the shadow pass loops to
+     * it, and a value above the total would march records the gather never wrote.
+     */
+    struct CloudVoxelCounts
+    {
+        int32_t Total  = 0;
+        int32_t Shadow = 0;
+    };
+
     inline CloudGpuPayload PackCloudParams( const ECS::VolumetricCloudData& data, const AtmosphereEnv& atmosphere,
-                                            const WindEnv& wind, float timeSeconds )
+                                            const WindEnv& wind, float timeSeconds,
+                                            const CloudVoxelCounts& voxels )
     {
         const glm::vec3 windVelocity =
              glm::vec3( wind.Direction.x, 0.0f, wind.Direction.y ) * wind.Strength * kCloudWindSpeedPerStrength;
@@ -646,6 +680,9 @@ namespace Desert::Graphic
         // toward the cell's own band by this number, and a value outside [0, 1] extrapolates the band
         // past the layer it is supposed to live inside.
         p.CloudHeightVariance = glm::clamp( data.CloudHeightVariance, 0.0f, 1.0f );
+
+        p.VoxelInstanceCount = glm::max( voxels.Total, 0 );
+        p.VoxelShadowCount   = glm::clamp( voxels.Shadow, 0, p.VoxelInstanceCount );
 
         return p;
     }

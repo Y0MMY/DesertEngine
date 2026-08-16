@@ -8,6 +8,7 @@
 #include <Engine/Graphic/ShaderProtocols/PointLight.hpp>
 #include <Engine/Graphic/ShaderProtocols/SpotLight.hpp>
 #include <Engine/Graphic/AtmosphereEnv.hpp>
+#include <Engine/Graphic/Clouds/CloudVolumePlacement.hpp>
 #include <Engine/Graphic/SkySettings.hpp>
 #include <Engine/Graphic/SunLightFx.hpp>
 #include <Engine/Graphic/WindEnv.hpp>
@@ -133,10 +134,14 @@ namespace Desert::Graphic
         void SetProceduralSky( bool enabled, const glm::vec3& sunDir, bool bakeNow, const SkySettings& sky,
                                const SunLightFx& fx );
 
-        // This frame's volumetric-cloud settings (from VolumetricCloudsComponent, via the ECS).
+        // This frame's volumetric-cloud settings (from VolumetricCloudsComponent, via the ECS), and the
+        // hero clouds the scene placed (from CloudVolumeComponent).
         // `present` is false when the scene has no cloud component at all — said explicitly, because the
-        // renderer keeps its settings across frames and would otherwise keep marching a deleted one.
-        void SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data );
+        // renderer keeps its settings across frames and would otherwise keep marching a deleted one. The
+        // placements are passed every frame for the same reason: an empty list is the instruction to give
+        // the atlas tiles back, and a scene that lost its last hero cloud has to be able to say so.
+        void SetVolumetricClouds( bool present, const ECS::VolumetricCloudData& data,
+                                  const CloudVolumePlacements& volumes );
 
         // This frame's exponential height fog (from ExponentialHeightFogComponent, via the ECS).
         // `present` follows the cloud rule above; `fogHeightY` is the fog entity's transform Y — the fog
