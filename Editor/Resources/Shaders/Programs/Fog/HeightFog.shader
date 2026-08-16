@@ -73,11 +73,13 @@ Shader "HeightFog"
         // distance ramp instead of 16 visible shells.
         Uniform(3) sampler3D u_AerialPerspective;
 
-        // The sky's DISTANT SKY LIGHT (Graphic::kFogDistantSkyLightBinding): one texel holding the
+        // The sky's DISTANT SKY LIGHT (Graphic::kFogDistantSkyLightBinding): two texels holding the
         // average radiance of the sky, marched this frame from 64 directions at 6 km
-        // (Programs/Sky/SkyDistantLight.shader). This is UE's arrangement verbatim — its height fog
-        // reads the same one-value LUT for the same term. Bound on the same terms as the volume above:
-        // always bound, read only when u_FogAmbient.w says the value is real.
+        // (Programs/Sky/SkyDistantLight.shader). The fog reads texel 0, the FULL-SPHERE mean — UE's
+        // arrangement verbatim, and the right one here: a fog pixel is lit from every direction at
+        // once and has no separate ground term to double-count against. (Texel 1 is the sky half,
+        // which the volumetric clouds read for the opposite reason.) Bound on the same terms as the
+        // volume above: always bound, read only when u_FogAmbient.w says the value is real.
         Uniform(4) sampler2D u_DistantSkyLight;
 
         PushConstant FogPush
@@ -125,7 +127,8 @@ Shader "HeightFog"
                 // gradient the packer already folded the dome's mean into Inscattering and w is 0 here.
                 if (u_FogAmbient.w > 0.5f)
                 {
-                    vec3 distantSky = texelFetch(u_DistantSkyLight, ivec2(0, 0), 0).rgb;
+                    vec3 distantSky =
+                         texelFetch(u_DistantSkyLight, ivec2(SKY_DISTANT_LIGHT_SPHERE_TEXEL, 0), 0).rgb;
                     params.Inscattering = params.Inscattering + u_FogAmbient.rgb * distantSky;
                 }
 

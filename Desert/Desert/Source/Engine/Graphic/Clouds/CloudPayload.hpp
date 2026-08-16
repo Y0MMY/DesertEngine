@@ -217,6 +217,13 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudProfileMapBinding    = 10; // march/shadow: per-cell Min/Max Height
     inline constexpr uint32_t kCloudProfileLutBinding    = 11; // march/shadow: the authored type curves
 
+    // THE PHYSICAL ATMOSPHERE, as the march reads it. Both are owned by this view's SkyboxRenderer and
+    // filled earlier in the same frame (SceneRenderer's LUT slot runs before the cloud slot), and both
+    // are ALWAYS bound — a declared sampler with no image is an invalid descriptor set, not an unused
+    // one, exactly like the shadow-map slot above. What varies is the gate in CloudRaymarchPush.
+    inline constexpr uint32_t kCloudAerialPerspectiveBinding = 12; // the 32x32x16 camera AP froxel volume
+    inline constexpr uint32_t kCloudDistantSkyLightBinding   = 13; // the 1x1 average-sky texel
+
     // The shadow pass's own output binding. Its inputs are the same weather map and noise volumes the
     // raymarch binds, at the same numbers — one density field, one set of bindings.
     inline constexpr uint32_t kCloudShadowOutputBinding = 0;
@@ -255,9 +262,23 @@ namespace Desert::Graphic
         // temporal resolve. y, z, w are unused. A vec4 and not a float because the block is std430-laid
         // out on the GLSL side and a lone float after a vec4 would disagree about the block's size.
         glm::vec4 Flags;
+
+        // THE VIEW'S PHYSICAL ATMOSPHERE — the two facts the march needs to address the aerial-perspective
+        // volume, and the two gates that say whether either physical quantity exists this frame:
+        //   x = the AP volume's far extent, kilometres  (AtmosphereEnv::AerialPerspectiveDepthKm)
+        //   y = the read-side view-distance scale       (AtmosphereEnv::AerialPerspectiveViewDistanceScale)
+        //   z = 1 when there is an AP volume to sample, 0 otherwise
+        //   w = 1 when there is a distant sky light to sample, 0 otherwise
+        //
+        // They ride HERE and not in the parameter block because both are per-VIEW facts about this frame
+        // — which resources the sky filled — rather than authored cloud settings, the same split
+        // FogPush::AerialPerspective makes for the same pair. Either gate at 0 makes its half of the
+        // composition the exact arithmetic identity of the artistic-gradient path, which is what lets one
+        // shader serve both sky models with no permutation.
+        glm::vec4 Atmosphere;
     };
 
-    static_assert( sizeof( CloudRaymarchPush ) == 96 );
+    static_assert( sizeof( CloudRaymarchPush ) == 112 );
 
     static_assert( sizeof( CloudRaymarchPush ) <= 128,
                    "Vulkan guarantees only 128 bytes of push-constant space, and the engine emits a "

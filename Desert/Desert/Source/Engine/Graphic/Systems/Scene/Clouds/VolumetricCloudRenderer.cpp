@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Clouds/CloudNoiseRules.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseVolumes.hpp>
+#include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/RenderGraphSort.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
 #include <Engine/Graphic/RenderPhase.hpp>
@@ -533,10 +534,21 @@ namespace Desert::Graphic::System
 
         const glm::mat4 viewProjection = camera->GetProjectionMatrix() * camera->GetViewMatrix();
 
+        // The sky this view published THIS frame. Both handles are null exactly when the quantity behind
+        // them does not exist — the artistic gradient, a sky switched off, or a fill that could not
+        // allocate — which is AtmosphereEnv's own contract, and the two gates below are the only place
+        // the march asks about the sky model at all.
+        const AtmosphereEnv& atmosphere = m_SceneRenderer->GetAtmosphere();
+        const bool           apActive   = atmosphere.AerialPerspectiveVolume != nullptr;
+        const bool           skyLight   = atmosphere.DistantSkyLight != nullptr;
+
         CloudRaymarchPush push{};
         push.InverseViewProjection = glm::inverse( viewProjection );
         push.CameraPosition        = glm::vec4( camera->GetPosition(), static_cast<float>( m_FrameIndex ) );
         push.Flags                 = glm::vec4( checkerboard ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f );
+        push.Atmosphere =
+             glm::vec4( atmosphere.AerialPerspectiveDepthKm, atmosphere.AerialPerspectiveViewDistanceScale,
+                        apActive ? 1.0f : 0.0f, skyLight ? 1.0f : 0.0f );
 
         auto& renderer = Renderer::GetInstance();
 
@@ -562,6 +574,17 @@ namespace Desert::Graphic::System
         // invalid descriptor set, not an unused one.
         m_RaymarchPipeline->SetInput( kCloudShadowMapBinding,
                                       m_CloudShadowMap ? m_CloudShadowMap.get() : m_WeatherMap.get() );
+        // The physical atmosphere's two images, bound on exactly the same terms and for exactly the same
+        // reason: the engine's 1x1(x1) fallbacks stand in when the sky did not publish them, and
+        // push.Atmosphere's gates are what keep the shader from reading either.
+        m_RaymarchPipeline->SetInput(
+             kCloudAerialPerspectiveBinding,
+             apActive ? atmosphere.AerialPerspectiveVolume
+                      : FallbackTextures::Get().GetFallbackTexture3D( Core::Formats::ImageFormat::RGBA8F ).get() );
+        m_RaymarchPipeline->SetInput(
+             kCloudDistantSkyLightBinding,
+             skyLight ? atmosphere.DistantSkyLight
+                      : FallbackTextures::Get().GetFallbackTexture2D( Core::Formats::ImageFormat::RGBA8F ).get() );
         m_RaymarchPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_RaymarchPipeline.get(), GroupCount( m_ScatterWidth ),

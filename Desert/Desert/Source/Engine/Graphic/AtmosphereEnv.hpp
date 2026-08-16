@@ -53,6 +53,24 @@ namespace Desert::Graphic
         // that reddens the sky behind it, which is the whole point of the physical model.
         glm::vec3 SunTransmittanceAtGround{ 1.0f };
 
+        // UE's AtmosphereLightIlluminanceOnGroundPostTransmittance: the sun LIGHT's own illuminance —
+        // the directional light's authored Color x Intensity — after the atmosphere has taken its cut.
+        // Exactly the product of the light's outer-space illuminance and the transmittance above, so it
+        // is the same number SceneRenderer::OnUpdate arrives at for the light's colour, computed once
+        // here rather than twice.
+        //
+        // WHY IT IS NOT SunIrradiance. SunIrradiance is the SKY's sun — the sky component's own
+        // SunColor x SunIntensity, elevation-tinted, which says how bright the disc in the sky looks and
+        // is consumed by the cloud march. This is what the sun DOES TO SURFACES, authored on the
+        // directional light. In a scene with a sky SunIntensity of 22 and a light Intensity of 1 they
+        // differ by more than an order of magnitude, and a consumer that wants "the light on the ground"
+        // must not read the other one.
+        //
+        // Its consumer is the fog's directional in-scattering lobe (Graphic::PackFogParams), in
+        // SkyModel::PhysicalAtmosphere only — the gradient's fog keeps the sky's sun, which is what it
+        // was calibrated against.
+        glm::vec3 SunIlluminanceOnGround{ 0.0f };
+
         // false when there is no enabled sky component, or no atmosphere sun to drive it. A consumer that
         // draws anyway is drawing against last frame's sun.
         bool Valid = false;

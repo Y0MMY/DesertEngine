@@ -31,6 +31,14 @@ Shader "CloudRaymarch"
         #include <Common/CloudShadow.glslh>
         #include <Common/CloudDensityProcedural.glslh>
 
+        // The aerial-perspective volume's SLICE MAPPING only — the same include, for the same reason, as
+        // Programs/Fog/HeightFog.shader: SkyScattering.glslh's integrator block is guarded on the two LUT
+        // callback macros, which this pass deliberately does not define. It READS the volume, it never
+        // fills it, so the only thing it needs from the sky's maths is the exact inverse of the mapping
+        // the fill wrote through. One mapping, three consumers, no chance of a slice drifting apart.
+        #include <Common/SkyMedium.glslh>
+        #include <Common/SkyScattering.glslh>
+
         // rgba16f: radiance is pre-tonemap HDR and transmittance is in [0,1]; half carries about three
         // decimal digits, which is an order of magnitude more than the 0.005 early-out needs.
         layout(binding = 0, rgba16f) restrict writeonly uniform image2D u_CloudScatter;
@@ -62,11 +70,37 @@ Shader "CloudRaymarch"
         // Programs/Clouds/CloudShadowMap.shader. Read in ONE fetch where the cone march took twelve.
         Uniform(9) sampler2D u_CloudShadowMap;
 
+        // THE SKY'S CAMERA AERIAL-PERSPECTIVE VOLUME (Graphic::kCloudAerialPerspectiveBinding): 32x32x16
+        // froxels of THIS camera's frustum, each holding the air between the eye and that distance —
+        // rgb premultiplied in-scatter, a the mean transmittance. Filled by
+        // Programs/Sky/SkyAerialPerspectiveLut.shader earlier in this same frame.
+        //
+        // Sampled TRILINEARLY and exactly ONCE per pixel, at the transmittance-weighted mean depth of the
+        // cloud this ray saw. The alternative — the air integrated per shaded sample — is a volume fetch
+        // inside a 128-step loop for a quantity that varies over kilometres, and the cloud's own march
+        // already knows where its mass is.
+        Uniform(12) sampler3D u_AerialPerspective;
+
+        // THE SKY'S DISTANT SKY LIGHT (Graphic::kCloudDistantSkyLightBinding): two texels holding the
+        // average radiance of the sky, marched this frame from 64 directions at 6 km
+        // (Programs/Sky/SkyDistantLight.shader). The march reads texel 1, the SKY HALF — the mean over
+        // the 32 directions that look UP (Graphic::kDistantLightSkyTexel).
+        //
+        // Not texel 0, the full-sphere mean the height fog reads: half of that is the lit ground, and
+        // CloudAmbient already has a ground-bounce term of its own. Feeding it the sphere mean would
+        // count the ground twice and hand every shadowed cloud face a near-achromatic grey (measured
+        // R/B 0.98) instead of the blue of the sky it hangs against (0.27).
+        Uniform(13) sampler2D u_DistantSkyLight;
+
         PushConstant CloudPush
         {
             mat4 u_InverseViewProjection;
             vec4 u_CameraPosition; // xyz = camera position in world units, w = frame index
             vec4 u_Flags;          // x = 1 when the checkerboard is active (Full resolution + temporal)
+            // Mirrored by Graphic::CloudRaymarchPush::Atmosphere — see it for the contract:
+            // x = AP volume depth (km), y = view-distance scale, z = 1 when the volume exists,
+            // w = 1 when the distant sky light exists.
+            vec4 u_Atmosphere;
         };
 
         LocalSize(8, 8, 1);
@@ -194,6 +228,21 @@ Shader "CloudRaymarch"
             float cosTheta = dot(dir, sunDir);
             vec3  sunColour = u_SunIrradiance.xyz * u_SunIrradiance.w * u_SunTint.xyz;
             float sigmaScale = u_ExtinctionTint.w * CLOUD_EXTINCTION_PER_WORLD_UNIT;
+
+            // THE SKY THE CLOUD'S SHADOWED SIDE IS LIT BY, chosen once per ray and not per sample: it is
+            // one value for the whole frame in both models, so fetching it inside the march would be the
+            // same texel read up to 128 times.
+            //
+            // In SkyModel::PhysicalAtmosphere it is the marched average sky — the sky half of the same
+            // 64-direction march the height fog's ambient comes out of, so a cloud's shadowed face and
+            // the haze under it are lit by one atmosphere. In SkyModel::ArtisticGradient it is
+            // u_ZenithRadiance, the hand-tuned dome CLD-100/101/102 calibrated the presets against,
+            // which stays the gradient's ambient bit for bit (the gate is 0 there, so this branch is not
+            // even taken). The GROUND term is not switched: it is the gradient's ground-bounce model in
+            // both, and the sky half deliberately excludes the ground so the two do not overlap.
+            vec3 ambientSky = u_ZenithRadiance.xyz;
+            if (u_Atmosphere.w > 0.5f)
+                ambientSky = texelFetch(u_DistantSkyLight, ivec2(SKY_DISTANT_LIGHT_SKY_TEXEL, 0), 0).rgb;
 
             // The cone toward the sun is the SAME for every shaded sample on this ray: its basis, its
             // golden-angle spiral and its segment weights depend on sunDir and the authored distance and
@@ -380,7 +429,7 @@ Shader "CloudRaymarch"
                         // see CloudShadowTintWeight, which the CloudMath tests drive as C++.
                         vec3 shadowTint = CloudShadowTintWeight(u_ShadowTint.xyz, tauSun);
 
-                        vec3 ambient = CloudAmbient(u_ZenithRadiance.xyz, u_GroundRadiance.xyz,
+                        vec3 ambient = CloudAmbient(ambientSky, u_GroundRadiance.xyz,
                                                     u_ZenithRadiance.w, u_GroundRadiance.w,
                                                     u_ScatteringAlbedo.w, height) *
                                        shadowTint *
@@ -452,25 +501,71 @@ Shader "CloudRaymarch"
             scattered *= horizon;
             transmittance = mix(1.0f, transmittance, horizon);
 
-            // Atmospheric perspective: distant clouds take the colour of the air in front of them. The
-            // sky is EVALUATED here through the shared model, in the exact direction this ray points —
-            // not interpolated between transported probe colours, and not a palette this shader reads.
-            SkyPacked sky;
-            for (int i = 0; i < SKY_PACKED_VEC4_COUNT; ++i)
-                sky.v[i] = u_SkyPacked[i];
+            // ATMOSPHERIC PERSPECTIVE: the air between the eye and the cloud. How much of it there is
+            // was decided by the march (cloudDistance); WHAT it is depends on the sky model, and the two
+            // answers are not two spellings of one quantity — they are two different models, one physical
+            // and one authored, each correct inside its own.
+            float strength = clamp(u_ShadowTint.w, 0.0f, 1.0f);
 
-            // Evaluated with a sun INTENSITY of zero, deliberately. Aerial perspective is the light the
-            // air in front of the cloud scatters toward the camera: the sky gradient and the sun's broad
-            // halo belong in it, the solar DISC does not. Leaving the disc in would paint a small
-            // blinding spot onto any distant cloud that happened to cross the sun. Zeroing the intensity
-            // removes exactly the disc term (core * sunIntensity) and leaves the halo, which is scaled
-            // by sunGlow instead.
-            vec3 skyColour = EvaluateSky(dir, UnpackSunDirection(sky), 0.0f, UnpackSunAngularRadius(sky),
-                                         UnpackSkyConfig(sky));
+            if (u_Atmosphere.z > 0.5f)
+            {
+                // THE PHYSICAL ATMOSPHERE, sampled — not approximated. The froxel at the cloud's own
+                // depth holds the light that stretch of air scatters toward the eye and the fraction of
+                // the cloud's own light that survives it, marched from the same medium and the same LUTs
+                // as the haze over the terrain below. That identity is the point: the cloud layer and the
+                // ground it hangs over now dissolve into ONE integral, so there is no colour seam where
+                // they meet at the horizon.
+                //
+                // Composed as UE composes SAMPLE_ATMOSPHERE_ON_CLOUDS (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH
+                // section 1.4): the cloud's radiance is attenuated by the air's transmittance, and the
+                // air's own in-scatter is added over the fraction of the pixel the cloud actually covers,
+                // 1 - transmittance. Where the cloud is transparent nothing is added, because the sky pass
+                // already drew that pixel's full atmospheric column — this is the only arrangement in
+                // which the air is neither missing behind the cloud nor counted twice beside it.
+                //
+                // The distance is the TRANSMITTANCE-WEIGHTED MEAN depth of the cloud, the same number the
+                // fades use, and it saturates at the volume's far extent (SkyApSliceUnitFromDistance):
+                // the shell reaches ~140 km and the volume typically 96, but past that the froxels have
+                // long since stopped changing, and the alternative is a hard ring in the sky where the
+                // volume ends.
+                float distanceKm = cloudDistance * (1.0f / CLOUD_WORLD_UNITS_PER_KM) *
+                                   max(u_Atmosphere.y, 0.0f);
+                float sliceUnit  = SkyApSliceUnitFromDistance(distanceKm, u_Atmosphere.x);
 
-            float aerial = CloudRemapRange(cloudDistance, fadeStart, fadeEnd, 0.0f, 1.0f) *
-                           clamp(u_ShadowTint.w, 0.0f, 1.0f);
-            scattered = mix(scattered, skyColour * (1.0f - transmittance), aerial);
+                // Read through the exact inverse of the fill's texel-centre remap on all three axes, the
+                // same three lines the fog pass reads it with.
+                vec3 uvw = vec3(SkyUnitToTexelUv(uv.x, SKY_AP_VOLUME_WIDTH),
+                                SkyUnitToTexelUv(uv.y, SKY_AP_VOLUME_HEIGHT),
+                                SkyUnitToTexelUv(sliceUnit, SKY_AP_VOLUME_DEPTH));
+                vec4 ap = texture(u_AerialPerspective, uvw);
+
+                // The composition itself, and the Atmospheric Perspective dial over it, are
+                // CloudApplyAerialPerspective — a pure function of five numbers, which is why it lives in
+                // Common/CloudGeometry.glslh where the CloudMath tests drive it as C++ and pin its energy
+                // bound.
+                scattered = CloudApplyAerialPerspective(scattered, transmittance, ap.rgb, ap.a, strength);
+            }
+            else
+            {
+                // THE ARTISTIC GRADIENT's own answer, frozen by teamlead decision and unchanged to the
+                // bit: the gradient publishes no medium to march, so distant clouds are faded toward the
+                // sky colour evaluated in this ray's direction over the authored distance range.
+                SkyPacked sky;
+                for (int i = 0; i < SKY_PACKED_VEC4_COUNT; ++i)
+                    sky.v[i] = u_SkyPacked[i];
+
+                // Evaluated with a sun INTENSITY of zero, deliberately. Aerial perspective is the light
+                // the air in front of the cloud scatters toward the camera: the sky gradient and the
+                // sun's broad halo belong in it, the solar DISC does not. Leaving the disc in would paint
+                // a small blinding spot onto any distant cloud that happened to cross the sun. Zeroing
+                // the intensity removes exactly the disc term (core * sunIntensity) and leaves the halo,
+                // which is scaled by sunGlow instead.
+                vec3 skyColour = EvaluateSky(dir, UnpackSunDirection(sky), 0.0f,
+                                             UnpackSunAngularRadius(sky), UnpackSkyConfig(sky));
+
+                float aerial = CloudRemapRange(cloudDistance, fadeStart, fadeEnd, 0.0f, 1.0f) * strength;
+                scattered    = mix(scattered, skyColour * (1.0f - transmittance), aerial);
+            }
 
             result = vec4(scattered, clamp(transmittance, 0.0f, 1.0f));
             imageStore(u_CloudScatter, coord, result);

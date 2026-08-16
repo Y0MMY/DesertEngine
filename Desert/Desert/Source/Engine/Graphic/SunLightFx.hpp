@@ -25,6 +25,18 @@ namespace Desert::Graphic
         // medium. Multiplies AtmosphereEnv::SunIrradiance, which the clouds alone consume.
         glm::vec3 CloudScatteredLuminanceScale = glm::vec3( 1.0f );
 
+        // The sun light's OWN illuminance before the atmosphere touches it — the authored Color times
+        // Intensity of the directional light that was chosen as the atmosphere sun. UE calls this the
+        // outer-space illuminance in the physical model, and it is NOT the same number as the sky's
+        // SunIntensity: that one says how bright the DISC in the sky looks, this one says how brightly
+        // the sun LIGHTS THINGS. They are authored on two different components and routinely differ by
+        // more than an order of magnitude.
+        //
+        // It travels here with the other properties of the chosen sun so that a consumer which needs the
+        // light's illuminance — the fog's directional lobe — reads the sun the sky is driving, and not
+        // whichever directional light happened to be first in the registry.
+        glm::vec3 OuterSpaceIlluminance = glm::vec3( 0.0f );
+
         // UE's "Affected By Atmosphere Transmittance": whether this sun's colour is multiplied by the
         // atmosphere's transmittance at ground level (physical model only — see the component).
         //

@@ -95,7 +95,7 @@ namespace Desert::Graphic
     inline constexpr uint32_t kSkyMultiScatterLutOutputBinding  = 0; // SkyMultiScatterLut: the image it fills
     inline constexpr uint32_t kSkyViewLutOutputBinding          = 0; // SkyViewLut: the image it fills
     inline constexpr uint32_t kSkyAerialPerspectiveOutputBinding = 0; // SkyAerialPerspectiveLut: the volume
-    inline constexpr uint32_t kSkyDistantLightOutputBinding      = 0; // SkyDistantLight: the one texel
+    inline constexpr uint32_t kSkyDistantLightOutputBinding      = 0; // SkyDistantLight: the two texels
     // LUT INPUT bindings, shared by every compute consumer (SkyMultiScatterLut reads the transmittance
     // at 2; SkyViewLut and BakeProceduralSky read the transmittance at 2 and the multi-scatter at 3).
     inline constexpr uint32_t kSkyTransmittanceLutBinding = 2;
@@ -123,6 +123,18 @@ namespace Desert::Graphic
     inline constexpr uint32_t kAerialPerspectiveWidth  = 32;
     inline constexpr uint32_t kAerialPerspectiveHeight = 32;
     inline constexpr uint32_t kAerialPerspectiveDepth  = 16;
+
+    // The distant sky light's extent, and the two texels it holds. ONE march of 64 directions, TWO
+    // reductions (Programs/Sky/SkyDistantLight.shader):
+    //   x = 0  the FULL-SPHERE mean — UE's Distant Sky Light, read by the height fog, which is lit from
+    //          every direction at once and has no ground term of its own;
+    //   x = 1  the SKY HALF, the mean over the 32 cells that look up — read by the volumetric clouds,
+    //          whose ambient already blends a sky radiance against a separate ground bounce and would
+    //          otherwise count the lit ground twice.
+    // The shaders index these by number, so the numbers live here and not in two shader comments.
+    inline constexpr uint32_t kDistantLightWidth       = 2;
+    inline constexpr int32_t  kDistantLightSphereTexel = 0;
+    inline constexpr int32_t  kDistantLightSkyTexel    = 1;
 
     // Push block of the SkyAerialPerspectiveLut pass — mirrored by `PushConstant SkyApPush` in
     // SkyAerialPerspectiveLut.shader. Everything here is per-VIEW and per-frame: the froxel grid is the
