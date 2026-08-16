@@ -434,6 +434,69 @@ TEST( VolumetricCloudReflection, QualityAndPresetSelectorsAreEnums )
 }
 
 // ---------------------------------------------------------------------------------------------------
+// CloudVolumeData — a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phase 1). Five fields in one
+// group, and the SIZE AND POSITION are deliberately absent: they are the entity's TransformComponent,
+// exactly as the fog height is, because the teamlead's Q2 answer makes the world extent a tile covers a
+// per-instance transform rather than a global constant. A field added here for extent or altitude would
+// be a second source of truth for a value the transform already owns.
+// ---------------------------------------------------------------------------------------------------
+
+TEST( CloudVolumeReflection, ExposesExactlyTheSpecifiedFieldsInOrder )
+{
+    const std::vector<std::string> expected = {
+         "Enabled", "Volume", "DensityScale", "DetailTypeBias", "CastsCloudShadow",
+    };
+
+    const TypeInfo& volume = Type( "CloudVolumeData" );
+    EXPECT_EQ( FieldNames( volume ), expected );
+    EXPECT_EQ( volume.Fields.size(), 5u );
+    EXPECT_EQ( CountInCategory( volume, "Cloud Volume" ), 5u );
+}
+
+TEST( CloudVolumeReflection, TheVolumeSlotNamesTheAssetTypeThatCanBeDroppedOnIt )
+{
+    // The AssetType string is what the Details panel's asset slot and the scene serializer's resolver
+    // both dispatch on. A wrong or missing one does not fail to compile: the slot silently falls through
+    // to the TEXTURE branch, which resolves the handle as a texture, reports "(missing)" for a perfectly
+    // good .dvol, and accepts a PNG.
+    const FieldInfo* slot = Find( Type( "CloudVolumeData" ), "Volume" );
+    ASSERT_NE( slot, nullptr );
+
+    EXPECT_EQ( slot->Type, FieldType::AssetHandle );
+    EXPECT_TRUE( slot->Meta.IsAsset );
+    EXPECT_EQ( slot->Meta.AssetType, "CloudVolumeAsset" );
+}
+
+TEST( CloudVolumeReflection, EveryFieldIsAnnotatedWellEnoughToAuthorAndGatedByTheMasterSwitch )
+{
+    const TypeInfo& volume = Type( "CloudVolumeData" );
+    for ( const auto& f : volume.Fields )
+    {
+        EXPECT_FALSE( f.Meta.Tooltip.empty() ) << f.Name << " has no tooltip";
+        EXPECT_FALSE( f.Meta.DisplayName.empty() ) << f.Name << " has no display name";
+        if ( f.Type == FieldType::Float || f.Type == FieldType::Int )
+            EXPECT_TRUE( f.Meta.HasRange ) << f.Name << " has no Range, so it draws as a bare drag field";
+
+        if ( f.Name == "Enabled" )
+            EXPECT_TRUE( f.Meta.EditCondition.empty() ) << "the master switch cannot gate itself";
+        else
+            EXPECT_EQ( f.Meta.EditCondition, "Enabled" ) << f.Name << " is not gated by the master switch";
+    }
+}
+
+TEST( CloudVolumeReflection, DefaultsPlaceANeutralInstanceThatChangesNothingUntilAVolumeIsBound )
+{
+    const TypeInfo& volume = Type( "CloudVolumeData" );
+
+    EXPECT_TRUE( DefaultOf<bool>( volume, "Enabled" ) );
+    // 1.0 and 0.0: the baked channels are used exactly as authored until somebody moves a slider, so
+    // placing the same .dvol twice gives two identical clouds rather than two different ones.
+    EXPECT_FLOAT_EQ( DefaultOf<float>( volume, "DensityScale" ), 1.0f );
+    EXPECT_FLOAT_EQ( DefaultOf<float>( volume, "DetailTypeBias" ), 0.0f );
+    EXPECT_TRUE( DefaultOf<bool>( volume, "CastsCloudShadow" ) );
+}
+
+// ---------------------------------------------------------------------------------------------------
 // ExponentialHeightFogData — 14 fields in three groups, UE's UExponentialHeightFogComponent parameter
 // for parameter (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section 3.2). The fog HEIGHT is deliberately
 // absent: it is the entity's TransformComponent Y, as UE takes it from the component transform.

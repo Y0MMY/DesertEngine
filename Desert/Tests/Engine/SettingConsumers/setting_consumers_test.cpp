@@ -296,6 +296,38 @@ namespace
     // field into the GPU block the fog pass evaluates; Enabled is the renderer's own dispatch gate.
     // ------------------------------------------------------------------------------------------------
 
+    // ------------------------------------------------------------------------------------------------
+    // Cloud Volume: a placed hero cloud (Docs/Clouds/VOXEL_CLOUD_PATH.md phase 1). Phase 1a delivered the
+    // .dvol format, the analytic baker, the asset and this component; the seam that reads them - the
+    // voxel density header, the instance buffer and the atlas binding - is phase 1b, which is a separate
+    // task because a different developer owns the cloud shaders. So every field here is PENDING against
+    // that one task, and the count below is what stops "the seam is not wired yet" from quietly growing
+    // to cover a field nobody meant to leave out.
+    // ------------------------------------------------------------------------------------------------
+
+    constexpr const char* kVoxel1bGate =
+         "Voxel phase 1b - the density seam: whether this instance is gathered into the buffer at all";
+    constexpr const char* kVoxel1bAtlas =
+         "Voxel phase 1b - the density seam: resolves the .dvol into an atlas tile and puts the tile "
+         "origin and the world-to-local transform in the instance record";
+    constexpr const char* kVoxel1bScale =
+         "Voxel phase 1b - the density seam: a per-instance multiplier the shader applies to the baked "
+         "Density Scale channel";
+    constexpr const char* kVoxel1bType =
+         "Voxel phase 1b - the density seam: a per-instance bias the shader applies to the baked Detail "
+         "Type channel before the erosion reads it";
+    constexpr const char* kVoxel1bShadow =
+         "Voxel phase 1b - the density seam: whether CloudShadowMap.shader marches this instance as well "
+         "as the view";
+
+    constexpr Row kCloudVolumeRows[] = {
+         { "Enabled", nullptr, kVoxel1bGate },
+         { "Volume", nullptr, kVoxel1bAtlas },
+         { "DensityScale", nullptr, kVoxel1bScale },
+         { "DetailTypeBias", nullptr, kVoxel1bType },
+         { "CastsCloudShadow", nullptr, kVoxel1bShadow },
+    };
+
     constexpr const char* kFogPayload = "Desert/Desert/Source/Engine/Graphic/Fog/FogPayload.hpp";
     constexpr const char* kFogRenderer =
          "Desert/Desert/Source/Engine/Graphic/Systems/Scene/Fog/HeightFogRenderer.cpp";
@@ -423,6 +455,11 @@ TEST( SettingConsumers, EveryCloudFieldNamesItsConsumerOrTheTaskThatOwesOne )
     CheckTableCoversTypeExactly( Type( "VolumetricCloudData" ), kCloudRows, std::size( kCloudRows ) );
 }
 
+TEST( SettingConsumers, EveryCloudVolumeFieldNamesItsConsumerOrTheTaskThatOwesOne )
+{
+    CheckTableCoversTypeExactly( Type( "CloudVolumeData" ), kCloudVolumeRows, std::size( kCloudVolumeRows ) );
+}
+
 TEST( SettingConsumers, EveryFogFieldNamesItsConsumer )
 {
     CheckTableCoversTypeExactly( Type( "ExponentialHeightFogData" ), kFogRows, std::size( kFogRows ) );
@@ -435,6 +472,7 @@ TEST( SettingConsumers, EveryNamedConsumerActuallyReadsTheFieldItClaims )
 
     CheckWiredRowsReadTheirField( root, kSkyRows, std::size( kSkyRows ) );
     CheckWiredRowsReadTheirField( root, kCloudRows, std::size( kCloudRows ) );
+    CheckWiredRowsReadTheirField( root, kCloudVolumeRows, std::size( kCloudVolumeRows ) );
     CheckWiredRowsReadTheirField( root, kFogRows, std::size( kFogRows ) );
 }
 
@@ -478,6 +516,18 @@ TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBee
     // CloudProfileCurves.hpp reads them — together with the six fields the authored forms added, and
     // Cloud Height Variance, which the payload clamps and packs.
     EXPECT_EQ( pending, 87 );
+}
+
+// The hero-cloud component landed one phase ahead of the seam that reads it, deliberately: the .dvol
+// format, the baker, the asset and this component are one task, and the shader-side seam is another
+// because a different developer owns the cloud shaders. All five fields are therefore owed by phase 1b,
+// and this five is what turns "the seam landed" into a reviewable edit that drives it to zero.
+TEST( SettingConsumers, TheCloudVolumeComponentOwesEveryFieldToTheSeamThatHasNotLandedYet )
+{
+    const std::ptrdiff_t pending = std::count_if( std::begin( kCloudVolumeRows ), std::end( kCloudVolumeRows ),
+                                                  []( const Row& r ) { return r.Task != nullptr; } );
+
+    EXPECT_EQ( pending, 5 );
 }
 
 int main( int argc, char** argv )

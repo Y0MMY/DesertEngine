@@ -15,6 +15,7 @@
 #include <Engine/ECS/SkyAtmosphereComponent.hpp>
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>
 #include <Engine/ECS/Components.hpp>
+#include <Engine/ECS/CloudVolumeComponent.hpp>
 
 namespace
 {
@@ -696,6 +697,17 @@ namespace
                     .Field( FieldInfo{ .Name = "Height", .Type = FieldType::Float, .Offset = offsetof( T, Height ), .Size = sizeof( T::Height ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Height", .Category = "Character", .HasRange = true, .RangeMin = 20.0f, .RangeMax = 1000.0f, .IsLength = true, } } )
                     .Field( FieldInfo{ .Name = "MaxSlopeDeg", .Type = FieldType::Float, .Offset = offsetof( T, MaxSlopeDeg ), .Size = sizeof( T::MaxSlopeDeg ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Max Slope", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 89.0f, .Units = "deg", } } )
                     .Field( FieldInfo{ .Name = "Gravity", .Type = FieldType::Float, .Offset = offsetof( T, Gravity ), .Size = sizeof( T::Gravity ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Gravity", .Category = "Character", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 6000.0f, .Units = "cm/s2", .Advanced = true, } } )
+                    .WithDefault<T>()
+                    .Register();
+            }
+            {
+                using T = ::Desert::ECS::CloudVolumeData;
+                TypeBuilder( "CloudVolumeData", sizeof( T ) )
+                    .Field( FieldInfo{ .Name = "Enabled", .Type = FieldType::Bool, .Offset = offsetof( T, Enabled ), .Size = sizeof( T::Enabled ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Enabled", .Category = "Cloud Volume", .Tooltip = "Master switch for this hero cloud. Off means the volume is not gathered, not uploaded and not marched — the procedural cloud deck is unaffected either way.", .Summary = true, } } )
+                    .Field( FieldInfo{ .Name = "Volume", .Type = FieldType::AssetHandle, .Offset = offsetof( T, Volume ), .Size = sizeof( T::Volume ), .TypeName = "Assets::AssetHandle", .Meta = PropertyMetadata{ .DisplayName = "Volume", .Category = "Cloud Volume", .Tooltip = "The baked .dvol volume. Bake one from a shape description with the CloudVolumeBaker tool; several entities may reference the same volume, and they then share one atlas tile.", .IsAsset = true, .AssetType = "CloudVolumeAsset", .EditCondition = "Enabled", } } )
+                    .Field( FieldInfo{ .Name = "DensityScale", .Type = FieldType::Float, .Offset = offsetof( T, DensityScale ), .Size = sizeof( T::DensityScale ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Density Scale", .Category = "Cloud Volume", .Tooltip = "Multiplies the volume's baked Density Scale channel. Lets one baked shape be placed twice at different opacities without re-baking it.", .HasRange = true, .RangeMin = 0.0f, .RangeMax = 4.0f, .EditCondition = "Enabled", } } )
+                    .Field( FieldInfo{ .Name = "DetailTypeBias", .Type = FieldType::Float, .Offset = offsetof( T, DetailTypeBias ), .Size = sizeof( T::DetailTypeBias ), .TypeName = "float", .Meta = PropertyMetadata{ .DisplayName = "Detail Type Bias", .Category = "Cloud Volume", .Tooltip = "Shifts the volume's baked Detail Type channel toward wispy (negative) or billowy (positive) before the erosion reads it. 0 uses the bake unchanged.", .HasRange = true, .RangeMin = -1.0f, .RangeMax = 1.0f, .EditCondition = "Enabled", } } )
+                    .Field( FieldInfo{ .Name = "CastsCloudShadow", .Type = FieldType::Bool, .Offset = offsetof( T, CastsCloudShadow ), .Size = sizeof( T::CastsCloudShadow ), .TypeName = "bool", .Meta = PropertyMetadata{ .DisplayName = "Casts Cloud Shadow", .Category = "Cloud Volume", .Tooltip = "Whether this cloud is marched into the cloud shadow map as well as into the view. Off is cheaper and is the right choice for a cloud far from anything the shadow would fall on.", .EditCondition = "Enabled", } } )
                     .WithDefault<T>()
                     .Register();
             }

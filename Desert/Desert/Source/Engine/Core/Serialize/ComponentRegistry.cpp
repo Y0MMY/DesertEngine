@@ -13,6 +13,7 @@
 #include <Engine/Assets/Mesh/SurfaceMaterialAsset.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
 #include <Engine/Assets/Skybox/SkyboxAsset.hpp>
+#include <Engine/Assets/Clouds/CloudVolumeAsset.hpp>
 #include <Engine/Assets/Prefab/PrefabData.hpp>
 #include <Engine/Geometry/DynamicMesh.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
@@ -209,6 +210,11 @@ namespace Desert::Core::Serialize
                     auto a = mgr.FindByHandle<Assets::TextureAsset>( Common::UUID( handle ) );
                     return a ? a->GetMetadata().Filepath.string() : "";
                 }
+                if ( type == "CloudVolumeAsset" )
+                {
+                    auto a = mgr.FindByHandle<Assets::CloudVolumeAsset>( Common::UUID( handle ) );
+                    return a ? a->GetMetadata().Filepath.string() : "";
+                }
                 if ( type == "FontAsset" )
                 {
                     // Fonts aren't AssetManager assets — the FontService owns the handle<->path registry.
@@ -276,6 +282,21 @@ namespace Desert::Core::Serialize
                 {
                     // Textures are registered from cooked paths by the preloader; just look up by path.
                     auto a = mgr.FindByPath<Assets::TextureAsset>( path );
+                    return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
+                }
+                if ( type == "CloudVolumeAsset" )
+                {
+                    // Hero-cloud volumes are not swept by the preloader (a .dvol is 4 MiB and only a
+                    // placed Cloud Volume wants one), so a scene reference creates and loads it here. The
+                    // load decodes the file and reports the reason if it cannot; it does not touch the
+                    // GPU, so a failure costs a log line rather than a frame.
+                    auto a = mgr.FindByPath<Assets::CloudVolumeAsset>( path );
+                    if ( !a )
+                    {
+                        a = m.CreateAsset<Assets::CloudVolumeAsset>( Assets::AssetPriority::Medium, path );
+                        if ( a )
+                            a->Load();
+                    }
                     return a ? static_cast<uint64_t>( a->GetMetadata().Handle ) : 0;
                 }
                 if ( type == "FontAsset" )
@@ -1021,6 +1042,10 @@ namespace Desert::Core::Serialize
              "VolumetricClouds", "VolumetricCloudData", &ECS::VolumetricCloudsComponent::Data ) );
         Register( MakeReflected<ECS::ExponentialHeightFogComponent, ECS::ExponentialHeightFogData>(
              "ExponentialHeightFog", "ExponentialHeightFogData", &ECS::ExponentialHeightFogComponent::Data ) );
+        // A placed hero cloud. One per entity, unlike the layer components above — a scene holds as many
+        // as the atlas has tiles, and its .dvol handle round-trips as a path through the AssetResolver.
+        Register( MakeReflected<ECS::CloudVolumeComponent, ECS::CloudVolumeData>(
+             "CloudVolume", "CloudVolumeData", &ECS::CloudVolumeComponent::Data ) );
 
         // ---- Script (manual: .lua path + exposed-property values) ----
         Register( MakeScript() );

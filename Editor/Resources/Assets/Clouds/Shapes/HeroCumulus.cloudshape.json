@@ -1,0 +1,104 @@
+{
+    "Name": "Hero Cumulus",
+    "Settings": {
+        "Width": 128,
+        "Height": 128,
+        "Depth": 64,
+        "Extent": [
+            102400.0,
+            102400.0,
+            51200.0
+        ],
+        "SignedDistanceRange": 25600.0
+    },
+    "Shape": {
+        "BlendRadius": 2500.0,
+        "ProfileFalloff": 8000.0,
+        "Primitives": [
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    0.0,
+                    0.0,
+                    -4000.0
+                ],
+                "Radii": [
+                    30000.0,
+                    28000.0,
+                    13000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.15,
+                "DensityScale": 0.85
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    2000.0,
+                    0.0,
+                    7000.0
+                ],
+                "Radii": [
+                    16000.0,
+                    15000.0,
+                    11000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.85,
+                "DensityScale": 1.0
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    -16000.0,
+                    4000.0,
+                    2000.0
+                ],
+                "Radii": [
+                    13000.0,
+                    12000.0,
+                    9000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.7,
+                "DensityScale": 0.95
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    17000.0,
+                    -3000.0,
+                    1000.0
+                ],
+                "Radii": [
+                    12000.0,
+                    12000.0,
+                    8500.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.7,
+                "DensityScale": 0.95
+            }
+        ]
+    }
+}
