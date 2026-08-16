@@ -6,6 +6,7 @@
 #include <Engine/Graphic/ColorTemperature.hpp>
 #include <Engine/Assets/AssetManager.hpp>
 #include <Engine/Assets/TextureAsset.hpp>
+#include <Engine/Assets/Clouds/CloudVolumeAsset.hpp>
 #include <Engine/Runtime/ResourceRegistry.hpp>
 #include <Engine/Runtime/Services/Font/FontService.hpp>
 #include <Engine/Graphic/Texture.hpp>
@@ -742,6 +743,85 @@ namespace Desert::Editor
                     }
                     if ( ImGui::IsItemHovered() )
                         ImGui::SetTooltip( "Pick a vector icon or drag an .svg here from the Content Browser" );
+                    break;
+                }
+
+                // Hero-cloud volume slot: a baked .dvol, dragged from the Content Browser as a generic
+                // AssetFile payload (a .dvol is not one of the FileExplorer's typed kinds). It resolves
+                // through the AssetManager like a texture, and the label shows the volume's dimensions
+                // because "HeroAnvil.dvol" alone does not say whether it is the 128x128x64 the atlas
+                // tiles expect — which is the one mismatch that stops it rendering.
+                if ( field.Meta.AssetType == "CloudVolumeAsset" )
+                {
+                    uint64_t* handle = static_cast<uint64_t*>( p );
+
+                    std::string display = "None";
+                    if ( *handle != 0 )
+                    {
+                        display = "(missing)";
+                        if ( assetMgr )
+                        {
+                            if ( auto volume =
+                                      assetMgr->FindByHandle<Assets::CloudVolumeAsset>( Common::UUID( *handle ) ) )
+                            {
+                                display =
+                                     std::filesystem::path( volume->GetMetadata().Filepath ).filename().string();
+                                if ( volume->IsReadyForUse() )
+                                {
+                                    const auto& header = volume->GetVolume().Header;
+                                    display += "  (" + std::to_string( header.Width ) + "x" +
+                                               std::to_string( header.Height ) + "x" +
+                                               std::to_string( header.Depth ) + ")";
+                                }
+                                else
+                                {
+                                    display += "  (not loaded)";
+                                }
+                            }
+                        }
+                    }
+
+                    ImGui::Button( display.c_str(), ImVec2( -1.0f, 0.0f ) );
+                    if ( ImGui::BeginDragDropTarget() )
+                    {
+                        if ( const ImGuiPayload* pl = ImGui::AcceptDragDropPayload( "AssetFile" ) )
+                        {
+                            const std::string path( static_cast<const char*>( pl->Data ),
+                                                    pl->DataSize > 0 ? pl->DataSize - 1 : 0 );
+                            if ( assetMgr && !path.empty() )
+                            {
+                                auto& manager = const_cast<Assets::AssetManager&>( *assetMgr );
+                                auto  volume  = assetMgr->FindByPath<Assets::CloudVolumeAsset>( path );
+                                if ( !volume )
+                                {
+                                    volume = manager.CreateAsset<Assets::CloudVolumeAsset>(
+                                         Assets::AssetPriority::Medium, path );
+                                    // Load here rather than lazily: the reason a bad .dvol was rejected is
+                                    // only useful next to the drop that caused it.
+                                    if ( volume )
+                                        volume->Load();
+                                }
+                                if ( volume )
+                                {
+                                    *handle = static_cast<uint64_t>( volume->GetMetadata().Handle );
+                                    changed = true;
+                                }
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Drag a baked .dvol here from the Content Browser. Bake one from a "
+                                           ".cloudshape.json with the CloudVolumeBaker tool." );
+                    if ( *handle != 0 )
+                    {
+                        ImGui::SameLine();
+                        if ( ImGui::SmallButton( "x##clearcloudvolume" ) )
+                        {
+                            *handle = 0;
+                            changed = true;
+                        }
+                    }
                     break;
                 }
 

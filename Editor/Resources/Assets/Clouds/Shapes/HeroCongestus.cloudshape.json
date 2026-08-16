@@ -1,0 +1,125 @@
+{
+    "Name": "Hero Congestus Tower",
+    "Settings": {
+        "Width": 128,
+        "Height": 128,
+        "Depth": 64,
+        "Extent": [
+            102400.0,
+            102400.0,
+            51200.0
+        ],
+        "SignedDistanceRange": 25600.0
+    },
+    "Shape": {
+        "BlendRadius": 2500.0,
+        "ProfileFalloff": 5500.0,
+        "Primitives": [
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    0.0,
+                    0.0,
+                    -14000.0
+                ],
+                "Radii": [
+                    22000.0,
+                    20000.0,
+                    6000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.1,
+                "DensityScale": 0.8
+            },
+            {
+                "Kind": "Capsule",
+                "Center": [
+                    1500.0,
+                    0.0,
+                    -2000.0
+                ],
+                "Radii": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "HalfAxis": [
+                    2000.0,
+                    0.0,
+                    9000.0
+                ],
+                "Radius": 9000.0,
+                "DetailType": 0.55,
+                "DensityScale": 1.0
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    -1000.0,
+                    1000.0,
+                    -4000.0
+                ],
+                "Radii": [
+                    15000.0,
+                    14000.0,
+                    8000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.7,
+                "DensityScale": 1.0
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    3000.0,
+                    -1500.0,
+                    6000.0
+                ],
+                "Radii": [
+                    12000.0,
+                    11500.0,
+                    7500.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.85,
+                "DensityScale": 1.0
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    6500.0,
+                    1500.0,
+                    14000.0
+                ],
+                "Radii": [
+                    8500.0,
+                    8000.0,
+                    6000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.95,
+                "DensityScale": 0.9
+            }
+        ]
+    }
+}

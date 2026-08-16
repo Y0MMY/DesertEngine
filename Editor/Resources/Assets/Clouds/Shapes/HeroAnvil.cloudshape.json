@@ -1,0 +1,104 @@
+{
+    "Name": "Hero Anvil",
+    "Settings": {
+        "Width": 128,
+        "Height": 128,
+        "Depth": 64,
+        "Extent": [
+            102400.0,
+            102400.0,
+            51200.0
+        ],
+        "SignedDistanceRange": 25600.0
+    },
+    "Shape": {
+        "BlendRadius": 2500.0,
+        "ProfileFalloff": 4500.0,
+        "Primitives": [
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    0.0,
+                    0.0,
+                    -14000.0
+                ],
+                "Radii": [
+                    16000.0,
+                    15000.0,
+                    5000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.05,
+                "DensityScale": 0.7
+            },
+            {
+                "Kind": "Capsule",
+                "Center": [
+                    0.0,
+                    0.0,
+                    -4000.0
+                ],
+                "Radii": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    9000.0
+                ],
+                "Radius": 7000.0,
+                "DetailType": 0.6,
+                "DensityScale": 1.0
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    4000.0,
+                    0.0,
+                    12000.0
+                ],
+                "Radii": [
+                    38000.0,
+                    34000.0,
+                    6500.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.25,
+                "DensityScale": 0.9
+            },
+            {
+                "Kind": "Ellipsoid",
+                "Center": [
+                    -2000.0,
+                    0.0,
+                    16000.0
+                ],
+                "Radii": [
+                    12000.0,
+                    11000.0,
+                    5000.0
+                ],
+                "HalfAxis": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "Radius": 0.0,
+                "DetailType": 0.9,
+                "DensityScale": 1.0
+            }
+        ]
+    }
+}

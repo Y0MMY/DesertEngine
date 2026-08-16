@@ -27,6 +27,7 @@
 
 // Components big enough to own a file. They live in Desert::ECS like everything below, and are included
 // here so that "the components" remains one include for every consumer.
+#include <Engine/ECS/CloudVolumeComponent.hpp>
 #include <Engine/ECS/ExponentialHeightFogComponent.hpp>
 #include <Engine/ECS/SkyAtmosphereComponent.hpp>
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>

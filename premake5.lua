@@ -22,6 +22,7 @@ include "Tools/FbxMeshSplitter/"
 include "Tools/ProjectHub/"
 include "Tools/DShaderTool/"
 include "Tools/PakTool/"
+include "Tools/CloudVolumeBaker/"
 group ""
 
 include "Desert/"
