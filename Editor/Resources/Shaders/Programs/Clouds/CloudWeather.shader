@@ -87,15 +87,14 @@ Shader "CloudWeather"
                              CloudPerlin(vec3(uv.x, uv.y, 0.83f), 3, seed + 9209u));
             vec2 p    = uv + warp * (u_WeatherWarpStrength * 0.35f);
 
-            // BASE PERIOD 8, not 2. Doubling from 2 over the authored 60 km tile put the dominant coverage
-            // feature at 30 km and the second at 15, with everything cloud-sized carrying a sixteenth of the
-            // amplitude. A camera on the ground sees the layer across a few kilometres of sky, so the whole
-            // visible dome fell inside ONE feature: at Coverage 0.5 the zenith was either solid or — as it
-            // was — completely empty, and no amount of shape detail could put a cloud where the coverage
-            // field said there was none. Eight puts the dominant feature at 7.5 km, the size of a cumulus
-            // cluster, and the tile stays 60 km so the field still does not repeat visibly toward the
-            // horizon.
-            float field = WeatherFbm(p, u_WeatherOctaves, 8, seed);
+            // CLOUD_WEATHER_BASE_PERIOD, not a literal. The dominant coverage cell is
+            // WeatherTileSize / that period, and what makes a ground observer's sky believable is how that
+            // cell compares with the disc of map the sky above thirty degrees actually covers — see
+            // CloudAutoWeatherTileSize in Common/CloudGeometry.glslh, which is the same relation solved
+            // for the tile and is what the component's default and every preset are now authored from.
+            // Raising the period here without moving those would put a different cell size on the same
+            // sky, which is why the number lives in one place.
+            float field = WeatherFbm(p, u_WeatherOctaves, int(CLOUD_WEATHER_BASE_PERIOD), seed);
 
             // Coverage cuts the field from above: Coverage = 0 removes everything, Coverage = 1 keeps
             // the whole range. Contrast then shapes what survives — high gives hard-edged islands, low a
@@ -106,13 +105,12 @@ Shader "CloudWeather"
             // Type and wetness vary across the map around their authored values. Variance of 0 gives one
             // uniform type over the whole sky, which is exactly what a stratus deck is.
             //
-            // BASE PERIOD 8, not 2, for the same reason the coverage field carries it: doubling from 2
-            // over a 60 km tile put the type's dominant feature at 30 km, so the whole dome a ground
-            // camera can see fell inside ONE of them and Cloud Type Variance — a slider whose entire
-            // purpose is putting different forms next to each other — could only fade the whole sky from
-            // one type to another over the course of a flight. Eight puts it at 7.5 km, the size of a
-            // cumulus cluster, which is the scale at which a shelf really does sit beside a tower.
-            float typeNoise = CloudPerlin(vec3(p.x, p.y, 0.41f), 8, seed + 5501u) * 1.5f + 0.5f;
+            // The SAME base period as the coverage field, for the reason the type describes the same cell
+            // the coverage does: a cell whose fill and whose form came from two different scales is two
+            // clouds. Cloud Type Variance — a slider whose entire purpose is putting different forms next
+            // to each other — can only do that when a shelf and a tower fit side by side in the sky the
+            // camera can see, which is what tying the period to the layer's altitude buys.
+            float typeNoise = CloudPerlin(vec3(p.x, p.y, 0.41f), int(CLOUD_WEATHER_BASE_PERIOD), seed + 5501u) * 1.5f + 0.5f;
             float type      = CloudProfileTypeAt(u_CloudType, typeNoise, u_CloudTypeVariance);
 
             float wetNoise = CloudPerlin(vec3(p.x, p.y, 0.59f), 3, seed + 6607u) * 1.5f + 0.5f;
@@ -139,8 +137,8 @@ Shader "CloudWeather"
             //
             // Period 8, seeded away from every other field here, so a cell's altitude is independent of
             // whether there is a cloud there at all: coverage decides WHERE, this decides HOW HIGH.
-            float centreNoise = CloudPerlin(vec3(p.x, p.y, 0.29f), 8, seed + 4409u) * 1.6f + 0.5f;
-            float widthNoise  = CloudPerlin(vec3(p.x, p.y, 0.67f), 8, seed + 3313u) * 1.6f + 0.5f;
+            float centreNoise = CloudPerlin(vec3(p.x, p.y, 0.29f), int(CLOUD_WEATHER_BASE_PERIOD), seed + 4409u) * 1.6f + 0.5f;
+            float widthNoise  = CloudPerlin(vec3(p.x, p.y, 0.67f), int(CLOUD_WEATHER_BASE_PERIOD), seed + 3313u) * 1.6f + 0.5f;
 
             vec2 heightNdf = CloudProfileHeightNdf(centreNoise, widthNoise);
 

@@ -111,11 +111,17 @@ namespace Desert::ECS
                   Tooltip( "High values give hard-edged islands, low values a soft blanket." ) )
         float CoverageContrast = 1.20f;
 
+        // 23 811.5 m is not a taste: it is CloudAutoWeatherTileSize (Common/CloudGeometry.glslh) for the
+        // default 1.5-5 km layer above. That function is the relation between this tile and the layer's
+        // altitude — how many coverage cells a ground observer gets to see overhead — and every preset
+        // and every scene in the repository is now authored from it. Moving the layer without moving
+        // this is what emptied Clouds_UEShowcase's zenith; the CloudPresets suite pins the pair.
         PROPERTY( DisplayName( "Weather Tile Size" ), Category( "Weather" ), Length,
                   Range( Common::Units::Metres( 5000.0f ), Common::Units::Metres( 400000.0f ) ),
                   EditCondition( "Enabled" ),
-                  Tooltip( "World size of one weather-map tile, i.e. the size of a cloud SYSTEM." ) )
-        float WeatherTileSize = Common::Units::Metres( 60000.0f );
+                  Tooltip( "World size of one weather-map tile, i.e. the size of a cloud SYSTEM. Roughly "
+                           "7.3x the layer's mid-altitude gives a ground observer a filled sky." ) )
+        float WeatherTileSize = Common::Units::Metres( 23811.5f );
 
         PROPERTY( DisplayName( "Weather Seed" ), Category( "Weather" ), Range( 0, 65535 ),
                   EditCondition( "Enabled" ), Tooltip( "Reshuffles the whole cloudscape layout." ) )
@@ -302,15 +308,19 @@ namespace Desert::ECS
                   Advanced, EditCondition( "Enabled" ), Tooltip( "Sharpness of the high-frequency billows." ) )
         float HighFreqBillowSharpness = 2.00f;
 
-        PROPERTY( DisplayName( "High Frequency Fade Start" ), Category( "Detail" ), Length,
-                  Range( 0.0f, Common::Units::Metres( 50000.0f ) ), EditCondition( "Enabled" ),
-                  Tooltip( "Distance at which the high-frequency layer starts fading." ) )
-        float HighFreqFadeStart = Common::Units::Metres( 2500.0f );
-
-        PROPERTY( DisplayName( "High Frequency Fade End" ), Category( "Detail" ), Length,
-                  Range( 0.0f, Common::Units::Metres( 50000.0f ) ), EditCondition( "Enabled" ),
-                  Tooltip( "Distance at which the high-frequency layer is gone." ) )
-        float HighFreqFadeEnd = Common::Units::Metres( 9000.0f );
+        // REPLACES High Frequency Fade Start / End, which were two authored distances describing a
+        // relation neither of them could see. The band survives where the march's own step is fine
+        // enough to resolve it and nowhere else, and that is a function of the quality tier as much as
+        // of distance — the same 2.5-9 km fade was four times oversampled on Ultra and below Nyquist on
+        // Low. The fade is now DERIVED from this size and the local step length (CloudBandWeight in
+        // Common/CloudGeometry.glslh), so there is one number to author and it is a physical one: how
+        // big the finest cauliflower creases are.
+        PROPERTY( DisplayName( "High Frequency Feature Size" ), Category( "Detail" ), Length,
+                  Range( Common::Units::Metres( 5.0f ), Common::Units::Metres( 400.0f ) ),
+                  EditCondition( "Enabled" ),
+                  Tooltip( "Size of the finest creases the near-field detail band carries. The band "
+                           "fades itself out wherever the march's step is too coarse to resolve it." ) )
+        float HighFreqFeatureSize = Common::Units::Metres( 45.0f );
 
         PROPERTY( DisplayName( "Curl Strength" ), Category( "Detail" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ),

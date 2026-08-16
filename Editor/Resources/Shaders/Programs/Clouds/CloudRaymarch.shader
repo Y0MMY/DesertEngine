@@ -269,6 +269,10 @@ Shader "CloudRaymarch"
             float visibleWeight   = 0.0f;
             float visibleDistance = 0.0f;
 
+            // Density x step length, summed over every shaded sample: the ray's own measurement of the
+            // mean extinction of the medium it crossed. Read only by CloudCloseExhaustedRay below.
+            float marchedDensityLength = 0.0f;
+
             // The march starts at the DITHERED position; tEnter stays the ray's true entry and is what
             // the horizon and distance fades below are measured against, so those keep a value that does
             // not carry a per-pixel dither.
@@ -310,15 +314,24 @@ Shader "CloudRaymarch"
                     // One evaluation returns the eroded density AND the unerroded profile: the profile
                     // feeds the in-scatter probability and the ambient occlusion below (CLD-106), and a
                     // separate CloudDensityCheap call here was two texture fetches per shaded sample.
-                    vec2  densitySample = CloudDensitySample(worldPos, height, state.T);
+                    // The stride at this sample, computed once and used twice: it gates the near-field
+                    // detail band (a statement about the sampling rate, not about the distance) and it
+                    // is the dt the in-scatter integration below runs over.
+                    float dt = CloudStepLength(state.T, u_MinStepSize, u_MaxStepSize, u_StepGrowthRate);
+
+                    vec2  densitySample = CloudDensitySample(worldPos, height, state.T, dt);
                     float density       = densitySample.x;
                     float profile       = densitySample.y;
                     occupied            = density > 0.0f;
 
-                    if (occupied)
+                    // A fine excursion that has not yet found anything is still SEARCHING, at the coarse
+                    // rate (CloudMarchAdvance). Its samples answer "is there cloud here" and nothing
+                    // else: the sample that first says yes is followed by a rewind of one coarse stride,
+                    // and the fine pass over that interval is what integrates it. Shading here as well
+                    // would count this step twice — and would pay for a cone march at every step of the
+                    // search, which is the cost the search exists to avoid.
+                    if (occupied && state.Shaded)
                     {
-                        float dt = CloudStepLength(state.T, u_MinStepSize, u_MaxStepSize, u_StepGrowthRate);
-
                         // --- optical depth toward the sun ---
                         float sunDensityLength = 0.0f;
 
@@ -460,6 +473,7 @@ Shader "CloudRaymarch"
                         float contribution = transmittance * (1.0f - stepTrans);
                         visibleWeight += contribution;
                         visibleDistance += contribution * state.T;
+                        marchedDensityLength += density * dt;
 
                         transmittance *= stepTrans;
                     }
@@ -470,16 +484,15 @@ Shader "CloudRaymarch"
                                           u_EmptySamplesBeforeCoarse);
             }
 
-            // Budget exhausted mid-shell: close the ray out rather than leaving it half-integrated. Every
-            // step still owed would have added SOMETHING, so the honest cheap stand-in is to let the
-            // remaining transmittance decay by what the traversed fraction suggests, which turns a hard cut
-            // into a fade. The alternative — leaving it — is the comb of streaks this replaces.
+            // Budget exhausted mid-shell: close the ray out with the mean extinction and mean radiance it
+            // measured over the part it did march — see CloudCloseExhaustedRay, which is where the
+            // reasoning and the energy bound live and which the CloudMath tests drive as C++.
             if (!finished)
             {
-                float travelled = clamp((state.T - tStart) / max(tExit - tStart, 1e-3f), 0.0f, 1.0f);
-                float owed      = 1.0f - travelled;
-                transmittance   = mix(transmittance, 1.0f, owed * owed);
-                scattered       = scattered * (1.0f - owed * owed);
+                CloudRayTail tail = CloudCloseExhaustedRay(scattered, transmittance, marchedDensityLength,
+                                                           state.T - tStart, tExit - state.T, sigmaScale);
+                scattered         = tail.Scattered;
+                transmittance     = tail.Transmittance;
             }
 
             // Horizon dissolve: the far edge of the layer fades into the sky instead of ending on the

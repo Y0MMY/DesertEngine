@@ -329,20 +329,23 @@ TEST( SkyAtmosphereReflection, BothSunPairsExplainTheSplit )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 106 fields in eight groups
+// VolumetricCloudData — 105 fields in eight groups
 // ---------------------------------------------------------------------------------------------------
 
-TEST( VolumetricCloudReflection, ExposesOneHundredAndSixFieldsInTheSpecifiedGroups )
+TEST( VolumetricCloudReflection, ExposesOneHundredAndFiveFieldsInTheSpecifiedGroups )
 {
     const TypeInfo& clouds = Type( "VolumetricCloudData" );
-    EXPECT_EQ( clouds.Fields.size(), 106u );
+    EXPECT_EQ( clouds.Fields.size(), 105u );
 
     EXPECT_EQ( CountInCategory( clouds, "Cloud Layer" ), 6u );
     EXPECT_EQ( CountInCategory( clouds, "Weather" ), 11u ); // + Cloud Height Variance
     // 17 since the Cloud Type axis became authored curves: three new profile gradients and the
     // three form bends that make them shapes a trapezoid pair cannot reach.
     EXPECT_EQ( CountInCategory( clouds, "Shape" ), 17u );
-    EXPECT_EQ( CountInCategory( clouds, "Detail" ), 22u );
+    // 21 since High Frequency Fade Start / End became the single High Frequency Feature Size: the
+    // distance the near-field band survives to is derived from that size and the march's own step
+    // (CloudBandWeight), so two authored distances that could contradict each other became one.
+    EXPECT_EQ( CountInCategory( clouds, "Detail" ), 21u );
     EXPECT_EQ( CountInCategory( clouds, "Lighting" ), 25u );
     EXPECT_EQ( CountInCategory( clouds, "Animation" ), 8u );
     // 16 since the shadow map landed: Cloud Shadow Map and Cloud Shadow Extent.

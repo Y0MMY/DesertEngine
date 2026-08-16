@@ -416,6 +416,32 @@ vec3 CloudCurl(vec2 uv, uint seed)
 const float CLOUD_CURL_ENCODE_SCALE = 0.25f;
 const float CLOUD_CURL_DECODE_SCALE = 4.0f; // 1 / CLOUD_CURL_ENCODE_SCALE
 
+// Half the decode scale IS the largest magnitude a decoded component can have: the byte holds
+// c * ENCODE + 0.5 clamped into [0,1], so c is recoverable over [-2, 2] and saturates outside it.
+// Named because the warp below has to divide by it to mean anything in world units.
+const float CLOUD_CURL_DECODE_MAX = 2.0f; // CLOUD_CURL_DECODE_SCALE * 0.5
+
+// The FINEST lattice in the curl field, and therefore the length over which the curl vector itself
+// changes direction. CloudPotential is CloudPerlinFbm01(p, 4, ...), whose four octaves run at periods
+// 4, 8, 16 and 32 — and because a curl is a GRADIENT, every octave contributes equally to it (weight
+// 0.5^i times period 4*2^i is the same product for all four), so the field's correlation length is set
+// by the finest of them: CurlTileSize / 32.
+//
+// This number is what makes the warp a warp. A displacement field folds the domain it warps as soon as
+// |grad D| reaches 1, and grad D is the displacement divided by the length over which the curl turns —
+// so a warp longer than CurlTileSize / 32 does not swirl the detail, it shreds it. See the warp site in
+// Common/CloudDensityProcedural.glslh for what that looked like on screen.
+const float CLOUD_CURL_FINEST_PERIOD = 32.0f;
+
+// The finest structure the RIDGED high-frequency band can carry, as cells across one tile of the volume
+// it is sampled from. CloudDetailTexel builds its G and A channels — the two the band folds — from a
+// three-octave FBM starting at period 8, so their finest lattice is 8 * 4 = 32 cells per tile, and the
+// band's `1 - |(|2x-1|*2-1)|^p` fold puts a second crease inside every one of them: 64.
+//
+// This is the number that turns "the band's features should be F across" into a tile size, and it is
+// what makes the band's frequency a stated quantity rather than whatever the detail tile happened to be.
+const float CLOUD_DETAIL_RIDGED_FINEST_PER_TILE = 64.0f;
+
 // Alpha is 1: the engine has no two- or three-channel image format (Core::Formats::ImageFormat has
 // RGBA8F as its only 8-bit colour format), so the fourth channel is paid for by the format and left at
 // a documented constant rather than filled with a number nobody reads.

@@ -217,8 +217,7 @@ namespace
          { "HighFreqStrength", nullptr, kT8 },
          { "HighFreqWispSharpness", nullptr, kT8 },
          { "HighFreqBillowSharpness", nullptr, kT8 },
-         { "HighFreqFadeStart", nullptr, kT8 },
-         { "HighFreqFadeEnd", nullptr, kT8 },
+         { "HighFreqFeatureSize", nullptr, kT8 },
          { "CurlStrength", nullptr, kT8 },
          { "CurlTileSize", nullptr, kT8 },
          { "DensitySharpenLow", nullptr, kT8 },
@@ -473,11 +472,11 @@ TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBee
     const std::ptrdiff_t pending = std::count_if( std::begin( kCloudRows ), std::end( kCloudRows ),
                                                   []( const Row& r ) { return r.Task != nullptr; } );
 
-    // 87, down from 90: the three legacy profile gradients now have a named C++ reader instead of a
-    // task that owes them one. The Cloud Type axis is baked into a texture on the CPU, so
-    // CloudProfileCurves.hpp reads them — together with the six fields the authored forms added, and
-    // Cloud Height Variance, which the payload clamps and packs.
-    EXPECT_EQ( pending, 87 );
+    // 86, down from 87: High Frequency Fade Start and High Frequency Fade End became the single High
+    // Frequency Feature Size. Two authored distances that could contradict the march's own sampling rate
+    // became one physical size whose fade the march derives (CloudBandWeight), so the component owes one
+    // reader fewer — not because anything was hidden, but because there is one fewer thing to author.
+    EXPECT_EQ( pending, 86 );
 }
 
 int main( int argc, char** argv )

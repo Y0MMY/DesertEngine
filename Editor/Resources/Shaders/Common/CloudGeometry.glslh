@@ -77,6 +77,50 @@ float CloudRemapRange(float v, float lo, float hi, float newLo, float newHi)
     return newLo + clamp((v - lo) / d, 0.0f, 1.0f) * (newHi - newLo);
 }
 
+// ---- The weather field's scale ----------------------------------------------------------------------
+
+// How many DOMINANT coverage cells fit across one weather tile. Programs/Clouds/CloudWeather.shader
+// starts its FBM here — for the coverage field, for the type field and for the per-cell height NDFs, all
+// of which describe the same cell and so must start at the same period. Defined in this file, and not as
+// a literal over there, because the tile size that goes with it is decided on the CPU and the two have
+// to agree or the sky is calibrated against a cell size nothing else believes in.
+const float CLOUD_WEATHER_BASE_PERIOD = 8.0f;
+
+// The tile that gives a GROUND OBSERVER a believable sky, from the layer's own geometry.
+//
+// The relation nothing in this renderer expressed until now: a camera on the ground looking at elevation
+// E meets the layer's mid-altitude at a horizontal range of mid / tan(E), so the whole sky above E is a
+// disc of that radius on the weather map. If the dominant coverage cell is comparable to that disc, the
+// observer sees ONE cell overhead — and at any coverage below 1 that cell is as likely to be a hole as a
+// cloud. Clouds_UEShowcase authored a 60 km tile over a layer at 1.5-5 km: a 7.5 km dominant cell
+// against a 5.6 km disc above 30 degrees, and the zenith rendered as empty blue while the horizon
+// carried a dense band. The audit's own §M.2 warning is about shrinking the 3D NOISE tiles; this is the
+// 2D weather tile, which is a different quantity and wants the opposite treatment.
+//
+// Fixing the elevation at 20 degrees — the height at which the showcase's sky measurably went from a
+// dense horizon band to empty blue, so it is the boundary being fixed rather than a round number — and
+// asking for CELLS_OVERHEAD cells across that disc rather than one gives
+//
+//     cell <= (mid / tan 20) / CELLS_OVERHEAD        and        tile = BASE_PERIOD * cell
+//
+// which is a single multiple of the layer's mid-altitude. Three cells is the smallest count that can
+// show cloud, gap and cloud overhead.
+//
+// BOTH DIRECTIONS FAIL, and the frames say where. Solving for 30 degrees instead gives Clouds_UEShowcase
+// a 15 km tile: the zenith fills, and the horizon becomes a wall of cells small enough that the step
+// schedule out there samples each of them four times — a boiling mush rather than a cloudscape. 20
+// degrees gives 23.8 km, at which the same frame carries cumulus with readable cauliflower tops AND a
+// zenith with cloud in it. That is the whole width of the usable band, which is why this is derived from
+// the layer and not left to be authored per scene.
+const float CLOUD_WEATHER_OVERHEAD_COT = 2.7474774f; // 1 / tan(20 degrees)
+const float CLOUD_WEATHER_CELLS_OVERHEAD = 3.0f;
+
+float CloudAutoWeatherTileSize(float layerBottomAltitude, float layerThickness)
+{
+    float mid = max(layerBottomAltitude + 0.5f * layerThickness, 1.0f);
+    return mid * (CLOUD_WEATHER_BASE_PERIOD * CLOUD_WEATHER_OVERHEAD_COT / CLOUD_WEATHER_CELLS_OVERHEAD);
+}
+
 // ---- Ray / sphere ----------------------------------------------------------------------------------
 
 // The two signed roots of a ray/sphere intersection. SIGNED, not absolute: the reference's slab test
@@ -236,6 +280,38 @@ float CloudStepLength(float t, float minStep, float maxStep, float growth)
     return clamp(mix(fine, linear, w), min(minStep, maxStep), max(minStep, maxStep));
 }
 
+// ---- The near-field detail band ---------------------------------------------------------------------
+
+// How much of the high-frequency erosion band a sample may carry, from the step the march is taking
+// THERE. This replaces two authored distances (High Freq Fade Start / End) with the relation those
+// distances were an attempt to express, and it is the relation that decides, not the authoring.
+//
+// A march samples the medium at intervals of S. Along the ray that is a sampling rate, and its Nyquist
+// limit is a feature of size 2S: anything finer cannot be reconstructed and arrives as noise for the
+// temporal resolve to average into mush. So a band whose finest content is `featureSize` is
+//
+//     * fully carried where the march is at least twice oversampled for it, S <= featureSize / 4;
+//     * gone at the Nyquist limit itself,                                  S >= featureSize / 2;
+//     * ramped between.
+//
+// The audit measured the old arrangement (NUBIS3_FULL_AUDIT §5.3): the band ran to an authored 9 km,
+// where its ~16 m features sit about five times below the step length — "it degrades into temporal
+// shimmer that the resolve then averages into mush". Two authored distances cannot express this, because
+// the step length is a function of the quality tier as well as of distance: the same 2.5-9 km fade is
+// four times oversampled on Ultra and below Nyquist on Low. Reading the step itself is exact on every
+// tier and stays exact if the schedule is ever retuned.
+//
+// WHAT THIS COSTS, measured rather than hoped: at the shipped High tier's MinStepSize of 15 m the
+// schedule cannot go below 15 m anywhere, so a band finer than 60 m is never fully carried and one finer
+// than 30 m is never carried at all. The band therefore ramps from about half strength at the camera to
+// nothing a couple of kilometres out. Making it stronger means a finer near-field step, which is a
+// perf trade rather than a maths one, and is not in this change.
+float CloudBandWeight(float featureSize, float stepLength)
+{
+    return CloudRemapRange(stepLength, 0.5f * max(featureSize, 1e-4f), 0.25f * max(featureSize, 1e-4f),
+                           0.0f, 1.0f);
+}
+
 // The empty-space skip, as a state machine over scalars.
 //
 // The reference skips empty space with a signed distance field baked into the alpha channel of its
@@ -246,24 +322,58 @@ float CloudStepLength(float t, float minStep, float maxStep, float growth)
 //   * outside the shell, zero samples — CloudShellBounds already clipped the ray;
 //   * inside it, march at `stride * coarseMultiplier` evaluating only the CHEAP density (weather map x
 //     height gradient x base shape: no detail fetch, no light march);
-//   * on a non-zero cheap sample, step BACK one coarse stride and switch to fine sampling, so the
+//   * on a non-zero cheap sample, step BACK one coarse stride and switch to the fine tier, so the
 //     leading edge that the coarse stride jumped over is not cut off the front of every cloud;
 //   * after `emptyBeforeCoarse` consecutive empty FINE samples, return to coarse.
 //
 // This is the Nubis1/2 miss-counting heuristic, and it needs no extra memory at all.
+//
+// THE TWO TIERS DO NOT MEASURE THE SAME FIELD, and that is what the first version of this machine got
+// wrong. The coarse tier's verdict is the CHEAP density — weather x envelope x base shape. The fine
+// tier's is the FULL density, which is the cheap one after the detail erosion has cut it, and the
+// erosion removes everything below `noiseComposite * DetailStrength`. Over most of a procedural
+// cloudscape the cheap density is small but strictly positive while the eroded one is exactly zero, so
+// the coarse tier says "cloud" and the fine tier finds nothing — again and again, at the same place:
+//
+//     coarse hit at T -> rewind one coarse stride C -> emptyBeforeCoarse empty fine samples of stride F
+//     -> back to coarse at T - C + E*F -> hit again -> rewind C -> fine at T - 2C + E*F
+//
+// which advances by (E - 2 * coarseMultiplier) fine strides per (E + 1) samples. At the shipped High
+// tier — coarseMultiplier 4, emptyBeforeCoarse 8 — that is EXACTLY ZERO: the march stood still, burning
+// nine samples per cycle to cover no ground, and every ray at an ordinary viewing elevation ran out of
+// MaxSteps over open sky. It was invisible to the unit tests because they drive both tiers from ONE
+// synthetic slab, so the two verdicts could not disagree. Measured on Clouds_UEShowcase at 24 degrees
+// elevation: the whole frame budget-exhausted, `finished` false on essentially every pixel, and the
+// exhaustion fade below then erased the cloud that had been integrated.
+//
+// Two things fix it, and both are properties rather than tunings:
+//
+//   * A FRONTIER. The rewind is clamped to the furthest point the fine tier has already sampled, so no
+//     interval is ever marched twice. This is what makes progress monotone rather than periodic.
+//   * SEARCHING AT THE COARSE RATE. Until a fine excursion has found real density, it is still
+//     SEARCHING, and there is nothing yet to resolve; it advances by the coarse stride while evaluating
+//     the full density — a strictly better occupancy test than the cheap one at the same sample rate.
+//     The first non-empty sample rewinds one coarse stride (once, guarded by `Shaded`) and only then
+//     does the excursion step at the fine stride, which is what resolves the cloud and its interior
+//     holes. A false positive therefore costs `emptyBeforeCoarse` coarse strides of GROUND for
+//     `emptyBeforeCoarse + 1` samples instead of standing still.
 struct CloudMarchState
 {
     float T;        // distance along the ray, world units
+    float Frontier; // furthest distance the FINE tier has sampled; the rewind never goes behind it
     int   EmptyRun; // consecutive empty fine samples
     bool  Fine;     // false = coarse tier (cheap density only)
+    bool  Shaded;   // this fine excursion has found real density at least once
 };
 
 CloudMarchState CloudMarchBegin(float tEnter)
 {
     CloudMarchState s;
     s.T        = tEnter;
+    s.Frontier = tEnter;
     s.EmptyRun = 0;
     s.Fine     = false;
+    s.Shaded   = false;
     return s;
 }
 
@@ -275,19 +385,22 @@ CloudMarchState CloudMarchAdvance(CloudMarchState s, bool occupied, float tEnter
 {
     // Named `stride`, not `step`: GLSL has a built-in step() and a local of that name would hide it.
     float stride = CloudStepLength(s.T, minStep, maxStep, growth);
+    float coarse = stride * max(coarseMultiplier, 1.0f);
 
     CloudMarchState next;
     next.T        = s.T;
+    next.Frontier = s.Fine ? max(s.Frontier, s.T) : s.Frontier;
     next.EmptyRun = 0;
     next.Fine     = s.Fine;
+    next.Shaded   = s.Shaded;
 
     if (!s.Fine)
     {
-        float coarse = stride * max(coarseMultiplier, 1.0f);
         if (occupied)
         {
-            next.T    = max(tEnter, s.T - coarse);
-            next.Fine = true;
+            next.T      = max(max(tEnter, s.T - coarse), next.Frontier);
+            next.Fine   = true;
+            next.Shaded = false;
         }
         else
         {
@@ -296,12 +409,23 @@ CloudMarchState CloudMarchAdvance(CloudMarchState s, bool occupied, float tEnter
         return next;
     }
 
+    if (occupied && !s.Shaded)
+    {
+        // Found while searching at the coarse rate: the leading edge lies within one coarse stride
+        // behind this sample. Rewind to it — once, which `Shaded` guarantees — and resolve from there.
+        next.T      = max(max(tEnter, s.T - coarse), s.Frontier);
+        next.Shaded = true;
+        return next;
+    }
+
     int  run  = occupied ? 0 : (s.EmptyRun + 1);
     bool fine = run < max(emptyBeforeCoarse, 1);
 
-    next.T        = s.T + stride;
+    // A searching excursion advances at the coarse rate; a resolving one at the fine stride.
+    next.T        = s.T + (s.Shaded ? stride : coarse);
     next.EmptyRun = fine ? run : 0;
     next.Fine     = fine;
+    next.Shaded   = fine ? s.Shaded : false;
     return next;
 }
 
@@ -482,6 +606,72 @@ float CloudMultiScatterOpticalDepth(float opticalDepthToSun, float profile, floa
            (CloudMultiScatterExtinction(profile, cosTheta) / CLOUD_MS_EXTINCTION_SURFACE);
 }
 
+// ---- Transmittance at depth ------------------------------------------------------------------------
+
+// The MEAN COSINE of a cloud droplet's phase function at visible wavelengths. Mie scattering off a
+// typical cumulus size distribution gives g ~ 0.85, and that is a property of water droplets rather than
+// a rendering choice: it is what decides how far light diffuses into a cloud, whatever two-lobe fit the
+// phase functions above use to draw the single-scattering lobes. Named here so the diffusion coefficient
+// below is a measured quantity and not a curve somebody liked.
+const float CLOUD_DROPLET_ASYMMETRY = 0.85f;
+
+// Beer's law is the WRONG SHAPE deep inside a cloud, and the octave chain inherits its shape.
+//
+// The chain (below) attenuates octave i with exp(-tau * a^i). Every term is an exponential, so the whole
+// estimate has an exponential floor: at the shipped three octaves and 0.5 falloff, an optical depth of
+// 50 toward the sun leaves 0.25 * exp(-12.5) = 9e-7 of the sun's light — that is what renders a
+// cumulonimbus interior as a hole rather than as the luminous mass of Nubis3 pp. 137/142. Deck p.136 is
+// the same observation from the authoring side: it drives the effective extinction of the
+// multiple-scattering term from 0.25 at the surface down to 0.05 in the core, and CloudMultiScatterExtinction
+// above ports that. But a fifth of an exponential is still an exponential, and 0.05 * 50 = 2.5 nepers is
+// still a factor of twelve.
+//
+// A STRONGLY SCATTERING SLAB DOES NOT DECAY EXPONENTIALLY. For a conservatively scattering medium the
+// diffusion approximation gives a transmittance that falls ALGEBRAICALLY with thickness,
+//
+//     T(tau) = 1 / (1 + (3/4) * (1 - g) * tau)
+//
+// (the classical two-stream / similarity result: the (1 - g) factor is the reduction to an equivalent
+// isotropic medium, and the 3/4 is the diffusion constant). At g = 0.85 and tau = 50 that is 0.15 —
+// five orders of magnitude above what the chain gives, and it is the difference between a core that
+// glows and a core that is a silhouette.
+//
+// The two descriptions own different regimes and the join is where the beam stops being a beam: Beer's
+// law is exact for the UNSCATTERED beam, and by definition the first scattering event happens at one
+// optical depth. Below one mean free path the answer is unchanged, bit for bit, so every thin cloud,
+// every rim and every edge in every scene renders exactly as it did. Above it, the tail is the diffusion
+// shape, anchored to Beer's own value at the join so the function is continuous:
+//
+//     T(tau) = exp(-tau)                                        tau <= 1
+//            = exp(-1) * (1 + k) / (1 + k * tau)                tau >  1,  k = (3/4)(1 - g)
+//
+// WHAT THIS DOES NOT REACH, stated because a measured shortfall is worth more than a claim. Anchoring
+// the tail to Beer at the join costs the amplitude: the chain's normalised transmittance comes out at
+// about 0.6 of the diffusion asymptote over tau 50-100 rather than at it. Closing that last factor would
+// mean re-deriving the octave weights themselves, which is a bigger change than this one and would move
+// every preset. What it does deliver is the SHAPE — algebraic, not exponential — which is worth 1e5 at
+// tau 50, and the tests pin both the shape and the shortfall so neither can drift quietly.
+const float CLOUD_DIFFUSION_JOIN_TAU = 1.0f;
+
+float CloudThickTransmittance(float opticalDepth)
+{
+    float tau = max(opticalDepth, 0.0f);
+    if (tau <= CLOUD_DIFFUSION_JOIN_TAU)
+        return exp(-tau);
+
+    float k = 0.75f * (1.0f - CLOUD_DROPLET_ASYMMETRY);
+    float a = exp(-CLOUD_DIFFUSION_JOIN_TAU) * (1.0f + k * CLOUD_DIFFUSION_JOIN_TAU);
+    return a / (1.0f + k * tau);
+}
+
+// Per channel, because ExtinctionTint is per channel and the optical depth each channel sees is its own.
+vec3 CloudThickTransmittance3(float opticalDepth, vec3 extinctionTint)
+{
+    return vec3(CloudThickTransmittance(opticalDepth * extinctionTint.x),
+                CloudThickTransmittance(opticalDepth * extinctionTint.y),
+                CloudThickTransmittance(opticalDepth * extinctionTint.z));
+}
+
 // Multiple scattering, approximated by N octaves with geometric falloff (Wrenninge et al. / Schneider).
 // Octave i attenuates with extinction^(a^i), contributes scatter^(b^i) and flattens its phase by c^i.
 // It costs arithmetic, not samples: the optical depth is the one already marched toward the sun, so a
@@ -502,7 +692,9 @@ vec3 CloudMultiScatter(float opticalDepthToSun, vec3 extinctionTint, float cosTh
     for (int i = 0; i < octaveCount; ++i)
     {
         float phase = CloudDualLobePhase(cosTheta, forwardG * phaseMul, backwardG * phaseMul, blend, silver);
-        vec3  beer  = exp(-max(opticalDepthToSun * extinctionMul, 0.0f) * extinctionTint);
+        // Not exp(): see CloudThickTransmittance. Identical to exp() for every octave whose own optical
+        // depth is under one mean free path, which is every octave of every thin cloud in every scene.
+        vec3 beer = CloudThickTransmittance3(max(opticalDepthToSun * extinctionMul, 0.0f), extinctionTint);
         total = total + beer * (scatterMul * phase);
         extinctionMul *= extinctionFalloff;
         scatterMul *= scatterFalloff;
@@ -562,6 +754,55 @@ vec3 CloudConeSampleOffset(vec3 sunDir, int i, int count, float marchDistance, f
     float radius = r * clamp(spread, 0.0f, 1.0f) * sqrt(t);
 
     return sunDir * r + (tangentX * cos(angle) + tangentY * sin(angle)) * radius;
+}
+
+// ---- Closing out a ray that ran out of budget ------------------------------------------------------
+
+// What a ray has when MaxSteps runs out before it left the shell or went opaque, and what to do with it.
+//
+// The old answer was to DELETE the difference: transmittance was pushed back toward 1 and the
+// accumulated radiance scaled down by the square of the untravelled fraction. That is the wrong sign in
+// both terms — a ray that ran out of budget has integrated too LITTLE cloud, not too much — and because
+// the fraction is a function of where the budget happened to run out, two neighbouring pixels that
+// exhausted at different places got visibly different answers. On Clouds_UEShowcase it read as dark
+// vertical drips hanging under every tall mass and as a sky far emptier than the density field.
+//
+// What replaces it is the cheapest honest statement available: the part of the shell that was NOT
+// marched looks, on average, like the part that WAS. The ray already knows its own mean extinction —
+// the density-length it accumulated over the distance it covered — and its own mean radiance per unit
+// of opacity, which is the premultiplied `scattered` divided by the opacity it has so far. One analytic
+// Beer step over the remaining distance closes the ray out with both.
+//
+// ENERGY BOUND, which is what the test pins: the tail adds at most `transmittance * meanRadiance`, so
+// the closure can never brighten a ray beyond the radiance it measured, and transmittance only falls.
+struct CloudRayTail
+{
+    vec3  Scattered;
+    float Transmittance;
+};
+
+CloudRayTail CloudCloseExhaustedRay(vec3 scattered, float transmittance, float densityLength,
+                                    float marchedDistance, float remainingDistance, float sigmaScale)
+{
+    CloudRayTail tail;
+    tail.Scattered     = scattered;
+    tail.Transmittance = transmittance;
+
+    if (remainingDistance <= 0.0f || marchedDistance <= 0.0f)
+        return tail;
+
+    float meanDensity = max(densityLength, 0.0f) / marchedDistance;
+    float tauTail     = meanDensity * max(sigmaScale, 0.0f) * remainingDistance;
+    float tailTrans   = CloudBeerTransmittance(tauTail);
+
+    // Premultiplied radiance over the opacity that produced it: the mean radiance the ray has seen. A
+    // ray with no opacity yet has no estimate and the max() leaves it alone rather than dividing by zero.
+    float opacity = 1.0f - clamp(transmittance, 0.0f, 1.0f);
+    vec3  mean    = opacity > 1e-4f ? scattered * (1.0f / opacity) : vec3(0.0f, 0.0f, 0.0f);
+
+    tail.Scattered     = scattered + mean * (clamp(transmittance, 0.0f, 1.0f) * (1.0f - tailTrans));
+    tail.Transmittance = clamp(transmittance, 0.0f, 1.0f) * tailTrans;
+    return tail;
 }
 
 // ---- Ambient ---------------------------------------------------------------------------------------

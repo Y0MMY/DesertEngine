@@ -2,6 +2,7 @@
 
 #include <Engine/Graphic/Clouds/CloudNoiseRules.hpp>
 #include <Engine/Graphic/Clouds/CloudNoiseVolumes.hpp>
+#include <Engine/Graphic/Clouds/CloudWeatherScale.hpp>
 #include <Engine/Graphic/FallbackTextures.hpp>
 #include <Engine/Graphic/RenderGraphSort.hpp>
 #include <Engine/Graphic/SkyPayload.hpp>
@@ -481,6 +482,25 @@ namespace Desert::Graphic::System
     void VolumetricCloudRenderer::DispatchWeather()
     {
         DESERT_PROFILE_SCOPE( "Clouds: WeatherMap" );
+
+        // The one place that knows both the tile and the layer, and the only moment worth saying it: the
+        // map is re-baked when a Weather field changes, not per frame. A tile far from the one the
+        // layer's altitude asks for is not a resource failure and must not be silently corrected — it is
+        // a sky that will read as a dense horizon band under empty blue, and the artist gets the numbers
+        // and the value that fixes it rather than a mystery. See CloudWeatherScale.hpp.
+        if ( !CloudWeatherTileIsPlausible( m_Data.WeatherTileSize, m_Data.LayerBottomAltitude,
+                                           m_Data.LayerThickness ) )
+        {
+            const float wanted = CloudAutoWeatherTileSize( m_Data.LayerBottomAltitude, m_Data.LayerThickness );
+            LOG_WARN( "[Clouds] Weather Tile Size {:.1f} km over a layer at {:.2f}-{:.2f} km: a ground "
+                      "camera sees {:.1f} coverage cells across the sky above 20 degrees, not {:.1f}. "
+                      "The layer's altitude asks for {:.1f} km.",
+                      Common::Units::ToMetres( m_Data.WeatherTileSize ) / 1000.0f,
+                      Common::Units::ToMetres( m_Data.LayerBottomAltitude ) / 1000.0f,
+                      Common::Units::ToMetres( m_Data.LayerBottomAltitude + m_Data.LayerThickness ) / 1000.0f,
+                      kCloudWeatherCellsOverhead * wanted / m_Data.WeatherTileSize, kCloudWeatherCellsOverhead,
+                      Common::Units::ToMetres( wanted ) / 1000.0f );
+        }
 
         auto& renderer = Renderer::GetInstance();
 
