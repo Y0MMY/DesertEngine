@@ -147,6 +147,11 @@ layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
     int   u_AutoDistanceFade;
     float u_CloudShadowExtent;
     int   u_CloudShadowEnabled;
+
+    // How far the profile map's Min/Max Height channels may move a cell's own base and ceiling off the
+    // whole layer. 0 is the layer itself, which is the field this engine had before per-cell bands
+    // existed. Appended to match CloudGpuPayload, whose offsets are static_asserted against this order.
+    float u_CloudHeightVariance;
 };
 
 // The wind the CLOUDS drift with: the scene's single shared wind, scaled by the layer's own influence

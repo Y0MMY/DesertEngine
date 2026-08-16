@@ -18,13 +18,16 @@
 #include "CloudGeometryReference.hpp"
 
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
 #include <Engine/Graphic/CloudQuality.hpp>
 
 #include <gtest/gtest.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <vector>
 
@@ -1376,9 +1379,11 @@ TEST( CloudShadowReadout, AnEmptyColumnShadowsNothingAtAnyHeight )
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
     // std430 rounds the block up to its 16-byte alignment; the buffer must cover that, not sizeof.
-    // 508 and not 500 since Ambient Occlusion and Auto Distance Fade landed — the occlusion strength the
-    // march scales the sky term by, and the flag that says the fade ranges come from the layer geometry.
-    EXPECT_EQ( sizeof( CloudGpuPayload ), 508u );
+    // 512 and not 508 since Cloud Height Variance landed — how far the profile map's Min/Max Height
+    // channels may move a cell's own base and ceiling off the layer. The block now happens to land on
+    // its own alignment, so the two numbers below are equal; that is a coincidence of this field count,
+    // not a rule, and the >= and %16 assertions below are what actually has to hold.
+    EXPECT_EQ( sizeof( CloudGpuPayload ), 512u );
     EXPECT_EQ( kCloudPayloadBytes, 512u );
     EXPECT_GE( kCloudPayloadBytes, sizeof( CloudGpuPayload ) );
     EXPECT_EQ( kCloudPayloadBytes % 16u, 0u );
@@ -1508,6 +1513,307 @@ TEST( CloudResolution, EachTierScalesTheTargetAndNeverProducesAZeroExtent )
     // takes the whole pass down with it.
     EXPECT_EQ( CloudScaledExtent( 1u, CloudResolutionScale::Quarter ), 1u );
     EXPECT_EQ( CloudScaledExtent( 0u, CloudResolutionScale::Half ), 1u );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The Cloud Type axis: authored profile curves and per-cell vertical bands.
+//
+// Every assertion here is a RELATION between two things that must agree and that are individually
+// correct either way: the table's baseline rows against the trapezoids they replaced, a profile's
+// support against the band it was told to live in, and the "off" end of each new knob against the field
+// the engine had before the knob existed. None of these has a symptom when it goes wrong — a profile
+// evaluated in the wrong band renders a sky, just not the authored one.
+// ---------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // The shader's own fetch, on the CPU: bilinear over the baked table with the SAME coordinate
+    // convention Common/CloudProfile.glslh gives the GPU. Texel centres map back to
+    // `uv * size - 0.5`, so a lookup coordinate from CloudProfileLutCoord lands on exactly the tap the
+    // builder wrote. Written here and not in the engine because only a test needs it.
+    glm::vec3 FetchProfileLut( const std::vector<unsigned char>& lut, glm::vec2 uv )
+    {
+        const glm::vec2 size( static_cast<float>( Desert::Graphic::kCloudProfileLutWidth ),
+                              static_cast<float>( Desert::Graphic::kCloudProfileLutTypes ) );
+        const float     x  = uv.x * size.x - 0.5f;
+        const float     y  = uv.y * size.y - 0.5f;
+        const int       x0 = static_cast<int>( std::floor( x ) );
+        const int       y0 = static_cast<int>( std::floor( y ) );
+        const float     fx = x - static_cast<float>( x0 );
+        const float     fy = y - static_cast<float>( y0 );
+
+        const auto texel = [&lut]( int tx, int ty, int channel )
+        {
+            const int cx = std::clamp( tx, 0, static_cast<int>( Desert::Graphic::kCloudProfileLutWidth ) - 1 );
+            const int cy = std::clamp( ty, 0, static_cast<int>( Desert::Graphic::kCloudProfileLutTypes ) - 1 );
+            const std::size_t at =
+                 ( static_cast<std::size_t>( cy ) * Desert::Graphic::kCloudProfileLutWidth + cx ) * 4u;
+            return static_cast<float>( lut[at + static_cast<std::size_t>( channel )] ) / 255.0f;
+        };
+
+        glm::vec3 out( 0.0f );
+        for ( int c = 0; c < 3; ++c )
+        {
+            const float a = glm::mix( texel( x0, y0, c ), texel( x0 + 1, y0, c ), fx );
+            const float b = glm::mix( texel( x0, y0 + 1, c ), texel( x0 + 1, y0 + 1, c ), fx );
+            out[c]        = glm::mix( a, b, fy );
+        }
+        return out;
+    }
+
+    // The whole profile path, end to end: layer height in, density multiplier out.
+    float ProfileAt( const std::vector<unsigned char>& lut, float heightFraction, float cloudType, glm::vec2 band,
+                     float basePower, float topPower )
+    {
+        const float cellHeight = R::CloudProfileCellHeight( heightFraction, band );
+        if ( cellHeight < 0.0f || cellHeight > 1.0f )
+            return 0.0f;
+
+        const glm::vec2 size( static_cast<float>( Desert::Graphic::kCloudProfileLutWidth ),
+                              static_cast<float>( Desert::Graphic::kCloudProfileLutTypes ) );
+        const glm::vec3 texel = FetchProfileLut( lut, R::CloudProfileLutCoord( cellHeight, cloudType, size ) );
+        return R::CloudProfileCompose( texel, basePower, topPower );
+    }
+
+    // Cloud Type of the row an anchor sits on: rows are evenly spaced over [0, 1].
+    float TypeOfRow( Desert::Graphic::CloudProfileForm form )
+    {
+        return static_cast<float>( form ) / static_cast<float>( Desert::Graphic::kCloudProfileLutTypes - 1u );
+    }
+} // namespace
+
+// THE STRICT-SUBSET PROPERTY. The three rows that carry the component's own trapezoids reproduce, to
+// within 8-bit quantisation and the table's tap spacing, exactly the profile the three-way blend
+// computed before the table existed. This is what makes the new axis a WIDENING of the old knob rather
+// than a retuning of it, and it is the single assertion that lets an already-authored scene be trusted.
+TEST( CloudProfileTable, BaselineRowsReproduceTheTrapezoidsTheyReplaced )
+{
+    using Desert::Graphic::CloudProfileForm;
+
+    const Desert::ECS::VolumetricCloudData data{};
+    const std::vector<unsigned char>       lut = Desert::Graphic::BuildCloudProfileLut( data );
+
+    const struct
+    {
+        CloudProfileForm Form;
+        glm::vec4        Gradient;
+        const char*      Name;
+    } rows[] = {
+         { CloudProfileForm::Stratus, data.StratusGradient, "Stratus" },
+         { CloudProfileForm::Stratocumulus, data.StratocumulusGradient, "Stratocumulus" },
+         { CloudProfileForm::Cumulus, data.CumulusGradient, "Cumulus" },
+    };
+
+    for ( const auto& row : rows )
+    {
+        for ( int i = 0; i <= 200; ++i )
+        {
+            const float h = static_cast<float>( i ) / 200.0f;
+
+            // The formula CloudDensityProcedural.glslh evaluated before this change, verbatim.
+            const float baseIn = R::CloudRemapRange( h, row.Gradient.x, row.Gradient.y, 0.0f, 1.0f );
+            const float topOut = R::CloudRemapRange( h, row.Gradient.z, row.Gradient.w, 1.0f, 0.0f );
+            const float want =
+                 std::pow( baseIn, data.BaseGradientPower ) * std::pow( topOut, data.TopGradientPower );
+
+            const float got = ProfileAt( lut, h, TypeOfRow( row.Form ), glm::vec2( 0.0f, 1.0f ),
+                                         data.BaseGradientPower, data.TopGradientPower );
+
+            EXPECT_NEAR( got, want, 0.03f ) << row.Name << " at height " << h;
+        }
+    }
+}
+
+// The new rows are not the old ones wearing a different name. A form that a trapezoid pair CAN express
+// is a monotone rise times a monotone fall, so its profile has exactly one maximum and never rises
+// again after falling; the anvil's whole point is that it does.
+TEST( CloudProfileTable, TheAnvilRowIsNotReachableByAnyTrapezoidPair )
+{
+    const Desert::ECS::VolumetricCloudData data{};
+    const std::vector<unsigned char>       lut  = Desert::Graphic::BuildCloudProfileLut( data );
+    const float                            type = TypeOfRow( Desert::Graphic::CloudProfileForm::Anvil );
+
+    std::vector<float> profile;
+    for ( int i = 0; i <= 100; ++i )
+    {
+        const float h = static_cast<float>( i ) / 100.0f;
+        profile.push_back(
+             ProfileAt( lut, h, type, glm::vec2( 0.0f, 1.0f ), data.BaseGradientPower, data.TopGradientPower ) );
+    }
+
+    // Walk the curve and count the times it turns around by more than the quantisation noise. A
+    // trapezoid product turns at most once (up, then down); a waist under a flare turns three times.
+    int         turns     = 0;
+    int         direction = 0;
+    const float epsilon   = 0.02f;
+    for ( std::size_t i = 1; i < profile.size(); ++i )
+    {
+        const float delta = profile[i] - profile[i - 1];
+        if ( std::fabs( delta ) < epsilon )
+            continue;
+        const int now = delta > 0.0f ? 1 : -1;
+        if ( direction != 0 && now != direction )
+            ++turns;
+        direction = now;
+    }
+
+    EXPECT_GE( turns, 2 ) << "the anvil profile rises, falls and rises again — a trapezoid pair cannot";
+}
+
+// A profile is a density multiplier. Above 1 it would brighten a cloud past the coverage that placed
+// it; below 0 it would subtract cloud from the sky.
+TEST( CloudProfileTable, EveryProfileIsBoundedByZeroAndOne )
+{
+    const Desert::ECS::VolumetricCloudData data{};
+    const std::vector<unsigned char>       lut = Desert::Graphic::BuildCloudProfileLut( data );
+
+    for ( int t = 0; t <= 40; ++t )
+    {
+        const float type = static_cast<float>( t ) / 40.0f;
+        for ( int i = 0; i <= 100; ++i )
+        {
+            const float h = static_cast<float>( i ) / 100.0f;
+            const float p =
+                 ProfileAt( lut, h, type, glm::vec2( 0.0f, 1.0f ), data.BaseGradientPower, data.TopGradientPower );
+            EXPECT_GE( p, 0.0f ) << "type " << type << " height " << h;
+            EXPECT_LE( p, 1.0f ) << "type " << type << " height " << h;
+        }
+    }
+}
+
+// A cell's cloud lives between the cell's own base and its own ceiling, and nowhere else. Without this
+// the per-cell band is decoration: the profile would still be evaluated across the whole layer and
+// every cloud would still start and stop at the same two altitudes.
+TEST( CloudProfileTable, ASupportLiesInsideTheCellsOwnBand )
+{
+    const Desert::ECS::VolumetricCloudData data{};
+    const std::vector<unsigned char>       lut = Desert::Graphic::BuildCloudProfileLut( data );
+
+    const glm::vec2 bands[] = {
+         glm::vec2( 0.0f, 1.0f ),
+         glm::vec2( 0.10f, 0.45f ),
+         glm::vec2( 0.55f, 0.95f ),
+         glm::vec2( 0.30f, 0.70f ),
+    };
+
+    for ( const glm::vec2& band : bands )
+    {
+        for ( int t = 0; t <= 10; ++t )
+        {
+            const float type = static_cast<float>( t ) / 10.0f;
+            for ( int i = 0; i <= 200; ++i )
+            {
+                const float h = static_cast<float>( i ) / 200.0f;
+                if ( h >= band.x && h <= band.y )
+                    continue;
+                EXPECT_FLOAT_EQ( ProfileAt( lut, h, type, band, data.BaseGradientPower, data.TopGradientPower ),
+                                 0.0f )
+                     << "band [" << band.x << ", " << band.y << "] leaked at height " << h;
+            }
+        }
+    }
+}
+
+// Two cells at different altitudes are two clouds, one above the other — not one cloud smeared over
+// both. This is the pp. 126/150 signature the audit named, and it is the reason the map grew channels.
+TEST( CloudProfileTable, CellsAtDifferentAltitudesHaveDisjointSupports )
+{
+    const Desert::ECS::VolumetricCloudData data{};
+    const std::vector<unsigned char>       lut = Desert::Graphic::BuildCloudProfileLut( data );
+
+    const glm::vec2 low( 0.05f, 0.40f );
+    const glm::vec2 high( 0.60f, 0.95f );
+    const float     type = TypeOfRow( Desert::Graphic::CloudProfileForm::Cumulus );
+
+    bool lowHasBody  = false;
+    bool highHasBody = false;
+
+    for ( int i = 0; i <= 200; ++i )
+    {
+        const float h    = static_cast<float>( i ) / 200.0f;
+        const float pLow = ProfileAt( lut, h, type, low, data.BaseGradientPower, data.TopGradientPower );
+        const float pTop = ProfileAt( lut, h, type, high, data.BaseGradientPower, data.TopGradientPower );
+
+        lowHasBody  = lowHasBody || pLow > 0.5f;
+        highHasBody = highHasBody || pTop > 0.5f;
+
+        // Disjoint: no height carries body for both. The bands do not overlap, so nothing may.
+        EXPECT_FALSE( pLow > 0.0f && pTop > 0.0f ) << "both cells have cloud at height " << h;
+    }
+
+    EXPECT_TRUE( lowHasBody ) << "the low cell has no cloud at all";
+    EXPECT_TRUE( highHasBody ) << "the high cell has no cloud at all";
+}
+
+// The "off" end of each new knob is the engine that existed before it. Not approximately — the whole
+// point of defaulting a serialized field is that a scene authored before it loads unchanged.
+TEST( CloudProfileTable, TheOffEndOfEachNewKnobIsThePreviousBehaviour )
+{
+    // Height Variance 0: every cell owns the whole layer, whatever the map says.
+    const float ndfs[][2] = { { 0.0f, 1.0f }, { 0.25f, 0.60f }, { 0.48f, 0.52f }, { 0.9f, 0.1f } };
+    for ( const auto& ndf : ndfs )
+    {
+        const glm::vec2 band = R::CloudProfileCellBand( ndf[0], ndf[1], 0.0f );
+        EXPECT_FLOAT_EQ( band.x, 0.0f );
+        EXPECT_FLOAT_EQ( band.y, 1.0f );
+    }
+
+    // Type Variance 0: one uniform type over the whole sky, whatever the noise field says.
+    for ( int i = 0; i <= 20; ++i )
+    {
+        const float noise = static_cast<float>( i ) / 20.0f;
+        EXPECT_FLOAT_EQ( R::CloudProfileTypeAt( 0.6f, noise, 0.0f ), 0.6f );
+        EXPECT_FLOAT_EQ( R::CloudProfileTypeAt( 0.0f, noise, 0.0f ), 0.0f );
+    }
+
+    // And a non-zero variance stays inside the axis: a type outside [0, 1] would index off the table.
+    for ( int i = 0; i <= 20; ++i )
+    {
+        const float noise = static_cast<float>( i ) / 20.0f;
+        const float type  = R::CloudProfileTypeAt( 0.5f, noise, 1.0f );
+        EXPECT_GE( type, 0.0f );
+        EXPECT_LE( type, 1.0f );
+    }
+}
+
+// The band the weather pass writes is ordered by construction, and a degenerate one still divides.
+TEST( CloudProfileTable, TheWrittenBandIsOrderedAndNeverZeroWidth )
+{
+    for ( int c = 0; c <= 20; ++c )
+    {
+        for ( int w = 0; w <= 20; ++w )
+        {
+            const glm::vec2 ndf =
+                 R::CloudProfileHeightNdf( static_cast<float>( c ) / 20.0f, static_cast<float>( w ) / 20.0f );
+            EXPECT_LE( ndf.x, ndf.y );
+            EXPECT_GE( ndf.x, 0.0f );
+            EXPECT_LE( ndf.y, 1.0f );
+
+            for ( int a = 0; a <= 4; ++a )
+            {
+                const glm::vec2 band = R::CloudProfileCellBand( ndf.x, ndf.y, static_cast<float>( a ) / 4.0f );
+                EXPECT_GT( band.y, band.x );
+            }
+        }
+    }
+
+    // Even a map whose two channels arrived the wrong way round — an artist can seed one — must not
+    // hand the march a zero or negative width to divide by.
+    const glm::vec2 inverted = R::CloudProfileCellBand( 0.9f, 0.1f, 1.0f );
+    EXPECT_GT( inverted.y, inverted.x );
+}
+
+// The table's dimensions are the shader's only source of truth for the type axis, because the shader
+// reads them with textureSize(). This pins the bytes the CPU actually uploads.
+TEST( CloudProfileTable, TheBakedTableHasTheDimensionsTheShaderWillRead )
+{
+    const Desert::ECS::VolumetricCloudData data{};
+    const std::vector<unsigned char>       lut = Desert::Graphic::BuildCloudProfileLut( data );
+
+    EXPECT_EQ( lut.size(), static_cast<std::size_t>( Desert::Graphic::kCloudProfileLutWidth ) *
+                                Desert::Graphic::kCloudProfileLutTypes * 4u );
+    EXPECT_EQ( Desert::Graphic::kCloudProfileLutTypes, 6u )
+         << "six authored forms: scud, shelf, stratocumulus, cumulus, congestus, anvil";
 }
 
 int main( int argc, char** argv )

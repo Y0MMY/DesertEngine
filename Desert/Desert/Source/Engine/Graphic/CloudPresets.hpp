@@ -12,7 +12,7 @@ namespace Desert::Graphic
     //
     // The table holds values rather than the apply-functions the particle presets use
     // (ParticleEditorPanel.cpp) for one reason worth the extra type: CloudPresetValues carries EXACTLY
-    // the 79 look fields and none of the 13 quality knobs, so a preset cannot reach a performance
+    // the 86 look fields and none of the 13 quality knobs, so a preset cannot reach a performance
     // setting - not by convention, by type. That is what stops "Storm" from silently halving the frame
     // rate the way the reference implementation's combined preset/quality block did.
     //
@@ -45,6 +45,7 @@ namespace Desert::Graphic
     X( float, WeatherWarpStrength )                                                                               \
     X( float, CloudType )                                                                                         \
     X( float, CloudTypeVariance )                                                                                 \
+    X( float, CloudHeightVariance )                                                                               \
     X( float, AnvilBias )                                                                                         \
     X( float, Wetness )                                                                                           \
     X( float, ShapeTileSize )                                                                                     \
@@ -55,6 +56,12 @@ namespace Desert::Graphic
     X( glm::vec4, StratusGradient )                                                                               \
     X( glm::vec4, StratocumulusGradient )                                                                         \
     X( glm::vec4, CumulusGradient )                                                                               \
+    X( glm::vec4, ShelfGradient )                                                                                 \
+    X( glm::vec3, ShelfProfileForm )                                                                              \
+    X( glm::vec4, CongestusGradient )                                                                             \
+    X( glm::vec3, CongestusProfileForm )                                                                          \
+    X( glm::vec4, AnvilGradient )                                                                                 \
+    X( glm::vec3, AnvilProfileForm )                                                                              \
     X( float, BaseGradientPower )                                                                                 \
     X( float, TopGradientPower )                                                                                  \
     X( float, DensityHeightBias )                                                                                 \
@@ -113,7 +120,7 @@ namespace Desert::Graphic
     X( float, WindHeightShear )                                                                                   \
     X( float, WindUpliftSpeed )
 
-    // The 78 fields a weather preset drives. Deliberately NOT the component: the quality group is
+    // The 86 fields a weather preset drives. Deliberately NOT the component: the quality group is
     // unreachable from here.
     struct CloudPresetValues
     {
@@ -148,6 +155,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.35f,
                 .CloudType                     = 0.75f,
                 .CloudTypeVariance             = 0.25f,
+                .CloudHeightVariance           = 0.45f,
                 .AnvilBias                     = 0.00f,
                 .Wetness                       = 0.00f,
                 .ShapeTileSize                 = Common::Units::Metres( 35000.0f ),
@@ -158,6 +166,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.08f, 0.20f, 0.32f },
                 .StratocumulusGradient         = { 0.0f, 0.18f, 0.55f, 0.78f },
                 .CumulusGradient               = { 0.0f, 0.22f, 0.68f, 0.92f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 1.50f,
                 .DensityHeightBias             = 0.50f,
@@ -230,6 +244,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.40f,
                 .CloudType                     = 0.70f,
                 .CloudTypeVariance             = 0.35f,
+                .CloudHeightVariance           = 0.55f,
                 .AnvilBias                     = 0.00f,
                 .Wetness                       = 0.05f,
                 .ShapeTileSize                 = Common::Units::Metres( 35000.0f ),
@@ -240,6 +255,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.08f, 0.20f, 0.32f },
                 .StratocumulusGradient         = { 0.0f, 0.18f, 0.55f, 0.78f },
                 .CumulusGradient               = { 0.0f, 0.22f, 0.68f, 0.92f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 1.50f,
                 .DensityHeightBias             = 0.60f,
@@ -312,6 +333,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.45f,
                 .CloudType                     = 0.60f,
                 .CloudTypeVariance             = 0.45f,
+                .CloudHeightVariance           = 0.55f,
                 .AnvilBias                     = 0.10f,
                 .Wetness                       = 0.15f,
                 .ShapeTileSize                 = Common::Units::Metres( 35000.0f ),
@@ -322,6 +344,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.08f, 0.20f, 0.32f },
                 .StratocumulusGradient         = { 0.0f, 0.18f, 0.55f, 0.78f },
                 .CumulusGradient               = { 0.0f, 0.22f, 0.68f, 0.92f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 1.50f,
                 .DensityHeightBias             = 0.70f,
@@ -394,6 +422,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.45f,
                 .CloudType                     = 0.80f,
                 .CloudTypeVariance             = 0.55f,
+                .CloudHeightVariance           = 0.65f,
                 .AnvilBias                     = 0.05f,
                 .Wetness                       = 0.10f,
                 .ShapeTileSize                 = Common::Units::Metres( 35000.0f ),
@@ -404,6 +433,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.08f, 0.20f, 0.32f },
                 .StratocumulusGradient         = { 0.0f, 0.18f, 0.55f, 0.78f },
                 .CumulusGradient               = { 0.0f, 0.22f, 0.68f, 0.92f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 3.20f,
                 .TopGradientPower              = 1.20f,
                 .DensityHeightBias             = 0.85f,
@@ -476,6 +511,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.20f,
                 .CloudType                     = 0.05f,
                 .CloudTypeVariance             = 0.10f,
+                .CloudHeightVariance           = 0.05f,
                 .AnvilBias                     = 0.00f,
                 .Wetness                       = 0.50f,
                 .ShapeTileSize                 = Common::Units::Metres( 60000.0f ),
@@ -486,6 +522,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.06f, 0.24f, 0.40f },
                 .StratocumulusGradient         = { 0.0f, 0.16f, 0.50f, 0.70f },
                 .CumulusGradient               = { 0.0f, 0.22f, 0.68f, 0.92f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 2.60f,
                 .TopGradientPower              = 1.80f,
                 .DensityHeightBias             = 0.20f,
@@ -558,6 +600,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.25f,
                 .CloudType                     = 0.25f,
                 .CloudTypeVariance             = 0.20f,
+                .CloudHeightVariance           = 0.10f,
                 .AnvilBias                     = 0.05f,
                 .Wetness                       = 0.60f,
                 .ShapeTileSize                 = Common::Units::Metres( 50000.0f ),
@@ -568,6 +611,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.08f, 0.22f, 0.36f },
                 .StratocumulusGradient         = { 0.0f, 0.18f, 0.58f, 0.82f },
                 .CumulusGradient               = { 0.0f, 0.22f, 0.70f, 0.94f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 2.30f,
                 .TopGradientPower              = 1.60f,
                 .DensityHeightBias             = 0.35f,
@@ -640,6 +689,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.60f,
                 .CloudType                     = 0.90f,
                 .CloudTypeVariance             = 0.50f,
+                .CloudHeightVariance           = 0.60f,
                 .AnvilBias                     = 0.75f,
                 .Wetness                       = 1.00f,
                 .ShapeTileSize                 = Common::Units::Metres( 30000.0f ),
@@ -650,6 +700,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.08f, 0.20f, 0.32f },
                 .StratocumulusGradient         = { 0.0f, 0.16f, 0.62f, 0.88f },
                 .CumulusGradient               = { 0.0f, 0.15f, 0.80f, 1.0f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 1.60f,
                 .TopGradientPower              = 1.10f,
                 .DensityHeightBias             = 1.10f,
@@ -722,6 +778,7 @@ namespace Desert::Graphic
                 .WeatherWarpStrength           = 0.50f,
                 .CloudType                     = 0.15f,
                 .CloudTypeVariance             = 0.30f,
+                .CloudHeightVariance           = 0.30f,
                 .AnvilBias                     = 0.00f,
                 .Wetness                       = 0.00f,
                 .ShapeTileSize                 = Common::Units::Metres( 70000.0f ),
@@ -732,6 +789,12 @@ namespace Desert::Graphic
                 .StratusGradient               = { 0.0f, 0.05f, 0.30f, 0.55f },
                 .StratocumulusGradient         = { 0.0f, 0.14f, 0.60f, 0.85f },
                 .CumulusGradient               = { 0.0f, 0.22f, 0.68f, 0.92f },
+                .ShelfGradient                 = { 0.02f, 0.05f, 0.44f, 0.52f },
+                .ShelfProfileForm              = { 0.28f, 0.30f, 0.35f },
+                .CongestusGradient             = { 0.00f, 0.45f, 0.70f, 1.00f },
+                .CongestusProfileForm          = { 0.62f, 0.42f, 1.20f },
+                .AnvilGradient                 = { 0.00f, 0.06f, 0.92f, 1.00f },
+                .AnvilProfileForm              = { 0.45f, 0.42f, -0.90f },
                 .BaseGradientPower             = 2.00f,
                 .TopGradientPower              = 2.20f,
                 .DensityHeightBias             = 0.20f,
@@ -814,7 +877,7 @@ namespace Desert::Graphic
         return values;
     }
 
-    // Overwrites the 79 look fields of @p data with the preset's. Pure: no logging, no GPU, no globals.
+    // Overwrites the 86 look fields of @p data with the preset's. Pure: no logging, no GPU, no globals.
     //
     // It deliberately does NOT write data.Preset. The caller records which preset it applied, which is
     // what keeps the contract "values in, values out" and keeps "applying a preset leaves everything

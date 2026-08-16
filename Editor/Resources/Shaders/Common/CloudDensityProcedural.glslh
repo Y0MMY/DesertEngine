@@ -16,11 +16,14 @@
 #define CLOUD_DENSITY_PROCEDURAL_GLSLH
 
 #include <Common/CloudDensity.glslh>
+#include <Common/CloudProfile.glslh>
 
 layout(binding = 3) uniform sampler3D u_ShapeNoise;
 layout(binding = 4) uniform sampler3D u_DetailNoise;
 layout(binding = 5) uniform sampler2D u_CurlNoise;
 layout(binding = 6) uniform sampler2D u_WeatherMap;
+layout(binding = 10) uniform sampler2D u_ProfileMap;
+layout(binding = 11) uniform sampler2D u_ProfileLut;
 
 // ---- Sampling coordinates --------------------------------------------------------------------------
 
@@ -80,29 +83,46 @@ vec3 CloudDetailSamplePos(vec3 worldPos, float heightFraction)
 
 // ---- The vertical envelope -------------------------------------------------------------------------
 
-// One cloud type's height profile. The four components of the gradient are the base-in start/end and the
-// top-out start/end, in normalized layer height; the two powers shape how flat the bottom and how round
-// the top of the cloud is. This is the envelope method of the Nubis slides, which is what a PROCEDURAL
-// profile has to be built from once there is no baked dimensional-profile channel to read.
-float CloudGradientProfile(float heightFraction, vec4 gradient)
+// The cloud's vertical profile at this place on the map, the deck's Vertical Profile Method (p. 19):
+// an AUTHORED curve chosen by the cell's type, evaluated between the cell's OWN base and ceiling.
+//
+// What this replaced, and why. The old form blended three fixed trapezoids by the type:
+//
+//     mix( pow(baseIn_s, P1) * pow(topOut_s, P2), ... , t )
+//
+// Every one of those is a monotone rise times a monotone fall, and a blend of three of them is still
+// bounded by the family. Dragging Cloud Type could move the four remap heights and nothing else, so the
+// only thing an artist ever saw was the SAME cloud, taller — the exact complaint this replaces. The
+// curves now come out of a table the CPU bakes from authored control values
+// (Engine/Graphic/Clouds/CloudProfileCurves.hpp), so a step along the type axis can pinch a waist into
+// a cloud, leave a stalk under a flaring head, or put a hard flat base under a lighter turret. Its
+// three legacy rows ARE the three trapezoids, so nothing the old knob could express was lost.
+//
+// And the profile is sampled between a per-cell Min/Max Height rather than across the whole layer, so
+// neighbouring cells sit in different vertical slabs: one cloud's base above its neighbour's top. That
+// is the pp. 126/150 signature, and one global slab cannot produce it at any setting.
+//
+// @param heightFraction  0 at the bottom of the LAYER, 1 at its top.
+// @param cloudType       the weather map's G channel.
+// @param band            this cell's own [base, ceiling], from CloudProfileCellBand.
+float CloudHeightGradient(float heightFraction, float cloudType, vec2 band)
 {
-    float baseIn = CloudRemapRange(heightFraction, gradient.x, gradient.y, 0.0f, 1.0f);
-    float topOut = CloudRemapRange(heightFraction, gradient.z, gradient.w, 1.0f, 0.0f);
-    return pow(baseIn, u_BaseGradientPower) * pow(topOut, u_TopGradientPower);
+    float cellHeight = CloudProfileCellHeight(heightFraction, band);
+    if (cellHeight < 0.0f || cellHeight > 1.0f)
+        return 0.0f;
+
+    vec2 lutSize = vec2(textureSize(u_ProfileLut, 0));
+    vec3 texel   = texture(u_ProfileLut, CloudProfileLutCoord(cellHeight, cloudType, lutSize)).rgb;
+    return CloudProfileCompose(texel, u_BaseGradientPower, u_TopGradientPower);
 }
 
-// Blend the three authored profiles by the cloud type of this place on the map: 0 = flat stratus,
-// 0.5 = stratocumulus, 1 = towering cumulus.
-float CloudHeightGradient(float heightFraction, float cloudType)
+// This cell's vertical band, from the profile map's two height channels and the authored amount. Same
+// tiling and same scroll as the weather map — they describe the same cell, and a cell whose coverage
+// and whose altitude came from two different places on the ground is two clouds, not one.
+vec2 CloudCellBand(vec3 worldPos)
 {
-    float stratus       = CloudGradientProfile(heightFraction, u_StratusGradient);
-    float stratocumulus = CloudGradientProfile(heightFraction, u_StratocumulusGradient);
-    float cumulus       = CloudGradientProfile(heightFraction, u_CumulusGradient);
-
-    float t = clamp(cloudType, 0.0f, 1.0f);
-    if (t < 0.5f)
-        return mix(stratus, stratocumulus, t * 2.0f);
-    return mix(stratocumulus, cumulus, (t - 0.5f) * 2.0f);
+    vec2 ndf = texture(u_ProfileMap, CloudWeatherUV(worldPos)).rg;
+    return CloudProfileCellBand(ndf.x, ndf.y, u_CloudHeightVariance);
 }
 
 // The anvil: near the top of the layer the coverage exponent is pulled below 1, which widens the cloud
@@ -128,13 +148,19 @@ float CloudPrecipitationAt(vec3 worldPos)
 // CloudDensitySample — which needs the same texel again for its density-scale channel — pays for one 2D
 // fetch instead of two. The fetch is not free at the rate this runs: once per fine sample plus once per
 // cone sample, so up to seven per shaded step.
-float CloudDensityCheapFrom(vec4 weather, vec3 worldPos, float heightFraction)
+float CloudDensityCheapFrom(vec4 weather, vec2 band, vec3 worldPos, float heightFraction)
 {
-    float coverage = CloudAnvilCoverage(weather.r, heightFraction);
+    // The anvil spreads at the top of a CLOUD, not at the top of the layer. Read at layer height it
+    // would never fire for a cell whose ceiling sits below 0.8 of the layer — most of them, once the
+    // bands vary — and would fire mid-body for a cell whose base sits high. At Cloud Height Variance 0
+    // the two heights are the same number, so this is not a change to any sky authored before bands.
+    float cellHeight = clamp(CloudProfileCellHeight(heightFraction, band), 0.0f, 1.0f);
+
+    float coverage = CloudAnvilCoverage(weather.r, cellHeight);
     if (coverage <= 0.0f)
         return 0.0f;
 
-    float gradient = CloudHeightGradient(heightFraction, weather.g);
+    float gradient = CloudHeightGradient(heightFraction, weather.g, band);
     if (gradient <= 0.0f)
         return 0.0f;
 
@@ -164,7 +190,17 @@ float CloudDensityCheapFrom(vec4 weather, vec3 worldPos, float heightFraction)
 
 float CloudDensityCheap(vec3 worldPos, float heightFraction)
 {
-    return CloudDensityCheapFrom(CloudSampleWeather(worldPos), worldPos, heightFraction);
+    vec4 weather = CloudSampleWeather(worldPos);
+
+    // Where there is no coverage there is no cloud, whatever the cell's band or its type says: the
+    // envelope is MULTIPLIED by coverage. Returning here is exactly what CloudDensityCheapFrom's own
+    // coverage test does one line later — the point of doing it before the call is the fetch it skips.
+    // This tier runs once per coarse step and up to LightMarchSamples times per shaded step, and most of
+    // those land in empty sky, so the profile map is only paid for where a cloud actually is.
+    if (weather.r <= 0.0f)
+        return 0.0f;
+
+    return CloudDensityCheapFrom(weather, CloudCellBand(worldPos), worldPos, heightFraction);
 }
 
 // Fine tier: everything above, plus the detail erosion, the curl warp, the high-frequency layer and the
@@ -174,11 +210,22 @@ float CloudDensityCheap(vec3 worldPos, float heightFraction)
 // than the CloudDensityCheap call this replaces.
 vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromCamera)
 {
-    vec4  weather = CloudSampleWeather(worldPos);
-    float profile = CloudDensityCheapFrom(weather, worldPos, heightFraction);
+    vec4 weather = CloudSampleWeather(worldPos);
+    if (weather.r <= 0.0f)
+        return vec2(0.0f, 0.0f);
+
+    vec2  band    = CloudCellBand(worldPos);
+    float profile = CloudDensityCheapFrom(weather, band, worldPos, heightFraction);
     float density = profile;
     if (density <= 0.0f)
         return vec2(0.0f, 0.0f);
+
+    // Everything below that asks "where in the cloud is this sample" asks the CELL, not the layer. A
+    // base, a growing top and a heavy core are properties of a cloud; once cells occupy different slabs
+    // of the layer, a term keyed to layer height gives a cell sitting in the lower third no top at all
+    // and a cell sitting in the upper third no base. At Cloud Height Variance 0 this is the same number
+    // as the layer height, so no sky authored before per-cell bands moves.
+    float cellHeight = clamp(CloudProfileCellHeight(heightFraction, band), 0.0f, 1.0f);
 
     // Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
     // without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
@@ -186,7 +233,7 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     vec3 curl = (texture(u_CurlNoise, vec2(worldPos.x, worldPos.z) / u_CurlTileSize).rgb - 0.5f) *
                 CLOUD_CURL_DECODE_SCALE;
     vec3 detailPos = CloudDetailSamplePos(worldPos, heightFraction) +
-                     curl * (u_CurlStrength * u_DetailTileSize * (1.0f - heightFraction));
+                     curl * (u_CurlStrength * u_DetailTileSize * (1.0f - cellHeight));
 
     vec4 detail = texture(u_DetailNoise, detailPos / u_DetailTileSize);
 
@@ -202,7 +249,7 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     // evaporation shreds the bases and edges into curls. The procedural proxy for "where is density
     // increasing" is HEIGHT: convection grows upward, entrainment eats the base. A constant bias gave
     // every altitude the same 50/50 blend, which is why the whole cloud rendered as uniform fibre.
-    float detailType     = clamp(u_DetailTypeBias + (heightFraction - 0.35f) * 0.9f, 0.0f, 1.0f);
+    float detailType     = clamp(u_DetailTypeBias + (cellHeight - 0.35f) * 0.9f, 0.0f, 1.0f);
     float noiseComposite = mix(wispy, billowy, detailType);
 
     // The extra close-range layer: ridged versions of the same two channels, faded out with distance
@@ -246,7 +293,7 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
 
     // Heavier tops. Centred on the middle of the layer so the bias redistributes density rather than
     // scaling the whole cloud, and clamped because the range reaches 2.
-    density *= max(1.0f + u_DensityHeightBias * (heightFraction - 0.5f), 0.0f);
+    density *= max(1.0f + u_DensityHeightBias * (cellHeight - 0.5f), 0.0f);
 
     return vec2(clamp(density, 0.0f, 1.0f), profile);
 }

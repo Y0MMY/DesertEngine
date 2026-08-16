@@ -55,5 +55,11 @@ namespace Desert::Tests::CloudGeometryRef
 // project through it, and a disagreement puts every shadow somewhere other than the cloud that cast it.
 #include <Common/CloudShadow.glslh>
 
+// The vertical profile's own arithmetic: the per-cell band, the lookup coordinate, the composition of
+// the profile table's three channels, and the two fields the weather pass writes. The same text the
+// weather pass and the raymarch compile — which is the whole point, because the two ENDS of this
+// arithmetic sit in different shaders and a disagreement between them is a sky, not an error.
+#include <Common/CloudProfile.glslh>
+
     } // namespace
 } // namespace Desert::Tests::CloudGeometryRef

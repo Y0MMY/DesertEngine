@@ -329,17 +329,19 @@ TEST( SkyAtmosphereReflection, BothSunPairsExplainTheSplit )
 }
 
 // ---------------------------------------------------------------------------------------------------
-// VolumetricCloudData — 99 fields in eight groups
+// VolumetricCloudData — 106 fields in eight groups
 // ---------------------------------------------------------------------------------------------------
 
-TEST( VolumetricCloudReflection, ExposesNinetyNineFieldsInTheSpecifiedGroups )
+TEST( VolumetricCloudReflection, ExposesOneHundredAndSixFieldsInTheSpecifiedGroups )
 {
     const TypeInfo& clouds = Type( "VolumetricCloudData" );
-    EXPECT_EQ( clouds.Fields.size(), 99u );
+    EXPECT_EQ( clouds.Fields.size(), 106u );
 
     EXPECT_EQ( CountInCategory( clouds, "Cloud Layer" ), 6u );
-    EXPECT_EQ( CountInCategory( clouds, "Weather" ), 10u );
-    EXPECT_EQ( CountInCategory( clouds, "Shape" ), 11u );
+    EXPECT_EQ( CountInCategory( clouds, "Weather" ), 11u ); // + Cloud Height Variance
+    // 17 since the Cloud Type axis became authored curves: three new profile gradients and the
+    // three form bends that make them shapes a trapezoid pair cannot reach.
+    EXPECT_EQ( CountInCategory( clouds, "Shape" ), 17u );
     EXPECT_EQ( CountInCategory( clouds, "Detail" ), 22u );
     EXPECT_EQ( CountInCategory( clouds, "Lighting" ), 25u );
     EXPECT_EQ( CountInCategory( clouds, "Animation" ), 8u );

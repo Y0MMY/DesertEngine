@@ -143,6 +143,15 @@ namespace Desert::Graphic
         // Appended, not inserted: every offset asserted below is a promise to the shaders.
         float   CloudShadowExtent;
         int32_t CloudShadowEnabled;
+
+        // ---- Per-cell vertical band ----
+        // How far the profile map's Min/Max Height channels are allowed to move a cell's own base and
+        // ceiling away from the whole layer. Appended, like everything before it: the offsets below are
+        // a promise to Common/CloudParams.glslh, and an insertion silently re-reads every field after it.
+        // The curves the type axis indexes are NOT here — they are baked into a texture on the CPU
+        // (Graphic::BuildCloudProfileLut), so authoring a new form costs a re-upload of 3 KiB rather
+        // than sixty floats crossing the bus every frame.
+        float CloudHeightVariance;
     };
 
     // Offsets of the vec4 run, and of the first and last scalar. Spot-checking three of them would not
@@ -175,10 +184,11 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, AutoDistanceFade ) == 496 );
     static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 500 );
     static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 504 );
-    static_assert( sizeof( CloudGpuPayload ) == 508,
-                   "The block ends at the last int. glm's vec4 has a 4-byte alignment (no SIMD gentypes "
-                   "in this build), so C++ adds no tail padding — std430 does, which is why the buffer "
-                   "below is created at the rounded-up size and not at sizeof." );
+    static_assert( offsetof( CloudGpuPayload, CloudHeightVariance ) == 508 );
+    static_assert( sizeof( CloudGpuPayload ) == 512,
+                   "The block ends at the last float. glm's vec4 has a 4-byte alignment (no SIMD "
+                   "gentypes in this build), so C++ adds no tail padding — std430 does, which is why "
+                   "the buffer below is created at the rounded-up size and not at sizeof." );
 
     // std430 rounds a block up to its own 16-byte alignment, so the SSBO must be at least this large
     // even though the C++ struct stops four bytes earlier. Creating it at sizeof() would leave the
@@ -200,6 +210,12 @@ namespace Desert::Graphic
     inline constexpr uint32_t kCloudSceneDepthBinding    = 7;
     inline constexpr uint32_t kCloudDepthGuideBinding    = 8; // raymarch: the RGBA8 upsampling guide
     inline constexpr uint32_t kCloudShadowMapBinding     = 9; // raymarch: the sun-space shadow map it reads
+    // The second weather image and the profile table. The map tiles the sky exactly as the weather map
+    // does and is written by the SAME compute pass — one dispatch, two outputs, because both fields are
+    // functions of the same warped lookup and generating them apart would mean warping twice.
+    inline constexpr uint32_t kCloudProfileOutputBinding = 1;  // weather pass: the second storage image
+    inline constexpr uint32_t kCloudProfileMapBinding    = 10; // march/shadow: per-cell Min/Max Height
+    inline constexpr uint32_t kCloudProfileLutBinding    = 11; // march/shadow: the authored type curves
 
     // The shadow pass's own output binding. Its inputs are the same weather map and noise volumes the
     // raymarch binds, at the same numbers — one density field, one set of bindings.
@@ -606,6 +622,11 @@ namespace Desert::Graphic
         p.AutoDistanceFade   = data.AutoDistanceFade ? 1 : 0;
         p.CloudShadowExtent  = CloudShadowExtentOf( data );
         p.CloudShadowEnabled = data.CloudShadowMap ? 1 : 0;
+
+        // Clamped here rather than trusted, like the fade pairs above: the shader lerps the whole layer
+        // toward the cell's own band by this number, and a value outside [0, 1] extrapolates the band
+        // past the layer it is supposed to live inside.
+        p.CloudHeightVariance = glm::clamp( data.CloudHeightVariance, 0.0f, 1.0f );
 
         return p;
     }

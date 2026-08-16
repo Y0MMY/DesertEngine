@@ -57,5 +57,7 @@
 //   4  sampler3D  the 128^3 detail volume  (Graphic::kCloudDetailNoiseBinding)
 //   5  sampler2D  the 128^2 curl map       (Graphic::kCloudCurlNoiseBinding)
 //   6  sampler2D  the 512^2 weather map    (Graphic::kCloudWeatherMapBinding)
+//  10  sampler2D  the 512^2 profile map    (Graphic::kCloudProfileMapBinding) — per-cell Min/Max Height
+//  11  sampler2D  the profile-curve table  (Graphic::kCloudProfileLutBinding) — height x cloud type
 
 #endif // CLOUD_DENSITY_GLSLH
