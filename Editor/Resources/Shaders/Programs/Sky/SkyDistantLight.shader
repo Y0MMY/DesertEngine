@@ -2,9 +2,18 @@ Shader "SkyDistantLight"
 {
     Compute
     {
-        // The DISTANT SKY LIGHT of the physical atmosphere (UE's Distant Sky Light LUT): one texel
-        // holding the average radiance of the sky seen from near the ground, refilled every frame
-        // because it depends on the sun.
+        // The DISTANT SKY LIGHT of the physical atmosphere (UE's Distant Sky Light LUT): the average
+        // radiance of the sky seen from near the ground, refilled every frame because it depends on
+        // the sun.
+        //
+        // TWO TEXELS, ONE MARCH. Texel (0,0) is the FULL-SPHERE mean — UE's own quantity, and what the
+        // height fog reads: a fog pixel is lit from every direction at once and has no ground term of
+        // its own. Texel (1,0) is the SKY HALF, the mean over the 32 cells that look up, and it is what
+        // the volumetric clouds' ambient reads: CloudAmbient already blends a sky radiance against a
+        // separate ground-bounce radiance, so feeding it the sphere mean would count the lit ground
+        // twice and give every shadowed cloud face the colour of dirt. Both come out of the SAME 64
+        // marched radiances in the same workgroup, so they cannot disagree; the split is
+        // Common/SkyScattering.glslh's SkyDistantLight / SkyDistantSkyLight, which the tests drive.
         //
         // ONE WORKGROUP, 64 THREADS, ONE DIRECTION EACH. The direction set and the per-direction
         // radiance are Common/SkyScattering.glslh's SkyDistantLightDirection / SkyDistantLightRadiance —
@@ -17,10 +26,11 @@ Shader "SkyDistantLight"
         // atmosphere march with two LUT fetches per step. In one thread that is ~2000 dependent texture
         // reads on the critical path of every frame; spread over a workgroup it is one march deep.
         //
-        // WHY ONE TEXEL AND NOT A CUBEMAP: this value's consumers want the MEAN sky, not its
-        // directional variation — the height fog's ambient in-scattering is isotropic by construction
-        // (the closed-form line integral has no direction in it), and directional ambient is what the
-        // IBL bake's irradiance cube already is.
+        // WHY A MEAN AND NOT A CUBEMAP: this value's consumers want the MEAN sky, not its directional
+        // variation — the height fog's ambient in-scattering is isotropic by construction (the
+        // closed-form line integral has no direction in it), the cloud ambient's is too (sky light
+        // arrives from the whole sky, which is why CloudAmbientOcclusion has no angle term), and
+        // directional ambient is what the IBL bake's irradiance cube already is.
 
         #include <Common/Atmosphere.glslh>
         #include <Common/SkyMedium.glslh>
@@ -65,6 +75,7 @@ Shader "SkyDistantLight"
         #include <Common/SkyScattering.glslh>
 
         shared vec3 s_Radiance[64];
+        shared vec3 s_SkyRadiance[64];
 
         LocalSize(64, 1, 1);
         void main()
@@ -89,14 +100,22 @@ Shader "SkyDistantLight"
             // Outer-space sun illuminance — the same pair every other physical pass reads.
             vec3 sunIlluminance = UnpackSkyConfig(s).sunColor * UnpackSunIntensity(s);
 
-            vec3 radiance = SkyDistantLightRadiance(atm, SkyDistantLightDirection(int(index)), sunDir,
-                                                    sunIlluminance, SKY_DISTANT_LIGHT_ALTITUDE_KM,
+            vec3 direction = SkyDistantLightDirection(int(index));
+
+            vec3 radiance = SkyDistantLightRadiance(atm, direction, sunDir, sunIlluminance,
+                                                    SKY_DISTANT_LIGHT_ALTITUDE_KM,
                                                     SKY_DISTANT_LIGHT_SAMPLES);
 
             // The art-direction tint that belongs INSIDE every scattering integration (UE's
             // SkyAndAerialPerspectiveLuminanceFactor): the ambient a fog receives has to be the ambient
             // of the sky that is on screen, tint and all.
-            s_Radiance[index] = radiance * UnpackSkyAndAerialPerspectiveLuminanceFactor(s);
+            vec3 tinted = radiance * UnpackSkyAndAerialPerspectiveLuminanceFactor(s);
+
+            s_Radiance[index] = tinted;
+
+            // The sky half of the same 64: a downward cell contributes zero to this sum, so the two
+            // reductions share every march and differ only in what they admit.
+            s_SkyRadiance[index] = direction.y > 0.0f ? tinted : vec3(0.0f, 0.0f, 0.0f);
 
             barrier();
 
@@ -105,14 +124,20 @@ Shader "SkyDistantLight"
             for (uint stride = 32u; stride > 0u; stride = stride >> 1u)
             {
                 if (index < stride)
-                    s_Radiance[index] = s_Radiance[index] + s_Radiance[index + stride];
+                {
+                    s_Radiance[index]    = s_Radiance[index] + s_Radiance[index + stride];
+                    s_SkyRadiance[index] = s_SkyRadiance[index] + s_SkyRadiance[index + stride];
+                }
                 barrier();
             }
 
             if (index == 0u)
             {
-                vec3 mean = s_Radiance[0] / float(SKY_DISTANT_LIGHT_DIRECTIONS);
-                imageStore(u_DistantSkyLight, ivec2(0, 0), vec4(mean, 1.0f));
+                vec3 mean    = s_Radiance[0] / float(SKY_DISTANT_LIGHT_DIRECTIONS);
+                vec3 skyMean = s_SkyRadiance[0] / float(SKY_DISTANT_LIGHT_SKY_DIRECTIONS);
+
+                imageStore(u_DistantSkyLight, ivec2(SKY_DISTANT_LIGHT_SPHERE_TEXEL, 0), vec4(mean, 1.0f));
+                imageStore(u_DistantSkyLight, ivec2(SKY_DISTANT_LIGHT_SKY_TEXEL, 0), vec4(skyMean, 1.0f));
             }
         }
     }

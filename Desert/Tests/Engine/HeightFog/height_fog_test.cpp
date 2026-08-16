@@ -406,8 +406,8 @@ TEST( FogPayload, PackerFoldsTheAtmosphereIntoSunLobeAndTheGradientsAmbient )
 
     const auto p = Desert::Graphic::PackFogParams( data, atmosphere, 0.0f );
 
-    // The lobe: authored colour + the sun's illuminance (AtmosphereEnv::SunIrradiance, at contribution
-    // 1 — FogPayload.hpp says why that and not UE's post-transmittance light illuminance).
+    // The lobe: authored colour + the SKY's sun (AtmosphereEnv::SunIrradiance), which is the gradient's
+    // half of the model-scoped choice — FogPayload.hpp says why the physical model takes the other.
     EXPECT_EQ( glm::vec3( p.Directional ), data.DirectionalInscatteringLuminance + atmosphere.SunIrradiance );
     EXPECT_EQ( glm::vec3( p.SunDirection ), atmosphere.SunDirection );
 
@@ -436,12 +436,13 @@ TEST( FogPayload, PhysicalAtmosphereMovesTheAmbientOntoTheDistantSkyLight )
          reinterpret_cast<Desert::Graphic::Image2D*>( static_cast<std::uintptr_t>( 0xF0 ) );
 
     Desert::Graphic::AtmosphereEnv atmosphere;
-    atmosphere.Valid           = true;
-    atmosphere.SunDirection    = glm::normalize( glm::vec3( 0.0f, 1.0f, 0.0f ) );
-    atmosphere.SunIrradiance   = { 10.0f, 9.0f, 8.0f };
-    atmosphere.ZenithRadiance  = { 0.2f, 0.4f, 0.8f };
-    atmosphere.GroundRadiance  = { 0.4f, 0.2f, 0.0f };
-    atmosphere.DistantSkyLight = distantSkyLight;
+    atmosphere.Valid                  = true;
+    atmosphere.SunDirection           = glm::normalize( glm::vec3( 0.0f, 1.0f, 0.0f ) );
+    atmosphere.SunIrradiance          = { 10.0f, 9.0f, 8.0f };
+    atmosphere.SunIlluminanceOnGround = { 0.8f, 0.7f, 0.6f };
+    atmosphere.ZenithRadiance         = { 0.2f, 0.4f, 0.8f };
+    atmosphere.GroundRadiance         = { 0.4f, 0.2f, 0.0f };
+    atmosphere.DistantSkyLight        = distantSkyLight;
 
     const auto p = Desert::Graphic::PackFogParams( data, atmosphere, 0.0f );
 
@@ -451,6 +452,42 @@ TEST( FogPayload, PhysicalAtmosphereMovesTheAmbientOntoTheDistantSkyLight )
     // The scale travels, and the gate says the texel is real.
     EXPECT_EQ( glm::vec3( p.Ambient ), data.SkyAtmosphereAmbientContributionColorScale );
     EXPECT_FLOAT_EQ( p.Ambient.w, 1.0f );
+}
+
+TEST( FogPayload, PhysicalAtmosphereLobeIsTheLightOnTheGroundNotTheSkysSun )
+{
+    // UE's AtmosphereLightIlluminanceOnGroundPostTransmittance, and the whole reason it is a separate
+    // field: the sky's sun and the light's sun are authored on two different components and are not the
+    // same number. The fixture uses the shipped magnitudes — a sky SunIntensity of 22 against a light
+    // Intensity of 1 — because "more than an order of magnitude" is the property under test, not a
+    // rounding difference.
+    Desert::ECS::ExponentialHeightFogData data;
+    data.DirectionalInscatteringLuminance = { 0.05f, 0.05f, 0.05f };
+
+    Desert::Graphic::Image2D* const distantSkyLight =
+         reinterpret_cast<Desert::Graphic::Image2D*>( static_cast<std::uintptr_t>( 0xF0 ) );
+
+    Desert::Graphic::AtmosphereEnv physical;
+    physical.Valid                  = true;
+    physical.SunDirection           = glm::normalize( glm::vec3( 0.0f, 1.0f, 0.0f ) );
+    physical.SunIrradiance          = { 22.0f, 21.1f, 19.4f }; // the SKY's sun: SunColor x SunIntensity
+    physical.SunIlluminanceOnGround = { 0.84f, 0.80f, 0.73f }; // the LIGHT's, after transmittance
+    physical.DistantSkyLight        = distantSkyLight;
+
+    const auto lit = Desert::Graphic::PackFogParams( data, physical, 0.0f );
+    EXPECT_EQ( glm::vec3( lit.Directional ),
+               data.DirectionalInscatteringLuminance + physical.SunIlluminanceOnGround );
+
+    // The same scene on the artistic gradient — no distant-sky-light handle — keeps the sky's sun.
+    Desert::Graphic::AtmosphereEnv gradient = physical;
+    gradient.DistantSkyLight                = nullptr;
+
+    const auto unlit = Desert::Graphic::PackFogParams( data, gradient, 0.0f );
+    EXPECT_EQ( glm::vec3( unlit.Directional ), data.DirectionalInscatteringLuminance + gradient.SunIrradiance );
+
+    // THE RELATION, not the two values: switching the model must move the lobe by more than a factor of
+    // ten, which is what makes the retune of every physical fog scene a requirement rather than taste.
+    EXPECT_GT( unlit.Directional.x, 10.0f * lit.Directional.x );
 }
 
 int main( int argc, char** argv )

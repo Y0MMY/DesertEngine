@@ -108,14 +108,23 @@ namespace Desert::Graphic
      * @param fogHeightWorldY the fog entity's TransformComponent Y, world units — the layer's floor,
      *                        never a field of the component (one owner, like UE's component transform).
      *
-     * The two atmosphere couplings:
+     * The two atmosphere couplings, both of them now scoped to the sky model by the SAME gate — a
+     * non-null AtmosphereEnv::DistantSkyLight, which is published in SkyModel::PhysicalAtmosphere and
+     * nowhere else. One gate rather than two so the fog cannot end up half physical:
      *   * DIRECTIONAL: UE feeds the lobe the sun's POST-TRANSMITTANCE illuminance
      *     (AtmosphereLightIlluminanceOnGroundPostTransmittance) scaled by the sky's
-     *     HeightFogContribution. Ours is AtmosphereEnv::SunIrradiance — the same elevation-tinted sun
-     *     the clouds are lit by, at contribution 1. That is a DELIBERATE divergence, not a gap: UE's
-     *     quantity is the directional LIGHT's illuminance, and publishing that here would make the
-     *     fog's sun lobe follow the light rather than the sky, which is a calibration event of its own
-     *     (named for the follow-up that moves the clouds onto the distant sky light).
+     *     HeightFogContribution. In PhysicalAtmosphere ours is now that quantity, at contribution 1:
+     *     AtmosphereEnv::SunIlluminanceOnGround, the directional LIGHT's Color x Intensity times the
+     *     atmosphere's transmittance toward the sun. In ArtisticGradient it stays
+     *     AtmosphereEnv::SunIrradiance, the sky's own elevation-tinted sun, which is what the gradient's
+     *     fog was authored against and what keeps a gradient scene bit for bit what it was.
+     *
+     *     THE TWO DIFFER BY MORE THAN AN ORDER OF MAGNITUDE and that is the point, not a defect: the
+     *     sky's SunIntensity says how bright the disc LOOKS (22 in the showcase scenes), the light's
+     *     Intensity says how brightly the sun LIGHTS THINGS (1 by default). A fog whose sun lobe is
+     *     twenty times the illuminance actually falling on the scene is a glow with no light behind it.
+     *     Physical scenes therefore author DirectionalInscatteringLuminance to say how strong they want
+     *     the lobe, exactly as UE scenes do.
      *   * AMBIENT: the average sky, and WHERE it comes from follows the sky model, because the two
      *     models have different ambients and neither is a stand-in for the other:
      *       - SkyModel::PhysicalAtmosphere — the DISTANT SKY LIGHT texel, marched every frame
@@ -142,20 +151,21 @@ namespace Desert::Graphic
 
         // The physical average sky is a GPU texel, so the ambient reaches the shader as two halves: the
         // scale here, the value there. The handle being non-null is the model switch — AtmosphereEnv
-        // publishes it in PhysicalAtmosphere and only there.
-        const bool physicalAmbient = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
+        // publishes it in PhysicalAtmosphere and only there — and it gates the DIRECTIONAL lobe too, so
+        // both couplings change model together.
+        const bool physical = atmosphere.Valid && atmosphere.DistantSkyLight != nullptr;
 
         glm::vec3 ambient{ 0.0f };
         glm::vec3 sunLobe = data.DirectionalInscatteringLuminance;
         glm::vec3 sunDir{ 0.0f, 1.0f, 0.0f };
         if ( atmosphere.Valid )
         {
-            if ( !physicalAmbient )
+            if ( !physical )
             {
                 ambient = data.SkyAtmosphereAmbientContributionColorScale * 0.5f *
                           ( atmosphere.ZenithRadiance + atmosphere.GroundRadiance );
             }
-            sunLobe += atmosphere.SunIrradiance;
+            sunLobe += physical ? atmosphere.SunIlluminanceOnGround : atmosphere.SunIrradiance;
             sunDir = atmosphere.SunDirection;
         }
         else
@@ -175,7 +185,7 @@ namespace Desert::Graphic
              glm::vec4( density0, falloff0, heightKm, glm::max( data.StartDistance, 0.0f ) / kFogWorldUnitsPerKm );
         p.Layer1 = glm::vec4( density1, falloff1, heightKm + data.SecondFogHeightOffset / kFogWorldUnitsPerKm,
                               glm::max( data.FogCutoffDistance, 0.0f ) / kFogWorldUnitsPerKm );
-        p.Ambient = glm::vec4( data.SkyAtmosphereAmbientContributionColorScale, physicalAmbient ? 1.0f : 0.0f );
+        p.Ambient = glm::vec4( data.SkyAtmosphereAmbientContributionColorScale, physical ? 1.0f : 0.0f );
         return p;
     }
 } // namespace Desert::Graphic

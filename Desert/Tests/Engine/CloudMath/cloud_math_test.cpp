@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <set>
 #include <vector>
 
 namespace R = Desert::Tests::CloudGeometryRef;
@@ -1082,6 +1083,86 @@ TEST( CloudAmbientOcclusion, ColumnExtinctionRelaxesWithDepthIntoTheProfile )
     EXPECT_FLOAT_EQ( R::CloudAmbientOcclusion( 0.9f, 50000.0f, sigma, 0.0f ), 1.0f );
 }
 
+TEST( CloudAerialPerspective, IsTheExactIdentityWhereThereIsNoAirAndWhereTheDialIsOff )
+{
+    const glm::vec3 cloud{ 3.0f, 2.5f, 2.0f };
+    const glm::vec3 air{ 0.4f, 0.6f, 1.1f };
+
+    // An empty froxel — no in-scatter, full transmittance — is the arithmetic identity at ANY strength.
+    // This is the property the artistic gradient's zero gate leans on: a scene with no volume must get
+    // its march's own colours back, bit for bit, and not an approximation of them.
+    for ( const float strength : { 0.0f, 0.37f, 1.0f } )
+    {
+        const glm::vec3 same = R::CloudApplyAerialPerspective( cloud, 0.3f, glm::vec3( 0.0f ), 1.0f, strength );
+        EXPECT_FLOAT_EQ( same.x, cloud.x );
+        EXPECT_FLOAT_EQ( same.y, cloud.y );
+        EXPECT_FLOAT_EQ( same.z, cloud.z );
+    }
+
+    // The dial at zero is the identity for ANY froxel — the artist's escape from the coupling.
+    const glm::vec3 off = R::CloudApplyAerialPerspective( cloud, 0.3f, air, 0.2f, 0.0f );
+    EXPECT_FLOAT_EQ( off.x, cloud.x );
+    EXPECT_FLOAT_EQ( off.y, cloud.y );
+    EXPECT_FLOAT_EQ( off.z, cloud.z );
+}
+
+TEST( CloudAerialPerspective, AddsTheAirOnlyOverThePartOfThePixelTheCloudCovers )
+{
+    const glm::vec3 cloud{ 3.0f, 2.5f, 2.0f };
+    const glm::vec3 air{ 0.4f, 0.6f, 1.1f };
+    const float     apT = 0.65f;
+
+    // A fully TRANSPARENT ray covers nothing: the sky pass already drew that pixel's whole atmospheric
+    // column, so the froxel must contribute nothing at all. Getting this wrong is a bright halo around
+    // every cloud, and it is the failure mode this assertion exists for.
+    const glm::vec3 empty = R::CloudApplyAerialPerspective( glm::vec3( 0.0f ), 1.0f, air, apT, 1.0f );
+    EXPECT_FLOAT_EQ( empty.x, 0.0f );
+    EXPECT_FLOAT_EQ( empty.y, 0.0f );
+    EXPECT_FLOAT_EQ( empty.z, 0.0f );
+
+    // A fully OPAQUE ray covers all of it: the whole froxel lands, over the attenuated cloud.
+    const glm::vec3 solid = R::CloudApplyAerialPerspective( cloud, 0.0f, air, apT, 1.0f );
+    EXPECT_NEAR( solid.x, cloud.x * apT + air.x, 1e-6f );
+    EXPECT_NEAR( solid.y, cloud.y * apT + air.y, 1e-6f );
+    EXPECT_NEAR( solid.z, cloud.z * apT + air.z, 1e-6f );
+
+    // In between, the added air is strictly proportional to the coverage.
+    const glm::vec3 half = R::CloudApplyAerialPerspective( cloud, 0.5f, air, apT, 1.0f );
+    EXPECT_NEAR( half.x, cloud.x * apT + air.x * 0.5f, 1e-6f );
+}
+
+TEST( CloudAerialPerspective, CannotInventLightAtAnySetting )
+{
+    // THE BOUND. A step of air cannot hand the eye more than the cloud it dims plus the light that air
+    // itself scatters — one assertion that catches any spurious factor anywhere in the composition,
+    // including a coverage term applied to the wrong side.
+    const glm::vec3 cloud{ 3.0f, 2.5f, 2.0f };
+    const glm::vec3 air{ 0.4f, 0.6f, 1.1f };
+
+    for ( int t = 0; t <= 10; ++t )
+    {
+        for ( int a = 0; a <= 10; ++a )
+        {
+            for ( int s = 0; s <= 10; ++s )
+            {
+                const glm::vec3 out = R::CloudApplyAerialPerspective( cloud, static_cast<float>( t ) * 0.1f, air,
+                                                                      static_cast<float>( a ) * 0.1f,
+                                                                      static_cast<float>( s ) * 0.1f );
+
+                EXPECT_LE( out.x, cloud.x + air.x + 1e-5f );
+                EXPECT_LE( out.y, cloud.y + air.y + 1e-5f );
+                EXPECT_LE( out.z, cloud.z + air.z + 1e-5f );
+                EXPECT_GE( out.x, 0.0f );
+            }
+        }
+    }
+
+    // Out-of-range inputs are clamped rather than extrapolated: a half-precision froxel can read back a
+    // transmittance a hair over 1, and a scene file can hold a strength of 2.
+    const glm::vec3 clamped = R::CloudApplyAerialPerspective( cloud, -0.2f, air, 1.4f, 3.0f );
+    EXPECT_NEAR( clamped.x, cloud.x + air.x, 1e-6f );
+}
+
 TEST( CloudAmbientColumnVertical, ProjectsTheSlantColumnAndRefusesToVanishAtSunrise )
 {
     // CLD-103: the shadow map integrates along the SUN; sky occlusion wants the stack OVERHEAD. At noon
@@ -1392,8 +1473,33 @@ TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 TEST( CloudPayload, ThePushConstantFitsTheGuaranteedRange )
 {
     EXPECT_LE( sizeof( CloudRaymarchPush ), 128u );
-    // mat4 + camera/frame vec4 + the checkerboard flag vec4.
-    EXPECT_EQ( sizeof( CloudRaymarchPush ), 96u );
+    // mat4 + camera/frame vec4 + the checkerboard flag vec4 + the per-view atmosphere vec4.
+    EXPECT_EQ( sizeof( CloudRaymarchPush ), 112u );
+    EXPECT_EQ( offsetof( CloudRaymarchPush, Atmosphere ), 96u );
+}
+
+TEST( CloudPayload, EveryBindingOfTheRaymarchIsDistinct )
+{
+    // The march declares eleven descriptors and one of them is the SKY's parameter buffer, whose number
+    // is owned by another header entirely (Graphic::kSkyPayloadBinding = 1). Two of these colliding is
+    // not a validation error — it is one resource silently overwriting another in the set, which is how
+    // the atmosphere's froxel volume could end up bound where the profile table was expected.
+    namespace G = Desert::Graphic;
+
+    const std::vector<uint32_t> bindings{
+         G::kCloudScatterOutputBinding,  G::kCloudParamsBinding,     G::kCloudShapeNoiseBinding,
+         G::kCloudDetailNoiseBinding,    G::kCloudCurlNoiseBinding,  G::kCloudWeatherMapBinding,
+         G::kCloudSceneDepthBinding,     G::kCloudDepthGuideBinding, G::kCloudShadowMapBinding,
+         G::kCloudProfileMapBinding,     G::kCloudProfileLutBinding, G::kCloudAerialPerspectiveBinding,
+         G::kCloudDistantSkyLightBinding };
+
+    const std::set<uint32_t> unique( bindings.begin(), bindings.end() );
+    EXPECT_EQ( unique.size(), bindings.size() );
+
+    // The scatter output and the sky buffer share a set with them, at 0 and 1; every sampler must sit
+    // above both.
+    EXPECT_GT( G::kCloudAerialPerspectiveBinding, 1u );
+    EXPECT_GT( G::kCloudDistantSkyLightBinding, 1u );
 }
 
 TEST( CloudPayload, EveryFieldReachesADistinctOffset )

@@ -302,18 +302,19 @@ TEST_F( ShaderRootFixture, TheClosureListsEachFileOnce )
 
 // ---- The descriptor count a pipeline layout and a bound set have to agree on ------------------------
 
-TEST_F( ShaderRootFixture, TheRaymarchDeclaresTwelveDescriptorsInSetZero )
+TEST_F( ShaderRootFixture, TheRaymarchDeclaresFourteenDescriptorsInSetZero )
 {
     // The regression guard for the failure this test file exists for. The raymarch gained a second
     // storage image (the composite's depth guide, binding 8) and went from eight descriptors to nine,
-    // then the cloud shadow map (binding 9) took it to ten, and the authored Cloud Type axis added the
-    // profile map (10) and the profile table (11) for twelve; a pipeline built before any of those
-    // changes and a set allocated after it could not be bound together. Twelve is not a magic number
-    // here — it is counted from the shader's own text by the engine's own reflection, so it moves when
-    // the shader does.
+    // then the cloud shadow map (binding 9) took it to ten, the authored Cloud Type axis added the
+    // profile map (10) and the profile table (11) for twelve, and joining the physical atmosphere added
+    // its aerial-perspective volume (12) and its distant sky light (13) for fourteen; a pipeline built
+    // before any of those changes and a set allocated after it could not be bound together. Fourteen is
+    // not a magic number here — it is counted from the shader's own text by the engine's own
+    // reflection, so it moves when the shader does.
     const auto bindings = ComputeSetZero( ShaderPath( "Clouds/CloudRaymarch.shader" ) );
 
-    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 12u );
+    EXPECT_EQ( ShaderReflection::CountDescriptors( bindings ), 14u );
 
     EXPECT_TRUE( HasBinding( bindings, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ) );          // scatter target
     EXPECT_TRUE( HasBinding( bindings, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) );         // sky params
@@ -327,6 +328,8 @@ TEST_F( ShaderRootFixture, TheRaymarchDeclaresTwelveDescriptorsInSetZero )
     EXPECT_TRUE( HasBinding( bindings, 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // cloud shadow map
     EXPECT_TRUE( HasBinding( bindings, 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile map
     EXPECT_TRUE( HasBinding( bindings, 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // profile table
+    EXPECT_TRUE( HasBinding( bindings, 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // AP volume
+    EXPECT_TRUE( HasBinding( bindings, 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) ); // distant sky light
 }
 
 TEST_F( ShaderRootFixture, TheShadowMapDeclaresItsOwnEightDescriptors )

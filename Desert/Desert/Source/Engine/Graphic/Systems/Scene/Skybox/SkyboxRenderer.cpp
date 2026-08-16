@@ -357,12 +357,14 @@ namespace Desert::Graphic::System
         if ( m_DistantLight )
             return true;
 
-        // ONE TEXEL. RGBA32F rather than the RGBA16F every other LUT uses: at 16 bytes total the exact
-        // format is free, and this value is added to a fog colour at night radiances where a half's
-        // three decimal digits would quantise into visible steps as the sun sets.
+        // TWO TEXELS: (0,0) the full-sphere mean the height fog reads, (1,0) the sky half the cloud
+        // ambient reads — one march, two reductions, see Programs/Sky/SkyDistantLight.shader. RGBA32F
+        // rather than the RGBA16F every other LUT uses: at 32 bytes total the exact format is free, and
+        // these values are added to a fog colour at night radiances where a half's three decimal digits
+        // would quantise into visible steps as the sun sets.
         const Core::Formats::Image2DSpecification distantSpec{
              .Tag        = "SkyDistantLight",
-             .Width      = 1,
+             .Width      = kDistantLightWidth,
              .Height     = 1,
              .Format     = Core::Formats::ImageFormat::RGBA32F,
              .Mips       = 1u,
@@ -373,16 +375,18 @@ namespace Desert::Graphic::System
 
         if ( !m_DistantLight )
         {
-            LOG_ERROR( "[SkyAtmosphere] The distant sky light (1x1 RGBA32F) could not be created; the "
+            LOG_ERROR( "[SkyAtmosphere] The distant sky light ({}x1 RGBA32F) could not be created; the "
                        "atmospheric fog in this view will fall back to its authored colour with no sky "
-                       "ambient." );
+                       "ambient, and the clouds to the artistic dome.",
+                       kDistantLightWidth );
             m_DistantLightResourcesFailed = true;
             return false;
         }
 
-        LOG_INFO( "[SkyAtmosphere] Distant sky light 1x1 RGBA32F allocated — {} directions marched at "
-                  "{} km every frame, reduced to one texel.",
-                  64, 6 );
+        LOG_INFO( "[SkyAtmosphere] Distant sky light {}x1 RGBA32F allocated — {} directions marched at "
+                  "{} km every frame, reduced to the full-sphere mean (the fog's) and the sky half "
+                  "(the clouds').",
+                  kDistantLightWidth, 64, 6 );
         return true;
     }
 
@@ -550,6 +554,11 @@ namespace Desert::Graphic::System
                  m_Sky.Model == ECS::SkyModel::PhysicalAtmosphere && fx.AffectedByAtmosphereTransmittance;
             m_Atmosphere.SunTransmittanceAtGround =
                  couple ? SunTransmittanceAtGround( m_Sky, m_Atmosphere.SunDirection ) : glm::vec3( 1.0f );
+
+            // The same product SceneRenderer::OnUpdate forms for the light's own colour, published once
+            // so the fog's directional lobe reads the sun on the ground instead of re-deriving it from a
+            // light list it has no business walking (UE publishes it on the View UB for the same reason).
+            m_Atmosphere.SunIlluminanceOnGround = fx.OuterSpaceIlluminance * m_Atmosphere.SunTransmittanceAtGround;
 
             // A sun below the horizon is a legal authored state (it is night), but it is also what an
             // inverted Translation looks like — and that mistake shipped in four scenes. Say it once, with

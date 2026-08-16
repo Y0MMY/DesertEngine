@@ -676,6 +676,35 @@ float CloudAutoFadeEnd(float planetRadius, float layerBottomAltitude, float laye
     return sqrt(2.0f * max(planetRadius, 1.0f) * top);
 }
 
+// ---- Aerial perspective ----------------------------------------------------------------------------
+
+// The air between the eye and the cloud, composed onto the cloud's own radiance.
+//
+// This is UE's SAMPLE_ATMOSPHERE_ON_CLOUDS arrangement (Docs/Sky/UE_SKYATMOSPHERE_RESEARCH.md section
+// 1.4) and it has exactly two terms, each answering a different question:
+//   * the cloud's radiance is ATTENUATED by @p apTransmittance, because that light had to cross the air
+//     to reach the camera;
+//   * the air's own in-scattered light is ADDED over 1 - @p cloudTransmittance, the fraction of the pixel
+//     the cloud actually covers. Not over the whole pixel: where the cloud is transparent the sky pass
+//     already drew that direction's full atmospheric column, and adding the froxel there would be the
+//     same air counted twice — which reads as a bright halo around every cloud edge.
+//
+// @p strength is the authored Atmospheric Perspective dial over the WHOLE coupling: 0 leaves the cloud's
+// own light exactly as the march produced it, 1 is the physical composition unmodified. Blending the
+// composed result rather than scaling the froxel keeps the two terms consistent with each other at every
+// setting — scaling only the in-scatter would brighten a cloud that the same air is supposed to be
+// dimming.
+//
+// ENERGY BOUND, which is what the test pins: for a transmittance in [0,1] and a non-negative froxel the
+// result can never exceed scattered + apLuminance, so no setting of the dial can invent light.
+vec3 CloudApplyAerialPerspective(vec3 scattered, float cloudTransmittance, vec3 apLuminance,
+                                 float apTransmittance, float strength)
+{
+    float coverage = 1.0f - clamp(cloudTransmittance, 0.0f, 1.0f);
+    vec3  composed = scattered * clamp(apTransmittance, 0.0f, 1.0f) + apLuminance * coverage;
+    return mix(scattered, composed, clamp(strength, 0.0f, 1.0f));
+}
+
 // ---- Scene depth -----------------------------------------------------------------------------------
 
 // Distance from the camera to the geometry the depth buffer recorded, in WORLD UNITS.
