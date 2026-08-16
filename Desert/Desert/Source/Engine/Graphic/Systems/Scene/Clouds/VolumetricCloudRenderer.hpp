@@ -4,6 +4,7 @@
 
 #include <Engine/Graphic/Clouds/CloudNoiseVolumes.hpp>
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
+#include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
 #include <Engine/Graphic/Materials/Clouds/MaterialVolumetricClouds.hpp>
 #include <Engine/Graphic/Pipeline.hpp>
 #include <Engine/Graphic/Renderer.hpp>
@@ -100,6 +101,31 @@ namespace Desert::Graphic::System
 
         static WeatherFingerprint FingerprintOf( const ECS::VolumetricCloudData& data );
 
+        // The authored curves the Cloud Type table is baked from. Compared field by field for the same
+        // reason the weather fingerprint is: nine vectors are cheap to compare and a hash that collided
+        // would leave the sky showing a form nobody authored, with nothing to look at.
+        struct ProfileFingerprint
+        {
+            glm::vec4 Stratus{ -1.0f };
+            glm::vec4 Shelf{ -1.0f };
+            glm::vec4 Stratocumulus{ -1.0f };
+            glm::vec4 Cumulus{ -1.0f };
+            glm::vec4 Congestus{ -1.0f };
+            glm::vec4 Anvil{ -1.0f };
+            glm::vec3 ShelfForm{ -1.0f };
+            glm::vec3 CongestusForm{ -1.0f };
+            glm::vec3 AnvilForm{ -1.0f };
+
+            bool operator==( const ProfileFingerprint& ) const = default;
+        };
+
+        static ProfileFingerprint ProfileFingerprintOf( const ECS::VolumetricCloudData& data );
+
+        // Bakes the Cloud Type table and uploads it, or returns false having logged and latched. Called
+        // from EnsureResources, so the cost lands on the first marched frame and on a curve edit, never
+        // per frame — the curves change when an artist drags one, and that is all.
+        bool EnsureProfileLut();
+
         bool CreatePipelines();
         // Allocates (or reallocates) the weather map, the scatter target and the depth guide for
         // @p width x @p height at the current resolution tier. Returns false having logged the reason and
@@ -128,6 +154,9 @@ namespace Desert::Graphic::System
         std::unique_ptr<MaterialVolumetricClouds> m_CompositeMaterial;
 
         std::shared_ptr<Image2D> m_WeatherMap;
+        // The second weather image (per-cell Min/Max Height) and the authored Cloud Type curve table.
+        std::shared_ptr<Image2D> m_ProfileMap;
+        std::shared_ptr<Image2D> m_ProfileLut;
         std::shared_ptr<Image2D> m_CloudShadowMap;
         std::shared_ptr<Image2D> m_ScatterImage;
         std::shared_ptr<Image2D> m_DepthGuideImage;
@@ -155,6 +184,8 @@ namespace Desert::Graphic::System
 
         WeatherFingerprint m_WeatherBaked{};
         bool               m_WeatherValid = false;
+
+        ProfileFingerprint m_ProfileLutBaked{};
 
         bool m_ResourcesFailed = false;
 

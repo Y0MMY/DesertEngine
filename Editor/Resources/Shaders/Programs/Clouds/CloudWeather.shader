@@ -2,17 +2,29 @@ Shader "CloudWeather"
 {
     Compute
     {
-        // Stage S1 of the volumetric clouds: the WEATHER MAP.
+        // Stage S1 of the volumetric clouds: the WEATHER MAP and the PROFILE MAP.
         //
-        // A 512x512 RGBA8 tile that says, for every place on the ground plane, how much sky is filled
-        // there, what kind of cloud it is, how wet it is and how dense it gets. The raymarch reads it
-        // once per sample and never re-derives any of it — this is the field that turns a noise volume
-        // into weather.
+        // Two 512x512 RGBA8 tiles that say, for every place on the ground plane, how much sky is filled
+        // there, what kind of cloud it is, how wet it is, how dense it gets, and which vertical SLAB of
+        // the layer its cloud occupies. The raymarch reads them once per sample and never re-derives any
+        // of it — this is the field that turns a noise volume into weather.
         //
+        //   Weather map
         //   R  coverage        after the domain warp, the FBM, the Coverage cut and Coverage Contrast
         //   G  cloud type      Cloud Type, varied across the map by Cloud Type Variance
         //   B  wetness         Wetness, varied the same way; darkens bases and feeds precipitation
         //   A  density scale   a low-frequency field the raymarch shapes with Density Scale Power
+        //
+        //   Profile map (Nubis3 p. 19's Min Height / Max Height NDFs)
+        //   R  min height      where this cell's cloud BASE sits inside the layer
+        //   G  max height      where its ceiling sits
+        //   B  A               unwritten. RGBA8 is the only 8-bit format the engine creates and the
+        //                      field needs two channels; the pair costs a megabyte of a map that is
+        //                      baked once per weather change, not per frame.
+        //
+        // ONE dispatch writes both. The warp below is the expensive part of this shader and both fields
+        // are functions of the same warped lookup, so a second pass would warp the domain twice to
+        // produce fields that have to agree about where a cloud is.
         //
         // It is regenerated only when a field of the Weather group changes (the renderer compares them),
         // not per frame: nothing in it depends on the camera or on time. The SCROLL is applied at sample
@@ -23,10 +35,12 @@ Shader "CloudWeather"
         #include <Common/CloudNoise.glslh>
         #include <Common/CloudGeometry.glslh>
         #include <Common/CloudParams.glslh>
+        #include <Common/CloudProfile.glslh>
 
         // rgba8, matching the VkFormat the engine creates for ImageFormat::RGBA8F. imageStore clamps and
         // quantises the [0,1] values written below.
         layout(binding = 0, rgba8) restrict writeonly uniform image2D u_WeatherOut;
+        layout(binding = 1, rgba8) restrict writeonly uniform image2D u_ProfileOut;
 
         LocalSize(8, 8, 1);
 
@@ -91,9 +105,15 @@ Shader "CloudWeather"
 
             // Type and wetness vary across the map around their authored values. Variance of 0 gives one
             // uniform type over the whole sky, which is exactly what a stratus deck is.
-            float typeNoise = CloudPerlin(vec3(p.x, p.y, 0.41f), 2, seed + 5501u) * 1.5f + 0.5f;
-            float type      = clamp(u_CloudType + (clamp(typeNoise, 0.0f, 1.0f) - 0.5f) * u_CloudTypeVariance,
-                                    0.0f, 1.0f);
+            //
+            // BASE PERIOD 8, not 2, for the same reason the coverage field carries it: doubling from 2
+            // over a 60 km tile put the type's dominant feature at 30 km, so the whole dome a ground
+            // camera can see fell inside ONE of them and Cloud Type Variance — a slider whose entire
+            // purpose is putting different forms next to each other — could only fade the whole sky from
+            // one type to another over the course of a flight. Eight puts it at 7.5 km, the size of a
+            // cumulus cluster, which is the scale at which a shelf really does sit beside a tower.
+            float typeNoise = CloudPerlin(vec3(p.x, p.y, 0.41f), 8, seed + 5501u) * 1.5f + 0.5f;
+            float type      = CloudProfileTypeAt(u_CloudType, typeNoise, u_CloudTypeVariance);
 
             float wetNoise = CloudPerlin(vec3(p.x, p.y, 0.59f), 3, seed + 6607u) * 1.5f + 0.5f;
             float wetness  = clamp(u_Wetness * (0.5f + clamp(wetNoise, 0.0f, 1.0f)), 0.0f, 1.0f);
@@ -112,6 +132,19 @@ Shader "CloudWeather"
                                         0.0f, 1.0f);
 
             imageStore(u_WeatherOut, coord, vec4(coverage, type, wetness, densityScale));
+
+            // The per-cell vertical band (Nubis3 p. 19's Min Height / Max Height NDFs). The construction
+            // itself lives in Common/CloudProfile.glslh, where the raymarch's half of the arithmetic is
+            // and where a test can compile it.
+            //
+            // Period 8, seeded away from every other field here, so a cell's altitude is independent of
+            // whether there is a cloud there at all: coverage decides WHERE, this decides HOW HIGH.
+            float centreNoise = CloudPerlin(vec3(p.x, p.y, 0.29f), 8, seed + 4409u) * 1.6f + 0.5f;
+            float widthNoise  = CloudPerlin(vec3(p.x, p.y, 0.67f), 8, seed + 3313u) * 1.6f + 0.5f;
+
+            vec2 heightNdf = CloudProfileHeightNdf(centreNoise, widthNoise);
+
+            imageStore(u_ProfileOut, coord, vec4(heightNdf.x, heightNdf.y, 0.0f, 0.0f));
         }
     }
 }

@@ -94,6 +94,8 @@ namespace Desert::Graphic::System
         m_CompositePipeline.reset();
         m_CompositeMaterial.reset();
         m_WeatherMap.reset();
+        m_ProfileMap.reset();
+        m_ProfileLut.reset();
         m_CloudShadowMap.reset();
         m_ScatterImage.reset();
         m_DepthGuideImage.reset();
@@ -209,6 +211,37 @@ namespace Desert::Graphic::System
             }
             m_WeatherValid = false;
         }
+
+        // The second weather image: the per-cell Min/Max Height NDFs. Same size, same tiling and same
+        // dispatch as the weather map — see the header of Programs/Clouds/CloudWeather.shader for why
+        // one pass writes both.
+        if ( !m_ProfileMap )
+        {
+            const Core::Formats::Image2DSpecification spec{
+                 .Tag        = "CloudProfileMap",
+                 .Width      = kWeatherMapSize,
+                 .Height     = kWeatherMapSize,
+                 .Format     = Core::Formats::ImageFormat::RGBA8F,
+                 .Mips       = 1u,
+                 .Usage      = Core::Formats::Image2DUsage::Image2D,
+                 .Properties = Core::Formats::Storage | Core::Formats::Sample,
+            };
+            m_ProfileMap = Image2D::Create( spec, nullptr );
+            if ( !m_ProfileMap )
+            {
+                LOG_ERROR( "[Clouds] The {}x{} profile map ({:.2f} MiB) could not be created; the cloud "
+                           "layer will not render for this view.",
+                           kWeatherMapSize, kWeatherMapSize,
+                           BytesToMiB( Core::Formats::CalculateImageSize( kWeatherMapSize, kWeatherMapSize,
+                                                                          Core::Formats::ImageFormat::RGBA8F ) ) );
+                m_ResourcesFailed = true;
+                return false;
+            }
+            m_WeatherValid = false;
+        }
+
+        if ( !EnsureProfileLut() )
+            return false;
 
         if ( !m_CloudShadowMap )
         {
@@ -390,6 +423,60 @@ namespace Desert::Graphic::System
         return true;
     }
 
+    VolumetricCloudRenderer::ProfileFingerprint
+    VolumetricCloudRenderer::ProfileFingerprintOf( const ECS::VolumetricCloudData& data )
+    {
+        return ProfileFingerprint{ .Stratus       = data.StratusGradient,
+                                   .Shelf         = data.ShelfGradient,
+                                   .Stratocumulus = data.StratocumulusGradient,
+                                   .Cumulus       = data.CumulusGradient,
+                                   .Congestus     = data.CongestusGradient,
+                                   .Anvil         = data.AnvilGradient,
+                                   .ShelfForm     = data.ShelfProfileForm,
+                                   .CongestusForm = data.CongestusProfileForm,
+                                   .AnvilForm     = data.AnvilProfileForm };
+    }
+
+    bool VolumetricCloudRenderer::EnsureProfileLut()
+    {
+        const ProfileFingerprint wanted = ProfileFingerprintOf( m_Data );
+        if ( m_ProfileLut && wanted == m_ProfileLutBaked )
+            return true;
+
+        // The table is a TEXTURE, and the old one may still sit in a descriptor of a frame in flight —
+        // the same reason the scatter target idles before it is replaced. Curves are dragged rarely
+        // enough that a device idle is the honest cost; a per-frame rebake would not be.
+        if ( m_ProfileLut )
+            Renderer::GetInstance().WaitDeviceIdle();
+
+        const Core::Formats::Image2DSpecification spec{
+             .Tag        = "CloudProfileLut",
+             .Width      = kCloudProfileLutWidth,
+             .Height     = kCloudProfileLutTypes,
+             .Format     = Core::Formats::ImageFormat::RGBA8F,
+             .Mips       = 1u,
+             .Data       = BuildCloudProfileLut( m_Data ),
+             .Usage      = Core::Formats::Image2DUsage::Image2D,
+             .Properties = Core::Formats::Sample,
+        };
+
+        m_ProfileLut = Image2D::Create( spec, nullptr );
+        if ( !m_ProfileLut )
+        {
+            LOG_ERROR( "[Clouds] The {}x{} cloud profile table could not be created; the cloud layer will "
+                       "not render for this view.",
+                       kCloudProfileLutWidth, kCloudProfileLutTypes );
+            m_ResourcesFailed = true;
+            return false;
+        }
+
+        m_ProfileLutBaked = wanted;
+        LOG_INFO( "[Clouds] Baked the {}x{} cloud profile table: {} authored vertical forms along the "
+                  "Cloud Type axis.",
+                  kCloudProfileLutWidth, kCloudProfileLutTypes, kCloudProfileLutTypes );
+        return true;
+    }
+
     void VolumetricCloudRenderer::DispatchWeather()
     {
         DESERT_PROFILE_SCOPE( "Clouds: WeatherMap" );
@@ -397,10 +484,13 @@ namespace Desert::Graphic::System
         auto& renderer = Renderer::GetInstance();
 
         renderer.ComputeImageBeginWrite( m_WeatherMap.get() );
+        renderer.ComputeImageBeginWrite( m_ProfileMap.get() );
         m_WeatherPipeline->SetOutput( kCloudWeatherOutputBinding, m_WeatherMap.get(), 0 );
+        m_WeatherPipeline->SetOutput( kCloudProfileOutputBinding, m_ProfileMap.get(), 0 );
         m_WeatherPipeline->SetStorageBuffer( kCloudParamsBinding, m_ParamsBuffer.get() );
         renderer.DispatchComputeInFrame( m_WeatherPipeline.get(), GroupCount( kWeatherMapSize ),
                                          GroupCount( kWeatherMapSize ), 1 );
+        renderer.ComputeImageEndWrite( m_ProfileMap.get() );
         renderer.ComputeImageEndWrite( m_WeatherMap.get() );
     }
 
@@ -425,6 +515,8 @@ namespace Desert::Graphic::System
         m_ShadowPipeline->SetInput( kCloudDetailNoiseBinding, noise.DetailNoise.get() );
         m_ShadowPipeline->SetInput( kCloudCurlNoiseBinding, noise.CurlNoise.get() );
         m_ShadowPipeline->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
+        m_ShadowPipeline->SetInput( kCloudProfileMapBinding, m_ProfileMap.get() );
+        m_ShadowPipeline->SetInput( kCloudProfileLutBinding, m_ProfileLut.get() );
         m_ShadowPipeline->SetPushConstants( &push, static_cast<uint32_t>( sizeof( push ) ) );
 
         renderer.DispatchComputeInFrame( m_ShadowPipeline.get(), GroupCount( kCloudShadowMapSize ),
@@ -463,6 +555,8 @@ namespace Desert::Graphic::System
         m_RaymarchPipeline->SetInput( kCloudDetailNoiseBinding, noise.DetailNoise.get() );
         m_RaymarchPipeline->SetInput( kCloudCurlNoiseBinding, noise.CurlNoise.get() );
         m_RaymarchPipeline->SetInput( kCloudWeatherMapBinding, m_WeatherMap.get() );
+        m_RaymarchPipeline->SetInput( kCloudProfileMapBinding, m_ProfileMap.get() );
+        m_RaymarchPipeline->SetInput( kCloudProfileLutBinding, m_ProfileLut.get() );
         m_RaymarchPipeline->SetInput( kCloudSceneDepthBinding, depthImage );
         // Always bound, even when the march will not read it: a declared sampler with no image is an
         // invalid descriptor set, not an unused one.

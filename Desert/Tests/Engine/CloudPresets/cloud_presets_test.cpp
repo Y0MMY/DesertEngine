@@ -231,7 +231,7 @@ TEST( CloudPresets, MovingAnySinglePresetDrivenFieldFallsBackToCustom )
              << f.Name << " was edited and the preset name survived it";
     }
 
-    EXPECT_EQ( perturbed, 79u ) << "the preset drives a different number of fields than specified";
+    EXPECT_EQ( perturbed, 86u ) << "the preset drives a different number of fields than specified";
 }
 
 // The other half of the same claim: a QUALITY edit must not cost the weather name. This is why the
@@ -466,6 +466,11 @@ TEST( CloudPresets, EveryPresetTimesEveryTierSatisfiesTheOrderingInvariants )
             EXPECT_TRUE( nonDecreasing( d.StratusGradient ) ) << where;
             EXPECT_TRUE( nonDecreasing( d.StratocumulusGradient ) ) << where;
             EXPECT_TRUE( nonDecreasing( d.CumulusGradient ) ) << where;
+            // The three forms the Cloud Type axis gained. A gradient whose base-in ends after its
+            // top-out begins is a profile that never opens, i.e. a type nobody can see.
+            EXPECT_TRUE( nonDecreasing( d.ShelfGradient ) ) << where;
+            EXPECT_TRUE( nonDecreasing( d.CongestusGradient ) ) << where;
+            EXPECT_TRUE( nonDecreasing( d.AnvilGradient ) ) << where;
 
             // A layer with no thickness and a march with no steps are both a division waiting to happen.
             EXPECT_GT( d.LayerThickness, 0.0f ) << where;

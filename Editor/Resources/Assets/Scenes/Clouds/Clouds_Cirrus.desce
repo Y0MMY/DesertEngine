@@ -113,6 +113,7 @@
     "WeatherWarpStrength": 0.5,
     "CloudType": 0.15,
     "CloudTypeVariance": 0.3,
+    "CloudHeightVariance": 0.3,
     "AnvilBias": 0.0,
     "Wetness": 0.0,
     "ShapeTileSize": 7000000.0,

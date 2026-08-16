@@ -153,6 +153,11 @@ namespace
     // into the block the march branches on.
     constexpr const char* kCloudPayload = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudPayload.hpp";
 
+    // The Cloud Type axis is baked into a texture on the CPU, so the six profile gradients and the three
+    // form bends have a named C++ reader rather than a shader that samples them: this file turns them
+    // into the table the march looks the profile up in.
+    constexpr const char* kCloudCurves = "Desert/Desert/Source/Engine/Graphic/Clouds/CloudProfileCurves.hpp";
+
     constexpr const char* kT8 = "T8 - weather map and raymarch: samples the density field and lights it";
     constexpr const char* kT8Steps =
          "T8 - weather map and raymarch: the step schedule and the sampling budget of the march";
@@ -179,6 +184,7 @@ namespace
          { "WeatherWarpStrength", nullptr, kT8 },
          { "CloudType", nullptr, kT8 },
          { "CloudTypeVariance", nullptr, kT8 },
+         { "CloudHeightVariance", kCloudPayload },
          { "AnvilBias", nullptr, kT8 },
          { "Wetness", nullptr, kT8 },
 
@@ -188,9 +194,15 @@ namespace
          { "BaseShapeRemapMin", nullptr, kT8 },
          { "ShapeErosionStrength", nullptr, kT8 },
          { "ExtinctionScale", nullptr, kT8 },
-         { "StratusGradient", nullptr, kT8 },
-         { "StratocumulusGradient", nullptr, kT8 },
-         { "CumulusGradient", nullptr, kT8 },
+         { "StratusGradient", kCloudCurves },
+         { "StratocumulusGradient", kCloudCurves },
+         { "CumulusGradient", kCloudCurves },
+         { "ShelfGradient", kCloudCurves },
+         { "ShelfProfileForm", kCloudCurves },
+         { "CongestusGradient", kCloudCurves },
+         { "CongestusProfileForm", kCloudCurves },
+         { "AnvilGradient", kCloudCurves },
+         { "AnvilProfileForm", kCloudCurves },
          { "BaseGradientPower", nullptr, kT8 },
          { "TopGradientPower", nullptr, kT8 },
          { "DensityHeightBias", nullptr, kT8 },
@@ -458,9 +470,11 @@ TEST( SettingConsumers, TheCloudComponentOwesExactlyTheFieldsItsPassesHaveNotBee
     const std::ptrdiff_t pending = std::count_if( std::begin( kCloudRows ), std::end( kCloudRows ),
                                                   []( const Row& r ) { return r.Task != nullptr; } );
 
-    // 95 fields, five of which the Details widget already consumes: the two selectors and the three
-    // noise seeds.
-    EXPECT_EQ( pending, 90 );
+    // 87, down from 90: the three legacy profile gradients now have a named C++ reader instead of a
+    // task that owes them one. The Cloud Type axis is baked into a texture on the CPU, so
+    // CloudProfileCurves.hpp reads them — together with the six fields the authored forms added, and
+    // Cloud Height Variance, which the payload clamps and packs.
+    EXPECT_EQ( pending, 87 );
 }
 
 int main( int argc, char** argv )

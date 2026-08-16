@@ -1,0 +1,113 @@
+// The VERTICAL PROFILE's own arithmetic: where a cell's cloud starts and stops inside the layer, and
+// where in the profile table a sample lands.
+//
+// Kept apart from Common/CloudDensityProcedural.glslh — which owns the samplers and the fetch — because
+// everything here is PURE, and pure means Tests/Engine/CloudMath compiles this very text as C++ and
+// asserts the relations on it. A cell band and a lookup coordinate are exactly the kind of value whose
+// two ends must agree and whose error has no symptom: a profile evaluated half a texel off does not
+// fail, it renders a slightly wrong sky forever.
+//
+// This is the deck's Vertical Profile Method (Nubis3 p. 19). Two things come from it:
+//
+//   * the profile is sampled between a PER-CELL Min Height and Max Height rather than across the whole
+//     layer, so neighbouring clouds occupy different vertical slabs — the signature of the pp. 126/150
+//     skies that a single global layer cannot produce at any setting;
+//   * the type axis indexes AUTHORED curves, not a blend of three trapezoids. The table those curves
+//     are baked into is Graphic::BuildCloudProfileLut (Engine/Graphic/Clouds/CloudProfileCurves.hpp).
+//
+// Written in the GLSL/C++ intersection: no samplers, no built-ins the two languages spell differently.
+
+#ifndef CLOUD_PROFILE_GLSLH
+#define CLOUD_PROFILE_GLSLH
+
+// The cell's CLOUD TYPE: the authored type, walked away from by a noise field.
+//
+// Lives here rather than inline in the weather pass because "variance 0 is one uniform type over the
+// whole sky" is a promise the stratus and overcast presets are built on, and a promise is something a
+// test should be able to hold the shader to.
+float CloudProfileTypeAt( float cloudType, float typeNoise, float variance )
+{
+    return clamp( cloudType + ( clamp( typeNoise, 0.0f, 1.0f ) - 0.5f ) * variance, 0.0f, 1.0f );
+}
+
+// The cell's raw Min/Max Height pair, as the weather pass writes it into the profile map.
+//
+// Authored as a CENTRE and a HALF-WIDTH rather than as two independent heights: two independent fields
+// would need ordering by hand and would mostly cancel — a base that rises while a ceiling falls only
+// makes every cloud thinner, which is not what the deck's pp. 126/150 skies are. Those are clouds of
+// comparable depth at visibly different altitudes, which is a moving centre.
+//
+// Both inputs are noise in [0, 1]. The returned pair is ordered by construction: the half-width is
+// positive, so the centre minus it can never exceed the centre plus it.
+//
+// The half-width range is deliberately generous — a mean band of ~0.85 of the layer rather than the
+// ~0.72 a narrower one gives. Bands that are too tight thin EVERY cloud, and a showcase sky loses its
+// towers before it gains its variety; the look this exists for is clouds of comparable depth at
+// different altitudes, which is the CENTRE moving, not the thickness shrinking.
+vec2 CloudProfileHeightNdf( float centreNoise, float widthNoise )
+{
+    float centre    = mix( 0.28f, 0.72f, clamp( centreNoise, 0.0f, 1.0f ) );
+    float halfWidth = mix( 0.30f, 0.55f, clamp( widthNoise, 0.0f, 1.0f ) );
+    return vec2( clamp( centre - halfWidth, 0.0f, 1.0f ), clamp( centre + halfWidth, 0.0f, 1.0f ) );
+}
+
+// The cell's own vertical band, as fractions of the layer.
+//
+// @param minHeightNdf  the profile map's R channel: where this cell's cloud base sits.
+// @param maxHeightNdf  its G channel: where the cell's ceiling sits.
+// @param amount        Cloud Height Variance. At 0 the band is the WHOLE layer, exactly — that is what
+//                      makes the knob's bottom end the engine's previous behaviour rather than an
+//                      approximation of it, and it is what every already-authored scene loads with.
+//
+// The `max` is not defensive: the two channels are independent fields, an artist can seed a map in
+// which a cell's ceiling falls below its base, and a zero-width band divides by zero one line later.
+vec2 CloudProfileCellBand( float minHeightNdf, float maxHeightNdf, float amount )
+{
+    float a    = clamp( amount, 0.0f, 1.0f );
+    float base = mix( 0.0f, minHeightNdf, a );
+    float top  = mix( 1.0f, maxHeightNdf, a );
+    return vec2( base, max( top, base + 1e-3f ) );
+}
+
+// Where @p heightFraction sits inside the cell's band: 0 at the cell's base, 1 at its ceiling.
+// Deliberately NOT clamped — the caller needs to know it fell outside, which is what makes a cell's
+// support end at its own ceiling instead of smearing along it.
+float CloudProfileCellHeight( float heightFraction, vec2 band )
+{
+    return ( heightFraction - band.x ) / ( band.y - band.x );
+}
+
+// The profile table's texture coordinate for a cell height and a cloud type.
+//
+// TEXEL CENTRES in both axes. The table's first and last taps ARE the curve's endpoints, so a lookup
+// at cell height 0 or 1 has to land exactly on them rather than half a texel outside, where a REPEAT
+// sampler — which is what every Image2D in this engine gets — would wrap it to the opposite edge and
+// read the top of the curve at the bottom of the cloud.
+//
+// @param lutSize  textureSize() of the table. Read from the image rather than mirrored in a constant:
+//                 the row count IS the number of authored forms, and a second copy of it in the shader
+//                 is one more thing that can disagree with the table the CPU actually uploaded.
+vec2 CloudProfileLutCoord( float cellHeight, float cloudType, vec2 lutSize )
+{
+    float u = ( clamp( cellHeight, 0.0f, 1.0f ) * ( lutSize.x - 1.0f ) + 0.5f ) / lutSize.x;
+    float v = ( clamp( cloudType, 0.0f, 1.0f ) * ( lutSize.y - 1.0f ) + 0.5f ) / lutSize.y;
+    return vec2( u, v );
+}
+
+// The profile the table's three channels describe, given the two shaping powers the artist authors.
+//
+//   bottom  the bottom-shaping curve of this type
+//   top     its top-shaping curve
+//   form    the bend a trapezoid cannot express, stored halved (see BuildCloudProfileLut)
+//
+// The powers stay OUTSIDE the table so that dragging Base/Top Gradient Power is a uniform write rather
+// than a texture re-upload; the shader paid these two `pow` calls before this table existed as well.
+float CloudProfileCompose( vec3 lutTexel, float baseGradientPower, float topGradientPower )
+{
+    float bottom = lutTexel.x;
+    float top    = lutTexel.y;
+    float form   = lutTexel.z * 2.0f;
+    return clamp( pow( bottom, baseGradientPower ) * pow( top, topGradientPower ) * form, 0.0f, 1.0f );
+}
+
+#endif // CLOUD_PROFILE_GLSLH

@@ -132,13 +132,26 @@ namespace Desert::ECS
 
         PROPERTY( DisplayName( "Cloud Type" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ),
-                  Tooltip( "0 = flat stratus, 0.5 = stratocumulus, 1 = towering cumulus." ) )
+                  Tooltip( "Which authored vertical FORM the clouds take, walked in order of convective "
+                           "development: 0 = flat scud/stratus, 0.2 = a hard-based stratocumulus shelf, "
+                           "0.4 = stratocumulus, 0.6 = cumulus, 0.8 = cauliflower congestus, "
+                           "1 = a cumulonimbus anvil with a pinched stalk." ) )
         float CloudType = 0.60f;
 
         PROPERTY( DisplayName( "Cloud Type Variance" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ),
-                  Tooltip( "How much the type varies across the map versus one uniform type." ) )
+                  Tooltip( "How far the type wanders from cloud cluster to cloud cluster. 0 gives one "
+                           "form over the whole sky; high values put shelves, towers and anvils in the "
+                           "same frame." ) )
         float CloudTypeVariance = 0.45f;
+
+        PROPERTY( DisplayName( "Cloud Height Variance" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
+                  EditCondition( "Enabled" ),
+                  Tooltip( "How much neighbouring clouds differ in BASE and TOP height. 0 makes every "
+                           "cloud fill the whole layer, as the layer's single global slab always did; "
+                           "raising it gives each cell its own vertical slab, so one cloud's base sits "
+                           "above another's top." ) )
+        float CloudHeightVariance = 0.55f;
 
         PROPERTY( DisplayName( "Anvil Bias" ), Category( "Weather" ), Range( 0.0f, 1.0f ),
                   EditCondition( "Enabled" ), Tooltip( "Spreads cloud tops outward - the cumulonimbus anvil." ) )
@@ -188,6 +201,51 @@ namespace Desert::ECS
         PROPERTY( DisplayName( "Cumulus Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
                   EditCondition( "Enabled" ), Tooltip( "The same four heights for the cumulus profile." ) )
         glm::vec4 CumulusGradient = { 0.00f, 0.22f, 0.68f, 0.92f };
+
+        // The three forms the Cloud Type axis gained. Each is a trapezoid PLUS a bend: a trapezoid
+        // product is a monotone rise times a monotone fall, so it can put a cloud's mass higher or lower
+        // but can never pinch a waist into it or leave a stalk under a flaring head. The bend is what
+        // makes the type knob choose a SHAPE instead of a height. See CloudProfileCurves.hpp.
+
+        PROPERTY( DisplayName( "Shelf Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
+                  EditCondition( "Enabled" ),
+                  Tooltip( "The four heights of the stratocumulus SHELF profile. Its base-in range is "
+                           "deliberately a few hundredths wide: that hard, flat, all-at-one-altitude "
+                           "base is what a shelf cloud is." ) )
+        glm::vec4 ShelfGradient = { 0.02f, 0.05f, 0.44f, 0.52f };
+
+        PROPERTY( DisplayName( "Shelf Profile Form" ), Category( "Shape" ), Range( -1.0f, 2.0f ), Advanced,
+                  EditCondition( "Enabled" ),
+                  Tooltip( "Bend applied to the shelf profile: (centre, half-width, amount) in normalized "
+                           "layer height. Amount 0 leaves a plain trapezoid, negative pinches a waist, "
+                           "positive thickens a belly." ) )
+        glm::vec3 ShelfProfileForm = { 0.28f, 0.30f, 0.35f };
+
+        PROPERTY( DisplayName( "Congestus Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
+                  EditCondition( "Enabled" ),
+                  Tooltip( "The four heights of the cauliflower congestus profile - a tall trapezoid with "
+                           "a short plateau, so the bend below can round it into a bulging mass." ) )
+        glm::vec4 CongestusGradient = { 0.00f, 0.45f, 0.70f, 1.00f };
+
+        PROPERTY( DisplayName( "Congestus Profile Form" ), Category( "Shape" ), Range( -1.0f, 2.0f ), Advanced,
+                  EditCondition( "Enabled" ),
+                  Tooltip( "Bend applied to the congestus profile: (centre, half-width, amount). A "
+                           "positive amount at mid height is the cauliflower bulge - full through the "
+                           "middle, tapering toward both the base and the top." ) )
+        glm::vec3 CongestusProfileForm = { 0.62f, 0.42f, 1.20f };
+
+        PROPERTY( DisplayName( "Anvil Gradient" ), Category( "Shape" ), Range( 0.0f, 1.0f ), Advanced,
+                  EditCondition( "Enabled" ),
+                  Tooltip( "The four heights of the cumulonimbus anvil profile: a box that fills nearly "
+                           "the whole layer, which the bend below then carves a stalk out of." ) )
+        glm::vec4 AnvilGradient = { 0.00f, 0.06f, 0.92f, 1.00f };
+
+        PROPERTY( DisplayName( "Anvil Profile Form" ), Category( "Shape" ), Range( -1.0f, 2.0f ), Advanced,
+                  EditCondition( "Enabled" ),
+                  Tooltip( "Bend applied to the anvil profile: (centre, half-width, amount). A strong "
+                           "negative amount low down is the pinched stalk that leaves the head flaring "
+                           "alone against the top of the layer." ) )
+        glm::vec3 AnvilProfileForm = { 0.45f, 0.42f, -0.90f };
 
         PROPERTY( DisplayName( "Base Gradient Power" ), Category( "Shape" ), Range( 0.5f, 6.0f ), Advanced,
                   EditCondition( "Enabled" ), Tooltip( "Flatness of the cloud bottom." ) )
