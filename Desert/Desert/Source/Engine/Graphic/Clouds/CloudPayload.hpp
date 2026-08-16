@@ -78,8 +78,7 @@ namespace Desert::Graphic
         float HighFreqStrength;
         float HighFreqWispSharpness;
         float HighFreqBillowSharpness;
-        float HighFreqFadeStart;
-        float HighFreqFadeEnd;
+        float HighFreqFeatureSize;
         float CurlStrength;
         float CurlTileSize;
         float DensitySharpenLow;
@@ -174,24 +173,24 @@ namespace Desert::Graphic
     static_assert( offsetof( CloudGpuPayload, Coverage ) == 216 );
     static_assert( offsetof( CloudGpuPayload, ShapeTileSize ) == 248 );
     static_assert( offsetof( CloudGpuPayload, DetailStrength ) == 272 );
-    static_assert( offsetof( CloudGpuPayload, LightMarchDistance ) == 356 );
-    static_assert( offsetof( CloudGpuPayload, AnimationSpeed ) == 408 );
-    static_assert( offsetof( CloudGpuPayload, MinStepSize ) == 440 );
-    static_assert( offsetof( CloudGpuPayload, TemporalBlendFactor ) == 460 );
-    static_assert( offsetof( CloudGpuPayload, WeatherSeed ) == 468 );
-    static_assert( offsetof( CloudGpuPayload, MultiScatterOctaves ) == 488 );
-    static_assert( offsetof( CloudGpuPayload, AmbientOcclusion ) == 492 );
-    static_assert( offsetof( CloudGpuPayload, AutoDistanceFade ) == 496 );
-    static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 500 );
-    static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 504 );
-    static_assert( offsetof( CloudGpuPayload, CloudHeightVariance ) == 508 );
-    static_assert( sizeof( CloudGpuPayload ) == 512,
+    static_assert( offsetof( CloudGpuPayload, LightMarchDistance ) == 352 );
+    static_assert( offsetof( CloudGpuPayload, AnimationSpeed ) == 404 );
+    static_assert( offsetof( CloudGpuPayload, MinStepSize ) == 436 );
+    static_assert( offsetof( CloudGpuPayload, TemporalBlendFactor ) == 456 );
+    static_assert( offsetof( CloudGpuPayload, WeatherSeed ) == 464 );
+    static_assert( offsetof( CloudGpuPayload, MultiScatterOctaves ) == 484 );
+    static_assert( offsetof( CloudGpuPayload, AmbientOcclusion ) == 488 );
+    static_assert( offsetof( CloudGpuPayload, AutoDistanceFade ) == 492 );
+    static_assert( offsetof( CloudGpuPayload, CloudShadowExtent ) == 496 );
+    static_assert( offsetof( CloudGpuPayload, CloudShadowEnabled ) == 500 );
+    static_assert( offsetof( CloudGpuPayload, CloudHeightVariance ) == 504 );
+    static_assert( sizeof( CloudGpuPayload ) == 508,
                    "The block ends at the last float. glm's vec4 has a 4-byte alignment (no SIMD "
                    "gentypes in this build), so C++ adds no tail padding — std430 does, which is why "
                    "the buffer below is created at the rounded-up size and not at sizeof." );
 
     // std430 rounds a block up to its own 16-byte alignment, so the SSBO must be at least this large
-    // even though the C++ struct stops four bytes earlier. Creating it at sizeof() would leave the
+    // even though the C++ struct stops short of it. Creating it at sizeof() would leave the
     // descriptor range short of the block the shader declares.
     inline constexpr uint32_t kCloudPayloadBytes = ( ( sizeof( CloudGpuPayload ) + 15u ) / 16u ) * 16u;
 
@@ -579,8 +578,7 @@ namespace Desert::Graphic
         p.HighFreqStrength        = data.HighFreqStrength;
         p.HighFreqWispSharpness   = data.HighFreqWispSharpness;
         p.HighFreqBillowSharpness = data.HighFreqBillowSharpness;
-        p.HighFreqFadeStart       = data.HighFreqFadeStart;
-        p.HighFreqFadeEnd         = glm::max( data.HighFreqFadeEnd, data.HighFreqFadeStart );
+        p.HighFreqFeatureSize     = glm::max( data.HighFreqFeatureSize, 1.0f );
         p.CurlStrength            = data.CurlStrength;
         p.CurlTileSize            = glm::max( data.CurlTileSize, 1.0f );
         p.DensitySharpenLow       = data.DensitySharpenLow;

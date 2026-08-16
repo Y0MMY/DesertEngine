@@ -12,6 +12,7 @@
 #include <Common/Core/Units.hpp>
 
 #include <Engine/ECS/VolumetricCloudsComponent.hpp>
+#include <Engine/Graphic/Clouds/CloudWeatherScale.hpp>
 #include <Engine/Graphic/CloudPresets.hpp>
 #include <Engine/Graphic/CloudQuality.hpp>
 #include <Engine/Reflection/ReflectionRegistry.hpp>
@@ -231,7 +232,8 @@ TEST( CloudPresets, MovingAnySinglePresetDrivenFieldFallsBackToCustom )
              << f.Name << " was edited and the preset name survived it";
     }
 
-    EXPECT_EQ( perturbed, 86u ) << "the preset drives a different number of fields than specified";
+    // 85 since High Frequency Fade Start / End became the single High Frequency Feature Size.
+    EXPECT_EQ( perturbed, 85u ) << "the preset drives a different number of fields than specified";
 }
 
 // The other half of the same claim: a QUALITY edit must not cost the weather name. This is why the
@@ -461,7 +463,7 @@ TEST( CloudPresets, EveryPresetTimesEveryTierSatisfiesTheOrderingInvariants )
             EXPECT_LE( d.NearFadeStart, d.NearFadeEnd ) << where;
             EXPECT_LE( d.SofteningStartDistance, d.SofteningEndDistance ) << where;
             EXPECT_LE( d.DistanceFadeStart, d.DistanceFadeEnd ) << where;
-            EXPECT_LE( d.HighFreqFadeStart, d.HighFreqFadeEnd ) << where;
+            EXPECT_GT( d.HighFreqFeatureSize, 0.0f ) << where;
 
             EXPECT_TRUE( nonDecreasing( d.StratusGradient ) ) << where;
             EXPECT_TRUE( nonDecreasing( d.StratocumulusGradient ) ) << where;
@@ -477,6 +479,32 @@ TEST( CloudPresets, EveryPresetTimesEveryTierSatisfiesTheOrderingInvariants )
             EXPECT_GT( d.MaxSteps, 0 ) << where;
             EXPECT_GT( d.ExtinctionScale, 0.0f ) << where;
         }
+    }
+}
+
+// Two values that must agree and never did: the weather field's horizontal scale and the layer's
+// altitude. Clouds_UEShowcase authored a 60 km tile over a layer at 1.5-5 km, so a ground camera saw one
+// coverage cell overhead and the zenith rendered as empty blue while the horizon carried a dense band.
+// Nothing related the two, so every preset drifted independently — the Overcast row was a 120 km tile
+// over a layer at 0.9-3.1 km, seven times what its own altitude asks for.
+//
+// The relation is CloudAutoWeatherTileSize (Engine/Graphic/Clouds/CloudWeatherScale.hpp, and the same
+// formula in Common/CloudGeometry.glslh with the reasoning). A preset that leaves the plausible band is
+// a sky an artist will report as broken, so it fails here instead.
+TEST( CloudPresets, EveryPresetsWeatherTileMatchesItsOwnLayerAltitude )
+{
+    for ( const Graphic::CloudPresetEntry& preset : Graphic::kCloudPresets )
+    {
+        VolumetricCloudData d{};
+        Graphic::ApplyPreset( preset.Id, d );
+
+        const float wanted = Graphic::CloudAutoWeatherTileSize( d.LayerBottomAltitude, d.LayerThickness );
+        EXPECT_TRUE(
+             Graphic::CloudWeatherTileIsPlausible( d.WeatherTileSize, d.LayerBottomAltitude, d.LayerThickness ) )
+             << preset.Name << ": tile " << Common::Units::ToMetres( d.WeatherTileSize ) / 1000.0f
+             << " km over a layer at " << Common::Units::ToMetres( d.LayerBottomAltitude ) / 1000.0f << "-"
+             << Common::Units::ToMetres( d.LayerBottomAltitude + d.LayerThickness ) / 1000.0f << " km wants "
+             << Common::Units::ToMetres( wanted ) / 1000.0f << " km";
     }
 }
 

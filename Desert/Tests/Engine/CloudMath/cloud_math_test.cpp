@@ -19,6 +19,7 @@
 
 #include <Engine/Graphic/Clouds/CloudPayload.hpp>
 #include <Engine/Graphic/Clouds/CloudProfileCurves.hpp>
+#include <Engine/Graphic/Clouds/CloudWeatherScale.hpp>
 #include <Engine/Graphic/CloudQuality.hpp>
 
 #include <gtest/gtest.h>
@@ -163,6 +164,29 @@ namespace
         for ( int i = 0; i < maxSteps && state.T < tExit; ++i )
         {
             const bool occupied = state.T >= slabStart && state.T <= slabEnd;
+            samples.push_back( MarchSample{ state.T, state.Fine } );
+            state = R::CloudMarchAdvance( state, occupied, tEnter, minStep, maxStep, growth, coarseMultiplier,
+                                          emptyBeforeCoarse );
+        }
+        return samples;
+    }
+
+    // The same drive, with the two tiers answering from DIFFERENT fields — which is what the renderer
+    // actually does and what RunMarch above cannot express. The coarse tier reads the cheap density and
+    // the fine tier the eroded one, and over most of a procedural cloudscape the first is positive where
+    // the second is zero.
+    std::vector<MarchSample> RunMarchSplit( float tEnter, float tExit, float cheapStart, float cheapEnd,
+                                            float fineStart, float fineEnd, float minStep, float maxStep,
+                                            float growth, float coarseMultiplier, int emptyBeforeCoarse,
+                                            int maxSteps )
+    {
+        std::vector<MarchSample> samples;
+        R::CloudMarchState       state = R::CloudMarchBegin( tEnter );
+
+        for ( int i = 0; i < maxSteps && state.T < tExit; ++i )
+        {
+            const bool occupied = state.Fine ? ( state.T >= fineStart && state.T <= fineEnd )
+                                             : ( state.T >= cheapStart && state.T <= cheapEnd );
             samples.push_back( MarchSample{ state.T, state.Fine } );
             state = R::CloudMarchAdvance( state, occupied, tEnter, minStep, maxStep, growth, coarseMultiplier,
                                           emptyBeforeCoarse );
@@ -598,6 +622,266 @@ TEST( CloudMarch, StartsCoarseSoAnEmptySkyCostsAlmostNothing )
     EXPECT_LT( samples.size(), static_cast<size_t>( 100000.0f / ( 500.0f * 3.0f ) ) + 2u );
 }
 
+// The defect the three tests above could not see, because they drive both tiers from ONE slab.
+//
+// The renderer's tiers read different fields: the coarse one the cheap density, the fine one the same
+// density after the detail erosion has cut it. Where the cheap density is positive and the eroded one is
+// zero — most of a procedural cloudscape — the old machine rewound one coarse stride on every coarse
+// hit, spent `emptyBeforeCoarse` fine strides finding nothing, and returned to a coarse tier that
+// immediately hit again. Net progress was (emptyBeforeCoarse - 2 * coarseMultiplier) fine strides per
+// (emptyBeforeCoarse + 1) samples: EXACTLY ZERO at the shipped High tier's 4 and 8, and negative at
+// Low's 4 and 4. Every ray at an ordinary viewing elevation exhausted MaxSteps over open sky.
+//
+// The relation, not the symptom: a ray that finds nothing must still cross its shell for a cost within a
+// small multiple of what the coarse tier alone would have paid.
+TEST( CloudMarch, CrossesAShellTheCoarseTierMisreadsForACostNearTheCoarseTierAlone )
+{
+    constexpr float kEnter   = 0.0f;
+    constexpr float kExit    = 850000.0f; // 8.5 km, the showcase's shell chord at 24 degrees elevation
+    constexpr float kMinStep = 1500.0f;   // the High tier
+    constexpr float kMaxStep = 70000.0f;
+    constexpr float kGrowth  = 0.008f;
+
+    // Every tier the engine ships, at its own coarse multiplier and empty run.
+    for ( const auto& tier : Desert::Graphic::kCloudQualityTiers )
+    {
+        const float coarse = tier.Values.CoarseStepMultiplier;
+        const int   empty  = tier.Values.EmptySamplesBeforeCoarse;
+
+        // The cheap density says "cloud" over the whole shell; the eroded density says "nothing" over
+        // all of it. This is the disagreement, in its purest form.
+        const auto samples = RunMarchSplit( kEnter, kExit, kEnter, kExit, 1e9f, 1e9f, kMinStep, kMaxStep, kGrowth,
+                                            coarse, empty, 100000 );
+
+        ASSERT_FALSE( samples.empty() ) << tier.Name;
+        // It got there at all — the old machine did not, at any budget.
+        EXPECT_GE( samples.back().Distance, kExit - kMaxStep ) << tier.Name;
+
+        // And it got there for a cost near the coarse tier's own. The coarse tier alone would pay about
+        // (kExit - kEnter) / (coarse * minStep) samples at the near end of the schedule; allow four
+        // times that for the search, which is still an order of magnitude under the old behaviour.
+        const size_t coarseOnly = static_cast<size_t>( ( kExit - kEnter ) / ( coarse * kMinStep ) );
+        EXPECT_LT( samples.size(), coarseOnly * 4u ) << tier.Name;
+    }
+}
+
+// The property that makes the above true rather than the number that happens to come out of it: no
+// interval is ever marched twice, so the machine cannot cycle.
+TEST( CloudMarch, NeverRewindsBehindGroundTheFineTierHasAlreadyCovered )
+{
+    R::CloudMarchState state     = R::CloudMarchBegin( 0.0f );
+    float              highWater = 0.0f;
+
+    for ( int i = 0; i < 20000 && state.T < 850000.0f; ++i )
+    {
+        // The pathological field again: coarse always yes, fine always no.
+        const bool occupied = !state.Fine;
+        if ( state.Fine )
+        {
+            EXPECT_GE( state.T, highWater - 1e-3f );
+            highWater = std::max( highWater, state.T );
+        }
+        state = R::CloudMarchAdvance( state, occupied, 0.0f, 1500.0f, 70000.0f, 0.008f, 4.0f, 8 );
+    }
+    EXPECT_GT( highWater, 0.0f );
+}
+
+// ---- Closing out a ray that ran out of budget ------------------------------------------------------
+
+TEST( CloudRayTail, CannotInventLightAndOnlyEverDarkensTransmittance )
+{
+    const glm::vec3 scattered( 0.4f, 0.5f, 0.6f );
+
+    // Nothing left to march: the identity, exactly.
+    {
+        const R::CloudRayTail tail =
+             R::CloudCloseExhaustedRay( scattered, 0.3f, 5000.0f, 100000.0f, 0.0f, 0.0005f );
+        EXPECT_FLOAT_EQ( tail.Transmittance, 0.3f );
+        EXPECT_FLOAT_EQ( tail.Scattered.x, scattered.x );
+    }
+
+    // A tail: transmittance falls, radiance rises, and the rise is bounded by the mean radiance the ray
+    // measured — it can never scatter more than the medium it already saw.
+    {
+        const float           transmittance = 0.3f;
+        const R::CloudRayTail tail =
+             R::CloudCloseExhaustedRay( scattered, transmittance, 5000.0f, 100000.0f, 400000.0f, 0.0005f );
+        EXPECT_LT( tail.Transmittance, transmittance );
+        EXPECT_GT( tail.Transmittance, 0.0f );
+        EXPECT_GE( tail.Scattered.x, scattered.x );
+
+        const glm::vec3 mean = scattered / ( 1.0f - transmittance );
+        EXPECT_LE( tail.Scattered.x, scattered.x + transmittance * mean.x + 1e-5f );
+    }
+
+    // A ray that measured no medium at all leaves both untouched, rather than dividing by its own zero.
+    {
+        const R::CloudRayTail tail =
+             R::CloudCloseExhaustedRay( glm::vec3( 0.0f ), 1.0f, 0.0f, 100000.0f, 400000.0f, 0.0005f );
+        EXPECT_FLOAT_EQ( tail.Transmittance, 1.0f );
+        EXPECT_FLOAT_EQ( tail.Scattered.x, 0.0f );
+    }
+
+    // Monotone in the distance still owed.
+    float previous = 1.1f;
+    for ( float remaining = 0.0f; remaining < 2000000.0f; remaining += 50000.0f )
+    {
+        const R::CloudRayTail tail =
+             R::CloudCloseExhaustedRay( scattered, 0.9f, 20000.0f, 100000.0f, remaining, 0.0005f );
+        EXPECT_LE( tail.Transmittance, previous );
+        previous = tail.Transmittance;
+    }
+}
+
+// ---- Transmittance at depth --------------------------------------------------------------------------
+
+namespace
+{
+    // The kernel the octave chain used before: pure Beer, per octave.
+    float BeerOctaveKernel( float tau )
+    {
+        return std::exp( -std::max( tau, 0.0f ) );
+    }
+
+    // The diffusion asymptote the deep tail is supposed to have the SHAPE of.
+    float DiffusionSlabTransmittance( float tau )
+    {
+        const float k = 0.75f * ( 1.0f - R::CLOUD_DROPLET_ASYMMETRY );
+        return 1.0f / ( 1.0f + k * tau );
+    }
+} // namespace
+
+TEST( CloudThickTransmittance, IsBeerBelowOneMeanFreePathAndStrictlyAboveItBeyond )
+{
+    // Identical to the old chain's kernel below the join — bit for bit, so no thin cloud, rim or edge in
+    // any scene moves at all.
+    for ( float tau = 0.0f; tau <= R::CLOUD_DIFFUSION_JOIN_TAU; tau += 0.02f )
+        EXPECT_FLOAT_EQ( R::CloudThickTransmittance( tau ), BeerOctaveKernel( tau ) );
+
+    // Continuous at the join.
+    EXPECT_NEAR( R::CloudThickTransmittance( R::CLOUD_DIFFUSION_JOIN_TAU ),
+                 BeerOctaveKernel( R::CLOUD_DIFFUSION_JOIN_TAU ), 1e-6f );
+
+    // Strictly greater above it, and by a lot where it matters.
+    for ( float tau = R::CLOUD_DIFFUSION_JOIN_TAU + 0.1f; tau < 120.0f; tau += 0.5f )
+        EXPECT_GT( R::CloudThickTransmittance( tau ), BeerOctaveKernel( tau ) );
+
+    EXPECT_GT( R::CloudThickTransmittance( 50.0f ) / BeerOctaveKernel( 50.0f ), 1e10f );
+}
+
+TEST( CloudThickTransmittance, IsMonotoneAndBoundedInZeroToOne )
+{
+    float previous = 1.0f + 1e-6f;
+    for ( float tau = 0.0f; tau < 500.0f; tau += 0.25f )
+    {
+        const float t = R::CloudThickTransmittance( tau );
+        EXPECT_GT( t, 0.0f ) << tau;
+        EXPECT_LE( t, 1.0f ) << tau;
+        EXPECT_LE( t, previous ) << tau;
+        previous = t;
+    }
+    EXPECT_FLOAT_EQ( R::CloudThickTransmittance( 0.0f ), 1.0f );
+}
+
+// The SHAPE at depth: the tail must fall like the diffusion slab's 1/(1 + k tau), not like an
+// exponential. Pinned as a ratio that stays flat rather than as a value, because it is the power law
+// that is the claim.
+TEST( CloudThickTransmittance, FallsAlgebraicallyAtDepthLikeADiffusingSlab )
+{
+    const float r50  = R::CloudThickTransmittance( 50.0f ) / DiffusionSlabTransmittance( 50.0f );
+    const float r100 = R::CloudThickTransmittance( 100.0f ) / DiffusionSlabTransmittance( 100.0f );
+    EXPECT_NEAR( r50, r100, 0.02f );
+
+    // Doubling the optical depth of a diffusing slab roughly halves what gets through — an exponential
+    // would divide it by exp(50).
+    EXPECT_NEAR( R::CloudThickTransmittance( 50.0f ) / R::CloudThickTransmittance( 100.0f ), 1.87f, 0.1f );
+}
+
+// What the chain as a whole now delivers at depth, and what it still does not. The number on the right
+// is a measurement, not a target: anchoring the tail to Beer's own value at the join costs amplitude,
+// and the chain lands at about 0.6 of the diffusion asymptote. Pinning it means the shortfall is a fact
+// on the record rather than a surprise, and that a later change to the octave weights has to restate it.
+TEST( CloudMultiScatter, ANormalisedThickChainSitsNearTheDiffusionAsymptote )
+{
+    const auto normalised = []( float tau )
+    {
+        const glm::vec3 deep =
+             R::CloudMultiScatter( tau, glm::vec3( 1.0f ), 0.5f, 3, 0.5f, 0.5f, 0.5f, 0.8f, -0.15f, 0.5f, 1.2f );
+        const glm::vec3 zero =
+             R::CloudMultiScatter( 0.0f, glm::vec3( 1.0f ), 0.5f, 3, 0.5f, 0.5f, 0.5f, 0.8f, -0.15f, 0.5f, 1.2f );
+        return deep.x / zero.x;
+    };
+
+    for ( float tau : { 50.0f, 75.0f, 100.0f } )
+    {
+        const float ratio = normalised( tau ) / DiffusionSlabTransmittance( tau );
+        EXPECT_GT( ratio, 0.45f ) << tau;
+        EXPECT_LT( ratio, 0.85f ) << tau;
+    }
+
+    // And the thing that was actually wrong: the old chain was five orders of magnitude below this.
+    const float oldChain =
+         ( BeerOctaveKernel( 50.0f ) + 0.5f * BeerOctaveKernel( 25.0f ) + 0.25f * BeerOctaveKernel( 12.5f ) ) /
+         1.75f;
+    EXPECT_GT( normalised( 50.0f ) / oldChain, 1e4f );
+}
+
+// The low-tau promise, made about the function the march actually calls rather than about its kernel:
+// every thin cloud in every scene renders exactly as before.
+TEST( CloudMultiScatter, IsUnchangedWhereverEveryOctaveIsUnderOneMeanFreePath )
+{
+    for ( float tau = 0.0f; tau <= R::CLOUD_DIFFUSION_JOIN_TAU; tau += 0.05f )
+    {
+        const glm::vec3 now =
+             R::CloudMultiScatter( tau, glm::vec3( 1.0f ), 0.5f, 3, 0.5f, 0.5f, 0.5f, 0.8f, -0.15f, 0.5f, 1.2f );
+
+        // The same sum, spelled with exp() as it used to be.
+        glm::vec3 before( 0.0f );
+        float     extinctionMul = 1.0f;
+        float     scatterMul    = 1.0f;
+        float     phaseMul      = 1.0f;
+        for ( int i = 0; i < 3; ++i )
+        {
+            const float phase = R::CloudDualLobePhase( 0.5f, 0.8f * phaseMul, -0.15f * phaseMul, 0.5f, 1.2f );
+            before += glm::vec3( BeerOctaveKernel( tau * extinctionMul ) ) * ( scatterMul * phase );
+            extinctionMul *= 0.5f;
+            scatterMul *= 0.5f;
+            phaseMul *= 0.5f;
+        }
+        EXPECT_NEAR( now.x, before.x, 1e-6f ) << tau;
+    }
+}
+
+// ---- The weather field's scale ----------------------------------------------------------------------
+
+// The C++ side decides this number (component default, preset table, the renderer's warning) and the
+// shader header states the reasoning. Two spellings of one formula is the exact shape of defect this
+// project has paid for; this is the assertion that keeps them one formula.
+TEST( CloudWeatherScale, TheCppMirrorIsTheShaderFormulaToTheBit )
+{
+    for ( float bottom : { 60000.0f, 150000.0f, 200000.0f, 800000.0f } )
+        for ( float thickness : { 70000.0f, 250000.0f, 350000.0f, 900000.0f } )
+            EXPECT_FLOAT_EQ( Desert::Graphic::CloudAutoWeatherTileSize( bottom, thickness ),
+                             R::CloudAutoWeatherTileSize( bottom, thickness ) );
+
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudWeatherBasePeriod, R::CLOUD_WEATHER_BASE_PERIOD );
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudWeatherOverheadCot, R::CLOUD_WEATHER_OVERHEAD_COT );
+    EXPECT_FLOAT_EQ( Desert::Graphic::kCloudWeatherCellsOverhead, R::CLOUD_WEATHER_CELLS_OVERHEAD );
+}
+
+// The component's own default must BE the derived value for the layer it ships with, or the very first
+// sky an artist sees is the miscalibrated one.
+TEST( CloudWeatherScale, TheComponentDefaultIsTheDerivedTileForItsOwnLayer )
+{
+    const Desert::ECS::VolumetricCloudData defaults;
+    EXPECT_TRUE( Desert::Graphic::CloudWeatherTileIsPlausible(
+         defaults.WeatherTileSize, defaults.LayerBottomAltitude, defaults.LayerThickness ) );
+    EXPECT_NEAR(
+         defaults.WeatherTileSize,
+         Desert::Graphic::CloudAutoWeatherTileSize( defaults.LayerBottomAltitude, defaults.LayerThickness ),
+         defaults.WeatherTileSize * 0.02f );
+}
+
 // ---- CLD-25: Beer -----------------------------------------------------------------------------------
 
 TEST( CloudBeer, IsOneAtZeroMonotoneAndMultiplicative )
@@ -757,19 +1041,31 @@ TEST( CloudInScatter, StaysInsideZeroToOne )
 
 // ---- CLD-28: multiple scattering ------------------------------------------------------------------
 
-TEST( CloudMultiScatter, OneOctaveReproducesSingleScatteringExactly )
+// One octave reproduces single scattering exactly WHILE THE MEDIUM IS THIN, and deliberately stops doing
+// so once it is not: past one mean free path the chain carries the diffusion tail (CloudThickTransmittance),
+// which is the whole point of that function and is what keeps a thick core luminous. The two halves are
+// asserted separately so the boundary is a statement rather than a tolerance.
+TEST( CloudMultiScatter, OneOctaveIsSingleScatteringWhileTheMediumIsThin )
 {
-    constexpr float kTau = 1.3f;
     constexpr float kCos = 0.4f;
     const glm::vec3 tint( 1.0f );
+    const float     phase = R::CloudDualLobePhase( kCos, 0.8f, -0.15f, 0.5f, 1.2f );
 
-    const glm::vec3 ms = R::CloudMultiScatter( kTau, tint, kCos, 1, 1.0f, 1.0f, 1.0f, 0.8f, -0.15f, 0.5f, 1.2f );
-    const float     single =
-         R::CloudBeerTransmittance( kTau ) * R::CloudDualLobePhase( kCos, 0.8f, -0.15f, 0.5f, 1.2f );
+    for ( float tau = 0.0f; tau <= R::CLOUD_DIFFUSION_JOIN_TAU; tau += 0.05f )
+    {
+        const glm::vec3 ms =
+             R::CloudMultiScatter( tau, tint, kCos, 1, 1.0f, 1.0f, 1.0f, 0.8f, -0.15f, 0.5f, 1.2f );
+        const float single = R::CloudBeerTransmittance( tau ) * phase;
 
-    EXPECT_FLOAT_EQ( ms.x, single );
-    EXPECT_FLOAT_EQ( ms.y, single );
-    EXPECT_FLOAT_EQ( ms.z, single );
+        EXPECT_FLOAT_EQ( ms.x, single ) << tau;
+        EXPECT_FLOAT_EQ( ms.y, single ) << tau;
+        EXPECT_FLOAT_EQ( ms.z, single ) << tau;
+    }
+
+    // Above the join it is strictly brighter than single scattering, which is the behaviour change.
+    const glm::vec3 thick =
+         R::CloudMultiScatter( 8.0f, tint, kCos, 1, 1.0f, 1.0f, 1.0f, 0.8f, -0.15f, 0.5f, 1.2f );
+    EXPECT_GT( thick.x, R::CloudBeerTransmittance( 8.0f ) * phase );
 }
 
 TEST( CloudMultiScatter, AddingOctavesIsMonotonicallyBrightening )
@@ -942,12 +1238,16 @@ TEST( CloudMultiScatterOpticalDepth, DeepBacklitSamplesGetStrictlyMoreEnergyThan
                  previous, previous * 1e-4f );
     }
 
-    // A thick core is the case the ablation shows, so state what it is worth: at an optical depth of 6 the
-    // old form left the first octave at exp(-6), the new one leaves it at exp(-6/5). The bound is stated
-    // as a factor rather than as two values because the factor is the paper's, 0.05 against 0.25.
+    // A thick core is the case the ablation shows, so state what it is worth — and the number moved when
+    // CloudThickTransmittance landed, which is worth saying rather than re-tuning around. The two
+    // mechanisms do the SAME job: p.136's depth modulation divides the optical depth by five, and the
+    // diffusion tail replaces the exponential the depth modulation was trying to escape. They are not
+    // additive, so with the tail in place the modulation is worth about 1.6x at an optical depth of 6
+    // where it used to be worth more than 3x. That is the modulation getting less to fix, not less
+    // effective: the un-modulated case at the same depth is itself far brighter than it was.
     const float before = MultiScatterBeforeDepthModulation( 6.0f, 0.95f ).x;
     const float after  = MultiScatterWithDepthModulation( 6.0f, 1.0f, 0.95f ).x;
-    EXPECT_GT( after, 3.0f * before );
+    EXPECT_GT( after, 1.4f * before );
 
     // The silhouette does not move: this multiplies the light a sample scatters, never the transmittance
     // the march accumulates, so however much brighter the core is it cannot be MORE than unoccluded.
@@ -1460,11 +1760,11 @@ TEST( CloudShadowReadout, AnEmptyColumnShadowsNothingAtAnyHeight )
 TEST( CloudPayload, TheBlockIsTheSizeTheBufferIsCreatedWith )
 {
     // std430 rounds the block up to its 16-byte alignment; the buffer must cover that, not sizeof.
-    // 512 and not 508 since Cloud Height Variance landed — how far the profile map's Min/Max Height
-    // channels may move a cell's own base and ceiling off the layer. The block now happens to land on
-    // its own alignment, so the two numbers below are equal; that is a coincidence of this field count,
-    // not a rule, and the >= and %16 assertions below are what actually has to hold.
-    EXPECT_EQ( sizeof( CloudGpuPayload ), 512u );
+    // 508 since High Frequency Fade Start / End became the single High Frequency Feature Size: the band
+    // no longer takes two authored distances, because the distance it survives to is derived from the
+    // size and the march's own step (CloudBandWeight). The block therefore stops four bytes short of its
+    // alignment again, which is the ordinary case; the >= and %16 assertions below are what has to hold.
+    EXPECT_EQ( sizeof( CloudGpuPayload ), 508u );
     EXPECT_EQ( kCloudPayloadBytes, 512u );
     EXPECT_GE( kCloudPayloadBytes, sizeof( CloudGpuPayload ) );
     EXPECT_EQ( kCloudPayloadBytes % 16u, 0u );
@@ -1510,10 +1810,10 @@ TEST( CloudPayload, EveryFieldReachesADistinctOffset )
     EXPECT_EQ( offsetof( CloudGpuPayload, SceneWind ), 176u );
     EXPECT_EQ( offsetof( CloudGpuPayload, PlanetRadius ), 192u );
     EXPECT_EQ( offsetof( CloudGpuPayload, Coverage ), 216u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, LightMarchDistance ), 356u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, MinStepSize ), 440u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, TemporalBlendFactor ), 460u );
-    EXPECT_EQ( offsetof( CloudGpuPayload, MultiScatterOctaves ), 488u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, LightMarchDistance ), 352u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, MinStepSize ), 436u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, TemporalBlendFactor ), 456u );
+    EXPECT_EQ( offsetof( CloudGpuPayload, MultiScatterOctaves ), 484u );
 }
 
 TEST( CloudPayload, PackingCarriesTheComponentAndTheAtmosphereThrough )
@@ -1572,8 +1872,7 @@ TEST( CloudPayload, InvertedRangesAreRepairedAtTheBoundary )
     data.SofteningEndDistance   = 100.0f;
     data.DistanceFadeStart      = 8000.0f;
     data.DistanceFadeEnd        = 20.0f;
-    data.HighFreqFadeStart      = 700.0f;
-    data.HighFreqFadeEnd        = 20.0f;
+    data.HighFreqFeatureSize    = -5.0f;
     data.MinStepSize            = 5000.0f;
     data.MaxStepSize            = 100.0f;
 
@@ -1583,7 +1882,7 @@ TEST( CloudPayload, InvertedRangesAreRepairedAtTheBoundary )
     EXPECT_GE( p.NearFadeEnd, p.NearFadeStart );
     EXPECT_GE( p.SofteningEndDistance, p.SofteningStartDistance );
     EXPECT_GE( p.DistanceFadeEnd, p.DistanceFadeStart );
-    EXPECT_GE( p.HighFreqFadeEnd, p.HighFreqFadeStart );
+    EXPECT_GE( p.HighFreqFeatureSize, 1.0f );
     EXPECT_GE( p.MaxStepSize, p.MinStepSize );
 }
 

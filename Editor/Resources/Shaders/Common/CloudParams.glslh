@@ -83,8 +83,7 @@ layout(std430, binding = CLOUD_PARAMS_BINDING) readonly buffer CloudParamsBuffer
     float u_HighFreqStrength;
     float u_HighFreqWispSharpness;
     float u_HighFreqBillowSharpness;
-    float u_HighFreqFadeStart;
-    float u_HighFreqFadeEnd;
+    float u_HighFreqFeatureSize;
     float u_CurlStrength;
     float u_CurlTileSize;
     float u_DensitySharpenLow;

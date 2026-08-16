@@ -4,7 +4,8 @@
 // functions, and through nothing else:
 //
 //     float CloudDensityCheap ( vec3 worldPos, float heightFraction );
-//     vec2  CloudDensitySample( vec3 worldPos, float heightFraction, float distanceFromCamera );
+//     vec2  CloudDensitySample( vec3 worldPos, float heightFraction, float distanceFromCamera,
+//                               float stepLength );
 //
 // SAMPLE returns x = the full (eroded) density and y = the unerroded profile in ONE evaluation: the
 // march needs both at every shaded sample (in-scatter probability and ambient occlusion are functions
@@ -17,8 +18,12 @@
 //                       geometry, where the planet radius would otherwise swamp a float; nothing of
 //                       that scale is ever formed here.
 //   heightFraction      0 at the bottom of the layer, 1 at the top, measured along the planet radius.
-//   distanceFromCamera  world units; drives the high-frequency fade, the distance softening and the
-//                       near fade, all of which are distance effects rather than position effects.
+//   distanceFromCamera  world units; drives the distance softening and the near fade, both of which are
+//                       distance effects rather than position effects.
+//   stepLength          world units; the stride the march is taking at this sample. NOT a distance in
+//                       disguise: the near-field detail band exists only where the march can resolve it,
+//                       which is a statement about the local SAMPLING RATE, and the same distance
+//                       carries a different rate on every quality tier (CloudBandWeight).
 //
 // and one accessor for the weather field the LIGHTING needs:
 //

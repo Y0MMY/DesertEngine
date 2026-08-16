@@ -208,7 +208,10 @@ float CloudDensityCheap(vec3 worldPos, float heightFraction)
 // needs BOTH at every shaded sample (the profile drives the in-scatter probability and the ambient
 // occlusion, CLD-106), and computing them in one evaluation is two texture fetches cheaper per sample
 // than the CloudDensityCheap call this replaces.
-vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromCamera)
+// @p stepLength is the march's own stride at this sample, in world units. It is not a distance in
+// disguise: the near-field band's amplitude is a statement about the SAMPLING RATE here (CloudBandWeight),
+// and the same distance carries a different rate on every quality tier.
+vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromCamera, float stepLength)
 {
     vec4 weather = CloudSampleWeather(worldPos);
     if (weather.r <= 0.0f)
@@ -230,10 +233,36 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     // Curl warps the DETAIL lookup, not the shape: a divergence-free warp swirls small structure around
     // without creating or destroying any of it, which is what gives an edge its turbulent look. The warp
     // is strongest at the cloud base, where the shear against still air is.
+    //
+    // TWO THINGS WERE WRONG HERE, and together they were the vertical combing on every cloud edge that
+    // three passes over this renderer had described and none had located.
+    //
+    // THE AXES. CloudCurl builds its field over the map's own two axes, which are world X and world Z,
+    // and returns (dPsi/dv, -dPsi/du, vorticity): the first TWO components are the divergence-free
+    // in-plane field and the third is the vertical vorticity, which is a rotation RATE and not a
+    // displacement at all. This site fed the returned vector straight into a world (x, y, z) offset, so
+    // the second in-plane component displaced the lookup VERTICALLY and the vorticity displaced it in Z.
+    // A vertical offset that is a function of horizontal position alone shifts the whole detail column
+    // up or down together — the pattern stays coherent down a screen column while decorrelating across
+    // one, which is precisely a comb of vertical filaments.
+    //
+    // THE SCALE. The offset was `CurlStrength * DetailTileSize` — measured in DETAIL tiles, a quantity
+    // the warp has no relationship to. A displacement field folds the domain it warps once the
+    // displacement exceeds the length over which the displacement itself turns, and for this field that
+    // length is CurlTileSize / CLOUD_CURL_FINEST_PERIOD (see there). At the showcase's 9 km curl tile
+    // that is 280 m, while the old expression displaced by up to 0.35 * 4 km * 2 = 2.8 km: ten times
+    // past folding, so the detail was not swirled but scrambled horizontally at the curl map's own
+    // frequency while staying coherent vertically — a comb of vertical filaments on every cloud edge.
+    //
+    // Measured in the curl field's OWN correlation length instead, so CurlStrength = 1 sits exactly at
+    // the folding bound and every authored value below it is a genuine swirl. On Clouds_UEShowcase the
+    // authored 0.35 now displaces by at most 49 m, which is the amplitude the frames show as turbulent
+    // rather than combed.
     vec3 curl = (texture(u_CurlNoise, vec2(worldPos.x, worldPos.z) / u_CurlTileSize).rgb - 0.5f) *
                 CLOUD_CURL_DECODE_SCALE;
-    vec3 detailPos = CloudDetailSamplePos(worldPos, heightFraction) +
-                     curl * (u_CurlStrength * u_DetailTileSize * (1.0f - cellHeight));
+    float curlUnit  = u_CurlTileSize / (CLOUD_CURL_FINEST_PERIOD * CLOUD_CURL_DECODE_MAX);
+    vec3  detailPos = CloudDetailSamplePos(worldPos, heightFraction) +
+                      vec3(curl.x, 0.0f, curl.y) * (u_CurlStrength * curlUnit * (1.0f - cellHeight));
 
     vec4 detail = texture(u_DetailNoise, detailPos / u_DetailTileSize);
 
@@ -252,13 +281,31 @@ vec2 CloudDensitySample(vec3 worldPos, float heightFraction, float distanceFromC
     float detailType     = clamp(u_DetailTypeBias + (cellHeight - 0.35f) * 0.9f, 0.0f, 1.0f);
     float noiseComposite = mix(wispy, billowy, detailType);
 
-    // The extra close-range layer: ridged versions of the same two channels, faded out with distance
-    // because past a few kilometres it is smaller than a pixel and turns into noise.
-    float hfWisps   = 1.0f - pow(abs(abs(detail.g * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqWispSharpness);
-    float hfBillows = pow(abs(abs(detail.a * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqBillowSharpness);
-    float highFreq  = clamp(mix(hfWisps, hfBillows, detailType), 0.0f, 1.0f);
-    float hfFade    = CloudRemapRange(distanceFromCamera, u_HighFreqFadeStart, u_HighFreqFadeEnd, 0.0f, 1.0f);
-    noiseComposite  = mix(mix(noiseComposite, highFreq, u_HighFreqStrength), noiseComposite, hfFade);
+    // THE NEAR-FIELD BAND: ridged folds of the same two channels, at their OWN tile and gated by the
+    // step length the march is taking here.
+    //
+    // It used to be folded out of `detail` — the fetch above, at the DETAIL tile. Ridging a signal
+    // creases it but adds no information: at the showcase's 4 km detail tile the band's content was the
+    // same 62 m structure the erosion already carried, so a third band existed in the code and not in
+    // the picture. Turning HighFreqStrength off changed nothing visible, which is what a dead knob looks
+    // like from the outside.
+    //
+    // Its own tile, derived from the feature size the artist asks for: the fold's finest content is
+    // CLOUD_DETAIL_RIDGED_FINEST_PER_TILE creases across a tile, so a tile of that many feature-sizes
+    // puts the band exactly where it was asked for. The second fetch is the price, and it is paid only
+    // where the band can actually be seen — CloudBandWeight is zero everywhere the march is at or below
+    // its own Nyquist limit for that size, which past a couple of kilometres is everywhere.
+    float bandWeight = CloudBandWeight(u_HighFreqFeatureSize, stepLength) * u_HighFreqStrength;
+    if (bandWeight > 0.0f)
+    {
+        float bandTile = u_HighFreqFeatureSize * CLOUD_DETAIL_RIDGED_FINEST_PER_TILE;
+        vec4  band     = texture(u_DetailNoise, detailPos / bandTile);
+
+        float hfWisps   = 1.0f - pow(abs(abs(band.g * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqWispSharpness);
+        float hfBillows = pow(abs(abs(band.a * 2.0f - 1.0f) * 2.0f - 1.0f), u_HighFreqBillowSharpness);
+        float highFreq  = clamp(mix(hfWisps, hfBillows, detailType), 0.0f, 1.0f);
+        noiseComposite  = mix(noiseComposite, highFreq, clamp(bandWeight, 0.0f, 1.0f));
+    }
 
     density = CloudRemapRange(density, noiseComposite * u_DetailStrength, 1.0f, 0.0f, 1.0f);
 
